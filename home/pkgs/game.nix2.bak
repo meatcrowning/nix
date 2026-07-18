@@ -1,0 +1,20 @@
+{ pkgs, ... }:
+
+{
+  home.packages = [
+    (pkgs.dwarf-fortress-packages.dwarf-fortress-full.override {
+      dfVersion = "0.47.05";
+      enableTWBT = true;
+      enableIntro = false;
+      enableFPS = true;
+      enableDwarfTherapist = false;
+
+      # Correct Parameter: Pass the version down to the engine matrix
+      df-games = pkgs.dwarf-fortress-packages.df-games // {
+        dwarf-fortress = pkgs.dwarf-fortress-packages.dwarf-fortress.override {
+          dfVersion = "0.47.05";
+        };
+      };
+    })
+  ];
+}
