@@ -74,6 +74,42 @@ hl.on("hyprland.start", function()
     hl.exec_cmd([[hyprctl dispatch 'hl.dsp.focus({ workspace = 50 })']])
 end)
 
+-- Titlebar geometry event stream, consumed by quickshell's WindowTracker.qml.
+-- Layer-shell titlebars can't be compositor-anchored to windows, and Hyprland
+-- emits no socket2 events during an interactive drag — so this in-compositor
+-- timer diffs window geometry at ~60Hz and pushes a custom socket2 event ONLY
+-- when something changed. Idle cost is one in-process comparison per tick; no
+-- process is spawned and nothing crosses the socket unless windows are
+-- actually moving. Event format (one line):
+--   custom>>tbgeom|<addr>,<x>,<y>,<w>,<h>,<focusHistoryID>;<addr>,...
+-- Only windows on the active workspace are included. Titles are deliberately
+-- NOT in the stream (they can contain arbitrary characters) — quickshell
+-- keeps sourcing those from `hyprctl clients -j` on the rare discrete events
+-- (openwindow / windowtitle / ...).
+local tbLast = nil
+hl.timer(function()
+    local ok, msg = pcall(function()
+        local ws = hl.get_active_workspace()
+        if not ws then return nil end
+        local parts = {}
+        for _, w in ipairs(hl.get_windows()) do
+            if w.mapped and not w.hidden and w.workspace and w.workspace.id == ws.id then
+                parts[#parts + 1] = string.format("%s,%d,%d,%d,%d,%d",
+                    w.address,
+                    math.floor(w.at.x + 0.5), math.floor(w.at.y + 0.5),
+                    math.floor(w.size.x + 0.5), math.floor(w.size.y + 0.5),
+                    w.focus_history_id)
+            end
+        end
+        table.sort(parts)
+        return table.concat(parts, ";")
+    end)
+    if ok and msg ~= nil and msg ~= tbLast then
+        tbLast = msg
+        hl.dispatch(hl.dsp.event("tbgeom|" .. msg))
+    end
+end, { timeout = 16, type = "repeat" })
+
 
 -------------------------------
 ---- ENVIRONMENT VARIABLES ----
