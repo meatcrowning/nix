@@ -157,15 +157,12 @@ Scope {
         BackgroundScroll {}
     }
 
-    // Vertical titlebar per window on the active workspace (close / maximize /
-    // rotated title). The model is the stable list of window ADDRESSES —
-    // geometry lives in WindowTracker.geometry so moves update bindings on
-    // live titlebars instead of making Variants recreate them (which is what
-    // caused the old blink/trail during drags).
-    Variants {
-        model: WindowTracker.windows
-        WindowTitlebar {}
-    }
+    // Vertical titlebars for windows on the active workspace (close /
+    // maximize / rotated title), all hosted in one fullscreen overlay
+    // surface — see TitlebarOverlay.qml (surface + input mask),
+    // WindowTitlebar.qml (per-window item, occlusion clipping) and
+    // WindowTracker.qml (event-driven geometry).
+    TitlebarOverlay {}
 
     // Desktop notifications: Quickshell owns org.freedesktop.Notifications and
     // renders toasts bottom-right, just inside the bar. One window (single

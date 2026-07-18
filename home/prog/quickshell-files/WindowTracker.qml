@@ -30,11 +30,13 @@ import QtQuick
 // heartbeat, mirroring Workspaces.qml's debounced Process/JSON pattern.
 //
 // Layer-shell surfaces can't interleave with regular windows, so true
-// z-order is impossible; instead each entry carries `occluded` — true when
-// a window ABOVE this one (approximated by focusHistoryID, which tracks
-// raise order for floating windows) overlaps the titlebar strip — and the
-// titlebar hides entirely rather than drawing on top of the covering
-// window. `focused` drives the active/inactive frame colour.
+// z-order is impossible; instead each entry carries `intervals` — the
+// y-ranges (titlebar-local px) of the strip NOT covered by any window
+// above this one (stacking approximated by focusHistoryID, which tracks
+// raise order for floating windows). TitlebarOverlay/WindowTitlebar render
+// only inside those intervals, so a covering window visually clips the
+// titlebar exactly where it overlaps, as if the titlebar sat beneath it.
+// `focused` drives the active/inactive frame colour.
 Singleton {
     id: root
 
@@ -51,7 +53,8 @@ Singleton {
     // either). Sorted so the list only changes when the window set does.
     property var windows: []
 
-    // address -> { x, y, width, height, title, floating, focused, occluded }
+    // address -> { x, y, width, height, title, floating, focused, fhid,
+    //              intervals: [[y0, y1], ...] }
     property var geometry: ({})
 
     // address -> {x, y, w, h} saved just before maximizing, so a second
@@ -72,6 +75,13 @@ Singleton {
         return s ? { w: s.width, h: s.height } : { w: 1920, h: 1080 };
     }
 
+    function _sameIntervals(a, b) {
+        if (!a || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++)
+            if (a[i][0] !== b[i][0] || a[i][1] !== b[i][1]) return false;
+        return true;
+    }
+
     // Occlusion + change detection + publish, shared by both sources.
     // `addrs` must be sorted; entries must carry x/y/width/height/title/
     // focused/fhid.
@@ -83,17 +93,39 @@ Singleton {
             const g = geo[addrs[i]];
             const tx = Math.min(g.x + g.width, tbMaxLeft);
             const ty = g.y - bw, th = g.height + bw * 2;
-            g.occluded = false;
+
+            // y-ranges of the strip covered by windows above this one.
+            // (A covering window is treated as spanning the strip's full
+            // 32px width — partial-x overlap is a sliver case not worth a
+            // 2D region decomposition.)
+            const covered = [];
             for (let j = 0; j < addrs.length; j++) {
                 if (j === i) continue;
                 const o = geo[addrs[j]];
                 if (o.fhid < g.fhid &&
                     o.x < tx + titlebarWidth && o.x + o.width > tx &&
-                    o.y < ty + th && o.y + o.height > ty) {
-                    g.occluded = true;
-                    break;
+                    o.y - bw < ty + th && o.y + o.height + bw > ty) {
+                    covered.push([Math.max(0, o.y - bw - ty),
+                                  Math.min(th, o.y + o.height + bw - ty)]);
                 }
             }
+            covered.sort((p, q) => p[0] - q[0]);
+
+            // Complement of the merged covered ranges = visible intervals.
+            const iv = [];
+            let cursor = 0;
+            for (let j = 0; j < covered.length; j++) {
+                if (covered[j][0] > cursor) iv.push([cursor, covered[j][0]]);
+                cursor = Math.max(cursor, covered[j][1]);
+            }
+            if (cursor < th) iv.push([cursor, th]);
+
+            // Keep the previous array REFERENCE when nothing changed, so
+            // the per-titlebar slice Repeater doesn't rebuild during plain
+            // moves.
+            const prev = geometry[addrs[i]];
+            g.intervals = (prev && _sameIntervals(prev.intervals, iv))
+                ? prev.intervals : iv;
         }
 
         let changed = addrs.length !== windows.length;
@@ -103,8 +135,8 @@ Singleton {
             changed = a !== windows[i] || !o ||
                 o.x !== n.x || o.y !== n.y ||
                 o.width !== n.width || o.height !== n.height ||
-                o.title !== n.title ||
-                o.focused !== n.focused || o.occluded !== n.occluded;
+                o.title !== n.title || o.focused !== n.focused ||
+                o.intervals !== n.intervals;
         }
         if (!changed) return;
 

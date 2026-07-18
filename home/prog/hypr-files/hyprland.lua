@@ -77,7 +77,7 @@ end)
 -- Titlebar geometry event stream, consumed by quickshell's WindowTracker.qml.
 -- Layer-shell titlebars can't be compositor-anchored to windows, and Hyprland
 -- emits no socket2 events during an interactive drag — so this in-compositor
--- timer diffs window geometry at ~60Hz and pushes a custom socket2 event ONLY
+-- timer diffs window geometry at ~120Hz and pushes a custom socket2 event ONLY
 -- when something changed. Idle cost is one in-process comparison per tick; no
 -- process is spawned and nothing crosses the socket unless windows are
 -- actually moving. Event format (one line):
@@ -108,7 +108,7 @@ hl.timer(function()
         tbLast = msg
         hl.dispatch(hl.dsp.event("tbgeom|" .. msg))
     end
-end, { timeout = 16, type = "repeat" })
+end, { timeout = 8, type = "repeat" })
 
 
 -------------------------------
