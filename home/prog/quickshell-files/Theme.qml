@@ -44,6 +44,8 @@ Singleton {
     // is accent at 0xee alpha; border_size = 2; rounding = 0. Derived from
     // accent so it recolours with the wallpaper alongside the rest of the panel.
     readonly property color windowBorder:      Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
+    // hypr general.col.inactive_border — rgba(595959aa), static (not wal-derived).
+    readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
     readonly property int   windowBorderWidth: 2
     readonly property int   windowRounding:    0
 }

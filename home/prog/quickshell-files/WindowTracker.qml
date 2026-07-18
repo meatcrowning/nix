@@ -19,9 +19,17 @@ import QtQuick
 // only mutates `geometry`, which live titlebars follow through bindings.
 //
 // Hyprland emits no events during an interactive drag, so drag-follow is
-// poll-based: a slow heartbeat, plus a fast poll that arms itself whenever a
-// refresh actually saw something change and stops as soon as a poll comes
-// back identical. Idle cost stays at 4 hyprctl calls/s; drags get ~20/s.
+// poll-based: a slow heartbeat, plus a ~60Hz fast poll that arms itself
+// whenever a refresh actually saw something change and stops as soon as a
+// poll comes back identical. The heartbeat also bounds how long a drag can
+// go unnoticed before the fast poll takes over.
+//
+// Layer-shell surfaces can't interleave with regular windows, so true
+// z-order is impossible; instead each entry carries `occluded` — true when
+// a window ABOVE this one (approximated by focusHistoryID, which tracks
+// raise order for floating windows) overlaps the titlebar strip — and the
+// titlebar hides entirely rather than drawing on top of the covering
+// window. `focused` drives the active/inactive frame colour.
 Singleton {
     id: root
 
@@ -38,7 +46,7 @@ Singleton {
     // either). Sorted so the list only changes when windows open/close.
     property var windows: []
 
-    // address -> { x, y, width, height, title, floating }
+    // address -> { x, y, width, height, title, floating, focused, occluded }
     property var geometry: ({})
 
     // address -> {x, y, w, h} saved just before maximizing, so a second
@@ -86,10 +94,35 @@ Singleton {
                     geo[c.address] = {
                         x: c.at[0], y: c.at[1],
                         width: c.size[0], height: c.size[1],
-                        title: c.title, floating: c.floating
+                        title: c.title, floating: c.floating,
+                        focused: c.focusHistoryID === 0,
+                        fhid: c.focusHistoryID
                     };
                 }
                 addrs.sort();
+
+                // Occlusion: hide a titlebar when a window above its own
+                // (lower focusHistoryID = raised more recently) overlaps the
+                // strip the titlebar occupies (see file doc comment).
+                const mon = root._monitorSize();
+                const bw = Theme.windowBorderWidth;
+                const tbMaxLeft = mon.w - Theme.barWidth - root.titlebarWidth;
+                for (let i = 0; i < addrs.length; i++) {
+                    const g = geo[addrs[i]];
+                    const tx = Math.min(g.x + g.width, tbMaxLeft);
+                    const ty = g.y - bw, th = g.height + bw * 2;
+                    g.occluded = false;
+                    for (let j = 0; j < addrs.length; j++) {
+                        if (j === i) continue;
+                        const o = geo[addrs[j]];
+                        if (o.fhid < g.fhid &&
+                            o.x < tx + root.titlebarWidth && o.x + o.width > tx &&
+                            o.y < ty + th && o.y + o.height > ty) {
+                            g.occluded = true;
+                            break;
+                        }
+                    }
+                }
 
                 let changed = addrs.length !== root.windows.length;
                 for (let i = 0; i < addrs.length && !changed; i++) {
@@ -98,7 +131,8 @@ Singleton {
                     changed = a !== root.windows[i] || !o ||
                         o.x !== n.x || o.y !== n.y ||
                         o.width !== n.width || o.height !== n.height ||
-                        o.title !== n.title;
+                        o.title !== n.title ||
+                        o.focused !== n.focused || o.occluded !== n.occluded;
                 }
                 if (!changed) return;
 
@@ -122,9 +156,10 @@ Singleton {
     }
 
     // Slow heartbeat — catches whatever the event stream doesn't announce
-    // (interactive drags emit no events at all).
+    // (interactive drags emit no events at all). Also the worst-case delay
+    // before a fresh drag is noticed and the fast poll takes over.
     Timer {
-        interval: 250
+        interval: 150
         running: true
         repeat: true
         onTriggered: root.refresh()
@@ -132,9 +167,10 @@ Singleton {
 
     // Fast follow while something is actually moving: re-armed by every
     // refresh that saw a change, decays on the first one that didn't.
+    // ~60Hz so titlebars track a drag within about a frame.
     Timer {
         id: fastPoll
-        interval: 50
+        interval: 16
         onTriggered: root.refresh()
     }
 

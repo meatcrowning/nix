@@ -13,7 +13,13 @@ PanelWindow {
     required property var modelData
 
     readonly property var geo: WindowTracker.geometry[modelData] ||
-        ({ x: 0, y: 0, width: 0, height: 0, title: "" })
+        ({ x: 0, y: 0, width: 0, height: 0, title: "", focused: false, occluded: true })
+
+    // A layer surface always draws above regular windows, so when this
+    // window is covered by another (occluded), hiding is the only honest
+    // option — better than the titlebar floating on top of the window
+    // that's covering it.
+    visible: !geo.occluded
 
     // Single-monitor box (see CLAUDE.md) — same assumption
     // WindowTracker._monitorSize() makes.
@@ -45,7 +51,9 @@ PanelWindow {
         anchors.fill: parent
         color: Theme.bg
         border.width: Theme.windowBorderWidth
-        border.color: Theme.windowBorder
+        // Track the window's own frame: accent for the focused window,
+        // Hyprland's inactive_border grey for everything else.
+        border.color: root.geo.focused ? Theme.windowBorder : Theme.windowBorderInactive
     }
 
     Column {
