@@ -1,3 +1,7 @@
+<img width="1920" height="1080" alt="desk2" src="https://github.com/user-attachments/assets/f5c81e56-bcef-43bc-97a0-0f004572a3bb" />
+<img width="1920" height="1080" alt="desk3" src="https://github.com/user-attachments/assets/62c10bfa-8f30-4ab4-8249-b09676932dfb" />
+<img width="1920" height="1080" alt="desk" src="https://github.com/user-attachments/assets/eb01f771-96bb-4b54-8b79-5e6cbcf35c07" />
+
 # `nixos flake`
 
 after a certain point i felt that my conversation with nixos should be mediated by language models. initially, this was via `aider` utilizing a multitude of models in a multitude of roles. and then grew into a sort of black hole from which various model and various harnesses have come to visit. im only now looping in git - because there is now a c++ plugin which add vertical titlebars. fun. the rest of this readme consists of words that i have neither written nor read (in great detail).  
