@@ -34,6 +34,13 @@ PanelWindow {
     property real _pinnedTop: -1
     readonly property real pinnedTopY: _pinnedTop // read by stacking siblings
 
+    // Hyprland files a layer surface into its layer array at creation and
+    // never moves it, so a live WlrLayershell.layer change is ignored. When
+    // the pinned state (=> layer) flips on an already-mapped popup, force a
+    // remap (unmap for a frame, then re-map) so it re-files at the new layer:
+    // Overlay (above windows) transient, Bottom (behind windows) pinned.
+    property bool _mapped: true
+
     signal opened()
 
     // Combined hover over the card OR the pin indicator. Driving open/close
@@ -66,7 +73,7 @@ PanelWindow {
         return Theme.gap;
     }
 
-    visible: open || card.x < card.hidden - 1
+    visible: _mapped && (open || card.x < card.hidden - 1)
     color: "transparent"
 
     anchors {
@@ -99,6 +106,16 @@ PanelWindow {
             _pinnedTop = -1;
             closeTimer.restart();
         }
+        // Recreate the surface AFTER the layer binding settles (a synchronous
+        // map reads the old layer). The deferred remap re-files it at the new
+        // one. Only when it should be on-screen — a plain close needs no remap.
+        if (open) { _mapped = false; remapTimer.restart(); }
+    }
+
+    Timer {
+        id: remapTimer
+        interval: 32
+        onTriggered: root._mapped = true
     }
 
     function hoverChanged(h) {
