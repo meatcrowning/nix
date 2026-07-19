@@ -56,6 +56,9 @@ PanelWindow {
 
     function launch(entry) {
         if (!entry) return;
+        // Vista "Start Navigation" click — the closest modern browsers let us
+        // get to IE's per-link click (page clicks are browser-internal now).
+        Sounds.play("Windows Navigation Start.wav");
         entry.execute();
         close();
     }

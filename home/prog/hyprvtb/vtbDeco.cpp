@@ -15,6 +15,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
+#include <hyprland/src/config/supplementary/executor/Executor.hpp>
 
 #include <pango/pangocairo.h>
 #include <cmath>
@@ -51,7 +52,7 @@ enum : uint32_t {
     RS_EDGE_T = 4,
     RS_EDGE_B = 8,
 };
-static constexpr int    VTB_RESIZE_STRIP = 14; // px of the bar's outer edge acting as the right handle
+static constexpr int    VTB_RESIZE_STRIP = 6;  // px of the bar's outer edge acting as the right handle — the "very edge", like the other sides
 static constexpr double VTB_MIN_SIZE     = 50; // fallback when the client reports no min size
 
 // linux/input-event-codes.h values (avoid the include)
@@ -61,6 +62,13 @@ static constexpr uint32_t VTB_BTN_RIGHT = 273;
 static bool superHeld() {
     const auto KB = g_pSeatManager->m_keyboard.lock();
     return KB && (KB->getModifiers() & (1 << 6)); // bit 6 = LOGO/SUPER (modmask 64)
+}
+
+// Vista system sounds (user's set in ~/.local/share/sounds/vista — see
+// quickshell/Sounds.qml for the full event map). The executor is
+// shell-interpreted (config exec_cmd relies on $HOME the same way).
+static void playSound(const char* file) {
+    Config::Supplementary::executor()->spawn(std::string("pw-play \"$HOME/.local/share/sounds/vista/") + file + "\" 2>/dev/null");
 }
 
 static std::string windowAddress(PHLWINDOW w) {
@@ -780,6 +788,7 @@ void CVtbDeco::minimizeWindow() {
     m_minSavedPos = PWINDOW->m_realPosition->goal();
     m_bMinimized  = true;
     m_minimizedAt = Time::steadyNow();
+    playSound("Windows Minimize.wav");
 
     // slide fully past the right edge (Hyprland's move animation is the
     // "slide out" itself)
@@ -825,6 +834,7 @@ void CVtbDeco::restoreFromMinimize() {
         return;
 
     m_bMinimized = false;
+    playSound("Windows Restore.wav");
     Config::Actions::move(m_minSavedPos, false, PWINDOW);
     if (PWINDOW->m_isFloating)
         g_pCompositor->changeWindowZOrder(PWINDOW, true);

@@ -57,6 +57,9 @@ Singleton {
         onNotification: function (n) {
             n.tracked = true;
 
+            // Vista sounds: Exclamation for critical toasts, Balloon otherwise.
+            Sounds.playThrottled(n.urgency === 2 ? "Windows Exclamation.wav" : "Windows Balloon.wav", 300);
+
             // Enforce maxVisible: retire the oldest non-critical toast (lowest
             // id == earliest). If everything on screen is critical, drop the
             // oldest regardless so we never grow without bound.

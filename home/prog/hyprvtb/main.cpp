@@ -444,7 +444,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.6"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.7"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

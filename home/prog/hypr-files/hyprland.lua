@@ -84,6 +84,8 @@ hl.on("hyprland.start", function()
     -- (`cliphist list` / `cliphist decode`; picker UI is future work).
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
+    -- Vista logon sound (sound map: quickshell/Sounds.qml)
+    hl.exec_cmd("pw-play \"$HOME/.local/share/sounds/vista/Windows Logon Sound.wav\"")
     -- Land on the "main" workspace (50, not 1) so a scroll-to-create
     -- workspace scheme has numeric room to grow both up (49, 48, ...) and
     -- down (51, 52, ...) from a central anchor, instead of hitting the floor
@@ -538,6 +540,19 @@ hl.window_rule({
     },
 
     no_focus = true,
+})
+
+hl.window_rule({
+    -- Vista-UAC treatment for the sudo password dialog (ksshaskpass, spawned
+    -- by the sudo-askpass wrapper in ~/nix/home/prog/askpass.nix): dim
+    -- everything around it, centre it, pin it above the stack. The wrapper
+    -- plays the UAC chime alongside.
+    name  = "askpass-dim",
+    match = { class = "^org\\.kde\\.ksshaskpass$" },
+
+    dim_around = true,
+    center     = true,
+    pin        = true,
 })
 
 -- Layer rules also return a handle.

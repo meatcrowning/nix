@@ -75,9 +75,15 @@ PanelWindow {
             onStreamFinished: {
                 try {
                     const all = JSON.parse(this.text);
+                    // Expand the client rect to the full visual frame: 2px
+                    // border all around plus the 32px hyprvtb titlebar on the
+                    // right (the scratchpad has no titlebar).
                     root.clients = all
                         .filter(c => c.mapped && !c.hidden && c.size[0] > 0)
-                        .map(c => Qt.rect(c.at[0], c.at[1], c.size[0], c.size[1]));
+                        .map(c => {
+                            const bar = c.class === "hyprvtb-scratch" ? 0 : 32;
+                            return Qt.rect(c.at[0] - 2, c.at[1] - 2, c.size[0] + 4 + bar, c.size[1] + 4);
+                        });
                 } catch (e) {
                     root.clients = [];
                 }
