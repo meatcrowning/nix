@@ -43,9 +43,14 @@ def main():
     else:
         s = max(s, 0.55)   # guarantee a vivid, legible accent
 
+    accent = hsv_hex(h, min(s, 1.0), max(v, 0.80))
     out = {
-        "ACCENT":    hsv_hex(h, min(s, 1.0), max(v, 0.80)),
-        "TEXT":      hsv_hex(h, min(s, 0.72), 0.95),
+        "ACCENT":    accent,
+        # Body text IS the accent colour (not a brighter tint of it), so the
+        # panel / runner / OSD text reads as the same red as kitty's foreground
+        # and the KDE/Qt apps' normal text — every "focused" surface is one
+        # colour. TEXTDIM below still gives an inactive/secondary tier.
+        "TEXT":      accent,
         "TEXTDIM":   hsv_hex(h, min(s, 0.60), 0.55),
         "DIM":       hsv_hex(h, min(s, 0.50), 0.33),
         "BORDER":    hsv_hex(h, min(s, 0.60), 0.22),

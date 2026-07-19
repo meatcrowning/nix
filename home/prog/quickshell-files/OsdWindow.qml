@@ -47,7 +47,9 @@ PanelWindow {
         Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
         radius: 0
-        color: Theme.bgAlt
+        // Pure black card, like the runner / power menu / cheatsheet (they all
+        // use Theme.bg). This was the one popup still on the tinted bgAlt.
+        color: Theme.bg
         border.color: Theme.accent
         border.width: 2
 
