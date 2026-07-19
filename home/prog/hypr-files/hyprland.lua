@@ -422,9 +422,15 @@ end)
 -- Windows are managed through the panel taskbar (program icons) and the
 -- hyprvtb titlebars (close / maximize / minimize-slide) instead.
 
--- Move/resize windows with mainMod + LMB/RMB and dragging
-hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
-hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
+-- Move windows with mainMod + LMB drag.
+-- Resizing is deliberately NOT bound to mainMod + RMB: that dispatcher
+-- (resizewindow) always resizes the TWO edges of whichever corner is nearest
+-- the cursor, so a drag that feels like "one side" moves two at once. Resize
+-- instead by grabbing the window border directly (general:resize_on_border,
+-- enabled above) — that path is edge-aware: grab a side to move just that
+-- edge, grab a corner to move the two edges meeting there.
+-- extend_border_grab_area (15px) widens the catch zone for the thin 2px border.
+hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(), { mouse = true })
 
 -- Scratchpad terminal (Meta+S): kitty sliding in from the left accent
 -- edge, no titlebar, always at the bottom of the z-order; width is
