@@ -15,7 +15,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
-#include <hyprland/src/config/supplementary/executor/Executor.hpp>
+#include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
 
 #include <pango/pangocairo.h>
 #include <cmath>
@@ -64,12 +64,6 @@ static bool superHeld() {
     return KB && (KB->getModifiers() & (1 << 6)); // bit 6 = LOGO/SUPER (modmask 64)
 }
 
-// Vista system sounds (user's set in ~/.local/share/sounds/vista — see
-// quickshell/Sounds.qml for the full event map). The executor is
-// shell-interpreted (config exec_cmd relies on $HOME the same way).
-void vtbPlaySound(const char* file) {
-    Config::Supplementary::executor()->spawn(std::string("pw-play \"$HOME/.local/share/sounds/vista/") + file + "\" 2>/dev/null");
-}
 
 static std::string windowAddress(PHLWINDOW w) {
     return std::format("address:0x{:x}", (uintptr_t)w.get());
@@ -87,6 +81,8 @@ CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
 }
 
 CVtbDeco::~CVtbDeco() {
+    if (m_bCursorOverridden)
+        Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
     if (g_pGlobalState)
         std::erase(g_pGlobalState->bars, m_self);
 }
@@ -603,22 +599,23 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
     if (!g_pGlobalState)
         return;
 
-    // A running edge-resize must ALWAYS see the release, even if the cursor
-    // ended up over another window or a layer surface (inputIsValid would
-    // gate it out and leave the resize stuck to the cursor).
-    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED && m_bEdgeResizing) {
-        endEdgeResize();
-        info.cancelled = true;
+    // Releases are processed UNGATED: they only clear/finish this deco's own
+    // press state. Gating them behind inputIsValid (or focus, see
+    // handleUpEvent) is how stale state leaked — a resize could stick if the
+    // cursor ended over a layer surface, and a stale cancelled-press flag
+    // ate a later client release (the stuck-mouse-after-restore bug).
+    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED) {
+        if (m_bEdgeResizing) {
+            endEdgeResize();
+            info.cancelled = true;
+            return;
+        }
+        handleUpEvent(info);
         return;
     }
 
     if (!inputIsValid())
         return;
-
-    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED) {
-        handleUpEvent(info);
-        return;
-    }
 
     if (tryStartEdgeResize(info, e))
         return;
@@ -643,6 +640,22 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         if (cell != m_iHoverCell) {
             m_iHoverCell = cell;
             damageEntire();
+        }
+
+        // Resize cursor over OUR right-edge zones. Hyprland's border-icon
+        // logic suppresses itself over decorations and only knows the client
+        // box, so the bar strip / right halo never get a cursor from it —
+        // set the same WINDOW_EDGE override it uses for the other sides.
+        if (m_pWindow->m_isFloating && !m_bMaximized && !m_bEdgeResizing && g_pInputManager->m_currentlyHeldButtons.empty()) {
+            const auto Z = borderResizeZone(g_pInputManager->getMouseCoordsInternal());
+            if (Z & RS_EDGE_R) {
+                const char* shape = (Z & RS_EDGE_T) ? "top_right_corner" : (Z & RS_EDGE_B) ? "bottom_right_corner" : "right_side";
+                Cursor::overrideController->setOverride(shape, Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+                m_bCursorOverridden = true;
+            } else if (m_bCursorOverridden) {
+                Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+                m_bCursorOverridden = false;
+            }
         }
     }
 
@@ -677,13 +690,11 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     info.cancelled   = true;
     m_bCancelledDown = true;
 
-    // Titlebar buttons are ACTIONS: they get the Vista click (minimize plays
-    // its own Minimize.wav instead — one sound per action, never two).
     switch (cellAt(COORDS)) {
-        case 0: vtbPlaySound("Windows Navigation Start.wav"); closeWindow(); return;
-        case 1: vtbPlaySound("Windows Navigation Start.wav"); toggleMaximize(); return;
+        case 0: closeWindow(); return;
+        case 1: toggleMaximize(); return;
         case 2: minimizeWindow(); return;
-        case 3: vtbPlaySound("Windows Navigation Start.wav"); togglePin(); return;
+        case 3: togglePin(); return;
         default: break;
     }
 
@@ -694,18 +705,24 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
 }
 
 void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
-    if (m_pWindow.lock() != Desktop::focusState()->window())
-        return;
-
-    if (m_bCancelledDown)
-        info.cancelled = true;
-    m_bCancelledDown = false;
+    // Clear press state UNCONDITIONALLY. This used to early-return when the
+    // window wasn't focused — but a minimize click hops focus to the next
+    // window mid-press, so the minimize's cancelled-press flag survived
+    // here. After restoring the window, its deco then cancelled the FIRST
+    // client release ("mouse stuck on a down-click until you click again",
+    // any app). One flag, one press: consume the release iff we consumed
+    // its press, and always reset.
+    const bool CANCELLED = m_bCancelledDown;
+    m_bCancelledDown     = false;
 
     if (m_bDraggingThis) {
         g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
         m_bDraggingThis = false;
     }
     m_bDragPending = false;
+
+    if (CANCELLED)
+        info.cancelled = true;
 }
 
 // ---- actions --------------------------------------------------------------
@@ -790,7 +807,6 @@ void CVtbDeco::minimizeWindow() {
     m_minSavedPos = PWINDOW->m_realPosition->goal();
     m_bMinimized  = true;
     m_minimizedAt = Time::steadyNow();
-    vtbPlaySound("Windows Minimize.wav");
 
     // slide fully past the right edge (Hyprland's move animation is the
     // "slide out" itself)
@@ -836,7 +852,6 @@ void CVtbDeco::restoreFromMinimize() {
         return;
 
     m_bMinimized = false;
-    vtbPlaySound("Windows Restore.wav");
     Config::Actions::move(m_minSavedPos, false, PWINDOW);
     if (PWINDOW->m_isFloating)
         g_pCompositor->changeWindowZOrder(PWINDOW, true);

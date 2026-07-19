@@ -290,7 +290,6 @@ PanelWindow {
                     // (Hover deliberately does NOT flip the selection — it
                     // caused accidental re-themes just from mousing past.)
                     onClicked: {
-                        Sounds.play("Windows Navigation Start.wav");
                         applyTimer.stop();
                         list.currentIndex = delegateRoot.index;
                         root.open = false;

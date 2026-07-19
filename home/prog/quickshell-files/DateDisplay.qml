@@ -1,13 +1,14 @@
 import QtQuick
 import Quickshell
 
-// Vertical date display: two-digit month stacked over two-digit day, same
-// treatment as Clock (bright over dim).
+// Vertical date display: month / year(2-digit) / day, month bright and the
+// year dim under it (day bright again so the two dims don't blur together).
 Column {
     id: root
     spacing: 2
 
     property string mo: "01"
+    property string yy: "00"
     property string dd: "01"
 
     function pad(n) { return (n < 10 ? "0" : "") + n }
@@ -15,6 +16,7 @@ Column {
     function refresh() {
         const d = clock.date;
         root.mo = pad(d.getMonth() + 1);
+        root.yy = pad(d.getFullYear() % 100);
         root.dd = pad(d.getDate());
     }
 
@@ -34,8 +36,14 @@ Column {
     }
     PixelText {
         anchors.horizontalCenter: parent.horizontalCenter
-        text: root.dd
+        text: root.yy
         color: Theme.textDim
+        font.pixelSize: Theme.clockSize
+    }
+    PixelText {
+        anchors.horizontalCenter: parent.horizontalCenter
+        text: root.dd
+        color: Theme.text
         font.pixelSize: Theme.clockSize
     }
 }

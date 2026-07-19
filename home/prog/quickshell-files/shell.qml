@@ -233,10 +233,7 @@ Scope {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            Sounds.play("Windows Navigation Start.wav");
-                            launcher.open = !launcher.open;
-                        }
+                        onClicked: launcher.open = !launcher.open
                     }
                 }
 
@@ -276,25 +273,25 @@ Scope {
                 }
             }
 
-            // divider between the status indicators and the date
+            // divider between the status indicators and the clock
             Rectangle {
                 id: statusDivider
-                anchors { bottom: dateDisplay.top; bottomMargin: Theme.gap * 2; horizontalCenter: parent.horizontalCenter }
+                anchors { bottom: clock.top; bottomMargin: Theme.gap * 2; horizontalCenter: parent.horizontalCenter }
                 width: Theme.cell - 8
                 height: 1
                 color: Theme.border
             }
 
-            // ---- date, sitting just above the clock ----
-            DateDisplay {
-                id: dateDisplay
-                anchors { bottom: clock.top; horizontalCenter: parent.horizontalCenter }
+            // ---- time, on top of the date ----
+            Clock {
+                id: clock
+                anchors { bottom: dateDisplay.top; horizontalCenter: parent.horizontalCenter }
                 anchors.bottomMargin: 6
             }
 
-            // ---- bottom: vertical clock ----
-            Clock {
-                id: clock
+            // ---- bottom: date (month / year / day) ----
+            DateDisplay {
+                id: dateDisplay
                 anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
                 anchors.bottomMargin: Theme.gap
             }

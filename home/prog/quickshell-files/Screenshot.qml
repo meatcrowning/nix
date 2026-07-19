@@ -239,10 +239,7 @@ PanelWindow {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        Sounds.play("Windows Navigation Start.wav");
-                        parent.clicked();
-                    }
+                    onClicked: parent.clicked()
                 }
             }
 
@@ -260,6 +257,10 @@ PanelWindow {
                     root.selX1 = root.selY1 = root.selX2 = root.selY2 = 0;
                     clientsProc.running = true; // fresh rects
                 }
+            }
+            MenuButton {
+                label: "full"
+                onClicked: root.capture(root.screenX, root.screenY, root.width, root.height)
             }
             MenuButton {
                 label: "delay: " + root.delaySec + "s"

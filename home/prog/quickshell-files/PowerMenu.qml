@@ -144,10 +144,7 @@ PanelWindow {
                         cursorShape: Qt.PointingHandCursor
                         hoverEnabled: true
                         onEntered: root.selected = index
-                        onClicked: {
-                            Sounds.play("Windows Navigation Start.wav");
-                            root.confirm(index);
-                        }
+                        onClicked: root.confirm(index)
                     }
                 }
             }

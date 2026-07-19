@@ -365,11 +365,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (g_pGlobalState)
             onWindowFocus(w);
     }));
-    // (A global every-left-click sound listener lived here briefly in 2.8;
-    // reverted — the click now plays on semantic ACTIONS only: titlebar
-    // buttons in vtbDeco, panel/launcher/tray clicks in quickshell, and web
-    // links via the vista-click Vivaldi extension.)
-
     // After any mouse release: re-pin the scratchpad (a border-drag may have
     // moved edges other than the right one) and persist its dragged width.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent e, Event::SCallbackInfo& info) {
@@ -450,7 +445,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.9"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.10"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

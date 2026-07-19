@@ -92,6 +92,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     // moves two edges. This engine resizes exactly the edges the grab point
     // implies (side handle -> one edge, corner zone -> two).
     bool                 m_bEdgeResizing = false;
+    bool                 m_bCursorOverridden = false; // we set the WINDOW_EDGE cursor override
     uint32_t             m_resizeEdges   = 0; // RS_EDGE_* bitmask
     Vector2D             m_resStartMouse;
     CBox                 m_resStartBox;

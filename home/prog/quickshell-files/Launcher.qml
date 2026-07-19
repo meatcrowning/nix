@@ -56,8 +56,6 @@ PanelWindow {
 
     function launch(entry) {
         if (!entry) return;
-        // Launching an app is an action -> Vista click.
-        Sounds.play("Windows Navigation Start.wav");
         entry.execute();
         close();
     }
