@@ -28,7 +28,7 @@
   };
   };
 
-  outputs = { nixpkgs, home-manager, plasma-manager, aerothemeplasma-nix, ollama-src, ... }@inputs:
+  outputs = { nixpkgs, home-manager, plasma-manager, aerothemeplasma-nix, ... }@inputs:
   let
     user = "lam";
     system = "x86_64-linux";

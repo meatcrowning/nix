@@ -13,7 +13,11 @@
     displayManager.sddm.enable = false;
     displayManager.ly.enable = true;
     desktopManager.plasma6.enable = true;
-    displayManager.defaultSession = lib.mkIf config.my.aerotheme.enable (lib.mkForce "aerothemeplasma");
+    # Hyprland is the default session; aerotheme (when enabled) takes over instead.
+    # Plasma stays installed and selectable at the greeter — it also supplies
+    # dolphin on PATH and xdg-desktop-portal-kde, which the Hyprland setup uses.
+    displayManager.defaultSession =
+      if config.my.aerotheme.enable then "aerothemeplasma" else "hyprland";
   };
 
   programs.aeroshell = lib.mkIf config.my.aerotheme.enable {

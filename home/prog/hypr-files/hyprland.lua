@@ -67,10 +67,11 @@ hl.on("hyprland.start", function()
     -- backfill anything already in that directory from before this existed.
     hl.exec_cmd("systemctl --user start wal-prepare.path")
     hl.exec_cmd("$HOME/.config/scripts/wal-prepare-all.sh")
-    -- Land on the "main" workspace (50, not 1) so the dynamic scroll-to-
-    -- create workspace system (quickshell/WorkspaceNav.qml) has numeric room
-    -- to grow both up (49, 48, ...) and down (51, 52, ...) from a central
-    -- anchor, instead of hitting the floor immediately at workspace 1.
+    -- Land on the "main" workspace (50, not 1) so a scroll-to-create
+    -- workspace scheme has numeric room to grow both up (49, 48, ...) and
+    -- down (51, 52, ...) from a central anchor, instead of hitting the floor
+    -- immediately at workspace 1. (The original WorkspaceNav.qml consumer of
+    -- this was removed with the Taskbar rework; the anchor is kept as-is.)
     hl.exec_cmd([[hyprctl dispatch 'hl.dsp.focus({ workspace = 50 })']])
 end)
 

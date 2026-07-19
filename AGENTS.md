@@ -35,7 +35,7 @@ The `my.aerotheme.enable` option (defined in `sys/options.nix`) allows for easy 
 
 ## Maintenance Instructions for AI Agents
 
-1. **Keep this file updated:** If you make substantial architectural changes, add new top-level directories, or introduce major new features/options, you MUST update this `REFERENCE.md` file to reflect those changes.
+1. **Keep this file updated:** If you make substantial architectural changes, add new top-level directories, or introduce major new features/options, you MUST update this `AGENTS.md` file to reflect those changes.
 2. **Respect the Structure:** Follow the existing patterns:
     - System-level changes go into `sys/`.
     - User-level/dotfile changes go into `home/`.

@@ -4,6 +4,7 @@
   nix = {
     settings = {
       experimental-features = [ "nix-command" "flakes" "pipe-operators" ];
+      auto-optimise-store = true;
       trusted-substituters = [
         "https://ai.cachix.org"
         "https://cuda-maintainers.cachix.org"
@@ -13,15 +14,20 @@
         "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
       ];
     };
+    # nix-collect-garbage wants a period like "14d" here; the old value "+10"
+    # (nix-env generation syntax) made the weekly nix-gc.service fail for months.
     gc = {
       automatic = true;
       dates = "weekly";
-      options = "--delete-older-than +10";
+      options = "--delete-older-than 14d";
     };
   };
 
   boot = {
-    loader = { systemd-boot.enable = true; efi.canTouchEfiVariables = true; };
+    loader = {
+      systemd-boot = { enable = true; configurationLimit = 15; };
+      efi.canTouchEfiVariables = true;
+    };
     kernelPackages = pkgs.linuxPackages_latest;
     plymouth.enable = false;
   };
@@ -31,10 +37,11 @@
 
   networking = {
     networkmanager.enable = true;
-    # jellyfin setings, disabled for now because i dont know if i really want to use it but what else is there as a media server lol oh i guess plex
+    # jellyfin settings, disabled for now because i dont know if i really want to use it but what else is there as a media server lol oh i guess plex
     #firewall = {
     #  allowedTCPPorts = [ 8096 8920 ]; # HTTP and HTTPS
-    #  allowedUDPPorts = [ 1900 7359 ]; # DLNA and Auto-discovery }
+    #  allowedUDPPorts = [ 1900 7359 ]; # DLNA and Auto-discovery
+    #};
   };
 
   nixpkgs.config.allowUnfree = true;

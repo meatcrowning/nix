@@ -1,4 +1,4 @@
-{ pkgs, kde-material-you-colors-latest, ... }:
+{ pkgs, ... }:
 
 {
   home.packages = with pkgs; [
