@@ -100,6 +100,17 @@ Scope {
     CpuPanel { id: cpuPanel }
     EthPanel { id: ethPanel }
 
+    // File-browser windows (real FloatingWindows, hyprvtb-decorated), one per
+    // open entry in the Browsers registry — spawned by a drive's "open".
+    Variants {
+        model: Browsers.entries
+        FileBrowser {
+            required property var modelData
+            browserId: modelData.id
+            startPath: modelData.path
+        }
+    }
+
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
         target: "lock"
@@ -144,6 +155,13 @@ Scope {
         function toggle(): void { screenshot.open = !screenshot.open; }
         function show(): void { screenshot.open = true; }
         function hide(): void { screenshot.open = false; }
+    }
+
+    // Open a file browser at a path: `qs ipc call browser open <path>`
+    // (drives' "open" buttons call Browsers.open directly).
+    IpcHandler {
+        target: "browser"
+        function open(path: string): void { Browsers.open(path && path.length ? path : "/home/lam"); }
     }
 
     // Pop the OSD from the brightness keys: `qs ipc call osd brightness`.
@@ -300,10 +318,10 @@ Scope {
                     bottomMargin: Theme.gap * 2
                     horizontalCenter: parent.horizontalCenter
                 }
-                onWeatherHovered: (h) => weatherPanel.hoverChanged(h)
-                onDiskHovered: (h) => diskPanel.hoverChanged(h)
-                onCpuHovered: (h) => cpuPanel.hoverChanged(h)
-                onEthHovered: (h) => ethPanel.hoverChanged(h)
+                onWeatherHovered: (h, cy) => { if (h) weatherPanel.anchorCenterY = cy; weatherPanel.hoverChanged(h); }
+                onDiskHovered: (h, cy) => { if (h) diskPanel.anchorCenterY = cy; diskPanel.hoverChanged(h); }
+                onCpuHovered: (h, cy) => { if (h) cpuPanel.anchorCenterY = cy; cpuPanel.hoverChanged(h); }
+                onEthHovered: (h, cy) => { if (h) ethPanel.anchorCenterY = cy; ethPanel.hoverChanged(h); }
             }
 
             // divider between the status indicators and the clock

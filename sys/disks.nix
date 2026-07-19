@@ -1,5 +1,24 @@
 { pkgs, ... }:
 
+let
+  # Relabel a filesystem (the "rename drive" action in the disk popup).
+  # Per-fstype tool; btrfs relabels online via the mountpoint. Invoked as
+  # `sudo drive-label <device> <fstype> <newlabel>` (NOPASSWD rule below).
+  driveLabel = pkgs.writeShellScriptBin "drive-label" ''
+    dev="$1"; fstype="$2"; label="$3"
+    [ -n "$dev" ] && [ -n "$fstype" ] || { echo "usage: drive-label <dev> <fstype> <label>" >&2; exit 2; }
+    case "$fstype" in
+      btrfs)
+        mp=$(${pkgs.util-linux}/bin/findmnt -n -o TARGET --source "$dev" | head -n1)
+        if [ -n "$mp" ]; then ${pkgs.btrfs-progs}/bin/btrfs filesystem label "$mp" "$label"
+        else ${pkgs.btrfs-progs}/bin/btrfs filesystem label "$dev" "$label"; fi ;;
+      ext2|ext3|ext4) ${pkgs.e2fsprogs}/bin/e2label "$dev" "$label" ;;
+      exfat)          ${pkgs.exfatprogs}/bin/exfatlabel "$dev" "$label" ;;
+      vfat|fat)       ${pkgs.dosfstools}/bin/fatlabel "$dev" "$label" ;;
+      *) echo "unsupported fstype: $fstype" >&2; exit 1 ;;
+    esac
+  '';
+in
 {
   # Auto-mount the three unmounted internal data drives under ~/drives.
   # by-uuid so kernel sd* reordering can't misroute them; nofail +
@@ -37,11 +56,11 @@
   # simple path (quickshell runs as lam, no TTY).
   security.sudo.extraRules = [{
     users = [ "lam" ];
-    commands = [{
-      command = "${pkgs.smartmontools}/bin/smartctl";
-      options = [ "NOPASSWD" ];
-    }];
+    commands = [
+      { command = "${pkgs.smartmontools}/bin/smartctl"; options = [ "NOPASSWD" ]; }
+      { command = "${driveLabel}/bin/drive-label"; options = [ "NOPASSWD" ]; }
+    ];
   }];
 
-  environment.systemPackages = [ pkgs.smartmontools pkgs.jq ];
+  environment.systemPackages = [ pkgs.smartmontools pkgs.jq driveLabel ];
 }

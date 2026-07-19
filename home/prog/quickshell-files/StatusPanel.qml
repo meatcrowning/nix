@@ -8,10 +8,15 @@ Column {
     id: root
     spacing: 6
 
-    signal weatherHovered(bool hovering)
-    signal diskHovered(bool hovering)
-    signal cpuHovered(bool hovering)
-    signal ethHovered(bool hovering)
+    // centerY = the module's scene-Y center, so its popup lines up with it
+    signal weatherHovered(bool hovering, real centerY)
+    signal diskHovered(bool hovering, real centerY)
+    signal cpuHovered(bool hovering, real centerY)
+    signal ethHovered(bool hovering, real centerY)
+
+    // scene-Y center of an item (bar spans full screen height, so scene Y
+    // equals screen Y)
+    function _cy(item) { return item.mapToItem(null, item.width / 2, item.height / 2).y; }
 
     // one dim label + one coloured value, centred. onWheelUp/onWheelDown are
     // optional function-valued properties — set on "bri"/"vol" below for
@@ -27,7 +32,7 @@ Column {
         property color valueColor: Theme.text
         property var onWheelUp: null
         property var onWheelDown: null
-        signal hovered(bool hovering)
+        signal hovered(bool hovering, real centerY)
         anchors.horizontalCenter: parent.horizontalCenter
         width: col.implicitWidth
         height: col.implicitHeight
@@ -51,8 +56,8 @@ Column {
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
-            onEntered: parent.hovered(true)
-            onExited: parent.hovered(false)
+            onEntered: parent.hovered(true, root._cy(parent))
+            onExited: parent.hovered(false, 0)
             onWheel: (wheel) => {
                 if (wheel.angleDelta.y > 0) {
                     if (onWheelUp) onWheelUp();
@@ -92,8 +97,8 @@ Column {
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.NoButton
-            onEntered: root.ethHovered(true)
-            onExited: root.ethHovered(false)
+            onEntered: root.ethHovered(true, root._cy(parent))
+            onExited: root.ethHovered(false, 0)
         }
     }
 
@@ -128,8 +133,8 @@ Column {
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.NoButton
-            onEntered: root.cpuHovered(true)
-            onExited: root.cpuHovered(false)
+            onEntered: root.cpuHovered(true, root._cy(parent))
+            onExited: root.cpuHovered(false, 0)
         }
     }
 
@@ -194,8 +199,8 @@ Column {
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.NoButton
-            onEntered: root.weatherHovered(true)
-            onExited: root.weatherHovered(false)
+            onEntered: root.weatherHovered(true, root._cy(parent))
+            onExited: root.weatherHovered(false, 0)
         }
     }
 }

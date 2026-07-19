@@ -13,10 +13,30 @@ SlidePopup {
     implicitWidth: 300
     implicitHeight: content.implicitHeight + 20
 
+    // this is THE pinnable panel; it pins whenever a file browser is open
+    isDisk: true
+    pinnedOpen: Popups.diskPinned
+    Component.onCompleted: Popups.diskWidth = implicitWidth
+
     onOpened: { usageProc.running = true; smartProc.running = true; }
 
-    property var drives: []  // [{src,label,mount,size,used,rota,model}]
+    property var drives: []  // [{src,label,mount,size,used,rota,model,fstype}]
     property var smart: ({}) // "/dev/sdX" -> {health,temp,wear,poh}
+    property string renaming: "" // src currently being relabeled inline
+
+    // relabel a filesystem via the root helper, then refresh
+    Process {
+        id: labelProc
+        onExited: { root.renaming = ""; usageProc.running = true; }
+    }
+    function relabel(src, fstype, newLabel) {
+        // resolve the wrapper's real store path so the NOPASSWD sudo rule
+        // (which lists that path) matches — same reason as disk-smart.sh.
+        labelProc.command = ["sh", "-c",
+            'exec sudo -n "$(readlink -f "$(command -v drive-label)")" "$1" "$2" "$3"',
+            "_", src, fstype, newLabel];
+        labelProc.running = true;
+    }
 
     function baseName(mount) {
         if (mount === "/") return "root";
@@ -41,7 +61,7 @@ SlidePopup {
                     if (f.length < 7) continue;
                     out.push({ src: f[0], label: f[1], mount: f[2],
                                size: parseFloat(f[3]) || 0, used: parseFloat(f[4]) || 0,
-                               rota: f[5] === "1", model: f[6] });
+                               rota: f[5] === "1", model: f[6], fstype: f[7] || "" });
                 }
                 root.drives = out;
             }
@@ -99,15 +119,69 @@ SlidePopup {
 
                 Row {
                     width: parent.width
-                    PixelText {
-                        width: parent.width - sizeText.width
-                        elide: Text.ElideRight
-                        text: (modelData.label && modelData.label.length ? modelData.label : root.baseName(modelData.mount))
-                              + (modelData.rota ? "" : " •")  // dot marks SSD
-                        color: Theme.text
+                    spacing: 4
+
+                    // name: click to rename (edits the real fs label), or an
+                    // inline text field while renaming this drive
+                    Item {
+                        width: parent.width - sizeText.width - browseBtn.width - 8
+                        height: 16
+
+                        PixelText {
+                            id: nameLabel
+                            visible: root.renaming !== modelData.src
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: (modelData.label && modelData.label.length ? modelData.label : root.baseName(modelData.mount))
+                                  + (modelData.rota ? "" : " •")  // dot marks SSD
+                            color: Theme.text
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.IBeamCursor
+                                onClicked: {
+                                    root.renaming = modelData.src;
+                                    nameEdit.text = modelData.label || "";
+                                    nameEdit.forceActiveFocus();
+                                    nameEdit.selectAll();
+                                }
+                            }
+                        }
+                        Rectangle {
+                            visible: root.renaming === modelData.src
+                            anchors.fill: parent
+                            color: Theme.bgAlt
+                            border.color: Theme.accent
+                            border.width: 1
+                            TextInput {
+                                id: nameEdit
+                                anchors { fill: parent; leftMargin: 3; rightMargin: 3 }
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: Theme.accent
+                                font.family: Theme.font
+                                font.pixelSize: Theme.fontSize
+                                renderType: Text.NativeRendering
+                                clip: true
+                                onAccepted: {
+                                    if (text && text !== modelData.label)
+                                        root.relabel(modelData.src, modelData.fstype, text);
+                                    else root.renaming = "";
+                                }
+                                Keys.onEscapePressed: root.renaming = ""
+                            }
+                        }
                     }
+
+                    // open a file browser rooted at this drive
+                    BrowserButton {
+                        id: browseBtn
+                        anchors.verticalCenter: parent.verticalCenter
+                        label: "open"
+                        onClicked: Browsers.open(modelData.mount)
+                    }
+
                     PixelText {
                         id: sizeText
+                        anchors.verticalCenter: parent.verticalCenter
                         text: root.fmtG(modelData.used) + "/" + root.fmtG(modelData.size)
                         color: Theme.textDim
                     }

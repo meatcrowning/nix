@@ -2,15 +2,17 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 
-// Shared base for the bar's hover popups (Calendar / AnalogClock /
-// WeatherPanel). All sit bottom-right, slide in from the right edge, stay
-// while hovered (350ms grace so the cursor can travel from the bar into
-// the card), and are mutually exclusive via the Popups coordinator — an
-// open popup slides fully away before the next slides in.
+// Shared base for the bar's hover popups. Slides in from the right edge,
+// stays while hovered (350ms grace), mutually exclusive via Popups.
 //
-// Subclass usage: set popupNamespace + implicitWidth/Height, put content
-// as children (they land inside the card), hook onOpened for refresh work.
-// The bar's hover zones call hoverChanged(bool).
+// Positioning:
+//   anchorCenterY < 0  -> anchored to the bottom (clock/date popups)
+//   anchorCenterY >= 0 -> vertical CENTER sits at that scene-Y, so the
+//                         popup lines up with the bar module it came from
+//                         (disk/cpu/eth/weather).
+// When the DiskPanel is pinned (a file browser is open) every OTHER popup
+// shifts left so its right edge meets the pinned panel's left edge, and the
+// disk panel itself drops to the bottom z-layer and stays open.
 PanelWindow {
     id: root
 
@@ -19,19 +21,49 @@ PanelWindow {
     property bool open: false
     property bool wantOpen: false
 
+    // vertical-centering: scene Y to center on; <0 keeps bottom anchoring
+    property real anchorCenterY: -1
+
+    // DiskPanel flags (see Popups): isDisk marks the one panel that pins;
+    // pinnedOpen is driven by the browser count.
+    property bool isDisk: false
+    property bool pinnedOpen: false
+
     signal opened()
+
+    readonly property real leftShift:
+        (Popups.diskPinned && !isDisk) ? (Popups.diskWidth + Theme.gap) : 0
 
     visible: open || card.x < card.hidden - 1
     color: "transparent"
 
-    anchors { bottom: true; right: true }
-    margins { bottom: Theme.gap; right: Theme.gap }
+    anchors {
+        right: true
+        top: root.anchorCenterY >= 0
+        bottom: root.anchorCenterY < 0
+    }
+    margins {
+        right: Theme.gap + root.leftShift
+        top: root.anchorCenterY >= 0
+             ? Math.max(Theme.gap, Math.round(root.anchorCenterY - root.implicitHeight / 2))
+             : 0
+        bottom: root.anchorCenterY < 0 ? Theme.gap : 0
+    }
     exclusiveZone: 0
 
-    WlrLayershell.layer: WlrLayer.Overlay
+    // pinned disk sits behind normal windows (the browser); everything else
+    // floats on top as usual
+    WlrLayershell.layer: (isDisk && pinnedOpen) ? WlrLayer.Bottom : WlrLayer.Overlay
     WlrLayershell.namespace: popupNamespace
 
+    // pinned open: forced visible, hover no longer closes it
+    onPinnedOpenChanged: {
+        if (pinnedOpen) { closeTimer.stop(); pendTimer.stop(); wantOpen = true; open = true; }
+        else closeTimer.restart();
+    }
+
     function hoverChanged(h) {
+        if (pinnedOpen) return;
         if (h) show();
         else closeTimer.restart();
     }
@@ -41,22 +73,18 @@ PanelWindow {
         wantOpen = true;
         if (open) return;
         const wait = Popups.claim(root);
-        if (wait > 0) {
-            pendTimer.interval = wait;
-            pendTimer.restart();
-        } else {
-            reallyOpen();
-        }
+        if (wait > 0) { pendTimer.interval = wait; pendTimer.restart(); }
+        else reallyOpen();
     }
 
     function reallyOpen() {
-        if (!wantOpen) return; // hover left during the wait
+        if (!wantOpen) return;
         opened();
         open = true;
     }
 
-    // called by the coordinator when another popup takes the spot
     function dismiss() {
+        if (pinnedOpen) return;
         wantOpen = false;
         open = false;
         closeTimer.stop();
@@ -72,6 +100,7 @@ PanelWindow {
         id: closeTimer
         interval: 350
         onTriggered: {
+            if (root.pinnedOpen) return;
             root.wantOpen = false;
             root.open = false;
             Popups.released(root);
