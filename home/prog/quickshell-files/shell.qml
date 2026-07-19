@@ -121,9 +121,11 @@ Scope {
             _savedPins = all.filter(p => p.pinnedOpen);
             // pin in layout order: tiled bottom row (disk ends up rightmost),
             // then cpu/eth stack above the disk
+            // pin order sets the bottom-row tiling (right->left from the disk):
+            // disk | clock | weather | calendar
             diskPanel.pinnedOpen = true;
-            weatherPanel.pinnedOpen = true;
             analogClock.pinnedOpen = true;
+            weatherPanel.pinnedOpen = true;
             calendar.pinnedOpen = true;
             cpuPanel.pinnedOpen = true;
             ethPanel.pinnedOpen = true;

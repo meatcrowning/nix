@@ -33,8 +33,9 @@ Column {
         property var onWheelUp: null
         property var onWheelDown: null
         signal hovered(bool hovering, real centerY)
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: col.implicitWidth
+        // full bar width so the hover/scroll band covers the whole module
+        // section, not just the centred text
+        width: parent.width
         height: col.implicitHeight
 
         Column {
@@ -70,8 +71,7 @@ Column {
 
     // ---------- Network (down / up rates) ----------
     Item {
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: ethCol.implicitWidth
+        width: parent.width
         height: ethCol.implicitHeight
         Column {
             id: ethCol
@@ -104,8 +104,7 @@ Column {
 
     // ---------- CPU (usage / temp) ----------
     Item {
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: cpuCol.implicitWidth
+        width: parent.width
         height: cpuCol.implicitHeight
         Column {
             id: cpuCol
@@ -175,8 +174,7 @@ Column {
     // ("rain", "snow", "clr"...) and the value is the temperature — the
     // word itself does the icon's job. Hover slides out the 7-day forecast.
     Item {
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: wxCol.implicitWidth
+        width: parent.width
         height: wxCol.implicitHeight
 
         Column {
