@@ -110,8 +110,13 @@ hl.env("HYPRCURSOR_SIZE", "22")
 hl.env("XCURSOR_THEME", "GoogleDot-Black")
 hl.env("HYPRCURSOR_THEME", "GoogleDot-Black")
 
--- Let Qt apps (incl. the Quickshell panel) pick up the system icon theme.
-hl.env("QT_QPA_PLATFORMTHEME", "gtk3")
+-- Route Qt apps through the KDE platform plugin (KDEPlasmaPlatformTheme) so
+-- they read their palette, fonts and icon theme from ~/.config/kdeglobals —
+-- which wal-set.sh recolours from the wallpaper and pins the pixel font into.
+-- This makes non-KDE Qt apps match the KDE ones and the panel. (Was "gtk3",
+-- which only gave them the GTK theme and left kdeglobals — i.e. the leftover
+-- Plasma theme — driving the KDE apps.)
+hl.env("QT_QPA_PLATFORMTHEME", "kde")
 
 
 -----------------------

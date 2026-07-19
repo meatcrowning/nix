@@ -231,4 +231,62 @@ if [ -f "$LUA" ]; then
     sed -i -E 's/(\["col\.crit"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${CRIT}"'ff)\2/' "$LUA"
 fi
 
+# ---- 7. KDE / Qt apps (kdeglobals colours + pixel font; live-reloaded) --------
+# Qt apps read their palette and fonts from ~/.config/kdeglobals: KDE apps
+# (Dolphin, Kate, dialogs) always do, and every other Qt app does too now that
+# hyprland.lua sets QT_QPA_PLATFORMTHEME=kde. Rewrite the colour groups from the
+# wallpaper palette and pin the same pixel font the panel and kitty use, then
+# poke running apps to reload. kwriteconfig6 edits keys surgically, so groups
+# owned elsewhere (KFileDialog Settings from plasma-manager, ColorEffects, etc.)
+# are left untouched.
+KG="$CONFIG/kdeglobals"
+if command -v kwriteconfig6 >/dev/null 2>&1; then
+    hx() { printf '%d,%d,%d' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }   # "rrggbb" -> "R,G,B"
+    kw() { kwriteconfig6 --file "$KG" "$@"; }
+    # group, background, foreground — the remaining roles are shared across groups.
+    kdecolor() {
+        local g="$1" bg="$2" fg="$3"
+        kw --group "$g" --key BackgroundNormal    "$(hx "$bg")"
+        kw --group "$g" --key BackgroundAlternate "$(hx "$BGALT")"
+        kw --group "$g" --key ForegroundNormal    "$(hx "$fg")"
+        kw --group "$g" --key ForegroundInactive  "$(hx "$TEXTDIM")"
+        kw --group "$g" --key ForegroundActive    "$(hx "$ACCENT")"
+        kw --group "$g" --key ForegroundLink      "$(hx "$ACCENT")"
+        kw --group "$g" --key ForegroundVisited   "$(hx "$TEXTDIM")"
+        kw --group "$g" --key ForegroundNegative  "$(hx "$CRIT")"
+        kw --group "$g" --key ForegroundNeutral   "$(hx "$WARN")"
+        kw --group "$g" --key ForegroundPositive  "$(hx "$OK")"
+        kw --group "$g" --key DecorationFocus     "$(hx "$ACCENT")"
+        kw --group "$g" --key DecorationHover     "$(hx "$ACCENT")"
+    }
+    kdecolor "Colors:Window"        "$BG"     "$TEXT"
+    kdecolor "Colors:View"          "$BG"     "$TEXT"
+    kdecolor "Colors:Button"        "$BGALT"  "$TEXT"
+    kdecolor "Colors:Selection"     "$ACCENT" "$BG"
+    kdecolor "Colors:Tooltip"       "$BGALT"  "$TEXT"
+    kdecolor "Colors:Complementary" "$BG"     "$TEXT"
+    kdecolor "Colors:Header"        "$BGALT"  "$TEXT"
+    # Window-manager (titlebar) colours — used by KDE apps' own CSDs.
+    kw --group WM --key activeBackground   "$(hx "$BGALT")"
+    kw --group WM --key activeForeground   "$(hx "$TEXT")"
+    kw --group WM --key inactiveBackground "$(hx "$BG")"
+    kw --group WM --key inactiveForeground "$(hx "$TEXTDIM")"
+
+    # Same pixel font as the panel/kitty, everywhere. 12pt ≈ the font's native
+    # 16px cell at 96dpi. Static (not wallpaper-derived), but re-pinned here so
+    # it lands on first login and overrides any stale Plasma-set font.
+    FSPEC="More Perfect DOS VGA,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+    for k in font menuFont toolBarFont smallestReadableFont fixed; do
+        kw --group General --key "$k" "$FSPEC"
+    done
+    kw --group WM --key activeFont "$FSPEC"
+
+    # Reload palette (0) and fonts (1) in running KDE/Qt apps without a relogin.
+    # Harmless if there's no session bus or no listeners.
+    if command -v dbus-send >/dev/null 2>&1; then
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 0 int32 0 >/dev/null 2>&1 || true
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 1 int32 0 >/dev/null 2>&1 || true
+    fi
+fi
+
 echo "wal-set: done."
