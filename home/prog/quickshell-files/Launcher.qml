@@ -56,9 +56,8 @@ PanelWindow {
 
     function launch(entry) {
         if (!entry) return;
-        // Vista "Start Navigation" click — the closest modern browsers let us
-        // get to IE's per-link click (page clicks are browser-internal now).
-        Sounds.play("Windows Navigation Start.wav");
+        // (No click sound here: the hyprvtb plugin plays Navigation Start on
+        // every left click globally, which covers launcher clicks too.)
         entry.execute();
         close();
     }

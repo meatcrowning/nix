@@ -58,3 +58,4 @@ inline UP<SGlobalState> g_pGlobalState;
 std::string vtbStatePath();
 void        vtbLoadGeometry();
 void        vtbSaveGeometry();
+void        vtbPlaySound(const char* file); // Vista sounds, defined in vtbDeco.cpp

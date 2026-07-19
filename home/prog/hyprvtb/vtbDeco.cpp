@@ -67,7 +67,7 @@ static bool superHeld() {
 // Vista system sounds (user's set in ~/.local/share/sounds/vista — see
 // quickshell/Sounds.qml for the full event map). The executor is
 // shell-interpreted (config exec_cmd relies on $HOME the same way).
-static void playSound(const char* file) {
+void vtbPlaySound(const char* file) {
     Config::Supplementary::executor()->spawn(std::string("pw-play \"$HOME/.local/share/sounds/vista/") + file + "\" 2>/dev/null");
 }
 
@@ -788,7 +788,7 @@ void CVtbDeco::minimizeWindow() {
     m_minSavedPos = PWINDOW->m_realPosition->goal();
     m_bMinimized  = true;
     m_minimizedAt = Time::steadyNow();
-    playSound("Windows Minimize.wav");
+    vtbPlaySound("Windows Minimize.wav");
 
     // slide fully past the right edge (Hyprland's move animation is the
     // "slide out" itself)
@@ -834,7 +834,7 @@ void CVtbDeco::restoreFromMinimize() {
         return;
 
     m_bMinimized = false;
-    playSound("Windows Restore.wav");
+    vtbPlaySound("Windows Restore.wav");
     Config::Actions::move(m_minSavedPos, false, PWINDOW);
     if (PWINDOW->m_isFloating)
         g_pCompositor->changeWindowZOrder(PWINDOW, true);
