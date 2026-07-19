@@ -28,7 +28,7 @@
     usbutils
     btrfs-progs
     claude-code
-
+    ranger
 
     #kde-material-you-colors-latest
     #ventoy-full-qt
