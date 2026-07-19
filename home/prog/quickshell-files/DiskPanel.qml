@@ -14,9 +14,14 @@ SlidePopup {
     implicitHeight: content.implicitHeight + 20
 
     // this is THE pinnable panel; it pins whenever a file browser is open
+    // (Popups.diskPinned) or the user toggles the pin indicator.
     isDisk: true
     pinnedOpen: Popups.diskPinned
-    Component.onCompleted: Popups.diskWidth = implicitWidth
+
+    // report our top scene-Y so cpu/eth can stack their popups above us
+    function _reportTop() { Popups.diskTopY = Math.max(Theme.gap, anchorCenterY - implicitHeight / 2); }
+    onAnchorCenterYChanged: _reportTop()
+    onImplicitHeightChanged: _reportTop()
 
     onOpened: { usageProc.running = true; smartProc.running = true; }
 
@@ -225,6 +230,41 @@ SlidePopup {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "reading…"
             color: Theme.textDim
+        }
+    }
+
+    // pin toggle, top-right. Lit when pinned (a browser is open, or the user
+    // pinned it manually); click to toggle. Unpinning lets the panel close on
+    // hover-out again even while a browser stays open.
+    Item {
+        anchors { top: parent.top; right: parent.right; topMargin: 7; rightMargin: 8 }
+        width: pinRow.implicitWidth
+        height: pinRow.implicitHeight
+
+        Row {
+            id: pinRow
+            spacing: 3
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 7
+                height: 7
+                radius: 4
+                color: root.pinnedOpen ? Theme.accent : "transparent"
+                border.color: (root.pinnedOpen || pinMa.containsMouse) ? Theme.accent : Theme.textDim
+                border.width: 1
+            }
+            PixelText {
+                text: root.pinnedOpen ? "pinned" : "pin"
+                color: (root.pinnedOpen || pinMa.containsMouse) ? Theme.accent : Theme.textDim
+            }
+        }
+
+        MouseArea {
+            id: pinMa
+            anchors { fill: parent; margins: -4 } // easier target
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Popups.diskPinned = !Popups.diskPinned
         }
     }
 }

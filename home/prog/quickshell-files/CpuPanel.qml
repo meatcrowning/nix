@@ -10,6 +10,7 @@ SlidePopup {
     popupNamespace: "qs-cpu"
     implicitWidth: 220
     implicitHeight: content.implicitHeight + 20
+    aboveDiskWhenPinned: true // stack above the disk panel while it's pinned
 
     Connections {
         target: SysInfo

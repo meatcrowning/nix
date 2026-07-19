@@ -144,7 +144,7 @@ Column {
         value: SysInfo.fmtSize(SysInfo.diskFreeKb)
         valueColor: SysInfo.diskUsePct >= 90 ? Theme.crit
                   : SysInfo.diskUsePct >= 75 ? Theme.warn : Theme.text
-        onHovered: (h) => root.diskHovered(h)
+        onHovered: (h, cy) => root.diskHovered(h, cy)
     }
 
     // ---------- Brightness ----------

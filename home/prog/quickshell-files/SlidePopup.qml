@@ -25,29 +25,37 @@ PanelWindow {
     property real anchorCenterY: -1
 
     // DiskPanel flags (see Popups): isDisk marks the one panel that pins;
-    // pinnedOpen is driven by the browser count.
+    // pinnedOpen is driven by the browser count / manual pin.
     property bool isDisk: false
     property bool pinnedOpen: false
+    // cpu/eth: when the disk panel is pinned, stack ABOVE it instead of
+    // over it (their bottom edge sits just above the disk panel's top).
+    property bool aboveDiskWhenPinned: false
 
     signal opened()
 
-    readonly property real leftShift:
-        (Popups.diskPinned && !isDisk) ? (Popups.diskWidth + Theme.gap) : 0
+    // true when this popup should sit above the pinned disk panel
+    readonly property bool stackAboveDisk: aboveDiskWhenPinned && Popups.diskPinned
+    // true when the popup is top-anchored (centered on a module, or stacked
+    // above the disk) vs bottom-anchored (clock/date/weather)
+    readonly property bool topAnchored: stackAboveDisk || anchorCenterY >= 0
 
     visible: open || card.x < card.hidden - 1
     color: "transparent"
 
     anchors {
         right: true
-        top: root.anchorCenterY >= 0
-        bottom: root.anchorCenterY < 0
+        top: root.topAnchored
+        bottom: !root.topAnchored
     }
     margins {
-        right: Theme.gap + root.leftShift
-        top: root.anchorCenterY >= 0
-             ? Math.max(Theme.gap, Math.round(root.anchorCenterY - root.implicitHeight / 2))
-             : 0
-        bottom: root.anchorCenterY < 0 ? Theme.gap : 0
+        right: Theme.gap
+        top: root.stackAboveDisk
+             ? Math.max(Theme.gap, Math.round(Popups.diskTopY - Theme.gap - root.implicitHeight))
+             : root.anchorCenterY >= 0
+               ? Math.max(Theme.gap, Math.round(root.anchorCenterY - root.implicitHeight / 2))
+               : 0
+        bottom: root.topAnchored ? 0 : Theme.gap
     }
     exclusiveZone: 0
 
