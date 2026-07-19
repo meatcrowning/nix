@@ -27,8 +27,18 @@ Column {
             id: cell
             required property var modelData
             readonly property bool focusedWin: modelData.activated
-            readonly property var appEntry: modelData.appId
-                ? DesktopEntries.heuristicLookup(modelData.appId) : null
+            // DesktopEntries scans lazily/asynchronously on first access, so at
+            // panel startup (windows already open) heuristicLookup can return
+            // null before the scan populates. A plain function-call binding would
+            // latch that null forever (heuristicLookup registers no dependency on
+            // the model), leaving apps whose window-class != icon-name stuck on
+            // the generic fallback. Touch .applications.values so this binding
+            // re-runs once the scan finishes and the real entry appears.
+            readonly property var appEntry: {
+                DesktopEntries.applications.values;
+                return modelData.appId
+                    ? DesktopEntries.heuristicLookup(modelData.appId) : null;
+            }
             readonly property string iconName: appEntry && appEntry.icon
                 ? appEntry.icon : (modelData.appId || "")
 
