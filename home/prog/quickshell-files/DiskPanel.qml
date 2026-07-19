@@ -130,6 +130,14 @@ SlidePopup {
                     width: parent.width
                     spacing: 4
 
+                    // open a file browser rooted at this drive (left of the name)
+                    BrowserButton {
+                        id: browseBtn
+                        anchors.verticalCenter: parent.verticalCenter
+                        label: "open"
+                        onClicked: Browsers.open(modelData.mount)
+                    }
+
                     // name: click to rename (edits the real fs label), or an
                     // inline text field while renaming this drive
                     Item {
@@ -178,14 +186,6 @@ SlidePopup {
                                 Keys.onEscapePressed: root.renaming = ""
                             }
                         }
-                    }
-
-                    // open a file browser rooted at this drive
-                    BrowserButton {
-                        id: browseBtn
-                        anchors.verticalCenter: parent.verticalCenter
-                        label: "open"
-                        onClicked: Browsers.open(modelData.mount)
                     }
 
                     PixelText {

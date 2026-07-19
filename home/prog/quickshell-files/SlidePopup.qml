@@ -32,20 +32,24 @@ PanelWindow {
     property bool aboveDiskWhenPinned: false
     property bool pinInPlace: false
     property real _pinnedTop: -1
+    readonly property real pinnedTopY: _pinnedTop // read by stacking siblings
 
     signal opened()
 
-    // stack above the disk panel only while it's actually open (and we're not
-    // already pinned)
-    readonly property bool aboveDisk: aboveDiskWhenPinned && Popups.diskOpen && !pinnedOpen
+    // stackable transients (cpu/eth) sit above the highest obstacle below them
+    // (the open disk panel and/or a pinned stackable sibling); -1 = nothing.
+    readonly property real obstacleTop: (aboveDiskWhenPinned && !pinnedOpen) ? Popups.stackObstacleTop(root) : -1
+    readonly property bool stackAbove: obstacleTop >= 0
     readonly property bool tiled: pinnedOpen && !pinInPlace       // bottom widget row
     readonly property bool frozenTop: pinnedOpen && pinInPlace    // stay where pinned
-    readonly property bool topAnchored: aboveDisk || frozenTop || (!pinnedOpen && anchorCenterY >= 0)
+    readonly property bool topAnchored: stackAbove || frozenTop || (!pinnedOpen && anchorCenterY >= 0)
 
-    // top position when we're top-anchored but NOT frozen
+    // top position when top-anchored but NOT frozen
     function _liveTop() {
-        if (aboveDiskWhenPinned && Popups.diskOpen)
-            return Math.max(Theme.gap, Math.round(Popups.diskTopY - Theme.gap - implicitHeight));
+        if (aboveDiskWhenPinned) {
+            const o = Popups.stackObstacleTop(root);
+            if (o >= 0) return Math.max(Theme.gap, Math.round(o - Theme.gap - implicitHeight));
+        }
         if (anchorCenterY >= 0)
             return Math.max(Theme.gap, Math.round(anchorCenterY - implicitHeight / 2));
         return Theme.gap;
@@ -74,13 +78,14 @@ PanelWindow {
 
     onPinnedOpenChanged: {
         if (pinnedOpen) {
-            if (pinInPlace) { _pinnedTop = _liveTop(); Popups.released(root); }
+            if (pinInPlace) { _pinnedTop = _liveTop(); Popups.registerStack(root, true); }
             else Popups.pin(root);
             closeTimer.stop(); pendTimer.stop();
             wantOpen = true; open = true;
         } else {
+            if (pinInPlace) Popups.registerStack(root, false);
+            else Popups.unpin(root);
             _pinnedTop = -1;
-            if (!pinInPlace) Popups.unpin(root);
             closeTimer.restart();
         }
     }
@@ -187,6 +192,11 @@ PanelWindow {
                 anchors { fill: parent; margins: -4 }
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                // hovering the pin sits "on top of" the card's hover area,
+                // which would otherwise read as leaving the popup and start
+                // the close/slide flicker — keep it open while over the pin
+                onEntered: root.show()
+                onExited: closeTimer.restart()
                 onClicked: root.pinnedOpen = !root.pinnedOpen
             }
         }
