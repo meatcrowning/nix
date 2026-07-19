@@ -21,7 +21,8 @@ namespace Event {
 // Vertical titlebar drawn by the compositor on the RIGHT edge of every
 // window — top to bottom: close [x], maximize [■] (fill-usable-area toggle,
 // not fullscreen), minimize [»] (slides the window off the right edge;
-// focusing it again — e.g. from the panel taskbar — slides it back), then
+// focusing it again — e.g. from the panel taskbar — slides it back), pin
+// [>>] (Hyprland pin — window kept on top / shown on all workspaces), then
 // the title as a column of upright letters reading top-down. Rendered as a
 // sticky window decoration with priority above the border and
 // DECORATION_PART_OF_MAIN_WINDOW, so Hyprland's own active/inactive border
@@ -80,7 +81,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     Vector2D             m_minSavedPos;
     Time::steady_tp      m_minimizedAt = Time::steadyNow();
 
-    int                  m_iHoverCell = -1; // 0 close, 1 max, 2 min, -1 none
+    int                  m_iHoverCell = -1; // 0 close, 1 max, 2 min, 3 pin, -1 none
 
     bool                 m_bDragPending   = false;
     bool                 m_bDraggingThis  = false;
@@ -101,6 +102,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     int                  cellAt(const Vector2D& localCoords);
 
     void                 closeWindow();
+    void                 togglePin();
     void                 restoreFromMinimize();
     CBox                 maximizeTarget();
 

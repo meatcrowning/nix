@@ -27,11 +27,11 @@ static CHyprColor configColor(Config::INTEGER color) {
     return CHyprColor{static_cast<uint64_t>(color)};
 }
 
-// Fixed interior metrics (logical px): three square button cells under the
-// top edge (close, maximize, minimize), title filling the rest.
+// Fixed interior metrics (logical px): four square button cells under the
+// top edge (close, maximize, minimize, pin), title filling the rest.
 static constexpr int VTB_PAD      = 2; // inset from the bar edge
 static constexpr int VTB_CELL_GAP = 2;
-static constexpr int VTB_CELLS    = 3;
+static constexpr int VTB_CELLS    = 4;
 
 static int           cellSize() {
     return g_pGlobalState->config.barWidth->value() - VTB_PAD * 2;
@@ -307,6 +307,12 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawCell(2, accentColor, false);
     drawGlyph(2, ">", m_iHoverCell == 2 ? accentColor : textColor);
 
+    // pin [>>] — Hyprland pin: keeps the window on top and on every
+    // workspace. Lit accent while pinned, like maximize while maximized.
+    const bool PINNED = PWINDOW->m_pinned;
+    drawCell(3, accentColor, PINNED);
+    drawGlyph(3, ">>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor);
+
     // ---- title, a column of upright letters ----
     const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
     if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
@@ -434,6 +440,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         case 0: closeWindow(); return;
         case 1: toggleMaximize(); return;
         case 2: minimizeWindow(); return;
+        case 3: togglePin(); return;
         default: break;
     }
 
@@ -510,6 +517,21 @@ void CVtbDeco::toggleMaximize() {
         Config::Actions::resize(T.size(), false, PWINDOW);
         Config::Actions::move(T.pos(), false, PWINDOW);
     }
+    damageEntire();
+}
+
+// Toggle Hyprland's own pin state (floating-only). Routed through the "pin"
+// dispatcher rather than flipping m_pinned directly so the workspace/rule
+// bookkeeping Hyprland does on pin stays correct — same map used for the
+// drag "mouse" dispatch above. The window was just focused in
+// handleDownEvent, but pass the address explicitly so we pin THIS window
+// regardless of focus timing.
+void CVtbDeco::togglePin() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !PWINDOW->m_isFloating)
+        return;
+
+    g_pKeybindManager->m_dispatchers["pin"](windowAddress(PWINDOW));
     damageEntire();
 }
 

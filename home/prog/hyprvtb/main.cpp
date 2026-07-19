@@ -364,7 +364,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / stacked title)", "lam", "2.3"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title)", "lam", "2.4"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
