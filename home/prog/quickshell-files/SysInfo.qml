@@ -28,6 +28,21 @@ Singleton {
     property var history: []
     readonly property int historyLen: 24
 
+    // Longer per-metric ring buffers for the hover line charts (CpuPanel,
+    // EthPanel). chartLen samples * intervalSec = window; 90 * 2s = 3 min.
+    readonly property int chartLen: 90
+    property var cpuHist: []
+    property var tempHist: []
+    property var rxHist: []
+    property var txHist: []
+
+    function _pushHist(arr, v) {
+        const h = arr.slice();
+        h.push(v);
+        while (h.length > chartLen) h.shift();
+        return h;
+    }
+
     property real _prevRx: -1
     property real _prevTx: -1
     property real _prevCpuTotal: -1
@@ -70,9 +85,15 @@ Singleton {
             h.push(rxSpeed + txSpeed);
             while (h.length > historyLen) h.shift();
             history = h;
+            rxHist = _pushHist(rxHist, rxSpeed);
+            txHist = _pushHist(txHist, txSpeed);
         }
         _prevRx = rx;
         _prevTx = tx;
+
+        // CPU/temp history for the hover charts (cpuUsage/cpuTemp are set above)
+        if (cpuUsage >= 0) cpuHist = _pushHist(cpuHist, cpuUsage);
+        if (cpuTemp >= 0) tempHist = _pushHist(tempHist, cpuTemp);
     }
 
     // Human-readable bytes/s -> e.g. "1.2M", "34K", "0"

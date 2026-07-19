@@ -27,6 +27,15 @@ in
     };
     # cava config for the panel's stereo VU bars (VuMeter.qml)
     "quickshell/scripts/cava-vu.conf".source = ./quickshell-files/scripts/cava-vu.conf;
+    # disk-hover data providers (DiskPanel.qml)
+    "quickshell/scripts/disk-usage.sh" = {
+      source = ./quickshell-files/scripts/disk-usage.sh;
+      executable = true;
+    };
+    "quickshell/scripts/disk-smart.sh" = {
+      source = ./quickshell-files/scripts/disk-smart.sh;
+      executable = true;
+    };
   };
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''

@@ -94,6 +94,12 @@ Scope {
         id: weatherPanel
     }
 
+    // Status-metric popups: per-drive usage + SMART, CPU usage/temp history,
+    // network throughput history — each opened by hovering its bar block.
+    DiskPanel { id: diskPanel }
+    CpuPanel { id: cpuPanel }
+    EthPanel { id: ethPanel }
+
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
         target: "lock"
@@ -295,6 +301,9 @@ Scope {
                     horizontalCenter: parent.horizontalCenter
                 }
                 onWeatherHovered: (h) => weatherPanel.hoverChanged(h)
+                onDiskHovered: (h) => diskPanel.hoverChanged(h)
+                onCpuHovered: (h) => cpuPanel.hoverChanged(h)
+                onEthHovered: (h) => ethPanel.hoverChanged(h)
             }
 
             // divider between the status indicators and the clock

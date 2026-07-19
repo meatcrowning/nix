@@ -9,6 +9,9 @@ Column {
     spacing: 6
 
     signal weatherHovered(bool hovering)
+    signal diskHovered(bool hovering)
+    signal cpuHovered(bool hovering)
+    signal ethHovered(bool hovering)
 
     // one dim label + one coloured value, centred. onWheelUp/onWheelDown are
     // optional function-valued properties — set on "bri"/"vol" below for
@@ -24,6 +27,7 @@ Column {
         property color valueColor: Theme.text
         property var onWheelUp: null
         property var onWheelDown: null
+        signal hovered(bool hovering)
         anchors.horizontalCenter: parent.horizontalCenter
         width: col.implicitWidth
         height: col.implicitHeight
@@ -46,7 +50,9 @@ Column {
 
         MouseArea {
             anchors.fill: parent
-            enabled: onWheelUp !== null || onWheelDown !== null
+            hoverEnabled: true
+            onEntered: parent.hovered(true)
+            onExited: parent.hovered(false)
             onWheel: (wheel) => {
                 if (wheel.angleDelta.y > 0) {
                     if (onWheelUp) onWheelUp();
@@ -58,46 +64,72 @@ Column {
     }
 
     // ---------- Network (down / up rates) ----------
-    Column {
+    Item {
         anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 1
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "eth"
-            color: Theme.textDim
+        width: ethCol.implicitWidth
+        height: ethCol.implicitHeight
+        Column {
+            id: ethCol
+            anchors.fill: parent
+            spacing: 1
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "eth"
+                color: Theme.textDim
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: SysInfo.fmtSpeed(SysInfo.rxSpeed)
+                color: Theme.info
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: SysInfo.fmtSpeed(SysInfo.txSpeed)
+                color: Theme.warn
+            }
         }
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: SysInfo.fmtSpeed(SysInfo.rxSpeed)
-            color: Theme.info
-        }
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: SysInfo.fmtSpeed(SysInfo.txSpeed)
-            color: Theme.warn
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: root.ethHovered(true)
+            onExited: root.ethHovered(false)
         }
     }
 
     // ---------- CPU (usage / temp) ----------
-    Column {
+    Item {
         anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 1
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "cpu"
-            color: Theme.textDim
+        width: cpuCol.implicitWidth
+        height: cpuCol.implicitHeight
+        Column {
+            id: cpuCol
+            anchors.fill: parent
+            spacing: 1
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "cpu"
+                color: Theme.textDim
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + ""
+                color: SysInfo.cpuUsage >= 90 ? Theme.crit
+                     : SysInfo.cpuUsage >= 75 ? Theme.warn : Theme.text
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + ""
+                color: SysInfo.cpuTemp >= 80 ? Theme.crit
+                     : SysInfo.cpuTemp >= 65 ? Theme.warn : Theme.textDim
+            }
         }
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + ""
-            color: SysInfo.cpuUsage >= 90 ? Theme.crit
-                 : SysInfo.cpuUsage >= 75 ? Theme.warn : Theme.text
-        }
-        PixelText {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + ""
-            color: SysInfo.cpuTemp >= 80 ? Theme.crit
-                 : SysInfo.cpuTemp >= 65 ? Theme.warn : Theme.textDim
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: root.cpuHovered(true)
+            onExited: root.cpuHovered(false)
         }
     }
 
@@ -107,6 +139,7 @@ Column {
         value: SysInfo.fmtSize(SysInfo.diskFreeKb)
         valueColor: SysInfo.diskUsePct >= 90 ? Theme.crit
                   : SysInfo.diskUsePct >= 75 ? Theme.warn : Theme.text
+        onHovered: (h) => root.diskHovered(h)
     }
 
     // ---------- Brightness ----------
