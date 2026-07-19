@@ -111,6 +111,30 @@ Scope {
         }
     }
 
+    // The "<" button at the bottom of the bar: reveal ALL popups at once as
+    // desktop widgets, restoring whatever was pinned before on toggle-off.
+    property bool allRevealed: false
+    property var _savedPins: []
+    function toggleRevealAll() {
+        const all = [calendar, analogClock, weatherPanel, diskPanel, cpuPanel, ethPanel];
+        if (!allRevealed) {
+            _savedPins = all.filter(p => p.pinnedOpen);
+            // pin in layout order: tiled bottom row (disk ends up rightmost),
+            // then cpu/eth stack above the disk
+            diskPanel.pinnedOpen = true;
+            weatherPanel.pinnedOpen = true;
+            analogClock.pinnedOpen = true;
+            calendar.pinnedOpen = true;
+            cpuPanel.pinnedOpen = true;
+            ethPanel.pinnedOpen = true;
+            allRevealed = true;
+        } else {
+            for (const p of all)
+                if (_savedPins.indexOf(p) < 0) p.pinnedOpen = false;
+            allRevealed = false;
+        }
+    }
+
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
         target: "lock"
@@ -162,6 +186,13 @@ Scope {
     IpcHandler {
         target: "browser"
         function open(path: string): void { Browsers.open(path && path.length ? path : "/home/lam"); }
+    }
+
+    // Reveal/hide all widgets: `qs ipc call widgets toggle` (also the bar's
+    // "<" button).
+    IpcHandler {
+        target: "widgets"
+        function toggle(): void { shell.toggleRevealAll(); }
     }
 
     // Pop the OSD from the brightness keys: `qs ipc call osd brightness`.
@@ -344,17 +375,40 @@ Scope {
                 anchors.bottomMargin: 6
             }
 
-            // ---- bottom: date (month / day / year) ----
+            // ---- date (month / day / year), above the reveal button ----
             DateDisplay {
                 id: dateDisplay
+                anchors { bottom: revealBtn.top; horizontalCenter: parent.horizontalCenter }
+                anchors.bottomMargin: 6
+            }
+
+            // ---- reveal-all-widgets toggle, at the very bottom ----
+            Rectangle {
+                id: revealBtn
                 anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
                 anchors.bottomMargin: Theme.gap
+                width: Theme.wsCell
+                height: 16
+                color: shell.allRevealed ? Theme.bgAlt : "transparent"
+                border.width: shell.allRevealed ? 2 : 1
+                border.color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.border
+                PixelText {
+                    anchors.centerIn: parent
+                    text: shell.allRevealed ? ">" : "<"
+                    color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.text
+                }
+                MouseArea {
+                    id: revealMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: shell.toggleRevealAll()
+                }
             }
 
             // Hover zones for the popups: the whole lower strip of the bar at
             // full width, not just the glyphs. The clock band pops the analog
-            // clock; the date band (down to the very bottom edge) pops the
-            // calendar. NoButton = hover only, clicks/scrolls pass through.
+            // clock; the date band pops the calendar. NoButton = hover only.
             MouseArea {
                 anchors { top: clock.top; topMargin: -Theme.gap; bottom: dateDisplay.top; left: parent.left; right: parent.right }
                 hoverEnabled: true
@@ -363,7 +417,7 @@ Scope {
                 onExited: analogClock.hoverChanged(false)
             }
             MouseArea {
-                anchors { top: dateDisplay.top; bottom: parent.bottom; left: parent.left; right: parent.right }
+                anchors { top: dateDisplay.top; bottom: revealBtn.top; left: parent.left; right: parent.right }
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
                 onEntered: calendar.hoverChanged(true)

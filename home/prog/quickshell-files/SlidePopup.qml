@@ -36,6 +36,17 @@ PanelWindow {
 
     signal opened()
 
+    // Combined hover over the card OR the pin indicator. Driving open/close
+    // off the OR (rather than each MouseArea's own enter/exit) means the
+    // card->pin handoff never momentarily reads as "left the popup", which
+    // was causing the slide-out/in flicker while hovering the pin.
+    readonly property bool cardHovered: cardMa.containsMouse || pinMa.containsMouse
+    onCardHoveredChanged: {
+        if (pinnedOpen) return;
+        if (cardHovered) show();
+        else closeTimer.restart();
+    }
+
     // stackable transients (cpu/eth) sit above the highest obstacle below them
     // (the open disk panel and/or a pinned stackable sibling); -1 = nothing.
     readonly property real obstacleTop: (aboveDiskWhenPinned && !pinnedOpen) ? Popups.stackObstacleTop(root) : -1
@@ -150,11 +161,10 @@ PanelWindow {
         radius: Theme.windowRounding
 
         MouseArea {
+            id: cardMa
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.NoButton
-            onEntered: root.show()
-            onExited: closeTimer.restart()
         }
 
         Item {
@@ -183,7 +193,7 @@ PanelWindow {
                     border.width: 1
                 }
                 PixelText {
-                    text: "pn"
+                    text: "p"
                     color: (root.pinnedOpen || pinMa.containsMouse) ? Theme.accent : Theme.textDim
                 }
             }
@@ -192,11 +202,6 @@ PanelWindow {
                 anchors { fill: parent; margins: -4 }
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                // hovering the pin sits "on top of" the card's hover area,
-                // which would otherwise read as leaving the popup and start
-                // the close/slide flicker — keep it open while over the pin
-                onEntered: root.show()
-                onExited: closeTimer.restart()
                 onClicked: root.pinnedOpen = !root.pinnedOpen
             }
         }
