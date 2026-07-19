@@ -60,6 +60,11 @@ hl.on("hyprland.start", function()
     -- (fired by wal-set.path when wall.png changes) can talk to hyprctl,
     -- then make sure that watcher is running.
     hl.exec_cmd("systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_CURRENT_DESKTOP PATH")
+    -- import-environment above only reaches systemd user units; xdg-desktop-
+    -- portal and its backends are D-Bus-activated, so they need the session
+    -- env in the *dbus* activation store too — otherwise the hyprland portal
+    -- can spawn without HYPRLAND_INSTANCE_SIGNATURE and screen-share fails.
+    hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
     hl.exec_cmd("systemctl --user start wal-set.path")
     -- Same for wal-prepare.path, which pre-caches tile/theme data for every
     -- image under ~/Pictures/wall as soon as it's added — see
