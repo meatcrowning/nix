@@ -206,11 +206,25 @@ fi
 # live-reload every running kitty
 pkill -USR1 -x kitty >/dev/null 2>&1
 
-# ---- 6. Hyprland focused-window border (live + persisted) --------------------
-hyprctl keyword general:col.active_border "rgba(${ACCENT}ee)" >/dev/null 2>&1
+# ---- 6. Hyprland focused-window border + hyprvtb titlebars (live + persisted)
+# `hyprctl keyword` doesn't exist on the lua-config parser ("use eval"), so
+# both the border and the hyprvtb titlebar-plugin colours go through one
+# `hyprctl eval hl.config(...)` call for the live update, and sed against the
+# palette-tagged lines in hyprland.lua for persistence across restarts.
+hyprctl eval 'hl.config({
+    general = { col = { active_border = "rgba('"${ACCENT}"'ee)" } },
+    plugin = { hyprvtb = {
+        ["col.text"]          = "rgba('"${TEXTDIM}"'ff)",
+        ["col.button_border"] = "rgba('"${BORDER}"'ff)",
+        ["col.accent"]        = "rgba('"${ACCENT}"'ff)",
+    } },
+})' >/dev/null 2>&1
 LUA="$CONFIG/hypr/hyprland.lua"
 if [ -f "$LUA" ]; then
     sed -i -E 's/(\<active_border[[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${ACCENT}"'ee)\2/' "$LUA"
+    sed -i -E 's/(\["col\.text"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${TEXTDIM}"'ff)\2/' "$LUA"
+    sed -i -E 's/(\["col\.button_border"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BORDER}"'ff)\2/' "$LUA"
+    sed -i -E 's/(\["col\.accent"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${ACCENT}"'ff)\2/' "$LUA"
 fi
 
 echo "wal-set: done."

@@ -157,12 +157,11 @@ Scope {
         BackgroundScroll {}
     }
 
-    // Vertical titlebars for windows on the active workspace (close /
-    // maximize / rotated title), all hosted in one fullscreen overlay
-    // surface — see TitlebarOverlay.qml (surface + input mask),
-    // WindowTitlebar.qml (per-window item, occlusion clipping) and
-    // WindowTracker.qml (event-driven geometry).
-    TitlebarOverlay {}
+    // Window titlebars are NOT drawn by quickshell: they're compositor-side
+    // (the hyprvtb Hyprland plugin, ~/nix/home/prog/hyprvtb/) so they stay
+    // locked to windows frame-for-frame. A layer-shell approach lived here
+    // once (TitlebarOverlay/WindowTitlebar/WindowTracker) but could only
+    // chase window geometry over IPC, always a frame or two behind.
 
     // Desktop notifications: Quickshell owns org.freedesktop.Notifications and
     // renders toasts bottom-right, just inside the bar. One window (single
