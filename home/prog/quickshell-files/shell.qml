@@ -74,6 +74,11 @@ Scope {
         id: wallpaperPicker
     }
 
+    // The Spectacle-style screenshot overlay (Meta+Shift+S).
+    Screenshot {
+        id: screenshot
+    }
+
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
         target: "lock"
@@ -110,6 +115,14 @@ Scope {
         function toggle(): void { wallpaperPicker.open = !wallpaperPicker.open; }
         function show(): void { wallpaperPicker.open = true; }
         function hide(): void { wallpaperPicker.open = false; }
+    }
+
+    // Let Hyprland toggle the screenshot overlay: `qs ipc call screenshot toggle`.
+    IpcHandler {
+        target: "screenshot"
+        function toggle(): void { screenshot.open = !screenshot.open; }
+        function show(): void { screenshot.open = true; }
+        function hide(): void { screenshot.open = false; }
     }
 
     // Pop the OSD from the media-key binds:

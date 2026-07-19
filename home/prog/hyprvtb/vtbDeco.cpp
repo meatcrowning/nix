@@ -51,7 +51,7 @@ enum : uint32_t {
     RS_EDGE_T = 4,
     RS_EDGE_B = 8,
 };
-static constexpr int    VTB_RESIZE_STRIP = 8;  // px of the bar's outer edge acting as the right handle
+static constexpr int    VTB_RESIZE_STRIP = 14; // px of the bar's outer edge acting as the right handle
 static constexpr double VTB_MIN_SIZE     = 50; // fallback when the client reports no min size
 
 // linux/input-event-codes.h values (avoid the include)

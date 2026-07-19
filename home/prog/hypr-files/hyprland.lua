@@ -72,6 +72,18 @@ hl.on("hyprland.start", function()
     -- backfill anything already in that directory from before this existed.
     hl.exec_cmd("systemctl --user start wal-prepare.path")
     hl.exec_cmd("$HOME/.config/scripts/wal-prepare-all.sh")
+    -- Tray applets + background services. The systemd user services
+    -- (easyeffects, udiskie) are WantedBy graphical-session.target, which
+    -- nothing activates in a Hyprland session — start them explicitly, same
+    -- as the wal path units above.
+    hl.exec_cmd("nm-applet --indicator")
+    hl.exec_cmd("kdeconnect-indicator")
+    hl.exec_cmd("systemctl --user start easyeffects.service udiskie.service")
+    hl.exec_cmd("$HOME/.local/bin/wizlight-tray.py")
+    -- Clipboard history: everything copied lands in cliphist's db
+    -- (`cliphist list` / `cliphist decode`; picker UI is future work).
+    hl.exec_cmd("wl-paste --type text --watch cliphist store")
+    hl.exec_cmd("wl-paste --type image --watch cliphist store")
     -- Land on the "main" workspace (50, not 1) so a scroll-to-create
     -- workspace scheme has numeric room to grow both up (49, 48, ...) and
     -- down (51, 52, ...) from a central anchor, instead of hitting the floor
@@ -364,6 +376,10 @@ hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("qs ipc call powermenu toggle"), { de
 -- Wallpaper picker: flip through ~/Pictures/wall with arrow keys, each
 -- highlight live-applies (wal-set.sh) as both wallpaper and theme.
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggle"), { description = "Wallpaper picker" })
+-- Spectacle-style screenshot overlay (quickshell/Screenshot.qml): dim +
+-- drag-select / window pick, delay + exit in the bottom menu; saves to
+-- ~/Pictures/Screenshots and copies to the clipboard.
+hl.bind(mainMod .. " + SHIFT + S", hl.dsp.exec_cmd("qs ipc call screenshot toggle"), { description = "Screenshot" })
 -- Bare Super tap opens the Quickshell runner (fires on release of Super).
 hl.bind(mainMod .. " + Super_L", hl.dsp.exec_cmd("qs ipc call launcher toggle"), { release = true })
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo(), { description = "Pseudo-tile" })
@@ -446,15 +462,18 @@ hl.bind(mainMod .. " + S", function()
     hl.plugin.hyprvtb.toggle_scratch()
 end, { description = "Scratchpad terminal" })
 
--- Alt-Tab window switching (single-workspace desktop): cycle focus and
--- raise. Focusing a minimized window slides it back in (hyprvtb).
+-- Alt-Tab window switching, KDE-style most-recently-used order (hyprvtb
+-- plugin). cycle_next walks the window LIST (creation order), which is why
+-- tabbing felt out of order — cycle_hist walks focus history instead:
+-- one alt-tab flips to the previous window; successive tabs within ~0.9s
+-- keep digging into the same history snapshot (KDE's hold-Alt walk), and
+-- pausing commits. Raise + minimized-restore ride on the plugin's focus
+-- listener. Focusing a minimized window slides it back in.
 hl.bind("ALT + TAB", function()
-    hl.dispatch(hl.dsp.window.cycle_next())
-    hl.dispatch(hl.dsp.window.bring_to_top())
-end, { description = "Next window" })
+    hl.plugin.hyprvtb.cycle_hist_next()
+end, { description = "Next window (recent first)" })
 hl.bind("ALT + SHIFT + TAB", function()
-    hl.dispatch(hl.dsp.window.cycle_next({ prev = true }))
-    hl.dispatch(hl.dsp.window.bring_to_top())
+    hl.plugin.hyprvtb.cycle_hist_prev()
 end, { description = "Previous window" })
 
 -- Multimedia keys for volume and brightness.

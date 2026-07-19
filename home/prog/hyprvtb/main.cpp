@@ -2,6 +2,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/history/WindowHistoryTracker.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
@@ -212,6 +213,83 @@ static void onWindowFocus(PHLWINDOW window) {
     }
 }
 
+// ---- KDE-style alt-tab: most-recently-used window cycling -----------------
+//
+// Hyprland's cyclenext walks the window LIST (creation order); KDE walks
+// focus history. Naively cycling the live history can only ever bounce
+// between the two most recent windows (focusing B puts it at the front, so
+// the "next" from B is A again — C is unreachable). KDE solves this with a
+// hold-Alt walk that commits on release; we approximate it: successive
+// calls within WALK_MS continue through a SNAPSHOT of the history taken
+// when the walk began, so tab-tab-tab digs deeper exactly like KDE's
+// switcher, and pausing (releasing Alt) naturally commits — the next
+// alt-tab starts a fresh walk from the new focus order.
+static std::vector<PHLWINDOWREF> s_altTabWalk;
+static size_t                    s_altTabPos  = 0;
+static Time::steady_tp           s_altTabLast = Time::steadyNow();
+static constexpr int             ALTTAB_WALK_MS = 900;
+
+static bool altTabCycleable(const PHLWINDOW& w) {
+    if (!w || !w->m_isMapped || w->isHidden())
+        return false;
+    if (w->m_class == SCRATCH_CLASS) // the scratchpad is toggled, not tabbed to
+        return false;
+    if (w->m_workspace && !w->m_workspace->isVisible())
+        return false;
+    return true; // minimized windows stay in: focusing them slides them back
+}
+
+static void cycleHist(bool prev) {
+    const auto CUR = Desktop::focusState()->window();
+    const bool CONTINUING =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - s_altTabLast).count() < ALTTAB_WALK_MS && !s_altTabWalk.empty();
+    s_altTabLast = Time::steadyNow();
+
+    if (!CONTINUING) {
+        s_altTabWalk.clear();
+        s_altTabPos = 0;
+        for (const auto& w : Desktop::History::windowTracker()->fullHistory()) {
+            const auto l = w.lock();
+            if (!l)
+                continue;
+            if (l == CUR || altTabCycleable(l)) {
+                if (l == CUR)
+                    s_altTabPos = s_altTabWalk.size();
+                s_altTabWalk.push_back(w);
+            }
+        }
+    }
+
+    const size_t N = s_altTabWalk.size();
+    if (N < 2)
+        return;
+
+    // step around the frozen ring, skipping entries that died mid-walk
+    for (size_t i = 1; i <= N; i++) {
+        const size_t idx = (s_altTabPos + (prev ? N - (i % N) : i)) % N;
+        const auto   w   = s_altTabWalk[idx].lock();
+        if (!w || (w != CUR && !altTabCycleable(w)))
+            continue;
+        s_altTabPos = idx;
+        // raise + minimized-restore ride on the window.active listener
+        Desktop::focusState()->fullWindowFocus(w, Desktop::FOCUS_REASON_CLICK);
+        return;
+    }
+}
+
+// lua: hyprvtb.cycle_hist_next() / cycle_hist_prev() — Alt(+Shift)+Tab.
+static int luaCycleHistNext(lua_State* L) {
+    if (g_pGlobalState)
+        cycleHist(false);
+    return 0;
+}
+
+static int luaCycleHistPrev(lua_State* L) {
+    if (g_pGlobalState)
+        cycleHist(true);
+    return 0;
+}
+
 // Deco of the currently focused window, or nullptr.
 static CVtbDeco* activeDeco() {
     if (!g_pGlobalState)
@@ -340,6 +418,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
     }
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
@@ -364,7 +444,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title) + KDE-style edge resize", "lam", "2.5"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.6"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

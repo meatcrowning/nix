@@ -19,5 +19,8 @@
     labwc
     quickshell
     noctalia-shell
+    # screenshots (Screenshot.qml overlay drives grim) + clipboard history
+    wl-clipboard
+    cliphist
     ];
 }
