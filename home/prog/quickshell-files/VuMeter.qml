@@ -68,4 +68,26 @@ Item {
         Channel { level: root.levelL }
         Channel { level: root.levelR }
     }
+
+    // The volume level as a horizontal line across both bars — the bar's
+    // always-visible volume indicator (the volume OSD is gone). Click or
+    // drag to set the level, scroll to nudge it.
+    Rectangle {
+        visible: SysInfo.volume >= 0
+        x: 0
+        width: parent.width
+        y: Math.max(0, Math.round(root.barH * (1 - Math.max(0, SysInfo.volume) / 100)) - 1)
+        height: 2
+        color: SysInfo.muted ? Theme.crit : Theme.text
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        function setFromY(y) {
+            SysInfo.setVolume(100 * (1 - y / height));
+        }
+        onPressed: (mouse) => setFromY(mouse.y)
+        onPositionChanged: (mouse) => { if (pressed) setFromY(mouse.y); }
+        onWheel: (wheel) => SysInfo.adjustVolume(wheel.angleDelta.y > 0 ? 5 : -5)
+    }
 }

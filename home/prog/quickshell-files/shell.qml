@@ -140,12 +140,20 @@ Scope {
         function hide(): void { screenshot.open = false; }
     }
 
-    // Pop the OSD from the media-key binds:
-    //   `qs ipc call osd volume` / `qs ipc call osd brightness`
+    // Pop the OSD from the brightness keys: `qs ipc call osd brightness`.
+    // (Volume no longer uses the OSD — the VU meter's level line in the bar
+    // is the always-visible indicator.)
     IpcHandler {
         target: "osd"
-        function volume(): void { Osd.trigger("volume"); }
         function brightness(): void { Osd.trigger("brightness"); }
+    }
+
+    // Volume keys route through SysInfo like brightness does — optimistic
+    // panel update + wpctl + the Vista ding, no OSD.
+    IpcHandler {
+        target: "volume"
+        function up(): void { SysInfo.adjustVolume(5); }
+        function down(): void { SysInfo.adjustVolume(-5); }
     }
 
     // Hardware brightness keys (hypr/hyprland.lua) routed through
@@ -286,7 +294,7 @@ Scope {
                     bottomMargin: Theme.gap * 2
                     horizontalCenter: parent.horizontalCenter
                 }
-                onWeatherHovered: (h) => weatherPanel.wxHover(h)
+                onWeatherHovered: (h) => weatherPanel.hoverChanged(h)
             }
 
             // divider between the status indicators and the clock
@@ -320,15 +328,15 @@ Scope {
                 anchors { top: clock.top; topMargin: -Theme.gap; bottom: dateDisplay.top; left: parent.left; right: parent.right }
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
-                onEntered: analogClock.clockHover(true)
-                onExited: analogClock.clockHover(false)
+                onEntered: analogClock.hoverChanged(true)
+                onExited: analogClock.hoverChanged(false)
             }
             MouseArea {
                 anchors { top: dateDisplay.top; bottom: parent.bottom; left: parent.left; right: parent.right }
                 hoverEnabled: true
                 acceptedButtons: Qt.NoButton
-                onEntered: calendar.dateHover(true)
-                onExited: calendar.dateHover(false)
+                onEntered: calendar.hoverChanged(true)
+                onExited: calendar.hoverChanged(false)
             }
         }
     }

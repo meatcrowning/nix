@@ -95,7 +95,18 @@ Singleton {
         volume = Math.max(0, Math.min(100, volume + step));
         Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@",
             Math.abs(step) + "%" + (step >= 0 ? "+" : "-")]);
-        Osd.trigger("volume");
+        Sounds.playThrottled("Windows Ding.wav", 250);
+    }
+
+    // Absolute set — the VU meter's draggable level line. Optimistic like
+    // adjustVolume; no-op when the target equals the current value so a drag
+    // only fires wpctl when the integer actually changes.
+    function setVolume(v) {
+        v = Math.round(Math.max(0, Math.min(100, v)));
+        if (v === volume) return;
+        volume = v;
+        Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", v + "%"]);
+        Sounds.playThrottled("Windows Ding.wav", 250);
     }
 
     // Optimistic local update (instant panel feedback) + a debounced actual

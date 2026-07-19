@@ -482,16 +482,17 @@ hl.bind("ALT + SHIFT + TAB", function()
 end, { description = "Previous window" })
 
 -- Multimedia keys for volume and brightness.
--- Volume: each also pops the Quickshell OSD (`qs ipc call osd volume`),
--- which re-reads the live level and shows it briefly.
+-- Volume: routed through quickshell's "volume" IpcHandler (optimistic
+-- panel update + wpctl + the Vista ding). No OSD — the VU meter's level
+-- line in the bar is the always-visible indicator.
 -- Brightness: this display is external (DDC/CI via ddcutil, no laptop
 -- backlight), and ddcutil takes ~1.5s/call — routed through Quickshell's
 -- SysInfo.adjustBrightness (debounced write + its own OSD trigger) instead
 -- of calling ddcutil directly, so holding the key doesn't stack up several
 -- slow DDC calls. See quickshell/shell.qml's "brightness" IpcHandler.
-hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+ && qs ipc call osd volume"), { locked = true, repeating = true })
-hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && qs ipc call osd volume"),      { locked = true, repeating = true })
-hl.bind("XF86AudioMute",        hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && qs ipc call osd volume"),     { locked = true, repeating = true })
+hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("qs ipc call volume up"),                          { locked = true, repeating = true })
+hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("qs ipc call volume down"),                        { locked = true, repeating = true })
+hl.bind("XF86AudioMute",        hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),     { locked = true, repeating = true })
 hl.bind("XF86AudioMicMute",     hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),   { locked = true, repeating = true })
 hl.bind("XF86MonBrightnessUp",  hl.dsp.exec_cmd("qs ipc call brightness up"),                       { locked = true, repeating = true })
 hl.bind("XF86MonBrightnessDown",hl.dsp.exec_cmd("qs ipc call brightness down"),                     { locked = true, repeating = true })

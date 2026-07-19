@@ -20,9 +20,6 @@ Singleton {
         kind = k;
         active = true;
         hideTimer.restart();
-        // Vista volume blip, throttled so key-repeat doesn't machine-gun it.
-        if (k === "volume")
-            Sounds.playThrottled("Windows Ding.wav", 250);
         if (k === "brightness") {
             // Brightness lives in SysInfo already (DDC/ddcutil is too slow,
             // ~1.5s/call, to re-read synchronously here). This used to run
