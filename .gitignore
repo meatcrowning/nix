@@ -1,0 +1,2 @@
+# open-webui writes this secret into cwd if launched from here — never commit it
+.webui_secret_key
