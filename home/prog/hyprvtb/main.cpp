@@ -8,6 +8,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/config/supplementary/executor/Executor.hpp>
 
 extern "C" {
 #include <lua.h>
@@ -62,11 +63,92 @@ void vtbSaveGeometry() {
         f << cls << '\t' << (int)box.x << ' ' << (int)box.y << ' ' << (int)box.w << ' ' << (int)box.h << '\n';
 }
 
+// ---- scratchpad terminal ---------------------------------------------------
+
+static constexpr const char* SCRATCH_CLASS = "hyprvtb-scratch";
+
+static PHLWINDOW scratchWindow() {
+    for (auto& w : g_pCompositor->m_windows) {
+        if (w->m_isMapped && !w->isHidden() && w->m_class == SCRATCH_CLASS)
+            return w;
+    }
+    return nullptr;
+}
+
+// Pinned geometry: left edge of the usable area, full height, width from the
+// remembered value (user-resizable via the right border, resize_on_border).
+static CBox scratchTarget(PHLWINDOW w) {
+    const auto PMONITOR = w->m_monitor ? w->m_monitor.lock() : Desktop::focusState()->monitor();
+    if (!PMONITOR)
+        return {};
+
+    const auto BS     = w->getRealBorderSize();
+    const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
+
+    double     width  = usable.w / 4.0;
+    const auto IT     = g_pGlobalState->savedGeometry.find(SCRATCH_CLASS);
+    if (IT != g_pGlobalState->savedGeometry.end() && IT->second.w >= 100)
+        width = IT->second.w;
+
+    return {usable.x + BS, usable.y + BS, width, usable.h - BS * 2};
+}
+
+static void showScratch(PHLWINDOW w, bool warpFromOffscreen) {
+    const auto T = scratchTarget(w);
+    if (T.w < 1)
+        return;
+
+    if (warpFromOffscreen)
+        w->m_realPosition->setValueAndWarp(Vector2D(T.x - T.w - 16, T.y));
+
+    Config::Actions::resize(T.size(), false, w);
+    Config::Actions::move(T.pos(), false, w);
+    g_pCompositor->changeWindowZOrder(w, false); // always at the BOTTOM
+    Desktop::focusState()->fullWindowFocus(w, Desktop::FOCUS_REASON_CLICK);
+    g_pGlobalState->scratchVisible = true;
+}
+
+static void hideScratch(PHLWINDOW w) {
+    const auto T = scratchTarget(w);
+    Config::Actions::move(Vector2D(T.x - T.w - 16, T.y), false, w);
+    g_pGlobalState->scratchVisible = false;
+
+    // hand focus back to some other window
+    for (auto& o : g_pCompositor->m_windows) {
+        if (o != w && o->m_isMapped && !o->isHidden() && o->m_workspace == w->m_workspace) {
+            Desktop::focusState()->fullWindowFocus(o, Desktop::FOCUS_REASON_CLICK);
+            return;
+        }
+    }
+    Desktop::focusState()->resetWindowFocus();
+}
+
+static void toggleScratch() {
+    const auto W = scratchWindow();
+    if (!W) {
+        // window.open places + slides it in once kitty has mapped
+        Config::Supplementary::executor()->spawn(std::string("kitty --class ") + SCRATCH_CLASS);
+        return;
+    }
+
+    if (g_pGlobalState->scratchVisible)
+        hideScratch(W);
+    else
+        showScratch(W, false);
+}
+
 // ---- window lifecycle ------------------------------------------------------
 
 static void onNewWindow(PHLWINDOW window) {
     if (window->m_X11DoesntWantBorders)
         return;
+
+    // The scratchpad gets NO titlebar; it slides in from the left edge and
+    // lives at the bottom of the z-order.
+    if (window->m_class == SCRATCH_CLASS) {
+        showScratch(window, true);
+        return;
+    }
 
     if (std::ranges::any_of(window->m_windowDecorations, [](const auto& d) { return d->getDisplayName() == "Hyprvtb"; }))
         return;
@@ -90,6 +172,11 @@ static void onCloseWindow(PHLWINDOW window) {
     if (!window || !window->m_isFloating || window->m_class.empty())
         return;
 
+    if (window->m_class == SCRATCH_CLASS) {
+        g_pGlobalState->scratchVisible = false;
+        return; // width is persisted on resize, not here
+    }
+
     for (auto& b : g_pGlobalState->bars) {
         if (b && b->getOwner() == window) {
             const auto BOX = b->memorableGeometry();
@@ -105,6 +192,17 @@ static void onCloseWindow(PHLWINDOW window) {
 static void onWindowFocus(PHLWINDOW window) {
     if (!window)
         return;
+
+    // the scratchpad never rises above other windows, even focused
+    if (window->m_class == SCRATCH_CLASS) {
+        g_pCompositor->changeWindowZOrder(window, false);
+        return;
+    }
+
+    // focus raises floating windows — so activating from the taskbar or
+    // alt-tab actually brings the window forward, not just recolours it
+    if (window->m_isFloating)
+        g_pCompositor->changeWindowZOrder(window, true);
 
     for (auto& b : g_pGlobalState->bars) {
         if (b && b->getOwner() == window) {
@@ -140,6 +238,21 @@ static int luaMinimizeActive(lua_State* L) {
 static int luaToggleMaximizeActive(lua_State* L) {
     if (auto d = activeDeco())
         d->toggleMaximize();
+    return 0;
+}
+
+// lua: hyprvtb.unfocus_all() — clicking bare desktop unfocuses everything
+// (wired to the quickshell bottom-layer click catcher).
+static int luaUnfocusAll(lua_State* L) {
+    if (g_pGlobalState)
+        Desktop::focusState()->resetWindowFocus();
+    return 0;
+}
+
+// lua: hyprvtb.toggle_scratch() — the Meta+S slide-in terminal.
+static int luaToggleScratch(lua_State* L) {
+    if (g_pGlobalState)
+        toggleScratch();
     return 0;
 }
 
@@ -181,6 +294,27 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (g_pGlobalState)
             onWindowFocus(w);
     }));
+    // After any mouse release: re-pin the scratchpad (a border-drag may have
+    // moved edges other than the right one) and persist its dragged width.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent e, Event::SCallbackInfo& info) {
+        if (!g_pGlobalState || e.state != WL_POINTER_BUTTON_STATE_RELEASED || !g_pGlobalState->scratchVisible)
+            return;
+        const auto W = scratchWindow();
+        if (!W)
+            return;
+        const auto  DRAGW = W->m_realSize->goal().x;
+        auto        T     = scratchTarget(W);
+        T.w               = DRAGW;
+        if (W->m_realPosition->goal() != T.pos() || W->m_realSize->goal().y != T.h) {
+            Config::Actions::resize(T.size(), false, W);
+            Config::Actions::move(T.pos(), false, W);
+        }
+        auto& saved = g_pGlobalState->savedGeometry[SCRATCH_CLASS];
+        if ((int)saved.w != (int)DRAGW) {
+            saved = {0, 0, DRAGW, T.h};
+            vtbSaveGeometry();
+        }
+    }));
 
     // Colour defaults follow the wal palette; overridden live from
     // hyprland.lua / wal-set.sh via plugin:hyprvtb:*.
@@ -213,6 +347,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (Config::mgr()->type() != Config::CONFIG_LEGACY) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "unfocus_all", ::luaUnfocusAll);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
     }
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
@@ -237,7 +373,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / stacked title)", "lam", "2.2"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / stacked title)", "lam", "2.3"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

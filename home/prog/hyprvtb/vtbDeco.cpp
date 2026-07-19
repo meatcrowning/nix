@@ -477,9 +477,12 @@ CBox CVtbDeco::maximizeTarget() {
 
     const auto GAP    = g_pGlobalState->config.maximizeGap->value();
     const auto BARW   = g_pGlobalState->config.barWidth->value();
+    // Inset by the border width so the window frame stays visible against
+    // the screen edges / panel when maximized.
+    const auto BS     = PWINDOW->getRealBorderSize() + GAP;
     const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
 
-    return {usable.x + GAP, usable.y + GAP, usable.w - GAP * 2 - BARW, usable.h - GAP * 2};
+    return {usable.x + BS, usable.y + BS, usable.w - BS * 2 - BARW, usable.h - BS * 2};
 }
 
 void CVtbDeco::toggleMaximize() {

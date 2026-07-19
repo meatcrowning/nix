@@ -61,7 +61,7 @@ if [ "$MODE" = "tile" ]; then
     [ -z "$MONS" ] && MONS="eDP-1 2560 1600"
     while read -r name w h; do
         [ -z "$name" ] && continue
-        out="$CACHE/tiled-${w}x${h}.png"
+        out="$CACHE/tiled-${KEY}-${w}x${h}.png"
         if [ ! -f "$out" ] || [ "$WALL" -nt "$out" ]; then
             magick -size "${w}x${h}" tile:"$WALL" "$out"
         fi

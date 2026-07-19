@@ -142,13 +142,6 @@ Scope {
                         color: Theme.text
                     }
 
-                    PixelText {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: SysInfo.battery < 0
-                            ? "battery --"
-                            : (SysInfo.charging ? "charging " : "battery ") + SysInfo.battery + "%"
-                        color: Theme.text
-                    }
 
                     // Password field — fades in under the clock once the user
                     // starts interacting. Kept in the layout (reserving its

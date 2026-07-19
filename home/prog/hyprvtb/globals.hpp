@@ -27,8 +27,15 @@ struct SGlobalState {
 
     // class -> last known floating geometry, persisted to
     // ~/.local/state/hyprvtb/geometry.tsv so apps reopen where/how you left
-    // them (saved on window close, applied on window open).
+    // them (saved on window close, applied on window open). The scratchpad
+    // terminal's entry only carries a meaningful width (the rest of its
+    // geometry is enforced).
     std::map<std::string, CBox> savedGeometry;
+
+    // The slide-in scratchpad terminal (kitty --class hyprvtb-scratch):
+    // no titlebar, pinned to the left edge full-height, always at the
+    // bottom of the z-order. Toggled by hl.plugin.hyprvtb.toggle_scratch().
+    bool scratchVisible = false;
 
     struct {
         SP<Config::Values::CBoolValue>   enabled;

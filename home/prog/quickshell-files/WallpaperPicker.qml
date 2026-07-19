@@ -41,6 +41,10 @@ PanelWindow {
     property var images: []          // absolute paths, name-sorted
     property string currentPath: ""  // the wallpaper active when the picker opened
     property bool initializing: false
+    // True once the user actually flipped to a different wallpaper this
+    // session — opening and closing the picker without touching anything
+    // must NOT re-apply the theme.
+    property bool dirty: false
 
     function toFileUrl(p) {
         return "file://" + encodeURI(p);
@@ -148,8 +152,9 @@ PanelWindow {
 
     // Runs the full (theme-included) apply exactly once, on whatever's
     // currently highlighted — called when the picker closes, not per-flip.
+    // A close with no flips is a no-op (see `dirty`).
     function commitFinal() {
-        if (commitProc.running) return;
+        if (!dirty || commitProc.running) return;
         const item = list.currentItem;
         if (!item) return;
         commitProc.command = ["sh", "-c",
@@ -181,6 +186,7 @@ PanelWindow {
 
     onOpenChanged: {
         if (open) {
+            dirty = false;
             refresh();
             list.forceActiveFocus();
         } else {
@@ -225,7 +231,10 @@ PanelWindow {
             boundsBehavior: Flickable.StopAtBounds
             onCurrentIndexChanged: {
                 positionViewAtIndex(currentIndex, ListView.Contain);
-                if (!root.initializing) applyTimer.restart();
+                if (!root.initializing) {
+                    root.dirty = true;
+                    applyTimer.restart();
+                }
             }
 
             Keys.onDownPressed: currentIndex = Math.min(currentIndex + 1, count - 1)
@@ -276,13 +285,15 @@ PanelWindow {
 
                 MouseArea {
                     anchors.fill: parent
-                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onEntered: list.currentIndex = delegateRoot.index
-                    // Selecting is just a flip, same as hovering — it
-                    // doesn't close the picker. Only Meta+W, Escape, or
-                    // Enter do that.
-                    onClicked: list.currentIndex = delegateRoot.index
+                    // Click = pick it: select, apply the full theme, close.
+                    // (Hover deliberately does NOT flip the selection — it
+                    // caused accidental re-themes just from mousing past.)
+                    onClicked: {
+                        applyTimer.stop();
+                        list.currentIndex = delegateRoot.index;
+                        root.open = false;
+                    }
                 }
             }
         }

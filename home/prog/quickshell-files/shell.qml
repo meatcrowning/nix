@@ -143,6 +143,13 @@ Scope {
         EdgeAccent {}
     }
 
+    // Bottom-layer click catcher: clicking bare desktop unfocuses all
+    // windows (via hl.plugin.hyprvtb.unfocus_all).
+    Variants {
+        model: Quickshell.screens
+        DesktopCatcher {}
+    }
+
     // Window titlebars are NOT drawn by quickshell: they're compositor-side
     // (the hyprvtb Hyprland plugin, ~/nix/home/prog/hyprvtb/) so they stay
     // locked to windows frame-for-frame. A layer-shell approach lived here

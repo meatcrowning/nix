@@ -160,8 +160,9 @@ hl.config({
             inactive_border = "rgba(595959aa)",
         },
 
-        -- Set to true to enable resizing windows by clicking and dragging on borders and gaps
-        resize_on_border = false,
+        -- Click-drag any window edge to resize (also how the scratchpad
+        -- terminal's width is adjusted).
+        resize_on_border = true,
 
         -- Please see https://wiki.hypr.land/Configuring/Advanced-and-Cool/Tearing/ before you turn this on
         allow_tearing = false,
@@ -302,7 +303,9 @@ hl.config({
         kb_options = "",
         kb_rules   = "",
 
-        follow_mouse = 0, -- 0: click to focus, like a regular DE. no focus-follows-mouse.
+        -- 2: pointer focus follows hover (so scrolling scrolls the window
+        -- UNDER the cursor) while keyboard focus still only moves on click.
+        follow_mouse = 2,
 
         sensitivity = 0, -- -1.0 - 1.0, 0 means no modification. per-device override below.
 
@@ -411,6 +414,14 @@ end)
 -- Move/resize windows with mainMod + LMB/RMB and dragging
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
 hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
+
+-- Scratchpad terminal (Meta+S): kitty sliding in from the left accent
+-- edge, no titlebar, always at the bottom of the z-order; width is
+-- drag-resizable on its right border and remembered. Logic lives in the
+-- hyprvtb plugin.
+hl.bind(mainMod .. " + S", function()
+    hl.plugin.hyprvtb.toggle_scratch()
+end, { description = "Scratchpad terminal" })
 
 -- Alt-Tab window switching (single-workspace desktop): cycle focus and
 -- raise. Focusing a minimized window slides it back in (hyprvtb).

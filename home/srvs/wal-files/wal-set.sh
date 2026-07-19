@@ -71,7 +71,7 @@ if [ "$MODE" = "tile" ]; then
     # wal-prepare.sh already generated the tiled PNG per monitor resolution.
     while read -r name w h; do
         [ -z "$name" ] && continue
-        out="$CACHE/tiled-${w}x${h}.png"
+        out="$CACHE/tiled-${KEY}-${w}x${h}.png"
         case "$PRELOADS" in *"$out"*) ;; *) PRELOADS="$PRELOADS$out
 ";; esac
         WALLLINES="$WALLLINES$name,$out
