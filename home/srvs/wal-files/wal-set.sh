@@ -241,16 +241,22 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     # system — the Breeze style below draws flat, so nothing gradients away from
     # it. Only selections (accent) and the near-black alternate-row stripe
     # (BackgroundAlternate = BGALT, set inside kdecolor) break the black.
-    kdecolor "Colors:Window"        "$BG"     "$TEXT"
-    kdecolor "Colors:View"          "$BG"     "$TEXT"
-    kdecolor "Colors:Button"        "$BG"     "$TEXT"
+    #
+    # Normal foreground text is ACCENT, not TEXT, so a KDE/Qt app's body text
+    # matches the red of the focused window's titlebar (hyprvtb draws the focused
+    # title in col.accent). Same choice as kitty's foreground above — the whole
+    # focused surface reads as one accent colour.
+    kdecolor "Colors:Window"        "$BG"     "$ACCENT"
+    kdecolor "Colors:View"          "$BG"     "$ACCENT"
+    kdecolor "Colors:Button"        "$BG"     "$ACCENT"
     kdecolor "Colors:Selection"     "$ACCENT" "$BG"
-    kdecolor "Colors:Tooltip"       "$BG"     "$TEXT"
-    kdecolor "Colors:Complementary" "$BG"     "$TEXT"
-    kdecolor "Colors:Header"        "$BG"     "$TEXT"
-    # Window-manager (titlebar) colours — used by KDE apps' own CSDs.
+    kdecolor "Colors:Tooltip"       "$BG"     "$ACCENT"
+    kdecolor "Colors:Complementary" "$BG"     "$ACCENT"
+    kdecolor "Colors:Header"        "$BG"     "$ACCENT"
+    # Window-manager (titlebar) colours — used by KDE apps' own CSDs. Active title
+    # text is ACCENT to match hyprvtb's focused titlebar (and the body text above).
     kw --group WM --key activeBackground   "$(hx "$BG")"
-    kw --group WM --key activeForeground   "$(hx "$TEXT")"
+    kw --group WM --key activeForeground   "$(hx "$ACCENT")"
     kw --group WM --key inactiveBackground "$(hx "$BG")"
     kw --group WM --key inactiveForeground "$(hx "$TEXTDIM")"
 
