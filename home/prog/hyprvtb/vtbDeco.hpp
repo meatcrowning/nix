@@ -22,8 +22,10 @@ namespace Event {
 // window — top to bottom: close [x], maximize [■] (fill-usable-area toggle,
 // not fullscreen), minimize [»] (slides the window off the right edge;
 // focusing it again — e.g. from the panel taskbar — slides it back), pin
-// [>>] (Hyprland pin — window kept on top / shown on all workspaces), then
-// the title as a column of upright letters reading top-down. Rendered as a
+// [o>] (Hyprland pin — window kept on top / shown on all workspaces),
+// roll-up [>>] (windowshade — collapses the window body horizontally to
+// just this bar, full height kept; click again to restore), then the title
+// as a column of upright letters reading top-down. Rendered as a
 // sticky window decoration with priority above the border and
 // DECORATION_PART_OF_MAIN_WINDOW, so Hyprland's own active/inactive border
 // wraps window + titlebar as one frame and the bar is locked to the window
@@ -77,11 +79,14 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_bMaximized = false;
     CBox                 m_savedGeometry;
 
+    bool                 m_bRolledUp = false;
+    CBox                 m_rollSavedGeometry;
+
     bool                 m_bMinimized = false;
     Vector2D             m_minSavedPos;
     Time::steady_tp      m_minimizedAt = Time::steadyNow();
 
-    int                  m_iHoverCell = -1; // 0 close, 1 max, 2 min, 3 pin, -1 none
+    int                  m_iHoverCell = -1; // 0 close, 1 max, 2 min, 3 pin, 4 rollup, -1 none
 
     bool                 m_bDragPending   = false;
     bool                 m_bDraggingThis  = false;
@@ -119,6 +124,7 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     void                 closeWindow();
     void                 togglePin();
+    void                 toggleRollup();
     void                 restoreFromMinimize();
     CBox                 maximizeTarget();
 

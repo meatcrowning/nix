@@ -31,11 +31,11 @@ static CHyprColor configColor(Config::INTEGER color) {
     return CHyprColor{static_cast<uint64_t>(color)};
 }
 
-// Fixed interior metrics (logical px): four square button cells under the
-// top edge (close, maximize, minimize, pin), title filling the rest.
+// Fixed interior metrics (logical px): five square button cells under the
+// top edge (close, maximize, minimize, pin, roll-up), title filling the rest.
 static constexpr int VTB_PAD      = 2; // inset from the bar edge
 static constexpr int VTB_CELL_GAP = 2;
-static constexpr int VTB_CELLS    = 4;
+static constexpr int VTB_CELLS    = 5;
 
 static int           cellSize() {
     return g_pGlobalState->config.barWidth->value() - VTB_PAD * 2;
@@ -135,6 +135,9 @@ CBox CVtbDeco::memorableGeometry() {
 
     if (m_bMaximized)
         return m_savedGeometry; // pre-maximize geometry is the one worth remembering
+
+    if (m_bRolledUp)
+        return m_rollSavedGeometry; // the pre-shade geometry, not the collapsed sliver
 
     const auto POS  = m_bMinimized ? m_minSavedPos : PWINDOW->m_realPosition->goal();
     const auto SIZE = PWINDOW->m_realSize->goal();
@@ -334,11 +337,16 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawCell(2, accentColor, false);
     drawGlyph(2, ">", m_iHoverCell == 2 ? accentColor : textColor);
 
-    // pin [>>] — Hyprland pin: keeps the window on top and on every
+    // pin [o>] — Hyprland pin: keeps the window on top and on every
     // workspace. Lit accent while pinned, like maximize while maximized.
     const bool PINNED = PWINDOW->m_pinned;
     drawCell(3, accentColor, PINNED);
-    drawGlyph(3, ">>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor);
+    drawGlyph(3, "o>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor);
+
+    // roll-up [>>] — windowshade: collapses the window body to just this
+    // bar (full height kept). Lit accent while rolled up, like maximize.
+    drawCell(4, accentColor, m_bRolledUp);
+    drawGlyph(4, ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor);
 
     // ---- title, a column of upright letters ----
     const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
@@ -514,7 +522,7 @@ uint32_t CVtbDeco::interiorResizeZone(const Vector2D& M) {
 
 bool CVtbDeco::tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e) {
     const auto PWINDOW = m_pWindow.lock();
-    if (!validMapped(m_pWindow) || !PWINDOW->m_isFloating || PWINDOW->isFullscreen() || m_bMinimized || m_bMaximized)
+    if (!validMapped(m_pWindow) || !PWINDOW->m_isFloating || PWINDOW->isFullscreen() || m_bMinimized || m_bMaximized || m_bRolledUp)
         return false;
 
     const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
@@ -695,6 +703,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         case 1: toggleMaximize(); return;
         case 2: minimizeWindow(); return;
         case 3: togglePin(); return;
+        case 4: toggleRollup(); return;
         default: break;
     }
 
@@ -754,7 +763,7 @@ CBox CVtbDeco::maximizeTarget() {
 
 void CVtbDeco::toggleMaximize() {
     const auto PWINDOW = m_pWindow.lock();
-    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized)
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized || m_bRolledUp)
         return;
 
     // Config::Actions directly — the legacy movewindowpixel dispatcher's
@@ -795,9 +804,44 @@ void CVtbDeco::togglePin() {
     damageEntire();
 }
 
+// Windowshade for a vertical titlebar: collapse the window body horizontally
+// down to just the bar (full height kept), and back. The bar reserves its
+// width on the window's RIGHT edge, so "collapse to the bar" means shrinking
+// the client width toward that edge — anchor the right edge (where the bar
+// lives) so the bar stays put, and pull the left edge across. Same
+// resize-before-move ordering as maximize: Config::Actions::resize keeps the
+// window's centre, so a move-then-resize would drift by half the size delta.
+// Floating-only, and mutually exclusive with maximize/minimize (guarded there
+// too) so the saved geometry can't get clobbered by a collapsed sliver.
+void CVtbDeco::toggleRollup() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized || m_bMaximized)
+        return;
+
+    if (m_bRolledUp) {
+        m_bRolledUp = false;
+        Config::Actions::resize(m_rollSavedGeometry.size(), false, PWINDOW);
+        Config::Actions::move(m_rollSavedGeometry.pos(), false, PWINDOW);
+    } else {
+        m_rollSavedGeometry = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
+
+        // Collapse to a 1px-wide client pinned to the original right edge, so
+        // the compositor-tracked frame is exactly the bar. (A client that
+        // enforces a larger min width overflows leftward off its own frame —
+        // its choice; the bar still sits where it was.)
+        const double   RIGHT  = m_rollSavedGeometry.x + m_rollSavedGeometry.w;
+        const double   SHADEW = 1;
+
+        m_bRolledUp = true;
+        Config::Actions::resize(Vector2D(SHADEW, m_rollSavedGeometry.h), false, PWINDOW);
+        Config::Actions::move(Vector2D(RIGHT - SHADEW, m_rollSavedGeometry.y), false, PWINDOW);
+    }
+    damageEntire();
+}
+
 void CVtbDeco::minimizeWindow() {
     const auto PWINDOW = m_pWindow.lock();
-    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized)
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized || m_bRolledUp)
         return;
 
     const auto PMONITOR = PWINDOW->m_monitor.lock();
