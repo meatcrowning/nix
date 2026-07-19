@@ -8,6 +8,8 @@ Column {
     id: root
     spacing: 6
 
+    signal weatherHovered(bool hovering)
+
     // one dim label + one coloured value, centred. onWheelUp/onWheelDown are
     // optional function-valued properties — set on "bri"/"vol" below for
     // scroll-to-adjust; left null (no-op) everywhere else.
@@ -128,5 +130,39 @@ Column {
         valueColor: SysInfo.muted ? Theme.crit : Theme.text
         onWheelUp: () => SysInfo.adjustVolume(5)
         onWheelDown: () => SysInfo.adjustVolume(-5)
+    }
+
+    // ---------- Weather (redacted-city) ----------
+    // Text-only like everything else: the CONDITION word is the dim label
+    // ("rain", "snow", "clr"...) and the value is the temperature — the
+    // word itself does the icon's job. Hover slides out the 7-day forecast.
+    Item {
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: wxCol.implicitWidth
+        height: wxCol.implicitHeight
+
+        Column {
+            id: wxCol
+            anchors.fill: parent
+            spacing: 1
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: Weather.cond
+                color: Theme.textDim
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: Weather.tempF === -999 ? "--" : Weather.tempF + ""
+                color: Weather.tempF !== -999 && Weather.tempF <= 32 ? Theme.info : Theme.text
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: root.weatherHovered(true)
+            onExited: root.weatherHovered(false)
+        }
     }
 }

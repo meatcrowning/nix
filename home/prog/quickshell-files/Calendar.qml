@@ -17,7 +17,7 @@ PanelWindow {
     color: "transparent"
 
     anchors { bottom: true; right: true }
-    margins { bottom: Theme.gap * 6; right: Theme.gap }
+    margins { bottom: Theme.gap; right: Theme.gap }
     implicitWidth: 7 * 26 + 24
     implicitHeight: header.implicitHeight + 6 * 20 + 56
     exclusiveZone: 0

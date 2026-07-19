@@ -237,6 +237,9 @@ hl.curve("easeOutCubic",   { type = "bezier", points = { {0.33, 1},    {0.68, 1}
 hl.curve("easy",           { type = "spring", mass = 1, stiffness = 71.2633, dampening = 15.8273644 })
 
 hl.animation({ leaf = "global",        enabled = true,  speed = 10,   bezier = "default" })
+-- monitorAdded drives the whole-screen zoom/fade when an output appears —
+-- which includes login. Off: the desktop should just BE there.
+hl.animation({ leaf = "monitorAdded",  enabled = false })
 hl.animation({ leaf = "border",        enabled = true,  speed = 5.39, bezier = "easeOutQuint" })
 hl.animation({ leaf = "windows",       enabled = true,  speed = 4.79, spring = "easy" })
 hl.animation({ leaf = "windowsIn",     enabled = true,  speed = 4.1,  spring = "easy",         style = "popin 87%" })

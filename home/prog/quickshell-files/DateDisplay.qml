@@ -2,14 +2,10 @@ import QtQuick
 import Quickshell
 
 // Vertical date display: month / day / year(2-digit) — bright month, dim
-// day and year under it. Hovering it emits hovered() so shell.qml can
-// slide out the Calendar (root is an Item, not the Column itself, because
-// Column forbids anchors on its children and the hover MouseArea needs
-// anchors.fill — same trick as StatusPanel's Stat).
+// day and year under it. (The calendar hover zone lives in shell.qml — it
+// covers the whole lower strip of the bar, not just these glyphs.)
 Item {
     id: root
-
-    signal hovered(bool hovering)
 
     property string mo: "01"
     property string yy: "00"
@@ -60,11 +56,4 @@ Item {
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton // hover only, clicks pass through
-        onEntered: root.hovered(true)
-        onExited: root.hovered(false)
-    }
 }

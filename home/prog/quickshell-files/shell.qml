@@ -84,6 +84,16 @@ Scope {
         id: calendar
     }
 
+    // The analog clock that slides out when hovering the digital clock.
+    AnalogClock {
+        id: analogClock
+    }
+
+    // The 7-day forecast that slides out when hovering the weather block.
+    WeatherPanel {
+        id: weatherPanel
+    }
+
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
         target: "lock"
@@ -268,7 +278,7 @@ Scope {
                 }
             }
 
-            // ---- system status, sitting just above the date ----
+            // ---- system status, sitting just above the clock ----
             StatusPanel {
                 width: parent.width
                 anchors {
@@ -276,6 +286,7 @@ Scope {
                     bottomMargin: Theme.gap * 2
                     horizontalCenter: parent.horizontalCenter
                 }
+                onWeatherHovered: (h) => weatherPanel.wxHover(h)
             }
 
             // divider between the status indicators and the clock
@@ -294,12 +305,30 @@ Scope {
                 anchors.bottomMargin: 6
             }
 
-            // ---- bottom: date (month / day / year); hover slides the calendar out ----
+            // ---- bottom: date (month / day / year) ----
             DateDisplay {
                 id: dateDisplay
                 anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
                 anchors.bottomMargin: Theme.gap
-                onHovered: (h) => calendar.dateHover(h)
+            }
+
+            // Hover zones for the popups: the whole lower strip of the bar at
+            // full width, not just the glyphs. The clock band pops the analog
+            // clock; the date band (down to the very bottom edge) pops the
+            // calendar. NoButton = hover only, clicks/scrolls pass through.
+            MouseArea {
+                anchors { top: clock.top; topMargin: -Theme.gap; bottom: dateDisplay.top; left: parent.left; right: parent.right }
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+                onEntered: analogClock.clockHover(true)
+                onExited: analogClock.clockHover(false)
+            }
+            MouseArea {
+                anchors { top: dateDisplay.top; bottom: parent.bottom; left: parent.left; right: parent.right }
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+                onEntered: calendar.dateHover(true)
+                onExited: calendar.dateHover(false)
             }
         }
     }
