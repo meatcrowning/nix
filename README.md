@@ -1,8 +1,6 @@
-# `nix` — NixOS + home-manager config for host `top`
+# `nixos flake`
 
-This is the flake that builds my personal desktop, a single machine named
-`top`. It defines both the system (NixOS) and my user environment
-(home-manager) from one place, pinned and reproducible.
+after a certain point i felt that my conversation with nixos should be mediated by language models. initially, this was via `aider` utilizing a multitude of models in a multitude of roles. and then grew into a sort of black hole from which various model and various harnesses have come to visit. im only now looping in git - because there is now a c++ plugin which add vertical titlebars. fun. the rest of this readme consists of words that i have neither written nor read (in great detail).  
 
 ## What it is
 
