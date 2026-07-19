@@ -9,7 +9,8 @@ SlidePopup {
 
     popupNamespace: "qs-calendar"
     implicitWidth: 7 * 26 + 24
-    implicitHeight: 6 * 20 + 76
+    // fit the content exactly (month is 5 or 6 rows) — no empty tail
+    implicitHeight: content.implicitHeight + 20
 
     onOpened: refresh()
 
@@ -31,6 +32,7 @@ SlidePopup {
     }
 
     Column {
+        id: content
         anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 10 }
         spacing: 8
 

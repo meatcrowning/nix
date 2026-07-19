@@ -2,16 +2,17 @@ import QtQuick
 import Quickshell
 
 // 7-day redacted-city forecast popup (SlidePopup: bottom-right, exclusive,
-// hover-kept), opened by the weather block in StatusPanel. One row per
-// day, column labels footed at the bottom.
+// hover-kept), opened by the weather block in StatusPanel. One row per day
+// with a labelled footer, sized to content (no empty gap).
 SlidePopup {
     id: root
 
     popupNamespace: "qs-weather"
     implicitWidth: 252
-    implicitHeight: 8 * 19 + 66
+    implicitHeight: content.implicitHeight + 20
 
     Column {
+        id: content
         anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 10 }
         spacing: 4
 
@@ -44,20 +45,17 @@ SlidePopup {
             text: "no data yet"
             color: Theme.textDim
         }
-    }
 
-    // column labels, footed in the leftover space at the bottom
-    Column {
-        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 8 }
-        spacing: 3
-
+        // column labels, directly under the chart
         Rectangle {
+            visible: Weather.days.length > 0
             anchors.horizontalCenter: parent.horizontalCenter
             width: 234
             height: 1
             color: Theme.border
         }
         Row {
+            visible: Weather.days.length > 0
             spacing: 0
             PixelText { width: 44; text: "day";   color: Theme.textDim }
             PixelText { width: 56; text: "sky";   color: Theme.textDim }
