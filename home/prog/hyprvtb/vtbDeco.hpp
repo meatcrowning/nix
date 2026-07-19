@@ -87,6 +87,15 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_bDraggingThis  = false;
     bool                 m_bCancelledDown = false;
 
+    // KDE-style resize engine: Hyprland's own resize (border or resizewindow)
+    // is always corner-quadrant based — grabbing the middle of one side still
+    // moves two edges. This engine resizes exactly the edges the grab point
+    // implies (side handle -> one edge, corner zone -> two).
+    bool                 m_bEdgeResizing = false;
+    uint32_t             m_resizeEdges   = 0; // RS_EDGE_* bitmask
+    Vector2D             m_resStartMouse;
+    CBox                 m_resStartBox;
+
     CHyprSignalListener  m_pMouseButtonCallback;
     CHyprSignalListener  m_pMouseMoveCallback;
 
@@ -100,6 +109,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 handleDownEvent(Event::SCallbackInfo& info);
     void                 handleUpEvent(Event::SCallbackInfo& info);
     int                  cellAt(const Vector2D& localCoords);
+
+    bool                 tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e);
+    uint32_t             borderResizeZone(const Vector2D& mouse);
+    uint32_t             interiorResizeZone(const Vector2D& mouse);
+    void                 updateEdgeResize();
+    void                 endEdgeResize();
 
     void                 closeWindow();
     void                 togglePin();

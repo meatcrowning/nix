@@ -12,6 +12,9 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+#include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/layout/target/Target.hpp>
+#include <hyprland/src/devices/IKeyboard.hpp>
 
 #include <pango/pangocairo.h>
 #include <cmath>
@@ -38,6 +41,26 @@ static int           cellSize() {
 }
 static int titleTop() {
     return VTB_PAD + VTB_CELLS * (cellSize() + VTB_CELL_GAP) + 4;
+}
+
+// KDE-style resize engine constants. Edge bitmask + the width of the
+// right-edge handle strip on the outer side of the titlebar.
+enum : uint32_t {
+    RS_EDGE_L = 1,
+    RS_EDGE_R = 2,
+    RS_EDGE_T = 4,
+    RS_EDGE_B = 8,
+};
+static constexpr int    VTB_RESIZE_STRIP = 8;  // px of the bar's outer edge acting as the right handle
+static constexpr double VTB_MIN_SIZE     = 50; // fallback when the client reports no min size
+
+// linux/input-event-codes.h values (avoid the include)
+static constexpr uint32_t VTB_BTN_LEFT  = 272;
+static constexpr uint32_t VTB_BTN_RIGHT = 273;
+
+static bool superHeld() {
+    const auto KB = g_pSeatManager->m_keyboard.lock();
+    return KB && (KB->getModifiers() & (1 << 6)); // bit 6 = LOGO/SUPER (modmask 64)
 }
 
 static std::string windowAddress(PHLWINDOW w) {
@@ -378,8 +401,210 @@ int CVtbDeco::cellAt(const Vector2D& c) {
     return -1;
 }
 
+// ---- KDE-style resize engine ----------------------------------------------
+//
+// Hyprland's native resize (border grab or the resizewindow dispatcher,
+// DragController.cpp) picks a corner purely by which QUADRANT of the window
+// the drag started in — grabbing the middle of one side still moves two
+// edges, even though the border cursor icon (InputManager's
+// setBorderIconDirection) correctly shows a single-edge arrow there. This
+// engine does what the icon promises: side handles move one edge, corner
+// zones move the two edges meeting there. Floating windows only; tiled and
+// bar-less windows (scratchpad) fall through to the native behavior.
+
+// The visual frame: window + our bar (they're wrapped by one border).
+static CBox frameBox(PHLWINDOW w) {
+    CBox box = {w->m_realPosition->value(), w->m_realSize->value()};
+    if (g_pGlobalState->config.enabled->value())
+        box.w += g_pGlobalState->config.barWidth->value();
+    return box;
+}
+
+// Border grab (plain LMB): mirrors the zone math of Hyprland's border icon
+// (CORNER = rounding + border + 10; rounding is 0 here) over the frame,
+// extended outward by the same grab halo native resize uses. Inside the
+// frame only the bar's outer strip is a handle (the client area isn't).
+uint32_t CVtbDeco::borderResizeZone(const Vector2D& M) {
+    static auto PRESIZEONBORDER = CConfigValue<Config::INTEGER>("general:resize_on_border");
+    static auto PEXTENDGRAB     = CConfigValue<Config::INTEGER>("general:extend_border_grab_area");
+    if (!*PRESIZEONBORDER)
+        return 0;
+
+    const auto   PWINDOW = m_pWindow.lock();
+    const CBox   FRAME   = frameBox(PWINDOW);
+    const double GRAB    = PWINDOW->getRealBorderSize() + *PEXTENDGRAB;
+    const double CORNERZ = PWINDOW->getRealBorderSize() + 10;
+
+    const CBox   HALO = {FRAME.x - GRAB, FRAME.y - GRAB, FRAME.w + 2 * GRAB, FRAME.h + 2 * GRAB};
+    if (!HALO.containsPoint(M))
+        return 0;
+
+    // corner-leeway hints, same thresholds as the border icon
+    uint32_t hintH = 0, hintV = 0;
+    if (M.x < FRAME.x + CORNERZ)
+        hintH = RS_EDGE_L;
+    else if (M.x > FRAME.x + FRAME.w - CORNERZ)
+        hintH = RS_EDGE_R;
+    if (M.y < FRAME.y + CORNERZ)
+        hintV = RS_EDGE_T;
+    else if (M.y > FRAME.y + FRAME.h - CORNERZ)
+        hintV = RS_EDGE_B;
+
+    if (!FRAME.containsPoint(M)) {
+        // in the halo: which side(s) is the cursor actually past?
+        uint32_t edges = 0;
+        if (M.x < FRAME.x)
+            edges |= RS_EDGE_L;
+        else if (M.x > FRAME.x + FRAME.w)
+            edges |= RS_EDGE_R;
+        if (M.y < FRAME.y)
+            edges |= RS_EDGE_T;
+        else if (M.y > FRAME.y + FRAME.h)
+            edges |= RS_EDGE_B;
+        // past one side but within the corner zone of the other axis -> corner
+        if (edges == RS_EDGE_L || edges == RS_EDGE_R)
+            edges |= hintV;
+        else if (edges == RS_EDGE_T || edges == RS_EDGE_B)
+            edges |= hintH;
+        return edges;
+    }
+
+    // inside the frame: only the bar's outermost strip acts as the right
+    // handle (button cells take priority — the caller checks them first via
+    // the normal bar path, but be defensive here too)
+    const auto BARBOX = assignedBoxGlobal();
+    const auto LOCAL  = M - BARBOX.pos();
+    if (VECINRECT(LOCAL, 0, 0, BARBOX.w, BARBOX.h) && cellAt(LOCAL) == -1 && LOCAL.x > BARBOX.w - VTB_RESIZE_STRIP)
+        return RS_EDGE_R | hintV;
+
+    return 0;
+}
+
+// Meta+RMB grab anywhere in the frame: KWin-style 3x3 zones. Outer ring maps
+// to the 8 handles; the centre cell falls back to the nearest corner.
+uint32_t CVtbDeco::interiorResizeZone(const Vector2D& M) {
+    const auto PWINDOW = m_pWindow.lock();
+    const CBox FRAME   = frameBox(PWINDOW);
+    if (!FRAME.containsPoint(M) || FRAME.w < 1 || FRAME.h < 1)
+        return 0;
+
+    const int col = std::clamp((int)((M.x - FRAME.x) / (FRAME.w / 3.0)), 0, 2);
+    const int row = std::clamp((int)((M.y - FRAME.y) / (FRAME.h / 3.0)), 0, 2);
+
+    uint32_t  edges = 0;
+    if (col == 0)
+        edges |= RS_EDGE_L;
+    else if (col == 2)
+        edges |= RS_EDGE_R;
+    if (row == 0)
+        edges |= RS_EDGE_T;
+    else if (row == 2)
+        edges |= RS_EDGE_B;
+
+    if (!edges) { // centre cell: nearest corner
+        edges |= (M.x < FRAME.x + FRAME.w / 2.0) ? RS_EDGE_L : RS_EDGE_R;
+        edges |= (M.y < FRAME.y + FRAME.h / 2.0) ? RS_EDGE_T : RS_EDGE_B;
+    }
+    return edges;
+}
+
+bool CVtbDeco::tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e) {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!validMapped(m_pWindow) || !PWINDOW->m_isFloating || PWINDOW->isFullscreen() || m_bMinimized || m_bMaximized)
+        return false;
+
+    const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
+    uint32_t   edges = 0;
+
+    if (e.button == VTB_BTN_RIGHT && superHeld())
+        edges = interiorResizeZone(MOUSE);
+    else if (e.button == VTB_BTN_LEFT)
+        edges = borderResizeZone(MOUSE);
+
+    if (!edges)
+        return false;
+
+    if (Desktop::focusState()->window() != PWINDOW)
+        Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+    g_pCompositor->changeWindowZOrder(PWINDOW, true);
+
+    m_bEdgeResizing  = true;
+    m_resizeEdges    = edges;
+    m_resStartMouse  = MOUSE;
+    m_resStartBox    = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
+    info.cancelled   = true; // keep native (quadrant-corner) border resize out of it
+    m_bCancelledDown = true;
+    return true;
+}
+
+// Same application path as Hyprland's own DragController: clamp the size,
+// compensate the position for left/top handles, then push it through the
+// layout target (setPositionGlobal + warpPositionSize — instant, no
+// animation rubber-banding).
+void CVtbDeco::updateEdgeResize() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!validMapped(m_pWindow)) {
+        endEdgeResize();
+        return;
+    }
+
+    const auto TARGET = PWINDOW->layoutTarget();
+    if (!TARGET) {
+        endEdgeResize();
+        return;
+    }
+
+    const auto DELTA   = g_pInputManager->getMouseCoordsInternal() - m_resStartMouse;
+
+    Vector2D   newSize = m_resStartBox.size();
+    if (m_resizeEdges & RS_EDGE_R)
+        newSize.x += DELTA.x;
+    if (m_resizeEdges & RS_EDGE_L)
+        newSize.x -= DELTA.x;
+    if (m_resizeEdges & RS_EDGE_B)
+        newSize.y += DELTA.y;
+    if (m_resizeEdges & RS_EDGE_T)
+        newSize.y -= DELTA.y;
+
+    const auto MINSIZE = TARGET->minSize().value_or(Vector2D{VTB_MIN_SIZE, VTB_MIN_SIZE});
+    const auto MAXSIZE = TARGET->maxSize().value_or(Vector2D{1e9, 1e9});
+    newSize            = newSize.clamp(MINSIZE, MAXSIZE);
+
+    Vector2D newPos = m_resStartBox.pos();
+    if (m_resizeEdges & RS_EDGE_L)
+        newPos.x += m_resStartBox.w - newSize.x;
+    if (m_resizeEdges & RS_EDGE_T)
+        newPos.y += m_resStartBox.h - newSize.y;
+
+    CBox wb = {newPos, newSize};
+    wb.round();
+
+    TARGET->setPositionGlobal(wb);
+    TARGET->warpPositionSize();
+    TARGET->damageEntire();
+}
+
+void CVtbDeco::endEdgeResize() {
+    m_bEdgeResizing  = false;
+    m_resizeEdges    = 0;
+    m_bCancelledDown = false;
+    damageEntire();
+}
+
 void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e) {
-    if (!g_pGlobalState || !inputIsValid())
+    if (!g_pGlobalState)
+        return;
+
+    // A running edge-resize must ALWAYS see the release, even if the cursor
+    // ended up over another window or a layer surface (inputIsValid would
+    // gate it out and leave the resize stuck to the cursor).
+    if (e.state != WL_POINTER_BUTTON_STATE_PRESSED && m_bEdgeResizing) {
+        endEdgeResize();
+        info.cancelled = true;
+        return;
+    }
+
+    if (!inputIsValid())
         return;
 
     if (e.state != WL_POINTER_BUTTON_STATE_PRESSED) {
@@ -387,12 +612,20 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
         return;
     }
 
+    if (tryStartEdgeResize(info, e))
+        return;
+
     handleDownEvent(info);
 }
 
 void CVtbDeco::onMouseMove(Vector2D coords) {
     if (!g_pGlobalState)
         return;
+
+    if (m_bEdgeResizing) {
+        updateEdgeResize();
+        return;
+    }
 
     // hover feedback on the button cells
     if (validMapped(m_pWindow) && !m_bMinimized) {
