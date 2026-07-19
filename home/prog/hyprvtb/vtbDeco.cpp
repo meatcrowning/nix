@@ -11,6 +11,7 @@
 #include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
+#include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 
 #include <pango/pangocairo.h>
 #include <cmath>
@@ -105,6 +106,9 @@ CBox CVtbDeco::memorableGeometry() {
     if (!PWINDOW)
         return {};
 
+    if (m_bMaximized)
+        return m_savedGeometry; // pre-maximize geometry is the one worth remembering
+
     const auto POS  = m_bMinimized ? m_minSavedPos : PWINDOW->m_realPosition->goal();
     const auto SIZE = PWINDOW->m_realSize->goal();
     return {POS, SIZE};
@@ -127,10 +131,9 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 // The title as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e reading
 // top-down): every UTF-8 codepoint on its own pango line, centered, with
 // antialiasing off so the pixel font stays crisp.
-void CVtbDeco::renderTitleTex(int runLenPx, float scale) {
+void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR) {
     const auto FONT  = g_pGlobalState->config.font->value();
     const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
-    const auto COLOR = configColor(g_pGlobalState->config.textColor->value());
     const int  BARW  = std::round(g_pGlobalState->config.barWidth->value() * scale);
 
     if (runLenPx < SIZE || m_szLastTitle.empty()) {
@@ -155,9 +158,7 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale) {
     for (int i = 0; i < shown; i++) {
         if (i)
             stacked += "\n";
-        // a lone space makes an invisible empty line — mark word gaps with
-        // a middle dot instead so the title stays readable
-        stacked += (cps[i] == " ") ? "·" : cps[i];
+        stacked += cps[i]; // spaces get their own (blank) cell
     }
     if (truncated)
         stacked += "\n…";
@@ -216,23 +217,42 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     if (!PWINDOW)
         return;
 
-    const auto SCALE = pMonitor->m_scale;
-    const auto BARW  = g_pGlobalState->config.barWidth->value();
+    const auto SCALE   = pMonitor->m_scale;
+    const auto BARW    = g_pGlobalState->config.barWidth->value();
+    const bool FOCUSED = PWINDOW == Desktop::focusState()->window();
 
-    auto       bgColor     = configColor(g_pGlobalState->config.bgColor->value());
-    auto       bgAltColor  = configColor(g_pGlobalState->config.bgAltColor->value());
-    auto       borderColor = configColor(g_pGlobalState->config.buttonBorderColor->value());
-    auto       textColor   = configColor(g_pGlobalState->config.textColor->value());
-    auto       accentColor = configColor(g_pGlobalState->config.accentColor->value());
-    auto       critColor   = configColor(g_pGlobalState->config.critColor->value());
+    auto       bgColor       = configColor(g_pGlobalState->config.bgColor->value());
+    auto       bgAltColor    = configColor(g_pGlobalState->config.bgAltColor->value());
+    auto       borderColor   = configColor(g_pGlobalState->config.buttonBorderColor->value());
+    auto       accentColor   = configColor(g_pGlobalState->config.accentColor->value());
+    auto       critColor     = configColor(g_pGlobalState->config.critColor->value());
+    auto       inactiveColor = configColor(g_pGlobalState->config.inactiveColor->value());
     bgColor.a *= a;
     bgAltColor.a *= a;
     borderColor.a *= a;
 
-    if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)g_pGlobalState->config.textColor->value()) {
+    // Buttons + title follow the window's frame: accent (active-border
+    // colour) when focused, the inactive-border grey otherwise.
+    const auto textColor = FOCUSED ? accentColor : inactiveColor;
+
+    if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)textColor.getAsHex() || m_bLastFocus != FOCUSED) {
         m_glyphCache.clear();
         m_pTitleTex     = nullptr;
-        m_lastTextColor = (uint64_t)g_pGlobalState->config.textColor->value();
+        m_lastTextColor = (uint64_t)textColor.getAsHex();
+        m_bLastFocus    = FOCUSED;
+    }
+
+    // A maximized window is pinned to its target: anything that moved or
+    // resized it (meta+drag, apps repositioning themselves) gets snapped
+    // back — maximized means immovable until unmaximized.
+    if (m_bMaximized && !m_bMinimized && PWINDOW->m_isFloating) {
+        const auto T = maximizeTarget();
+        if (PWINDOW->m_realPosition->goal() != T.pos() || PWINDOW->m_realSize->goal() != T.size()) {
+            // resize BEFORE move: Actions::resize keeps the window's centre,
+            // so a move-then-resize lands off-target
+            Config::Actions::resize(T.size(), false, PWINDOW);
+            Config::Actions::move(T.pos(), false, PWINDOW);
+        }
     }
 
     const auto DECOBOX = assignedBoxGlobal();
@@ -279,20 +299,20 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawCell(0, critColor, false);
     drawGlyph(0, "x", m_iHoverCell == 0 ? critColor : textColor);
 
-    // maximize [■] — accent while maximized or hovered
+    // maximize [=] — accent while maximized or hovered
     drawCell(1, accentColor, m_bMaximized);
-    drawGlyph(1, "■", m_bMaximized ? accentColor : textColor);
+    drawGlyph(1, "=", (m_bMaximized || m_iHoverCell == 1) ? accentColor : textColor);
 
-    // minimize [»] — slides the window off to the right
+    // minimize [>] — slides the window off to the right
     drawCell(2, accentColor, false);
-    drawGlyph(2, "»", m_iHoverCell == 2 ? accentColor : textColor);
+    drawGlyph(2, ">", m_iHoverCell == 2 ? accentColor : textColor);
 
     // ---- title, a column of upright letters ----
     const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
     if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
         m_szLastTitle   = PWINDOW->m_title;
         m_iLastTitleRun = RUNLEN;
-        renderTitleTex(RUNLEN, SCALE);
+        renderTitleTex(RUNLEN, SCALE, textColor);
     }
     m_fLastScale = SCALE;
 
@@ -417,8 +437,10 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         default: break;
     }
 
-    // anywhere else on the bar: drag the window
-    m_bDragPending = true;
+    // anywhere else on the bar: drag the window (maximized windows are
+    // pinned — no dragging until unmaximized)
+    if (!m_bMaximized)
+        m_bDragPending = true;
 }
 
 void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
@@ -444,40 +466,46 @@ void CVtbDeco::closeWindow() {
         PWINDOW->sendClose();
 }
 
+// Edge-to-edge across the monitor's usable area (panel exclusive zones
+// already subtracted via the reserved area), minus our own bar width on the
+// right. maximize_gap (default 0) is an optional breathing margin.
+CBox CVtbDeco::maximizeTarget() {
+    const auto PWINDOW  = m_pWindow.lock();
+    const auto PMONITOR = PWINDOW ? PWINDOW->m_monitor.lock() : nullptr;
+    if (!PMONITOR)
+        return {};
+
+    const auto GAP    = g_pGlobalState->config.maximizeGap->value();
+    const auto BARW   = g_pGlobalState->config.barWidth->value();
+    const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
+
+    return {usable.x + GAP, usable.y + GAP, usable.w - GAP * 2 - BARW, usable.h - GAP * 2};
+}
+
 void CVtbDeco::toggleMaximize() {
     const auto PWINDOW = m_pWindow.lock();
-    if (!PWINDOW || !PWINDOW->m_isFloating)
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized)
         return;
 
-    const auto PMONITOR = PWINDOW->m_monitor.lock();
-    if (!PMONITOR)
-        return;
-
-    const auto ADDR = windowAddress(PWINDOW);
-
+    // Config::Actions directly — the legacy movewindowpixel dispatcher's
+    // move path proved unreliable on the lua build, and there's no reason
+    // to round-trip through string parsing anyway.
+    // resize BEFORE move in both directions: Actions::resize keeps the
+    // window's centre, so a move-then-resize drifts by half the size delta.
     if (m_bMaximized) {
-        g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", (int)m_savedGeometry.x, (int)m_savedGeometry.y, ADDR));
-        g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},{}", (int)m_savedGeometry.w, (int)m_savedGeometry.h, ADDR));
         m_bMaximized = false;
+        Config::Actions::resize(m_savedGeometry.size(), false, PWINDOW);
+        Config::Actions::move(m_savedGeometry.pos(), false, PWINDOW);
     } else {
         m_savedGeometry = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
 
-        // Edge-to-edge across the monitor's usable area (panel exclusive
-        // zones already subtracted via the reserved area), minus our own bar
-        // width on the right. maximize_gap (default 0) is an optional
-        // breathing margin.
-        const auto GAP    = g_pGlobalState->config.maximizeGap->value();
-        const auto BARW   = g_pGlobalState->config.barWidth->value();
-        const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
+        const auto T = maximizeTarget();
+        if (T.w < 50 || T.h < 50)
+            return;
 
-        const int  X = usable.x + GAP;
-        const int  Y = usable.y + GAP;
-        const int  W = usable.w - GAP * 2 - BARW;
-        const int  H = usable.h - GAP * 2;
-
-        g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", X, Y, ADDR));
-        g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},{}", W, H, ADDR));
         m_bMaximized = true;
+        Config::Actions::resize(T.size(), false, PWINDOW);
+        Config::Actions::move(T.pos(), false, PWINDOW);
     }
     damageEntire();
 }
@@ -497,8 +525,8 @@ void CVtbDeco::minimizeWindow() {
 
     // slide fully past the right edge (Hyprland's move animation is the
     // "slide out" itself)
-    const int X = PMONITOR->m_position.x + PMONITOR->m_size.x;
-    g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", X, (int)m_minSavedPos.y, windowAddress(PWINDOW)));
+    const double X = PMONITOR->m_position.x + PMONITOR->m_size.x;
+    Config::Actions::move(Vector2D(X, m_minSavedPos.y), false, PWINDOW);
 
     // hand focus to another window on the workspace; focusing the minimized
     // window again (e.g. via its panel icon) is the restore trigger
@@ -530,7 +558,7 @@ void CVtbDeco::restoreFromMinimize() {
         return;
 
     m_bMinimized = false;
-    g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", (int)m_minSavedPos.x, (int)m_minSavedPos.y, windowAddress(PWINDOW)));
+    Config::Actions::move(m_minSavedPos, false, PWINDOW);
     if (PWINDOW->m_isFloating)
         g_pCompositor->changeWindowZOrder(PWINDOW, true);
     damageEntire();

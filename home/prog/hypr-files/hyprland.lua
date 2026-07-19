@@ -412,6 +412,17 @@ end)
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
 hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
+-- Alt-Tab window switching (single-workspace desktop): cycle focus and
+-- raise. Focusing a minimized window slides it back in (hyprvtb).
+hl.bind("ALT + TAB", function()
+    hl.dispatch(hl.dsp.window.cycle_next())
+    hl.dispatch(hl.dsp.window.bring_to_top())
+end, { description = "Next window" })
+hl.bind("ALT + SHIFT + TAB", function()
+    hl.dispatch(hl.dsp.window.cycle_next({ prev = true }))
+    hl.dispatch(hl.dsp.window.bring_to_top())
+end, { description = "Previous window" })
+
 -- Multimedia keys for volume and brightness.
 -- Volume: each also pops the Quickshell OSD (`qs ipc call osd volume`),
 -- which re-reads the live level and shows it briefly.

@@ -42,6 +42,7 @@ struct SGlobalState {
         SP<Config::Values::CColorValue>  buttonBorderColor;
         SP<Config::Values::CColorValue>  accentColor;
         SP<Config::Values::CColorValue>  critColor;
+        SP<Config::Values::CColorValue>  inactiveColor;
     } config;
 };
 

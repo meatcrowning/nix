@@ -46,6 +46,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     PHLWINDOW                          getOwner();
     void                               onConfigReloaded();
 
+    // Public: also invoked through the hyprvtb.* lua functions (panel icon
+    // click minimizes the active window, etc.).
+    void                               minimizeWindow();
+    void                               toggleMaximize();
+
     // Called from main.cpp's window.active listener: focusing a minimized
     // window slides it back in.
     void                               onFocusGained();
@@ -66,6 +71,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     int                  m_iLastTitleRun = -1;
     float                m_fLastScale    = -1;
     uint64_t             m_lastTextColor = 0;
+    bool                 m_bLastFocus    = false;
 
     bool                 m_bMaximized = false;
     CBox                 m_savedGeometry;
@@ -84,7 +90,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     CHyprSignalListener  m_pMouseMoveCallback;
 
     void                 renderPass(PHLMONITOR, float const& a);
-    void                 renderTitleTex(int runLenPx, float scale);
+    void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
 
     bool                 inputIsValid();
@@ -95,9 +101,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     int                  cellAt(const Vector2D& localCoords);
 
     void                 closeWindow();
-    void                 toggleMaximize();
-    void                 minimizeWindow();
     void                 restoreFromMinimize();
+    CBox                 maximizeTarget();
 
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();

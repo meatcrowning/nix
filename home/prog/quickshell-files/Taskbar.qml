@@ -58,7 +58,15 @@ Column {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: cell.modelData.activate()
+                // Clicking the ACTIVE program's icon minimizes it (hyprvtb
+                // slides it off-screen); clicking any other icon focuses it,
+                // which also slides a minimized window back in.
+                onClicked: {
+                    if (cell.modelData.activated)
+                        Quickshell.execDetached(["hyprctl", "eval", "hl.plugin.hyprvtb.minimize_active()"]);
+                    else
+                        cell.modelData.activate();
+                }
             }
 
             Tooltip {

@@ -5,6 +5,14 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/shared/actions/ConfigActions.hpp>
+
+extern "C" {
+#include <lua.h>
+#include <lauxlib.h>
+}
 
 #include <algorithm>
 #include <cstdlib>
@@ -72,9 +80,8 @@ static void onNewWindow(PHLWINDOW window) {
     if (window->m_isFloating) {
         const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
         if (IT != g_pGlobalState->savedGeometry.end()) {
-            const auto ADDR = std::format("address:0x{:x}", (uintptr_t)window.get());
-            g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},{}", (int)IT->second.w, (int)IT->second.h, ADDR));
-            g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", (int)IT->second.x, (int)IT->second.y, ADDR));
+            Config::Actions::resize(IT->second.size(), false, window);
+            Config::Actions::move(IT->second.pos(), false, window);
         }
     }
 }
@@ -105,6 +112,35 @@ static void onWindowFocus(PHLWINDOW window) {
             break;
         }
     }
+}
+
+// Deco of the currently focused window, or nullptr.
+static CVtbDeco* activeDeco() {
+    if (!g_pGlobalState)
+        return nullptr;
+    const auto W = Desktop::focusState()->window();
+    if (!W)
+        return nullptr;
+    for (auto& b : g_pGlobalState->bars) {
+        if (b && b->getOwner() == W)
+            return b.get();
+    }
+    return nullptr;
+}
+
+// lua: hyprvtb.minimize_active() — used by the panel taskbar (clicking the
+// active program's icon minimizes it).
+static int luaMinimizeActive(lua_State* L) {
+    if (auto d = activeDeco())
+        d->minimizeWindow();
+    return 0;
+}
+
+// lua: hyprvtb.toggle_maximize_active()
+static int luaToggleMaximizeActive(lua_State* L) {
+    if (auto d = activeDeco())
+        d->toggleMaximize();
+    return 0;
 }
 
 static void onConfigReloaded() {
@@ -159,6 +195,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.buttonBorderColor = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.button_border", "Button outline colour", 0xff192c38);
     g_pGlobalState->config.accentColor       = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.accent", "Accent (maximize/minimize hover) colour", 0xff5c9fcc);
     g_pGlobalState->config.critColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.crit", "Close-hover colour", 0xff70c3fa);
+    g_pGlobalState->config.inactiveColor     = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.inactive", "Unfocused text colour (matches general:col.inactive_border)", 0xaa595959);
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.barWidth);
@@ -171,6 +208,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.buttonBorderColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.accentColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.critColor);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.inactiveColor);
+
+    if (Config::mgr()->type() != Config::CONFIG_LEGACY) {
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
+    }
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
         if (g_pGlobalState)
@@ -194,7 +237,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / stacked title)", "lam", "2.0"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / stacked title)", "lam", "2.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

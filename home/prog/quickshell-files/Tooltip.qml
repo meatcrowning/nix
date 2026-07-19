@@ -20,15 +20,26 @@ PopupWindow {
     implicitWidth: box.implicitWidth
     implicitHeight: box.implicitHeight
 
+    // mapToItem in a plain binding captures ancestor positions ONCE at
+    // creation — an item that gets laid out later (e.g. a Repeater cell in a
+    // Column) keeps its birth position (y=0, i.e. "near the top") forever.
+    // So: recompute the mapping every time the tooltip is shown instead.
+    property real anchorX: 0
+    property real anchorY: 0
+    function reposition() {
+        if (!ready)
+            return;
+        const p = tip.target.mapToItem(null, 0, tip.target.height / 2);
+        anchorX = p.x - 8;
+        anchorY = p.y;
+    }
+    onVisibleChanged: if (visible) reposition()
+
     anchor {
         window: tip.target ? tip.target.QsWindow.window : null
-        // mapToItem(null, …) yields window/scene coordinates and never throws
-        // (QsWindow.itemRect does, before the item is a window member).
         rect {
-            x: tip.ready ? tip.target.mapToItem(null, 0, 0).x - 8 : 0
-            y: tip.ready
-                ? tip.target.mapToItem(null, 0, tip.target.height / 2).y
-                : 0
+            x: tip.anchorX
+            y: tip.anchorY
             width: 1
             height: 1
         }
