@@ -41,3 +41,7 @@ The `my.aerotheme.enable` option (defined in `sys/options.nix`) allows for easy 
     - User-level/dotfile changes go into `home/`.
     - Prefer creating small, focused `.nix` files within the appropriate subdirectory instead of bloating `configuration.nix` or `lam.nix`.
 3. **Recursive Imports:** Remember that adding a file to `sys/` or `home/` is sufficient for it to be included; you do not need to manually add it to an `imports` list unless it is outside those trees.
+4. **Never clobber the user's own edits.** The user routinely hand-edits files in this repo directly (adding a package, flipping an option, etc.) and may leave those changes uncommitted. Before committing or pushing:
+    - **Always run `git -C ~/nix status` first.** If the working tree contains changes you did NOT make, STOP. Those are almost certainly the user's — do not assume they are stale or safe to discard.
+    - **Never run reverting/destructive git commands** here to "clean up" — no `git reset --hard`, `git checkout -- <file>`, `git restore`, `git stash`, or `git clean`. Any of these can silently wipe the user's untracked/uncommitted work, which is exactly the failure to avoid.
+    - **Scope your commits to the files you actually changed** (`git add <specific paths>`), rather than `git add -A`, when unexpected changes are present — so you don't bundle the user's in-progress edits into your commit. If you can't tell what's yours vs. theirs, ask before committing.
