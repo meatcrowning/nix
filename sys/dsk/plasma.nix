@@ -12,6 +12,19 @@
     # same way (session .desktop files are DM-agnostic).
     displayManager.sddm.enable = false;
     displayManager.ly.enable = true;
+    # The "wavy" colormix shader animation, themed to the desktop's wal
+    # palette. NOTE: this is a static snapshot of the palette (orange, as of
+    # 2026-07) — ly's config is system-level and can't follow wallpaper
+    # changes. Colors are 0xSSRRGGBB (SS = styling; 01 = bold).
+    displayManager.ly.settings = {
+      animation = "colormix";
+      colormix_col1 = "0x00CC4400"; # accent
+      colormix_col2 = "0x0054382A"; # dim
+      colormix_col3 = "0x20000000"; # near-black (hi-black style)
+      fg = "0x00E08E65";            # input text — palette "ok", readable on the waves
+      border_fg = "0x00CC4400";     # box border = accent
+      error_fg = "0x01FA5C0C";      # bold crit
+    };
     desktopManager.plasma6.enable = true;
     # Hyprland is the default session; aerotheme (when enabled) takes over instead.
     # Plasma stays installed and selectable at the greeter — it also supplies

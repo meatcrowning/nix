@@ -14,7 +14,7 @@ Item {
     property int levelR: 0
 
     readonly property int barW: 5
-    readonly property int barH: 34
+    readonly property int barH: 68
     readonly property int gapPx: 4
 
     width: barW * 2 + gapPx
@@ -58,7 +58,7 @@ Item {
             anchors.margins: 1
             height: Math.round((parent.height - 2) * parent.level / 100)
             color: Theme.accent
-            Behavior on height { NumberAnimation { duration: 60 } }
+            Behavior on height { NumberAnimation { duration: 30 } }
         }
     }
 

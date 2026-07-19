@@ -79,6 +79,11 @@ Scope {
         id: screenshot
     }
 
+    // The month calendar that slides out when hovering the panel date.
+    Calendar {
+        id: calendar
+    }
+
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
         target: "lock"
@@ -289,11 +294,12 @@ Scope {
                 anchors.bottomMargin: 6
             }
 
-            // ---- bottom: date (month / year / day) ----
+            // ---- bottom: date (month / day / year); hover slides the calendar out ----
             DateDisplay {
                 id: dateDisplay
                 anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
                 anchors.bottomMargin: Theme.gap
+                onHovered: (h) => calendar.dateHover(h)
             }
         }
     }
