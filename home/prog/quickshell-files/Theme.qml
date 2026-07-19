@@ -6,11 +6,14 @@ Singleton {
     // Everything uses the same pixel font kitty uses.
     readonly property string font: "More Perfect DOS VGA"
 
-    // Text size in PIXELS (not points). The pixel font's native cell is 16px,
-    // so an integer multiple of that stays crisp; point sizes get DPI-scaled to
-    // a fractional pixel height that smears the glyphs. See PixelText.qml.
-    readonly property int fontSize: 16
-    readonly property int clockSize: 16   // same size as the rest of the panel
+    // Text size in PIXELS (not points). Matched to kitty's on-screen size:
+    // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to
+    // ~14.67px, so 15px here matches the terminal. NOTE: the font's native cell
+    // is 16px, so 15 is slightly off-grid and a touch softer than 16 would be —
+    // intentional, it's the price of matching kitty rather than the pixel grid.
+    // See PixelText.qml.
+    readonly property int fontSize: 15
+    readonly property int clockSize: 15   // same size as the rest of the panel
 
     // Panel geometry (logical px)
     readonly property int barWidth: 48
