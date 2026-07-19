@@ -172,7 +172,17 @@ Scope {
 
             anchors { top: true; bottom: true; right: true }
             implicitWidth: Theme.barWidth
-            exclusiveZone: Theme.barWidth
+            // Reserve one window-border less than the bar's real width. The bar
+            // still occupies its full barWidth (it's anchored right and this
+            // layer sits above windows), but a maximized window is now allowed
+            // to extend that 2px further right — tucking its right border UNDER
+            // the accent strip below instead of leaving it visible just to the
+            // left of it. Otherwise the window's 2px border and the bar's 2px
+            // accent stack side by side and read as one double-width border on
+            // maximized windows. This mirrors the left screen edge, where the
+            // EdgeAccent and a window's left border already share the same
+            // pixels. Keep in sync with the window border (hypr border_size).
+            exclusiveZone: Theme.barWidth - Theme.windowBorderWidth
             color: Theme.bg
 
             WlrLayershell.namespace: "qs-bar"
