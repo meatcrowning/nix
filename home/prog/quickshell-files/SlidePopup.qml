@@ -5,14 +5,19 @@ import Quickshell.Wayland
 // Shared base for the bar's hover popups. Slides in from the right edge,
 // stays while hovered (350ms grace), mutually exclusive via Popups.
 //
-// Positioning:
-//   anchorCenterY < 0  -> anchored to the bottom (clock/date popups)
-//   anchorCenterY >= 0 -> vertical CENTER sits at that scene-Y, so the
-//                         popup lines up with the bar module it came from
-//                         (disk/cpu/eth/weather).
-// When the DiskPanel is pinned (a file browser is open) every OTHER popup
-// shifts left so its right edge meets the pinned panel's left edge, and the
-// disk panel itself drops to the bottom z-layer and stays open.
+// Positioning (unpinned):
+//   anchorCenterY >= 0 -> vertical CENTER at that scene-Y (cpu/eth), UNLESS
+//                         aboveDiskWhenPinned and the disk widget is open, in
+//                         which case it stacks just above the disk panel.
+//   anchorCenterY < 0  -> bottom-anchored (clock/date/weather/disk).
+//
+// Pinning (pin indicator, top-right): a pinned popup becomes a desktop widget
+// — stays open, drops to the bottom z-layer, and its border goes inactive.
+//   pinInPlace = false (default): tiles into a right-to-left row along the
+//                bottom (Popups.offsetFor) so pinned widgets don't overlap.
+//   pinInPlace = true  (cpu/eth): freezes wherever it was when pinned (above
+//                the disk, or centered on its module) rather than dropping to
+//                the bottom row.
 PanelWindow {
     id: root
 
@@ -20,25 +25,31 @@ PanelWindow {
     property string popupNamespace: "qs-popup"
     property bool open: false
     property bool wantOpen: false
-
-    // vertical-centering: scene Y to center on; <0 keeps bottom anchoring
-    property real anchorCenterY: -1
-
-    // DiskPanel flags (see Popups): isDisk marks the one panel that pins;
-    // pinnedOpen is driven by the browser count / manual pin.
-    property bool isDisk: false
     property bool pinnedOpen: false
-    // cpu/eth: when the disk panel is pinned, stack ABOVE it instead of
-    // over it (their bottom edge sits just above the disk panel's top).
+
+    property real anchorCenterY: -1
+    property bool isDisk: false
     property bool aboveDiskWhenPinned: false
+    property bool pinInPlace: false
+    property real _pinnedTop: -1
 
     signal opened()
 
-    // true when this popup should sit above the pinned disk panel
-    readonly property bool stackAboveDisk: aboveDiskWhenPinned && Popups.diskPinned
-    // true when the popup is top-anchored (centered on a module, or stacked
-    // above the disk) vs bottom-anchored (clock/date/weather)
-    readonly property bool topAnchored: stackAboveDisk || anchorCenterY >= 0
+    // stack above the disk panel only while it's actually open (and we're not
+    // already pinned)
+    readonly property bool aboveDisk: aboveDiskWhenPinned && Popups.diskOpen && !pinnedOpen
+    readonly property bool tiled: pinnedOpen && !pinInPlace       // bottom widget row
+    readonly property bool frozenTop: pinnedOpen && pinInPlace    // stay where pinned
+    readonly property bool topAnchored: aboveDisk || frozenTop || (!pinnedOpen && anchorCenterY >= 0)
+
+    // top position when we're top-anchored but NOT frozen
+    function _liveTop() {
+        if (aboveDiskWhenPinned && Popups.diskOpen)
+            return Math.max(Theme.gap, Math.round(Popups.diskTopY - Theme.gap - implicitHeight));
+        if (anchorCenterY >= 0)
+            return Math.max(Theme.gap, Math.round(anchorCenterY - implicitHeight / 2));
+        return Theme.gap;
+    }
 
     visible: open || card.x < card.hidden - 1
     color: "transparent"
@@ -49,25 +60,29 @@ PanelWindow {
         bottom: !root.topAnchored
     }
     margins {
-        right: Theme.gap
-        top: root.stackAboveDisk
-             ? Math.max(Theme.gap, Math.round(Popups.diskTopY - Theme.gap - root.implicitHeight))
-             : root.anchorCenterY >= 0
-               ? Math.max(Theme.gap, Math.round(root.anchorCenterY - root.implicitHeight / 2))
-               : 0
+        // tiled widgets tile right-to-left (reference pinned.length so the
+        // offset recomputes when the pinned set changes)
+        right: Theme.gap + ((root.tiled && Popups.pinned.length >= 0) ? Popups.offsetFor(root) : 0)
+        top: root.frozenTop ? root._pinnedTop : (root.topAnchored ? root._liveTop() : 0)
         bottom: root.topAnchored ? 0 : Theme.gap
     }
     exclusiveZone: 0
 
-    // pinned disk sits behind normal windows (the browser); everything else
-    // floats on top as usual
-    WlrLayershell.layer: (isDisk && pinnedOpen) ? WlrLayer.Bottom : WlrLayer.Overlay
+    // pinned widgets live on the desktop, behind windows
+    WlrLayershell.layer: root.pinnedOpen ? WlrLayer.Bottom : WlrLayer.Overlay
     WlrLayershell.namespace: popupNamespace
 
-    // pinned open: forced visible, hover no longer closes it
     onPinnedOpenChanged: {
-        if (pinnedOpen) { closeTimer.stop(); pendTimer.stop(); wantOpen = true; open = true; }
-        else closeTimer.restart();
+        if (pinnedOpen) {
+            if (pinInPlace) { _pinnedTop = _liveTop(); Popups.released(root); }
+            else Popups.pin(root);
+            closeTimer.stop(); pendTimer.stop();
+            wantOpen = true; open = true;
+        } else {
+            _pinnedTop = -1;
+            if (!pinInPlace) Popups.unpin(root);
+            closeTimer.restart();
+        }
     }
 
     function hoverChanged(h) {
@@ -75,7 +90,6 @@ PanelWindow {
         if (h) show();
         else closeTimer.restart();
     }
-
     function show() {
         closeTimer.stop();
         wantOpen = true;
@@ -84,13 +98,11 @@ PanelWindow {
         if (wait > 0) { pendTimer.interval = wait; pendTimer.restart(); }
         else reallyOpen();
     }
-
     function reallyOpen() {
         if (!wantOpen) return;
         opened();
         open = true;
     }
-
     function dismiss() {
         if (pinnedOpen) return;
         wantOpen = false;
@@ -127,7 +139,8 @@ PanelWindow {
         Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
         color: Theme.bg
-        border.color: Theme.windowBorder
+        // pinned widgets read as "unfocused" — inactive border colour
+        border.color: root.pinnedOpen ? Theme.windowBorderInactive : Theme.windowBorder
         border.width: Theme.windowBorderWidth
         radius: Theme.windowRounding
 
@@ -142,6 +155,40 @@ PanelWindow {
         Item {
             id: contentHolder
             anchors.fill: parent
+        }
+
+        // pin indicator / toggle (top-right): a dot + "pn". Dot filled when
+        // pinned; click to pin this popup as a desktop widget (or unpin it).
+        Item {
+            anchors { top: parent.top; right: parent.right; topMargin: 7; rightMargin: 8 }
+            width: pinRow.implicitWidth
+            height: pinRow.implicitHeight
+            z: 10
+
+            Row {
+                id: pinRow
+                spacing: 3
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 7
+                    height: 7
+                    radius: 4
+                    color: root.pinnedOpen ? Theme.accent : "transparent"
+                    border.color: (root.pinnedOpen || pinMa.containsMouse) ? Theme.accent : Theme.textDim
+                    border.width: 1
+                }
+                PixelText {
+                    text: "pn"
+                    color: (root.pinnedOpen || pinMa.containsMouse) ? Theme.accent : Theme.textDim
+                }
+            }
+            MouseArea {
+                id: pinMa
+                anchors { fill: parent; margins: -4 }
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.pinnedOpen = !root.pinnedOpen
+            }
         }
     }
 }

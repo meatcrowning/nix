@@ -17,14 +17,9 @@ Singleton {
         const e = entries.slice();
         e.push({ id: id, path: path });
         entries = e;
-        Popups.diskPinned = true; // opening via a drive always pins
     }
 
     function close(id) {
         entries = entries.filter(e => e.id !== id);
-        // only auto-unpin once the LAST browser closes; while others remain,
-        // leave the pin as-is so a manual unpin isn't undone
-        if (entries.length === 0)
-            Popups.diskPinned = false;
     }
 }

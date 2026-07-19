@@ -321,7 +321,9 @@ Scope {
                 // weather slides out at the BOTTOM like the clock/date popups
                 // (anchorCenterY stays -1), not centered on its bar module
                 onWeatherHovered: (h, cy) => weatherPanel.hoverChanged(h)
-                onDiskHovered: (h, cy) => { if (h) diskPanel.anchorCenterY = cy; diskPanel.hoverChanged(h); }
+                // disk slides out at the BOTTOM (anchorCenterY stays -1) — it's
+                // tall, so bottom-anchoring reads better than centering
+                onDiskHovered: (h, cy) => diskPanel.hoverChanged(h)
                 onCpuHovered: (h, cy) => { if (h) cpuPanel.anchorCenterY = cy; cpuPanel.hoverChanged(h); }
                 onEthHovered: (h, cy) => { if (h) ethPanel.anchorCenterY = cy; ethPanel.hoverChanged(h); }
             }

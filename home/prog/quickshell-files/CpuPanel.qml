@@ -10,7 +10,8 @@ SlidePopup {
     popupNamespace: "qs-cpu"
     implicitWidth: 220
     implicitHeight: content.implicitHeight + 20
-    aboveDiskWhenPinned: true // stack above the disk panel while it's pinned
+    aboveDiskWhenPinned: true // stack above the disk panel while it's open
+    pinInPlace: true          // pinning freezes it here, not the bottom row
 
     Connections {
         target: SysInfo
