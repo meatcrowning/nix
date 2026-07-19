@@ -57,6 +57,7 @@ Column {
                 cursorShape: Qt.PointingHandCursor
                 acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 onClicked: (mouse) => {
+                    Sounds.play("Windows Navigation Start.wav");
                     if (mouse.button === Qt.LeftButton) {
                         if (entry.item.onlyMenu) menu.open();
                         else entry.item.activate();

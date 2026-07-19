@@ -9,8 +9,10 @@ import QtQuick
 //   login          -> "Windows Logon Sound.wav"     (hyprland.lua autostart)
 //   notifications  -> Balloon / Exclamation          (Notifications.qml)
 //   volume change  -> "Windows Ding.wav" throttled   (Osd.qml)
-//   ANY left click -> "Windows Navigation Start.wav" (hyprvtb global listener,
-//                     throttled 90ms, muted over fullscreen windows)
+//   action clicks  -> "Windows Navigation Start.wav" — semantic actions only:
+//                     titlebar buttons (hyprvtb), taskbar/tray/launcher/
+//                     powermenu/wallpaper/screenshot-menu clicks (here), and
+//                     web links (the vista-click Vivaldi extension)
 //   minimize/restore -> Minimize / Restore           (hyprvtb plugin)
 //   trash change   -> "Windows Recycle.wav"          (vista-trash-sound.path)
 //   sudo prompt    -> "Windows User Account Control.wav" (sudo-askpass wrapper)

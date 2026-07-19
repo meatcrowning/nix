@@ -233,7 +233,10 @@ Scope {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: launcher.open = !launcher.open
+                        onClicked: {
+                            Sounds.play("Windows Navigation Start.wav");
+                            launcher.open = !launcher.open;
+                        }
                     }
                 }
 

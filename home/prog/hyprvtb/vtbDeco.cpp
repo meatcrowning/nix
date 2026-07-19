@@ -677,11 +677,13 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     info.cancelled   = true;
     m_bCancelledDown = true;
 
+    // Titlebar buttons are ACTIONS: they get the Vista click (minimize plays
+    // its own Minimize.wav instead — one sound per action, never two).
     switch (cellAt(COORDS)) {
-        case 0: closeWindow(); return;
-        case 1: toggleMaximize(); return;
+        case 0: vtbPlaySound("Windows Navigation Start.wav"); closeWindow(); return;
+        case 1: vtbPlaySound("Windows Navigation Start.wav"); toggleMaximize(); return;
         case 2: minimizeWindow(); return;
-        case 3: togglePin(); return;
+        case 3: vtbPlaySound("Windows Navigation Start.wav"); togglePin(); return;
         default: break;
     }
 

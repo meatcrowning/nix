@@ -56,8 +56,8 @@ PanelWindow {
 
     function launch(entry) {
         if (!entry) return;
-        // (No click sound here: the hyprvtb plugin plays Navigation Start on
-        // every left click globally, which covers launcher clicks too.)
+        // Launching an app is an action -> Vista click.
+        Sounds.play("Windows Navigation Start.wav");
         entry.execute();
         close();
     }

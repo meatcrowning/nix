@@ -239,7 +239,10 @@ PanelWindow {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: parent.clicked()
+                    onClicked: {
+                        Sounds.play("Windows Navigation Start.wav");
+                        parent.clicked();
+                    }
                 }
             }
 

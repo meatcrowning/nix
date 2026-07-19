@@ -72,10 +72,13 @@ Column {
                 // slides it off-screen); clicking any other icon focuses it,
                 // which also slides a minimized window back in.
                 onClicked: {
-                    if (cell.modelData.activated)
+                    if (cell.modelData.activated) {
+                        // minimize plays its own sound compositor-side
                         Quickshell.execDetached(["hyprctl", "eval", "hl.plugin.hyprvtb.minimize_active()"]);
-                    else
+                    } else {
+                        Sounds.play("Windows Navigation Start.wav");
                         cell.modelData.activate();
+                    }
                 }
             }
 
