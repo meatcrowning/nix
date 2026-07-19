@@ -14,6 +14,7 @@
 
 #include <pango/pangocairo.h>
 #include <cmath>
+#include <chrono>
 #include <format>
 
 #include "globals.hpp"
@@ -25,16 +26,21 @@ static CHyprColor configColor(Config::INTEGER color) {
     return CHyprColor{static_cast<uint64_t>(color)};
 }
 
-// Fixed interior metrics (logical px), mirroring the old quickshell design:
-// two square button cells under the top edge, title filling the rest.
+// Fixed interior metrics (logical px): three square button cells under the
+// top edge (close, maximize, minimize), title filling the rest.
 static constexpr int VTB_PAD      = 2; // inset from the bar edge
 static constexpr int VTB_CELL_GAP = 2;
+static constexpr int VTB_CELLS    = 3;
 
 static int           cellSize() {
     return g_pGlobalState->config.barWidth->value() - VTB_PAD * 2;
 }
 static int titleTop() {
-    return VTB_PAD + 2 * (cellSize() + VTB_CELL_GAP) + 4;
+    return VTB_PAD + VTB_CELLS * (cellSize() + VTB_CELL_GAP) + 4;
+}
+
+static std::string windowAddress(PHLWINDOW w) {
+    return std::format("address:0x{:x}", (uintptr_t)w.get());
 }
 
 CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
@@ -49,7 +55,8 @@ CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
 }
 
 CVtbDeco::~CVtbDeco() {
-    std::erase(g_pGlobalState->bars, m_self);
+    if (g_pGlobalState)
+        std::erase(g_pGlobalState->bars, m_self);
 }
 
 SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
@@ -93,6 +100,16 @@ PHLWINDOW CVtbDeco::getOwner() {
     return m_pWindow.lock();
 }
 
+CBox CVtbDeco::memorableGeometry() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return {};
+
+    const auto POS  = m_bMinimized ? m_minSavedPos : PWINDOW->m_realPosition->goal();
+    const auto SIZE = PWINDOW->m_realSize->goal();
+    return {POS, SIZE};
+}
+
 void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
     if (!validMapped(m_pWindow) || !g_pGlobalState->config.enabled->value())
         return;
@@ -107,29 +124,49 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 
 // ---- text rendering -------------------------------------------------------
 
-// The title, rendered bottom-to-top: pango draws a single ellipsized line
-// into a cairo context rotated -90°, with antialiasing off so the pixel
-// font stays crisp. Surface is (lineH x runLen): x = glyph height,
-// y = the vertical run the text reads along.
+// The title as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e reading
+// top-down): every UTF-8 codepoint on its own pango line, centered, with
+// antialiasing off so the pixel font stays crisp.
 void CVtbDeco::renderTitleTex(int runLenPx, float scale) {
     const auto FONT  = g_pGlobalState->config.font->value();
     const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
     const auto COLOR = configColor(g_pGlobalState->config.textColor->value());
-    const int  LINEH = SIZE + 2;
+    const int  BARW  = std::round(g_pGlobalState->config.barWidth->value() * scale);
 
     if (runLenPx < SIZE || m_szLastTitle.empty()) {
         m_pTitleTex = nullptr;
         return;
     }
 
-    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, LINEH, runLenPx);
+    // split into codepoints, one per line; truncate to what fits, with a
+    // trailing "…" cell when cut short
+    const int                maxLines = runLenPx / SIZE;
+    std::vector<std::string> cps;
+    for (size_t i = 0; i < m_szLastTitle.size();) {
+        size_t len = 1;
+        while (i + len < m_szLastTitle.size() && (m_szLastTitle[i + len] & 0xC0) == 0x80)
+            len++;
+        cps.push_back(m_szLastTitle.substr(i, len));
+        i += len;
+    }
+    std::string stacked;
+    const bool  truncated = (int)cps.size() > maxLines;
+    const int   shown     = truncated ? std::max(0, maxLines - 1) : (int)cps.size();
+    for (int i = 0; i < shown; i++) {
+        if (i)
+            stacked += "\n";
+        // a lone space makes an invisible empty line — mark word gaps with
+        // a middle dot instead so the title stays readable
+        stacked += (cps[i] == " ") ? "·" : cps[i];
+    }
+    if (truncated)
+        stacked += "\n…";
+
+    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
     auto CR   = cairo_create(SURF);
 
     cairo_font_options_t* fo = cairo_font_options_create();
     cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_NONE);
-
-    cairo_translate(CR, 0, runLenPx);
-    cairo_rotate(CR, -M_PI / 2.0);
 
     PangoLayout* layout = pango_cairo_create_layout(CR);
     pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
@@ -138,9 +175,10 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale) {
     pango_font_description_set_family(fd, FONT.c_str());
     pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
     pango_layout_set_font_description(layout, fd);
-    pango_layout_set_text(layout, m_szLastTitle.c_str(), -1);
-    pango_layout_set_width(layout, runLenPx * PANGO_SCALE);
-    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+    pango_layout_set_text(layout, stacked.c_str(), -1);
+    pango_layout_set_width(layout, BARW * PANGO_SCALE);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+    pango_layout_set_spacing(layout, 0);
 
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
     cairo_move_to(CR, 0, 0);
@@ -157,12 +195,18 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale) {
     cairo_surface_destroy(SURF);
 }
 
-SP<Render::ITexture> CVtbDeco::renderGlyph(const std::string& glyph, float scale) {
-    const auto FONT  = g_pGlobalState->config.font->value();
-    const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
-    const auto COLOR = configColor(g_pGlobalState->config.textColor->value());
+SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale) {
+    const auto key = glyph + "|" + std::format("{:08x}", color.getAsHex());
+    auto       it  = m_glyphCache.find(key);
+    if (it != m_glyphCache.end() && it->second)
+        return it->second;
 
-    return g_pHyprRenderer->renderText(glyph, COLOR, SIZE, false, FONT, 0);
+    const auto FONT = g_pGlobalState->config.font->value();
+    const int  SIZE = std::round(g_pGlobalState->config.fontSize->value() * scale);
+
+    auto       tex = g_pHyprRenderer->renderText(glyph, color, SIZE, false, FONT, 0);
+    m_glyphCache[key] = tex;
+    return tex;
 }
 
 // ---- drawing --------------------------------------------------------------
@@ -172,16 +216,24 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     if (!PWINDOW)
         return;
 
-    const auto  SCALE   = pMonitor->m_scale;
-    const auto  BARW    = g_pGlobalState->config.barWidth->value();
-    const bool  FOCUSED = PWINDOW == Desktop::focusState()->window();
+    const auto SCALE = pMonitor->m_scale;
+    const auto BARW  = g_pGlobalState->config.barWidth->value();
 
-    auto        bgColor     = configColor(g_pGlobalState->config.bgColor->value());
-    auto        borderColor = configColor(g_pGlobalState->config.buttonBorderColor->value());
-    auto        textColor   = configColor(g_pGlobalState->config.textColor->value());
-    auto        accentColor = configColor(g_pGlobalState->config.accentColor->value());
+    auto       bgColor     = configColor(g_pGlobalState->config.bgColor->value());
+    auto       bgAltColor  = configColor(g_pGlobalState->config.bgAltColor->value());
+    auto       borderColor = configColor(g_pGlobalState->config.buttonBorderColor->value());
+    auto       textColor   = configColor(g_pGlobalState->config.textColor->value());
+    auto       accentColor = configColor(g_pGlobalState->config.accentColor->value());
+    auto       critColor   = configColor(g_pGlobalState->config.critColor->value());
     bgColor.a *= a;
+    bgAltColor.a *= a;
     borderColor.a *= a;
+
+    if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)g_pGlobalState->config.textColor->value()) {
+        m_glyphCache.clear();
+        m_pTitleTex     = nullptr;
+        m_lastTextColor = (uint64_t)g_pGlobalState->config.textColor->value();
+    }
 
     const auto DECOBOX = assignedBoxGlobal();
 
@@ -201,38 +253,44 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     const int CELL = cellSize();
 
-    // outlined cell helper: 1px outline + bg fill
-    auto drawCell = [&](int idx, const CHyprColor& outline) {
-        const double y = VTB_PAD + idx * (CELL + VTB_CELL_GAP);
-        g_pHyprOpenGL->renderRect(localBox(VTB_PAD, y, CELL, CELL), outline, {});
-        g_pHyprOpenGL->renderRect(localBox(VTB_PAD + 1, y + 1, CELL - 2, CELL - 2), bgColor, {});
+    // one button cell: hover -> bgAlt fill + 2px outline in `hot`, otherwise
+    // 1px outline in the plain button-border colour (mirrors the old QS look)
+    auto      drawCell = [&](int idx, const CHyprColor& hot, bool active) {
+        const double y       = VTB_PAD + idx * (CELL + VTB_CELL_GAP);
+        const bool   hovered = m_iHoverCell == idx;
+        const int    bw      = (hovered || active) ? 2 : 1;
+        auto         oc      = (hovered || active) ? hot : borderColor;
+        oc.a *= a;
+        g_pHyprOpenGL->renderRect(localBox(VTB_PAD, y, CELL, CELL), oc, {});
+        g_pHyprOpenGL->renderRect(localBox(VTB_PAD + bw, y + bw, CELL - 2 * bw, CELL - 2 * bw), (hovered || active) ? bgAltColor : bgColor, {});
     };
 
-    // ---- close cell ----
-    drawCell(0, borderColor);
-    if (!m_pCloseTex || m_fLastScale != SCALE)
-        m_pCloseTex = renderGlyph("x", SCALE);
-    if (m_pCloseTex && m_pCloseTex->m_texID != 0) {
-        const auto TSZ = m_pCloseTex->m_size;
-        CBox       gbox = {barBox.x + (VTB_PAD + CELL / 2.0) * SCALE - TSZ.x / 2.0, barBox.y + (VTB_PAD + CELL / 2.0) * SCALE - TSZ.y / 2.0, TSZ.x, TSZ.y};
-        g_pHyprOpenGL->renderTexture(m_pCloseTex, gbox.round(), {.a = a});
-    }
+    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color) {
+        auto tex = glyphTex(glyph, color, SCALE);
+        if (!tex || tex->m_texID == 0)
+            return;
+        const auto   TSZ = tex->m_size;
+        const double cy  = VTB_PAD + idx * (CELL + VTB_CELL_GAP) + CELL / 2.0;
+        CBox         gbox = {barBox.x + (VTB_PAD + CELL / 2.0) * SCALE - TSZ.x / 2.0, barBox.y + cy * SCALE - TSZ.y / 2.0, TSZ.x, TSZ.y};
+        g_pHyprOpenGL->renderTexture(tex, gbox.round(), {.a = a});
+    };
 
-    // ---- maximize cell ----
-    drawCell(1, m_bMaximized ? accentColor : borderColor);
-    {
-        const double cy  = VTB_PAD + (CELL + VTB_CELL_GAP) + CELL / 2.0;
-        const double ind = CELL / 2.0; // indicator square size
-        auto         col = m_bMaximized ? accentColor : textColor;
-        col.a *= a;
-        g_pHyprOpenGL->renderRect(localBox(BARW / 2.0 - ind / 2.0, cy - ind / 2.0, ind, ind), col, {});
-        g_pHyprOpenGL->renderRect(localBox(BARW / 2.0 - ind / 2.0 + 1, cy - ind / 2.0 + 1, ind - 2, ind - 2), bgColor, {});
-    }
+    // close [x] — crit on hover, like the QS bar had
+    drawCell(0, critColor, false);
+    drawGlyph(0, "x", m_iHoverCell == 0 ? critColor : textColor);
 
-    // ---- title ----
+    // maximize [■] — accent while maximized or hovered
+    drawCell(1, accentColor, m_bMaximized);
+    drawGlyph(1, "■", m_bMaximized ? accentColor : textColor);
+
+    // minimize [»] — slides the window off to the right
+    drawCell(2, accentColor, false);
+    drawGlyph(2, "»", m_iHoverCell == 2 ? accentColor : textColor);
+
+    // ---- title, a column of upright letters ----
     const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
     if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
-        m_szLastTitle  = PWINDOW->m_title;
+        m_szLastTitle   = PWINDOW->m_title;
         m_iLastTitleRun = RUNLEN;
         renderTitleTex(RUNLEN, SCALE);
     }
@@ -240,7 +298,7 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     if (m_pTitleTex && m_pTitleTex->m_texID != 0) {
         const auto TSZ  = m_pTitleTex->m_size;
-        CBox       tbox = {barBox.x + (BARW * SCALE) / 2.0 - TSZ.x / 2.0, barBox.y + titleTop() * SCALE, TSZ.x, TSZ.y};
+        CBox       tbox = {barBox.x, barBox.y + titleTop() * SCALE, TSZ.x, TSZ.y};
         g_pHyprOpenGL->renderTexture(m_pTitleTex, tbox.round(), {.a = a});
     }
 }
@@ -284,8 +342,18 @@ Vector2D CVtbDeco::cursorRelativeToBar() {
     return g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
 }
 
+int CVtbDeco::cellAt(const Vector2D& c) {
+    const int CELL = cellSize();
+    for (int i = 0; i < VTB_CELLS; i++) {
+        const double y = VTB_PAD + i * (CELL + VTB_CELL_GAP);
+        if (VECINRECT(c, VTB_PAD, y, VTB_PAD + CELL, y + CELL))
+            return i;
+    }
+    return -1;
+}
+
 void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e) {
-    if (!inputIsValid())
+    if (!g_pGlobalState || !inputIsValid())
         return;
 
     if (e.state != WL_POINTER_BUTTON_STATE_PRESSED) {
@@ -297,6 +365,20 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
 }
 
 void CVtbDeco::onMouseMove(Vector2D coords) {
+    if (!g_pGlobalState)
+        return;
+
+    // hover feedback on the button cells
+    if (validMapped(m_pWindow) && !m_bMinimized) {
+        const auto BOX    = assignedBoxGlobal();
+        const auto LOCAL  = g_pInputManager->getMouseCoordsInternal() - BOX.pos();
+        const int  cell   = VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h) ? cellAt(LOCAL) : -1;
+        if (cell != m_iHoverCell) {
+            m_iHoverCell = cell;
+            damageEntire();
+        }
+    }
+
     if (!m_bDragPending || !validMapped(m_pWindow))
         return;
 
@@ -328,15 +410,11 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     info.cancelled   = true;
     m_bCancelledDown = true;
 
-    const int CELL = cellSize();
-    if (VECINRECT(COORDS, VTB_PAD, VTB_PAD, VTB_PAD + CELL, VTB_PAD + CELL)) {
-        closeWindow();
-        return;
-    }
-    const int Y1 = VTB_PAD + CELL + VTB_CELL_GAP;
-    if (VECINRECT(COORDS, VTB_PAD, Y1, VTB_PAD + CELL, Y1 + CELL)) {
-        toggleMaximize();
-        return;
+    switch (cellAt(COORDS)) {
+        case 0: closeWindow(); return;
+        case 1: toggleMaximize(); return;
+        case 2: minimizeWindow(); return;
+        default: break;
     }
 
     // anywhere else on the bar: drag the window
@@ -358,6 +436,8 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
     m_bDragPending = false;
 }
 
+// ---- actions --------------------------------------------------------------
+
 void CVtbDeco::closeWindow() {
     const auto PWINDOW = m_pWindow.lock();
     if (PWINDOW)
@@ -373,27 +453,98 @@ void CVtbDeco::toggleMaximize() {
     if (!PMONITOR)
         return;
 
+    const auto ADDR = windowAddress(PWINDOW);
+
     if (m_bMaximized) {
-        g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},activewindow", (int)m_savedGeometry.x, (int)m_savedGeometry.y));
-        g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},activewindow", (int)m_savedGeometry.w, (int)m_savedGeometry.h));
+        g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", (int)m_savedGeometry.x, (int)m_savedGeometry.y, ADDR));
+        g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},{}", (int)m_savedGeometry.w, (int)m_savedGeometry.h, ADDR));
         m_bMaximized = false;
     } else {
         m_savedGeometry = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
 
+        // Edge-to-edge across the monitor's usable area (panel exclusive
+        // zones already subtracted via the reserved area), minus our own bar
+        // width on the right. maximize_gap (default 0) is an optional
+        // breathing margin.
         const auto GAP    = g_pGlobalState->config.maximizeGap->value();
         const auto BARW   = g_pGlobalState->config.barWidth->value();
-        CBox       usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
+        const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
 
         const int  X = usable.x + GAP;
         const int  Y = usable.y + GAP;
         const int  W = usable.w - GAP * 2 - BARW;
         const int  H = usable.h - GAP * 2;
 
-        g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},activewindow", X, Y));
-        g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},activewindow", W, H));
+        g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", X, Y, ADDR));
+        g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},{}", W, H, ADDR));
         m_bMaximized = true;
     }
     damageEntire();
+}
+
+void CVtbDeco::minimizeWindow() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized)
+        return;
+
+    const auto PMONITOR = PWINDOW->m_monitor.lock();
+    if (!PMONITOR)
+        return;
+
+    m_minSavedPos = PWINDOW->m_realPosition->goal();
+    m_bMinimized  = true;
+    m_minimizedAt = Time::steadyNow();
+
+    // slide fully past the right edge (Hyprland's move animation is the
+    // "slide out" itself)
+    const int X = PMONITOR->m_position.x + PMONITOR->m_size.x;
+    g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", X, (int)m_minSavedPos.y, windowAddress(PWINDOW)));
+
+    // hand focus to another window on the workspace; focusing the minimized
+    // window again (e.g. via its panel icon) is the restore trigger
+    PHLWINDOW next = nullptr;
+    for (auto& w : g_pCompositor->m_windows) {
+        if (w == PWINDOW || !w->m_isMapped || w->isHidden() || w->m_workspace != PWINDOW->m_workspace)
+            continue;
+        // skip other minimized windows
+        bool minimized = false;
+        for (auto& b : g_pGlobalState->bars) {
+            if (b && b->getOwner() == w && b->m_bMinimized) {
+                minimized = true;
+                break;
+            }
+        }
+        if (!minimized)
+            next = w;
+    }
+
+    if (next)
+        Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_CLICK);
+    else
+        Desktop::focusState()->resetWindowFocus();
+}
+
+void CVtbDeco::restoreFromMinimize() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !m_bMinimized)
+        return;
+
+    m_bMinimized = false;
+    g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", (int)m_minSavedPos.x, (int)m_minSavedPos.y, windowAddress(PWINDOW)));
+    if (PWINDOW->m_isFloating)
+        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+    damageEntire();
+}
+
+void CVtbDeco::onFocusGained() {
+    if (!m_bMinimized)
+        return;
+
+    // ignore focus churn caused by the minimize itself
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_minimizedAt).count() < 300)
+        return;
+
+    restoreFromMinimize();
 }
 
 // ---- misc -----------------------------------------------------------------
@@ -408,7 +559,9 @@ void CVtbDeco::updateWindow(PHLWINDOW pWindow) {
 
 void CVtbDeco::onConfigReloaded() {
     m_pTitleTex = nullptr;
-    m_pCloseTex = nullptr;
+    m_glyphCache.clear();
+    if (!validMapped(m_pWindow))
+        return;
     g_pDecorationPositioner->repositionDeco(this);
     damageEntire();
 }

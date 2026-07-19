@@ -89,6 +89,8 @@ hl.config({
             ["col.text"]          = "rgba(8c7138ff)",
             ["col.button_border"] = "rgba(382d16ff)",
             ["col.accent"]        = "rgba(d99c1fff)",
+            ["col.bg_alt"]        = "rgba(120f08ff)",
+            ["col.crit"]          = "rgba(fab424ff)",
         },
     },
 })
@@ -310,11 +312,8 @@ hl.config({
     },
 })
 
-hl.gesture({
-    fingers = 3,
-    direction = "horizontal",
-    action = "workspace"
-})
+-- (3-finger workspace gesture removed: this desktop is locked to a single
+-- workspace — the panel is a program taskbar, not a workspace switcher.)
 
 -- Logitech ERGO M575 (trackball). Values carried over from the Plasma
 -- install's kcminputrc ([Libinput][1133][16534][Logitech ERGO M575]):
@@ -405,26 +404,9 @@ hl.on("keybinds.submap", function(name)
     hl.exec_cmd("$HOME/.config/scripts/resize-mode-notify.sh " .. (name == "resize" and "enter" or "leave"))
 end)
 
--- Switch workspaces with mainMod + [0-9]
--- Move active window to a workspace with mainMod + SHIFT + [0-9]
-for i = 1, 10 do
-    local key = i % 10 -- 10 maps to key 0
-    hl.bind(mainMod .. " + " .. key,             hl.dsp.focus({ workspace = i}),        { description = "Go to workspace " .. i })
-    hl.bind(mainMod .. " + SHIFT + " .. key,     hl.dsp.window.move({ workspace = i }), { description = "Send to workspace " .. i })
-end
-
--- Example special workspace (scratchpad)
-hl.bind(mainMod .. " + S",         hl.dsp.workspace.toggle_special("magic"),            { description = "Toggle scratchpad" })
-hl.bind(mainMod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }), { description = "Send to scratchpad" })
-
--- Scroll through existing workspaces with mainMod + scroll. Routed through
--- Quickshell's WorkspaceNav (see quickshell/WorkspaceNav.qml) instead of a
--- plain e+1/e-1 dispatch, so this gets the same dynamic-creation gating as
--- the unmodified background-only scroll (BackgroundScroll.qml): landing on
--- an existing workspace always works, but growing past the current frontier
--- requires the workspace you're leaving to actually have a window in it.
-hl.bind(mainMod .. " + mouse_down", hl.dsp.exec_cmd("qs ipc call workspace next"))
-hl.bind(mainMod .. " + mouse_up",   hl.dsp.exec_cmd("qs ipc call workspace prev"))
+-- Workspace switching removed: this desktop is locked to ONE workspace.
+-- Windows are managed through the panel taskbar (program icons) and the
+-- hyprvtb titlebars (close / maximize / minimize-slide) instead.
 
 -- Move/resize windows with mainMod + LMB/RMB and dragging
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })

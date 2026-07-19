@@ -6,6 +6,7 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <hyprland/src/helpers/time/Time.hpp>
 #include "globals.hpp"
 
 // inputIsValid() pokes at InputManager internals, same as hyprbars does.
@@ -18,13 +19,15 @@ namespace Event {
 }
 
 // Vertical titlebar drawn by the compositor on the RIGHT edge of every
-// window: close button, maximize (fill-usable-area toggle, not fullscreen),
-// then the window title rotated to read bottom-to-top. Rendered as a sticky
-// window decoration with priority above the border and
+// window — top to bottom: close [x], maximize [■] (fill-usable-area toggle,
+// not fullscreen), minimize [»] (slides the window off the right edge;
+// focusing it again — e.g. from the panel taskbar — slides it back), then
+// the title as a column of upright letters reading top-down. Rendered as a
+// sticky window decoration with priority above the border and
 // DECORATION_PART_OF_MAIN_WINDOW, so Hyprland's own active/inactive border
 // wraps window + titlebar as one frame and the bar is locked to the window
 // in the same rendered frame — the whole reason this is a plugin and not a
-// layer-shell client (see quickshell's former WindowTracker.qml).
+// layer-shell client.
 class CVtbDeco : public IHyprWindowDecoration {
   public:
     CVtbDeco(PHLWINDOW);
@@ -43,6 +46,14 @@ class CVtbDeco : public IHyprWindowDecoration {
     PHLWINDOW                          getOwner();
     void                               onConfigReloaded();
 
+    // Called from main.cpp's window.active listener: focusing a minimized
+    // window slides it back in.
+    void                               onFocusGained();
+
+    // The geometry that should be remembered for this window (the restore
+    // position if it's currently minimized, its live goal otherwise).
+    CBox                               memorableGeometry();
+
     WP<CVtbDeco>                       m_self;
 
   private:
@@ -50,13 +61,20 @@ class CVtbDeco : public IHyprWindowDecoration {
     CBox                 m_bAssignedBox;
 
     SP<Render::ITexture> m_pTitleTex;
-    SP<Render::ITexture> m_pCloseTex;
+    std::map<std::string, SP<Render::ITexture>> m_glyphCache; // "glyph|rgbahex" -> tex
     std::string          m_szLastTitle;
     int                  m_iLastTitleRun = -1;
     float                m_fLastScale    = -1;
+    uint64_t             m_lastTextColor = 0;
 
     bool                 m_bMaximized = false;
     CBox                 m_savedGeometry;
+
+    bool                 m_bMinimized = false;
+    Vector2D             m_minSavedPos;
+    Time::steady_tp      m_minimizedAt = Time::steadyNow();
+
+    int                  m_iHoverCell = -1; // 0 close, 1 max, 2 min, -1 none
 
     bool                 m_bDragPending   = false;
     bool                 m_bDraggingThis  = false;
@@ -67,16 +85,19 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     void                 renderPass(PHLMONITOR, float const& a);
     void                 renderTitleTex(int runLenPx, float scale);
-    SP<Render::ITexture> renderGlyph(const std::string& glyph, float scale);
+    SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
 
     bool                 inputIsValid();
     void                 onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e);
     void                 onMouseMove(Vector2D coords);
     void                 handleDownEvent(Event::SCallbackInfo& info);
     void                 handleUpEvent(Event::SCallbackInfo& info);
+    int                  cellAt(const Vector2D& localCoords);
 
     void                 closeWindow();
     void                 toggleMaximize();
+    void                 minimizeWindow();
+    void                 restoreFromMinimize();
 
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();

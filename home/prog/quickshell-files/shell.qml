@@ -120,14 +120,6 @@ Scope {
         function brightness(): void { Osd.trigger("brightness"); }
     }
 
-    // Dynamic workspace navigation (see WorkspaceNav.qml) driven by
-    // mainMod+scroll: `qs ipc call workspace next|prev`.
-    IpcHandler {
-        target: "workspace"
-        function next(): void { WorkspaceNav.go(1); }
-        function prev(): void { WorkspaceNav.go(-1); }
-    }
-
     // Hardware brightness keys (hypr/hyprland.lua) routed through
     // SysInfo.adjustBrightness — same debounced ddcutil write + optimistic
     // panel update as scrolling "bri" in the status panel, instead of
@@ -149,12 +141,6 @@ Scope {
     Variants {
         model: Quickshell.screens
         EdgeAccent {}
-    }
-
-    // Scroll-to-switch-workspace on bare desktop background, one per monitor.
-    Variants {
-        model: Quickshell.screens
-        BackgroundScroll {}
     }
 
     // Window titlebars are NOT drawn by quickshell: they're compositor-side
@@ -236,7 +222,7 @@ Scope {
                     color: Theme.border
                 }
 
-                Workspaces {
+                Taskbar {
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
 

@@ -217,6 +217,8 @@ hyprctl eval 'hl.config({
         ["col.text"]          = "rgba('"${TEXTDIM}"'ff)",
         ["col.button_border"] = "rgba('"${BORDER}"'ff)",
         ["col.accent"]        = "rgba('"${ACCENT}"'ff)",
+        ["col.bg_alt"]        = "rgba('"${BGALT}"'ff)",
+        ["col.crit"]          = "rgba('"${CRIT}"'ff)",
     } },
 })' >/dev/null 2>&1
 LUA="$CONFIG/hypr/hyprland.lua"
@@ -225,6 +227,8 @@ if [ -f "$LUA" ]; then
     sed -i -E 's/(\["col\.text"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${TEXTDIM}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.button_border"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BORDER}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.accent"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${ACCENT}"'ff)\2/' "$LUA"
+    sed -i -E 's/(\["col\.bg_alt"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BGALT}"'ff)\2/' "$LUA"
+    sed -i -E 's/(\["col\.crit"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${CRIT}"'ff)\2/' "$LUA"
 fi
 
 echo "wal-set: done."

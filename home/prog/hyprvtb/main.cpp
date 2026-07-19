@@ -4,8 +4,14 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/managers/KeybindManager.hpp>
 
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <sstream>
 
 #include "vtbDeco.hpp"
 #include "globals.hpp"
@@ -14,6 +20,41 @@
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
+
+// ---- per-class geometry memory --------------------------------------------
+
+std::string vtbStatePath() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : "") + "/.local/state/hyprvtb/geometry.tsv";
+}
+
+void vtbLoadGeometry() {
+    std::ifstream f(vtbStatePath());
+    if (!f.good())
+        return;
+
+    std::string line;
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        std::string        cls;
+        double             x, y, w, h;
+        if (!std::getline(ss, cls, '\t'))
+            continue;
+        if (!(ss >> x >> y >> w >> h))
+            continue;
+        g_pGlobalState->savedGeometry[cls] = CBox{x, y, w, h};
+    }
+}
+
+void vtbSaveGeometry() {
+    const auto PATH = vtbStatePath();
+    std::filesystem::create_directories(std::filesystem::path(PATH).parent_path());
+    std::ofstream f(PATH, std::ios::trunc);
+    for (const auto& [cls, box] : g_pGlobalState->savedGeometry)
+        f << cls << '\t' << (int)box.x << ' ' << (int)box.y << ' ' << (int)box.w << ' ' << (int)box.h << '\n';
+}
+
+// ---- window lifecycle ------------------------------------------------------
 
 static void onNewWindow(PHLWINDOW window) {
     if (window->m_X11DoesntWantBorders)
@@ -26,6 +67,44 @@ static void onNewWindow(PHLWINDOW window) {
     g_pGlobalState->bars.emplace_back(bar);
     bar->m_self = bar;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
+
+    // reopen where/how this app was last closed
+    if (window->m_isFloating) {
+        const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
+        if (IT != g_pGlobalState->savedGeometry.end()) {
+            const auto ADDR = std::format("address:0x{:x}", (uintptr_t)window.get());
+            g_pKeybindManager->m_dispatchers["resizewindowpixel"](std::format("exact {} {},{}", (int)IT->second.w, (int)IT->second.h, ADDR));
+            g_pKeybindManager->m_dispatchers["movewindowpixel"](std::format("exact {} {},{}", (int)IT->second.x, (int)IT->second.y, ADDR));
+        }
+    }
+}
+
+static void onCloseWindow(PHLWINDOW window) {
+    if (!window || !window->m_isFloating || window->m_class.empty())
+        return;
+
+    for (auto& b : g_pGlobalState->bars) {
+        if (b && b->getOwner() == window) {
+            const auto BOX = b->memorableGeometry();
+            if (BOX.w > 50 && BOX.h > 50) {
+                g_pGlobalState->savedGeometry[window->m_class] = BOX;
+                vtbSaveGeometry();
+            }
+            break;
+        }
+    }
+}
+
+static void onWindowFocus(PHLWINDOW window) {
+    if (!window)
+        return;
+
+    for (auto& b : g_pGlobalState->bars) {
+        if (b && b->getOwner() == window) {
+            b->onFocusGained();
+            break;
+        }
+    }
 }
 
 static void onConfigReloaded() {
@@ -49,20 +128,37 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     g_pGlobalState = makeUnique<SGlobalState>();
+    vtbLoadGeometry();
 
-    static auto P = Event::bus()->m_events.window.open.listen([&](PHLWINDOW w) { onNewWindow(w); });
+    // Listeners are stored in g_pGlobalState (destroyed with it in
+    // PLUGIN_EXIT) and every callback re-checks the state pointer: a
+    // callback firing into a torn-down plugin is a compositor segfault.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.open.listen([](PHLWINDOW w) {
+        if (g_pGlobalState)
+            onNewWindow(w);
+    }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.close.listen([](PHLWINDOW w) {
+        if (g_pGlobalState)
+            onCloseWindow(w);
+    }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.active.listen([](PHLWINDOW w, Desktop::eFocusReason r) {
+        if (g_pGlobalState)
+            onWindowFocus(w);
+    }));
 
-    // Colour defaults follow the wal palette Theme.qml currently carries;
-    // override via plugin:hyprvtb:* in hyprland.lua.
+    // Colour defaults follow the wal palette; overridden live from
+    // hyprland.lua / wal-set.sh via plugin:hyprvtb:*.
     g_pGlobalState->config.enabled           = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:enabled", "Whether the vertical titlebars are enabled", true);
     g_pGlobalState->config.barWidth          = makeShared<Config::Values::CIntValue>("plugin:hyprvtb:bar_width", "Width of the vertical titlebar", 32);
     g_pGlobalState->config.fontSize          = makeShared<Config::Values::CIntValue>("plugin:hyprvtb:font_size", "Text size in px", 16);
-    g_pGlobalState->config.maximizeGap       = makeShared<Config::Values::CIntValue>("plugin:hyprvtb:maximize_gap", "Gap kept around a maximized window (= general:gaps_out)", 35);
+    g_pGlobalState->config.maximizeGap       = makeShared<Config::Values::CIntValue>("plugin:hyprvtb:maximize_gap", "Extra margin kept around a maximized window", 0);
     g_pGlobalState->config.font              = makeShared<Config::Values::CStringValue>("plugin:hyprvtb:font", "Titlebar font", "More Perfect DOS VGA");
     g_pGlobalState->config.bgColor           = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:bg_color", "Bar background", 0xff000000);
+    g_pGlobalState->config.bgAltColor        = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.bg_alt", "Hovered button fill", 0xff080e12);
     g_pGlobalState->config.textColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.text", "Title / glyph colour", 0xff3f6d8c);
     g_pGlobalState->config.buttonBorderColor = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.button_border", "Button outline colour", 0xff192c38);
-    g_pGlobalState->config.accentColor       = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.accent", "Accent (active maximize) colour", 0xff5c9fcc);
+    g_pGlobalState->config.accentColor       = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.accent", "Accent (maximize/minimize hover) colour", 0xff5c9fcc);
+    g_pGlobalState->config.critColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.crit", "Close-hover colour", 0xff70c3fa);
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.barWidth);
@@ -70,22 +166,35 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.maximizeGap);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.font);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.bgColor);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.bgAltColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.textColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.buttonBorderColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.accentColor);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.critColor);
 
-    static auto P2 = Event::bus()->m_events.config.reloaded.listen([&] { onConfigReloaded(); });
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
+        if (g_pGlobalState)
+            onConfigReloaded();
+    }));
 
-    // decorate windows that already exist
-    for (auto& w : g_pCompositor->m_windows) {
-        if (w->isHidden() || !w->m_isMapped)
-            continue;
-        onNewWindow(w);
+    // decorate windows that already exist (none when loaded at config-parse
+    // time during compositor startup — the window.open listener covers those)
+    if (g_pCompositor) {
+        for (auto& w : g_pCompositor->m_windows) {
+            if (w->isHidden() || !w->m_isMapped)
+                continue;
+            onNewWindow(w);
+        }
     }
 
-    HyprlandAPI::reloadConfig();
+    // NOTE: deliberately NOT calling HyprlandAPI::reloadConfig() here. When
+    // the plugin is loaded by hl.plugin.load() during config parsing, the
+    // remainder of that same parse applies our plugin:hyprvtb:* values, and
+    // scheduling a nested reload from inside a reload is exactly the kind of
+    // re-entrancy that segfaulted this plugin's v2. After a manual
+    // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / rotated title)", "lam", "1.0"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / stacked title)", "lam", "2.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -93,4 +202,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
         m->m_scheduledRecalc = true;
 
     g_pHyprRenderer->m_renderPass.removeAllOfType("CVtbPassElement");
+
+    // Destroys the event listeners with the state, so nothing can call back
+    // into this image after unload.
+    g_pGlobalState.reset();
 }
