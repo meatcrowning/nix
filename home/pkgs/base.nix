@@ -29,6 +29,7 @@
     btrfs-progs
     claude-code
     ranger
+    grim
 
     #kde-material-you-colors-latest
     #ventoy-full-qt
