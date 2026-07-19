@@ -553,6 +553,15 @@ void CVtbDeco::minimizeWindow() {
         Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_CLICK);
     else
         Desktop::focusState()->resetWindowFocus();
+
+    // Focusing `next` raises it to the top of the floating stack, which would
+    // otherwise pop it OVER the minimizing window before its slide-out finishes
+    // (the window would appear to teleport instead of sliding away). Re-raise
+    // the minimizing window so it stays visually on top for the whole slide;
+    // once it's off-screen its z-order no longer matters, and restore re-raises
+    // it anyway.
+    if (PWINDOW->m_isFloating)
+        g_pCompositor->changeWindowZOrder(PWINDOW, true);
 }
 
 void CVtbDeco::restoreFromMinimize() {
