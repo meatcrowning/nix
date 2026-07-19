@@ -259,33 +259,44 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
         kw --group "$g" --key DecorationFocus     "$(hx "$ACCENT")"
         kw --group "$g" --key DecorationHover     "$(hx "$ACCENT")"
     }
+    # Every background is pure black (BG) to match the panel/kitty/rest of the
+    # system — the Breeze style below draws flat, so nothing gradients away from
+    # it. Only selections (accent) and the near-black alternate-row stripe
+    # (BackgroundAlternate = BGALT, set inside kdecolor) break the black.
     kdecolor "Colors:Window"        "$BG"     "$TEXT"
     kdecolor "Colors:View"          "$BG"     "$TEXT"
-    kdecolor "Colors:Button"        "$BGALT"  "$TEXT"
+    kdecolor "Colors:Button"        "$BG"     "$TEXT"
     kdecolor "Colors:Selection"     "$ACCENT" "$BG"
-    kdecolor "Colors:Tooltip"       "$BGALT"  "$TEXT"
+    kdecolor "Colors:Tooltip"       "$BG"     "$TEXT"
     kdecolor "Colors:Complementary" "$BG"     "$TEXT"
-    kdecolor "Colors:Header"        "$BGALT"  "$TEXT"
+    kdecolor "Colors:Header"        "$BG"     "$TEXT"
     # Window-manager (titlebar) colours — used by KDE apps' own CSDs.
-    kw --group WM --key activeBackground   "$(hx "$BGALT")"
+    kw --group WM --key activeBackground   "$(hx "$BG")"
     kw --group WM --key activeForeground   "$(hx "$TEXT")"
     kw --group WM --key inactiveBackground "$(hx "$BG")"
     kw --group WM --key inactiveForeground "$(hx "$TEXTDIM")"
 
-    # Same pixel font as the panel/kitty, everywhere. 12pt ≈ the font's native
-    # 16px cell at 96dpi. Static (not wallpaper-derived), but re-pinned here so
-    # it lands on first login and overrides any stale Plasma-set font.
-    FSPEC="More Perfect DOS VGA,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+    # Flat widget style (Breeze, not Oxygen's gradients/frames) + a dark icon
+    # set whose light glyphs read on the black background. Static, but pinned
+    # here so they always win over stale Plasma settings.
+    kw --group KDE   --key widgetStyle "Breeze"
+    kw --group Icons --key Theme        "breeze-dark"
+
+    # Same pixel font AND size as kitty (font_size 11 in kitty.conf), everywhere.
+    # Static (not wallpaper-derived), but re-pinned here so it lands on first
+    # login and overrides any stale Plasma-set font.
+    FSPEC="More Perfect DOS VGA,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
     for k in font menuFont toolBarFont smallestReadableFont fixed; do
         kw --group General --key "$k" "$FSPEC"
     done
     kw --group WM --key activeFont "$FSPEC"
 
-    # Reload palette (0) and fonts (1) in running KDE/Qt apps without a relogin.
-    # Harmless if there's no session bus or no listeners.
+    # Reload palette (0), fonts (1), style (2) and icons (4) in running KDE/Qt
+    # apps without a relogin. Harmless if there's no session bus or no listeners.
     if command -v dbus-send >/dev/null 2>&1; then
-        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 0 int32 0 >/dev/null 2>&1 || true
-        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 1 int32 0 >/dev/null 2>&1 || true
+        for change in 0 1 2 4; do
+            dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 "$change" int32 0 >/dev/null 2>&1 || true
+        done
     fi
 fi
 
