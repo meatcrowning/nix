@@ -25,6 +25,8 @@ in
       source = ./quickshell-files/scripts/sysinfo.sh;
       executable = true;
     };
+    # cava config for the panel's stereo VU bars (VuMeter.qml)
+    "quickshell/scripts/cava-vu.conf".source = ./quickshell-files/scripts/cava-vu.conf;
   };
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''

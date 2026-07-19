@@ -1,8 +1,8 @@
 import QtQuick
 import Quickshell
 
-// Vertical date display: month / year(2-digit) / day, month bright and the
-// year dim under it (day bright again so the two dims don't blur together).
+// Vertical date display: month / day / year(2-digit) — bright month, dim
+// day and year under it.
 Column {
     id: root
     spacing: 2
@@ -36,14 +36,14 @@ Column {
     }
     PixelText {
         anchors.horizontalCenter: parent.horizontalCenter
-        text: root.yy
+        text: root.dd
         color: Theme.textDim
         font.pixelSize: Theme.clockSize
     }
     PixelText {
         anchors.horizontalCenter: parent.horizontalCenter
-        text: root.dd
-        color: Theme.text
+        text: root.yy
+        color: Theme.textDim
         font.pixelSize: Theme.clockSize
     }
 }

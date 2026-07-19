@@ -116,6 +116,11 @@ Column {
         onWheelDown: () => SysInfo.adjustBrightness(-5)
     }
 
+    // ---------- Stereo output VU (left / right channel) ----------
+    VuMeter {
+        anchors.horizontalCenter: parent.horizontalCenter
+    }
+
     // ---------- Volume ----------
     Stat {
         label: "vol"
