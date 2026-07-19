@@ -241,14 +241,6 @@ static int luaToggleMaximizeActive(lua_State* L) {
     return 0;
 }
 
-// lua: hyprvtb.unfocus_all() — clicking bare desktop unfocuses everything
-// (wired to the quickshell bottom-layer click catcher).
-static int luaUnfocusAll(lua_State* L) {
-    if (g_pGlobalState)
-        Desktop::focusState()->resetWindowFocus();
-    return 0;
-}
-
 // lua: hyprvtb.toggle_scratch() — the Meta+S slide-in terminal.
 static int luaToggleScratch(lua_State* L) {
     if (g_pGlobalState)
@@ -347,7 +339,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (Config::mgr()->type() != Config::CONFIG_LEGACY) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
-        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "unfocus_all", ::luaUnfocusAll);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
     }
 
