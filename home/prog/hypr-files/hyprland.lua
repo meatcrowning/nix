@@ -66,6 +66,10 @@ hl.on("hyprland.start", function()
     -- can spawn without HYPRLAND_INSTANCE_SIGNATURE and screen-share fails.
     hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
     hl.exec_cmd("systemctl --user start wal-set.path")
+    -- Grey unfocused kitty terminals to match filer / the hyprvtb inactive
+    -- tone. kitty can't self-detect OS focus under Hyprland, so this listens to
+    -- the event socket and drives `kitty @ set-colors` (see kitty-focus-dim.py).
+    hl.exec_cmd("python3 $HOME/.config/kitty/kitty-focus-dim.py")
     -- Same for wal-prepare.path, which pre-caches tile/theme data for every
     -- image under ~/Pictures/wall as soon as it's added — see
     -- scripts/wal-prepare.sh — so WallpaperPicker.qml flips land fast. Also
