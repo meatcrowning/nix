@@ -103,9 +103,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_bCancelledDown = false;
 
     // Shade-drag: dragging a rolled-up window's floating bar relocates the
-    // (still-hidden) window; a press that never moves is a click that unrolls.
+    // (still-hidden) window; a press that never moves is a click, and only a
+    // click on the roll-up cell ([<<]) unrolls — a click elsewhere is inert.
     bool                 m_bRollDragPending = false;
     bool                 m_bRollDragging    = false;
+    int                  m_iRollPressCell   = -1; // cell hit on the shaded-bar press (4 == unroll)
     Vector2D             m_rollDragMouseStart;
     CBox                 m_rollDragBoxStart;
     Vector2D             m_rollDragWinStart;

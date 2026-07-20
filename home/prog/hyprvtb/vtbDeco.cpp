@@ -678,8 +678,16 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
                 m_rollBox.x  = m_rollDragBoxStart.x + DELTA.x;
                 m_rollBox.y  = m_rollDragBoxStart.y + DELTA.y;
                 m_iHoverCell = -1;
-                if (PWINDOW) // move the hidden window so it reappears here on restore
-                    PWINDOW->m_realPosition->setValueAndWarp(m_rollDragWinStart + DELTA);
+                if (PWINDOW) {
+                    // Move the hidden window so it reappears here on restore.
+                    // Update BOTH the logical box (m_position) and the animated
+                    // draw position: warping only m_realPosition left m_position
+                    // stale, so a later real drag snapped back to the pre-shade
+                    // spot before following the cursor (the "skips positions" bug).
+                    const Vector2D NEWPOS = m_rollDragWinStart + DELTA;
+                    PWINDOW->m_position = NEWPOS;
+                    PWINDOW->m_realPosition->setValueAndWarp(NEWPOS);
+                }
                 damageEntire();
             }
             return;
@@ -807,32 +815,40 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     info.cancelled   = true;
     m_bCancelledDown = true;
 
-    if (cellAt(LOCAL) == 0) {
+    const int CELL = cellAt(LOCAL);
+    if (CELL == 0) {
         closeWindow(); // [x] closes even while shaded
         return;
     }
 
     // Arm a drag. onMouseMove promotes it to an actual move once the cursor
     // travels past a small threshold (dragging the shade relocates the still-
-    // hidden window); handleRolledUp treats a release-without-move as a click
-    // that un-shades. So the bar drags freely and only a plain click unrolls.
+    // hidden window); handleRolledUp treats a release-without-move on the
+    // roll-up cell ([<<]) as the un-shade click. Pressing anywhere else on the
+    // bar can still drag it, but a plain click there is inert — only the button
+    // unrolls.
     m_bRollDragPending   = true;
     m_bRollDragging      = false;
+    m_iRollPressCell     = CELL;
     m_rollDragMouseStart = MOUSE;
     m_rollDragBoxStart   = m_rollBox;
-    m_rollDragWinStart   = PWINDOW->m_realPosition->goal();
+    m_rollDragWinStart   = PWINDOW->m_position; // logical box, same as a real drag reads
 }
 
 void CVtbDeco::handleRolledUp(Event::SCallbackInfo& info) {
     const bool CANCELLED  = m_bCancelledDown;
     const bool WASPENDING = m_bRollDragPending;
     const bool WASDRAG    = m_bRollDragging;
+    const int  PRESSCELL  = m_iRollPressCell;
     m_bCancelledDown   = false;
     m_bRollDragPending = false;
     m_bRollDragging    = false;
+    m_iRollPressCell   = -1;
 
-    // pressed the bar and released without moving -> a click -> un-shade
-    if (WASPENDING && !WASDRAG)
+    // Un-shade ONLY when the roll-up cell ([<<]) was clicked without dragging.
+    // A plain click elsewhere on the bar does nothing — the button is the only
+    // way to unroll (a bare-bar click used to unroll, which was too easy to hit).
+    if (WASPENDING && !WASDRAG && PRESSCELL == 4)
         toggleRollup();
 
     if (CANCELLED)
@@ -944,7 +960,13 @@ void CVtbDeco::toggleRollup() {
     m_bRollDragPending = false;
     m_bRollDragging    = false;
 
-    g_pHyprRenderer->damageBox(CBox{PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()});
+    // Damage the FULL bounding box — border + drop shadow, not just the client
+    // rect. Hiding the window stops it (and its shadow decoration) drawing, but
+    // only the region we damage gets repainted with what's behind; damaging the
+    // bare client box left the border outline and shadow halo as stale pixels.
+    CBox stale = PWINDOW->getFullWindowBoundingBox();
+    stale.expand(8); // small cushion for shadow blur bleed past the reported extents
+    g_pHyprRenderer->damageBox(stale);
     PWINDOW->setHidden(true);
 
     // hand focus to another visible, non-hidden window on this workspace
