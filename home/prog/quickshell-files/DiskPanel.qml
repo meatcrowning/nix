@@ -130,12 +130,13 @@ SlidePopup {
                     width: parent.width
                     spacing: 4
 
-                    // open a file browser rooted at this drive (left of the name)
+                    // open the standalone filer rooted at this drive (left of
+                    // the name). filer takes the directory as its first argument.
                     BrowserButton {
                         id: browseBtn
                         anchors.verticalCenter: parent.verticalCenter
                         label: "open"
-                        onClicked: Browsers.open(modelData.mount)
+                        onClicked: Quickshell.execDetached(["filer", modelData.mount])
                     }
 
                     // name: click to rename (edits the real fs label), or an
