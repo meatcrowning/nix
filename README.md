@@ -1,8 +1,4 @@
-<p align="center">
-  <img width="1920" height="1080" alt="Screenshot_20260719_134403" src="https://github.com/user-attachments/assets/0d5b7c6c-90bb-4da8-856d-b5b88fc11901" />
-  <br>
-  <em>two terminals on the left (with vertical titlebars waow) and various widgets on the right</em>
-</p>
+<img width="1920" height="1080" alt="Screenshot_20260719_163518" src="https://github.com/user-attachments/assets/4ba7649d-046b-48cb-b2c7-59ae0ec964ab" />
 
 # `nixos/hyprland/qs/...`
 
