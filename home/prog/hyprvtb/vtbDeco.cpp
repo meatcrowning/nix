@@ -40,7 +40,7 @@ static constexpr int VTB_CELLS    = 5;
 // Hard (sharp, un-blurred) drop shadow cast to the bottom-left of a normal
 // window: a solid rectangle offset this many logical px down and left, behind
 // the window.
-static constexpr int VTB_SHADOW_SIZE = 8;
+static constexpr int VTB_SHADOW_SIZE = 24;
 
 static int           cellSize() {
     return g_pGlobalState->config.barWidth->value() - VTB_PAD * 2;
