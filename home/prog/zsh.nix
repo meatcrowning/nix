@@ -11,7 +11,11 @@
       ll = "ls -l";
       update = "sudo nixos-rebuild switch --upgrade --flake /home/lam/nix/#top";
       rbsys = "sudo nixos-rebuild switch --flake /home/lam/nix/#top";
-      rbhome = "home-manager switch --flake /home/lam/nix/#lam";
+      # Home is managed only through the system rebuild now (the standalone
+      # homeConfigurations was removed to kill the dual-wiring clobber), so
+      # rbhome just IS rbsys. A NOPASSWD sudo rule (sys/nixos-rebuild.nix) makes
+      # all three passwordless.
+      rbhome = "sudo nixos-rebuild switch --flake /home/lam/nix/#top";
       trash = "sudo nix-collect-garbage";
       tree = "tree --dirsfirst";
     };

@@ -112,15 +112,12 @@
       };
     };
 
-    homeConfigurations = {
-      "${user}" = home-manager.lib.homeManagerConfiguration {
-        inherit pkgs;
-        extraSpecialArgs = { inherit inputs user; };
-        modules = [
-          ./lam.nix
-          plasma-manager.homeModules.plasma-manager
-        ];
-      };
-    };
+    # NOTE: there is deliberately NO standalone `homeConfigurations` output.
+    # Home is managed solely through the NixOS module above (see
+    # home-manager.nixosModules.home-manager). Having both was the "dual wiring"
+    # that let `home-manager switch` (rbhome) changes get clobbered on boot when
+    # the system re-activated its own copy of ./lam.nix. One source of truth now:
+    # everything goes through `nixos-rebuild switch` (rbsys/rbhome/update), which
+    # is passwordless via sys/nixos-rebuild.nix.
   };
 }
