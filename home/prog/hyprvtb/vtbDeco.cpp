@@ -392,7 +392,15 @@ bool CVtbDeco::inputIsValid() {
 
     auto       focusState = Desktop::focusState();
 
-    if (WINDOWATCURSOR != m_pWindow && m_pWindow != focusState->window())
+    // Accept only when the cursor is over US, or over EMPTY space while we're
+    // focused (the resize halo just outside our frame). The old test also
+    // accepted "we're focused" when the cursor sat over ANOTHER window — so a
+    // focused window hidden BEHIND another still grabbed presses aimed at the
+    // window on top, then moved/resized itself and cancelled the event (e.g.
+    // dragging filer's inner bar moved the focused window behind it, and filer
+    // never got the press). If something else occupies the point, it occludes
+    // us and must own the event.
+    if (WINDOWATCURSOR != m_pWindow && (WINDOWATCURSOR || m_pWindow != focusState->window()))
         return false;
 
     // don't fight top/overlay layer surfaces (launcher, lock, ...)
