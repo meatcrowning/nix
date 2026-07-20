@@ -23,5 +23,5 @@ bool CVtbPassElement::needsPrecomputeBlur() {
 }
 
 std::optional<CBox> CVtbPassElement::boundingBox() {
-    return data.deco->renderBoundsGlobal().translate(-g_pHyprRenderer->m_renderData.pMonitor->m_position).expand(4);
+    return data.deco->effectiveBoxGlobal().translate(-g_pHyprRenderer->m_renderData.pMonitor->m_position).expand(4);
 }

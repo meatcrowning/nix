@@ -51,6 +51,7 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     PHLWINDOW                          getOwner();
     void                               onConfigReloaded();
+    bool                               isMaximized() const { return m_bMaximized; } // for the sibling shadow deco
 
     // Called from main.cpp's render-stage hook (RENDER_POST_WINDOWS): a shaded
     // window is hidden, so Hyprland won't render it or call our draw() — this
@@ -149,7 +150,33 @@ class CVtbDeco : public IHyprWindowDecoration {
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();
     CBox                 effectiveBoxGlobal(); // m_rollBox while shaded, else assignedBoxGlobal()
-    CBox                 renderBoundsGlobal(); // full drawn bounds (bar + bottom-left shadow), for damage
 
     friend class CVtbPassElement;
+};
+
+// The bottom-left hard drop shadow, as its OWN decoration rather than something
+// the titlebar draws. The titlebar is a STICKY-right deco, so it can only ever
+// declare a right-edge extent — Hyprland would never damage a bottom-left
+// region as the window moves, which is what made the shadow trail. This is an
+// ABSOLUTE, non-reserved, NON_SOLID deco that declares LEFT+BOTTOM extents (so
+// the shadow area is part of the window's damage box) and renders a plain rect
+// pass element (region-accurate occlusion behind the window — no flashing).
+class CVtbShadowDeco : public IHyprWindowDecoration {
+  public:
+    CVtbShadowDeco(PHLWINDOW);
+    virtual ~CVtbShadowDeco();
+
+    virtual SDecorationPositioningInfo getPositioningInfo();
+    virtual void                       onPositioningReply(const SDecorationPositioningReply& reply);
+    virtual void                       draw(PHLMONITOR, float const& a);
+    virtual eDecorationType            getDecorationType();
+    virtual void                       updateWindow(PHLWINDOW);
+    virtual void                       damageEntire();
+    virtual eDecorationLayer           getDecorationLayer();
+    virtual uint64_t                   getDecorationFlags();
+    virtual std::string                getDisplayName();
+
+  private:
+    PHLWINDOWREF m_pWindow;
+    CBox         m_bAssignedBox;
 };

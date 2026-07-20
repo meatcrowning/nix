@@ -25,6 +25,8 @@
 #include "globals.hpp"
 #include "VtbPassElement.hpp"
 
+#include <hyprland/src/render/pass/RectPassElement.hpp>
+
 using namespace Render::GL;
 
 static CHyprColor configColor(Config::INTEGER color) {
@@ -134,22 +136,6 @@ CBox CVtbDeco::assignedBoxGlobal() {
 // the live decoration position.
 CBox CVtbDeco::effectiveBoxGlobal() {
     return m_bRolledUp ? m_rollBox : assignedBoxGlobal();
-}
-
-// Full bounds of everything this deco draws, for the pass element's damage box:
-// the bar, plus (for a normal window) the bottom-left hard shadow, which
-// extends beyond the reserved bar box down and to the left of the window.
-CBox CVtbDeco::renderBoundsGlobal() {
-    const auto BAR     = effectiveBoxGlobal();
-    const auto PWINDOW = m_pWindow.lock();
-    if (m_bRolledUp || m_bMaximized || !PWINDOW)
-        return BAR;
-
-    const double WINW = PWINDOW->m_realSize->value().x;
-    const double OFF  = VTB_SHADOW_SIZE;
-    // left edge at the shadow; width spans window + shadow + bar; height grows
-    // by the bottom shadow overhang
-    return {BAR.x - WINW - OFF, BAR.y, WINW + OFF + BAR.w, BAR.h + OFF};
 }
 
 PHLWINDOW CVtbDeco::getOwner() {
@@ -319,23 +305,6 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     if (barBox.w < 1 || barBox.h < 1)
         return;
-
-    // Hard drop shadow, bottom-left. This decoration renders UNDER the window
-    // surface (getDecorationLayer == DECORATION_LAYER_UNDER), so a solid rect
-    // the size of the window frame, offset down and left, is covered in its
-    // centre by the window and shows only as a sharp L-shaped overhang along
-    // the left and bottom edges. Skipped while shaded / maximized / fullscreen.
-    if (!m_bRolledUp && !m_bMaximized && !PWINDOW->isFullscreen()) {
-        const double WINWPX = PWINDOW->m_realSize->value().x * SCALE;
-        const double OFF    = VTB_SHADOW_SIZE * SCALE;
-        if (WINWPX > 1) {
-            CHyprColor shadow = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
-            shadow.a *= a;
-            CBox shadowBox = {barBox.x - WINWPX - OFF, barBox.y + OFF, WINWPX, barBox.h};
-            shadowBox.round();
-            g_pHyprOpenGL->renderRect(shadowBox, shadow, {});
-        }
-    }
 
     // background
     g_pHyprOpenGL->renderRect(barBox, bgColor, {});
@@ -1113,4 +1082,105 @@ eDecorationLayer CVtbDeco::getDecorationLayer() {
 
 uint64_t CVtbDeco::getDecorationFlags() {
     return DECORATION_ALLOWS_MOUSE_INPUT | DECORATION_PART_OF_MAIN_WINDOW;
+}
+
+// ---- CVtbShadowDeco: bottom-left hard drop shadow -------------------------
+
+CVtbShadowDeco::CVtbShadowDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow), m_pWindow(pWindow) {
+    ;
+}
+
+CVtbShadowDeco::~CVtbShadowDeco() {
+    ;
+}
+
+SDecorationPositioningInfo CVtbShadowDeco::getPositioningInfo() {
+    SDecorationPositioningInfo info;
+    info.policy   = DECORATION_POSITION_ABSOLUTE;
+    info.edges    = DECORATION_EDGE_LEFT | DECORATION_EDGE_BOTTOM;
+    info.priority = 5;      // below the titlebar; order among non-solid decos is irrelevant
+    info.reserved = false;  // must NOT inset the window — this is just a shadow
+    // Declare the shadow's reach so a moving window's damage box includes it.
+    info.desiredExtents = {{(double)VTB_SHADOW_SIZE, 0.0}, {0.0, (double)VTB_SHADOW_SIZE}};
+    return info;
+}
+
+void CVtbShadowDeco::onPositioningReply(const SDecorationPositioningReply& reply) {
+    m_bAssignedBox = reply.assignedGeometry; // empty for ABSOLUTE; we position off the window
+}
+
+void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
+    if (!validMapped(m_pWindow) || !g_pGlobalState || !g_pGlobalState->config.enabled->value())
+        return;
+
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault() || PWINDOW->isFullscreen())
+        return;
+
+    // no shadow on our custom-maximized windows (the sibling titlebar knows)
+    for (auto& b : g_pGlobalState->bars) {
+        if (b && b->getOwner() == PWINDOW) {
+            if (b->isMaximized())
+                return;
+            break;
+        }
+    }
+
+    const auto SCALE = pMonitor->m_scale;
+
+    // Global window box with the same workspace-slide + floating-drag offsets
+    // the titlebar uses, so the shadow tracks the window through animations.
+    CBox       g   = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+    const auto WS  = PWINDOW->m_workspace;
+    const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
+    g.translate(OFF);
+
+    CBox local = {g.x - pMonitor->m_position.x, g.y - pMonitor->m_position.y, g.w, g.h};
+    local.translate(PWINDOW->m_floatingOffset).scale(SCALE).round();
+    if (local.w < 1 || local.h < 1)
+        return;
+
+    // Window-sized rect offset down and left; NON_SOLID + BOTTOM layer means the
+    // window covers its centre and only the sharp L-overhang shows.
+    const double N = VTB_SHADOW_SIZE * SCALE;
+    CBox         shadowBox = {local.x - N, local.y + N, local.w, local.h};
+    shadowBox.round();
+
+    CHyprColor color = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
+    color.a *= a;
+
+    CRectPassElement::SRectData data;
+    data.box   = shadowBox;
+    data.color = color;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data));
+}
+
+void CVtbShadowDeco::damageEntire() {
+    if (!validMapped(m_pWindow))
+        return;
+    const auto PWINDOW = m_pWindow.lock();
+    CBox       g = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+    const double N = VTB_SHADOW_SIZE;
+    // window box grown by the shadow's left + bottom overhang
+    g_pHyprRenderer->damageBox(CBox{g.x - N, g.y, g.w + N, g.h + N});
+}
+
+eDecorationType CVtbShadowDeco::getDecorationType() {
+    return DECORATION_CUSTOM;
+}
+
+void CVtbShadowDeco::updateWindow(PHLWINDOW) {
+    damageEntire();
+}
+
+eDecorationLayer CVtbShadowDeco::getDecorationLayer() {
+    return DECORATION_LAYER_BOTTOM;
+}
+
+uint64_t CVtbShadowDeco::getDecorationFlags() {
+    return DECORATION_NON_SOLID;
+}
+
+std::string CVtbShadowDeco::getDisplayName() {
+    return "HyprvtbShadow";
 }

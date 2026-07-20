@@ -169,6 +169,9 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
     bar->m_self = bar;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
 
+    // Separate decoration for the bottom-left hard shadow (see CVtbShadowDeco).
+    HyprlandAPI::addWindowDecoration(PHANDLE, window, makeUnique<CVtbShadowDeco>(window));
+
     // reopen where/how this app was last closed — ONLY for a genuinely new
     // window, never for one that's already open (a reload must not move it)
     if (isNew && window->m_isFloating) {
@@ -503,7 +506,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.16"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.17"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
