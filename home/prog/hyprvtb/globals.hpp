@@ -16,8 +16,25 @@ inline HANDLE PHANDLE = nullptr;
 
 class CVtbDeco;
 
+// One saved window from a session snapshot (see vtbSaveSession /
+// vtbRestoreSession in main.cpp): what to relaunch, where to place it, and
+// which exclusive state to put it back into.
+struct SSessionEntry {
+    std::string cls;
+    std::string cmd;                // shell command (incl. cd to cwd) to relaunch
+    CBox        box;                // geometry to restore
+    bool        maximized = false;
+    bool        minimized = false;
+    bool        rolled    = false;
+    bool        consumed  = false;  // set once a relaunched window has claimed it
+};
+
 struct SGlobalState {
     std::vector<WP<CVtbDeco>> bars;
+
+    // Windows queued for layout after a login relaunch; drained by onNewWindow
+    // as each relaunched window maps. Empty except briefly at startup.
+    std::vector<SSessionEntry> pendingRestore;
 
     // Event-bus listeners live in the state object — NOT function-local
     // statics — so PLUGIN_EXIT tearing down the state also deregisters
@@ -58,3 +75,6 @@ inline UP<SGlobalState> g_pGlobalState;
 std::string vtbStatePath();
 void        vtbLoadGeometry();
 void        vtbSaveGeometry();
+std::string vtbSessionPath();
+void        vtbSaveSession();
+void        vtbRestoreSession();

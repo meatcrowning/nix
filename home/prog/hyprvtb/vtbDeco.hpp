@@ -52,6 +52,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     PHLWINDOW                          getOwner();
     void                               onConfigReloaded();
     bool                               isMaximized() const { return m_bMaximized; } // for the sibling shadow deco
+    bool                               isMinimized() const { return m_bMinimized; } // for session snapshot
+    bool                               isRolledUp() const { return m_bRolledUp; }   // for session snapshot
 
     // Called from main.cpp's render-stage hook (RENDER_POST_WINDOWS): a shaded
     // window is hidden, so Hyprland won't render it or call our draw() — this

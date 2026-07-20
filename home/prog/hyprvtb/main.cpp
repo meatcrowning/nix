@@ -22,6 +22,7 @@ extern "C" {
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 #include <hyprland/src/SharedDefs.hpp> // eRenderStage
@@ -67,9 +68,164 @@ void vtbSaveGeometry() {
         f << cls << '\t' << (int)box.x << ' ' << (int)box.y << ' ' << (int)box.w << ' ' << (int)box.h << '\n';
 }
 
-// ---- scratchpad terminal ---------------------------------------------------
-
+// The slide-in scratchpad terminal's window class (defined here, ahead of the
+// scratchpad section, because the session snapshot below also skips it).
 static constexpr const char* SCRATCH_CLASS = "hyprvtb-scratch";
+
+// ---- session snapshot (manual save on a keybind + restore at login) --------
+//
+// Unlike the per-class geometry memory above (which just repositions an app
+// when you next open it), a session snapshot records the FULL set of open
+// windows — class, geometry, min/roll/max state, and the exact command +cwd
+// that launched each — so a fresh login can relaunch and lay them back out.
+// Saving is explicit (hyprvtb:save_session, bound to a key); restore runs once
+// at PLUGIN_INIT and only when the session is genuinely empty.
+
+std::string vtbSessionPath() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : "") + "/.local/state/hyprvtb/session.tsv";
+}
+
+// Single-quote for /bin/sh, escaping embedded quotes, so argv tokens with
+// spaces/metacharacters relaunch verbatim.
+static std::string shQuote(const std::string& s) {
+    std::string out = "'";
+    for (const char c : s) {
+        if (c == '\'')
+            out += "'\\''";
+        else
+            out += c;
+    }
+    out += "'";
+    return out;
+}
+
+// Rebuild a relaunch command from a live PID: argv from /proc/PID/cmdline
+// (NUL-separated), run in /proc/PID/cwd. "" if the process is gone or exposes
+// no cmdline (kernel thread, already-exited helper) — such a window is simply
+// not persisted, since we couldn't bring it back anyway.
+static std::string vtbRelaunchCmd(pid_t pid) {
+    if (pid <= 0)
+        return "";
+
+    std::ifstream cf("/proc/" + std::to_string(pid) + "/cmdline", std::ios::binary);
+    if (!cf.good())
+        return "";
+    const std::string raw((std::istreambuf_iterator<char>(cf)), std::istreambuf_iterator<char>());
+    if (raw.empty())
+        return "";
+
+    std::string argv, tok;
+    const auto  flush = [&] {
+        if (tok.empty())
+            return;
+        if (!argv.empty())
+            argv += ' ';
+        argv += shQuote(tok);
+        tok.clear();
+    };
+    for (const char c : raw) {
+        if (c == '\0')
+            flush();
+        else
+            tok += c;
+    }
+    flush();
+    if (argv.empty())
+        return "";
+
+    std::error_code ec;
+    const auto      cwd = std::filesystem::read_symlink("/proc/" + std::to_string(pid) + "/cwd", ec);
+    if (!ec && !cwd.empty())
+        return "cd " + shQuote(cwd.string()) + " && exec " + argv;
+    return "exec " + argv;
+}
+
+void vtbSaveSession() {
+    const auto PATH = vtbSessionPath();
+    std::filesystem::create_directories(std::filesystem::path(PATH).parent_path());
+    std::ofstream f(PATH, std::ios::trunc);
+
+    int n = 0;
+    for (auto& b : g_pGlobalState->bars) {
+        if (!b)
+            continue;
+        const auto w = b->getOwner();
+        if (!w || !w->m_isMapped || w->m_class.empty() || w->m_class == SCRATCH_CLASS)
+            continue;
+
+        const std::string cmd = vtbRelaunchCmd(w->getPID());
+        if (cmd.empty())
+            continue; // can't relaunch it -> don't pretend we can
+
+        const CBox box   = b->memorableGeometry();
+        int        flags = 0;
+        if (b->isMaximized())
+            flags |= 1;
+        if (b->isMinimized())
+            flags |= 2;
+        if (b->isRolledUp())
+            flags |= 4;
+
+        // cls \t flags \t x \t y \t w \t h \t cmd(rest-of-line)
+        f << w->m_class << '\t' << flags << '\t' << (int)box.x << '\t' << (int)box.y << '\t' << (int)box.w << '\t'
+          << (int)box.h << '\t' << cmd << '\n';
+        n++;
+    }
+    f.close();
+
+    HyprlandAPI::addNotification(PHANDLE, "[hyprvtb] session saved (" + std::to_string(n) + " windows)",
+                                 CHyprColor{0.4, 0.8, 1.0, 1.0}, 3000);
+}
+
+// Read the snapshot and, ONLY on a fresh (empty) session, relaunch every entry
+// and queue it for layout. onNewWindow consumes the queue as windows appear.
+void vtbRestoreSession() {
+    std::ifstream f(vtbSessionPath());
+    if (!f.good())
+        return;
+
+    std::vector<SSessionEntry> entries;
+    std::string                line;
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        SSessionEntry      e;
+        std::string        flagss, xs, ys, ws, hs;
+        if (!std::getline(ss, e.cls, '\t') || !std::getline(ss, flagss, '\t') || !std::getline(ss, xs, '\t') ||
+            !std::getline(ss, ys, '\t') || !std::getline(ss, ws, '\t') || !std::getline(ss, hs, '\t') ||
+            !std::getline(ss, e.cmd))
+            continue;
+        try {
+            const int flags = std::stoi(flagss);
+            e.box            = CBox{(double)std::stoi(xs), (double)std::stoi(ys), (double)std::stoi(ws), (double)std::stoi(hs)};
+            e.maximized      = flags & 1;
+            e.minimized      = flags & 2;
+            e.rolled         = flags & 4;
+        } catch (...) {
+            continue;
+        }
+        if (e.cls.empty() || e.cmd.empty())
+            continue;
+        entries.push_back(std::move(e));
+    }
+    if (entries.empty())
+        return;
+
+    // Only relaunch on a genuinely fresh session. If any non-scratch window is
+    // already open, this is a mid-session (re)init, not a login — relaunching
+    // would double everything, so bail without spawning or queuing.
+    for (auto& w : g_pCompositor->m_windows) {
+        if (w && w->m_isMapped && !w->m_class.empty() && w->m_class != SCRATCH_CLASS)
+            return;
+    }
+
+    g_pGlobalState->pendingRestore = std::move(entries);
+    for (auto& e : g_pGlobalState->pendingRestore)
+        Config::Supplementary::executor()->spawn(e.cmd);
+}
+
+// ---- scratchpad terminal ---------------------------------------------------
+// (SCRATCH_CLASS is defined above, ahead of the session-snapshot helpers.)
 
 static PHLWINDOW scratchWindow() {
     for (auto& w : g_pCompositor->m_windows) {
@@ -166,6 +322,7 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
 
     auto bar = makeUnique<CVtbDeco>(window);
     g_pGlobalState->bars.emplace_back(bar);
+    const WP<CVtbDeco> thisDeco = g_pGlobalState->bars.back();
     bar->m_self = bar;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
 
@@ -175,6 +332,34 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
     // reopen where/how this app was last closed — ONLY for a genuinely new
     // window, never for one that's already open (a reload must not move it)
     if (isNew && window->m_isFloating) {
+        // A pending session-restore entry for this class wins over the per-class
+        // memory: place the relaunched window at its snapshot geometry and put
+        // it back into its saved min/roll/max state. First unconsumed match by
+        // class (multiple windows of one class restore in save order).
+        SSessionEntry* match = nullptr;
+        for (auto& e : g_pGlobalState->pendingRestore) {
+            if (!e.consumed && e.cls == window->m_class) {
+                match = &e;
+                break;
+            }
+        }
+        if (match) {
+            match->consumed = true;
+            Config::Actions::resize(match->box.size(), false, window);
+            Config::Actions::move(match->box.pos(), false, window);
+            // Re-apply the one exclusive state (geometry is set first so a later
+            // un-maximize / un-minimize returns to the restored box).
+            if (thisDeco) {
+                if (match->maximized)
+                    thisDeco->toggleMaximize();
+                else if (match->rolled)
+                    thisDeco->toggleRollup();
+                else if (match->minimized)
+                    thisDeco->minimizeWindow();
+            }
+            return;
+        }
+
         const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
         if (IT != g_pGlobalState->savedGeometry.end()) {
             Config::Actions::resize(IT->second.size(), false, window);
@@ -369,6 +554,15 @@ static int luaToggleScratch(lua_State* L) {
     return 0;
 }
 
+// lua: hyprvtb.save_session() — snapshot the current windows (position +
+// min/roll/max state + relaunch command) so the next fresh login restores
+// them. Bind to a key (Meta+Ctrl+S); pops a confirmation notification.
+static int luaSaveSession(lua_State* L) {
+    if (g_pGlobalState)
+        vtbSaveSession();
+    return 0;
+}
+
 static void onConfigReloaded() {
     for (auto& b : g_pGlobalState->bars) {
         if (!b)
@@ -482,6 +676,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
     }
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
@@ -499,6 +694,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     }
 
+    // Restore a saved session, but only on a fresh login (vtbRestoreSession
+    // no-ops if any user window is already open — see its guard). Must run
+    // AFTER the window.open listener is registered above so the relaunched
+    // windows get consumed from pendingRestore as they map.
+    vtbRestoreSession();
+
     // NOTE: deliberately NOT calling HyprlandAPI::reloadConfig() here. When
     // the plugin is loaded by hl.plugin.load() during config parsing, the
     // remainder of that same parse applies our plugin:hyprvtb:* values, and
@@ -506,7 +707,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.18"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.19"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

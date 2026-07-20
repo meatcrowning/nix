@@ -467,6 +467,15 @@ hl.bind(mainMod .. " + S", function()
     hl.plugin.hyprvtb.toggle_scratch()
 end, { description = "Scratchpad terminal" })
 
+-- Save the current window session — every window's position, its
+-- minimized/rolled/maximized state, and the command that launched it — to
+-- ~/.local/state/hyprvtb/session.tsv. A fresh login relaunches and re-lays-out
+-- everything. Manual on purpose (Meta+Ctrl+S); pops a confirmation
+-- notification. Logic lives in the hyprvtb plugin.
+hl.bind(mainMod .. " + CTRL + S", function()
+    hl.plugin.hyprvtb.save_session()
+end, { description = "Save window session" })
+
 -- Alt-Tab window switching, KDE-style most-recently-used order (hyprvtb
 -- plugin). cycle_next walks the window LIST (creation order), which is why
 -- tabbing felt out of order — cycle_hist walks focus history instead:
