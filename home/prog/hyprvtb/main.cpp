@@ -143,14 +143,21 @@ static void toggleScratch() {
 
 // ---- window lifecycle ------------------------------------------------------
 
-static void onNewWindow(PHLWINDOW window) {
+// isNew distinguishes a genuine window.open (apply the remembered per-class
+// geometry — "reopen the app where you left it") from re-decorating an already
+// open window when the plugin loads over a running session (PLUGIN_INIT's
+// existing-window sweep, incl. every hot `hyprctl plugin load`). Applying saved
+// geometry to already-placed windows is what made a reload teleport them all.
+static void onNewWindow(PHLWINDOW window, bool isNew) {
     if (window->m_X11DoesntWantBorders)
         return;
 
     // The scratchpad gets NO titlebar; it slides in from the left edge and
-    // lives at the bottom of the z-order.
+    // lives at the bottom of the z-order. Only (re)place it on a real open —
+    // on a reload it's already positioned, leave it be.
     if (window->m_class == SCRATCH_CLASS) {
-        showScratch(window, true);
+        if (isNew)
+            showScratch(window, true);
         return;
     }
 
@@ -162,8 +169,9 @@ static void onNewWindow(PHLWINDOW window) {
     bar->m_self = bar;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
 
-    // reopen where/how this app was last closed
-    if (window->m_isFloating) {
+    // reopen where/how this app was last closed — ONLY for a genuinely new
+    // window, never for one that's already open (a reload must not move it)
+    if (isNew && window->m_isFloating) {
         const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
         if (IT != g_pGlobalState->savedGeometry.end()) {
             Config::Actions::resize(IT->second.size(), false, window);
@@ -386,7 +394,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // callback firing into a torn-down plugin is a compositor segfault.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.open.listen([](PHLWINDOW w) {
         if (g_pGlobalState)
-            onNewWindow(w);
+            onNewWindow(w, true); // real open — remembered geometry applies
     }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.close.listen([](PHLWINDOW w) {
         if (g_pGlobalState)
@@ -420,10 +428,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Shaded (rolled-up) windows are hidden — Hyprland never renders them or
     // calls their decoration draw() — so draw each shaded window's bar here,
-    // once per monitor, after the window layer (floats over windows, under
-    // top-layer panels). renderShadeIfRolled no-ops for non-shaded bars.
+    // once per monitor. RENDER_PRE_WINDOWS fires after the background/bottom
+    // layers but before windows, so the shade bar sits OVER the desktop
+    // widgets (bottom-layer quickshell) yet UNDER every window.
+    // renderShadeIfRolled no-ops for non-shaded bars.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (!g_pGlobalState || stage != RENDER_POST_WINDOWS)
+        if (!g_pGlobalState || stage != RENDER_PRE_WINDOWS)
             return;
         const auto PMONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
         if (!PMONITOR)
@@ -482,7 +492,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         for (auto& w : g_pCompositor->m_windows) {
             if (w->isHidden() || !w->m_isMapped)
                 continue;
-            onNewWindow(w);
+            onNewWindow(w, false); // already open — decorate only, don't move it
         }
     }
 
@@ -493,7 +503,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.13"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.15"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

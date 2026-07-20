@@ -37,6 +37,11 @@ static constexpr int VTB_PAD      = 2; // inset from the bar edge
 static constexpr int VTB_CELL_GAP = 2;
 static constexpr int VTB_CELLS    = 5;
 
+// Hard (sharp, un-blurred) drop shadow cast to the bottom-left of a normal
+// window: a solid rectangle offset this many logical px down and left, behind
+// the window.
+static constexpr int VTB_SHADOW_SIZE = 8;
+
 static int           cellSize() {
     return g_pGlobalState->config.barWidth->value() - VTB_PAD * 2;
 }
@@ -129,6 +134,22 @@ CBox CVtbDeco::assignedBoxGlobal() {
 // the live decoration position.
 CBox CVtbDeco::effectiveBoxGlobal() {
     return m_bRolledUp ? m_rollBox : assignedBoxGlobal();
+}
+
+// Full bounds of everything this deco draws, for the pass element's damage box:
+// the bar, plus (for a normal window) the bottom-left hard shadow, which
+// extends beyond the reserved bar box down and to the left of the window.
+CBox CVtbDeco::renderBoundsGlobal() {
+    const auto BAR     = effectiveBoxGlobal();
+    const auto PWINDOW = m_pWindow.lock();
+    if (m_bRolledUp || m_bMaximized || !PWINDOW)
+        return BAR;
+
+    const double WINW = PWINDOW->m_realSize->value().x;
+    const double OFF  = VTB_SHADOW_SIZE;
+    // left edge at the shadow; width spans window + shadow + bar; height grows
+    // by the bottom shadow overhang
+    return {BAR.x - WINW - OFF, BAR.y, WINW + OFF + BAR.w, BAR.h + OFF};
 }
 
 PHLWINDOW CVtbDeco::getOwner() {
@@ -298,6 +319,23 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     if (barBox.w < 1 || barBox.h < 1)
         return;
+
+    // Hard drop shadow, bottom-left. This decoration renders UNDER the window
+    // surface (getDecorationLayer == DECORATION_LAYER_UNDER), so a solid rect
+    // the size of the window frame, offset down and left, is covered in its
+    // centre by the window and shows only as a sharp L-shaped overhang along
+    // the left and bottom edges. Skipped while shaded / maximized / fullscreen.
+    if (!m_bRolledUp && !m_bMaximized && !PWINDOW->isFullscreen()) {
+        const double WINWPX = PWINDOW->m_realSize->value().x * SCALE;
+        const double OFF    = VTB_SHADOW_SIZE * SCALE;
+        if (WINWPX > 1) {
+            CHyprColor shadow = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
+            shadow.a *= a;
+            CBox shadowBox = {barBox.x - WINWPX - OFF, barBox.y + OFF, WINWPX, barBox.h};
+            shadowBox.round();
+            g_pHyprOpenGL->renderRect(shadowBox, shadow, {});
+        }
+    }
 
     // background
     g_pHyprOpenGL->renderRect(barBox, bgColor, {});

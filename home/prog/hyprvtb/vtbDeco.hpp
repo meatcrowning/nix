@@ -149,6 +149,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();
     CBox                 effectiveBoxGlobal(); // m_rollBox while shaded, else assignedBoxGlobal()
+    CBox                 renderBoundsGlobal(); // full drawn bounds (bar + bottom-left shadow), for damage
 
     friend class CVtbPassElement;
 };
