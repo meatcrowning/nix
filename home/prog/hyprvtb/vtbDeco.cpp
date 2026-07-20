@@ -717,7 +717,17 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         // box, so the bar strip / right halo never get a cursor from it —
         // set the same WINDOW_EDGE override it uses for the other sides.
         if (m_pWindow->m_isFloating && !m_bMaximized && !m_bEdgeResizing && g_pInputManager->m_currentlyHeldButtons.empty()) {
-            const auto Z = borderResizeZone(g_pInputManager->getMouseCoordsInternal());
+            const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
+            // ...but only when our edge is actually the top-most thing here. If
+            // another window is stacked over ours at this point, the edge is
+            // occluded and can't be grabbed — offering the resize cursor there
+            // was misleading (the press is already rejected by inputIsValid's
+            // same window-at-cursor test). vectorToWindowUnified honours z-order;
+            // a null result is empty space, where a halo edge-grab is still valid.
+            const auto WINDOWATCURSOR = g_pCompositor->vectorToWindowUnified(
+                MOUSE, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
+            const bool occluded = WINDOWATCURSOR && WINDOWATCURSOR != m_pWindow;
+            const auto Z        = occluded ? 0u : borderResizeZone(MOUSE);
             if (Z & RS_EDGE_R) {
                 const char* shape = (Z & RS_EDGE_T) ? "top_right_corner" : (Z & RS_EDGE_B) ? "bottom_right_corner" : "right_side";
                 Cursor::overrideController->setOverride(shape, Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
