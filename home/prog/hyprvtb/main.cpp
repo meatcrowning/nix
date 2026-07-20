@@ -24,6 +24,8 @@ extern "C" {
 #include <fstream>
 #include <sstream>
 
+#include <hyprland/src/SharedDefs.hpp> // eRenderStage
+
 #include "vtbDeco.hpp"
 #include "globals.hpp"
 
@@ -320,6 +322,35 @@ static int luaToggleMaximizeActive(lua_State* L) {
     return 0;
 }
 
+// lua: hyprvtb.rollup([address]) — windowshade a window (same as the titlebar
+// >> button). No arg targets the active window (bind this to a key). A shaded
+// window is hidden and thus not focusable, so pass "address:0x.." to un-shade
+// a specific one from a script.
+static int luaRollup(lua_State* L) {
+    if (!g_pGlobalState)
+        return 0;
+
+    std::string a = luaL_optstring(L, 1, "");
+    if (a.starts_with("address:"))
+        a = a.substr(8);
+
+    CVtbDeco* deco = nullptr;
+    if (a.starts_with("0x")) {
+        const uintptr_t want = std::strtoull(a.c_str(), nullptr, 16);
+        for (auto& b : g_pGlobalState->bars) {
+            if (b && (uintptr_t)b->getOwner().get() == want) {
+                deco = b.get();
+                break;
+            }
+        }
+    } else
+        deco = activeDeco();
+
+    if (deco)
+        deco->toggleRollup();
+    return 0;
+}
+
 // lua: hyprvtb.toggle_scratch() — the Meta+S slide-in terminal.
 static int luaToggleScratch(lua_State* L) {
     if (g_pGlobalState)
@@ -387,6 +418,22 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     }));
 
+    // Shaded (rolled-up) windows are hidden — Hyprland never renders them or
+    // calls their decoration draw() — so draw each shaded window's bar here,
+    // once per monitor, after the window layer (floats over windows, under
+    // top-layer panels). renderShadeIfRolled no-ops for non-shaded bars.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
+        if (!g_pGlobalState || stage != RENDER_POST_WINDOWS)
+            return;
+        const auto PMONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
+        if (!PMONITOR)
+            return;
+        for (auto& b : g_pGlobalState->bars) {
+            if (b)
+                b->renderShadeIfRolled(PMONITOR);
+        }
+    }));
+
     // Colour defaults follow the wal palette; overridden live from
     // hyprland.lua / wal-set.sh via plugin:hyprvtb:*.
     g_pGlobalState->config.enabled           = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:enabled", "Whether the vertical titlebars are enabled", true);
@@ -418,6 +465,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (Config::mgr()->type() != Config::CONFIG_LEGACY) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "rollup", ::luaRollup);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
@@ -445,7 +493,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.11"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab", "lam", "2.12"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

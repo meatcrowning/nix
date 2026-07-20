@@ -23,9 +23,12 @@ namespace Event {
 // not fullscreen), minimize [»] (slides the window off the right edge;
 // focusing it again — e.g. from the panel taskbar — slides it back), pin
 // [o>] (Hyprland pin — window kept on top / shown on all workspaces),
-// roll-up [>>] (windowshade — collapses the window body horizontally to
-// just this bar, full height kept; click again to restore), then the title
-// as a column of upright letters reading top-down. Rendered as a
+// roll-up [>>] (windowshade — hides the whole window, leaving only this bar
+// floating in place; click it again to restore. The window is genuinely
+// hidden, not resized, so it works for every app regardless of min size and
+// no client sliver is left over; the hidden window's bar is drawn by a
+// render-stage hook in main.cpp since Hyprland no longer renders the window),
+// then the title as a column of upright letters reading top-down. Rendered as a
 // sticky window decoration with priority above the border and
 // DECORATION_PART_OF_MAIN_WINDOW, so Hyprland's own active/inactive border
 // wraps window + titlebar as one frame and the bar is locked to the window
@@ -49,10 +52,16 @@ class CVtbDeco : public IHyprWindowDecoration {
     PHLWINDOW                          getOwner();
     void                               onConfigReloaded();
 
-    // Public: also invoked through the hyprvtb.* lua functions (panel icon
-    // click minimizes the active window, etc.).
+    // Called from main.cpp's render-stage hook (RENDER_POST_WINDOWS): a shaded
+    // window is hidden, so Hyprland won't render it or call our draw() — this
+    // enqueues the bar's pass element for the shade to stay visible in place.
+    void                               renderShadeIfRolled(PHLMONITOR);
+
+    // Public: also invoked through the hyprvtb.* lua functions / dispatchers
+    // (panel icon click minimizes the active window, hyprvtb:rollup, etc.).
     void                               minimizeWindow();
     void                               toggleMaximize();
+    void                               toggleRollup();
 
     // Called from main.cpp's window.active listener: focusing a minimized
     // window slides it back in.
@@ -80,7 +89,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     CBox                 m_savedGeometry;
 
     bool                 m_bRolledUp = false;
-    CBox                 m_rollSavedGeometry;
+    CBox                 m_rollBox; // on-screen bar box captured when shaded (for render + hit-test while hidden)
 
     bool                 m_bMinimized = false;
     Vector2D             m_minSavedPos;
@@ -114,6 +123,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 onMouseMove(Vector2D coords);
     void                 handleDownEvent(Event::SCallbackInfo& info);
     void                 handleUpEvent(Event::SCallbackInfo& info);
+    void                 handleRolledDown(Event::SCallbackInfo& info); // click on a shaded window's floating bar
     int                  cellAt(const Vector2D& localCoords);
 
     bool                 tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e);
@@ -124,12 +134,12 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     void                 closeWindow();
     void                 togglePin();
-    void                 toggleRollup();
     void                 restoreFromMinimize();
     CBox                 maximizeTarget();
 
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();
+    CBox                 effectiveBoxGlobal(); // m_rollBox while shaded, else assignedBoxGlobal()
 
     friend class CVtbPassElement;
 };

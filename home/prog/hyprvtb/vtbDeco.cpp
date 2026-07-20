@@ -124,6 +124,13 @@ CBox CVtbDeco::assignedBoxGlobal() {
     return box.translate(WORKSPACEOFFSET);
 }
 
+// While shaded the window is hidden and its geometry is frozen, so the bar is
+// drawn/hit-tested against the box captured at shade time; otherwise it tracks
+// the live decoration position.
+CBox CVtbDeco::effectiveBoxGlobal() {
+    return m_bRolledUp ? m_rollBox : assignedBoxGlobal();
+}
+
 PHLWINDOW CVtbDeco::getOwner() {
     return m_pWindow.lock();
 }
@@ -136,9 +143,8 @@ CBox CVtbDeco::memorableGeometry() {
     if (m_bMaximized)
         return m_savedGeometry; // pre-maximize geometry is the one worth remembering
 
-    if (m_bRolledUp)
-        return m_rollSavedGeometry; // the pre-shade geometry, not the collapsed sliver
-
+    // (a shaded window keeps its real geometry — it's hidden, not resized —
+    // so the normal path below already reports the right box)
     const auto POS  = m_bMinimized ? m_minSavedPos : PWINDOW->m_realPosition->goal();
     const auto SIZE = PWINDOW->m_realSize->goal();
     return {POS, SIZE};
@@ -285,7 +291,7 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         }
     }
 
-    const auto DECOBOX = assignedBoxGlobal();
+    const auto DECOBOX = effectiveBoxGlobal();
 
     CBox       barBox = {DECOBOX.x - pMonitor->m_position.x, DECOBOX.y - pMonitor->m_position.y, DECOBOX.w, DECOBOX.h};
     barBox.translate(PWINDOW->m_floatingOffset).scale(SCALE).round();
@@ -622,6 +628,14 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
         return;
     }
 
+    // A shaded window is hidden, so the normal inputIsValid() path (which needs
+    // the window under the cursor / focused) never accepts — hit-test the
+    // floating bar ourselves instead.
+    if (m_bRolledUp) {
+        handleRolledDown(info);
+        return;
+    }
+
     if (!inputIsValid())
         return;
 
@@ -637,6 +651,18 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
 
     if (m_bEdgeResizing) {
         updateEdgeResize();
+        return;
+    }
+
+    // shaded window: hover-test its floating bar, nothing else (no resize
+    // cursor, no drag — the window is hidden and stays put)
+    if (m_bRolledUp) {
+        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - m_rollBox.pos();
+        const int  cell  = VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h) ? cellAt(LOCAL) : -1;
+        if (cell != m_iHoverCell) {
+            m_iHoverCell = cell;
+            damageEntire();
+        }
         return;
     }
 
@@ -734,6 +760,30 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
         info.cancelled = true;
 }
 
+// Click on a shaded window's floating bar. The window is hidden (so where its
+// body used to be is click-through), and we own the hit-test: [x] closes it,
+// anything else on the bar un-shades. info.cancelled stops the click from
+// falling through to whatever window is now behind the bar.
+void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+    if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
+        return;
+
+    const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - m_rollBox.pos();
+    if (!VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h))
+        return; // not on the bar — let the click pass through to what's behind
+
+    info.cancelled   = true;
+    m_bCancelledDown = true;
+
+    if (cellAt(LOCAL) == 0)
+        closeWindow();  // [x] closes even while shaded
+    else
+        toggleRollup(); // any other cell / the bar body restores it
+}
+
 // ---- actions --------------------------------------------------------------
 
 void CVtbDeco::closeWindow() {
@@ -804,39 +854,70 @@ void CVtbDeco::togglePin() {
     damageEntire();
 }
 
-// Windowshade for a vertical titlebar: collapse the window body horizontally
-// down to just the bar (full height kept), and back. The bar reserves its
-// width on the window's RIGHT edge, so "collapse to the bar" means shrinking
-// the client width toward that edge — anchor the right edge (where the bar
-// lives) so the bar stays put, and pull the left edge across. Same
-// resize-before-move ordering as maximize: Config::Actions::resize keeps the
-// window's centre, so a move-then-resize would drift by half the size delta.
-// Floating-only, and mutually exclusive with maximize/minimize (guarded there
-// too) so the saved geometry can't get clobbered by a collapsed sliver.
+// Windowshade by HIDING the whole window (not resizing it): the window keeps
+// its geometry and is marked hidden, so Hyprland stops rendering it and stops
+// routing input to it — only this bar remains, drawn by the render-stage hook
+// in main.cpp and hit-tested here. Because nothing is moved or resized, this
+// works for every app regardless of min size, leaves no client sliver, and —
+// key detail — restoring is just an un-hide: the window reappears exactly
+// where it is now, never snapping back to some pre-shade position. Floating
+// only, and mutually exclusive with maximize/minimize (guarded there too).
 void CVtbDeco::toggleRollup() {
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized || m_bMaximized)
         return;
 
     if (m_bRolledUp) {
-        m_bRolledUp = false;
-        Config::Actions::resize(m_rollSavedGeometry.size(), false, PWINDOW);
-        Config::Actions::move(m_rollSavedGeometry.pos(), false, PWINDOW);
-    } else {
-        m_rollSavedGeometry = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
-
-        // Collapse to a 1px-wide client pinned to the original right edge, so
-        // the compositor-tracked frame is exactly the bar. (A client that
-        // enforces a larger min width overflows leftward off its own frame —
-        // its choice; the bar still sits where it was.)
-        const double   RIGHT  = m_rollSavedGeometry.x + m_rollSavedGeometry.w;
-        const double   SHADEW = 1;
-
-        m_bRolledUp = true;
-        Config::Actions::resize(Vector2D(SHADEW, m_rollSavedGeometry.h), false, PWINDOW);
-        Config::Actions::move(Vector2D(RIGHT - SHADEW, m_rollSavedGeometry.y), false, PWINDOW);
+        // un-shade in place
+        m_bRolledUp  = false;
+        m_iHoverCell = -1;
+        g_pHyprRenderer->damageBox(m_rollBox); // clear the floating bar
+        PWINDOW->setHidden(false);
+        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+        Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+        damageEntire();
+        return;
     }
-    damageEntire();
+
+    // shade: remember where the bar sits (for render + hit-test while hidden),
+    // clear the area the window occupied, then hide it
+    m_rollBox    = assignedBoxGlobal();
+    m_bRolledUp  = true;
+    m_iHoverCell = -1;
+
+    g_pHyprRenderer->damageBox(CBox{PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()});
+    PWINDOW->setHidden(true);
+
+    // hand focus to another visible, non-hidden window on this workspace
+    PHLWINDOW next = nullptr;
+    for (auto& w : g_pCompositor->m_windows) {
+        if (w == PWINDOW || !w->m_isMapped || w->isHidden() || w->m_workspace != PWINDOW->m_workspace)
+            continue;
+        next = w;
+    }
+    if (next)
+        Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_CLICK);
+    else
+        Desktop::focusState()->resetWindowFocus();
+
+    damageEntire(); // draws the bar at m_rollBox
+}
+
+// Enqueue the shaded window's bar into the current frame's render pass. Called
+// per-monitor from main.cpp's RENDER_POST_WINDOWS hook (a hidden window gets no
+// draw() of its own). Skips monitors/workspaces the shade isn't showing on.
+void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
+    if (!m_bRolledUp || !g_pGlobalState || !g_pGlobalState->config.enabled->value())
+        return;
+
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !pMonitor || PWINDOW->m_monitor.lock() != pMonitor)
+        return;
+    if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
+        return;
+
+    auto data = CVtbPassElement::SVtbData{this, 1.F};
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CVtbPassElement>(data));
 }
 
 void CVtbDeco::minimizeWindow() {
@@ -933,7 +1014,7 @@ void CVtbDeco::onConfigReloaded() {
 }
 
 void CVtbDeco::damageEntire() {
-    g_pHyprRenderer->damageBox(assignedBoxGlobal());
+    g_pHyprRenderer->damageBox(effectiveBoxGlobal());
 }
 
 eDecorationLayer CVtbDeco::getDecorationLayer() {
