@@ -101,6 +101,14 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_bDraggingThis  = false;
     bool                 m_bCancelledDown = false;
 
+    // Shade-drag: dragging a rolled-up window's floating bar relocates the
+    // (still-hidden) window; a press that never moves is a click that unrolls.
+    bool                 m_bRollDragPending = false;
+    bool                 m_bRollDragging    = false;
+    Vector2D             m_rollDragMouseStart;
+    CBox                 m_rollDragBoxStart;
+    Vector2D             m_rollDragWinStart;
+
     // KDE-style resize engine: Hyprland's own resize (border or resizewindow)
     // is always corner-quadrant based — grabbing the middle of one side still
     // moves two edges. This engine resizes exactly the edges the grab point
@@ -123,7 +131,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 onMouseMove(Vector2D coords);
     void                 handleDownEvent(Event::SCallbackInfo& info);
     void                 handleUpEvent(Event::SCallbackInfo& info);
-    void                 handleRolledDown(Event::SCallbackInfo& info); // click on a shaded window's floating bar
+    void                 handleRolledDown(Event::SCallbackInfo& info); // press on a shaded window's floating bar
+    void                 handleRolledUp(Event::SCallbackInfo& info);   // release: click un-shades, drag ends move
     int                  cellAt(const Vector2D& localCoords);
 
     bool                 tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e);

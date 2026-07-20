@@ -349,10 +349,10 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawCell(3, accentColor, PINNED);
     drawGlyph(3, "o>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor);
 
-    // roll-up [>>] — windowshade: collapses the window body to just this
-    // bar (full height kept). Lit accent while rolled up, like maximize.
+    // roll-up — windowshade toggle: [>>] hides the window down to just this
+    // bar; while shaded it shows [<<] to roll it back. Lit accent while shaded.
     drawCell(4, accentColor, m_bRolledUp);
-    drawGlyph(4, ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor);
+    drawGlyph(4, m_bRolledUp ? "<<" : ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor);
 
     // ---- title, a column of upright letters ----
     const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
@@ -624,6 +624,10 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
             info.cancelled = true;
             return;
         }
+        if (m_bRolledUp) {
+            handleRolledUp(info);
+            return;
+        }
         handleUpEvent(info);
         return;
     }
@@ -654,9 +658,26 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         return;
     }
 
-    // shaded window: hover-test its floating bar, nothing else (no resize
-    // cursor, no drag — the window is hidden and stays put)
+    // shaded window: either drag its floating bar (relocating the hidden
+    // window) or just hover-test it — no resize cursor.
     if (m_bRolledUp) {
+        if (m_bRollDragPending || m_bRollDragging) {
+            const auto DELTA = g_pInputManager->getMouseCoordsInternal() - m_rollDragMouseStart;
+            if (!m_bRollDragging && (std::abs(DELTA.x) + std::abs(DELTA.y)) > 4)
+                m_bRollDragging = true;
+            if (m_bRollDragging) {
+                const auto PWINDOW = m_pWindow.lock();
+                g_pHyprRenderer->damageBox(m_rollBox); // clear the bar's old spot
+                m_rollBox.x  = m_rollDragBoxStart.x + DELTA.x;
+                m_rollBox.y  = m_rollDragBoxStart.y + DELTA.y;
+                m_iHoverCell = -1;
+                if (PWINDOW) // move the hidden window so it reappears here on restore
+                    PWINDOW->m_realPosition->setValueAndWarp(m_rollDragWinStart + DELTA);
+                damageEntire();
+            }
+            return;
+        }
+
         const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - m_rollBox.pos();
         const int  cell  = VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h) ? cellAt(LOCAL) : -1;
         if (cell != m_iHoverCell) {
@@ -771,17 +792,44 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
         return;
 
-    const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - m_rollBox.pos();
+    const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
+    const auto LOCAL = MOUSE - m_rollBox.pos();
     if (!VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h))
         return; // not on the bar — let the click pass through to what's behind
 
     info.cancelled   = true;
     m_bCancelledDown = true;
 
-    if (cellAt(LOCAL) == 0)
-        closeWindow();  // [x] closes even while shaded
-    else
-        toggleRollup(); // any other cell / the bar body restores it
+    if (cellAt(LOCAL) == 0) {
+        closeWindow(); // [x] closes even while shaded
+        return;
+    }
+
+    // Arm a drag. onMouseMove promotes it to an actual move once the cursor
+    // travels past a small threshold (dragging the shade relocates the still-
+    // hidden window); handleRolledUp treats a release-without-move as a click
+    // that un-shades. So the bar drags freely and only a plain click unrolls.
+    m_bRollDragPending   = true;
+    m_bRollDragging      = false;
+    m_rollDragMouseStart = MOUSE;
+    m_rollDragBoxStart   = m_rollBox;
+    m_rollDragWinStart   = PWINDOW->m_realPosition->goal();
+}
+
+void CVtbDeco::handleRolledUp(Event::SCallbackInfo& info) {
+    const bool CANCELLED  = m_bCancelledDown;
+    const bool WASPENDING = m_bRollDragPending;
+    const bool WASDRAG    = m_bRollDragging;
+    m_bCancelledDown   = false;
+    m_bRollDragPending = false;
+    m_bRollDragging    = false;
+
+    // pressed the bar and released without moving -> a click -> un-shade
+    if (WASPENDING && !WASDRAG)
+        toggleRollup();
+
+    if (CANCELLED)
+        info.cancelled = true;
 }
 
 // ---- actions --------------------------------------------------------------
@@ -869,8 +917,10 @@ void CVtbDeco::toggleRollup() {
 
     if (m_bRolledUp) {
         // un-shade in place
-        m_bRolledUp  = false;
-        m_iHoverCell = -1;
+        m_bRolledUp        = false;
+        m_iHoverCell       = -1;
+        m_bRollDragPending = false;
+        m_bRollDragging    = false;
         g_pHyprRenderer->damageBox(m_rollBox); // clear the floating bar
         PWINDOW->setHidden(false);
         g_pCompositor->changeWindowZOrder(PWINDOW, true);
@@ -881,9 +931,11 @@ void CVtbDeco::toggleRollup() {
 
     // shade: remember where the bar sits (for render + hit-test while hidden),
     // clear the area the window occupied, then hide it
-    m_rollBox    = assignedBoxGlobal();
-    m_bRolledUp  = true;
-    m_iHoverCell = -1;
+    m_rollBox          = assignedBoxGlobal();
+    m_bRolledUp        = true;
+    m_iHoverCell       = -1;
+    m_bRollDragPending = false;
+    m_bRollDragging    = false;
 
     g_pHyprRenderer->damageBox(CBox{PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()});
     PWINDOW->setHidden(true);
