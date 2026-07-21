@@ -10,6 +10,7 @@ SlidePopup {
     id: root
 
     popupNamespace: "qs-disk"
+    persistKey: "disk"
     implicitWidth: 300
     implicitHeight: content.implicitHeight + 20
 
@@ -25,7 +26,13 @@ SlidePopup {
         Popups.diskTopY = Math.max(Theme.gap, sh - Theme.gap - implicitHeight);
     }
     onImplicitHeightChanged: _reportTop()
-    Component.onCompleted: _reportTop()
+    // Pre-warm the (fast, df+lsblk) drive list at startup so the widget already
+    // knows its real height before it's ever revealed/pinned — otherwise it
+    // maps at the one-line "reading…" height and the widgets stacked above it
+    // freeze too low. SMART stays on-demand (onOpened) to avoid spinning idle
+    // disks up at login; its later per-drive lines just push the stack up via
+    // the reactive stacking (Popups.stackObstacleTop).
+    Component.onCompleted: { _reportTop(); usageProc.running = true; }
 
     onOpened: { usageProc.running = true; smartProc.running = true; }
 

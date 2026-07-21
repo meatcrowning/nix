@@ -18,9 +18,14 @@ Singleton {
     property var pinned: []        // tiled pinned widgets, in pin order
     property var stackPinned: []   // in-place pinned popups (cpu/eth)
 
-    // DiskPanel: whether it's currently open + its top scene-Y, so cpu/eth
-    // stack their popups above it while it's open.
+    // DiskPanel: whether it's currently open (transient hover OR pinned),
+    // whether it's PINNED specifically, and its top scene-Y — so the in-place
+    // stackables (cpu/gpu/eth) can sit above it. diskPinned is tracked apart
+    // from diskOpen so a transient disk hover doesn't shove already-pinned
+    // widgets around, while a pinned disk that grows as its data loads DOES
+    // push the widgets stacked above it upward (see stackObstacleTop).
     property bool diskOpen: false
+    property bool diskPinned: false
     property real diskTopY: 0
 
     function claim(who) {
@@ -76,14 +81,24 @@ Singleton {
             stackPinned = stackPinned.filter(w => w !== who);
         }
     }
-    // Highest obstacle a transient stackable must sit above: the disk panel
-    // (if open) and any pinned stackable sibling. Returns the min top scene-Y,
-    // or -1 if there's nothing to stack above (so it centers on its module).
-    function stackObstacleTop(exclude) {
+    // Highest obstacle the stackable `who` must sit above. Returns the min top
+    // scene-Y of everything below it, or -1 if there's nothing (so it centers
+    // on its module). Two regimes, so a pinned widget stays put on a transient
+    // disk hover yet re-stacks when a pinned disk grows:
+    //   who is TRANSIENT (not pinned): above the disk whenever it's open, and
+    //     above every pinned stackable sibling.
+    //   who is PINNED in place: above the disk only when the disk is itself
+    //     PINNED, and above only the siblings pinned BEFORE it (a deterministic
+    //     bottom-up chain: disk -> gpu -> cpu -> eth, no mutual reference).
+    function stackObstacleTop(who) {
+        const idx = stackPinned.indexOf(who);
+        const pinnedWho = idx >= 0;
         let t = -1;
-        if (diskOpen) t = diskTopY;
-        for (const p of stackPinned) {
-            if (p === exclude) continue;
+        if (pinnedWho ? diskPinned : diskOpen) t = diskTopY;
+        for (let i = 0; i < stackPinned.length; i++) {
+            const p = stackPinned[i];
+            if (p === who) continue;
+            if (pinnedWho && i > idx) continue; // only sit above earlier-pinned
             if (t < 0 || p.pinnedTopY < t) t = p.pinnedTopY;
         }
         return t;

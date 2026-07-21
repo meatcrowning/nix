@@ -1,6 +1,6 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC
 #
 # Battery/AC and wifi were dropped (desktop box, no laptop battery — the
 # "bat" reading used to pick up the Logitech trackball's own hidpp battery
@@ -43,4 +43,14 @@ for dir in /sys/class/hwmon/hwmon*/; do
     break
 done
 
-printf '%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp"
+# GPU utilization + temp via nvidia-smi (NVIDIA proprietary driver). One cheap
+# (~20ms) query for both. "gpuUsePct|gpuTempC"; -1|-1 if nvidia-smi is missing
+# or errors (so the panel shows "--" rather than a stale value).
+gpu="-1|-1"
+if command -v nvidia-smi >/dev/null 2>&1; then
+    graw=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null)
+    g=$(printf '%s\n' "$graw" | awk -F',' 'NR==1{gsub(/ /,""); if($1!="" && $2!="") printf "%d|%d", $1, $2}')
+    [ -n "$g" ] && gpu="$g"
+fi
+
+printf '%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu"

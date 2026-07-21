@@ -12,6 +12,7 @@ Column {
     signal weatherHovered(bool hovering, real centerY)
     signal diskHovered(bool hovering, real centerY)
     signal cpuHovered(bool hovering, real centerY)
+    signal gpuHovered(bool hovering, real centerY)
     signal ethHovered(bool hovering, real centerY)
 
     // scene-Y center of an item (bar spans full screen height, so scene Y
@@ -134,6 +135,41 @@ Column {
             acceptedButtons: Qt.NoButton
             onEntered: root.cpuHovered(true, root._cy(parent))
             onExited: root.cpuHovered(false, 0)
+        }
+    }
+
+    // ---------- GPU (usage / temp) ----------
+    Item {
+        width: parent.width
+        height: gpuCol.implicitHeight
+        Column {
+            id: gpuCol
+            anchors.fill: parent
+            spacing: 1
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "gpu"
+                color: Theme.textDim
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + ""
+                color: SysInfo.gpuUsage >= 90 ? Theme.crit
+                     : SysInfo.gpuUsage >= 75 ? Theme.warn : Theme.text
+            }
+            PixelText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: SysInfo.gpuTemp < 0 ? "--" : SysInfo.gpuTemp + ""
+                color: SysInfo.gpuTemp >= 80 ? Theme.crit
+                     : SysInfo.gpuTemp >= 65 ? Theme.warn : Theme.textDim
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onEntered: root.gpuHovered(true, root._cy(parent))
+            onExited: root.gpuHovered(false, 0)
         }
     }
 

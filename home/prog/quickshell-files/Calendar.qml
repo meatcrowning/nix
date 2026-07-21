@@ -8,6 +8,7 @@ SlidePopup {
     id: root
 
     popupNamespace: "qs-calendar"
+    persistKey: "calendar"
     implicitWidth: 7 * 26 + 24
     // fit the content exactly (month is 5 or 6 rows) — no empty tail
     implicitHeight: content.implicitHeight + 20

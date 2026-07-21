@@ -98,6 +98,7 @@ Scope {
     // network throughput history — each opened by hovering its bar block.
     DiskPanel { id: diskPanel }
     CpuPanel { id: cpuPanel }
+    GpuPanel { id: gpuPanel }
     EthPanel { id: ethPanel }
 
     // File-browser windows (real FloatingWindows, hyprvtb-decorated), one per
@@ -113,29 +114,112 @@ Scope {
 
     // The "<" button at the bottom of the bar: reveal ALL popups at once as
     // desktop widgets, restoring whatever was pinned before on toggle-off.
+    //
+    // The reveal/hide is STAGED into a little fan rather than flipping every
+    // pin at once. Reveal order (out): disk; then clock+gpu; then weather+cpu;
+    // then calendar+eth — the tiled row fans out leftward from the disk while
+    // the stack fans upward above it. Hide runs the same stages in reverse.
+    // Each stage is ~_fanStepMs after the last, so widgets cascade in/out
+    // instead of popping together. Whatever was pinned BEFORE a reveal is kept
+    // pinned on the following hide (_savedPins), so the toggle is lossless.
     property bool allRevealed: false
     property var _savedPins: []
+
+    // every pinnable widget, and the two fan orders. The stack order (gpu
+    // before cpu before eth) also fixes their bottom-up stacking above the
+    // disk; the tiled order (clock/weather/calendar) fixes the row's left fan.
+    readonly property var _allWidgets: [calendar, analogClock, weatherPanel, diskPanel, cpuPanel, gpuPanel, ethPanel]
+    readonly property var _fanOut: [[diskPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
+
+    // one stage every _fanStepMs — set to just past a single widget's full
+    // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a
+    // stage finishes animating before the next one starts.
+    readonly property int _fanStepMs: 300
+    property var _fanStages: []
+    property int _fanIndex: 0
+    property bool _fanRevealing: true
+
+    Timer {
+        id: fanTimer
+        interval: shell._fanStepMs
+        repeat: true
+        onTriggered: shell._fanStep()
+    }
+    function _fanStep() {
+        if (_fanIndex >= _fanStages.length) { fanTimer.stop(); return; }
+        const grp = _fanStages[_fanIndex];
+        for (const w of grp) {
+            // in-place stackables (gpu/cpu/eth) emerge from / sink into the
+            // widget below them; tiled ones (disk/clock/weather/calendar) keep
+            // the plain horizontal slide via pinnedOpen.
+            if (w.aboveDiskWhenPinned) {
+                if (_fanRevealing) w.fanRevealStacked(); else w.fanHideStacked();
+            } else {
+                w.pinnedOpen = _fanRevealing;
+            }
+        }
+        _fanIndex++;
+        if (_fanIndex >= _fanStages.length) fanTimer.stop();
+    }
+    function _runFan(stages, revealing) {
+        fanTimer.stop();
+        _fanStages = stages;
+        _fanRevealing = revealing;
+        _fanIndex = 0;
+        _fanStep();          // first stage fires immediately
+        if (_fanIndex < _fanStages.length) fanTimer.start();
+    }
+
     function toggleRevealAll() {
-        const all = [calendar, analogClock, weatherPanel, diskPanel, cpuPanel, ethPanel];
         if (!allRevealed) {
-            _savedPins = all.filter(p => p.pinnedOpen);
-            // pin in layout order: tiled bottom row (disk ends up rightmost),
-            // then cpu/eth stack above the disk
-            // pin order sets the bottom-row tiling (right->left from the disk):
-            // disk | clock | weather | calendar
-            diskPanel.pinnedOpen = true;
-            analogClock.pinnedOpen = true;
-            weatherPanel.pinnedOpen = true;
-            calendar.pinnedOpen = true;
-            cpuPanel.pinnedOpen = true;
-            ethPanel.pinnedOpen = true;
+            _savedPins = _allWidgets.filter(p => p.pinnedOpen);
             allRevealed = true;
+            _runFan(_fanOut, true);
         } else {
-            for (const p of all)
-                if (_savedPins.indexOf(p) < 0) p.pinnedOpen = false;
             allRevealed = false;
+            // exact reverse of the fan-out: same stage pairing, reversed order
+            // (empty stages kept so the cadence stays symmetric). Anything that
+            // was pinned before the reveal is left pinned.
+            const stages = _fanOut.slice().reverse()
+                .map(grp => grp.filter(p => _savedPins.indexOf(p) < 0));
+            _runFan(stages, false);
         }
     }
+
+    // ---- desktop-widget persistence (Meta+Ctrl+S, alongside the window
+    // session save) -------------------------------------------------------
+    // Snapshot exactly which widgets are pinned right now — the user may have
+    // revealed all then unpinned a few, so this reads the live pins, not the
+    // "show all" flag. Restored once at startup below.
+    function saveWidgets() {
+        const keys = _allWidgets.filter(p => p.pinnedOpen).map(p => p.persistKey).join(" ");
+        Quickshell.execDetached(["sh", "-c",
+            "d=\"$HOME/.local/state/quickshell\"; mkdir -p \"$d\"; printf '%s\\n' \"$1\" > \"$d/widgets\"",
+            "_", keys]);
+    }
+    function applyWidgetState(text) {
+        const keys = (text || "").trim().split(/\s+/).filter(s => s.length);
+        if (!keys.length) return;
+        // pin in the same layout order the reveal uses so tiling (disk rightmost,
+        // clock/weather/calendar left) and stacking (gpu/cpu/eth bottom-up) land
+        // right regardless of the order the keys were written in.
+        const order = [diskPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel];
+        let n = 0;
+        for (const w of order)
+            if (keys.indexOf(w.persistKey) >= 0) { w.pinnedOpen = true; n++; }
+        if (n === _allWidgets.length) allRevealed = true;
+    }
+
+    // Read the saved pin set once at startup. A Process (not FileView) keeps it
+    // simple and the async read doubles as a small settle delay before pins map.
+    Process {
+        id: widgetStateProc
+        command: ["sh", "-c", "cat \"$HOME/.local/state/quickshell/widgets\" 2>/dev/null || true"]
+        stdout: StdioCollector {
+            onStreamFinished: shell.applyWidgetState(this.text)
+        }
+    }
+    Component.onCompleted: widgetStateProc.running = true
 
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
@@ -195,6 +279,7 @@ Scope {
     IpcHandler {
         target: "widgets"
         function toggle(): void { shell.toggleRevealAll(); }
+        function save(): void { shell.saveWidgets(); }
     }
 
     // Pop the OSD from the brightness keys: `qs ipc call osd brightness`.
@@ -358,6 +443,7 @@ Scope {
                 // tall, so bottom-anchoring reads better than centering
                 onDiskHovered: (h, cy) => diskPanel.hoverChanged(h)
                 onCpuHovered: (h, cy) => { if (h) cpuPanel.anchorCenterY = cy; cpuPanel.hoverChanged(h); }
+                onGpuHovered: (h, cy) => { if (h) gpuPanel.anchorCenterY = cy; gpuPanel.hoverChanged(h); }
                 onEthHovered: (h, cy) => { if (h) ethPanel.anchorCenterY = cy; ethPanel.hoverChanged(h); }
             }
 

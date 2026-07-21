@@ -14,6 +14,7 @@ SlidePopup {
     id: root
 
     popupNamespace: "qs-analog-clock"
+    persistKey: "clock"
     implicitWidth: 168
     implicitHeight: content.implicitHeight + 20
 

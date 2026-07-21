@@ -15,6 +15,8 @@ Singleton {
     property bool   muted: false
     property int    cpuUsage: -1        // 0-100, or -1 until the second poll
     property int    cpuTemp: -1         // Celsius, k10temp's Tctl reading, or -1
+    property int    gpuUsage: -1        // 0-100, nvidia-smi utilization, or -1
+    property int    gpuTemp: -1         // Celsius, nvidia-smi temperature, or -1
 
     // Brightness (DDC/CI over I2C via ddcutil — this monitor is external,
     // no laptop backlight). Polled separately from everything else below:
@@ -33,6 +35,8 @@ Singleton {
     readonly property int chartLen: 90
     property var cpuHist: []
     property var tempHist: []
+    property var gpuHist: []
+    property var gpuTempHist: []
     property var rxHist: []
     property var txHist: []
 
@@ -56,7 +60,7 @@ Singleton {
         const line = (text || "").trim();
         if (line === "") return;
         const f = line.split("|");
-        if (f.length < 9) return;
+        if (f.length < 11) return;
 
         const rx      = parseFloat(f[0]) || 0;
         const tx      = parseFloat(f[1]) || 0;
@@ -78,6 +82,11 @@ Singleton {
         const rawTemp = parseInt(f[8]);
         cpuTemp = rawTemp < 0 ? -1 : Math.round(rawTemp / 1000);
 
+        const gu = parseInt(f[9]);
+        gpuUsage = isNaN(gu) || gu < 0 ? -1 : gu;
+        const gt = parseInt(f[10]);
+        gpuTemp = isNaN(gt) || gt < 0 ? -1 : gt;
+
         if (_prevRx >= 0) {
             rxSpeed = Math.max(0, (rx - _prevRx) / intervalSec);
             txSpeed = Math.max(0, (tx - _prevTx) / intervalSec);
@@ -94,6 +103,8 @@ Singleton {
         // CPU/temp history for the hover charts (cpuUsage/cpuTemp are set above)
         if (cpuUsage >= 0) cpuHist = _pushHist(cpuHist, cpuUsage);
         if (cpuTemp >= 0) tempHist = _pushHist(tempHist, cpuTemp);
+        if (gpuUsage >= 0) gpuHist = _pushHist(gpuHist, gpuUsage);
+        if (gpuTemp >= 0) gpuTempHist = _pushHist(gpuTempHist, gpuTemp);
     }
 
     // Human-readable bytes/s -> e.g. "1.2M", "34K", "0"

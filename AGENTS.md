@@ -33,6 +33,48 @@ The `my.aerotheme.enable` option (defined in `sys/options.nix`) allows for easy 
 - `sys/hw/nvidia.nix`: Contains NVIDIA-specific drivers and configuration.
 - `sys/gme/steam.nix`: Gaming and Steam-specific system settings.
 
+### Desktop shell: Hyprland + Quickshell (`home/prog/`)
+
+The live desktop is Hyprland driving a Quickshell panel. Source lives in
+`home/prog/quickshell-files/` (the `.qml` panel) and `home/prog/hypr-files/`
+(`hyprland.lua`), plus the `hyprvtb` Hyprland plugin (`home/prog/hyprvtb/`,
+C++ — compositor-side window titlebars + session save/restore).
+
+**Applying edits + reloading (READ THIS before editing panel/hypr config):**
+
+- **Rebuild alias reality:** `rbhome`/`rbsys`/`update` all run
+  `sudo nixos-rebuild switch --flake /home/lam/nix/#top` (home-manager is a
+  NixOS module here; there is no standalone `home-manager switch`). A NOPASSWD
+  rule allows the sudo. A **new** file must be `git add`-ed before the rebuild
+  — the tree is dirty and flake eval ignores untracked files, so a brand-new
+  `Foo.qml` is silently missing from the build otherwise.
+
+- **Most `quickshell-files/*` are Nix-store symlinks.** A rebuild swaps the
+  symlinks but Quickshell watches the resolved store paths, so the swap does
+  NOT trigger its hot-reload — the panel keeps running the old tree. Force a
+  reload by modifying the ONE real file it watches, `~/.config/quickshell/
+  Theme.qml`, **in place (same inode)** — e.g. append then restore a trailing
+  comment (`printf '\n// x\n' >> Theme.qml` then `cat backup > Theme.qml`).
+  Do NOT use `sed -i`/`mv` (rename = new inode = no reload), and note it
+  **dedupes by content** so an identical rewrite is a no-op. A reload rebuilds
+  only Quickshell's QML tree in-process (never touches Hyprland); a parse error
+  keeps the old tree + fires a toast, so it can't crash the session.
+
+- **Seed-once mutable files are NOT updated by rebuild:** `Theme.qml`,
+  `hyprland.lua`, `hyprpaper.conf` are installed only if absent (they're
+  rewritten in place at runtime by `wal-set.sh`). To change one, edit BOTH the
+  nix source AND the live `~/.config/...` file **in place** (targeted string
+  edit — never overwrite wholesale or you reset the live wal palette/border).
+  Apply `hyprland.lua` keybind changes with **`hyprctl reload`** (re-runs the
+  live Lua, re-registers `hl.bind`s, does not disturb the session).
+
+- **Verify without visuals — the user does the visual/animation checks.** Don't
+  screenshot. Use `qs log | tail` (parse/binding-loop errors), `qs ipc show` /
+  `qs ipc call` (wiring), `hyprctl binds` (keybinds). `qs log` is CUMULATIVE
+  across reloads — snapshot its line count before an action and read only the
+  new tail, or old warnings will mislead you. Never run bare `qs` (it launches
+  a second panel instance).
+
 ## Maintenance Instructions for AI Agents
 
 1. **Keep this file updated:** If you make substantial architectural changes, add new top-level directories, or introduce major new features/options, you MUST update this `AGENTS.md` file to reflect those changes.

@@ -476,9 +476,16 @@ end, { description = "Scratchpad terminal" })
 -- ~/.local/state/hyprvtb/session.tsv. A fresh login relaunches and re-lays-out
 -- everything. Manual on purpose (Meta+Ctrl+S); pops a confirmation
 -- notification. Logic lives in the hyprvtb plugin.
+--
+-- The same keybind also snapshots the quickshell desktop widgets (which pins
+-- are currently on the desktop — including any the user manually unpinned
+-- after "show all"), so a fresh login restores them too. That state lives in
+-- quickshell, not hyprvtb, so it's a separate qs IPC call rather than part of
+-- the window session. See shell.qml's "widgets" IpcHandler / saveWidgets.
 hl.bind(mainMod .. " + CTRL + S", function()
     hl.plugin.hyprvtb.save_session()
-end, { description = "Save window session" })
+    hl.exec_cmd("qs ipc call widgets save")
+end, { description = "Save window session + desktop widgets" })
 
 -- Alt-Tab window switching, KDE-style most-recently-used order (hyprvtb
 -- plugin). cycle_next walks the window LIST (creation order), which is why

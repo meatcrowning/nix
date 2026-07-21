@@ -8,6 +8,7 @@ SlidePopup {
     id: root
 
     popupNamespace: "qs-weather"
+    persistKey: "weather"
     implicitWidth: 252
     implicitHeight: content.implicitHeight + 20
 
