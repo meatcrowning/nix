@@ -95,8 +95,8 @@ Window {
     // ---- page theming: wal-coloured scrollbars ----
     // Chromium's default scrollbars clash with the wal palette, so inject a
     // stylesheet into every page (::-webkit-scrollbar + the standard
-    // scrollbar-color) matching the DE. Same WebEngineScript mechanism a
-    // userscript would use — see the userScripts.collection on each view.
+    // scrollbar-color) matching the DE. Injected via runJavaScript on load
+    // (WebEngineScript isn't a creatable QML element in this Qt build).
     function cssColor(c) {
         return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
              + Math.round(c.b * 255) + "," + c.a.toFixed(3) + ")";
@@ -120,17 +120,9 @@ Window {
             if (v) v.runJavaScript(win.scrollbarJs());
         }
     }
-    // sourceCode re-evaluates when the palette changes (it reads Theme.*), so
-    // future page loads pick up new colours; reinjectScrollbar() live-updates
-    // already-open pages.
-    WebEngineScript {
-        id: scrollbarScript
-        name: "surfer-scrollbar"
-        injectionPoint: WebEngineScript.DocumentReady
-        worldId: WebEngineScript.ApplicationWorld
-        runOnSubframes: true
-        sourceCode: win.scrollbarJs()
-    }
+    // scrollbarJs() is re-run on each page load (see onLoadingChanged) so new
+    // loads pick up the current palette; reinjectScrollbar() live-updates
+    // already-open pages when the wallpaper palette changes.
     Connections {
         target: WalPalette
         function onChanged() { win.reinjectScrollbar(); }
@@ -257,15 +249,16 @@ Window {
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
-                userScripts.collection: [ scrollbarScript ]
                 Component.onCompleted: url = seed
 
-                // inject userscripts on navigation (document-start / -end)
+                // inject the themed scrollbar CSS + userscripts on navigation
                 onLoadingChanged: (info) => {
-                    if (info.status === WebEngineView.LoadStartedStatus)
+                    if (info.status === WebEngineView.LoadStartedStatus) {
                         win.runUserscripts(webview, info.url.toString(), "start");
-                    else if (info.status === WebEngineView.LoadSucceededStatus)
+                    } else if (info.status === WebEngineView.LoadSucceededStatus) {
+                        webview.runJavaScript(win.scrollbarJs());
                         win.runUserscripts(webview, info.url.toString(), "end");
+                    }
                 }
 
                 onNewWindowRequested: (request) => win.newTab(request.requestedUrl)
