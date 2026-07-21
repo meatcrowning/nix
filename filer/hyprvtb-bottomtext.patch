@@ -1,0 +1,122 @@
+diff --git a/home/prog/hyprvtb/vtbDeco.cpp b/home/prog/hyprvtb/vtbDeco.cpp
+index af10fc5..df531d5 100644
+--- a/home/prog/hyprvtb/vtbDeco.cpp
++++ b/home/prog/hyprvtb/vtbDeco.cpp
+@@ -171,28 +171,28 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
+ 
+ // ---- text rendering -------------------------------------------------------
+ 
+-// The title as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e reading
+-// top-down): every UTF-8 codepoint on its own pango line, centered, with
+-// antialiasing off so the pixel font stays crisp.
+-void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR) {
+-    const auto FONT  = g_pGlobalState->config.font->value();
+-    const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
+-    const int  BARW  = std::round(g_pGlobalState->config.barWidth->value() * scale);
++// Render a string as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e
++// reading top-down): every UTF-8 codepoint on its own pango line, centered,
++// antialiasing off so the pixel font stays crisp. Truncated to maxRunPx with a
++// trailing "…". The returned texture is sized tight to the drawn lines (so a
++// caller can bottom-anchor it); nullptr when there is nothing to draw.
++static SP<Render::ITexture> renderVertColumn(const std::string& text, int maxRunPx, float scale, const CHyprColor& COLOR) {
++    const auto FONT = g_pGlobalState->config.font->value();
++    const int  SIZE = std::round(g_pGlobalState->config.fontSize->value() * scale);
++    const int  BARW = std::round(g_pGlobalState->config.barWidth->value() * scale);
+ 
+-    if (runLenPx < SIZE || m_szLastTitle.empty()) {
+-        m_pTitleTex = nullptr;
+-        return;
+-    }
++    if (maxRunPx < SIZE || text.empty())
++        return nullptr;
+ 
+     // split into codepoints, one per line; truncate to what fits, with a
+     // trailing "…" cell when cut short
+-    const int                maxLines = runLenPx / SIZE;
++    const int                maxLines = maxRunPx / SIZE;
+     std::vector<std::string> cps;
+-    for (size_t i = 0; i < m_szLastTitle.size();) {
++    for (size_t i = 0; i < text.size();) {
+         size_t len = 1;
+-        while (i + len < m_szLastTitle.size() && (m_szLastTitle[i + len] & 0xC0) == 0x80)
++        while (i + len < text.size() && (text[i + len] & 0xC0) == 0x80)
+             len++;
+-        cps.push_back(m_szLastTitle.substr(i, len));
++        cps.push_back(text.substr(i, len));
+         i += len;
+     }
+     std::string stacked;
+@@ -205,8 +205,13 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR
+     }
+     if (truncated)
+         stacked += "\n…";
++    if (stacked.empty())
++        return nullptr;
++
++    const int lines = shown + (truncated ? 1 : 0);
++    const int surfH = std::min(maxRunPx, lines * SIZE + 2); // tight, +2 guards clipping
+ 
+-    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
++    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, surfH);
+     auto CR   = cairo_create(SURF);
+ 
+     cairo_font_options_t* fo = cairo_font_options_create();
+@@ -233,10 +238,31 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR
+     cairo_font_options_destroy(fo);
+     cairo_surface_flush(SURF);
+ 
+-    m_pTitleTex = g_pHyprRenderer->createTexture(SURF);
++    auto tex = g_pHyprRenderer->createTexture(SURF);
+ 
+     cairo_destroy(CR);
+     cairo_surface_destroy(SURF);
++    return tex;
++}
++
++// The window title, upright top-down. A U+001F in the title splits off a second
++// string (e.g. filer's current-dir size) that is rendered at the BOTTOM of the
++// bar instead of inline; titles without the separator render exactly as before.
++void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR) {
++    std::string main = m_szLastTitle, bottom;
++    const auto  sep = m_szLastTitle.find('\x1f');
++    if (sep != std::string::npos) {
++        main   = m_szLastTitle.substr(0, sep);
++        bottom = m_szLastTitle.substr(sep + 1);
++    }
++
++    // Bottom line first, so the title run can be shortened to avoid overlapping it.
++    m_pSizeTex = renderVertColumn(bottom, runLenPx, scale, COLOR);
++    const int SIZEH    = (m_pSizeTex && m_pSizeTex->m_texID != 0) ? (int)m_pSizeTex->m_size.y : 0;
++    const int GAP      = SIZEH ? (int)std::round((VTB_PAD + 4) * scale) : 0;
++    const int titleRun = std::max(0, runLenPx - SIZEH - GAP);
++
++    m_pTitleTex = renderVertColumn(main, titleRun, scale, COLOR);
+ }
+ 
+ SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale) {
+@@ -375,6 +401,13 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
+         CBox       tbox = {barBox.x, barBox.y + titleTop() * SCALE, TSZ.x, TSZ.y};
+         g_pHyprOpenGL->renderTexture(m_pTitleTex, tbox.round(), {.a = a});
+     }
++
++    // optional bottom line (filer's dir size), anchored to the bar's bottom edge
++    if (m_pSizeTex && m_pSizeTex->m_texID != 0) {
++        const auto SSZ  = m_pSizeTex->m_size;
++        CBox       sbox = {barBox.x, barBox.y + barBox.h - SSZ.y - std::round(VTB_PAD * SCALE), SSZ.x, SSZ.y};
++        g_pHyprOpenGL->renderTexture(m_pSizeTex, sbox.round(), {.a = a});
++    }
+ }
+ 
+ // ---- input ----------------------------------------------------------------
+diff --git a/home/prog/hyprvtb/vtbDeco.hpp b/home/prog/hyprvtb/vtbDeco.hpp
+index 7e7d8cc..5bd75c9 100644
+--- a/home/prog/hyprvtb/vtbDeco.hpp
++++ b/home/prog/hyprvtb/vtbDeco.hpp
+@@ -79,6 +79,7 @@ class CVtbDeco : public IHyprWindowDecoration {
+     CBox                 m_bAssignedBox;
+ 
+     SP<Render::ITexture> m_pTitleTex;
++    SP<Render::ITexture> m_pSizeTex; // optional bottom line (e.g. filer's dir size)
+     std::map<std::string, SP<Render::ITexture>> m_glyphCache; // "glyph|rgbahex" -> tex
+     std::string          m_szLastTitle;
+     int                  m_iLastTitleRun = -1;

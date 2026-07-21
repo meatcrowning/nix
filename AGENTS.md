@@ -19,6 +19,7 @@ The configuration is split into three main areas: System-wide NixOS settings, Us
     - `home/pkgs/`: Categories of packages (base, dev, game, media, etc.).
     - `home/prog/`: Program-specific configurations (zsh, bash, mpv, etc.).
 - `lam.nix`: The entry point for the Home Manager configuration, which imports the `home/` directory.
+- `filer/`: Vendored source of the standalone Qt/QML file browser (its own self-contained flake — `main.py`, `qml/`). Lives at the repo top level **on purpose**: it must stay outside `home/`/`sys/`, whose `umport` recursively imports every `.nix` file (it would try to eval filer's `flake.nix` as a module). Nothing in the NixOS/home evaluation imports `filer/` — it's inert vendored source that simply travels with the repo. The `filer` binary is built and installed by `home/prog/filer.nix`, which wraps `python3` around the **live** source at `/home/lam/nix/filer/main.py` (absolute path, valid on both `top` and `air`), so QML/Python edits are picked up with no rebuild. A compat symlink `~/Projects/filer → ~/nix/filer` preserves the old source path. filer's own flake builds on `x86_64-linux` + `aarch64-linux` (`nix run ~/nix/filer` / `run.sh` work on book too).
 
 ## Key Features & Conventions
 

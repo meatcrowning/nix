@@ -1,0 +1,575 @@
+import QtQuick
+import QtQuick.Window
+
+// Standalone port of the Quickshell panel's FileBrowser.qml. Runs as its own
+// PySide6 process (main.py), so Quickshell config hot-reloads no longer restart
+// it. It's a real Wayland Window, so the hyprvtb plugin still gives it the same
+// vertical titlebar / drag / edge-resize / minimize as every other window.
+//
+// The list is a lazy tree: each row carries a depth, and directories can be
+// expanded in place (the toggle to the left of the name). Rows come from
+// `FileOps.listDir` (main.py); file operations go through `FileOps.run` /
+// `execDetached`, argv arrays only, so paths with spaces/metachars are safe.
+// `Theme` is a pragma-singleton (qml/qmldir); `FileOps` is a context property.
+Window {
+    id: win
+
+    // startDir is a context property from main.py (the arg-given dir, or home).
+    property string startPath: startDir
+
+    // Focus-aware foreground: while the window is unfocused, controls and text
+    // grey to the SAME tone the hyprvtb titlebar fades to (Theme.inactive), so
+    // filer reads as "inactive" in lock-step with its titlebar.
+    readonly property color fgAccent: win.active ? Theme.accent : Theme.inactive
+    readonly property color fgText:   win.active ? Theme.text  : Theme.inactive
+
+    title: "browse: " + view.dirName
+    width: 720
+    height: 460
+    minimumWidth: 540
+    // tall enough that the right strip's sort + operation buttons (3 + 7 cells)
+    // always clear the dir-size readout pinned at its bottom
+    minimumHeight: 400
+    visible: true
+    color: Theme.bg
+
+    onClosing: Qt.quit()
+
+    // Square 28×28 operation button for the right strip — same cell geometry as
+    // the sort buttons and the hyprvtb titlebar. Uses the built-in `enabled`
+    // (a disabled one ignores clicks and dims to 0.4), and greys its accent
+    // when the window is unfocused, like the titlebar.
+    component OpButton: Rectangle {
+        id: ob
+        property string label: ""
+        property bool danger: false
+        property bool active: false   // lit like a hovered cell (for toggles, e.g. "h")
+        signal clicked()
+        readonly property bool winActive: Window.active
+        readonly property bool hot: obMa.containsMouse   // stays false while disabled
+        readonly property bool lit: (hot || active) && enabled
+        width: 28
+        height: 28
+        color: lit ? Theme.bgAlt : Theme.bg
+        border.width: lit ? 2 : 1
+        border.color: !enabled ? Theme.border
+                     : lit ? (winActive ? Theme.accent : Theme.inactive)
+                     : Theme.border
+        opacity: enabled ? 1 : 0.4
+
+        PixelText {
+            anchors.centerIn: parent
+            text: ob.label
+            color: ob.danger ? Theme.crit
+                 : ob.lit ? (ob.winActive ? Theme.accent : Theme.inactive)
+                 : (ob.winActive ? Theme.text : Theme.inactive)
+        }
+        MouseArea {
+            id: obMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: ob.clicked()
+        }
+    }
+
+    // file-op completion: rebuild the tree, reselect the affected path
+    Connections {
+        target: FileOps
+        function onFinished(reselect) {
+            view.refresh();
+            if (reselect) view.selected = reselect;
+            view.refreshDirSize();   // an op changed what the dir holds
+        }
+    }
+
+    Rectangle {
+        id: view
+        anchors.fill: parent
+        color: Theme.bg
+
+        property string path: win.startPath
+        property string selected: ""        // absolute path of the selected row
+        property bool selectedIsDir: false
+        property var clip: null             // { op:"copy"|"cut", path }
+
+        // tree state: the flat list of currently-visible rows, plus the set of
+        // directory paths the user has expanded (persisted across refreshes so
+        // an op doesn't collapse the tree).
+        property var rows: []
+        property var expandedPaths: new Set()
+
+        // sort state (driven by the header sort buttons). Grouping is always
+        // hidden → dirs → files; sortField/sortAsc order within each group.
+        property string sortField: startSortField   // "name" | "created" | "size"
+        property bool sortAsc: startSortAsc
+        function setSort(f) {
+            if (sortField === f) sortAsc = !sortAsc;   // re-click flips direction
+            else { sortField = f; sortAsc = true; }
+            rebuild();
+            persist();
+        }
+
+        // Whether dotfiles are listed. Toggled by the "h" strip button; when
+        // off, hidden entries are filtered out of the tree entirely.
+        property bool showHidden: startShowHidden
+        function toggleHidden() { showHidden = !showHidden; rebuildKeepScroll(); persist(); }
+
+        // Persist the last directory + sort + hidden toggle so filer reopens
+        // how you left it (main.py's Settings writes ~/.local/state/filer/state.json).
+        function persist() { Settings.save(path, sortField, sortAsc, showHidden); }
+
+        // total size of the files directly in the current dir (not recursive —
+        // instant, no du). Shown at the bottom of the titlebar (via the window
+        // title, rendered by the hyprvtb plugin).
+        property real dirBytes: 0
+        readonly property string dirSizeStr: sizeStr(dirBytes)
+        function refreshDirSize() {
+            const es = FileOps.listDir(path);
+            let t = 0;
+            for (let i = 0; i < es.length; i++) t += es[i].size;
+            dirBytes = t;
+        }
+
+        readonly property string dirName: {
+            const p = path.replace(/\/+$/, "");
+            const i = p.lastIndexOf("/");
+            return i >= 0 ? (p.substring(i + 1) || "/") : p;
+        }
+
+        function join(dir, name) { return dir.replace(/\/+$/, "") + "/" + name; }
+        function parentOf(p) {
+            const q = p.replace(/\/+$/, "");
+            const i = q.lastIndexOf("/");
+            return i > 0 ? q.substring(0, i) : "/";
+        }
+        function dirNameOf(p) {
+            const q = p.replace(/\/+$/, "");
+            const i = q.lastIndexOf("/");
+            return i >= 0 ? q.substring(i + 1) : q;
+        }
+
+        // ---- tree model ----
+        // Order one directory level: hidden entries first, then dirs, then files
+        // (always), and within each group by the active sort field/direction.
+        function sortEntries(entries) {
+            const f = sortField, asc = sortAsc;
+            const arr = entries.slice();
+            arr.sort((a, b) => {
+                const ga = a.hidden ? 0 : (a.isDir ? 1 : 2);
+                const gb = b.hidden ? 0 : (b.isDir ? 1 : 2);
+                if (ga !== gb) return ga - gb;   // group order is fixed
+                let c;
+                if (f === "size") c = a.size - b.size;
+                else if (f === "created") c = a.created - b.created;
+                else if (f === "modified") c = a.modified - b.modified;
+                else c = 0;
+                if (c === 0) {                    // name tie-break (and f==="name")
+                    const an = a.name.toLowerCase(), bn = b.name.toLowerCase();
+                    c = an < bn ? -1 : (an > bn ? 1 : 0);
+                }
+                return asc ? c : -c;
+            });
+            return arr;
+        }
+
+        // Recursively flatten `dir` into `out`, descending into any subdir whose
+        // path is in expandedPaths. Reassigning `rows` at the end drives the view.
+        function buildRows(dir, depth, out) {
+            const entries = sortEntries(FileOps.listDir(dir));
+            for (let i = 0; i < entries.length; i++) {
+                const e = entries[i];
+                if (!view.showHidden && e.hidden) continue;   // "h" toggle: drop dotfiles
+                const exp = e.isDir && view.expandedPaths.has(e.path);
+                out.push({ name: e.name, path: e.path, isDir: e.isDir,
+                           size: e.size, created: e.created, modified: e.modified,
+                           depth: depth, expanded: exp });
+                if (exp) buildRows(e.path, depth + 1, out);
+            }
+        }
+        function rebuild() { const out = []; buildRows(path, 0, out); rows = out; }
+        function refresh() { rebuildKeepScroll(); }
+
+        // Reassigning the model resets ListView.contentY to 0, which is right for
+        // a cd but jarring for expand/collapse/refresh (the view jumps to the
+        // top). Save and restore the scroll offset around those rebuilds.
+        function rebuildKeepScroll() {
+            const y = list.contentY;
+            rebuild();
+            list.contentY = Math.max(0, Math.min(y, list.contentHeight - list.height));
+        }
+
+        function toggleExpand(p) {
+            if (expandedPaths.has(p)) expandedPaths.delete(p);
+            else expandedPaths.add(p);
+            rebuildKeepScroll();
+        }
+
+        function go(p) { path = p; selected = ""; rebuild(); refreshDirSize(); persist(); }
+
+        Component.onCompleted: { rebuild(); refreshDirSize(); }
+
+        // integer byte size -> compact string (delegate helper)
+        function sizeStr(b) {
+            if (b < 1024) return b + "B";
+            if (b < 1048576) return Math.round(b / 1024) + "K";
+            if (b < 1073741824) return (b / 1048576).toFixed(1) + "M";
+            return (b / 1073741824).toFixed(1) + "G";
+        }
+        // epoch seconds -> relative "N units ago" (delegate helper)
+        function fmtRel(sec) {
+            if (!sec) return "";
+            let d = Date.now() / 1000 - sec;
+            if (d < 0) d = 0;
+            const u = (n, w) => n + " " + w + (n === 1 ? "" : "s") + " ago";
+            if (d < 45) return "just now";
+            if (d < 5400) return u(Math.max(1, Math.round(d / 60)), "minute");
+            if (d < 79200) return u(Math.round(d / 3600), "hour");
+            if (d < 2160000) return u(Math.round(d / 86400), "day");     // < ~25d
+            if (d < 31557600) return u(Math.round(d / 2629800), "month");
+            return u(Math.round(d / 31557600), "year");
+        }
+
+        // ---- right strip: sort controls, mirroring the hyprvtb titlebar ----
+        // A full-height 32px strip on the right edge (same width as the window's
+        // vertical titlebar), with three 28×28 square buttons at the top — same
+        // geometry as the compositor's close/maximize/… cells — so the sort
+        // controls read as a second button stack just inboard of the real one.
+        // n = name, c = created, s = size; the active button shows ↑/↓ and
+        // re-clicking it flips direction.
+        Rectangle {
+            id: rightStrip
+            anchors { top: parent.top; right: parent.right; bottom: parent.bottom }
+            width: 32
+            // == the hyprvtb bar background (bg_color 0xff000000), and no border,
+            // so this strip and the compositor titlebar read as one continuous
+            // bar. The window frame already wraps content+bar as a single frame.
+            color: Theme.bg
+
+            // divider on the LEFT only (between the file list and the bar); the
+            // right edge stays seamless with the compositor titlebar.
+            Rectangle {
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                width: 1
+                color: Theme.border
+            }
+
+            // drag the empty strip to move the window, so the whole merged bar
+            // (this half + the compositor titlebar) is draggable. Declared before
+            // the buttons so their MouseAreas win their own cells. Calls the
+            // window's startSystemMove() directly (a QWindow slot) — the compositor
+            // then owns the drag, same as dragging the hyprvtb titlebar.
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                onPressed: win.startSystemMove()
+            }
+
+            // top stack: sort buttons, a spacer, then the file-operation buttons
+            // — all 28×28 cells matching the hyprvtb titlebar, so the strip reads
+            // as one continuous column of square buttons.
+            Column {
+                anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 2 }
+                spacing: 2
+
+                // sort buttons: n = name, c = created, s = size. The active one
+                // shows ↑/↓ and re-clicking it flips direction. 1px border idle,
+                // 2px accent + bgAlt fill when active/hovered.
+                Repeater {
+                    model: [ { l: "n", f: "name" }, { l: "c", f: "created" }, { l: "s", f: "size" } ]
+                    Rectangle {
+                        id: sortBtn
+                        required property var modelData
+                        width: 28
+                        height: 28
+                        readonly property bool active: view.sortField === modelData.f
+                        readonly property bool hot: active || sortMa.containsMouse
+                        color: hot ? Theme.bgAlt : Theme.bg
+                        border.width: hot ? 2 : 1
+                        border.color: hot ? win.fgAccent : Theme.border
+
+                        PixelText {
+                            anchors.centerIn: parent
+                            text: sortBtn.active ? (sortBtn.modelData.l + (view.sortAsc ? "↑" : "↓"))
+                                                 : sortBtn.modelData.l
+                            color: sortBtn.active ? win.fgAccent : win.fgText
+                        }
+                        MouseArea {
+                            id: sortMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: view.setSort(sortBtn.modelData.f)
+                        }
+                    }
+                }
+
+                // spacer separating the sort section from the operations section
+                Item { width: 28; height: 12 }
+
+                // file operations (formerly the bottom toolbar): + new, r rename,
+                // cp copy, cx cut, p paste, t trash. Delete is intentionally gone
+                // — it moves to the right-click menu later.
+                OpButton { label: "+"; onClicked: newDlg.open() }
+                OpButton {
+                    label: "r"; enabled: view.selected !== ""
+                    onClicked: { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); }
+                }
+                OpButton {
+                    label: "cp"; enabled: view.selected !== ""
+                    onClicked: view.clip = { op: "copy", path: view.selected }
+                }
+                OpButton {
+                    label: "cx"; enabled: view.selected !== ""
+                    onClicked: view.clip = { op: "cut", path: view.selected }
+                }
+                OpButton {
+                    label: "p"; enabled: view.clip !== null
+                    onClicked: {
+                        const src = view.clip.path;
+                        const dst = view.join(view.path, view.dirNameOf(src));
+                        if (view.clip.op === "copy") FileOps.run(["cp", "-a", "--", src, dst], dst);
+                        else { FileOps.run(["mv", "--", src, dst], dst); view.clip = null; }
+                    }
+                }
+                OpButton {
+                    label: "t"; enabled: view.selected !== ""
+                    onClicked: { FileOps.run(["gio", "trash", "--", view.selected], ""); view.selected = ""; }
+                }
+                // toggle: show/hide dotfiles. Lit while hidden files are shown.
+                OpButton { label: "h"; active: view.showHidden; onClicked: view.toggleHidden() }
+            }
+
+            // total size of the files directly in the current dir, at the BOTTOM
+            // of the strip as upright stacked characters — the same vertical style
+            // as the titlebar title, on filer's half of the merged bar.
+            Column {
+                anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 5 }
+                spacing: -2
+                Repeater {
+                    model: view.dirSizeStr.split("")
+                    PixelText {
+                        required property var modelData
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData
+                        color: !win.active ? Theme.inactive : Theme.textDim
+                    }
+                }
+            }
+        }
+
+        // ---- header: up + editable location bar ----
+        Rectangle {
+            id: header
+            anchors { top: parent.top; left: parent.left; right: rightStrip.left }
+            height: 30
+            color: Theme.bgAlt
+            border.color: Theme.border
+            border.width: 1
+
+            BrowserButton {
+                id: upBtn
+                anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
+                label: "↑ up"
+                winActive: win.active
+                onClicked: view.go(view.parentOf(view.path))
+            }
+
+            // editable path field with Tab-completion. The button's label is a
+            // PixelText centred in a 22px box; the field's text is a TextInput
+            // centred in a 22px box at the same header centre — so they align.
+            // (verticalCenterOffset trims the ~1px Text-vs-TextInput metric gap.)
+            Rectangle {
+                id: pathBox
+                anchors { left: upBtn.right; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
+                height: 22
+                clip: true
+                color: Theme.bg
+                border.width: 1
+                border.color: pathField.activeFocus ? Theme.accent : Theme.border
+
+                TextInput {
+                    id: pathField
+                    anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; verticalCenterOffset: -1; leftMargin: 6; rightMargin: 6 }
+                    color: win.active ? Theme.text : Theme.inactive
+                    font.family: Theme.font
+                    font.pixelSize: Theme.fontSize
+                    font.hintingPreference: Font.PreferFullHinting
+                    renderType: Text.NativeRendering
+                    antialiasing: false
+                    clip: true
+                    selectByMouse: true
+
+                    property var completions: []
+
+                    // Track view.path without a plain binding (which typing would
+                    // break): mirror it into `text` whenever it changes.
+                    property string bound: view.path
+                    onBoundChanged: { text = bound; completions = []; }
+                    Component.onCompleted: text = view.path
+
+                    function refreshCompletions() { completions = FileOps.completePath(text); }
+                    // longest common prefix of the candidate paths
+                    function common(arr) {
+                        if (arr.length === 0) return "";
+                        let p = arr[0];
+                        for (let i = 1; i < arr.length; i++) {
+                            const s = arr[i]; let j = 0;
+                            while (j < p.length && j < s.length && p[j] === s[j]) j++;
+                            p = p.substring(0, j);
+                        }
+                        return p;
+                    }
+
+                    onTextEdited: refreshCompletions()
+                    Keys.onPressed: (e) => {
+                        if (e.key === Qt.Key_Tab) {
+                            if (completions.length > 0) {
+                                const c = common(completions);
+                                if (c.length >= text.length) { text = c; cursorPosition = text.length; }
+                                refreshCompletions();
+                            }
+                            e.accepted = true;
+                        }
+                    }
+                    onAccepted: {
+                        const p = text.trim();
+                        if (p !== "" && FileOps.isDir(p)) view.go(p);
+                        else text = view.path;   // revert on a non-directory
+                        completions = [];
+                    }
+                    Keys.onEscapePressed: { text = view.path; completions = []; focus = false; }
+                }
+
+                // ghost completion: greyed suffix of the top candidate, drawn
+                // right after the typed text (Tab accepts it).
+                PixelText {
+                    id: ghost
+                    anchors { verticalCenter: pathField.verticalCenter }
+                    x: pathField.x + pathField.contentWidth
+                    color: win.active ? Theme.textDim : Theme.inactive
+                    visible: pathField.activeFocus && text !== ""
+                    text: (pathField.completions.length > 0 && pathField.completions[0].indexOf(pathField.text) === 0)
+                          ? pathField.completions[0].substring(pathField.text.length) : ""
+                }
+            }
+        }
+
+        // ---- tree list ----
+        ListView {
+            id: list
+            anchors { top: header.bottom; left: parent.left; right: rightStrip.left; bottom: parent.bottom; margins: 2 }
+            clip: true
+            model: view.rows
+            boundsBehavior: Flickable.StopAtBounds
+
+            delegate: Rectangle {
+                id: row
+                required property var modelData
+                required property int index
+                width: list.width
+                height: 22
+                readonly property string abs: modelData.path
+                readonly property int indent: modelData.depth * 14
+                color: view.selected === abs ? Theme.highlight : "transparent"
+
+                // row-wide select / open. Declared first so the expand toggle
+                // (declared last → higher z) wins clicks in its own area.
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: { view.selected = row.abs; view.selectedIsDir = row.modelData.isDir; }
+                    onDoubleClicked: {
+                        if (row.modelData.isDir) view.go(row.abs);
+                        else FileOps.execDetached(["xdg-open", row.abs]);
+                    }
+                }
+
+                // tree guide lines: one vertical rule per ancestor level, aligned
+                // under that ancestor's expand toggle, so an expanded subtree
+                // reads as a connected branch.
+                Repeater {
+                    model: row.modelData.depth
+                    Rectangle {
+                        required property int index
+                        width: 1
+                        height: row.height
+                        x: 6 + index * 14 + 8
+                        color: Theme.border
+                    }
+                }
+
+                PixelText {
+                    id: nameText
+                    anchors { left: parent.left; leftMargin: 6 + row.indent + 20; right: szText.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    elide: Text.ElideRight
+                    text: row.modelData.name
+                    color: !win.active ? Theme.inactive : (row.modelData.isDir ? Theme.accent : Theme.text)
+                }
+                // columns: size | created | modified (fixed widths, so they line
+                // up across rows). Dirs show no size but keep their timestamps.
+                PixelText {
+                    id: szText
+                    width: 52
+                    horizontalAlignment: Text.AlignRight
+                    anchors { right: createdText.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                    text: row.modelData.isDir ? "" : view.sizeStr(row.modelData.size)
+                    color: !win.active ? Theme.inactive : Theme.textDim
+                }
+                PixelText {
+                    id: createdText
+                    width: 146
+                    elide: Text.ElideRight
+                    anchors { right: modifiedText.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                    text: "c: " + view.fmtRel(row.modelData.created)
+                    color: !win.active ? Theme.inactive : Theme.textDim
+                }
+                PixelText {
+                    id: modifiedText
+                    width: 146
+                    elide: Text.ElideRight
+                    anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    text: "m: " + view.fmtRel(row.modelData.modified)
+                    color: !win.active ? Theme.inactive : Theme.textDim
+                }
+
+                // expand/collapse toggle, in the slot where the [ ] brackets were.
+                MouseArea {
+                    visible: row.modelData.isDir
+                    width: 16; height: 16
+                    anchors { left: parent.left; leftMargin: 6 + row.indent; verticalCenter: parent.verticalCenter }
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: view.toggleExpand(row.abs)
+                    PixelText {
+                        anchors.centerIn: parent
+                        text: row.modelData.expanded ? "−" : "+"
+                        color: !win.active ? Theme.inactive : Theme.accent
+                    }
+                }
+            }
+        }
+
+        // ---- modal dialogs (simple centered prompts) ----
+        // (delDlg is kept for the delete action, which moves to the right-click
+        // menu — see the trash/delete split; it's wired there later.)
+        BrowserPrompt {
+            id: newDlg
+            title: "new folder name"
+            onAccepted: (t) => { if (t) FileOps.run(["mkdir", "--", view.join(view.path, t)], view.join(view.path, t)); }
+        }
+        BrowserPrompt {
+            id: renameDlg
+            title: "rename to"
+            onAccepted: (t) => {
+                if (t) {
+                    const dst = view.join(view.parentOf(view.selected), t);
+                    FileOps.run(["mv", "--", view.selected, dst], dst);
+                }
+            }
+        }
+        BrowserConfirm {
+            id: delDlg
+            text: "permanently delete?\n" + view.dirNameOf(view.selected)
+            onConfirmed: { FileOps.run(["rm", "-rf", "--", view.selected], ""); view.selected = ""; }
+        }
+    }
+}

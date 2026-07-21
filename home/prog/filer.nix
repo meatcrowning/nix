@@ -1,7 +1,8 @@
 { pkgs, lib, ... }:
 
 # filer — the standalone Qt/QML file browser split out of the Quickshell panel
-# (source at ~/Projects/filer). This module:
+# (source at ~/nix/filer, in this repo so it travels to every machine on pull).
+# This module:
 #   * builds a fast-launching `filer` wrapper binary (task: instant cold start),
 #   * registers its desktop entry so it appears in the Quickshell runner, and
 #   * makes it the default handler for directories (task: default file manager).
@@ -9,9 +10,10 @@
 # INSTANT COLD START: the wrapper is a plain store binary — `python3` (with
 # PySide6) + Qt env baked in by wrapQtAppsHook — so launching it is just an
 # exec, with none of the ~1s `nix develop` evaluation the old run.sh launcher
-# paid every time. It still runs the LIVE source at ~/Projects/filer/main.py
+# paid every time. It still runs the LIVE source at ~/nix/filer/main.py
 # (not a baked copy), so day-to-day QML/Python edits need no rebuild — only
-# changing the runtime deps (PySide6, Qt) does.
+# changing the runtime deps (PySide6, Qt) does. The absolute path resolves on
+# both `top` and `air` (book), since ~/nix lives at /home/lam/nix on each.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
@@ -28,7 +30,7 @@ let
       runHook preInstall
       mkdir -p $out/bin
       makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
-        --add-flags /home/lam/Projects/filer/main.py \
+        --add-flags /home/lam/nix/filer/main.py \
         "''${qtWrapperArgs[@]}"
       runHook postInstall
     '';
