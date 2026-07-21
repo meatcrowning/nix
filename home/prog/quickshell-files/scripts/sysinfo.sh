@@ -3,10 +3,12 @@
 #   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging
 #
 # Wifi stays dropped (both hosts are wired). Battery is back, scoped to
-# /sys/class/power_supply/BAT* specifically (not a generic power_supply
-# scan — that's what previously picked up the Logitech trackball's own
-# hidpp battery on a desktop with no laptop battery at all). -1|0 when no
-# BAT* node exists, so the panel shows "--" and stays hidden on a desktop.
+# /sys/class/power_supply/BAT* (generic ACPI laptops) and macsmc-battery
+# (Apple Silicon under Asahi, book's driver) specifically — not a generic
+# power_supply type=Battery scan, since that's what previously picked up the
+# Logitech trackball's own hidpp battery on a desktop with no laptop battery
+# at all. -1|0 when neither node exists, so the panel shows "--" and stays
+# hidden on a desktop.
 # Brightness was dropped too: this machine's display is external (DDC/CI
 # over I2C via ddcutil), and ddcutil takes ~1.5s per call — too slow for
 # this 2s poll loop, so SysInfo.qml polls it separately on its own longer
@@ -46,6 +48,26 @@ for dir in /sys/class/hwmon/hwmon*/; do
     break
 done
 
+# k10temp is AMD-only (top). book (Apple Silicon under Asahi) has no
+# per-core CPU temp exposed at all, so fall back to macsmc_hwmon's
+# "Battery Hotspot" sensor as a stand-in — it sits right next to the SoC and
+# tracks load heat closely enough to serve as a "cpu temp" reading there.
+if [ "$cputemp" = "-1" ]; then
+    for dir in /sys/class/hwmon/hwmon*/; do
+        [ "$(cat "$dir/name" 2>/dev/null)" = "macsmc_hwmon" ] || continue
+        for lbl in "$dir"temp*_label; do
+            [ -f "$lbl" ] || continue
+            if [ "$(cat "$lbl" 2>/dev/null)" = "Battery Hotspot" ]; then
+                input="${lbl%_label}_input"
+                raw=$(cat "$input" 2>/dev/null)
+                [ -n "$raw" ] && cputemp=$raw
+                break
+            fi
+        done
+        break
+    done
+fi
+
 # GPU utilization + temp via nvidia-smi (NVIDIA proprietary driver). One cheap
 # (~20ms) query for both. "gpuUsePct|gpuTempC"; -1|-1 if nvidia-smi is missing
 # or errors (so the panel shows "--" rather than a stale value).
@@ -56,10 +78,11 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     [ -n "$g" ] && gpu="$g"
 fi
 
-# Battery percentage + charging flag via /sys/class/power_supply/BAT*.
-# "-1|0" when the node doesn't exist (desktop box, no battery).
+# Battery percentage + charging flag via /sys/class/power_supply/BAT*
+# (generic ACPI, e.g. top if it ever had one) or macsmc-battery (book).
+# "-1|0" when neither node exists (desktop box, no battery).
 bat="-1|0"
-for dir in /sys/class/power_supply/BAT*/; do
+for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/; do
     [ -f "$dir/capacity" ] || continue
     cap=$(cat "$dir/capacity" 2>/dev/null)
     status=$(cat "$dir/status" 2>/dev/null)

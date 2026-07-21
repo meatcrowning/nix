@@ -14,10 +14,10 @@ Singleton {
     property int    volume: -1          // 0-100, or -1 when unavailable
     property bool   muted: false
     property int    cpuUsage: -1        // 0-100, or -1 until the second poll
-    property int    cpuTemp: -1         // Celsius, k10temp's Tctl reading, or -1
-    property int    gpuUsage: -1        // 0-100, nvidia-smi utilization, or -1
-    property int    gpuTemp: -1         // Celsius, nvidia-smi temperature, or -1
-    property int    batteryPct: -1      // 0-100, or -1 when no BAT* node (desktop)
+    property int    cpuTemp: -1         // Celsius, k10temp's Tctl (or book's Battery Hotspot fallback), or -1
+    property int    gpuUsage: -1        // 0-100, nvidia-smi utilization, or -1 (no nvidia-smi, e.g. book)
+    property int    gpuTemp: -1         // Celsius, nvidia-smi temperature, or -1 (no nvidia-smi, e.g. book)
+    property int    batteryPct: -1      // 0-100, or -1 when no BAT*/macsmc-battery node (desktop)
     property bool   batteryCharging: false
 
     // Brightness. On a machine with a real panel backlight (laptops) this

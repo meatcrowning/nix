@@ -139,7 +139,11 @@ Column {
     }
 
     // ---------- GPU (usage / temp) ----------
+    // Auto-hides on a host with no nvidia-smi (e.g. book) — SysInfo.gpuUsage
+    // stays -1 on every poll there, same hardware-detection pattern as
+    // battery's visible check below.
     Item {
+        visible: SysInfo.gpuUsage >= 0
         width: parent.width
         height: gpuCol.implicitHeight
         Column {
