@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, host, ... }:
 
 # filer — the standalone Qt/QML file browser split out of the Quickshell panel
 # (source at ~/nix/filer, in this repo so it travels to every machine on pull).
@@ -17,24 +17,37 @@
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
-  filer = pkgs.stdenv.mkDerivation {
-    pname = "filer";
-    version = "live";
-    dontUnpack = true;
+  # On air, nixpkgs' Qt/Mesa can't get a GPU context: same root cause already
+  # diagnosed for hyprvtb/Hyprland in NEXTSTEPS.md — nixpkgs' Mesa has no
+  # working Apple Silicon (Honeykrisp) GBM/EGL driver, so QRhiGles2 fails to
+  # create a context and the app aborts. Fedora's own Mesa (system) does have
+  # it — it's what quickshell/Hyprland already run against here — so on air,
+  # skip nixpkgs' Qt/PySide6 entirely and exec the system python3 with the
+  # dnf-installed python3-pyside6 instead. `top` is untouched.
+  filer =
+    if host == "air" then
+      pkgs.writeShellScriptBin "filer" ''
+        exec /usr/bin/python3 /home/lam/nix/filer/main.py "$@"
+      ''
+    else
+      pkgs.stdenv.mkDerivation {
+        pname = "filer";
+        version = "live";
+        dontUnpack = true;
 
-    nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-    buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
+        nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
+        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
 
-    dontWrapQtApps = true; # we wrap the python launcher ourselves
-    installPhase = ''
-      runHook preInstall
-      mkdir -p $out/bin
-      makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
-        --add-flags /home/lam/nix/filer/main.py \
-        "''${qtWrapperArgs[@]}"
-      runHook postInstall
-    '';
-  };
+        dontWrapQtApps = true; # we wrap the python launcher ourselves
+        installPhase = ''
+          runHook preInstall
+          mkdir -p $out/bin
+          makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
+            --add-flags /home/lam/nix/filer/main.py \
+            "''${qtWrapperArgs[@]}"
+          runHook postInstall
+        '';
+      };
 in
 {
   home.packages = [ filer ];
