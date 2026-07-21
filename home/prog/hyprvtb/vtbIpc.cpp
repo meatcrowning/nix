@@ -111,6 +111,8 @@ namespace {
                 b.tooltip = pctDecode(f[3]);
             if (f.size() > 4)
                 b.draggable = (f[4] == "1");
+            if (f.size() > 5)
+                b.bottom = (f[5] == "1");
             if (!b.id.empty())
                 reg.buttons.push_back(std::move(b));
         }

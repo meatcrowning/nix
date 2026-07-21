@@ -13,11 +13,13 @@ the server side):
     <- ADDR <text>                               the title editor was submitted
     <- WAKE                                       the window was just un-hidden
 
-Buttons are (id, label, state[, tooltip[, draggable]]) tuples — state 0 normal,
-1 active/lit, 2 disabled — or the string "-" for a separator. Labels are
-1-2 char glyphs drawn in the titlebar's pixel font; the optional tooltip pops
-out beside the bar on hover; draggable (bool) marks a button reorderable by
-dragging (surfer's tabs). Fields may contain ANY character — the wire
+Buttons are (id, label, state[, tooltip[, draggable[, bottom]]]) tuples —
+state 0 normal, 1 active/lit, 2 disabled — or the string "-" for a separator.
+Labels are 1-2 char glyphs drawn in the titlebar's pixel font; the optional
+tooltip pops out beside the bar on hover; draggable (bool) marks a button
+reorderable by dragging (surfer's tabs); bottom (bool) anchors it to the
+bottom of the column (surfer's settings button). Fields may contain ANY
+character — the wire
 separators ':' and '|' (and newlines) are percent-encoded here and decoded by
 the plugin, so a "|" or ":" glyph label survives intact.
 
@@ -120,7 +122,8 @@ class VtbClient:
                 bid, label, state = b[0], b[1], b[2]
                 tip = b[3] if len(b) > 3 else ""
                 drag = 1 if (len(b) > 4 and b[4]) else 0
-                parts.append(f"{self._enc(bid)}:{self._enc(label)}:{int(state)}:{self._enc(tip)}:{drag}")
+                bottom = 1 if (len(b) > 5 and b[5]) else 0
+                parts.append(f"{self._enc(bid)}:{self._enc(label)}:{int(state)}:{self._enc(tip)}:{drag}:{bottom}")
         self._send_locked(f"REGISTER {self._pid} " + "|".join(parts))
 
     def _send_footer_locked(self):

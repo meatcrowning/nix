@@ -214,6 +214,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     pid_t                appPid();
     int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
     int                  appDropSlot(const Vector2D& localCoords, const SVtbAppReg& reg); // nearest draggable slot to cursor Y
+    void                 prewarmGlyphs(); // upload app-button glyph textures ahead of the render (Asahi tiler race)
     std::string          tooltipForCell(int cell); // "" = none
     double               cellCenterY(int cell);    // bar-local logical y of a hover cell's centre
     void                 renderTooltip(PHLMONITOR, const CBox& barBox, float scale, float a);

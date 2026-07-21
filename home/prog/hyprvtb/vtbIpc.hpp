@@ -6,15 +6,17 @@
 //
 // Wire protocol (newline-terminated ASCII lines):
 //   client -> server:
-//     REGISTER <pid> <id>:<label>:<state>[:<tooltip>[:<drag>]]|...
+//     REGISTER <pid> <id>:<label>:<state>[:<tooltip>[:<drag>[:<bottom>]]]|...
 //         Replaces the client's whole button set (re-send any time state
 //         changes — labels and states are data, not fixed at startup).
 //         state: 0 normal, 1 active/lit (toggles), 2 disabled (drawn dim,
 //         clicks ignored). tooltip is optional hover text. drag ("1") marks the
 //         button reorderable: dragging it up/down the column sends a REORDER
-//         back (surfer's tabs). Fields are percent-encoded by the client
-//         (%3A ':', %7C '|', %0A newline) and decoded here, so a label may be
-//         any glyph incl. "|" or ":". An entry with id "-" is a separator.
+//         back (surfer's tabs). bottom ("1") anchors the button to the BOTTOM of
+//         the inner column (stacked upward, below the top group and above the
+//         footer) — surfer's settings button. Fields are percent-encoded by the
+//         client (%3A ':', %7C '|', %0A newline) and decoded here, so a label
+//         may be any glyph incl. "|" or ":". An entry with id "-" is a separator.
 //     FOOTER <text>
 //         Short text drawn as stacked upright characters at the bottom of the
 //         inner column (filer's dir-size readout). Empty text clears it.
@@ -52,6 +54,7 @@ struct SVtbAppButton {
     int         state     = 0;     // 0 normal, 1 active/lit, 2 disabled
     std::string tooltip;
     bool        draggable = false; // reorderable by dragging (surfer tabs)
+    bool        bottom    = false; // anchored to the bottom of the column (settings)
     bool        isSep() const {
         return id == "-";
     }

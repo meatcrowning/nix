@@ -168,8 +168,8 @@ Window {
                        tip: i === currentTab ? "close · " + ttl : ttl, drag: true });
         }
         arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab" });
-        arr.push("-");
-        arr.push({ id: "settings", label: "st", state: 0, tip: "userscripts folder / settings" });
+        // settings pins to the bottom of the inner column (hyprvtb bottom-anchor)
+        arr.push({ id: "settings", label: "st", state: 0, tip: "userscripts folder / settings", bottom: true });
         return arr;
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)

@@ -83,20 +83,47 @@ static int    sysColX() { return gridLeftMargin() + cellSize() + VTB_CELL_GAP; }
 static double titleTexX() { return sysColX() + cellSize() / 2.0 - colW() / 2.0; }
 static double footerTexX() { return innerColX() + cellSize() / 2.0 - colW() / 2.0; }
 
-// Walk the app-button column's layout: calls cb(index, y) for every real
-// button cell (spacers advance y without a cell). Single source of truth for
-// both drawing and hit-testing.
+// Walk the app-button column's layout: calls cb(index, y) for EVERY entry
+// (cells and separators alike — the callback checks isSep()). Single source of
+// truth for drawing and hit-testing. Two groups: normal buttons stack from the
+// top down; buttons flagged `bottom` stack anchored to the bottom of the column
+// (the settings button), never overlapping the top group. `contentH` is the
+// bar's logical height.
 template <typename F>
-static void walkAppCells(const std::vector<SVtbAppButton>& btns, F&& cb) {
-    double y = VTB_PAD;
+static void walkAppLayout(const std::vector<SVtbAppButton>& btns, double contentH, F&& cb) {
+    const int  CELL = cellSize();
+    const auto adv  = [&](const SVtbAppButton& b) { return b.isSep() ? (VTB_SEP_H + VTB_CELL_GAP) : (CELL + VTB_CELL_GAP); };
+
+    double y = VTB_PAD; // top group
     for (size_t i = 0; i < btns.size(); i++) {
-        if (btns[i].isSep()) {
-            y += VTB_SEP_H + VTB_CELL_GAP;
+        if (btns[i].bottom)
             continue;
-        }
         cb(i, y);
-        y += cellSize() + VTB_CELL_GAP;
+        y += adv(btns[i]);
     }
+
+    double bh = 0; // bottom group's total height
+    for (size_t i = 0; i < btns.size(); i++)
+        if (btns[i].bottom)
+            bh += adv(btns[i]);
+
+    double by = std::max(y, contentH - VTB_PAD - bh); // from the bottom up, but never into the top group
+    for (size_t i = 0; i < btns.size(); i++) {
+        if (!btns[i].bottom)
+            continue;
+        cb(i, by);
+        by += adv(btns[i]);
+    }
+}
+
+// Total logical height of the bottom-anchored button group (0 if none) — used
+// to keep the footer above it.
+static double bottomGroupH(const std::vector<SVtbAppButton>& btns) {
+    double bh = 0;
+    for (const auto& b : btns)
+        if (b.bottom)
+            bh += b.isSep() ? (VTB_SEP_H + VTB_CELL_GAP) : (cellSize() + VTB_CELL_GAP);
+    return bh;
 }
 
 // KDE-style resize engine constants. Edge bitmask + the width of the
@@ -543,31 +570,29 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     m_lastIpcSerial = VtbIpc::serial.load(std::memory_order_relaxed);
     SVtbAppReg reg;
     if (VtbIpc::get(appPid(), reg)) {
-        // separators ("-"): a thin divider line centred in the separator gap
-        // (surfer's rule under copy-url, above the tab buttons)
-        {
-            double sy = VTB_PAD;
-            for (size_t i = 0; i < reg.buttons.size(); i++) {
-                if (reg.buttons[i].isSep()) {
-                    if (sy + VTB_SEP_H <= DECOBOX.h - VTB_PAD) {
-                        auto sc = textColor;
-                        sc.a *= a;
-                        g_pHyprOpenGL->renderRect(localBox(innerColX() + 2, sy + VTB_SEP_H / 2.0, cellSize() - 4, 1), sc, {});
-                    }
-                    sy += VTB_SEP_H + VTB_CELL_GAP;
-                } else {
-                    sy += CELL + VTB_CELL_GAP;
+        const double CONTENTH  = DECOBOX.h;
+        double       appBottom = VTB_PAD; // bottom of the TOP group (footer stays below it)
+
+        walkAppLayout(reg.buttons, CONTENTH, [&](size_t i, double y) {
+            const auto& b = reg.buttons[i];
+
+            // separator ("-"): a thin divider line centred in the gap
+            if (b.isSep()) {
+                if (y + VTB_SEP_H <= CONTENTH - VTB_PAD) {
+                    auto sc = textColor;
+                    sc.a *= a;
+                    g_pHyprOpenGL->renderRect(localBox(innerColX() + 2, y + VTB_SEP_H / 2.0, cellSize() - 4, 1), sc, {});
                 }
+                if (!b.bottom)
+                    appBottom = std::max(appBottom, y + VTB_SEP_H);
+                return;
             }
-        }
 
-        double appBottom = VTB_PAD; // where the buttons end (footer must stay below)
-        walkAppCells(reg.buttons, [&](size_t i, double y) {
-            if (y + CELL > DECOBOX.h - VTB_PAD)
+            if (y + CELL > CONTENTH - VTB_PAD)
                 return; // window too short for this cell — clip, don't overlap
-            appBottom = y + CELL;
+            if (!b.bottom)
+                appBottom = std::max(appBottom, y + CELL);
 
-            const auto& b        = reg.buttons[i];
             const bool  disabled = b.state == 2;
             const bool  hovered  = m_iHoverCell == (int)(VTB_APPCELL + i);
             const bool  lit      = !disabled && (hovered || b.state == 1);
@@ -581,10 +606,11 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
             drawGlyphXY(innerColX(), y, b.label, flashing ? bgColor : (disabled ? inactiveColor : (lit ? litCol : textColor)));
         });
 
-        // footer: short stacked text pinned to the bottom of the inner column
-        // (filer's dir-size readout). Rendered with the same pango path as the
-        // title; skipped if the window is too short to fit any of it.
-        const int FRUNLEN = std::round((DECOBOX.h - appBottom - VTB_PAD * 2) * SCALE);
+        // footer: short stacked text at the bottom of the inner column (filer's
+        // dir-size readout), kept ABOVE any bottom-anchored buttons. Rendered
+        // with the same pango path as the title; skipped if too short to fit.
+        const double BH     = bottomGroupH(reg.buttons);
+        const int    FRUNLEN = std::round((CONTENTH - appBottom - BH - VTB_PAD * 2) * SCALE);
         if (reg.footer != m_szLastFooter || FRUNLEN != m_iLastFooterRun || !m_pFooterTex) {
             m_szLastFooter   = reg.footer;
             m_iLastFooterRun = FRUNLEN;
@@ -593,21 +619,20 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         }
         if (m_pFooterTex && m_pFooterTex->m_texID != 0) {
             // the texture's glyphs start at its top; bottom-anchor using the real
-            // pango text height so the readout hugs the bar's bottom edge
+            // pango text height so the readout hugs the bar's bottom edge (above
+            // the bottom-anchored group, if any)
             const auto TSZ  = m_pFooterTex->m_size;
-            CBox       fbox = {barBox.x + footerTexX() * SCALE, barBox.y + barBox.h - VTB_PAD * SCALE - m_iFooterTextH, TSZ.x, TSZ.y};
+            CBox       fbox = {barBox.x + footerTexX() * SCALE, barBox.y + barBox.h - (VTB_PAD + BH) * SCALE - m_iFooterTextH, TSZ.x, TSZ.y};
             g_pHyprOpenGL->renderTexture(m_pFooterTex, fbox.round(), {.a = a});
         }
 
         // drag-reorder feedback: an accent insertion bar at the target slot and
         // a lifted copy of the dragged button following the cursor's Y.
         if (m_bAppDragging && m_iAppDragTarget >= 0) {
-            double tgtY = -1, srcY = -1;
-            walkAppCells(reg.buttons, [&](size_t i, double y) {
+            double tgtY = -1;
+            walkAppLayout(reg.buttons, CONTENTH, [&](size_t i, double y) {
                 if ((int)i == m_iAppDragTarget)
                     tgtY = y;
-                if ((int)i == m_iAppPressIdx)
-                    srcY = y;
             });
             if (tgtY >= 0) {
                 auto ac = accentColor;
@@ -615,8 +640,8 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
                 g_pHyprOpenGL->renderRect(localBox(innerColX(), tgtY - VTB_CELL_GAP / 2.0 - 1, CELL, 2), ac, {});
             }
             // lifted cell at the cursor's Y (clamped into the column)
-            const auto  MOUSELOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
-            const double liftY     = std::clamp(MOUSELOCAL.y - CELL / 2.0, (double)VTB_PAD, DECOBOX.h - VTB_PAD - CELL);
+            const auto   MOUSELOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
+            const double liftY      = std::clamp(MOUSELOCAL.y - CELL / 2.0, (double)VTB_PAD, CONTENTH - VTB_PAD - CELL);
             if (m_iAppPressIdx >= 0 && m_iAppPressIdx < (int)reg.buttons.size()) {
                 drawCellXY(innerColX(), liftY, FOCUSED ? accentColor : inactiveColor, true, false);
                 drawGlyphXY(innerColX(), liftY, reg.buttons[m_iAppPressIdx].label, FOCUSED ? accentColor : inactiveColor);
@@ -672,8 +697,8 @@ double CVtbDeco::cellCenterY(int cell) {
         if (VtbIpc::get(appPid(), reg)) {
             const size_t want = cell - VTB_APPCELL;
             double       cy   = -1;
-            walkAppCells(reg.buttons, [&](size_t i, double y) {
-                if (i == want)
+            walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
+                if (i == want && !reg.buttons[i].isSep())
                     cy = y + CELL / 2.0;
             });
             return cy;
@@ -849,11 +874,14 @@ void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
     if (!validMapped(m_pWindow))
         return;
 
-    // registration changed since the last render -> repaint the bar (covers
-    // sort-arrow flips after a click, surfer's loading state, etc., without
-    // waiting for the mouse to move)
+    // registration changed since the last render -> pre-upload the new glyphs
+    // (so the redraw doesn't create+sample them in one tiler job — the
+    // flash-blank fix) then repaint the bar. This runs from the timer, off the
+    // render pass, which is exactly the separate GPU submission we need; it's
+    // also why the serial check lives here and not in onMouseMove any more.
     if (ipcSerial != m_lastIpcSerial) {
         m_lastIpcSerial = ipcSerial;
+        prewarmGlyphs();
         damageEntire();
     }
 
@@ -902,11 +930,47 @@ int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
     if (c.x < innerColX() || c.x > innerColX() + cellSize())
         return -1;
     int hit = -1;
-    walkAppCells(reg.buttons, [&](size_t i, double y) {
-        if (c.y >= y && c.y <= y + cellSize())
+    walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
+        if (!reg.buttons[i].isSep() && c.y >= y && c.y <= y + cellSize())
             hit = (int)i;
     });
     return hit;
+}
+
+// Render this window's app-button glyph textures into the cache NOW, from the
+// main-thread timer — a GPU submission separate from (and before) the frame
+// that samples them. Fixes a flash-blank on Apple-Silicon/Asahi: when several
+// buttons changed colour at once (filer enabling copy/cut/… on a selection),
+// renderPass created those glyph textures AND sampled them in the same tiler
+// job, and the just-uploaded textures read blank for that one frame. Cheap: a
+// handful of small glyphs, only when the registration changed.
+void CVtbDeco::prewarmGlyphs() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+    const auto PMONITOR = PWINDOW->m_monitor.lock();
+    if (!PMONITOR)
+        return;
+    const float SCALE   = PMONITOR->m_scale;
+    const bool  FOCUSED = PWINDOW == Desktop::focusState()->window();
+
+    const auto accentColor   = configColor(g_pGlobalState->config.accentColor->value());
+    const auto inactiveColor = configColor(g_pGlobalState->config.inactiveColor->value());
+    const auto bgColor       = configColor(g_pGlobalState->config.bgColor->value());
+    const auto textColor     = FOCUSED ? accentColor : inactiveColor;
+
+    SVtbAppReg reg;
+    if (!VtbIpc::get(appPid(), reg))
+        return;
+    for (const auto& b : reg.buttons) {
+        if (b.isSep() || b.label.empty())
+            continue;
+        // every colour a glyph can be drawn in: normal, disabled, lit, flashed
+        glyphTex(b.label, textColor, SCALE);
+        glyphTex(b.label, inactiveColor, SCALE);
+        glyphTex(b.label, accentColor, SCALE);
+        glyphTex(b.label, bgColor, SCALE);
+    }
 }
 
 // Nearest DRAGGABLE app slot to the cursor's Y (the reorder drop target) — the
@@ -915,7 +979,7 @@ int CVtbDeco::appDropSlot(const Vector2D& c, const SVtbAppReg& reg) {
     int    best     = -1;
     double bestDist = 1e9;
     const int CELL  = cellSize();
-    walkAppCells(reg.buttons, [&](size_t i, double y) {
+    walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
         if (!reg.buttons[i].draggable)
             return;
         const double d = std::abs(c.y - (y + CELL / 2.0));
@@ -1376,15 +1440,10 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     if (!g_pGlobalState)
         return;
 
-    // App-button registrations change on the I/O thread, which can't touch the
-    // renderer; this main-thread hook notices the bump and damages the bar so
-    // new/changed buttons appear. (Most changes coincide with client-driven
-    // damage anyway — this catches the stragglers.)
-    const uint64_t IPCSERIAL = VtbIpc::serial.load(std::memory_order_relaxed);
-    if (IPCSERIAL != m_lastIpcSerial) {
-        m_lastIpcSerial = IPCSERIAL;
-        damageEntire();
-    }
+    // App-button registration changes are handled by the main-thread timer
+    // (mainThreadTick), which pre-warms glyph textures before repainting — see
+    // the note there. Doing it here too would repaint WITHOUT that pre-warm and
+    // reintroduce the flash-blank, so onMouseMove no longer touches the serial.
 
     if (m_bEdgeResizing) {
         updateEdgeResize();

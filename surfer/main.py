@@ -144,7 +144,8 @@ class Titlebar(QObject):
                 out.append("-")
             else:
                 out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
-                            str(b.get("tip", "")), bool(b.get("drag", False))))
+                            str(b.get("tip", "")), bool(b.get("drag", False)),
+                            bool(b.get("bottom", False))))
         self._client.set_buttons(out)
 
     @Slot(str)
