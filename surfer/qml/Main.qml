@@ -86,11 +86,6 @@ Window {
         return t.substring(0, 2);
     }
 
-    // Run userscripts matching `url` for a load phase ("start" | "end").
-    function runUserscripts(view, url, phase) {
-        var codes = UserScripts.matching(url, phase);
-        for (var i = 0; i < codes.length; i++) view.runJavaScript(codes[i]);
-    }
 
     // ---- page theming: wal-coloured scrollbars ----
     // Chromium's default scrollbars clash with the wal palette, so inject a
@@ -226,16 +221,9 @@ Window {
         Titlebar.setButtons(tbButtons);
     }
 
-    // Persistent profile (cookies/cache under the app's data dirs), shared by
-    // every tab. Downloads land in ~/Downloads with their suggested name.
-    WebEngineProfile {
-        id: sharedProfile
-        storageName: "surfer"
-        offTheRecord: false
-        onDownloadRequested: (download) => download.accept()
-    }
-
     // ---- content: one WebEngineView per tab, only the current one visible ----
+    // The shared persistent profile (with the userscript collection) is owned by
+    // Python — see SurferProfile / UserScripts in main.py.
     Item {
         anchors.fill: parent
 
@@ -248,17 +236,15 @@ Window {
                 required property string seed
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
-                profile: sharedProfile
+                profile: SurferProfile
                 Component.onCompleted: url = seed
 
-                // inject the themed scrollbar CSS + userscripts on navigation
+                // userscripts are injected by the profile (document-start, GM
+                // shim — see UserScripts in main.py); this just themes the
+                // scrollbar once the page has loaded
                 onLoadingChanged: (info) => {
-                    if (info.status === WebEngineView.LoadStartedStatus) {
-                        win.runUserscripts(webview, info.url.toString(), "start");
-                    } else if (info.status === WebEngineView.LoadSucceededStatus) {
+                    if (info.status === WebEngineView.LoadSucceededStatus)
                         webview.runJavaScript(win.scrollbarJs());
-                        win.runUserscripts(webview, info.url.toString(), "end");
-                    }
                 }
 
                 onNewWindowRequested: (request) => win.newTab(request.requestedUrl)

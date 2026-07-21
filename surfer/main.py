@@ -24,6 +24,7 @@ from PySide6.QtCore import QObject, Slot, Signal, QUrl, QFileSystemWatcher, Prop
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -166,15 +167,69 @@ class Clip(QObject):
         QGuiApplication.clipboard().setText(text)
 
 
-class UserScripts(QObject):
-    """Greasemonkey-style userscripts: every ``*.js`` in
-    $XDG_CONFIG_HOME/surfer/userscripts/ is loaded, its ``// ==UserScript==``
-    metadata block parsed (@name, @match/@include, @run-at), and injected into
-    matching pages on navigation (start/end phase). The folder is watched, so
-    dropping/editing a file reloads live — that's how you "import" a userscript.
+# A pragmatic GreaseMonkey API shim, prepended to every userscript so real GM
+# scripts (4chan X, OneeChan, …) run. GM values are backed by the page's
+# localStorage (per-origin, persisted in the profile). GM_xmlhttpRequest is a
+# fetch shim — it CANNOT bypass CORS the way a real manager does, so a script's
+# cross-origin calls only work where the remote sends CORS headers. `__ns`,
+# `__name`, `__ver` are declared per-script before this blob.
+_GM_SHIM = r"""
+var __gmkey = function(k){ return "__gm__"+__ns+"__"+k; };
+var __gmlisteners = {};
+function GM_getValue(k, d){ try{ var v = window.localStorage.getItem(__gmkey(k)); return v===null? d : JSON.parse(v); }catch(e){ return d; } }
+function GM_setValue(k, v){ var old; try{ old = GM_getValue(k); }catch(e){}
+  try{ window.localStorage.setItem(__gmkey(k), JSON.stringify(v)); }catch(e){}
+  var ls = __gmlisteners[k]; if(ls){ for(var i=0;i<ls.length;i++){ try{ ls[i](k, old, v, false); }catch(e){} } } }
+function GM_deleteValue(k){ try{ window.localStorage.removeItem(__gmkey(k)); }catch(e){} }
+function GM_listValues(){ var out=[]; var pre="__gm__"+__ns+"__"; try{ for(var i=0;i<window.localStorage.length;i++){ var kk=window.localStorage.key(i); if(kk && kk.indexOf(pre)===0) out.push(kk.slice(pre.length)); } }catch(e){} return out; }
+function GM_addValueChangeListener(k, fn){ (__gmlisteners[k]=__gmlisteners[k]||[]).push(fn); return k+":"+(__gmlisteners[k].length-1); }
+function GM_removeValueChangeListener(id){}
+function GM_addStyle(css){ var s=document.createElement("style"); s.textContent=css; (document.head||document.documentElement||document).appendChild(s); return s; }
+function GM_openInTab(url, opts){ try{ return window.open(url, "_blank"); }catch(e){ return null; } }
+function GM_setClipboard(text){ try{ navigator.clipboard.writeText(text); }catch(e){} }
+function GM_xmlhttpRequest(o){
+  o = o||{}; var ctrl = new AbortController();
+  var init = { method:(o.method||"GET"), headers:(o.headers||{}), signal:ctrl.signal, credentials:(o.anonymous?"omit":"include"), mode:"cors" };
+  if(o.data!=null) init.body = o.data;
+  fetch(o.url, init).then(function(r){
+    var rt = o.responseType;
+    var body = (rt==="arraybuffer")? r.arrayBuffer() : (rt==="blob")? r.blob() : r.text();
+    return Promise.resolve(body).then(function(b){
+      var hdr=""; try{ r.headers.forEach(function(v,k){ hdr += k+": "+v+"\r\n"; }); }catch(e){}
+      var resp = { readyState:4, status:r.status, statusText:r.statusText, finalUrl:r.url, responseHeaders:hdr };
+      if(rt==="arraybuffer"||rt==="blob"){ resp.response=b; resp.responseText=""; }
+      else if(rt==="json"){ try{ resp.response=JSON.parse(b); }catch(e){ resp.response=null; } resp.responseText=b; }
+      else { resp.response=b; resp.responseText=b; }
+      if(o.onload) o.onload(resp);
+    });
+  }).catch(function(e){ if(o.onerror) o.onerror({error:String(e), status:0, readyState:4}); });
+  return { abort:function(){ try{ctrl.abort();}catch(e){} } };
+}
+var unsafeWindow = window;
+var GM_info = { script:{ name:__name, version:__ver, namespace:__ns }, scriptHandler:"surfer", version:"0.1" };
+var GM = {
+  getValue:function(k,d){ return Promise.resolve(GM_getValue(k,d)); },
+  setValue:function(k,v){ return Promise.resolve(GM_setValue(k,v)); },
+  deleteValue:function(k){ return Promise.resolve(GM_deleteValue(k)); },
+  listValues:function(){ return Promise.resolve(GM_listValues()); },
+  openInTab:function(u,o){ return GM_openInTab(u,o); },
+  xmlHttpRequest:GM_xmlhttpRequest, setClipboard:GM_setClipboard, addStyle:GM_addStyle, info:GM_info
+};
+"""
 
-    QtWebEngine has no Chromium-extension support at all, so this (plus the
-    per-page CSS surfer already injects) is the extensibility surface."""
+
+class UserScripts(QObject):
+    """GreaseMonkey-style userscripts: every ``*.js`` in
+    $XDG_CONFIG_HOME/surfer/userscripts/ is loaded, its ``// ==UserScript==``
+    metadata parsed (@name/@namespace/@version, @match/@include, @run-at), and
+    compiled into a QWebEngineScript on the shared profile — injected at
+    document-start (or -end) with a GM_* API shim (see _GM_SHIM) so real GM
+    scripts run. Scoped to matching URLs by an in-page guard. The folder is
+    watched, so dropping/editing a file reloads live — that's how you import one.
+
+    QtWebEngine has no Chromium-extension support, so this + the injected CSS is
+    the extensibility surface. Limits: GM_xmlhttpRequest is a fetch shim (no CORS
+    bypass); GM values are localStorage-backed (per-origin, not cross-domain)."""
 
     changed = Signal()
 
@@ -183,11 +238,17 @@ class UserScripts(QObject):
         cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
         self._dir = cfg / "surfer" / "userscripts"
         self._scripts = []
+        self._profile = None
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._reload)
         self._watcher.fileChanged.connect(self._reload)
         self._ensure_dir()
         self._reload()
+
+    def set_profile(self, profile):
+        """Attach the shared WebEngine profile whose script collection we drive."""
+        self._profile = profile
+        self._rebuild_scripts()
 
     def _ensure_dir(self):
         try:
@@ -199,7 +260,7 @@ class UserScripts(QObject):
 
     @staticmethod
     def _parse_meta(text):
-        name, matches, run_at = "", [], "end"
+        meta = {"name": "", "namespace": "", "version": "", "matches": [], "run_at": "end"}
         m = re.search(r"//\s*==UserScript==(.*?)//\s*==/UserScript==", text, re.S)
         if m:
             for line in m.group(1).splitlines():
@@ -207,13 +268,17 @@ class UserScripts(QObject):
                 if not lm:
                     continue
                 key, val = lm.group(1).lower(), lm.group(2).strip()
-                if key == "name":
-                    name = val
+                if key == "name" and not meta["name"]:
+                    meta["name"] = val
+                elif key == "namespace":
+                    meta["namespace"] = val
+                elif key == "version":
+                    meta["version"] = val
                 elif key in ("match", "include"):
-                    matches.append(val)
+                    meta["matches"].append(val)
                 elif key == "run-at":
-                    run_at = "start" if "start" in val else "end"
-        return name, matches, run_at
+                    meta["run_at"] = "start" if "start" in val else "end"
+        return meta
 
     def _enabled_path(self):
         return self._dir.parent / "userscripts.json"
@@ -238,36 +303,53 @@ class UserScripts(QObject):
                 text = f.read_text(encoding="utf-8")
             except OSError:
                 continue
-            name, matches, run_at = self._parse_meta(text)
+            meta = self._parse_meta(text)
             scripts.append({
-                "name": name or f.stem, "file": f.name, "path": str(f),
-                "matches": matches, "runAt": run_at, "code": text,
+                "name": meta["name"] or f.stem, "namespace": meta["namespace"] or (meta["name"] or f.stem),
+                "version": meta["version"], "file": f.name, "path": str(f),
+                "matches": meta["matches"], "runAt": meta["run_at"], "code": text,
                 "enabled": bool(enabled.get(f.name, True)),
             })
             if str(f) not in self._watcher.files():
                 self._watcher.addPath(str(f))
         self._scripts = scripts
+        self._rebuild_scripts()
         self.changed.emit()
 
     @staticmethod
     def _glob_to_re(glob):
         return "^" + "".join(".*" if c == "*" else re.escape(c) for c in glob) + "$"
 
-    def _url_matches(self, matches, url):
-        if not matches:
-            return True
-        for g in matches:
-            try:
-                if re.match(self._glob_to_re(g), url):
-                    return True
-            except re.error:
-                continue
-        return False
+    def _wrap(self, s):
+        """Wrap a userscript in a URL guard + the GM shim, ready to inject."""
+        guard = json.dumps([self._glob_to_re(m) for m in s["matches"]])
+        header = ("var __ns=%s, __name=%s, __ver=%s;\n"
+                  % (json.dumps(s["namespace"]), json.dumps(s["name"]), json.dumps(s["version"])))
+        gate = ("var __g=%s;\n"
+                "if(__g.length){var __m=false;for(var __i=0;__i<__g.length;__i++){"
+                "try{if(new RegExp(__g[__i]).test(location.href)){__m=true;break;}}catch(e){}}"
+                "if(!__m)return;}\n" % guard)
+        return ("(function(){\n" + gate + header + _GM_SHIM
+                + "\ntry{\n" + s["code"] + "\n}catch(e){console.error('[surfer userscript]', __name, e);}\n"
+                + "})();\n")
 
-    @Slot(str, str, result="QVariantList")
-    def matching(self, url, phase):
-        return [s["code"] for s in self._scripts
-                if s["enabled"] and s["runAt"] == phase and self._url_matches(s["matches"], url)]
+    def _rebuild_scripts(self):
+        if self._profile is None:
+            return
+        coll = self._profile.scripts()
+        coll.clear()
+        for s in self._scripts:
+            if not s["enabled"]:
+                continue
+            qs = QWebEngineScript()
+            qs.setName(s["file"])
+            qs.setInjectionPoint(
+                QWebEngineScript.InjectionPoint.DocumentCreation if s["runAt"] == "start"
+                else QWebEngineScript.InjectionPoint.DocumentReady)
+            qs.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)  # GM scripts need the page's window
+            qs.setRunsOnSubFrames(False)
+            qs.setSourceCode(self._wrap(s))
+            coll.insert(qs)
 
     @Slot(str, bool)
     def setEnabled(self, file, on):
@@ -339,16 +421,25 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
+    # Shared persistent profile (cookies/cache/localStorage on disk). Owned by
+    # Python so UserScripts can drive its QWebEngineScript collection — the QML
+    # WebEngineScript element isn't creatable in this Qt build.
+    profile = QWebEngineProfile("surfer")
+    profile.setParent(app)
+    profile.downloadRequested.connect(lambda d: d.accept())
+
     palette = Palette(PANEL_THEME)
     titlebar = Titlebar()
     clip = Clip()
     session = Session()
     userscripts = UserScripts()
+    userscripts.set_profile(profile)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
     ctx.setContextProperty("UserScripts", userscripts)
+    ctx.setContextProperty("SurferProfile", profile)
     ctx.setContextProperty("startUrl", start_url)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
