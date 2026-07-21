@@ -81,6 +81,50 @@ Window {
         return t.substring(0, 2);
     }
 
+    // ---- page theming: wal-coloured scrollbars ----
+    // Chromium's default scrollbars clash with the wal palette, so inject a
+    // stylesheet into every page (::-webkit-scrollbar + the standard
+    // scrollbar-color) matching the DE. Same WebEngineScript mechanism a
+    // userscript would use — see the userScripts.collection on each view.
+    function cssColor(c) {
+        return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
+             + Math.round(c.b * 255) + "," + c.a.toFixed(3) + ")";
+    }
+    function scrollbarJs() {
+        var bg = cssColor(Theme.bg), thumb = cssColor(Theme.border), hover = cssColor(Theme.accent);
+        var css = "::-webkit-scrollbar{width:12px;height:12px;background:" + bg + ";}"
+                + "::-webkit-scrollbar-track{background:" + bg + ";}"
+                + "::-webkit-scrollbar-thumb{background:" + thumb + ";border:3px solid " + bg + ";}"
+                + "::-webkit-scrollbar-thumb:hover{background:" + hover + ";}"
+                + "::-webkit-scrollbar-corner{background:" + bg + ";}"
+                + "html{scrollbar-color:" + thumb + " " + bg + ";}";
+        return "(function(){var id='__surfer_scrollbar__';var css=" + JSON.stringify(css) + ";"
+             + "var s=document.getElementById(id);"
+             + "if(!s){s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s);}"
+             + "s.textContent=css;})();";
+    }
+    function reinjectScrollbar() {
+        for (var i = 0; i < viewRep.count; i++) {
+            var v = viewRep.itemAt(i);
+            if (v) v.runJavaScript(win.scrollbarJs());
+        }
+    }
+    // sourceCode re-evaluates when the palette changes (it reads Theme.*), so
+    // future page loads pick up new colours; reinjectScrollbar() live-updates
+    // already-open pages.
+    WebEngineScript {
+        id: scrollbarScript
+        name: "surfer-scrollbar"
+        injectionPoint: WebEngineScript.DocumentReady
+        worldId: WebEngineScript.ApplicationWorld
+        runOnSubframes: true
+        sourceCode: win.scrollbarJs()
+    }
+    Connections {
+        target: WalPalette
+        function onChanged() { win.reinjectScrollbar(); }
+    }
+
     // Address text -> url: explicit schemes pass through, host-ish strings get
     // https://, anything else becomes a DuckDuckGo search.
     function normalize(t) {
@@ -198,6 +242,7 @@ Window {
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
+                userScripts.collection: [ scrollbarScript ]
                 Component.onCompleted: url = seed
 
                 onNewWindowRequested: (request) => win.newTab(request.requestedUrl)
