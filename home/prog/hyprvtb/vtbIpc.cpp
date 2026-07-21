@@ -109,14 +109,18 @@ namespace {
             }
             if (f.size() > 3)
                 b.tooltip = pctDecode(f[3]);
+            if (f.size() > 4)
+                b.draggable = (f[4] == "1");
             if (!b.id.empty())
                 reg.buttons.push_back(std::move(b));
         }
 
         std::lock_guard lk(g_lk);
-        // keep an existing footer across button re-registrations
-        if (auto it = g_regs.find(pid); it != g_regs.end())
-            reg.footer = it->second.footer;
+        // keep an existing footer / title-edit flag across button re-registrations
+        if (auto it = g_regs.find(pid); it != g_regs.end()) {
+            reg.footer    = it->second.footer;
+            reg.titleEdit = it->second.titleEdit;
+        }
         c.pid          = pid;
         g_regs[pid]    = std::move(reg);
         g_regFd[pid]   = c.fd;
@@ -136,6 +140,22 @@ namespace {
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void handleTitleEdit(SClient& c, const std::string& arg) {
+        if (c.pid <= 0)
+            return;
+        const bool      on = (arg == "1");
+        std::lock_guard lk(g_lk);
+        // the reg may not exist yet if TITLEEDIT arrives before the first
+        // REGISTER — create a bare entry so the flag isn't lost
+        auto& reg = g_regs[c.pid];
+        if (g_regFd.find(c.pid) == g_regFd.end())
+            g_regFd[c.pid] = c.fd;
+        if (reg.titleEdit == on)
+            return;
+        reg.titleEdit = on;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
     void handleLine(SClient& c, const std::string& line) {
         if (line.starts_with("REGISTER "))
             handleRegister(c, line.substr(9));
@@ -143,6 +163,8 @@ namespace {
             handleFooter(c, line.substr(7));
         else if (line == "FOOTER")
             handleFooter(c, "");
+        else if (line.starts_with("TITLEEDIT "))
+            handleTitleEdit(c, line.substr(10));
     }
 
     void dropClient(SClient& c) {
@@ -297,13 +319,35 @@ bool VtbIpc::get(pid_t pid, SVtbAppReg& out) {
     return true;
 }
 
+namespace {
+    // Non-blocking + NOSIGNAL send of one line to whoever owns pid's buttons: a
+    // dead/wedged client can't stall or kill the compositor; its actual cleanup
+    // happens on the I/O thread's next poll. Call with g_lk held.
+    void sendLineLocked(pid_t pid, const std::string& line) {
+        const auto it = g_regFd.find(pid);
+        if (it == g_regFd.end())
+            return;
+        const std::string msg = line + "\n";
+        (void)!::send(it->second, msg.data(), msg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+    }
+}
+
 void VtbIpc::sendClick(pid_t pid, const std::string& id) {
     std::lock_guard lk(g_lk);
-    const auto      it = g_regFd.find(pid);
-    if (it == g_regFd.end())
-        return;
-    const std::string msg = "CLICK " + id + "\n";
-    // non-blocking + NOSIGNAL: a dead/wedged client can't stall or kill the
-    // compositor; its actual cleanup happens on the I/O thread's next poll
-    (void)!send(it->second, msg.data(), msg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+    sendLineLocked(pid, "CLICK " + id);
+}
+
+void VtbIpc::sendReorder(pid_t pid, const std::string& srcId, const std::string& dstId) {
+    std::lock_guard lk(g_lk);
+    sendLineLocked(pid, "REORDER " + srcId + " " + dstId);
+}
+
+void VtbIpc::sendAddr(pid_t pid, const std::string& text) {
+    std::lock_guard lk(g_lk);
+    sendLineLocked(pid, "ADDR " + text); // text is the rest of the line (no newline inserted)
+}
+
+void VtbIpc::sendWake(pid_t pid) {
+    std::lock_guard lk(g_lk);
+    sendLineLocked(pid, "WAKE");
 }

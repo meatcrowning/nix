@@ -3,9 +3,13 @@ import QtQuick.Window
 import QtWebEngine
 
 // surfer — minimal wal-themed browser. The content engine is QtWebEngine
-// (open Chromium); most of the browser chrome lives in the hyprvtb titlebar's
-// app-button column (back/forward/reload/tabs/copy-url), leaving the window
-// itself with just an address row + tab strip in filer's pixel-font style.
+// (open Chromium); ALL of the browser chrome lives in the hyprvtb titlebar:
+//   • outer column: the stacked title doubles as an editable ADDRESS BAR
+//     (click it, the compositor grabs the keyboard, type, Enter to go).
+//   • inner column: back / fwd / reload / copy-url, a separator, then one
+//     button per TAB (2-letter label from the page title, drag to reorder,
+//     click the active one to close), and a new-tab button at the bottom.
+// The window itself is pure page — no in-window toolbar or tab strip.
 Window {
     id: win
 
@@ -15,34 +19,66 @@ Window {
     minimumHeight: 320
     visible: true
     color: Theme.bg
-    title: "surf: " + (current && current.title !== "" ? current.title : "new tab")
 
-    // Focus-aware foreground, same idiom as filer: controls grey to the
-    // titlebar's inactive tone while the window is unfocused.
-    readonly property color fgAccent: win.active ? Theme.accent : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text  : Theme.inactive
+    // The window title IS the address bar: the plugin renders it as the stacked
+    // outer-column text and seeds its editor from it. Keep it the live URL.
+    title: current ? current.url.toString() : "surfer"
 
     readonly property string homeUrl: "https://start.duckduckgo.com/"
 
-    onClosing: Qt.quit()
+    onClosing: { win.saveSession(); Qt.quit(); }
 
     // ---- tabs ----
-    // `seed` is only the initial url; live navigation state stays inside each
-    // WebEngineView. NB (prototype): removing a tab makes the Repeater rebuild
-    // the views after it, which reloads those tabs — fine for v1.
+    // Each row is { tid, seed }: tid is a stable id (survives reorder/remove so
+    // titlebar button ids and the active-tab pointer stay valid); seed is only
+    // the initial url — live navigation state stays inside each WebEngineView.
     ListModel { id: tabs }
+    property int nextTid: 1
     property int currentTab: 0
+    property int tabRev: 0   // bumped on any add/remove/move so tbButtons re-evaluates
     readonly property Item current: viewRep.count > currentTab && currentTab >= 0
                                     ? viewRep.itemAt(currentTab) : null
 
+    // WAKE nudge: after the window is un-hidden (roll-up restore) QtWebEngine
+    // presents black until it redraws; hide+show the live view to force a frame.
+    property bool nudging: false
+    Timer { id: nudgeTimer; interval: 32; onTriggered: win.nudging = false }
+    function nudgeCurrent() { win.nudging = true; nudgeTimer.restart(); }
+
     function newTab(url) {
-        tabs.append({ seed: url });
+        tabs.append({ tid: nextTid, seed: url });
+        nextTid += 1;
         currentTab = tabs.count - 1;
+        tabRev += 1;
+    }
+    function tabIndexByTid(tid) {
+        for (var i = 0; i < tabs.count; i++)
+            if (tabs.get(i).tid === tid) return i;
+        return -1;
     }
     function closeTab(i) {
+        if (i < 0 || i >= tabs.count) return;
         if (tabs.count <= 1) { Qt.quit(); return; }
+        var wasCur = currentTab;
         tabs.remove(i);
-        if (currentTab >= tabs.count) currentTab = tabs.count - 1;
+        if (wasCur > i) currentTab = wasCur - 1;
+        else if (wasCur === i) currentTab = Math.min(i, tabs.count - 1);
+        tabRev += 1;
+    }
+    function moveTab(fromIdx, toIdx) {
+        if (fromIdx < 0 || toIdx < 0 || fromIdx >= tabs.count || toIdx >= tabs.count || fromIdx === toIdx)
+            return;
+        var curTid = tabs.get(currentTab).tid;
+        tabs.move(fromIdx, toIdx, 1);
+        currentTab = tabIndexByTid(curTid);
+        tabRev += 1;
+    }
+
+    // 2-letter tab label from the page title (what the titlebar used to show).
+    function tabLabel(v) {
+        var t = (v && v.title) ? v.title.trim() : "";
+        if (t.length === 0) return "·";
+        return t.substring(0, 2);
     }
 
     // Address text -> url: explicit schemes pass through, host-ish strings get
@@ -56,40 +92,88 @@ Window {
         return "https://duckduckgo.com/?q=" + encodeURIComponent(t);
     }
 
+    function saveSession() {
+        var urls = [];
+        for (var i = 0; i < tabs.count; i++) {
+            var v = viewRep.count > i ? viewRep.itemAt(i) : null;
+            var u = (v && v.url) ? v.url.toString() : tabs.get(i).seed;
+            urls.push(u && u !== "" ? u : win.homeUrl);
+        }
+        Session.save(urls, currentTab);
+    }
+
     // ---- hyprvtb titlebar buttons (the browser's real chrome) ----
-    readonly property var tbButtons: [
-        { id: "back",     label: "<",  state: current && current.canGoBack ? 0 : 2,    tip: "back" },
-        { id: "fwd",      label: ">",  state: current && current.canGoForward ? 0 : 2, tip: "forward" },
-        { id: "reload",   label: current && current.loading ? "x" : "r", state: 0,
-          tip: current && current.loading ? "stop loading" : "reload" },
-        { id: "newtab",   label: "+t", state: 0,                          tip: "new tab" },
-        { id: "closetab", label: "xt", state: 0,                          tip: "close tab" },
-        { id: "nexttab",  label: ">t", state: tabs.count > 1 ? 0 : 2,     tip: "next tab" },
-        { id: "copyurl",  label: "cu", state: current ? 0 : 2,            tip: "copy url" },
-    ]
+    readonly property var tbButtons: {
+        void tabRev;                    // structural-change dependency
+        var arr = [
+            { id: "back",    label: "<",  state: current && current.canGoBack ? 0 : 2,    tip: "back" },
+            { id: "fwd",     label: ">",  state: current && current.canGoForward ? 0 : 2, tip: "forward" },
+            { id: "reload",  label: current && current.loading ? "x" : "r", state: 0,
+              tip: current && current.loading ? "stop loading" : "reload" },
+            { id: "copyurl", label: "cu", state: current ? 0 : 2,           tip: "copy url" },
+            "-",
+        ];
+        for (var i = 0; i < tabs.count; i++) {
+            var v = viewRep.count > i ? viewRep.itemAt(i) : null;
+            var ttl = v && v.title ? v.title : "tab";
+            arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v),
+                       state: i === currentTab ? 1 : 0,
+                       tip: i === currentTab ? "close · " + ttl : ttl, drag: true });
+        }
+        arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab" });
+        return arr;
+    }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
     Connections {
         target: Titlebar
         function onClicked(id) {
-            switch (id) {
-            case "back":     if (win.current) win.current.goBack(); break;
-            case "fwd":      if (win.current) win.current.goForward(); break;
-            case "reload":
-                if (!win.current) break;
+            if (id === "back")    { if (win.current) win.current.goBack(); return; }
+            if (id === "fwd")     { if (win.current) win.current.goForward(); return; }
+            if (id === "reload") {
+                if (!win.current) return;
                 if (win.current.loading) win.current.stop(); else win.current.reload();
-                break;
-            case "newtab":   win.newTab(win.homeUrl); addr.selectAll(); addr.forceActiveFocus(); break;
-            case "closetab": win.closeTab(win.currentTab); break;
-            case "nexttab":  if (tabs.count > 1) win.currentTab = (win.currentTab + 1) % tabs.count; break;
-            case "copyurl":  if (win.current) Clip.copy(win.current.url.toString()); break;
+                return;
+            }
+            if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
+            if (id === "newtab")  { win.newTab(win.homeUrl); return; }
+            if (id.indexOf("tab:") === 0) {
+                var idx = win.tabIndexByTid(parseInt(id.substring(4)));
+                if (idx < 0) return;
+                if (idx === win.currentTab) win.closeTab(idx);  // re-click active tab = close
+                else win.currentTab = idx;
+                return;
             }
         }
+        // drag-reorder: move the src tab to the dst tab's slot
+        function onReordered(srcId, dstId) {
+            if (srcId.indexOf("tab:") !== 0 || dstId.indexOf("tab:") !== 0) return;
+            win.moveTab(win.tabIndexByTid(parseInt(srcId.substring(4))),
+                        win.tabIndexByTid(parseInt(dstId.substring(4))));
+        }
+        // the in-bar address editor was submitted
+        function onAddrSubmitted(text) {
+            var u = win.normalize(text);
+            if (u !== "" && win.current) win.current.url = u;
+        }
+        // un-hidden: force the live view to repaint out of its black state
+        function onWake() { win.nudgeCurrent(); }
     }
 
     Component.onCompleted: {
+        Titlebar.setTitleEdit(true);
+        if (startUrl !== "") {
+            newTab(normalize(startUrl));
+        } else {
+            var s = Session.load();
+            if (s.tabs && s.tabs.length > 0) {
+                for (var i = 0; i < s.tabs.length; i++) newTab(s.tabs[i]);
+                currentTab = Math.min(Math.max(0, s.current), tabs.count - 1);
+            } else {
+                newTab(homeUrl);
+            }
+        }
         Titlebar.setButtons(tbButtons);
-        newTab(startUrl !== "" ? normalize(startUrl) : homeUrl);
     }
 
     // Persistent profile (cookies/cache under the app's data dirs), shared by
@@ -101,114 +185,9 @@ Window {
         onDownloadRequested: (download) => download.accept()
     }
 
-    // ---- header: back-context address bar (filer's header look) ----
-    Rectangle {
-        id: header
-        anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 30
-        visible: win.visibility !== Window.FullScreen
-        color: Theme.bgAlt
-        border.color: Theme.border
-        border.width: 1
-
-        Rectangle {
-            id: addrBox
-            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
-            height: 22
-            clip: true
-            color: Theme.bg
-            border.width: 1
-            border.color: addr.activeFocus ? Theme.accent : Theme.border
-
-            TextInput {
-                id: addr
-                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; verticalCenterOffset: -1; leftMargin: 6; rightMargin: 6 }
-                color: addr.activeFocus ? (win.active ? Theme.text : Theme.inactive)
-                                        : (win.active ? Theme.textDim : Theme.inactive)
-                font.family: Theme.font
-                font.pixelSize: Theme.fontSize
-                font.hintingPreference: Font.PreferFullHinting
-                renderType: Text.NativeRendering
-                antialiasing: false
-                clip: true
-                selectByMouse: true
-
-                // mirror the live tab's url without a plain binding (typing
-                // would break it) — same pattern as filer's path field
-                property string bound: win.current ? win.current.url.toString() : ""
-                onBoundChanged: if (!activeFocus) text = bound
-                onActiveFocusChanged: if (activeFocus) selectAll()
-
-                onAccepted: {
-                    const u = win.normalize(text);
-                    if (u !== "" && win.current) { win.current.url = u; win.current.forceActiveFocus(); }
-                }
-                Keys.onEscapePressed: { text = bound; if (win.current) win.current.forceActiveFocus(); }
-            }
-        }
-    }
-
-    // ---- tab strip ----
-    Rectangle {
-        id: tabstrip
-        anchors { top: header.bottom; left: parent.left; right: parent.right }
-        height: 22
-        visible: win.visibility !== Window.FullScreen
-        color: Theme.bg
-
-        Row {
-            anchors.fill: parent
-            Repeater {
-                model: tabs
-                Rectangle {
-                    required property int index
-                    readonly property Item view: viewRep.count > index ? viewRep.itemAt(index) : null
-                    readonly property bool active: win.currentTab === index
-                    width: Math.min(180, (tabstrip.width - 24) / Math.max(1, tabs.count))
-                    height: tabstrip.height
-                    color: active ? Theme.highlight : Theme.bg
-                    border.width: 1
-                    border.color: active ? (win.active ? Theme.accent : Theme.inactive) : Theme.border
-
-                    PixelText {
-                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 6; rightMargin: 6 }
-                        elide: Text.ElideRight
-                        text: parent.view && parent.view.title !== "" ? parent.view.title : "…"
-                        color: parent.active ? win.fgAccent : win.fgText
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-                        onClicked: (e) => {
-                            if (e.button === Qt.MiddleButton) win.closeTab(parent.index);
-                            else win.currentTab = parent.index;
-                        }
-                    }
-                }
-            }
-
-            // new-tab box at the end of the strip
-            Rectangle {
-                width: 24
-                height: tabstrip.height
-                color: plusMa.containsMouse ? Theme.bgAlt : Theme.bg
-                border.width: 1
-                border.color: plusMa.containsMouse ? win.fgAccent : Theme.border
-                PixelText { anchors.centerIn: parent; text: "+"; color: win.fgText }
-                MouseArea {
-                    id: plusMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: { win.newTab(win.homeUrl); addr.selectAll(); addr.forceActiveFocus(); }
-                }
-            }
-        }
-    }
-
     // ---- content: one WebEngineView per tab, only the current one visible ----
     Item {
-        anchors { top: tabstrip.visible ? tabstrip.bottom : parent.top; left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors.fill: parent
 
         Repeater {
             id: viewRep
@@ -217,7 +196,7 @@ Window {
                 required property int index
                 required property string seed
                 anchors.fill: parent
-                visible: win.currentTab === index
+                visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
                 Component.onCompleted: url = seed
 

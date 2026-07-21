@@ -14,6 +14,7 @@ Host support mirrors filer (home/prog/surfer.nix): on air this runs the
 SYSTEM python3 + Fedora's python3-pyside6 (nixpkgs Mesa has no Apple Silicon
 GBM driver), on top the nixpkgs build.
 """
+import json
 import os
 import re
 import sys
@@ -112,15 +113,28 @@ class Palette(QObject):
 
 
 class Titlebar(QObject):
-    """hyprvtb app-button bridge — identical contract to filer's (QML pushes
-    button sets, clicks come back on the `clicked` signal, thread-safe via
-    queued signal delivery)."""
+    """hyprvtb app-button bridge. QML pushes button sets; the titlebar sends
+    back four things, each bounced through a Qt signal (queued across the
+    VtbClient I/O thread onto the GUI thread before any UI is touched):
+      clicked(id)          a button was clicked
+      reordered(src, dst)  a draggable tab button was dropped on another's slot
+      addrSubmitted(text)  the in-bar address editor was submitted (Enter)
+      wake()               the window was un-hidden (roll-up restore) — a cue to
+                           repaint (QtWebEngine blacks out after a hide)."""
 
     clicked = Signal(str)
+    reordered = Signal(str, str)
+    addrSubmitted = Signal(str)
+    wake = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._client = VtbClient(on_click=self.clicked.emit)
+        self._client = VtbClient(
+            on_click=self.clicked.emit,
+            on_reorder=lambda s, d: self.reordered.emit(s, d),
+            on_addr=self.addrSubmitted.emit,
+            on_wake=self.wake.emit,
+        )
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
@@ -130,12 +144,17 @@ class Titlebar(QObject):
                 out.append("-")
             else:
                 out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
-                            str(b.get("tip", ""))))
+                            str(b.get("tip", "")), bool(b.get("drag", False))))
         self._client.set_buttons(out)
 
     @Slot(str)
     def setFooter(self, text):
         self._client.set_footer(text)
+
+    @Slot(bool)
+    def setTitleEdit(self, on):
+        """Mark the stacked title (the outer column) an editable address bar."""
+        self._client.set_title_edit(on)
 
 
 class Clip(QObject):
@@ -144,6 +163,34 @@ class Clip(QObject):
     @Slot(str)
     def copy(self, text):
         QGuiApplication.clipboard().setText(text)
+
+
+class Session(QObject):
+    """Persists the open tabs (their URLs) + the active tab index to
+    $XDG_STATE_HOME/surfer/session.json, so a relaunch restores what was open."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+        self._path = state / "surfer" / "session.json"
+
+    @Slot("QVariantList", int)
+    def save(self, urls, current):
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"tabs": [str(u) for u in urls if str(u)], "current": int(current)}
+            self._path.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass
+
+    @Slot(result="QVariantMap")
+    def load(self):
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            tabs = [str(u) for u in data.get("tabs", []) if str(u)]
+            return {"tabs": tabs, "current": int(data.get("current", 0))}
+        except (OSError, ValueError, TypeError):
+            return {"tabs": [], "current": 0}
 
 
 def main():
@@ -167,9 +214,11 @@ def main():
     palette = Palette(PANEL_THEME)
     titlebar = Titlebar()
     clip = Clip()
+    session = Session()
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
+    ctx.setContextProperty("Session", session)
     ctx.setContextProperty("startUrl", start_url)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))

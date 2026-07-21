@@ -18,6 +18,8 @@
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
 
 #include <pango/pangocairo.h>
+#include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cmath>
 #include <chrono>
 #include <format>
@@ -131,6 +133,34 @@ CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
 
     m_pMouseButtonCallback = Event::bus()->m_events.input.mouse.button.listen([&](IPointer::SButtonEvent e, Event::SCallbackInfo& info) { onMouseButton(info, e); });
     m_pMouseMoveCallback   = Event::bus()->m_events.input.mouse.move.listen([&](Vector2D c, Event::SCallbackInfo& info) { onMouseMove(c); });
+    m_pKeyboardKeyCallback = Event::bus()->m_events.input.keyboard.key.listen([&](IKeyboard::SKeyEvent e, Event::SCallbackInfo& info) { onKeyboardKey(info, e); });
+}
+
+// Codepoint-boundary walk over a UTF-8 buffer: previous / next boundary byte
+// offset from `pos` (used by the title editor's cursor movement / deletes).
+static size_t prevCp(const std::string& s, size_t pos) {
+    if (pos == 0)
+        return 0;
+    size_t p = pos - 1;
+    while (p > 0 && (static_cast<unsigned char>(s[p]) & 0xC0) == 0x80)
+        p--;
+    return p;
+}
+static size_t nextCp(const std::string& s, size_t pos) {
+    if (pos >= s.size())
+        return s.size();
+    size_t p = pos + 1;
+    while (p < s.size() && (static_cast<unsigned char>(s[p]) & 0xC0) == 0x80)
+        p++;
+    return p;
+}
+static int countCp(const std::string& s, size_t byteLen) {
+    int n = 0;
+    for (size_t i = 0; i < byteLen && i < s.size();) {
+        i = nextCp(s, i);
+        n++;
+    }
+    return n;
 }
 
 CVtbDeco::~CVtbDeco() {
@@ -220,7 +250,8 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 // top-down): every UTF-8 codepoint on its own pango line, centered, with
 // antialiasing off so the pixel font stays crisp. One column wide (colW) —
 // used for the title (outer column) and the app footer (inner column).
-SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outTextH) {
+SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outTextH, int* outLines,
+                                                bool ellipsis) {
     const auto FONT  = g_pGlobalState->config.font->value();
     const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
     const int  BARW  = std::round(colW() * scale);
@@ -229,7 +260,8 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
         return nullptr;
 
     // split into codepoints, one per line; truncate to what fits, with a
-    // trailing "…" cell when cut short
+    // trailing "…" cell when cut short (unless ellipsis is off — the editor
+    // stacks the whole buffer and lets pango clip to the surface)
     const int                maxLines = runLenPx / SIZE;
     std::vector<std::string> cps;
     for (size_t i = 0; i < text.size();) {
@@ -240,7 +272,7 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
         i += len;
     }
     std::string stacked;
-    const bool  truncated = (int)cps.size() > maxLines;
+    const bool  truncated = ellipsis && (int)cps.size() > maxLines;
     const int   shown     = truncated ? std::max(0, maxLines - 1) : (int)cps.size();
     for (int i = 0; i < shown; i++) {
         if (i)
@@ -249,6 +281,8 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     }
     if (truncated)
         stacked += "\n…";
+    if (outLines)
+        *outLines = shown + (truncated ? 1 : 0);
 
     auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
     auto CR   = cairo_create(SURF);
@@ -337,10 +371,16 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         m_tooltipCache.clear();
         m_pTitleTex     = nullptr;
         m_pFooterTex    = nullptr;
+        m_pEditTex      = nullptr;
         m_szLastFooter.clear();
         m_lastTextColor = (uint64_t)textColor.getAsHex();
         m_bLastFocus    = FOCUSED;
     }
+
+    // The title editor needs the keyboard, so it only lives while focused —
+    // clicking away (losing focus) discards the edit.
+    if (m_bEditing && !FOCUSED)
+        exitEdit(false);
 
     // A maximized window is pinned to its target: anything that moved or
     // resized it (meta+drag, apps repositioning themselves) gets snapped
@@ -441,24 +481,86 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawGlyph(4, m_bRolledUp ? "<<" : ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor);
 
     // ---- title, a column of upright letters (outer column, under the cells) ----
-    const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
-    if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
-        m_szLastTitle   = PWINDOW->m_title;
-        m_iLastTitleRun = RUNLEN;
-        renderTitleTex(RUNLEN, SCALE, textColor);
+    // In edit mode the same region becomes the address editor: it shows the
+    // live edit buffer, a caret (or an inverted block when the whole field is
+    // selected), instead of the window title.
+    const int    RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
+    const double TITLEX = barBox.x + titleTexX() * SCALE;
+    const double TITLEY = barBox.y + titleTop() * SCALE;
+
+    if (m_bEditing) {
+        if (!m_pEditTex) {
+            int th = 0, lines = 0;
+            // a blank buffer still needs a texture so the caret has a line to sit on
+            const std::string SHOWN = m_editBuf.empty() ? std::string(" ") : m_editBuf;
+            m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, m_editSelectAll ? bgColor : textColor, &th, &lines, /*ellipsis=*/false);
+            m_iEditLineH = lines > 0 ? th / lines : std::round(g_pGlobalState->config.fontSize->value() * SCALE);
+            m_iEditLines = lines;
+        }
+        if (m_pEditTex && m_pEditTex->m_texID != 0) {
+            const auto TSZ = m_pEditTex->m_size;
+            // whole-field selection: an accent block behind the (bg-coloured)
+            // text, sized to the real text height (not the full column run)
+            if (m_editSelectAll) {
+                const double selH = std::min((double)TSZ.y, (double)(m_iEditLineH * std::max(1, m_iEditLines)));
+                CBox         sel  = {TITLEX, TITLEY, TSZ.x, selH};
+                g_pHyprOpenGL->renderRect(sel.round(), accentColor, {});
+            }
+            CBox tbox = {TITLEX, TITLEY, TSZ.x, TSZ.y};
+            g_pHyprOpenGL->renderTexture(m_pEditTex, tbox.round(), {.a = a});
+        }
+        // caret: a horizontal bar between codepoint rows at the cursor, blinking
+        // ~500ms. Not drawn while the whole field is selected (the block shows it).
+        if (!m_editSelectAll && m_iEditLineH > 0) {
+            const long ms      = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_editBlinkAt).count();
+            const bool blinkOn = (ms / 500) % 2 == 0;
+            if (blinkOn) {
+                int caretLine = countCp(m_editBuf, m_editCursor);
+                const int maxLine = std::max(0, RUNLEN / std::max(1, m_iEditLineH));
+                caretLine       = std::clamp(caretLine, 0, maxLine);
+                const double cy = TITLEY + caretLine * (double)m_iEditLineH;
+                CBox caret = {TITLEX + 2 * SCALE, cy, (double)(cellSize() - 4) * SCALE, std::max(1.0, 2.0 * (double)SCALE)};
+                g_pHyprOpenGL->renderRect(caret.round(), accentColor, {});
+            }
+            damageEntire(); // keep the blink ticking on a still cursor
+        }
+    } else {
+        if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
+            m_szLastTitle   = PWINDOW->m_title;
+            m_iLastTitleRun = RUNLEN;
+            renderTitleTex(RUNLEN, SCALE, textColor);
+        }
+
+        if (m_pTitleTex && m_pTitleTex->m_texID != 0) {
+            const auto TSZ  = m_pTitleTex->m_size;
+            CBox       tbox = {TITLEX, TITLEY, TSZ.x, TSZ.y};
+            g_pHyprOpenGL->renderTexture(m_pTitleTex, tbox.round(), {.a = a});
+        }
     }
     m_fLastScale = SCALE;
-
-    if (m_pTitleTex && m_pTitleTex->m_texID != 0) {
-        const auto TSZ  = m_pTitleTex->m_size;
-        CBox       tbox = {barBox.x + titleTexX() * SCALE, barBox.y + titleTop() * SCALE, TSZ.x, TSZ.y};
-        g_pHyprOpenGL->renderTexture(m_pTitleTex, tbox.round(), {.a = a});
-    }
 
     // ---- inner column: app-registered buttons + stacked footer (vtbIpc) ----
     m_lastIpcSerial = VtbIpc::serial.load(std::memory_order_relaxed);
     SVtbAppReg reg;
     if (VtbIpc::get(appPid(), reg)) {
+        // separators ("-"): a thin divider line centred in the separator gap
+        // (surfer's rule under copy-url, above the tab buttons)
+        {
+            double sy = VTB_PAD;
+            for (size_t i = 0; i < reg.buttons.size(); i++) {
+                if (reg.buttons[i].isSep()) {
+                    if (sy + VTB_SEP_H <= DECOBOX.h - VTB_PAD) {
+                        auto sc = textColor;
+                        sc.a *= a;
+                        g_pHyprOpenGL->renderRect(localBox(innerColX() + 2, sy + VTB_SEP_H / 2.0, cellSize() - 4, 1), sc, {});
+                    }
+                    sy += VTB_SEP_H + VTB_CELL_GAP;
+                } else {
+                    sy += CELL + VTB_CELL_GAP;
+                }
+            }
+        }
+
         double appBottom = VTB_PAD; // where the buttons end (footer must stay below)
         walkAppCells(reg.buttons, [&](size_t i, double y) {
             if (y + CELL > DECOBOX.h - VTB_PAD)
@@ -495,6 +597,31 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
             const auto TSZ  = m_pFooterTex->m_size;
             CBox       fbox = {barBox.x + footerTexX() * SCALE, barBox.y + barBox.h - VTB_PAD * SCALE - m_iFooterTextH, TSZ.x, TSZ.y};
             g_pHyprOpenGL->renderTexture(m_pFooterTex, fbox.round(), {.a = a});
+        }
+
+        // drag-reorder feedback: an accent insertion bar at the target slot and
+        // a lifted copy of the dragged button following the cursor's Y.
+        if (m_bAppDragging && m_iAppDragTarget >= 0) {
+            double tgtY = -1, srcY = -1;
+            walkAppCells(reg.buttons, [&](size_t i, double y) {
+                if ((int)i == m_iAppDragTarget)
+                    tgtY = y;
+                if ((int)i == m_iAppPressIdx)
+                    srcY = y;
+            });
+            if (tgtY >= 0) {
+                auto ac = accentColor;
+                ac.a *= a;
+                g_pHyprOpenGL->renderRect(localBox(innerColX(), tgtY - VTB_CELL_GAP / 2.0 - 1, CELL, 2), ac, {});
+            }
+            // lifted cell at the cursor's Y (clamped into the column)
+            const auto  MOUSELOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
+            const double liftY     = std::clamp(MOUSELOCAL.y - CELL / 2.0, (double)VTB_PAD, DECOBOX.h - VTB_PAD - CELL);
+            if (m_iAppPressIdx >= 0 && m_iAppPressIdx < (int)reg.buttons.size()) {
+                drawCellXY(innerColX(), liftY, FOCUSED ? accentColor : inactiveColor, true, false);
+                drawGlyphXY(innerColX(), liftY, reg.buttons[m_iAppPressIdx].label, FOCUSED ? accentColor : inactiveColor);
+            }
+            damageEntire();
         }
     }
 
@@ -730,6 +857,13 @@ void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
         damageEntire();
     }
 
+    // address editor open: keep frames coming so the caret blinks on a still
+    // cursor, and skip the hover-tooltip dwell (the bar is in edit mode).
+    if (m_bEditing) {
+        damageEntire();
+        return;
+    }
+
     // tooltip dwell (hover state is maintained by onMouseMove; this just starts
     // the slide-in once the cursor has rested long enough). Skip if we're
     // already showing THIS cell — otherwise re-fire when the tooltip is absent,
@@ -773,6 +907,180 @@ int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
             hit = (int)i;
     });
     return hit;
+}
+
+// Nearest DRAGGABLE app slot to the cursor's Y (the reorder drop target) — the
+// reorder is confined to the draggable group (surfer's tabs); -1 if none.
+int CVtbDeco::appDropSlot(const Vector2D& c, const SVtbAppReg& reg) {
+    int    best     = -1;
+    double bestDist = 1e9;
+    const int CELL  = cellSize();
+    walkAppCells(reg.buttons, [&](size_t i, double y) {
+        if (!reg.buttons[i].draggable)
+            return;
+        const double d = std::abs(c.y - (y + CELL / 2.0));
+        if (d < bestDist) {
+            bestDist = d;
+            best     = (int)i;
+        }
+    });
+    return best;
+}
+
+// ---- title address editor -------------------------------------------------
+
+bool CVtbDeco::titleEditEnabled() {
+    SVtbAppReg reg;
+    return VtbIpc::get(appPid(), reg) && reg.titleEdit;
+}
+
+// The clickable address-bar region: the outer column band from the title top
+// down (where the stacked title texture is drawn).
+bool CVtbDeco::inTitleRegion(const Vector2D& c) {
+    return c.y >= titleTop() && c.x >= sysColX() && c.x <= sysColX() + cellSize();
+}
+
+void CVtbDeco::enterEdit() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+    m_editBuf       = PWINDOW->m_title; // seed with the current address (surfer sets title = URL)
+    m_editCursor    = m_editBuf.size();
+    m_editSelectAll = true;             // click-to-edit selects the whole field, like a browser
+    m_bEditing      = true;
+    m_pEditTex      = nullptr;
+    m_editBlinkAt   = Time::steadyNow();
+    hideTooltip();
+    damageEntire();
+}
+
+void CVtbDeco::exitEdit(bool submit) {
+    if (!m_bEditing)
+        return;
+    m_bEditing = false;
+    if (submit)
+        VtbIpc::sendAddr(appPid(), m_editBuf);
+    m_editBuf.clear();
+    m_editCursor    = 0;
+    m_editSelectAll = false;
+    m_pEditTex      = nullptr;
+    damageEntire();
+}
+
+// Keyboard grab while the address editor is open: swallow the keys we act on
+// (info.cancelled stops them before keybinds AND the focused client), but let
+// Ctrl/Alt/Super combos through so compositor shortcuts still work — same as a
+// focused text field. Fires for every deco's listener; only the one editing acts.
+void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEvent& e) {
+    if (!m_bEditing)
+        return;
+
+    // Only swallow keys while WE are the focused window. If focus slipped away
+    // before renderPass could cancel the edit, bail out here — never eat keys
+    // meant for another client.
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || PWINDOW != Desktop::focusState()->window()) {
+        exitEdit(false);
+        return;
+    }
+
+    const auto KB = g_pSeatManager->m_keyboard.lock();
+    if (!KB || !KB->m_xkbState)
+        return;
+
+    const uint32_t     xkbcode = e.keycode + 8; // libinput -> xkb
+    const xkb_keysym_t sym     = xkb_state_key_get_one_sym(KB->m_xkbState, xkbcode);
+    const uint32_t     mods    = KB->getModifiers();
+
+    // let global keybinds (Super+…, Ctrl/Alt combos) pass straight through
+    if (mods & (HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META))
+        return;
+
+    char       utf8[8] = {0};
+    const int  n       = xkb_state_key_get_utf8(KB->m_xkbState, xkbcode, utf8, sizeof(utf8));
+    const bool printable = n > 0 && static_cast<unsigned char>(utf8[0]) >= 0x20 && static_cast<unsigned char>(utf8[0]) != 0x7f;
+
+    bool ours = printable;
+    switch (sym) {
+        case XKB_KEY_Escape:
+        case XKB_KEY_Return:
+        case XKB_KEY_KP_Enter:
+        case XKB_KEY_BackSpace:
+        case XKB_KEY_Delete:
+        case XKB_KEY_Left:
+        case XKB_KEY_Right:
+        case XKB_KEY_Home:
+        case XKB_KEY_End: ours = true; break;
+        default: break;
+    }
+    if (!ours) // modifiers, F-keys, etc. — leave for the normal pipeline
+        return;
+
+    info.cancelled = true;                                  // swallow press AND release
+    if (e.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+        return;
+
+    m_editBlinkAt = Time::steadyNow(); // reset blink so the caret is solid while typing
+
+    if (sym == XKB_KEY_Escape) {
+        exitEdit(false);
+        return;
+    }
+    if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) {
+        exitEdit(true);
+        return;
+    }
+
+    // whole-field selection drops on the first edit, replacing/collapsing it
+    if (m_editSelectAll) {
+        switch (sym) {
+            case XKB_KEY_Left:
+            case XKB_KEY_Home: m_editCursor = 0; m_editSelectAll = false; damageEntire(); return;
+            case XKB_KEY_Right:
+            case XKB_KEY_End: m_editCursor = m_editBuf.size(); m_editSelectAll = false; damageEntire(); return;
+            case XKB_KEY_BackSpace:
+            case XKB_KEY_Delete: m_editBuf.clear(); m_editCursor = 0; m_editSelectAll = false; m_pEditTex = nullptr; damageEntire(); return;
+            default: break; // printable: replace the whole field
+        }
+        m_editBuf.clear();
+        m_editCursor    = 0;
+        m_editSelectAll = false;
+        m_pEditTex      = nullptr;
+    }
+
+    switch (sym) {
+        case XKB_KEY_Left: m_editCursor = prevCp(m_editBuf, m_editCursor); damageEntire(); return;
+        case XKB_KEY_Right: m_editCursor = nextCp(m_editBuf, m_editCursor); damageEntire(); return;
+        case XKB_KEY_Home: m_editCursor = 0; damageEntire(); return;
+        case XKB_KEY_End: m_editCursor = m_editBuf.size(); damageEntire(); return;
+        case XKB_KEY_BackSpace: {
+            if (m_editCursor > 0) {
+                const size_t p = prevCp(m_editBuf, m_editCursor);
+                m_editBuf.erase(p, m_editCursor - p);
+                m_editCursor = p;
+                m_pEditTex   = nullptr;
+                damageEntire();
+            }
+            return;
+        }
+        case XKB_KEY_Delete: {
+            if (m_editCursor < m_editBuf.size()) {
+                const size_t nx = nextCp(m_editBuf, m_editCursor);
+                m_editBuf.erase(m_editCursor, nx - m_editCursor);
+                m_pEditTex = nullptr;
+                damageEntire();
+            }
+            return;
+        }
+        default: break;
+    }
+
+    if (printable) {
+        m_editBuf.insert(m_editCursor, utf8, n);
+        m_editCursor += n;
+        m_pEditTex = nullptr;
+        damageEntire();
+    }
 }
 
 // ---- input ----------------------------------------------------------------
@@ -1122,6 +1430,32 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         return;
     }
 
+    // app-button press in progress: promote to a drag once the cursor travels,
+    // then track the drop slot (draggable buttons only — surfer's tabs). A
+    // non-draggable button dragged off cancels its pending click.
+    if (m_bAppPressPending) {
+        const auto   DELTA = g_pInputManager->getMouseCoordsInternal() - m_appDragMouseStart;
+        const double dist  = std::abs(DELTA.x) + std::abs(DELTA.y);
+        if (!m_bAppDragging && dist > 6) {
+            if (m_appPressDraggable)
+                m_bAppDragging = true;
+            else
+                m_bAppPressPending = false;
+        }
+        if (m_bAppDragging) {
+            SVtbAppReg reg;
+            if (VtbIpc::get(appPid(), reg)) {
+                const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
+                const int  tgt   = appDropSlot(LOCAL, reg);
+                if (tgt != m_iAppDragTarget)
+                    m_iAppDragTarget = tgt;
+            }
+            damageEntire();
+        }
+        if (m_bAppPressPending)
+            return; // holding a button — don't fall through to window hover/drag
+    }
+
     // hover feedback on the button cells (system column + app column)
     if (validMapped(m_pWindow) && !m_bMinimized) {
         const auto BOX    = assignedBoxGlobal();
@@ -1201,6 +1535,18 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     m_bCancelledDown = true;
     hideTooltip(); // a press dismisses the hover label
 
+    // address editor already open: clicking the field re-selects the whole
+    // address; a press anywhere else on the bar cancels the edit and proceeds.
+    if (m_bEditing) {
+        if (titleEditEnabled() && inTitleRegion(COORDS)) {
+            m_editSelectAll = true;
+            m_pEditTex      = nullptr;
+            damageEntire();
+            return;
+        }
+        exitEdit(false);
+    }
+
     // fire the click-activation flash on whichever system cell was hit (close /
     // minimize also close/hide the window, so their flash just isn't seen)
     const int SYSCELL = cellAt(COORDS);
@@ -1216,21 +1562,35 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         default: break;
     }
 
-    // inner column: app-registered buttons. A hit sends CLICK <id> back to the
-    // owning client (disabled cells are inert but still swallow the press —
-    // they're buttons, not drag area).
+    // inner column: app-registered buttons. A press ARMS the button — the CLICK
+    // fires on release (handleUpEvent), so a press+drag can instead reorder a
+    // draggable button. Disabled cells are inert but still swallow the press.
     {
         SVtbAppReg reg;
         if (VtbIpc::get(appPid(), reg)) {
             const int AI = appCellAt(COORDS, reg);
             if (AI >= 0) {
-                if (reg.buttons[AI].state != 2) {
-                    flashCell(VTB_APPCELL + AI); // activation feedback
-                    VtbIpc::sendClick(appPid(), reg.buttons[AI].id);
-                }
+                if (reg.buttons[AI].state == 2)
+                    return; // disabled: inert
+                m_bAppPressPending  = true;
+                m_bAppDragging      = false;
+                m_iAppPressIdx      = AI;
+                m_appPressId        = reg.buttons[AI].id;
+                m_appPressDraggable = reg.buttons[AI].draggable;
+                m_appDragMouseStart = g_pInputManager->getMouseCoordsInternal();
+                m_iAppDragTarget    = AI;
                 return;
             }
         }
+    }
+
+    // editable title (address bar): a plain click opens the editor; a drag from
+    // here still moves the window (promoted on move), so just arm both.
+    if (titleEditEnabled() && inTitleRegion(COORDS)) {
+        m_bTitlePressPending = true;
+        if (!m_bMaximized)
+            m_bDragPending = true;
+        return;
     }
 
     // anywhere else on the bar: drag the window (maximized windows are
@@ -1249,6 +1609,51 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
     // its press, and always reset.
     const bool CANCELLED = m_bCancelledDown;
     m_bCancelledDown     = false;
+
+    // app-button release: a click (no drag) activates via CLICK; a drag drops a
+    // reorder via REORDER (draggable buttons only).
+    if (m_bAppPressPending) {
+        const bool        dragging = m_bAppDragging;
+        const int         src      = m_iAppPressIdx;
+        const int         tgt      = m_iAppDragTarget;
+        const std::string srcId    = m_appPressId;
+        m_bAppPressPending = false;
+        m_bAppDragging     = false;
+        m_iAppPressIdx     = -1;
+        m_iAppDragTarget   = -1;
+        if (dragging) {
+            if (tgt >= 0 && tgt != src) {
+                SVtbAppReg reg;
+                if (VtbIpc::get(appPid(), reg) && tgt < (int)reg.buttons.size())
+                    VtbIpc::sendReorder(appPid(), srcId, reg.buttons[tgt].id);
+            }
+            damageEntire();
+        } else {
+            flashCell(VTB_APPCELL + src); // activation feedback
+            VtbIpc::sendClick(appPid(), srcId);
+        }
+        m_bDragPending = false;
+        if (CANCELLED)
+            info.cancelled = true;
+        return;
+    }
+
+    // title-region release: a click (never promoted to a window drag) opens the
+    // address editor.
+    if (m_bTitlePressPending) {
+        const bool wasDrag   = m_bDraggingThis;
+        m_bTitlePressPending = false;
+        if (m_bDraggingThis) {
+            g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
+            m_bDraggingThis = false;
+        }
+        m_bDragPending = false;
+        if (!wasDrag && !m_bEditing)
+            enterEdit();
+        if (CANCELLED)
+            info.cancelled = true;
+        return;
+    }
 
     if (m_bDraggingThis) {
         g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
@@ -1415,6 +1820,9 @@ void CVtbDeco::toggleRollup() {
         PWINDOW->setHidden(false);
         g_pCompositor->changeWindowZOrder(PWINDOW, true);
         Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+        // the window's surface was hidden; nudge the client to repaint (QtWebEngine
+        // presents black after its surface is un-hidden until it redraws)
+        VtbIpc::sendWake(appPid());
         damageEntire();
         return;
     }

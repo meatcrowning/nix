@@ -121,6 +121,35 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     int                  m_iHoverCell = -1; // 0-4 system cells, 1000+i app cells, -1 none
 
+    // ---- title address editor (opt-in per app via TITLEEDIT; surfer's URL bar) ----
+    // The stacked title under the system cells becomes an editable field: a
+    // click enters edit mode, the compositor grabs the keyboard (swallowing keys
+    // before keybinds/clients), draws a caret in the vertical text, and Enter
+    // sends the result back as ADDR. Editing requires the window focused and is
+    // cancelled if focus is lost.
+    bool                 m_bEditing        = false;
+    std::string          m_editBuf;                    // UTF-8 edit buffer
+    size_t               m_editCursor      = 0;        // byte offset, codepoint boundary
+    bool                 m_editSelectAll   = false;    // whole field selected (initial state)
+    SP<Render::ITexture> m_pEditTex;                   // rebuilt on every buffer/selection change
+    int                  m_iEditLineH      = 0;        // device-px height of one stacked codepoint
+    int                  m_iEditLines      = 0;        // codepoint lines currently drawn
+    Time::steady_tp      m_editBlinkAt     = Time::steadyNow();
+    bool                 m_bTitlePressPending = false; // press landed in the title region (click vs drag)
+    CHyprSignalListener  m_pKeyboardKeyCallback;
+
+    // ---- app-button drag-reorder (draggable buttons, e.g. surfer tabs) ----
+    // App-button clicks fire on RELEASE now (so press+drag can reorder instead):
+    // a press on an app cell arms this; a release without a drag is the click, a
+    // drag past a threshold reorders (draggable buttons only) and sends REORDER.
+    bool                 m_bAppPressPending  = false;
+    bool                 m_bAppDragging      = false;
+    int                  m_iAppPressIdx      = -1;     // reg index of the pressed button
+    std::string          m_appPressId;                 // its id (for CLICK / REORDER)
+    bool                 m_appPressDraggable = false;
+    Vector2D             m_appDragMouseStart;
+    int                  m_iAppDragTarget    = -1;     // reg index the drag currently hovers
+
     // Click-activation flash: the clicked cell briefly inverts (fills with its
     // highlight colour, label drawn in the bar background) so a press reads as
     // "activated". Same cell-id space as m_iHoverCell.
@@ -171,11 +200,20 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     void                 renderPass(PHLMONITOR, float const& a);
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
-    SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr);
+    SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr,
+                                          int* outLines = nullptr, bool ellipsis = true);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
+
+    // title address editor
+    bool                 titleEditEnabled();
+    bool                 inTitleRegion(const Vector2D& localCoords);
+    void                 enterEdit();
+    void                 exitEdit(bool submit);
+    void                 onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEvent& e);
 
     pid_t                appPid();
     int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
+    int                  appDropSlot(const Vector2D& localCoords, const SVtbAppReg& reg); // nearest draggable slot to cursor Y
     std::string          tooltipForCell(int cell); // "" = none
     double               cellCenterY(int cell);    // bar-local logical y of a hover cell's centre
     void                 renderTooltip(PHLMONITOR, const CBox& barBox, float scale, float a);
