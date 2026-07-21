@@ -75,10 +75,21 @@ Window {
     }
 
     // 2-letter tab label from the page title (what the titlebar used to show).
+    // Strip a leading notification counter — "(3) ", "[3] ", bullet markers —
+    // so a site that blinks its title for unread counts doesn't flip the label
+    // back and forth.
     function tabLabel(v) {
         var t = (v && v.title) ? v.title.trim() : "";
+        t = t.replace(/^\s*[\(\[]\s*\d+\s*[\)\]]\s*/, "");
+        t = t.replace(/^\s*[•·*•●✱]\s*/, "").trim();
         if (t.length === 0) return "·";
         return t.substring(0, 2);
+    }
+
+    // Run userscripts matching `url` for a load phase ("start" | "end").
+    function runUserscripts(view, url, phase) {
+        var codes = UserScripts.matching(url, phase);
+        for (var i = 0; i < codes.length; i++) view.runJavaScript(codes[i]);
     }
 
     // ---- page theming: wal-coloured scrollbars ----
@@ -165,6 +176,8 @@ Window {
                        tip: i === currentTab ? "close · " + ttl : ttl, drag: true });
         }
         arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab" });
+        arr.push("-");
+        arr.push({ id: "settings", label: "st", state: 0, tip: "userscripts folder / settings" });
         return arr;
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
@@ -181,6 +194,7 @@ Window {
             }
             if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
             if (id === "newtab")  { win.newTab(win.homeUrl); return; }
+            if (id === "settings") { UserScripts.openFolder(); return; }
             if (id.indexOf("tab:") === 0) {
                 var idx = win.tabIndexByTid(parseInt(id.substring(4)));
                 if (idx < 0) return;
@@ -237,6 +251,7 @@ Window {
             id: viewRep
             model: tabs
             WebEngineView {
+                id: webview
                 required property int index
                 required property string seed
                 anchors.fill: parent
@@ -244,6 +259,14 @@ Window {
                 profile: sharedProfile
                 userScripts.collection: [ scrollbarScript ]
                 Component.onCompleted: url = seed
+
+                // inject userscripts on navigation (document-start / -end)
+                onLoadingChanged: (info) => {
+                    if (info.status === WebEngineView.LoadStartedStatus)
+                        win.runUserscripts(webview, info.url.toString(), "start");
+                    else if (info.status === WebEngineView.LoadSucceededStatus)
+                        win.runUserscripts(webview, info.url.toString(), "end");
+                }
 
                 onNewWindowRequested: (request) => win.newTab(request.requestedUrl)
                 onFullScreenRequested: (request) => {

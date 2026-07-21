@@ -165,6 +165,133 @@ class Clip(QObject):
         QGuiApplication.clipboard().setText(text)
 
 
+class UserScripts(QObject):
+    """Greasemonkey-style userscripts: every ``*.js`` in
+    $XDG_CONFIG_HOME/surfer/userscripts/ is loaded, its ``// ==UserScript==``
+    metadata block parsed (@name, @match/@include, @run-at), and injected into
+    matching pages on navigation (start/end phase). The folder is watched, so
+    dropping/editing a file reloads live — that's how you "import" a userscript.
+
+    QtWebEngine has no Chromium-extension support at all, so this (plus the
+    per-page CSS surfer already injects) is the extensibility surface."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        self._dir = cfg / "surfer" / "userscripts"
+        self._scripts = []
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.directoryChanged.connect(self._reload)
+        self._watcher.fileChanged.connect(self._reload)
+        self._ensure_dir()
+        self._reload()
+
+    def _ensure_dir(self):
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        if self._dir.is_dir() and str(self._dir) not in self._watcher.directories():
+            self._watcher.addPath(str(self._dir))
+
+    @staticmethod
+    def _parse_meta(text):
+        name, matches, run_at = "", [], "end"
+        m = re.search(r"//\s*==UserScript==(.*?)//\s*==/UserScript==", text, re.S)
+        if m:
+            for line in m.group(1).splitlines():
+                lm = re.match(r"\s*//\s*@(\S+)\s+(.*\S)", line)
+                if not lm:
+                    continue
+                key, val = lm.group(1).lower(), lm.group(2).strip()
+                if key == "name":
+                    name = val
+                elif key in ("match", "include"):
+                    matches.append(val)
+                elif key == "run-at":
+                    run_at = "start" if "start" in val else "end"
+        return name, matches, run_at
+
+    def _enabled_path(self):
+        return self._dir.parent / "userscripts.json"
+
+    def _load_enabled(self):
+        try:
+            data = json.loads(self._enabled_path().read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _reload(self, *args):
+        self._ensure_dir()
+        enabled = self._load_enabled()
+        scripts = []
+        try:
+            files = sorted(self._dir.glob("*.js"))
+        except OSError:
+            files = []
+        for f in files:
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            name, matches, run_at = self._parse_meta(text)
+            scripts.append({
+                "name": name or f.stem, "file": f.name, "path": str(f),
+                "matches": matches, "runAt": run_at, "code": text,
+                "enabled": bool(enabled.get(f.name, True)),
+            })
+            if str(f) not in self._watcher.files():
+                self._watcher.addPath(str(f))
+        self._scripts = scripts
+        self.changed.emit()
+
+    @staticmethod
+    def _glob_to_re(glob):
+        return "^" + "".join(".*" if c == "*" else re.escape(c) for c in glob) + "$"
+
+    def _url_matches(self, matches, url):
+        if not matches:
+            return True
+        for g in matches:
+            try:
+                if re.match(self._glob_to_re(g), url):
+                    return True
+            except re.error:
+                continue
+        return False
+
+    @Slot(str, str, result="QVariantList")
+    def matching(self, url, phase):
+        return [s["code"] for s in self._scripts
+                if s["enabled"] and s["runAt"] == phase and self._url_matches(s["matches"], url)]
+
+    @Slot(str, bool)
+    def setEnabled(self, file, on):
+        m = self._load_enabled()
+        m[str(file)] = bool(on)
+        try:
+            self._enabled_path().write_text(json.dumps(m), encoding="utf-8")
+        except OSError:
+            pass
+        self._reload()
+
+    @Slot()
+    def openFolder(self):
+        self._ensure_dir()
+        try:
+            import subprocess
+            subprocess.Popen(["xdg-open", str(self._dir)])
+        except OSError:
+            pass
+
+    @Property("QVariantList", notify=changed)
+    def scripts(self):
+        return [{k: v for k, v in s.items() if k != "code"} for s in self._scripts]
+
+
 class Session(QObject):
     """Persists the open tabs (their URLs) + the active tab index to
     $XDG_STATE_HOME/surfer/session.json, so a relaunch restores what was open."""
@@ -215,10 +342,12 @@ def main():
     titlebar = Titlebar()
     clip = Clip()
     session = Session()
+    userscripts = UserScripts()
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
+    ctx.setContextProperty("UserScripts", userscripts)
     ctx.setContextProperty("startUrl", start_url)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
