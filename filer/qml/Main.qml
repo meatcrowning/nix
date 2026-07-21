@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls.Basic
 
 // Standalone port of the Quickshell panel's FileBrowser.qml. Runs as its own
 // PySide6 process (main.py), so Quickshell config hot-reloads no longer restart
@@ -42,6 +43,7 @@ Window {
     component OpButton: Rectangle {
         id: ob
         property string label: ""
+        property string tooltip: ""
         property bool danger: false
         property bool active: false   // lit like a hovered cell (for toggles, e.g. "h")
         signal clicked()
@@ -70,6 +72,47 @@ Window {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: ob.clicked()
+            onEntered: ttDelay.restart()
+            onExited: { ttDelay.stop(); tt.armed = false; }
+        }
+
+        // Themed tooltip (Theme colours + PixelText, not the native style) — a
+        // real Popup, so it renders on the window's overlay layer, always on
+        // top regardless of where OpButton sits in the tree. Opens to the LEFT
+        // since these buttons sit flush against the right window edge.
+        //
+        // x is animated with Behavior, not a Popup enter/exit Transition — a
+        // Transition's NumberAnimation assigns x directly, which fights a
+        // permanent binding on the same property (that was the first attempt,
+        // and it's why it looked janky). Behavior + a boolean-driven x is the
+        // same idiom the panel's own edge-reveal widgets use (Launcher/
+        // OsdWindow/SlidePopup in quickshell-files): 220ms, Easing.OutCubic.
+        // `armed` (not hover directly) drives x, so the close slide is the
+        // mirror of the open slide instead of a Popup-lifecycle snap; `visible`
+        // stays true until the close slide actually finishes, same as
+        // OsdWindow's `visible: Osd.active || card.x < card.hidden - 1`.
+        Timer { id: ttDelay; interval: 450; onTriggered: tt.armed = true }
+        ToolTip {
+            id: tt
+            parent: ob
+            property bool armed: false
+            readonly property real shownX: -tt.width - 6
+            visible: ob.tooltip !== "" && (armed || x < -1)
+            text: ob.tooltip
+            timeout: 6000
+            padding: 6
+            x: armed ? shownX : 0
+            y: (ob.height - tt.height) / 2
+            Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            background: Rectangle {
+                color: Theme.bg
+                border.color: Theme.accent
+                border.width: 1
+            }
+            contentItem: PixelText {
+                text: ob.tooltip
+                color: Theme.text
+            }
         }
     }
 
@@ -276,7 +319,11 @@ Window {
                 // shows ↑/↓ and re-clicking it flips direction. 1px border idle,
                 // 2px accent + bgAlt fill when active/hovered.
                 Repeater {
-                    model: [ { l: "n", f: "name" }, { l: "c", f: "created" }, { l: "s", f: "size" } ]
+                    model: [
+                        { l: "n", f: "name",    t: "sort by name" },
+                        { l: "c", f: "created", t: "sort by created date" },
+                        { l: "s", f: "size",    t: "sort by size" }
+                    ]
                     Rectangle {
                         id: sortBtn
                         required property var modelData
@@ -300,6 +347,36 @@ Window {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: view.setSort(sortBtn.modelData.f)
+                            onEntered: sortTtDelay.restart()
+                            onExited: { sortTtDelay.stop(); sortTt.armed = false; }
+                        }
+
+                        // same themed, sliding tooltip as OpButton — see its
+                        // definition above for why this is Behavior-on-x (not
+                        // a Popup enter/exit Transition) and why `armed` (not
+                        // hover directly) drives it.
+                        Timer { id: sortTtDelay; interval: 450; onTriggered: sortTt.armed = true }
+                        ToolTip {
+                            id: sortTt
+                            parent: sortBtn
+                            property bool armed: false
+                            readonly property real shownX: -sortTt.width - 6
+                            visible: sortTt.armed || sortTt.x < -1
+                            text: sortBtn.modelData.t
+                            timeout: 6000
+                            padding: 6
+                            x: armed ? shownX : 0
+                            y: (sortBtn.height - sortTt.height) / 2
+                            Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                            background: Rectangle {
+                                color: Theme.bg
+                                border.color: Theme.accent
+                                border.width: 1
+                            }
+                            contentItem: PixelText {
+                                text: sortBtn.modelData.t
+                                color: Theme.text
+                            }
                         }
                     }
                 }
@@ -310,21 +387,21 @@ Window {
                 // file operations (formerly the bottom toolbar): + new, r rename,
                 // cp copy, cx cut, p paste, t trash. Delete is intentionally gone
                 // — it moves to the right-click menu later.
-                OpButton { label: "+"; onClicked: newDlg.open() }
+                OpButton { label: "+"; tooltip: "new file or folder"; onClicked: newDlg.open() }
                 OpButton {
-                    label: "r"; enabled: view.selected !== ""
+                    label: "r"; tooltip: "rename selected"; enabled: view.selected !== ""
                     onClicked: { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); }
                 }
                 OpButton {
-                    label: "cp"; enabled: view.selected !== ""
+                    label: "cp"; tooltip: "copy selected"; enabled: view.selected !== ""
                     onClicked: view.clip = { op: "copy", path: view.selected }
                 }
                 OpButton {
-                    label: "cx"; enabled: view.selected !== ""
+                    label: "cx"; tooltip: "cut selected"; enabled: view.selected !== ""
                     onClicked: view.clip = { op: "cut", path: view.selected }
                 }
                 OpButton {
-                    label: "p"; enabled: view.clip !== null
+                    label: "p"; tooltip: "paste"; enabled: view.clip !== null
                     onClicked: {
                         const src = view.clip.path;
                         const dst = view.join(view.path, view.dirNameOf(src));
@@ -333,11 +410,11 @@ Window {
                     }
                 }
                 OpButton {
-                    label: "t"; enabled: view.selected !== ""
+                    label: "t"; tooltip: "move to trash"; enabled: view.selected !== ""
                     onClicked: { FileOps.run(["gio", "trash", "--", view.selected], ""); view.selected = ""; }
                 }
                 // toggle: show/hide dotfiles. Lit while hidden files are shown.
-                OpButton { label: "h"; active: view.showHidden; onClicked: view.toggleHidden() }
+                OpButton { label: "h"; tooltip: "toggle hidden files"; active: view.showHidden; onClicked: view.toggleHidden() }
             }
 
             // total size of the files directly in the current dir, at the BOTTOM
@@ -505,22 +582,14 @@ Window {
                     text: row.modelData.name
                     color: !win.active ? Theme.inactive : (row.modelData.isDir ? Theme.accent : Theme.text)
                 }
-                // columns: size | created | modified (fixed widths, so they line
-                // up across rows). Dirs show no size but keep their timestamps.
+                // columns: size | modified (fixed widths, so they line up across
+                // rows). Dirs show no size but keep their modified timestamp.
                 PixelText {
                     id: szText
                     width: 52
                     horizontalAlignment: Text.AlignRight
-                    anchors { right: createdText.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-                    text: row.modelData.isDir ? "" : view.sizeStr(row.modelData.size)
-                    color: !win.active ? Theme.inactive : Theme.textDim
-                }
-                PixelText {
-                    id: createdText
-                    width: 146
-                    elide: Text.ElideRight
                     anchors { right: modifiedText.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-                    text: "c: " + view.fmtRel(row.modelData.created)
+                    text: row.modelData.isDir ? "" : view.sizeStr(row.modelData.size)
                     color: !win.active ? Theme.inactive : Theme.textDim
                 }
                 PixelText {
