@@ -2,8 +2,9 @@ pragma Singleton
 import Quickshell
 import QtQuick
 
-// Windows Vista system sounds (user-provided, extracted to
-// ~/.local/share/sounds/vista — NOT in the repo, the wavs are Microsoft's).
+// Windows Vista system sounds. The wavs are Microsoft's, so they live in a
+// private submodule (github.com/meatcrowning/vista-sounds → sounds/), symlinked
+// to ~/.local/share/sounds/vista by home/srvs/vista-sounds.nix.
 // Central playback so every component names a file, not a pipeline. Event
 // map (who calls what):
 //   login          -> "Windows Logon Sound.wav"     (hyprland.lua autostart)
