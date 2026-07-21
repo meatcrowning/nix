@@ -215,6 +215,19 @@ var GM = {
   openInTab:function(u,o){ return GM_openInTab(u,o); },
   xmlHttpRequest:GM_xmlhttpRequest, setClipboard:GM_setClipboard, addStyle:GM_addStyle, info:GM_info
 };
+// Also expose the GM_* API on window: some scripts feature-detect via
+// window.GM_xmlhttpRequest (4chan X uses it to tell userscript from a Chrome
+// extension — without it, it tries chrome.runtime.getManifest() and dies).
+// Actual storage calls stay bare/lexical (per-script namespace); these are for
+// detection and cross-script use.
+try {
+  var __W = window;
+  __W.GM_getValue=GM_getValue; __W.GM_setValue=GM_setValue; __W.GM_deleteValue=GM_deleteValue;
+  __W.GM_listValues=GM_listValues; __W.GM_addValueChangeListener=GM_addValueChangeListener;
+  __W.GM_removeValueChangeListener=GM_removeValueChangeListener; __W.GM_addStyle=GM_addStyle;
+  __W.GM_openInTab=GM_openInTab; __W.GM_setClipboard=GM_setClipboard;
+  __W.GM_xmlhttpRequest=GM_xmlhttpRequest; __W.GM_info=GM_info; if(!__W.GM) __W.GM=GM;
+} catch(e){}
 """
 
 
@@ -329,27 +342,39 @@ class UserScripts(QObject):
                 "if(__g.length){var __m=false;for(var __i=0;__i<__g.length;__i++){"
                 "try{if(new RegExp(__g[__i]).test(location.href)){__m=true;break;}}catch(e){}}"
                 "if(!__m)return;}\n" % guard)
-        return ("(function(){\n" + gate + header + _GM_SHIM
-                + "\ntry{\n" + s["code"] + "\n}catch(e){console.error('[surfer userscript]', __name, e);}\n"
-                + "})();\n")
+        body = (header + _GM_SHIM
+                + "\ntry{\n" + s["code"]
+                + "\n}catch(e){console.error('[surfer userscript]', __name, e);}\n")
+        # QtWebEngine's DocumentCreation injection fires BEFORE <html> exists
+        # (document.documentElement is null), but real document-start scripts
+        # (4chan X) capture document.documentElement once at eval and bail if
+        # it's null. So defer the body until documentElement appears — still
+        # early (before the page's own scripts run for real), but valid.
+        return ("(function(){\n" + gate
+                + "function __run(){\n" + body + "}\n"
+                "if(document.documentElement){__run();return;}\n"
+                "var __iv=setInterval(function(){if(document.documentElement){clearInterval(__iv);__run();}},0);\n"
+                "})();\n")
 
     def _rebuild_scripts(self):
         if self._profile is None:
             return
         coll = self._profile.scripts()
         coll.clear()
-        for s in self._scripts:
-            if not s["enabled"]:
+        world = 10  # each script gets its OWN isolated world so they don't
+        for s in self._scripts:  # clobber each other's globals (4chan X vs OneeChan
+            if not s["enabled"]:  # both assign window.$) — like a real GM manager
                 continue
             qs = QWebEngineScript()
             qs.setName(s["file"])
             qs.setInjectionPoint(
                 QWebEngineScript.InjectionPoint.DocumentCreation if s["runAt"] == "start"
                 else QWebEngineScript.InjectionPoint.DocumentReady)
-            qs.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)  # GM scripts need the page's window
+            qs.setWorldId(world)
             qs.setRunsOnSubFrames(False)
             qs.setSourceCode(self._wrap(s))
             coll.insert(qs)
+            world += 1
 
     @Slot(str, bool)
     def setEnabled(self, file, on):
