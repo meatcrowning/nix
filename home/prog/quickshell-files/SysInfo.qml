@@ -17,14 +17,19 @@ Singleton {
     property int    cpuTemp: -1         // Celsius, k10temp's Tctl reading, or -1
     property int    gpuUsage: -1        // 0-100, nvidia-smi utilization, or -1
     property int    gpuTemp: -1         // Celsius, nvidia-smi temperature, or -1
+    property int    batteryPct: -1      // 0-100, or -1 when no BAT* node (desktop)
+    property bool   batteryCharging: false
 
-    // Brightness (DDC/CI over I2C via ddcutil — this monitor is external,
-    // no laptop backlight). Polled separately from everything else below:
-    // ddcutil takes ~1.5s per call, far too slow for the 2s main poll.
+    // Brightness. On a machine with a real panel backlight (laptops) this
+    // goes through brightnessctl against /sys/class/backlight, which is
+    // fast. Otherwise it falls back to DDC/CI over I2C via ddcutil for an
+    // external monitor, which takes ~1.5s per call — far too slow for the
+    // 2s main poll, hence the separate polling/debounce machinery below.
     // adjustBrightness() updates this optimistically so scrolling feels
     // instant; the periodic poll here just corrects for drift (e.g. the
     // monitor's own physical buttons).
     property int    brightness: -1      // 0-100, or -1 until first poll
+    property bool   useBacklight: false // detected at startup, see below
 
     // throughput history for the sparkline (bytes/s totals)
     property var history: []
@@ -60,7 +65,7 @@ Singleton {
         const line = (text || "").trim();
         if (line === "") return;
         const f = line.split("|");
-        if (f.length < 11) return;
+        if (f.length < 13) return;
 
         const rx      = parseFloat(f[0]) || 0;
         const tx      = parseFloat(f[1]) || 0;
@@ -86,6 +91,10 @@ Singleton {
         gpuUsage = isNaN(gu) || gu < 0 ? -1 : gu;
         const gt = parseInt(f[10]);
         gpuTemp = isNaN(gt) || gt < 0 ? -1 : gt;
+
+        const bp = parseInt(f[11]);
+        batteryPct = isNaN(bp) || bp < 0 ? -1 : bp;
+        batteryCharging = f[12] === "1";
 
         if (_prevRx >= 0) {
             rxSpeed = Math.max(0, (rx - _prevRx) / intervalSec);
@@ -172,7 +181,9 @@ Singleton {
 
     function fireBrightnessWrite() {
         ddcBusy = true;
-        ddcutilWriteProc.command = ["ddcutil", "setvcp", "10", String(root.brightness)];
+        ddcutilWriteProc.command = useBacklight
+            ? ["brightnessctl", "set", String(root.brightness) + "%"]
+            : ["ddcutil", "setvcp", "10", String(root.brightness)];
         ddcutilWriteProc.running = true;
     }
 
@@ -193,17 +204,40 @@ Singleton {
 
     Process {
         id: ddcutilProc
-        command: ["ddcutil", "getvcp", "10", "--brief"]
+        command: root.useBacklight
+            ? ["brightnessctl", "-m", "i"]
+            : ["ddcutil", "getvcp", "10", "--brief"]
         onExited: ddcBusy = false
         stdout: StdioCollector {
             onStreamFinished: {
-                // "VCP 10 C <current> <max>"
-                const parts = text.trim().split(/\s+/);
-                if (parts.length >= 4) {
-                    const v = parseInt(parts[3]);
-                    if (!isNaN(v)) root.brightness = v;
+                if (root.useBacklight) {
+                    // "<class>,<name>,<current>,<percent>%,<max>"
+                    const parts = text.trim().split(",");
+                    if (parts.length >= 4) {
+                        const v = parseInt(parts[3]);
+                        if (!isNaN(v)) root.brightness = v;
+                    }
+                } else {
+                    // "VCP 10 C <current> <max>"
+                    const parts = text.trim().split(/\s+/);
+                    if (parts.length >= 4) {
+                        const v = parseInt(parts[3]);
+                        if (!isNaN(v)) root.brightness = v;
+                    }
                 }
             }
+        }
+    }
+
+    // Detect a real panel backlight once at startup; ddcutilProc/Write above
+    // pick brightnessctl vs ddcutil off this. Runs before the timer below
+    // (triggeredOnStart) issues the first read.
+    Process {
+        id: backlightDetectProc
+        command: ["sh", "-c", "ls /sys/class/backlight/*/brightness 2>/dev/null | head -n1"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: root.useBacklight = text.trim() !== ""
         }
     }
 

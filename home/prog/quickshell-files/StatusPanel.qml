@@ -182,6 +182,19 @@ Column {
         onHovered: (h, cy) => root.diskHovered(h, cy)
     }
 
+    // ---------- Battery ----------
+    // Auto-hides on a host with no BAT* node (SysInfo.batteryPct stays -1) —
+    // no host check needed here, same hardware-detection pattern as bri's
+    // useBacklight below.
+    Stat {
+        visible: SysInfo.batteryPct >= 0
+        label: "bat"
+        value: SysInfo.batteryPct + ""
+        valueColor: SysInfo.batteryCharging ? Theme.ok
+                  : SysInfo.batteryPct <= 15 ? Theme.crit
+                  : SysInfo.batteryPct <= 30 ? Theme.warn : Theme.text
+    }
+
     // ---------- Brightness ----------
     Stat {
         label: "bri"

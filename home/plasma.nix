@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, host, ... }:
 
 {
   programs.plasma = {
@@ -129,7 +129,7 @@
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
       kwinrc.Tiling.padding = 4;
-      kwinrc.Xwayland.Scale = 1;
+      kwinrc.Xwayland.Scale = if host == "air" then 2 else 1;
       plasma-localerc.Formats.LANG = "en_US.UTF-8";
     };
   };

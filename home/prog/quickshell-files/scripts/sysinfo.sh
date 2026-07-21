@@ -1,13 +1,16 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging
 #
-# Battery/AC and wifi were dropped (desktop box, no laptop battery — the
-# "bat" reading used to pick up the Logitech trackball's own hidpp battery
-# via the generic power_supply scan, not anything meaningful). Brightness
-# was dropped too: this machine's display is external (DDC/CI over I2C via
-# ddcutil), and ddcutil takes ~1.5s per call — too slow for this 2s poll
-# loop, so SysInfo.qml polls it separately on its own longer timer instead.
+# Wifi stays dropped (both hosts are wired). Battery is back, scoped to
+# /sys/class/power_supply/BAT* specifically (not a generic power_supply
+# scan — that's what previously picked up the Logitech trackball's own
+# hidpp battery on a desktop with no laptop battery at all). -1|0 when no
+# BAT* node exists, so the panel shows "--" and stays hidden on a desktop.
+# Brightness was dropped too: this machine's display is external (DDC/CI
+# over I2C via ddcutil), and ddcutil takes ~1.5s per call — too slow for
+# this 2s poll loop, so SysInfo.qml polls it separately on its own longer
+# timer instead.
 
 net=$(awk 'NR>2{gsub(/:/," "); if($1!="lo"){rx+=$2; tx+=$10}} END{printf "%d|%d", rx, tx}' /proc/net/dev)
 disk=$(df -kP / | awk 'NR==2{gsub(/%/,"",$5); printf "%d|%d", $4, $5}')
@@ -53,4 +56,17 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     [ -n "$g" ] && gpu="$g"
 fi
 
-printf '%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu"
+# Battery percentage + charging flag via /sys/class/power_supply/BAT*.
+# "-1|0" when the node doesn't exist (desktop box, no battery).
+bat="-1|0"
+for dir in /sys/class/power_supply/BAT*/; do
+    [ -f "$dir/capacity" ] || continue
+    cap=$(cat "$dir/capacity" 2>/dev/null)
+    status=$(cat "$dir/status" 2>/dev/null)
+    chg=0
+    [ "$status" = "Charging" ] && chg=1
+    [ -n "$cap" ] && bat="$cap|$chg"
+    break
+done
+
+printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat"

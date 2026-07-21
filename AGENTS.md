@@ -6,9 +6,10 @@ This file provides a high-level overview of the configuration structure and key 
 
 The configuration is split into three main areas: System-wide NixOS settings, User-specific Home Manager settings, and Machine-specific host definitions.
 
-- `flake.nix`: The entry point for the entire configuration. Defines inputs (nixpkgs, home-manager, etc.) and orchestrates the `top` NixOS configuration.
+- `flake.nix`: The entry point for the entire configuration. Defines inputs (nixpkgs, home-manager, etc.), orchestrates the `top` NixOS configuration, and exposes a standalone `homeConfigurations.air` for a second, non-NixOS machine.
 - `hosts/`: Contains machine-specific configurations.
-    - `hosts/top/`: Configuration for the primary host "top".
+    - `hosts/top/`: Configuration for the primary host "top" (full NixOS, x86_64-linux).
+- **`air`**: a MacBook Air running Fedora Asahi Remix (aarch64-linux), OS hostname `book`. Not NixOS — it only gets `home-manager` layered on top of the existing Fedora install via `homeConfigurations.air` (`home-manager.lib.homeManagerConfiguration` in `flake.nix`, reusing `./lam.nix`/`home/` unchanged). It has no `hosts/air/` or system-level config — `sys/*` is NixOS-only and doesn't apply. Activate/update with `home-manager switch --flake /home/lam/nix#air`.
 - `sys/`: System-wide NixOS modules and configurations.
     - Uses a recursive importer in `sys/default.nix` to automatically include all `.nix` files in this tree.
     - `sys/options.nix`: Defines custom options (e.g., `my.aerotheme.enable`).
@@ -22,7 +23,10 @@ The configuration is split into three main areas: System-wide NixOS settings, Us
 ## Key Features & Conventions
 
 ### Recursive Imports (`umport`)
-Both `sys/` and `home/` use a helper function named `umport` (defined in their respective `default.nix` files). This function automatically imports every `.nix` file found recursively in those directories. Adding a new `.nix` file anywhere in these trees will automatically apply it to the configuration.
+Both `sys/` and `home/` use a helper function named `umport` (defined in their respective `default.nix` files). This function automatically imports every `.nix` file found recursively in those directories. Adding a new `.nix` file anywhere in these trees will automatically apply it to the configuration — including for `air`, since it consumes the same `home/` tree as `top` via `lam.nix`.
+
+### Per-host branching (`host`)
+`flake.nix` threads `host = "top"` or `host = "air"` into every `home/*.nix` module via `specialArgs`/`extraSpecialArgs` (take it as a module arg: `{ host, ... }:`). Use this — not a separate per-host file — for the rare line that must actually differ (see `home/prog/zsh.nix`'s rebuild aliases, `home/plasma.nix`'s `Xwayland.Scale`, `home/prog/hypr-host.nix`'s generated `host.lua` consumed by `home/prog/hypr-files/hyprland.lua`'s monitor scale). Everything else in `home/` is shared verbatim between both machines — that's the point of the split. Packages unavailable on aarch64-linux (proprietary x86_64-only binaries: `vcv-rack`, `pcsx2`, `vintagestory`, `google-chrome`, `wineWow64Packages`, `spotify`, `dwarf-fortress-packages`) are gated with `lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [...]` instead of `host ==`, since the real constraint is architecture, not the specific machine.
 
 ### Aerotheme Plasma Toggle
 The `my.aerotheme.enable` option (defined in `sys/options.nix`) allows for easy switching between a standard Plasma 6 experience and the Windows-themed `aerothemeplasma`.

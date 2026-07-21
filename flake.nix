@@ -72,21 +72,30 @@
       };
     });
 
-    pkgs = import nixpkgs {
-      inherit system;
+    overlays = [ vcv-rack-overlay ollama-overlay breeze-square-overlay ];
+
+    mkPkgs = system: overlays: import nixpkgs {
+      inherit system overlays;
       config.allowUnfree = true;
-      overlays = [ vcv-rack-overlay ollama-overlay breeze-square-overlay ];
       # config.allowInsecure = true;
     };
+
+    # breeze-square-overlay's patched breeze has no cache hit on any
+    # platform (it's a local patch) — plasma-manager pulls kdePackages.breeze
+    # in transitively regardless of home.packages, so it always compiles
+    # from source. Skipped for air (for now, see home/pkgs/desktop/kde.nix)
+    # by leaving the overlay out of its pkgs entirely — corners just stay
+    # round there until this gets added back.
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ollama-overlay ];
 
   in
   {
     nixosConfigurations = {
       top = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit inputs user; };
+        specialArgs = { inherit inputs user; host = "top"; };
         modules = [
           ({ pkgs, ... }: {
-            nixpkgs.overlays = [ vcv-rack-overlay ollama-overlay breeze-square-overlay ];
+            nixpkgs.overlays = overlays;
             environment.systemPackages = [
               #koboldcpp-latest
               pkgs.ollama-latest-cuda
@@ -100,7 +109,7 @@
           aerothemeplasma-nix.nixosModules.aerothemeplasma-nix
           {
             home-manager = {
-              extraSpecialArgs = { inherit inputs user; };
+              extraSpecialArgs = { inherit inputs user; host = "top"; };
               useGlobalPkgs = true;
               useUserPackages = true;
               backupFileExtension = "backup";
@@ -112,12 +121,21 @@
       };
     };
 
-    # NOTE: there is deliberately NO standalone `homeConfigurations` output.
-    # Home is managed solely through the NixOS module above (see
-    # home-manager.nixosModules.home-manager). Having both was the "dual wiring"
-    # that let `home-manager switch` (rbhome) changes get clobbered on boot when
-    # the system re-activated its own copy of ./lam.nix. One source of truth now:
-    # everything goes through `nixos-rebuild switch` (rbsys/rbhome/update), which
-    # is passwordless via sys/nixos-rebuild.nix.
+    # `top`'s home is managed solely through the NixOS module above (see
+    # home-manager.nixosModules.home-manager) — having a standalone
+    # homeConfigurations entry for the SAME machine was the "dual wiring" that
+    # let `home-manager switch` (rbhome) changes get clobbered on boot when the
+    # system re-activated its own copy of ./lam.nix. `air` below has no NixOS
+    # layer to collide with, so a standalone entry for it is safe.
+    homeConfigurations = {
+      air = home-manager.lib.homeManagerConfiguration {
+        pkgs = pkgsAir;
+        extraSpecialArgs = { inherit inputs user; host = "air"; };
+        modules = [
+          plasma-manager.homeModules.plasma-manager
+          ./lam.nix
+        ];
+      };
+    };
   };
 }

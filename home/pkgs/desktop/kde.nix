@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, host, ... }:
 
 {
   home.packages = with pkgs; [
@@ -18,7 +18,6 @@
     qttools
     elisa
     qtsvg
-    breeze
     qtstyleplugin-kvantum
     plasmatube
     oxygen
@@ -27,5 +26,11 @@
     partitionmanager
     qtwebsockets
    # plasma-framework
-    ]);
+    ]) ++ lib.optionals (host == "top") [
+    # breeze-square-overlay patches this locally, so there's no cache hit —
+    # it always compiles from source (KDE Frameworks/Qt, genuinely slow).
+    # Skipped on air for now to keep first bring-up fast; corners just stay
+    # round there until this is added back.
+    kdePackages.breeze
+    ];
 }

@@ -6,11 +6,15 @@
 ------------------
 
 -- See https://wiki.hypr.land/Configuring/Basics/Monitors/
+-- host.lua is regenerated per-host by home/prog/hypr-host.nix (this file
+-- itself is only seeded once, see home/prog/hyprland.nix).
+local host = dofile(os.getenv("HOME") .. "/.config/hypr/host.lua")
+
 hl.monitor({
     output   = "",
     mode     = "preferred",
     position = "auto",
-    scale    = "1",
+    scale    = host.scale or "1",
 })
 
 ---------------------

@@ -1,25 +1,14 @@
-{ pkgs, ... }:
+{ pkgs, lib, host, ... }:
 
 {
   home.packages = with pkgs; [
     vim
-    btop
-    tree
-    unzip
-    git
-    gh
     nh
     wget
-    curl
-    rsync
     htop
-    fastfetch
     broot
-    cmatrix
     croc
-    libnotify
     home-manager
-    feh
     cava
     killall
     # open-webui hardcodes KEY_FILE = cwd/.webui_secret_key, so launching it
@@ -39,17 +28,30 @@
       fi
       exec ${open-webui}/bin/open-webui "$@"
     '')
-    playerctl
-    smartmontools
-    usbutils
-    btrfs-progs
     claude-code
-    ranger
-    grim
 
     #kde-material-you-colors-latest
     #ventoy-full-qt
     #kquitapp6
     #okay maybe a little media
+  # already native on air (this Fedora install) — skip duplicating there.
+  ] ++ lib.optionals (host != "air") [
+    btop
+    tree
+    unzip
+    git
+    gh
+    curl
+    rsync
+    fastfetch
+    cmatrix
+    libnotify
+    feh
+    playerctl
+    smartmontools
+    usbutils
+    btrfs-progs
+    ranger
+    grim
   ];
 }

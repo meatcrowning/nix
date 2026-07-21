@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
 let
   cga8x8thick = pkgs.fetchurl {
@@ -17,7 +17,10 @@ let
   };
 in
 {
-  home.packages = [
+  # dwarf-fortress-packages is x86_64-only (proprietary binary, no aarch64
+  # build) — lib.optionals keeps this whole attribute path from ever being
+  # forced on air, not just from being installed.
+  home.packages = lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [
     (pkgs.dwarf-fortress-packages.dwarf-fortress_0_47_05.override {
       theme = my-theme;
       enableDFHack = true;
