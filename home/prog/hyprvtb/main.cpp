@@ -10,6 +10,7 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/supplementary/executor/Executor.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 
 extern "C" {
 #include <lua.h>
@@ -28,6 +29,7 @@ extern "C" {
 #include <hyprland/src/SharedDefs.hpp> // eRenderStage
 
 #include "vtbDeco.hpp"
+#include "vtbIpc.hpp"
 #include "globals.hpp"
 
 // Do NOT change this function.
@@ -586,6 +588,29 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState = makeUnique<SGlobalState>();
     vtbLoadGeometry();
 
+    // App-button socket ($XDG_RUNTIME_DIR/hyprvtb-buttons.sock): client apps
+    // register the inner titlebar column's buttons here. All I/O on its own
+    // thread; see vtbIpc.hpp for the protocol.
+    VtbIpc::start();
+
+    // 150ms main-thread heartbeat: repaints bars whose registration changed
+    // (the IPC thread must never touch the renderer) and pops hover tooltips
+    // once their dwell passes even with a motionless cursor. Same re-arm
+    // pattern as Hyprland's own ANRManager.
+    g_pGlobalState->tick = makeShared<CEventLoopTimer>(std::chrono::milliseconds(150),
+                                                       [](SP<CEventLoopTimer> self, void*) {
+                                                           if (!g_pGlobalState)
+                                                               return;
+                                                           const auto SERIAL = VtbIpc::serial.load(std::memory_order_relaxed);
+                                                           for (auto& b : g_pGlobalState->bars) {
+                                                               if (b)
+                                                                   b->mainThreadTick(SERIAL);
+                                                           }
+                                                           self->updateTimeout(std::chrono::milliseconds(150));
+                                                       },
+                                                       nullptr);
+    g_pEventLoopManager->addTimer(g_pGlobalState->tick);
+
     // Listeners are stored in g_pGlobalState (destroyed with it in
     // PLUGIN_EXIT) and every callback re-checks the state pointer: a
     // callback firing into a torn-down plugin is a compositor segfault.
@@ -623,21 +648,30 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     }));
 
-    // Shaded (rolled-up) windows are hidden — Hyprland never renders them or
-    // calls their decoration draw() — so draw each shaded window's bar here,
-    // once per monitor. RENDER_PRE_WINDOWS fires after the background/bottom
-    // layers but before windows, so the shade bar sits OVER the desktop
-    // widgets (bottom-layer quickshell) yet UNDER every window.
-    // renderShadeIfRolled no-ops for non-shaded bars.
+    // Two render-stage jobs, both per-monitor:
+    //  * RENDER_PRE_WINDOWS (after background/bottom layers, before windows):
+    //    draw each shaded (rolled-up) window's bar. A shaded window is hidden,
+    //    so Hyprland never renders it or calls its draw() — the shade bar sits
+    //    OVER the desktop widgets (bottom-layer quickshell) yet UNDER windows.
+    //  * RENDER_POST_WINDOWS (after windows, before top/overlay layers): draw
+    //    the hover tooltip so it lands OVER the window it labels (the bar's own
+    //    UNDER-layer pass draws before the window; the tooltip overhangs left
+    //    into the window's area and would be occluded there).
+    // Both helpers no-op when they have nothing to draw.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (!g_pGlobalState || stage != RENDER_PRE_WINDOWS)
+        if (!g_pGlobalState || (stage != RENDER_PRE_WINDOWS && stage != RENDER_POST_WINDOWS))
             return;
         const auto PMONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
         if (!PMONITOR)
             return;
         for (auto& b : g_pGlobalState->bars) {
-            if (b)
+            if (!b)
+                continue;
+            // shade bar UNDER windows (pre); hover tooltip OVER windows (post)
+            if (stage == RENDER_PRE_WINDOWS)
                 b->renderShadeIfRolled(PMONITOR);
+            else
+                b->enqueueTooltip(PMONITOR);
         }
     }));
 
@@ -707,10 +741,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.21"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.27"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
+    // Join the IPC thread FIRST — it must be gone before this .so unloads.
+    VtbIpc::stop();
+
+    // The tick timer's callback code lives in this .so: deregister and drop it
+    // before anything else so it can never fire into an unloaded image.
+    if (g_pGlobalState && g_pGlobalState->tick) {
+        g_pEventLoopManager->removeTimer(g_pGlobalState->tick);
+        g_pGlobalState->tick.reset();
+    }
+
     for (auto& m : g_pCompositor->m_monitors)
         m->m_scheduledRecalc = true;
 

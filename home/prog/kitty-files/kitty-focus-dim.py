@@ -19,10 +19,31 @@ import subprocess
 
 INACTIVE = "#595959"  # == filer Theme.inactive / hyprvtb col.inactive
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+THEME_CONF = os.path.expanduser("~/.config/kitty/theme.conf")  # written by wal-set.sh
 
 
 def kitty_sock(pid):
     return f"unix:{RUNTIME}/kitty-{pid}"
+
+
+def focused_fg():
+    """The focused foreground = theme.conf's `foreground` (the wallpaper accent,
+    rewritten by wal-set.sh on every theme switch). We restore focus by setting
+    this explicitly rather than `set-colors --reset`: --reset implies
+    --configured, which rewrites kitty's *configured* defaults to the values
+    they had at STARTUP — after that a live config reload (wal-set.sh's SIGUSR1)
+    can no longer change kitty's colors, so a theme switch would leave the text
+    stuck on the old palette. A plain foreground= override touches only the live
+    window and IS superseded by the next reload, so themes keep working."""
+    try:
+        with open(THEME_CONF) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] == "foreground":
+                    return parts[1]
+    except OSError:
+        pass
+    return None
 
 
 def kitty_pid_at(addr):
@@ -42,8 +63,14 @@ def kitty_pid_at(addr):
 def recolor(pid, focused):
     if not pid:
         return
-    args = ["kitty", "@", "--to", kitty_sock(pid), "set-colors"]
-    args += ["--reset"] if focused else [f"foreground={INACTIVE}"]
+    if focused:
+        fg = focused_fg()
+        # fall back to --reset only if theme.conf is unreadable (better a
+        # possibly-stale colour than leaving the window greyed)
+        color = f"foreground={fg}" if fg else "--reset"
+    else:
+        color = f"foreground={INACTIVE}"
+    args = ["kitty", "@", "--to", kitty_sock(pid), "set-colors", color]
     try:
         subprocess.run(args, capture_output=True, timeout=2)
     except Exception:

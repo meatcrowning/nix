@@ -36,82 +36,55 @@ Window {
 
     onClosing: Qt.quit()
 
-    // Square 28×28 operation button for the right strip — same cell geometry as
-    // the sort buttons and the hyprvtb titlebar. Uses the built-in `enabled`
-    // (a disabled one ignores clicks and dims to 0.4), and greys its accent
-    // when the window is unfocused, like the titlebar.
-    component OpButton: Rectangle {
-        id: ob
-        property string label: ""
-        property string tooltip: ""
-        property bool danger: false
-        property bool active: false   // lit like a hovered cell (for toggles, e.g. "h")
-        signal clicked()
-        readonly property bool winActive: Window.active
-        readonly property bool hot: obMa.containsMouse   // stays false while disabled
-        readonly property bool lit: (hot || active) && enabled
-        width: 28
-        height: 28
-        color: lit ? Theme.bgAlt : Theme.bg
-        border.width: lit ? 2 : 1
-        border.color: !enabled ? Theme.border
-                     : lit ? (winActive ? Theme.accent : Theme.inactive)
-                     : Theme.border
-        opacity: enabled ? 1 : 0.4
+    // ---- hyprvtb titlebar buttons (the old right strip, now native) ----
+    // The sort + file-op buttons live in the REAL compositor titlebar: hyprvtb
+    // draws a double-wide bar on every window and this registers filer's
+    // buttons for its inner column (Titlebar bridge in main.py → the plugin's
+    // socket). Labels and states are plain data — this array re-evaluates
+    // whenever the view state it references changes, and every change pushes a
+    // full re-registration (cheap: one line on a Unix socket).
+    // state: 0 normal, 1 active/lit, 2 disabled ("-" spacers dropped — the
+    // column reads cleaner as one uniform grid).
+    readonly property var tbButtons: {
+        const sort = (f, l, tip) => ({ id: "sort-" + f,
+                                       label: view.sortField === f ? l + (view.sortAsc ? "↑" : "↓") : l,
+                                       state: view.sortField === f ? 1 : 0, tip: tip });
+        const sel = view.selected !== "" ? 0 : 2;
+        return [
+            sort("name", "n", "sort by name"),
+            sort("created", "c", "sort by created date"),
+            sort("size", "s", "sort by size"),
+            { id: "new",    label: "+",  state: 0,                             tip: "new file or folder" },
+            { id: "rename", label: "r",  state: sel,                           tip: "rename selected" },
+            { id: "copy",   label: "cp", state: sel,                           tip: "copy selected" },
+            { id: "cut",    label: "cx", state: sel,                           tip: "cut selected" },
+            { id: "paste",  label: "p",  state: view.clip !== null ? 0 : 2,    tip: "paste" },
+            { id: "trash",  label: "t",  state: sel,                           tip: "move to trash" },
+            { id: "hidden", label: "h",  state: view.showHidden ? 1 : 0,       tip: "toggle hidden files" },
+        ];
+    }
+    onTbButtonsChanged: Titlebar.setButtons(tbButtons)
+    Component.onCompleted: Titlebar.setButtons(tbButtons)
 
-        PixelText {
-            anchors.centerIn: parent
-            text: ob.label
-            color: ob.danger ? Theme.crit
-                 : ob.lit ? (ob.winActive ? Theme.accent : Theme.inactive)
-                 : (ob.winActive ? Theme.text : Theme.inactive)
-        }
-        MouseArea {
-            id: obMa
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: ob.clicked()
-            onEntered: ttDelay.restart()
-            onExited: { ttDelay.stop(); tt.armed = false; }
-        }
-
-        // Themed tooltip (Theme colours + PixelText, not the native style) — a
-        // real Popup, so it renders on the window's overlay layer, always on
-        // top regardless of where OpButton sits in the tree. Opens to the LEFT
-        // since these buttons sit flush against the right window edge.
-        //
-        // x is animated with Behavior, not a Popup enter/exit Transition — a
-        // Transition's NumberAnimation assigns x directly, which fights a
-        // permanent binding on the same property (that was the first attempt,
-        // and it's why it looked janky). Behavior + a boolean-driven x is the
-        // same idiom the panel's own edge-reveal widgets use (Launcher/
-        // OsdWindow/SlidePopup in quickshell-files): 220ms, Easing.OutCubic.
-        // `armed` (not hover directly) drives x, so the close slide is the
-        // mirror of the open slide instead of a Popup-lifecycle snap; `visible`
-        // stays true until the close slide actually finishes, same as
-        // OsdWindow's `visible: Osd.active || card.x < card.hidden - 1`.
-        Timer { id: ttDelay; interval: 450; onTriggered: tt.armed = true }
-        ToolTip {
-            id: tt
-            parent: ob
-            property bool armed: false
-            readonly property real shownX: -tt.width - 6
-            visible: ob.tooltip !== "" && (armed || x < -1)
-            text: ob.tooltip
-            timeout: 6000
-            padding: 6
-            x: armed ? shownX : 0
-            y: (ob.height - tt.height) / 2
-            Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            background: Rectangle {
-                color: Theme.bg
-                border.color: Theme.accent
-                border.width: 1
+    Connections {
+        target: Titlebar
+        function onClicked(id) {
+            if (id.startsWith("sort-")) { view.setSort(id.substring(5)); return; }
+            switch (id) {
+            case "new":    newDlg.open(); break;
+            case "rename": if (view.selected) { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); } break;
+            case "copy":   if (view.selected) view.clip = { op: "copy", path: view.selected }; break;
+            case "cut":    if (view.selected) view.clip = { op: "cut", path: view.selected }; break;
+            case "paste": {
+                if (view.clip === null) break;
+                const src = view.clip.path;
+                const dst = view.join(view.path, view.dirNameOf(src));
+                if (view.clip.op === "copy") FileOps.run(["cp", "-a", "--", src, dst], dst);
+                else { FileOps.run(["mv", "--", src, dst], dst); view.clip = null; }
+                break;
             }
-            contentItem: PixelText {
-                text: ob.tooltip
-                color: Theme.text
+            case "trash":  if (view.selected) { FileOps.run(["gio", "trash", "--", view.selected], ""); view.selected = ""; } break;
+            case "hidden": view.toggleHidden(); break;
             }
         }
     }
@@ -250,7 +223,7 @@ Window {
 
         function go(p) { path = p; selected = ""; rebuild(); refreshDirSize(); persist(); }
 
-        Component.onCompleted: { rebuild(); refreshDirSize(); }
+        Component.onCompleted: { rebuild(); refreshDirSize(); Titlebar.setFooter(dirSizeStr); }
 
         // integer byte size -> compact string (delegate helper)
         function sizeStr(b) {
@@ -273,172 +246,18 @@ Window {
             return u(Math.round(d / 31557600), "year");
         }
 
-        // ---- right strip: sort controls, mirroring the hyprvtb titlebar ----
-        // A full-height 32px strip on the right edge (same width as the window's
-        // vertical titlebar), with three 28×28 square buttons at the top — same
-        // geometry as the compositor's close/maximize/… cells — so the sort
-        // controls read as a second button stack just inboard of the real one.
-        // n = name, c = created, s = size; the active button shows ↑/↓ and
-        // re-clicking it flips direction.
-        Rectangle {
-            id: rightStrip
-            anchors { top: parent.top; right: parent.right; bottom: parent.bottom }
-            width: 32
-            // == the hyprvtb bar background (bg_color 0xff000000), and no border,
-            // so this strip and the compositor titlebar read as one continuous
-            // bar. The window frame already wraps content+bar as a single frame.
-            color: Theme.bg
+        // (the right strip that used to live here — sort buttons, file-op
+        // buttons, dir-size readout — moved into the REAL compositor titlebar:
+        // see tbButtons/Connections up top, and the dirSizeStr footer below.)
 
-            // divider on the LEFT only (between the file list and the bar); the
-            // right edge stays seamless with the compositor titlebar.
-            Rectangle {
-                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                width: 1
-                color: Theme.border
-            }
-
-            // drag the empty strip to move the window, so the whole merged bar
-            // (this half + the compositor titlebar) is draggable. Declared before
-            // the buttons so their MouseAreas win their own cells. Calls the
-            // window's startSystemMove() directly (a QWindow slot) — the compositor
-            // then owns the drag, same as dragging the hyprvtb titlebar.
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                onPressed: win.startSystemMove()
-            }
-
-            // top stack: sort buttons, a spacer, then the file-operation buttons
-            // — all 28×28 cells matching the hyprvtb titlebar, so the strip reads
-            // as one continuous column of square buttons.
-            Column {
-                anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 2 }
-                spacing: 2
-
-                // sort buttons: n = name, c = created, s = size. The active one
-                // shows ↑/↓ and re-clicking it flips direction. 1px border idle,
-                // 2px accent + bgAlt fill when active/hovered.
-                Repeater {
-                    model: [
-                        { l: "n", f: "name",    t: "sort by name" },
-                        { l: "c", f: "created", t: "sort by created date" },
-                        { l: "s", f: "size",    t: "sort by size" }
-                    ]
-                    Rectangle {
-                        id: sortBtn
-                        required property var modelData
-                        width: 28
-                        height: 28
-                        readonly property bool active: view.sortField === modelData.f
-                        readonly property bool hot: active || sortMa.containsMouse
-                        color: hot ? Theme.bgAlt : Theme.bg
-                        border.width: hot ? 2 : 1
-                        border.color: hot ? win.fgAccent : Theme.border
-
-                        PixelText {
-                            anchors.centerIn: parent
-                            text: sortBtn.active ? (sortBtn.modelData.l + (view.sortAsc ? "↑" : "↓"))
-                                                 : sortBtn.modelData.l
-                            color: sortBtn.active ? win.fgAccent : win.fgText
-                        }
-                        MouseArea {
-                            id: sortMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: view.setSort(sortBtn.modelData.f)
-                            onEntered: sortTtDelay.restart()
-                            onExited: { sortTtDelay.stop(); sortTt.armed = false; }
-                        }
-
-                        // same themed, sliding tooltip as OpButton — see its
-                        // definition above for why this is Behavior-on-x (not
-                        // a Popup enter/exit Transition) and why `armed` (not
-                        // hover directly) drives it.
-                        Timer { id: sortTtDelay; interval: 450; onTriggered: sortTt.armed = true }
-                        ToolTip {
-                            id: sortTt
-                            parent: sortBtn
-                            property bool armed: false
-                            readonly property real shownX: -sortTt.width - 6
-                            visible: sortTt.armed || sortTt.x < -1
-                            text: sortBtn.modelData.t
-                            timeout: 6000
-                            padding: 6
-                            x: armed ? shownX : 0
-                            y: (sortBtn.height - sortTt.height) / 2
-                            Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                            background: Rectangle {
-                                color: Theme.bg
-                                border.color: Theme.accent
-                                border.width: 1
-                            }
-                            contentItem: PixelText {
-                                text: sortBtn.modelData.t
-                                color: Theme.text
-                            }
-                        }
-                    }
-                }
-
-                // spacer separating the sort section from the operations section
-                Item { width: 28; height: 12 }
-
-                // file operations (formerly the bottom toolbar): + new, r rename,
-                // cp copy, cx cut, p paste, t trash. Delete is intentionally gone
-                // — it moves to the right-click menu later.
-                OpButton { label: "+"; tooltip: "new file or folder"; onClicked: newDlg.open() }
-                OpButton {
-                    label: "r"; tooltip: "rename selected"; enabled: view.selected !== ""
-                    onClicked: { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); }
-                }
-                OpButton {
-                    label: "cp"; tooltip: "copy selected"; enabled: view.selected !== ""
-                    onClicked: view.clip = { op: "copy", path: view.selected }
-                }
-                OpButton {
-                    label: "cx"; tooltip: "cut selected"; enabled: view.selected !== ""
-                    onClicked: view.clip = { op: "cut", path: view.selected }
-                }
-                OpButton {
-                    label: "p"; tooltip: "paste"; enabled: view.clip !== null
-                    onClicked: {
-                        const src = view.clip.path;
-                        const dst = view.join(view.path, view.dirNameOf(src));
-                        if (view.clip.op === "copy") FileOps.run(["cp", "-a", "--", src, dst], dst);
-                        else { FileOps.run(["mv", "--", src, dst], dst); view.clip = null; }
-                    }
-                }
-                OpButton {
-                    label: "t"; tooltip: "move to trash"; enabled: view.selected !== ""
-                    onClicked: { FileOps.run(["gio", "trash", "--", view.selected], ""); view.selected = ""; }
-                }
-                // toggle: show/hide dotfiles. Lit while hidden files are shown.
-                OpButton { label: "h"; tooltip: "toggle hidden files"; active: view.showHidden; onClicked: view.toggleHidden() }
-            }
-
-            // total size of the files directly in the current dir, at the BOTTOM
-            // of the strip as upright stacked characters — the same vertical style
-            // as the titlebar title, on filer's half of the merged bar.
-            Column {
-                anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 5 }
-                spacing: -2
-                Repeater {
-                    model: view.dirSizeStr.split("")
-                    PixelText {
-                        required property var modelData
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: modelData
-                        color: !win.active ? Theme.inactive : Theme.textDim
-                    }
-                }
-            }
-        }
+        // dir-size readout: stacked at the bottom of the titlebar's inner
+        // column, drawn by the plugin (FOOTER message).
+        onDirSizeStrChanged: Titlebar.setFooter(dirSizeStr)
 
         // ---- header: up + editable location bar ----
         Rectangle {
             id: header
-            anchors { top: parent.top; left: parent.left; right: rightStrip.left }
+            anchors { top: parent.top; left: parent.left; right: parent.right }
             height: 30
             color: Theme.bgAlt
             border.color: Theme.border
@@ -535,7 +354,7 @@ Window {
         // ---- tree list ----
         ListView {
             id: list
-            anchors { top: header.bottom; left: parent.left; right: rightStrip.left; bottom: parent.bottom; margins: 2 }
+            anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
             clip: true
             model: view.rows
             boundsBehavior: Flickable.StopAtBounds

@@ -8,6 +8,12 @@ class CVtbPassElement : public IPassElement {
     struct SVtbData {
         CVtbDeco* deco = nullptr;
         float     a    = 1.F;
+        // A tooltip-only element: enqueued at RENDER_POST_WINDOWS so the hover
+        // label draws OVER the window surface. The bar itself is a normal
+        // UNDER-layer element (deco draws before the window) — fine for the bar,
+        // which lives in reserved space to the right, but the tooltip pops out
+        // LEFT into the window's area and would be painted over there.
+        bool tooltipOnly = false;
     };
 
     CVtbPassElement(const SVtbData& data_);

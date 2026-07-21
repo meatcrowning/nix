@@ -131,6 +131,13 @@ Scope {
     readonly property var _allWidgets: [calendar, analogClock, weatherPanel, diskPanel, cpuPanel, gpuPanel, ethPanel]
     readonly property var _fanOut: [[diskPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
 
+    // The desktop widgets fanned out at login when nothing has been saved yet
+    // (first boot / cleared state). persistKeys, NOT widget refs — declarative
+    // so this stays a trivial one-line edit, and a saved set (Meta+Ctrl+S writes
+    // the live pins) always overrides it. Add host-specific defaults here later
+    // without touching any of the fan logic below.
+    readonly property var _defaultWidgets: ["clock", "weather", "disk", "cpu", "eth"]
+
     // one stage every _fanStepMs — set to just past a single widget's full
     // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a
     // stage finishes animating before the next one starts.
@@ -197,24 +204,48 @@ Scope {
             "d=\"$HOME/.local/state/quickshell\"; mkdir -p \"$d\"; printf '%s\\n' \"$1\" > \"$d/widgets\"",
             "_", keys]);
     }
+    // pin order for the instant (reload) path: same layout order the reveal
+    // uses so tiling (disk rightmost, clock/weather/calendar left) and stacking
+    // (gpu/cpu/eth bottom-up) land right regardless of saved key order.
+    readonly property var _pinOrder: [diskPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
+
+    // text is two lines: "<space-separated keys>\n<login|reload>".
     function applyWidgetState(text) {
-        const keys = (text || "").trim().split(/\s+/).filter(s => s.length);
-        if (!keys.length) return;
-        // pin in the same layout order the reveal uses so tiling (disk rightmost,
-        // clock/weather/calendar left) and stacking (gpu/cpu/eth bottom-up) land
-        // right regardless of the order the keys were written in.
-        const order = [diskPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel];
-        let n = 0;
-        for (const w of order)
-            if (keys.indexOf(w.persistKey) >= 0) { w.pinnedOpen = true; n++; }
-        if (n === _allWidgets.length) allRevealed = true;
+        const lines = (text || "").split("\n");
+        const saved = (lines[0] || "").trim().split(/\s+/).filter(s => s.length);
+        const login = (lines[1] || "").trim() !== "reload";
+        // saved set wins; otherwise the baked-in default (first boot).
+        const want = saved.length ? saved : _defaultWidgets;
+        if (!want.length) return;
+        if (want.length === _allWidgets.length) allRevealed = true;
+
+        if (login) {
+            // Fan the wanted widgets OUT (staged cascade) at a genuine login,
+            // reusing the exact stage grouping/order the reveal button uses so
+            // tiling and stacking land right — filtered to the wanted set (empty
+            // stages fall through). Mirrors "how they are now": they fan in.
+            const stages = _fanOut.map(grp => grp.filter(w => want.indexOf(w.persistKey) >= 0));
+            _runFan(stages, true);
+        } else {
+            // A hot reload (e.g. wal-set.sh rewriting Theme.qml) recreates this
+            // whole tree — snap the pins back instantly instead of replaying the
+            // ~1.2s fan on every wallpaper change.
+            for (const w of _pinOrder)
+                if (want.indexOf(w.persistKey) >= 0) w.pinnedOpen = true;
+        }
     }
 
-    // Read the saved pin set once at startup. A Process (not FileView) keeps it
-    // simple and the async read doubles as a small settle delay before pins map.
+    // Read the saved pin set once at startup, plus a login-vs-reload flag: a
+    // marker in $XDG_RUNTIME_DIR (wiped on logout) exists on reloads but not on
+    // the session's first load, so only a real login gets the fan cascade. A
+    // Process (not FileView) keeps it simple and the async read doubles as a
+    // small settle delay before pins map.
     Process {
         id: widgetStateProc
-        command: ["sh", "-c", "cat \"$HOME/.local/state/quickshell/widgets\" 2>/dev/null || true"]
+        command: ["sh", "-c",
+            "printf '%s\\n' \"$(cat \"$HOME/.local/state/quickshell/widgets\" 2>/dev/null | head -1)\"; " +
+            "m=\"${XDG_RUNTIME_DIR:-/tmp}/qs-fanned\"; " +
+            "[ -e \"$m\" ] && echo reload || { touch \"$m\"; echo login; }"]
         stdout: StdioCollector {
             onStreamFinished: shell.applyWidgetState(this.text)
         }

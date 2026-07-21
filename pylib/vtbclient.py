@@ -1,0 +1,156 @@
+"""Client for hyprvtb's app-button socket (the inner half of the double-wide
+titlebar the compositor draws on every window's right edge).
+
+Protocol (newline-terminated lines over a Unix stream socket at
+$XDG_RUNTIME_DIR/hyprvtb-buttons.sock — see ~/nix/home/prog/hyprvtb/vtbIpc.hpp,
+the server side):
+
+    -> REGISTER <pid> <id>:<label>:<state>|...   replace our whole button set
+    -> FOOTER <text>                             stacked text at column bottom
+    <- CLICK <id>                                a button was clicked
+
+Buttons are (id, label, state[, tooltip]) tuples — state 0 normal,
+1 active/lit, 2 disabled — or the string "-" for a 12px spacer. Labels are
+1-2 char glyphs drawn in the titlebar's pixel font; the optional tooltip pops
+out beside the bar on hover. Fields may contain ANY character — the wire
+separators ':' and '|' (and newlines) are percent-encoded here and decoded by
+the plugin, so a "|" or ":" glyph label survives intact.
+
+All I/O runs on a daemon thread that reconnects forever (start the app before
+the plugin loads and the buttons appear once it does; plugin reloads re-register
+automatically). on_click fires ON THAT THREAD — Qt apps should bounce it
+through a Signal (queued across threads) before touching any UI.
+"""
+import os
+import socket
+import threading
+import time
+
+
+def _sock_path():
+    rt = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    return os.path.join(rt, "hyprvtb-buttons.sock")
+
+
+class VtbClient:
+    def __init__(self, on_click=None, pid=None):
+        self._on_click = on_click
+        self._pid = pid or os.getpid()
+        self._lock = threading.Lock()
+        self._sock = None          # guarded by _lock
+        self._buttons = []         # last set, guarded by _lock (resent on reconnect)
+        self._footer = ""
+        self._stop = False
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    # ---- public API ----
+
+    def set_buttons(self, buttons):
+        """buttons: list of (id, label, state[, tooltip]) tuples or "-"
+        spacers. Replaces the whole set; call again on any change."""
+        with self._lock:
+            self._buttons = list(buttons)
+            self._send_register_locked()
+
+    def set_footer(self, text):
+        with self._lock:
+            self._footer = str(text)
+            self._send_footer_locked()
+
+    def close(self):
+        self._stop = True
+        with self._lock:
+            if self._sock:
+                try:
+                    self._sock.close()
+                except OSError:
+                    pass
+                self._sock = None
+
+    # ---- wire helpers (call with _lock held) ----
+
+    def _send_locked(self, line):
+        if not self._sock:
+            return
+        try:
+            self._sock.sendall((line + "\n").encode())
+        except OSError:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None  # reader thread will reconnect
+
+    @staticmethod
+    def _enc(s):
+        # Percent-encode only the wire separators (and newlines/CR) so a field
+        # may hold ANY character — notably a "|" or ":" glyph label (e.g. kitty's
+        # vertical-split "|"), which the old space-replacement silently blanked.
+        # The plugin percent-decodes each field; non-ASCII glyphs (↑ » …) pass
+        # through untouched as UTF-8. Order matters: "%" must be escaped first.
+        return (str(s).replace("%", "%25").replace(":", "%3A").replace("|", "%7C")
+                .replace("\n", "%0A").replace("\r", "%0D"))
+
+    def _send_register_locked(self):
+        if not self._buttons:
+            return
+        parts = []
+        for b in self._buttons:
+            if b == "-":
+                parts.append("-::0")
+            else:
+                bid, label, state = b[0], b[1], b[2]
+                tip = b[3] if len(b) > 3 else ""
+                parts.append(f"{self._enc(bid)}:{self._enc(label)}:{int(state)}:{self._enc(tip)}")
+        self._send_locked(f"REGISTER {self._pid} " + "|".join(parts))
+
+    def _send_footer_locked(self):
+        self._send_locked("FOOTER " + self._footer)
+
+    # ---- reader / reconnect thread ----
+
+    def _loop(self):
+        buf = b""
+        while not self._stop:
+            with self._lock:
+                sock = self._sock
+            if sock is None:
+                try:
+                    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    sock.connect(_sock_path())
+                except OSError:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+                    time.sleep(3)  # plugin not loaded (yet) — keep trying
+                    continue
+                buf = b""
+                with self._lock:
+                    self._sock = sock
+                    self._send_register_locked()
+                    if self._footer:
+                        self._send_footer_locked()
+            try:
+                data = sock.recv(4096)
+            except OSError:
+                data = b""
+            if not data:  # server gone (plugin unloaded) — reconnect loop
+                with self._lock:
+                    if self._sock is sock:
+                        self._sock = None
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+                continue
+            buf += data
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                text = line.decode(errors="replace").strip()
+                if text.startswith("CLICK ") and self._on_click:
+                    try:
+                        self._on_click(text[6:])
+                    except Exception:
+                        pass  # a click handler bug must not kill the reader

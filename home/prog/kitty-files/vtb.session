@@ -1,0 +1,7 @@
+# Default startup session (kitty.conf: startup_session vtb.session).
+# The background launch starts the hyprvtb titlebar-button client for this
+# kitty instance (split/copy/paste/tab buttons in the compositor titlebar's
+# inner column — see ~/nix/pylib/kitty-vtb.py); the bare launch is the normal
+# shell window every kitty opens with.
+launch --type=background /usr/bin/env python3 /home/lam/nix/pylib/kitty-vtb.py
+launch

@@ -33,22 +33,68 @@ static CHyprColor configColor(Config::INTEGER color) {
     return CHyprColor{static_cast<uint64_t>(color)};
 }
 
-// Fixed interior metrics (logical px): five square button cells under the
-// top edge (close, maximize, minimize, pin, roll-up), title filling the rest.
+// Fixed interior metrics (logical px). The bar is DOUBLE-WIDE for every
+// window: two columns of bar_width each. The INNER column (adjacent to the
+// window content) holds app-registered buttons (vtbIpc) — empty for apps that
+// registered none; the OUTER column holds the five system cells (close,
+// maximize, minimize, pin, roll-up) with the stacked title under them, exactly
+// as the single-wide bar did.
 static constexpr int VTB_PAD      = 2; // inset from the bar edge
 static constexpr int VTB_CELL_GAP = 2;
 static constexpr int VTB_CELLS    = 5;
+static constexpr int VTB_SEP_H    = 12;   // spacer height between app-button groups
+static constexpr int VTB_APPCELL  = 1000; // m_iHoverCell base for app cells (0-4 = system)
+
+// How long a clicked cell stays inverted as activation feedback.
+static constexpr float VTB_FLASH_MS = 220.f;
 
 // Hard (sharp, un-blurred) drop shadow cast to the bottom-left of a normal
 // window: a solid rectangle offset this many logical px down and left, behind
 // the window.
 static constexpr int VTB_SHADOW_SIZE = 24;
 
+// One column's width (the bar_width config value) and the full double-wide
+// bar. The system column starts at colW() in bar-local coordinates.
+static int colW() {
+    return g_pGlobalState->config.barWidth->value();
+}
+static int totalBarW() {
+    return colW() * 2;
+}
 static int           cellSize() {
-    return g_pGlobalState->config.barWidth->value() - VTB_PAD * 2;
+    return colW() - VTB_PAD * 2;
 }
 static int titleTop() {
     return VTB_PAD + VTB_CELLS * (cellSize() + VTB_CELL_GAP) + 4;
+}
+
+// The two button columns (inner app column, then outer system column) are laid
+// out as ONE grid centered in the double-wide bar, with the gap BETWEEN the
+// columns equal to the gap between rows (VTB_CELL_GAP) and matching left/right
+// margins. Bar-local logical x of each column's cells:
+static int gridLeftMargin() {
+    return (totalBarW() - (2 * cellSize() + VTB_CELL_GAP)) / 2;
+}
+static int    innerColX() { return gridLeftMargin(); }
+static int    sysColX() { return gridLeftMargin() + cellSize() + VTB_CELL_GAP; }
+// The stacked title / footer are colW-wide textures centered on their column.
+static double titleTexX() { return sysColX() + cellSize() / 2.0 - colW() / 2.0; }
+static double footerTexX() { return innerColX() + cellSize() / 2.0 - colW() / 2.0; }
+
+// Walk the app-button column's layout: calls cb(index, y) for every real
+// button cell (spacers advance y without a cell). Single source of truth for
+// both drawing and hit-testing.
+template <typename F>
+static void walkAppCells(const std::vector<SVtbAppButton>& btns, F&& cb) {
+    double y = VTB_PAD;
+    for (size_t i = 0; i < btns.size(); i++) {
+        if (btns[i].isSep()) {
+            y += VTB_SEP_H + VTB_CELL_GAP;
+            continue;
+        }
+        cb(i, y);
+        y += cellSize() + VTB_CELL_GAP;
+    }
 }
 
 // KDE-style resize engine constants. Edge bitmask + the width of the
@@ -95,7 +141,6 @@ CVtbDeco::~CVtbDeco() {
 }
 
 SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
-    const auto                 WIDTH   = g_pGlobalState->config.barWidth->value();
     const auto                 ENABLED = g_pGlobalState->config.enabled->value();
 
     SDecorationPositioningInfo info;
@@ -106,7 +151,7 @@ SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
     // bar_precedence_over_border).
     info.priority       = 10005;
     info.reserved       = true;
-    info.desiredExtents = {{0, 0}, {ENABLED ? WIDTH : 0, 0}};
+    info.desiredExtents = {{0.0, 0.0}, {ENABLED ? (double)totalBarW() : 0.0, 0.0}};
     return info;
 }
 
@@ -171,28 +216,27 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 
 // ---- text rendering -------------------------------------------------------
 
-// The title as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e reading
+// A string as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e reading
 // top-down): every UTF-8 codepoint on its own pango line, centered, with
-// antialiasing off so the pixel font stays crisp.
-void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR) {
+// antialiasing off so the pixel font stays crisp. One column wide (colW) —
+// used for the title (outer column) and the app footer (inner column).
+SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outTextH) {
     const auto FONT  = g_pGlobalState->config.font->value();
     const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
-    const int  BARW  = std::round(g_pGlobalState->config.barWidth->value() * scale);
+    const int  BARW  = std::round(colW() * scale);
 
-    if (runLenPx < SIZE || m_szLastTitle.empty()) {
-        m_pTitleTex = nullptr;
-        return;
-    }
+    if (runLenPx < SIZE || text.empty())
+        return nullptr;
 
     // split into codepoints, one per line; truncate to what fits, with a
     // trailing "…" cell when cut short
     const int                maxLines = runLenPx / SIZE;
     std::vector<std::string> cps;
-    for (size_t i = 0; i < m_szLastTitle.size();) {
+    for (size_t i = 0; i < text.size();) {
         size_t len = 1;
-        while (i + len < m_szLastTitle.size() && (m_szLastTitle[i + len] & 0xC0) == 0x80)
+        while (i + len < text.size() && (text[i + len] & 0xC0) == 0x80)
             len++;
-        cps.push_back(m_szLastTitle.substr(i, len));
+        cps.push_back(text.substr(i, len));
         i += len;
     }
     std::string stacked;
@@ -228,15 +272,26 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& COLOR
     cairo_move_to(CR, 0, 0);
     pango_cairo_show_layout(CR, layout);
 
+    if (outTextH) {
+        int lw = 0, lh = 0;
+        pango_layout_get_pixel_size(layout, &lw, &lh);
+        *outTextH = lh;
+    }
+
     pango_font_description_free(fd);
     g_object_unref(layout);
     cairo_font_options_destroy(fo);
     cairo_surface_flush(SURF);
 
-    m_pTitleTex = g_pHyprRenderer->createTexture(SURF);
+    auto tex = g_pHyprRenderer->createTexture(SURF);
 
     cairo_destroy(CR);
     cairo_surface_destroy(SURF);
+    return tex;
+}
+
+void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& color) {
+    m_pTitleTex = renderStackedTex(m_szLastTitle, runLenPx, scale, color);
 }
 
 SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale) {
@@ -261,7 +316,6 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         return;
 
     const auto SCALE   = pMonitor->m_scale;
-    const auto BARW    = g_pGlobalState->config.barWidth->value();
     const bool FOCUSED = PWINDOW == Desktop::focusState()->window();
 
     auto       bgColor       = configColor(g_pGlobalState->config.bgColor->value());
@@ -280,7 +334,10 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)textColor.getAsHex() || m_bLastFocus != FOCUSED) {
         m_glyphCache.clear();
+        m_tooltipCache.clear();
         m_pTitleTex     = nullptr;
+        m_pFooterTex    = nullptr;
+        m_szLastFooter.clear();
         m_lastTextColor = (uint64_t)textColor.getAsHex();
         m_bLastFocus    = FOCUSED;
     }
@@ -316,26 +373,48 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     const int CELL = cellSize();
 
-    // one button cell: hover -> bgAlt fill + 2px outline in `hot`, otherwise
-    // 1px outline in the plain button-border colour (mirrors the old QS look)
-    auto      drawCell = [&](int idx, const CHyprColor& hot, bool active) {
-        const double y       = VTB_PAD + idx * (CELL + VTB_CELL_GAP);
-        const bool   hovered = m_iHoverCell == idx;
-        const int    bw      = (hovered || active) ? 2 : 1;
-        auto         oc      = (hovered || active) ? hot : borderColor;
-        oc.a *= a;
-        g_pHyprOpenGL->renderRect(localBox(VTB_PAD, y, CELL, CELL), oc, {});
-        g_pHyprOpenGL->renderRect(localBox(VTB_PAD + bw, y + bw, CELL - 2 * bw, CELL - 2 * bw), (hovered || active) ? bgAltColor : bgColor, {});
+    // Whether a cell is currently showing its click-activation flash.
+    const auto FLASHNOW    = Time::steadyNow();
+    auto       cellFlashing = [&](int id) {
+        return id >= 0 && m_flashCell == id &&
+            std::chrono::duration<float, std::milli>(FLASHNOW - m_flashAt).count() < VTB_FLASH_MS;
     };
 
-    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color) {
+    // one button cell at bar-local (x, y): flash -> solid highlight fill (the
+    // caller draws the glyph in bg for the inverted look); lit -> bgAlt fill +
+    // 2px outline in `hot`; otherwise 1px outline in the plain button-border
+    // colour (mirrors the old QS look)
+    auto      drawCellXY = [&](double x, double y, const CHyprColor& hot, bool lit, bool flash = false) {
+        if (flash) {
+            auto fc = hot;
+            fc.a *= a;
+            g_pHyprOpenGL->renderRect(localBox(x, y, CELL, CELL), fc, {});
+            return;
+        }
+        const int bw = lit ? 2 : 1;
+        auto      oc = lit ? hot : borderColor;
+        oc.a *= a;
+        g_pHyprOpenGL->renderRect(localBox(x, y, CELL, CELL), oc, {});
+        g_pHyprOpenGL->renderRect(localBox(x + bw, y + bw, CELL - 2 * bw, CELL - 2 * bw), lit ? bgAltColor : bgColor, {});
+    };
+
+    auto drawGlyphXY = [&](double x, double y, const std::string& glyph, const CHyprColor& color) {
         auto tex = glyphTex(glyph, color, SCALE);
         if (!tex || tex->m_texID == 0)
             return;
-        const auto   TSZ = tex->m_size;
-        const double cy  = VTB_PAD + idx * (CELL + VTB_CELL_GAP) + CELL / 2.0;
-        CBox         gbox = {barBox.x + (VTB_PAD + CELL / 2.0) * SCALE - TSZ.x / 2.0, barBox.y + cy * SCALE - TSZ.y / 2.0, TSZ.x, TSZ.y};
+        const auto TSZ  = tex->m_size;
+        CBox       gbox = {barBox.x + (x + CELL / 2.0) * SCALE - TSZ.x / 2.0, barBox.y + (y + CELL / 2.0) * SCALE - TSZ.y / 2.0, TSZ.x, TSZ.y};
         g_pHyprOpenGL->renderTexture(tex, gbox.round(), {.a = a});
+    };
+
+    // the five system cells live in the OUTER column
+    auto drawCell = [&](int idx, const CHyprColor& hot, bool active) {
+        const double y = VTB_PAD + idx * (CELL + VTB_CELL_GAP);
+        drawCellXY(sysColX(), y, hot, m_iHoverCell == idx || active, cellFlashing(idx));
+    };
+
+    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color) {
+        drawGlyphXY(sysColX(), VTB_PAD + idx * (CELL + VTB_CELL_GAP), glyph, cellFlashing(idx) ? bgColor : color);
     };
 
     // close [x] — crit on hover, like the QS bar had
@@ -361,7 +440,7 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawCell(4, accentColor, m_bRolledUp);
     drawGlyph(4, m_bRolledUp ? "<<" : ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor);
 
-    // ---- title, a column of upright letters ----
+    // ---- title, a column of upright letters (outer column, under the cells) ----
     const int RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
     if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
         m_szLastTitle   = PWINDOW->m_title;
@@ -372,9 +451,328 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     if (m_pTitleTex && m_pTitleTex->m_texID != 0) {
         const auto TSZ  = m_pTitleTex->m_size;
-        CBox       tbox = {barBox.x, barBox.y + titleTop() * SCALE, TSZ.x, TSZ.y};
+        CBox       tbox = {barBox.x + titleTexX() * SCALE, barBox.y + titleTop() * SCALE, TSZ.x, TSZ.y};
         g_pHyprOpenGL->renderTexture(m_pTitleTex, tbox.round(), {.a = a});
     }
+
+    // ---- inner column: app-registered buttons + stacked footer (vtbIpc) ----
+    m_lastIpcSerial = VtbIpc::serial.load(std::memory_order_relaxed);
+    SVtbAppReg reg;
+    if (VtbIpc::get(appPid(), reg)) {
+        double appBottom = VTB_PAD; // where the buttons end (footer must stay below)
+        walkAppCells(reg.buttons, [&](size_t i, double y) {
+            if (y + CELL > DECOBOX.h - VTB_PAD)
+                return; // window too short for this cell — clip, don't overlap
+            appBottom = y + CELL;
+
+            const auto& b        = reg.buttons[i];
+            const bool  disabled = b.state == 2;
+            const bool  hovered  = m_iHoverCell == (int)(VTB_APPCELL + i);
+            const bool  lit      = !disabled && (hovered || b.state == 1);
+            // lit cells grey to the inactive tone on unfocused windows, like
+            // the old in-window strip did (win.fgAccent)
+            const auto& litCol   = FOCUSED ? accentColor : inactiveColor;
+
+            const bool flashing = cellFlashing(VTB_APPCELL + (int)i);
+            drawCellXY(innerColX(), y, litCol, lit, flashing);
+            // disabled cells dim to the inactive grey, like filer's 0.4-opacity look
+            drawGlyphXY(innerColX(), y, b.label, flashing ? bgColor : (disabled ? inactiveColor : (lit ? litCol : textColor)));
+        });
+
+        // footer: short stacked text pinned to the bottom of the inner column
+        // (filer's dir-size readout). Rendered with the same pango path as the
+        // title; skipped if the window is too short to fit any of it.
+        const int FRUNLEN = std::round((DECOBOX.h - appBottom - VTB_PAD * 2) * SCALE);
+        if (reg.footer != m_szLastFooter || FRUNLEN != m_iLastFooterRun || !m_pFooterTex) {
+            m_szLastFooter   = reg.footer;
+            m_iLastFooterRun = FRUNLEN;
+            m_iFooterTextH   = 0;
+            m_pFooterTex     = renderStackedTex(reg.footer, FRUNLEN, SCALE, textColor, &m_iFooterTextH);
+        }
+        if (m_pFooterTex && m_pFooterTex->m_texID != 0) {
+            // the texture's glyphs start at its top; bottom-anchor using the real
+            // pango text height so the readout hugs the bar's bottom edge
+            const auto TSZ  = m_pFooterTex->m_size;
+            CBox       fbox = {barBox.x + footerTexX() * SCALE, barBox.y + barBox.h - VTB_PAD * SCALE - m_iFooterTextH, TSZ.x, TSZ.y};
+            g_pHyprOpenGL->renderTexture(m_pFooterTex, fbox.round(), {.a = a});
+        }
+    }
+
+    // keep repainting while a click-flash plays, then clear it (the cell reverts
+    // to its normal look on the frame the flash expires)
+    if (m_flashCell != -1) {
+        if (cellFlashing(m_flashCell))
+            damageEntire();
+        else
+            m_flashCell = -1;
+    }
+
+    // NOTE: the hover tooltip is NOT drawn here — this pass element is an
+    // UNDER-layer decoration (drawn before the window surface), and the tooltip
+    // overhangs the window to the left, so drawing it here would put it behind
+    // the window. It's enqueued separately at RENDER_POST_WINDOWS; see
+    // enqueueTooltip / drawTooltipPass.
+}
+
+// Hover text for a cell: fixed strings for the five system cells, the
+// registered tooltip for app cells ("" = draw nothing).
+std::string CVtbDeco::tooltipForCell(int cell) {
+    switch (cell) {
+        case 0: return "close";
+        case 1: return m_bMaximized ? "unmaximize" : "maximize";
+        case 2: return "minimize";
+        case 3: return "pin";
+        case 4: return m_bRolledUp ? "unroll" : "roll up";
+        default: break;
+    }
+    if (cell >= VTB_APPCELL) {
+        SVtbAppReg reg;
+        if (VtbIpc::get(appPid(), reg)) {
+            const size_t i = cell - VTB_APPCELL;
+            if (i < reg.buttons.size())
+                return reg.buttons[i].tooltip;
+        }
+    }
+    return "";
+}
+
+double CVtbDeco::cellCenterY(int cell) {
+    const int CELL = cellSize();
+    if (cell >= 0 && cell < VTB_CELLS)
+        return VTB_PAD + cell * (CELL + VTB_CELL_GAP) + CELL / 2.0;
+    if (cell >= VTB_APPCELL) {
+        SVtbAppReg reg;
+        if (VtbIpc::get(appPid(), reg)) {
+            const size_t want = cell - VTB_APPCELL;
+            double       cy   = -1;
+            walkAppCells(reg.buttons, [&](size_t i, double y) {
+                if (i == want)
+                    cy = y + CELL / 2.0;
+            });
+            return cy;
+        }
+    }
+    return -1;
+}
+
+// The pop-out label itself: 1px accent outline, bar-background fill, pixel
+// font — the same look filer's old in-window tooltips had. Animated: slides
+// OUT of the bar's left edge (OutCubic, ~220ms) like the quickshell hover
+// widgets slide out of the screen edge, and retracts back into it. The label
+// starts fully tucked behind the bar and is clipped to the bar's left edge, so
+// the un-emerged part stays hidden behind the bar as it travels. Called each
+// rendered frame from drawTooltipPass while m_bTooltipShown; advances the slide
+// phase itself and re-damages until it settles, so it animates on a still cursor.
+static constexpr float VTB_TT_SLIDE_MS = 220.f; // matches SlidePopup's 220ms card slide
+
+static float easeOutCubic(float t) {
+    const float u = 1.f - std::clamp(t, 0.f, 1.f);
+    return 1.f - u * u * u;
+}
+
+void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCALE, float a) {
+    if (!m_bTooltipShown)
+        return;
+
+    // advance the slide phase toward the current target (1 shown, 0 retracted)
+    const float TARGET = m_ttWantShown ? 1.f : 0.f;
+    const auto  NOW    = Time::steadyNow();
+    float       dt     = std::chrono::duration<float, std::milli>(NOW - m_ttPhaseAt).count();
+    m_ttPhaseAt        = NOW;
+    dt                 = std::clamp(dt, 0.f, 64.f); // cap so a stale timestamp can't jump the slide
+    const float step   = dt / VTB_TT_SLIDE_MS;
+    if (m_ttPhase < TARGET)
+        m_ttPhase = std::min(TARGET, m_ttPhase + step);
+    else if (m_ttPhase > TARGET)
+        m_ttPhase = std::max(TARGET, m_ttPhase - step);
+    const bool animating = (m_ttPhase != TARGET);
+
+    // fully retracted -> finalize: stop being an active element next frame
+    if (m_ttPhase <= 0.f && !m_ttWantShown) {
+        m_bTooltipShown = false;
+        m_ttCell        = -1;
+        if (m_tooltipBox.w > 0) {
+            CBox b = m_tooltipBox;
+            g_pHyprRenderer->damageBox(b.expand(4));
+            m_tooltipBox = {};
+        }
+        return;
+    }
+
+    const auto TEXT = tooltipForCell(m_ttCell);
+    const double CY = cellCenterY(m_ttCell);
+    if (TEXT.empty() || CY < 0)
+        return;
+
+    auto bgColor   = configColor(g_pGlobalState->config.bgColor->value());
+    auto accent    = configColor(g_pGlobalState->config.accentColor->value());
+    auto textCol   = configColor(g_pGlobalState->config.textColor->value());
+
+    const float E = easeOutCubic(m_ttPhase); // eased slide amount (no fade — it emerges from behind the bar)
+    bgColor.a *= a;
+    accent.a *= a;
+
+    const auto FONT = g_pGlobalState->config.font->value();
+    const int  SIZE = std::round(g_pGlobalState->config.fontSize->value() * SCALE);
+    const auto KEY  = TEXT + "|" + std::format("{:08x}", textCol.getAsHex());
+
+    auto       it  = m_tooltipCache.find(KEY);
+    auto       tex = (it != m_tooltipCache.end()) ? it->second : (m_tooltipCache[KEY] = g_pHyprRenderer->renderText(TEXT, textCol, SIZE, false, FONT, 0));
+    if (!tex || tex->m_texID == 0)
+        return;
+
+    const double PADPX = 6 * SCALE;
+    const double W     = tex->m_size.x + PADPX * 2;
+    const double H     = tex->m_size.y + PADPX * 2;
+
+    // rest position sits just left of the bar; at phase 0 the label is shoved a
+    // full width+gap to the RIGHT so it's entirely tucked behind the bar, then
+    // slides left out into place. hideDist = W + gap => right edge starts at the
+    // bar's left edge.
+    const double restX    = barBox.x - W - 6 * SCALE;
+    const double hideDist = W + 6 * SCALE;
+    const double slideX   = restX + (1.f - E) * hideDist;
+
+    // Clip everything to the LEFT of the bar so the not-yet-emerged part stays
+    // hidden behind it. renderRect/renderTexture reset the GL scissor to their
+    // own damage region internally, so a manual scissor would be ignored — pass
+    // a clipped damage region via the render-data structs instead.
+    CRegion clip = g_pHyprRenderer->m_renderData.damage.copy();
+    clip.intersect(CBox{0.0, 0.0, barBox.x, (double)pMonitor->m_transformedSize.y});
+
+    CBox box = {slideX, barBox.y + CY * SCALE - H / 2.0, W, H};
+    box.round();
+
+    g_pHyprOpenGL->renderRect(box, accent, {.damage = &clip});
+    CBox inner = {box.x + SCALE, box.y + SCALE, box.w - 2 * SCALE, box.h - 2 * SCALE};
+    g_pHyprOpenGL->renderRect(inner.round(), bgColor, {.damage = &clip});
+    CBox tbox = {box.x + PADPX, box.y + PADPX, (double)tex->m_size.x, (double)tex->m_size.y};
+    g_pHyprOpenGL->renderTexture(tex, tbox.round(), {.damage = &clip, .a = a});
+
+    // remember the GLOBAL logical box (covering the full slide range, up to the
+    // bar edge) so a later damage clears every pixel the label could have touched
+    const auto   DECOBOX = effectiveBoxGlobal();
+    const double LW      = W / SCALE + 10;
+    const double LH      = H / SCALE + 4;
+    m_tooltipBox         = {DECOBOX.x - LW, DECOBOX.y + CY - LH / 2.0, LW + 2, LH};
+
+    // keep frames coming until the slide settles (a motionless cursor emits no
+    // events of its own; this self-sustains the animation)
+    if (animating)
+        g_pHyprRenderer->damageBox(CBox{m_tooltipBox});
+}
+
+// Begin the click-activation flash on a cell (system 0-4 or app 1000+i): the
+// cell inverts for VTB_FLASH_MS, self-damaging each frame in renderPass until
+// it expires. Feedback that a press registered.
+void CVtbDeco::flashCell(int cell) {
+    m_flashCell = cell;
+    m_flashAt   = Time::steadyNow();
+    damageEntire();
+}
+
+// Request the tooltip retract (slide + fade back out). The actual teardown
+// happens in renderTooltip once the phase reaches 0; here we just flip the
+// target and kick a frame so the retract animates instead of snapping.
+void CVtbDeco::hideTooltip() {
+    if (!m_bTooltipShown || !m_ttWantShown)
+        return;
+    m_ttWantShown = false;
+    m_ttPhaseAt   = Time::steadyNow(); // fresh dt so the slide-out starts smooth
+    if (m_tooltipBox.w > 0)
+        g_pHyprRenderer->damageBox(CBox{m_tooltipBox}.expand(4));
+}
+
+// The tooltip's own pass element body (RENDER_POST_WINDOWS): recompute the
+// monitor-local bar box the same way renderPass does, then draw the label.
+void CVtbDeco::drawTooltipPass(PHLMONITOR pMonitor, float a) {
+    if (!m_bTooltipShown || !validMapped(m_pWindow) || !pMonitor)
+        return;
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+
+    const auto SCALE   = pMonitor->m_scale;
+    const auto DECOBOX = effectiveBoxGlobal();
+
+    CBox       barBox = {DECOBOX.x - pMonitor->m_position.x, DECOBOX.y - pMonitor->m_position.y, DECOBOX.w, DECOBOX.h};
+    barBox.translate(PWINDOW->m_floatingOffset).scale(SCALE).round();
+    if (barBox.w < 1 || barBox.h < 1)
+        return;
+
+    renderTooltip(pMonitor, barBox, SCALE, a);
+}
+
+// Enqueue the hover tooltip over the window surface. Called per-monitor from
+// main.cpp's RENDER_POST_WINDOWS hook; no-ops unless a tooltip is showing for
+// a window on this monitor.
+void CVtbDeco::enqueueTooltip(PHLMONITOR pMonitor) {
+    if (!m_bTooltipShown || !g_pGlobalState || !g_pGlobalState->config.enabled->value())
+        return;
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !pMonitor || PWINDOW->m_monitor.lock() != pMonitor)
+        return;
+
+    auto data        = CVtbPassElement::SVtbData{this, 1.F};
+    data.tooltipOnly = true;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CVtbPassElement>(data));
+}
+
+void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
+    if (!validMapped(m_pWindow))
+        return;
+
+    // registration changed since the last render -> repaint the bar (covers
+    // sort-arrow flips after a click, surfer's loading state, etc., without
+    // waiting for the mouse to move)
+    if (ipcSerial != m_lastIpcSerial) {
+        m_lastIpcSerial = ipcSerial;
+        damageEntire();
+    }
+
+    // tooltip dwell (hover state is maintained by onMouseMove; this just starts
+    // the slide-in once the cursor has rested long enough). Skip if we're
+    // already showing THIS cell — otherwise re-fire when the tooltip is absent,
+    // retracting, or belongs to a different cell.
+    const bool alreadyShowingHover = m_bTooltipShown && m_ttWantShown && m_ttCell == m_iHoverCell;
+    if (m_iHoverCell != -1 && !m_bMinimized && !alreadyShowingHover &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_hoverSince).count() > 450 && !tooltipForCell(m_iHoverCell).empty()) {
+        m_ttCell        = m_iHoverCell;
+        m_ttWantShown   = true;
+        m_bTooltipShown = true;
+        m_ttPhaseAt     = Time::steadyNow(); // fresh dt so the slide-in starts smooth
+        // Pre-size the tooltip box to a generous strip left of the cell BEFORE
+        // the first render: the RENDER_POST_WINDOWS pass element uses it as its
+        // bounding box, so it must already cover the label on the frame the
+        // tooltip first appears (renderTooltip narrows it to the exact box).
+        const auto   B  = effectiveBoxGlobal();
+        const double CY = cellCenterY(m_ttCell);
+        if (CY >= 0) {
+            m_tooltipBox = {B.x - 360, B.y + CY - 30, 360, 60};
+            g_pHyprRenderer->damageBox(CBox{m_tooltipBox});
+        }
+        damageEntire();
+    }
+}
+
+pid_t CVtbDeco::appPid() {
+    if (m_appPid == -1) {
+        const auto W = m_pWindow.lock();
+        m_appPid     = W ? W->getPID() : 0;
+    }
+    return m_appPid;
+}
+
+// Hit-test the inner (app) column: index into reg.buttons, or -1.
+int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
+    if (c.x < innerColX() || c.x > innerColX() + cellSize())
+        return -1;
+    int hit = -1;
+    walkAppCells(reg.buttons, [&](size_t i, double y) {
+        if (c.y >= y && c.y <= y + cellSize())
+            hit = (int)i;
+    });
+    return hit;
 }
 
 // ---- input ----------------------------------------------------------------
@@ -425,10 +823,12 @@ Vector2D CVtbDeco::cursorRelativeToBar() {
 }
 
 int CVtbDeco::cellAt(const Vector2D& c) {
+    // system cells live in the OUTER column of the double-wide bar
     const int CELL = cellSize();
+    const int X    = sysColX();
     for (int i = 0; i < VTB_CELLS; i++) {
         const double y = VTB_PAD + i * (CELL + VTB_CELL_GAP);
-        if (VECINRECT(c, VTB_PAD, y, VTB_PAD + CELL, y + CELL))
+        if (VECINRECT(c, X, y, X + CELL, y + CELL))
             return i;
     }
     return -1;
@@ -445,11 +845,11 @@ int CVtbDeco::cellAt(const Vector2D& c) {
 // zones move the two edges meeting there. Floating windows only; tiled and
 // bar-less windows (scratchpad) fall through to the native behavior.
 
-// The visual frame: window + our bar (they're wrapped by one border).
+// The visual frame: window + our (double-wide) bar, wrapped by one border.
 static CBox frameBox(PHLWINDOW w) {
     CBox box = {w->m_realPosition->value(), w->m_realSize->value()};
     if (g_pGlobalState->config.enabled->value())
-        box.w += g_pGlobalState->config.barWidth->value();
+        box.w += totalBarW();
     return box;
 }
 
@@ -668,6 +1068,16 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     if (!g_pGlobalState)
         return;
 
+    // App-button registrations change on the I/O thread, which can't touch the
+    // renderer; this main-thread hook notices the bump and damages the bar so
+    // new/changed buttons appear. (Most changes coincide with client-driven
+    // damage anyway — this catches the stragglers.)
+    const uint64_t IPCSERIAL = VtbIpc::serial.load(std::memory_order_relaxed);
+    if (IPCSERIAL != m_lastIpcSerial) {
+        m_lastIpcSerial = IPCSERIAL;
+        damageEntire();
+    }
+
     if (m_bEdgeResizing) {
         updateEdgeResize();
         return;
@@ -705,18 +1115,30 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         const int  cell  = VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h) ? cellAt(LOCAL) : -1;
         if (cell != m_iHoverCell) {
             m_iHoverCell = cell;
+            m_hoverSince = Time::steadyNow(); // the main-thread tick pops the tooltip after the dwell
+            hideTooltip();
             damageEntire();
         }
         return;
     }
 
-    // hover feedback on the button cells
+    // hover feedback on the button cells (system column + app column)
     if (validMapped(m_pWindow) && !m_bMinimized) {
         const auto BOX    = assignedBoxGlobal();
         const auto LOCAL  = g_pInputManager->getMouseCoordsInternal() - BOX.pos();
-        const int  cell   = VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h) ? cellAt(LOCAL) : -1;
+        int        cell   = VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h) ? cellAt(LOCAL) : -1;
+        if (cell == -1 && VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h)) {
+            SVtbAppReg reg;
+            if (VtbIpc::get(appPid(), reg)) {
+                const int AI = appCellAt(LOCAL, reg);
+                if (AI >= 0 && reg.buttons[AI].state != 2) // disabled cells don't light
+                    cell = VTB_APPCELL + AI;
+            }
+        }
         if (cell != m_iHoverCell) {
             m_iHoverCell = cell;
+            m_hoverSince = Time::steadyNow(); // the main-thread tick pops the tooltip after the dwell
+            hideTooltip();
             damageEntire();
         }
 
@@ -777,14 +1199,38 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
 
     info.cancelled   = true;
     m_bCancelledDown = true;
+    hideTooltip(); // a press dismisses the hover label
 
-    switch (cellAt(COORDS)) {
+    // fire the click-activation flash on whichever system cell was hit (close /
+    // minimize also close/hide the window, so their flash just isn't seen)
+    const int SYSCELL = cellAt(COORDS);
+    if (SYSCELL >= 0)
+        flashCell(SYSCELL);
+
+    switch (SYSCELL) {
         case 0: closeWindow(); return;
         case 1: toggleMaximize(); return;
         case 2: minimizeWindow(); return;
         case 3: togglePin(); return;
         case 4: toggleRollup(); return;
         default: break;
+    }
+
+    // inner column: app-registered buttons. A hit sends CLICK <id> back to the
+    // owning client (disabled cells are inert but still swallow the press —
+    // they're buttons, not drag area).
+    {
+        SVtbAppReg reg;
+        if (VtbIpc::get(appPid(), reg)) {
+            const int AI = appCellAt(COORDS, reg);
+            if (AI >= 0) {
+                if (reg.buttons[AI].state != 2) {
+                    flashCell(VTB_APPCELL + AI); // activation feedback
+                    VtbIpc::sendClick(appPid(), reg.buttons[AI].id);
+                }
+                return;
+            }
+        }
     }
 
     // anywhere else on the bar: drag the window (maximized windows are
@@ -832,8 +1278,11 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
 
     info.cancelled   = true;
     m_bCancelledDown = true;
+    hideTooltip();
 
     const int CELL = cellAt(LOCAL);
+    if (CELL >= 0)
+        flashCell(CELL); // activation feedback (shaded bar draws through the same renderPass)
     if (CELL == 0) {
         closeWindow(); // [x] closes even while shaded
         return;
@@ -891,7 +1340,7 @@ CBox CVtbDeco::maximizeTarget() {
         return {};
 
     const auto GAP    = g_pGlobalState->config.maximizeGap->value();
-    const auto BARW   = g_pGlobalState->config.barWidth->value();
+    const auto BARW   = totalBarW();
     // Inset by the border width so the window frame stays visible against
     // the screen edges / panel when maximized.
     const auto BS     = PWINDOW->getRealBorderSize() + GAP;

@@ -33,6 +33,9 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
 
+sys.path.insert(0, str(HERE.parent / "pylib"))
+from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+
 # The panel's palette file, rewritten by wal-set.sh between the wal markers.
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
 PALETTE_KEYS = ["bg", "bgAlt", "border", "accent", "dim", "text", "textDim",
@@ -238,6 +241,37 @@ class Settings(QObject):
             pass
 
 
+class Titlebar(QObject):
+    """Bridge to the hyprvtb titlebar's app-button column (the inner half of
+    the compositor's double-wide bar — where filer's sort/op strip moved).
+
+    QML pushes the full button set whenever any label/state changes, and
+    receives clicks back through the `clicked` signal. VtbClient's callback
+    fires on its reader thread; emitting a Signal from there is safe — Qt
+    queues the delivery onto the main thread for the QML Connections item."""
+
+    clicked = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._client = VtbClient(on_click=self.clicked.emit)
+
+    @Slot("QVariantList")
+    def setButtons(self, buttons):
+        out = []
+        for b in buttons:
+            if isinstance(b, str):
+                out.append("-")  # spacer
+            else:
+                out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
+                            str(b.get("tip", ""))))
+        self._client.set_buttons(out)
+
+    @Slot(str)
+    def setFooter(self, text):
+        self._client.set_footer(text)
+
+
 class WinCtl(QObject):
     """Lets the QML sort strip act like a titlebar: dragging its empty area
     starts a compositor-side window move, so the strip + the hyprvtb bar behave
@@ -281,12 +315,14 @@ def main():
     ops = FileOps()
     palette = Palette(PANEL_THEME)
     winctl = WinCtl()
+    titlebar = Titlebar()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
     # Quick type name and would shadow the context property.
     # WalPalette first, so Theme's bindings resolve it when Theme is instantiated.
     ctx.setContextProperty("FileOps", ops)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("WinCtl", winctl)
+    ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("startDir", start_dir)
     # Last-used sort + hidden-files toggle, restored into the view on startup.

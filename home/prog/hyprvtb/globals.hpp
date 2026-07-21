@@ -11,6 +11,7 @@
 #include <string>
 
 #include <hyprland/src/helpers/signal/Signal.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 
 inline HANDLE PHANDLE = nullptr;
 
@@ -53,6 +54,13 @@ struct SGlobalState {
     // no titlebar, pinned to the left edge full-height, always at the
     // bottom of the z-order. Toggled by hl.plugin.hyprvtb.toggle_scratch().
     bool scratchVisible = false;
+
+    // Main-thread heartbeat (150ms): damages bars whose app-button
+    // registration changed (the IPC thread can't touch the renderer) and pops
+    // hover tooltips after their dwell even when the cursor sits perfectly
+    // still (mouse-move events alone can't do that). Removed in PLUGIN_EXIT
+    // before the state dies.
+    SP<CEventLoopTimer> tick;
 
     struct {
         SP<Config::Values::CBoolValue>   enabled;

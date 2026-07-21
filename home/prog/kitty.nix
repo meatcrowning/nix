@@ -9,6 +9,11 @@
   # from hyprland.lua's autostart (needs the live HYPRLAND_INSTANCE_SIGNATURE).
   xdg.configFile."kitty/kitty-focus-dim.py".source = ./kitty-files/kitty-focus-dim.py;
 
+  # Startup session: a background launch of the hyprvtb titlebar-button client
+  # (~/nix/pylib/kitty-vtb.py, run from the live repo) plus the normal shell
+  # window. See the startup_session note in kitty.conf.
+  xdg.configFile."kitty/vtb.session".source = ./kitty-files/vtb.session;
+
   # theme.conf is fully rewritten (plain `cat >`) by wal-set.sh on every
   # wallpaper change — needs to be a real writable file, seeded once, not a
   # read-only Nix-store symlink.

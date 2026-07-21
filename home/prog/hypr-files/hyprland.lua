@@ -94,12 +94,14 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
     -- Vista logon sound (sound map: quickshell/Sounds.qml)
     hl.exec_cmd("pw-play \"$HOME/.local/share/sounds/vista/Windows Logon Sound.wav\"")
-    -- Land on the "main" workspace (50, not 1) so a scroll-to-create
-    -- workspace scheme has numeric room to grow both up (49, 48, ...) and
-    -- down (51, 52, ...) from a central anchor, instead of hitting the floor
-    -- immediately at workspace 1. (The original WorkspaceNav.qml consumer of
-    -- this was removed with the Taskbar rework; the anchor is kept as-is.)
-    hl.exec_cmd([[hyprctl dispatch 'hl.dsp.focus({ workspace = 50 })']])
+    -- NOTE: deliberately do NOT switch to a "main" workspace here. This desktop
+    -- is locked to a SINGLE workspace, and the hyprvtb plugin relaunches the
+    -- saved session during config load (hl.plugin.load below) — those windows
+    -- map onto the default workspace 1. An async `focus workspace 50` used to
+    -- run here and race that mapping: windows that mapped before the switch
+    -- stayed on 1, ones after landed on 50, so a fresh login scattered programs
+    -- across two workspaces (some only reachable via their taskbar icon).
+    -- Staying on workspace 1 keeps everything on the one workspace.
 end)
 
 -- Compositor-drawn vertical titlebars (close / maximize / rotated title,

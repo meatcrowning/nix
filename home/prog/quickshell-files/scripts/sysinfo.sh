@@ -81,13 +81,31 @@ fi
 # Battery percentage + charging flag via /sys/class/power_supply/BAT*
 # (generic ACPI, e.g. top if it ever had one) or macsmc-battery (book).
 # "-1|0" when neither node exists (desktop box, no battery).
+#
+# Percentage is computed from the energy_now/energy_full ratio (equivalently
+# charge_now/charge_full) — the same figure `upower -b` reports — NOT the raw
+# `capacity` node. On book's macsmc-battery `capacity` is the SMC's own gauge
+# and reads several points high (e.g. 99 vs upower's 93), so the panel used to
+# disagree with upower. Falls back to `capacity` on hosts lacking the
+# energy/charge_* pair, where capacity already matches.
 bat="-1|0"
 for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/; do
     [ -f "$dir/capacity" ] || continue
-    cap=$(cat "$dir/capacity" 2>/dev/null)
     status=$(cat "$dir/status" 2>/dev/null)
     chg=0
     [ "$status" = "Charging" ] && chg=1
+
+    now=""; full=""
+    if [ -r "$dir/energy_now" ] && [ -r "$dir/energy_full" ]; then
+        now=$(cat "$dir/energy_now" 2>/dev/null); full=$(cat "$dir/energy_full" 2>/dev/null)
+    elif [ -r "$dir/charge_now" ] && [ -r "$dir/charge_full" ]; then
+        now=$(cat "$dir/charge_now" 2>/dev/null); full=$(cat "$dir/charge_full" 2>/dev/null)
+    fi
+    if [ -n "$now" ] && [ -n "$full" ] && [ "$full" -gt 0 ] 2>/dev/null; then
+        cap=$(awk -v n="$now" -v f="$full" 'BEGIN{ printf "%d", n*100/f + 0.5 }')  # rounded, float-safe
+    else
+        cap=$(cat "$dir/capacity" 2>/dev/null)
+    fi
     [ -n "$cap" ] && bat="$cap|$chg"
     break
 done

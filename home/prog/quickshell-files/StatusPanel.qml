@@ -192,7 +192,10 @@ Column {
     // useBacklight below.
     Stat {
         visible: SysInfo.batteryPct >= 0
-        label: "bat"
+        // label flips to "chg" while charging — an unmistakable indicator on
+        // top of the green value colour (a colour alone is easy to miss when
+        // the pack is near full and the normal colour is already light).
+        label: SysInfo.batteryCharging ? "chg" : "bat"
         value: SysInfo.batteryPct + ""
         valueColor: SysInfo.batteryCharging ? Theme.ok
                   : SysInfo.batteryPct <= 15 ? Theme.crit

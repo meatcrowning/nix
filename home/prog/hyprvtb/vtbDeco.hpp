@@ -8,6 +8,7 @@
 #include <hyprland/src/helpers/signal/Signal.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include "globals.hpp"
+#include "vtbIpc.hpp"
 
 // inputIsValid() pokes at InputManager internals, same as hyprbars does.
 #define private public
@@ -60,6 +61,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     // enqueues the bar's pass element for the shade to stay visible in place.
     void                               renderShadeIfRolled(PHLMONITOR);
 
+    // Called from main.cpp's RENDER_POST_WINDOWS hook: enqueues the hover
+    // tooltip as a pass element that draws OVER the window surface (the bar's
+    // own UNDER-layer pass draws before the window, so a tooltip drawn there —
+    // it overhangs the window to the left — is painted over and invisible).
+    void                               enqueueTooltip(PHLMONITOR);
+
     // Public: also invoked through the hyprvtb.* lua functions / dispatchers
     // (panel icon click minimizes the active window, hyprvtb:rollup, etc.).
     void                               minimizeWindow();
@@ -69,6 +76,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     // Called from main.cpp's window.active listener: focusing a minimized
     // window slides it back in.
     void                               onFocusGained();
+
+    // Called from main.cpp's 150ms main-thread timer: damages the bar when
+    // the app-button registration changed, and pops the hover tooltip once
+    // its dwell has passed (a motionless cursor generates no move events).
+    void                               mainThreadTick(uint64_t ipcSerial);
 
     // The geometry that should be remembered for this window (the restore
     // position if it's currently minimized, its live goal otherwise).
@@ -88,6 +100,15 @@ class CVtbDeco : public IHyprWindowDecoration {
     uint64_t             m_lastTextColor = 0;
     bool                 m_bLastFocus    = false;
 
+    // App-button column (the inner half of the double-wide bar) — buttons a
+    // client registered for this window's PID over the vtbIpc socket.
+    pid_t                m_appPid        = -1; // -1 = not resolved yet, 0 = none
+    uint64_t             m_lastIpcSerial = 0;  // damage when VtbIpc::serial moves
+    SP<Render::ITexture> m_pFooterTex;         // stacked footer text, bottom of the inner column
+    std::string          m_szLastFooter;
+    int                  m_iLastFooterRun = -1;
+    int                  m_iFooterTextH   = 0; // real pango height, for bottom-anchoring
+
     bool                 m_bMaximized = false;
     CBox                 m_savedGeometry;
 
@@ -98,7 +119,28 @@ class CVtbDeco : public IHyprWindowDecoration {
     Vector2D             m_minSavedPos;
     Time::steady_tp      m_minimizedAt = Time::steadyNow();
 
-    int                  m_iHoverCell = -1; // 0 close, 1 max, 2 min, 3 pin, 4 rollup, -1 none
+    int                  m_iHoverCell = -1; // 0-4 system cells, 1000+i app cells, -1 none
+
+    // Click-activation flash: the clicked cell briefly inverts (fills with its
+    // highlight colour, label drawn in the bar background) so a press reads as
+    // "activated". Same cell-id space as m_iHoverCell.
+    int                  m_flashCell = -1;
+    Time::steady_tp      m_flashAt   = Time::steadyNow();
+
+    // Hover tooltips: after a dwell on a cell (detected by the main-thread
+    // timer, since a motionless cursor emits no move events), a themed label
+    // pops out to the LEFT of the bar. Drawn as its OWN pass element at
+    // RENDER_POST_WINDOWS (see enqueueTooltip) so it sits over the window
+    // surface — the bar's UNDER-layer pass draws before the window and the
+    // label overhangs the window's area.
+    Time::steady_tp      m_hoverSince   = Time::steadyNow();
+    bool                 m_bTooltipShown = false; // element active (visible OR still animating out)
+    bool                 m_ttWantShown   = false; // slide target: 1 while dwelt+hovering, 0 to retract
+    int                  m_ttCell        = -1;    // cell the current tooltip belongs to (survives hover change during slide-out)
+    float                m_ttPhase       = 0.f;   // 0 fully retracted .. 1 fully out (eased slide+fade)
+    Time::steady_tp      m_ttPhaseAt     = Time::steadyNow(); // last phase advance, for dt
+    CBox                 m_tooltipBox;      // last drawn box, GLOBAL logical (for damage)
+    std::map<std::string, SP<Render::ITexture>> m_tooltipCache; // "text|rgbahex" -> tex
 
     bool                 m_bDragPending   = false;
     bool                 m_bDraggingThis  = false;
@@ -129,7 +171,17 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     void                 renderPass(PHLMONITOR, float const& a);
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
+    SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
+
+    pid_t                appPid();
+    int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
+    std::string          tooltipForCell(int cell); // "" = none
+    double               cellCenterY(int cell);    // bar-local logical y of a hover cell's centre
+    void                 renderTooltip(PHLMONITOR, const CBox& barBox, float scale, float a);
+    void                 drawTooltipPass(PHLMONITOR, float a); // computes barBox, then renderTooltip
+    void                 hideTooltip();
+    void                 flashCell(int cell); // start the click-activation flash on a cell
 
     bool                 inputIsValid();
     void                 onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e);
