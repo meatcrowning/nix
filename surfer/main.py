@@ -24,7 +24,7 @@ from PySide6.QtCore import QObject, Slot, Signal, QUrl, QFileSystemWatcher, Prop
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
-from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineScript
+from PySide6.QtWebEngineCore import QWebEngineScript
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -251,17 +251,12 @@ class UserScripts(QObject):
         cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
         self._dir = cfg / "surfer" / "userscripts"
         self._scripts = []
-        self._profile = None
+        self._qscripts = []   # QWebEngineScript objects, bound to each view's userScripts.collection
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._reload)
         self._watcher.fileChanged.connect(self._reload)
         self._ensure_dir()
         self._reload()
-
-    def set_profile(self, profile):
-        """Attach the shared WebEngine profile whose script collection we drive."""
-        self._profile = profile
-        self._rebuild_scripts()
 
     def _ensure_dir(self):
         try:
@@ -326,7 +321,7 @@ class UserScripts(QObject):
             if str(f) not in self._watcher.files():
                 self._watcher.addPath(str(f))
         self._scripts = scripts
-        self._rebuild_scripts()
+        self._build_qscripts()
         self.changed.emit()
 
     @staticmethod
@@ -356,11 +351,12 @@ class UserScripts(QObject):
                 "var __iv=setInterval(function(){if(document.documentElement){clearInterval(__iv);__run();}},0);\n"
                 "})();\n")
 
-    def _rebuild_scripts(self):
-        if self._profile is None:
-            return
-        coll = self._profile.scripts()
-        coll.clear()
+    def _build_qscripts(self):
+        # Build the QWebEngineScript objects that each WebEngineView binds to via
+        # userScripts.collection (the QML view IGNORES a Python QWebEngineProfile
+        # — it uses its own QQuickWebEngineProfile — so profile.scripts() never
+        # reaches it; the view's own userScripts collection is the path that works).
+        out = []
         world = 10  # each script gets its OWN isolated world so they don't
         for s in self._scripts:  # clobber each other's globals (4chan X vs OneeChan
             if not s["enabled"]:  # both assign window.$) — like a real GM manager
@@ -373,8 +369,13 @@ class UserScripts(QObject):
             qs.setWorldId(world)
             qs.setRunsOnSubFrames(False)
             qs.setSourceCode(self._wrap(s))
-            coll.insert(qs)
+            out.append(qs)
             world += 1
+        self._qscripts = out
+
+    @Property("QVariantList", notify=changed)
+    def scriptObjects(self):
+        return self._qscripts
 
     @Slot(str, bool)
     def setEnabled(self, file, on):
@@ -429,6 +430,15 @@ class Session(QObject):
 
 
 def main():
+    # CORS bypass for userscripts' GM_xmlhttpRequest (a fetch shim): disable the
+    # same-origin policy so cross-origin requests (4chan X archives, media title
+    # lookups, etc.) aren't blocked. NB this lowers security browser-wide — it's
+    # a deliberate trade-off for a personal userscript-running browser. Must be
+    # set before QtWebEngine initializes.
+    _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    if "disable-web-security" not in _flags:
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " --disable-web-security").strip()
+
     # Chromium must be initialized before the QGuiApplication exists.
     QtWebEngineQuick.initialize()
 
@@ -446,25 +456,16 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
-    # Shared persistent profile (cookies/cache/localStorage on disk). Owned by
-    # Python so UserScripts can drive its QWebEngineScript collection — the QML
-    # WebEngineScript element isn't creatable in this Qt build.
-    profile = QWebEngineProfile("surfer")
-    profile.setParent(app)
-    profile.downloadRequested.connect(lambda d: d.accept())
-
     palette = Palette(PANEL_THEME)
     titlebar = Titlebar()
     clip = Clip()
     session = Session()
     userscripts = UserScripts()
-    userscripts.set_profile(profile)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
     ctx.setContextProperty("UserScripts", userscripts)
-    ctx.setContextProperty("SurferProfile", profile)
     ctx.setContextProperty("startUrl", start_url)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))

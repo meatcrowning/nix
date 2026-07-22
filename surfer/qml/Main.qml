@@ -221,9 +221,16 @@ Window {
         Titlebar.setButtons(tbButtons);
     }
 
+    // Persistent profile (cookies/cache/localStorage on disk — GM_setValue is
+    // localStorage-backed, so it must persist). Downloads land in ~/Downloads.
+    WebEngineProfile {
+        id: sharedProfile
+        storageName: "surfer"
+        offTheRecord: false
+        onDownloadRequested: (download) => download.accept()
+    }
+
     // ---- content: one WebEngineView per tab, only the current one visible ----
-    // The shared persistent profile (with the userscript collection) is owned by
-    // Python — see SurferProfile / UserScripts in main.py.
     Item {
         anchors.fill: parent
 
@@ -236,7 +243,11 @@ Window {
                 required property string seed
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
-                profile: SurferProfile
+                profile: sharedProfile
+                // userscripts inject via the view's OWN collection (the view
+                // ignores a Python QWebEngineProfile) — GM shim, document-start,
+                // isolated worlds; see UserScripts in main.py
+                userScripts.collection: UserScripts.scriptObjects
                 Component.onCompleted: url = seed
 
                 // userscripts are injected by the profile (document-start, GM
