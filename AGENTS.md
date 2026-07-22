@@ -72,14 +72,49 @@ C++ — compositor-side window titlebars + session save/restore).
   nix source AND the live `~/.config/...` file **in place** (targeted string
   edit — never overwrite wholesale or you reset the live wal palette/border).
   Apply `hyprland.lua` keybind changes with **`hyprctl reload`** (re-runs the
-  live Lua, re-registers `hl.bind`s, does not disturb the session).
+  live Lua, re-registers `hl.bind`s, does not disturb the session). **Trap:** a
+  fix applied to the nix `hyprland.lua` source does nothing until it's ALSO put
+  in the live file — the running system keeps the old behaviour indefinitely
+  (this bit us: a stale `focus workspace 50` line lived on in the live file long
+  after it was removed from source, scattering windows across two workspaces).
 
-- **Verify without visuals — the user does the visual/animation checks.** Don't
-  screenshot. Use `qs log | tail` (parse/binding-loop errors), `qs ipc show` /
-  `qs ipc call` (wiring), `hyprctl binds` (keybinds). `qs log` is CUMULATIVE
-  across reloads — snapshot its line count before an action and read only the
-  new tail, or old warnings will mislead you. Never run bare `qs` (it launches
-  a second panel instance).
+- **`hyprvtb` plugin (C++) reload after a source edit:** `git add` the changed
+  files (flake eval ignores untracked), `rbsys` to recompile (the symlink
+  `~/.config/hypr/plugins/libhyprvtb.so` repoints to the new store path), then
+  live-reload — but `hyprctl plugin load <the symlink>` does NOT pick up the new
+  build: `dlopen` caches by the path string, which never changes, so it returns
+  the stale mapping. Load the **resolved** store path instead:
+  `real=$(readlink -f ~/.config/hypr/plugins/libhyprvtb.so); hyprctl plugin
+  unload "$real"; hyprctl plugin load "$real"`. Bump the version string in
+  `main.cpp` per change and confirm `hyprctl plugin list` shows a **new
+  Handle + Version** and **exactly one** hyprvtb (unload matches by exact path,
+  so a stale prior build can linger as a second copy → double titlebars; unload
+  its old store path if so). Reloading is safe (session save/restore) but
+  briefly re-decorates every window.
+
+- **`surfer`/`filer` (standalone PySide6 apps) run the LIVE source** at
+  `~/nix/{surfer,filer}/main.py` — `.py`/`.qml` edits need NO rebuild, but there
+  is NO hot-reload either: **relaunch the app** to pick up a change. Syntax-check
+  QML headlessly with `qmllint -I <qml import paths> qml/Main.qml` (import paths
+  from the app's wrapper env) — the "Failed to import" lines are just missing
+  paths, not errors. QtWebEngine/permission/notification API details are best
+  confirmed against the QML type defs (`plugins.qmltypes`) rather than guessed.
+
+- **Verify without visuals — the user does ALL visual/animation/interaction
+  checks (screenshots, drags, hover, spinner animation, tooltip look).** Never
+  screenshot or drive the GUI yourself unless explicitly asked. Verify by other
+  means: `qs log | tail` (panel parse/binding errors — CUMULATIVE across
+  reloads, so snapshot the line count first and read only the new tail),
+  `qs ipc show`/`qs ipc call` (panel wiring), `hyprctl plugin list`/`clients`/
+  `workspaces`/the Hyprland log (plugin state + crashes), `qmllint` (QML syntax),
+  and headless PySide harnesses (e.g. pre-grant a permission and assert a signal
+  fires) for app logic. Never run bare `qs` (it launches a second panel).
+
+- **Commit + push after making changes here.** `~/nix` is kept committed and
+  pushed — after a working change, `git add` the specific files you touched
+  (never `-A` when the tree has the user's own uncommitted edits — see the
+  maintenance rules below), commit, and `git push origin main` **without waiting
+  to be asked**. End commit messages with the `Co-Authored-By` trailer.
 
 ## Maintenance Instructions for AI Agents
 
