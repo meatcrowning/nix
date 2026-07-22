@@ -369,11 +369,40 @@ Window {
                 readonly property int indent: modelData.depth * 14
                 color: view.selected === abs ? Theme.highlight : "transparent"
 
-                // row-wide select / open. Declared first so the expand toggle
-                // (declared last → higher z) wins clicks in its own area.
+                // Drag-out: hand this file to other apps as a text/uri-list, so
+                // it can be dropped onto a browser upload field, another file
+                // manager, etc. — the standard desktop "drag a file out" gesture.
+                Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.CopyAction | Qt.LinkAction
+                Drag.mimeData: ({ "text/uri-list": "file://" + encodeURI(row.abs) + "\r\n" })
+
+                // row-wide select / open / drag-out. Declared first so the expand
+                // toggle (declared last → higher z) wins clicks in its own area.
                 MouseArea {
+                    id: rowMa
                     anchors.fill: parent
-                    onClicked: { view.selected = row.abs; view.selectedIsDir = row.modelData.isDir; }
+                    property real px: 0
+                    property real py: 0
+                    property bool dragging: false
+                    onPressed: (m) => {
+                        view.selected = row.abs; view.selectedIsDir = row.modelData.isDir;
+                        rowMa.px = m.x; rowMa.py = m.y; rowMa.dragging = false;
+                    }
+                    onPositionChanged: (m) => {
+                        if (rowMa.dragging || !rowMa.pressed)
+                            return;
+                        const dx = m.x - rowMa.px, dy = m.y - rowMa.py;
+                        // horizontal-dominant drag = drag the file OUT; a mostly
+                        // vertical drag falls through to the list's flick/scroll.
+                        if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+                            rowMa.dragging = true;
+                            row.grabToImage(function(res) {
+                                row.Drag.imageSource = res.url;
+                                row.Drag.startDrag(Qt.CopyAction);
+                            });
+                        }
+                    }
+                    onReleased: rowMa.dragging = false
                     onDoubleClicked: {
                         if (row.modelData.isDir) view.go(row.abs);
                         else FileOps.execDetached(["xdg-open", row.abs]);
