@@ -160,6 +160,7 @@ CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
 
     m_pMouseButtonCallback = Event::bus()->m_events.input.mouse.button.listen([&](IPointer::SButtonEvent e, Event::SCallbackInfo& info) { onMouseButton(info, e); });
     m_pMouseMoveCallback   = Event::bus()->m_events.input.mouse.move.listen([&](Vector2D c, Event::SCallbackInfo& info) { onMouseMove(c); });
+    m_pMouseAxisCallback   = Event::bus()->m_events.input.mouse.axis.listen([&](IPointer::SAxisEvent e, Event::SCallbackInfo& info) { onMouseAxis(info, e); });
     m_pKeyboardKeyCallback = Event::bus()->m_events.input.keyboard.key.listen([&](IKeyboard::SKeyEvent e, Event::SCallbackInfo& info) { onKeyboardKey(info, e); });
 }
 
@@ -523,52 +524,78 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     const double TITLEY = barBox.y + TITLETOP * SCALE;
 
     if (m_bEditing) {
+        // auto-scroll to keep the caret on-screen whenever it MOVED (typing /
+        // arrows / click) — not on a manual wheel-scroll, which leaves it put.
+        if (m_editCursor != m_editLastCaret) {
+            m_editLastCaret = m_editCursor;
+            ensureEditCaretVisible();
+        }
+
         const size_t selLo  = std::min(m_editSelAnchor, m_editCursor);
         const size_t selHi  = std::max(m_editSelAnchor, m_editCursor);
         const bool   hasSel = selHi > selLo;
+
+        // byte offset of the first visible row (the m_editScrollCp'th codepoint)
+        size_t visStart = 0;
+        for (int i = 0; i < m_editScrollCp && visStart < m_editBuf.size(); i++)
+            visStart = nextCp(m_editBuf, visStart);
+
+        // rows below are relative to the scroll offset; everything is clamped to
+        // the visible window so a long URL's selection/text never spills past the
+        // bar's bottom edge (which used to run off-window and flicker).
+        const int loCp = hasSel ? (countCp(m_editBuf, selLo) - m_editScrollCp) : 0;
+        const int hiCp = hasSel ? (countCp(m_editBuf, selHi) - m_editScrollCp) : 0;
+
         if (!m_pEditTex) {
             int th = 0, lines = 0;
-            // a blank buffer still needs a texture so the caret has a line to sit on
-            const std::string SHOWN = m_editBuf.empty() ? std::string(" ") : m_editBuf;
+            // render only from the scroll offset; pango clips to the RUNLEN-tall
+            // surface, so nothing is drawn below the bar
+            const std::string SHOWN = m_editBuf.empty() ? std::string(" ") : m_editBuf.substr(visStart);
             m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, textColor, &th, &lines, /*ellipsis=*/false);
             m_iEditLineH = lines > 0 ? th / lines : std::round(g_pGlobalState->config.fontSize->value() * SCALE);
             m_iEditLines = lines;
-            // the selected substring, rendered in bg colour; drawn over the
-            // accent highlight so those rows read inverted (rebuilt alongside
-            // the full text — same invalidation)
-            m_pEditSelTex = hasSel
-                ? renderStackedTex(m_editBuf.substr(selLo, selHi - selLo), RUNLEN, SCALE, bgColor, nullptr, nullptr, /*ellipsis=*/false)
-                : nullptr;
+            // the selected substring (bg colour, drawn over the accent block so
+            // those rows invert), clamped to the visible window: it starts at
+            // max(selLo, visStart) and its own surface is only as tall as the
+            // space left below that row, so it can't spill either.
+            m_pEditSelTex = nullptr;
+            if (hasSel && m_iEditLineH > 0) {
+                const size_t vSelLo    = std::max(selLo, visStart);
+                const int    selRow    = std::max(0, loCp);
+                const int    selRunLen = std::max(0, RUNLEN - selRow * m_iEditLineH);
+                if (selHi > vSelLo && selRunLen >= m_iEditLineH)
+                    m_pEditSelTex = renderStackedTex(m_editBuf.substr(vSelLo, selHi - vSelLo), selRunLen, SCALE, bgColor, nullptr, nullptr, /*ellipsis=*/false);
+            }
         }
-        // highlight block behind the selected rows (accent), then the full text,
-        // then the bg-coloured selected substring on top so those rows invert —
-        // the whole-field look, generalised to an arbitrary range.
-        const int loCp = hasSel ? countCp(m_editBuf, selLo) : 0;
-        const int hiCp = hasSel ? countCp(m_editBuf, selHi) : 0;
+
+        const int maxRow = m_iEditLineH > 0 ? std::max(0, RUNLEN / m_iEditLineH) : 0;
         if (m_pEditTex && m_pEditTex->m_texID != 0) {
             const auto TSZ = m_pEditTex->m_size;
             if (hasSel && m_iEditLineH > 0) {
-                CBox block = {TITLEX, TITLEY + loCp * (double)m_iEditLineH, (double)TSZ.x, (hiCp - loCp) * (double)m_iEditLineH};
-                g_pHyprOpenGL->renderRect(block.round(), accentColor, {});
+                const int blkLo = std::clamp(loCp, 0, maxRow);
+                const int blkHi = std::clamp(hiCp, 0, maxRow);
+                if (blkHi > blkLo) {
+                    CBox block = {TITLEX, TITLEY + blkLo * (double)m_iEditLineH, (double)TSZ.x, (blkHi - blkLo) * (double)m_iEditLineH};
+                    g_pHyprOpenGL->renderRect(block.round(), accentColor, {});
+                }
             }
             CBox tbox = {TITLEX, TITLEY, TSZ.x, TSZ.y};
             g_pHyprOpenGL->renderTexture(m_pEditTex, tbox.round(), {.a = a});
         }
         if (hasSel && m_pEditSelTex && m_pEditSelTex->m_texID != 0 && m_iEditLineH > 0) {
-            const auto TSZ  = m_pEditSelTex->m_size;
-            CBox       sbox = {TITLEX, TITLEY + loCp * (double)m_iEditLineH, TSZ.x, TSZ.y};
+            const auto TSZ    = m_pEditSelTex->m_size;
+            const int  selRow = std::max(0, loCp);
+            CBox       sbox   = {TITLEX, TITLEY + selRow * (double)m_iEditLineH, TSZ.x, TSZ.y};
             g_pHyprOpenGL->renderTexture(m_pEditSelTex, sbox.round(), {.a = a});
         }
-        // caret: a horizontal bar between codepoint rows at the cursor, blinking
-        // ~500ms. Not drawn while there's a selection (the block shows focus).
+        // caret: a horizontal bar at the cursor's row (relative to scroll), drawn
+        // only when there's no selection and the row is within the visible window.
         if (!hasSel && m_iEditLineH > 0) {
-            const long ms      = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_editBlinkAt).count();
-            const bool blinkOn = (ms / 500) % 2 == 0;
-            if (blinkOn) {
-                int caretLine = countCp(m_editBuf, m_editCursor);
-                const int maxLine = std::max(0, RUNLEN / std::max(1, m_iEditLineH));
-                caretLine       = std::clamp(caretLine, 0, maxLine);
-                const double cy = TITLEY + caretLine * (double)m_iEditLineH;
+            const long ms       = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_editBlinkAt).count();
+            const bool blinkOn  = (ms / 500) % 2 == 0;
+            const int  caretRow = countCp(m_editBuf, m_editCursor) - m_editScrollCp;
+            if (blinkOn && caretRow >= 0 && caretRow <= maxRow) {
+                const double cy = TITLEY + caretRow * (double)m_iEditLineH;
                 CBox caret = {TITLEX + 2 * SCALE, cy, (double)(cellSize() - 4) * SCALE, std::max(1.0, 2.0 * (double)SCALE)};
                 g_pHyprOpenGL->renderRect(caret.round(), accentColor, {});
             }
@@ -1064,6 +1091,8 @@ void CVtbDeco::enterEdit() {
     m_editCursor    = m_editBuf.size(); // whole field selected on open, like a browser:
     m_editSelAnchor = 0;                //   anchor 0 .. cursor end
     m_bEditDragging = false;
+    m_editScrollCp  = 0;                // show the URL from the top; wheel/caret scroll from here
+    m_editLastCaret = m_editCursor;     // don't auto-scroll to the (end) caret on open
     m_bEditing      = true;
     m_pEditTex      = nullptr;
     m_pEditSelTex   = nullptr;
@@ -1108,13 +1137,64 @@ size_t CVtbDeco::editByteAtLocalY(double localY) {
     const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
     const double lineH = (m_iEditLineH > 0) ? m_iEditLineH / scale
                                             : (double)g_pGlobalState->config.fontSize->value();
-    int       row = (int)std::floor((localY - titleTopEff()) / std::max(1.0, lineH));
+    const int displayRow = (int)std::floor((localY - titleTopEff()) / std::max(1.0, lineH));
     const int nCp = countCp(m_editBuf, m_editBuf.size());
-    row           = std::clamp(row, 0, nCp);
+    // the on-screen rows start at m_editScrollCp, so add it back to the click row
+    const int row = std::clamp(displayRow + m_editScrollCp, 0, nCp);
     size_t off = 0;
     for (int k = 0; k < row; k++)
         off = nextCp(m_editBuf, off);
     return off;
+}
+
+// How many stacked codepoint rows fit in the address editor's height (device
+// px / line height), matching renderPass's RUNLEN / m_iEditLineH.
+int CVtbDeco::editVisibleRows() {
+    const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
+    const double avail = (effectiveBoxGlobal().h - titleTopEff() - VTB_PAD) * scale;
+    const double lineH = m_iEditLineH > 0 ? (double)m_iEditLineH
+                                          : (g_pGlobalState->config.fontSize->value() * scale);
+    return std::max(1, (int)std::floor(avail / std::max(1.0, lineH)));
+}
+
+// Scroll the vertical address text so the caret's row is on-screen. Only nudges
+// when the caret is above/below the visible window, so a manual wheel-scroll
+// that keeps the caret in view isn't yanked back.
+void CVtbDeco::ensureEditCaretVisible() {
+    const int caretCp = countCp(m_editBuf, m_editCursor);
+    const int rows    = editVisibleRows();
+    const int before  = m_editScrollCp;
+    if (caretCp < m_editScrollCp)
+        m_editScrollCp = caretCp;
+    else if (caretCp >= m_editScrollCp + rows)
+        m_editScrollCp = caretCp - rows + 1;
+    if (m_editScrollCp < 0)
+        m_editScrollCp = 0;
+    if (m_editScrollCp != before)
+        m_pEditTex = nullptr; // scrolled -> rebuild the (substring) texture
+}
+
+// Wheel while the address editor is open scrolls the stacked URL instead of the
+// page (we own the keyboard grab; owning the wheel too keeps a long URL
+// navigable). Only the focused/editing window's deco consumes it.
+void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEvent& e) {
+    if (!m_bEditing)
+        return;
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || PWINDOW != Desktop::focusState()->window())
+        return;
+    if (e.axis != WL_POINTER_AXIS_VERTICAL_SCROLL || e.delta == 0.0)
+        return;
+    info.cancelled = true; // scroll the editor, not the page
+    const int totalCp   = countCp(m_editBuf, m_editBuf.size());
+    const int rows      = editVisibleRows();
+    const int maxScroll = std::max(0, totalCp - rows);
+    const int next      = std::clamp(m_editScrollCp + (e.delta > 0 ? 1 : -1), 0, maxScroll);
+    if (next != m_editScrollCp) {
+        m_editScrollCp = next;
+        m_pEditTex     = nullptr;
+        damageEntire();
+    }
 }
 
 // Keyboard grab while the address editor is open: swallow the keys we act on

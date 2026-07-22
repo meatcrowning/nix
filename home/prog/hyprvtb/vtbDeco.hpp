@@ -136,6 +136,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     // extends. Both are byte offsets on codepoint boundaries.
     size_t               m_editSelAnchor   = 0;
     bool                 m_bEditDragging   = false;    // mouse selecting in the field
+    int                  m_editScrollCp    = 0;        // first visible codepoint row (long-URL scroll)
+    size_t               m_editLastCaret   = 0;        // caret pos last frame (to auto-scroll only on caret moves)
     SP<Render::ITexture> m_pEditTex;                   // full text (textColor); rebuilt on buffer/selection change
     SP<Render::ITexture> m_pEditSelTex;                // selected substring (bgColor) overlaid on the highlight
     int                  m_iEditLineH      = 0;        // device-px height of one stacked codepoint
@@ -204,6 +206,7 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     CHyprSignalListener  m_pMouseButtonCallback;
     CHyprSignalListener  m_pMouseMoveCallback;
+    CHyprSignalListener  m_pMouseAxisCallback;
 
     void                 renderPass(PHLMONITOR, float const& a);
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
@@ -220,6 +223,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEvent& e);
     bool                 deleteEditSelection();          // erase the selected range; true if there was one
     size_t               editByteAtLocalY(double localY); // bar-local Y -> byte offset (codepoint boundary)
+    int                  editVisibleRows();              // codepoint rows that fit in the editor
+    void                 ensureEditCaretVisible();       // scroll so the caret row is on-screen
 
     pid_t                appPid();
     int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
@@ -235,6 +240,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 inputIsValid();
     void                 onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent e);
     void                 onMouseMove(Vector2D coords);
+    void                 onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEvent& e);
     void                 handleDownEvent(Event::SCallbackInfo& info);
     void                 handleUpEvent(Event::SCallbackInfo& info);
     void                 handleRolledDown(Event::SCallbackInfo& info); // press on a shaded window's floating bar

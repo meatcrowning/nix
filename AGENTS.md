@@ -87,9 +87,14 @@ C++ — compositor-side window titlebars + session save/restore).
   `real=$(readlink -f ~/.config/hypr/plugins/libhyprvtb.so); hyprctl plugin
   unload "$real"; hyprctl plugin load "$real"`. Bump the version string in
   `main.cpp` per change and confirm `hyprctl plugin list` shows a **new
-  Handle + Version** and **exactly one** hyprvtb (unload matches by exact path,
-  so a stale prior build can linger as a second copy → double titlebars; unload
-  its old store path if so). Reloading is safe (session save/restore) but
+  Handle + Version** and **exactly one** hyprvtb. Unload matches by exact path
+  string, so stale copies linger as a second plugin → double titlebars; to clear
+  them unload BOTH the symlink (what the LOGIN `hl.plugin.load` used — a
+  resolved-path unload won't match it) AND any old `/nix/store/*-hyprvtb-0.1/…/
+  libhyprvtb.so` (a prior resolved-path load; harmless no-ops if not loaded),
+  then re-check the count is 1. (`plugin list -j` gives handle+version but not
+  the path, so you can't unload by handle.) Reloading is safe (session save/
+  restore) but
   briefly re-decorates every window.
 
 - **`surfer`/`filer` (standalone PySide6 apps) run the LIVE source** at
