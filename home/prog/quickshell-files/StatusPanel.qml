@@ -212,9 +212,8 @@ Column {
     }
 
     // ---------- Stereo output VU (left / right channel) ----------
-    VuMeter {
-        anchors.horizontalCenter: parent.horizontalCenter
-    }
+    // Full bar width like the other modules; its bars/line stay centred.
+    VuMeter {}
 
     // ---------- Volume ----------
     Stat {

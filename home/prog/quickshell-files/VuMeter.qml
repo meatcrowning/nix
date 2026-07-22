@@ -16,8 +16,12 @@ Item {
     readonly property int barW: 5
     readonly property int barH: 68
     readonly property int gapPx: 4
+    readonly property int meterW: barW * 2 + gapPx   // the visual meter's width
 
-    width: barW * 2 + gapPx
+    // Full bar width so the click/drag/scroll band covers the whole module
+    // section, not just the narrow pair of bars — same treatment as the
+    // eth/cpu/disk/weather text modules. The bars + volume line stay centred.
+    width: parent.width
     height: barH
 
     Process {
@@ -62,25 +66,34 @@ Item {
         }
     }
 
-    Row {
+    // Centred visual meter: the two channel bars plus the volume-level line.
+    Item {
+        id: meter
         anchors.centerIn: parent
-        spacing: root.gapPx
-        Channel { level: root.levelL }
-        Channel { level: root.levelR }
+        width: root.meterW
+        height: root.barH
+
+        Row {
+            anchors.centerIn: parent
+            spacing: root.gapPx
+            Channel { level: root.levelL }
+            Channel { level: root.levelR }
+        }
+
+        // The volume level as a horizontal line across both bars — the bar's
+        // always-visible volume indicator (the volume OSD is gone).
+        Rectangle {
+            visible: SysInfo.volume >= 0
+            x: 0
+            width: parent.width
+            y: Math.max(0, Math.round(root.barH * (1 - Math.max(0, SysInfo.volume) / 100)) - 1)
+            height: 2
+            color: SysInfo.muted ? Theme.crit : Theme.text
+        }
     }
 
-    // The volume level as a horizontal line across both bars — the bar's
-    // always-visible volume indicator (the volume OSD is gone). Click or
-    // drag to set the level, scroll to nudge it.
-    Rectangle {
-        visible: SysInfo.volume >= 0
-        x: 0
-        width: parent.width
-        y: Math.max(0, Math.round(root.barH * (1 - Math.max(0, SysInfo.volume) / 100)) - 1)
-        height: 2
-        color: SysInfo.muted ? Theme.crit : Theme.text
-    }
-
+    // Full-width interaction band: click or drag anywhere across the module to
+    // set the level, scroll to nudge it — you don't have to land on the bars.
     MouseArea {
         anchors.fill: parent
         function setFromY(y) {
