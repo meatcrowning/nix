@@ -33,8 +33,7 @@ SlidePopup {
                 PixelText { width: 74; text: parent.modelData.hi + "/" + parent.modelData.lo; color: Theme.text }
                 PixelText {
                     width: 60
-                    text: (parent.modelData.precip >= 0.05 ? parent.modelData.precip.toFixed(1) + "\"" : "-")
-                          + (parent.modelData.prob >= 0 ? " " + parent.modelData.prob + "%" : "")
+                    text: parent.modelData.prob >= 0 ? parent.modelData.prob + "%" : "-"
                     color: parent.modelData.precip >= 0.05 ? Theme.info : Theme.textDim
                 }
             }

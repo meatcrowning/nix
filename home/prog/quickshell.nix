@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, host, ... }:
 
 let
   qmlDir = ./quickshell-files;
@@ -36,6 +36,19 @@ in
       source = ./quickshell-files/scripts/disk-smart.sh;
       executable = true;
     };
+    # Per-host branch point for the panel (e.g. the default desktop-widget set
+    # in shell.qml's _defaultWidgets). A generated singleton, mirroring
+    # hypr/host.lua — regenerated every switch rather than a seeded-once file,
+    # so it always reflects the machine it was built for. Not a source .qml, so
+    # it never collides with the qmlFiles readDir above.
+    "quickshell/Host.qml".text = ''
+      pragma Singleton
+      import QtQuick
+
+      QtObject {
+          readonly property string name: "${host}"
+      }
+    '';
   };
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''

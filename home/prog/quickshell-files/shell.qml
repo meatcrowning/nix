@@ -134,9 +134,12 @@ Scope {
     // The desktop widgets fanned out at login when nothing has been saved yet
     // (first boot / cleared state). persistKeys, NOT widget refs — declarative
     // so this stays a trivial one-line edit, and a saved set (Meta+Ctrl+S writes
-    // the live pins) always overrides it. Add host-specific defaults here later
-    // without touching any of the fan logic below.
-    readonly property var _defaultWidgets: ["clock", "weather", "disk", "cpu", "eth"]
+    // the live pins) always overrides it. Branched per host via the generated
+    // Host.qml singleton (see quickshell.nix): top pins gpu alongside the core
+    // set; book (air) keeps eth instead.
+    readonly property var _defaultWidgets: Host.name === "air"
+        ? ["clock", "weather", "disk", "cpu", "eth"]
+        : ["clock", "weather", "disk", "cpu", "gpu"]
 
     // one stage every _fanStepMs — set to just past a single widget's full
     // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a
