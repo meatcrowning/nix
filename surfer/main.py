@@ -708,6 +708,22 @@ class Prefs(QObject):
         except OSError:
             pass
 
+    # dark-mode settings live under the "dark" key of the same prefs.json (the
+    # DarkMode bridge owns the shape — global on/off, brightness, contrast, and
+    # the per-site exception list).
+    def loadDark(self):
+        d = self._read().get("dark", {})
+        return d if isinstance(d, dict) else {}
+
+    def saveDark(self, dark):
+        d = self._read()
+        d["dark"] = dark
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
 
 class Zoom(QObject):
     """The single shared page-zoom level (all tabs), persisted to prefs.json and
@@ -744,6 +760,149 @@ class Zoom(QObject):
     @Slot()
     def reset(self):
         self._set(1.0)
+
+
+class DarkMode(QObject):
+    """Dark-reader-style page dimming. Injects a whole-page CSS filter
+    (invert + hue-rotate, the same approach as Dark Reader's *filter* mode) with
+    adjustable brightness/contrast, and re-inverts media (img/video/canvas/
+    iframe/embed) so photos and embeds still look right.
+
+    State — a global on/off, brightness, contrast, and a per-site exception list
+    (hostnames where it's forced OFF, i.e. the "whitelist") — persists to the
+    "dark" key of prefs.json. QML calls js(url) on each page load and again on
+    every `changed` (live re-inject into open tabs); the same call both applies
+    AND un-applies, so toggling off cleanly strips the style.
+
+    v1 limits (shared with Dark Reader's filter mode): a full-page CSS filter can
+    interfere with `position:fixed` containment on some sites, and injection is
+    at load-finished, so a brief light flash is possible before it lands."""
+
+    changed = Signal()
+
+    def __init__(self, prefs, parent=None):
+        super().__init__(parent)
+        self._prefs = prefs
+        d = prefs.loadDark()
+        self._enabled = bool(d.get("enabled", False))
+        self._brightness = self._clamp(d.get("brightness", 100))
+        self._contrast = self._clamp(d.get("contrast", 100))
+        # hostnames where dark mode is turned OFF (Dark Reader's per-site
+        # exceptions) — applied everywhere else when the global toggle is on.
+        self._exceptions = set(str(h) for h in d.get("exceptions", []) if h)
+
+    @staticmethod
+    def _clamp(v):
+        try:
+            return max(50, min(150, int(v)))
+        except (TypeError, ValueError):
+            return 100
+
+    @staticmethod
+    def _host(url):
+        try:
+            return QUrl(url).host().lower()
+        except Exception:
+            return ""
+
+    def _persist(self):
+        self._prefs.saveDark({
+            "enabled": self._enabled,
+            "brightness": self._brightness,
+            "contrast": self._contrast,
+            "exceptions": sorted(self._exceptions),
+        })
+
+    def _get_enabled(self):
+        return self._enabled
+
+    enabled = Property(bool, _get_enabled, notify=changed)
+
+    def _get_brightness(self):
+        return self._brightness
+
+    brightness = Property(int, _get_brightness, notify=changed)
+
+    def _get_contrast(self):
+        return self._contrast
+
+    contrast = Property(int, _get_contrast, notify=changed)
+
+    @Slot(bool)
+    def setEnabled(self, on):
+        on = bool(on)
+        if on == self._enabled:
+            return
+        self._enabled = on
+        self._persist()
+        self.changed.emit()
+
+    @Slot(int)
+    def setBrightness(self, v):
+        v = self._clamp(v)
+        if v == self._brightness:
+            return
+        self._brightness = v
+        self._persist()
+        self.changed.emit()
+
+    @Slot(int)
+    def setContrast(self, v):
+        v = self._clamp(v)
+        if v == self._contrast:
+            return
+        self._contrast = v
+        self._persist()
+        self.changed.emit()
+
+    @Slot(str, result=bool)
+    def isSiteEnabled(self, url):
+        """Whether dark mode applies to this URL's host (host not in the
+        exception list). Independent of the global toggle — the per-site bit."""
+        h = self._host(url)
+        return bool(h) and h not in self._exceptions
+
+    @Slot(str)
+    def toggleSite(self, url):
+        h = self._host(url)
+        if not h:
+            return
+        if h in self._exceptions:
+            self._exceptions.discard(h)
+        else:
+            self._exceptions.add(h)
+        self._persist()
+        self.changed.emit()
+
+    def _css(self):
+        # NB: keep this %-free — the literal "100%" in the filter would collide
+        # with str %-formatting, so interpolate by concatenation.
+        b = str(self._brightness)
+        c = str(self._contrast)
+        return (
+            "html{filter:invert(100%) hue-rotate(180deg) "
+            "brightness(" + b + "%) contrast(" + c + "%)!important;"
+            "background:#181818!important}"
+            "img,picture,video,canvas,iframe,embed,object{"
+            "filter:invert(100%) hue-rotate(180deg)!important}"
+        )
+
+    @Slot(str, result=str)
+    def js(self, url):
+        """JS that installs OR removes the dark-mode <style> for this url given
+        the current state — one call handles both apply and un-apply."""
+        active = self._enabled and self.isSiteEnabled(url)
+        css = self._css() if active else ""
+        return (
+            "(function(){var id='__surfer_darkmode__';"
+            "var s=document.getElementById(id);"
+            "var css=%s;"
+            "if(!css){if(s)s.remove();return;}"
+            "if(!s){s=document.createElement('style');s.id=id;"
+            "(document.head||document.documentElement).appendChild(s);}"
+            "s.textContent=css;})();"
+            % json.dumps(css)
+        )
 
 
 class ZoomFilter(QObject):
@@ -1228,6 +1387,7 @@ def main():
     downloads = Downloads(app)
     prefs = Prefs()
     zoom = Zoom(prefs, app)
+    darkmode = DarkMode(prefs, app)
     adblocker = AdBlocker(app)
     cosmetic = Cosmetic(adblocker, app)
     download_dir = str(Path.home() / "Downloads")
@@ -1244,6 +1404,7 @@ def main():
     ctx.setContextProperty("Downloads", downloads)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Zoom", zoom)
+    ctx.setContextProperty("DarkMode", darkmode)
     ctx.setContextProperty("Cosmetic", cosmetic)
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)

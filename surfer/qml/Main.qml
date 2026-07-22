@@ -164,6 +164,31 @@ Window {
         function onChanged() { win.reinjectScrollbar(); }
     }
 
+    // ---- dark mode (DarkMode bridge) ----
+    // The config panel slides out from the left edge; the "dm" titlebar button
+    // toggles it. DarkMode.js(url) returns the JS that applies OR strips the
+    // whole-page invert filter for that url — run on each page load and, live,
+    // on every settings change. dmRev bumps on `changed` so the QML bindings
+    // below (this-site state, slider values) re-evaluate.
+    property bool dmPanelOpen: false
+    property int dmRev: 0
+    readonly property string dmCurUrl: win.current ? win.current.url.toString() : ""
+    readonly property string dmHost: {
+        void win.dmRev;
+        return win.dmCurUrl.replace(/^[a-z]+:\/\//, "").replace(/\/.*$/, "");
+    }
+    readonly property bool dmSiteOn: { void win.dmRev; return DarkMode.isSiteEnabled(win.dmCurUrl); }
+    function reinjectDark() {
+        for (var i = 0; i < viewRep.count; i++) {
+            var v = viewRep.itemAt(i);
+            if (v) v.runJavaScript(DarkMode.js("" + v.url));
+        }
+    }
+    Connections {
+        target: DarkMode
+        function onChanged() { win.dmRev += 1; win.reinjectDark(); }
+    }
+
     // Address text -> url: explicit schemes pass through, host-ish strings get
     // https://, anything else becomes a DuckDuckGo search.
     function normalize(t) {
@@ -216,6 +241,11 @@ Window {
             { id: "reload",  label: current && current.loading ? "x" : "r", state: 0,
               tip: current && current.loading ? "stop loading" : "reload" },
             { id: "copyurl", label: "cu", state: current ? 0 : 2,           tip: "copy url" },
+            // dark mode: opens the slide-out config panel (on/off, per-site
+            // whitelist, brightness/contrast). Highlights (state 1) while the
+            // global toggle is on. DarkMode.enabled's notify is `changed`, so
+            // this binding re-evaluates whenever the setting flips.
+            { id: "darkmode", label: "dm", state: DarkMode.enabled ? 1 : 0,  tip: "dark mode" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -243,6 +273,7 @@ Window {
                 return;
             }
             if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
+            if (id === "darkmode") { win.dmPanelOpen = !win.dmPanelOpen; return; }
             if (id === "newtab")  { win.newTab(win.homeUrl); return; }
             if (id === "settings") { UserScripts.openFolder(); return; }
             if (id.indexOf("tab:") === 0) {
@@ -360,6 +391,9 @@ Window {
                         if (Math.abs(webview.zoomFactor - Zoom.level) > 0.001)
                             webview.zoomFactor = Zoom.level;
                         webview.runJavaScript(win.scrollbarJs());
+                        // dark mode: apply (or strip) the whole-page invert
+                        // filter for this url. No-op unless enabled for the site.
+                        webview.runJavaScript(DarkMode.js("" + webview.url));
                         // cosmetic ad-blocking (element hiding) — the half the
                         // network interceptor can't do. Specific (per-site)
                         // rules first; then gather the page's classes/ids and
@@ -465,6 +499,122 @@ Window {
             spacing: 8
             BrowserButton { label: "allow"; onClicked: win.grantPermission() }
             BrowserButton { label: "block"; onClicked: win.denyPermission() }
+        }
+    }
+
+    // ---- dark-mode config panel: a drawer that slides in from the left edge
+    // (the side the chrome/titlebar lives on) when the "dm" button is clicked.
+    // A transparent scrim behind it closes it on an outside click.
+    MouseArea {
+        id: dmScrim
+        anchors.fill: parent
+        z: 2400
+        visible: win.dmPanelOpen
+        onClicked: win.dmPanelOpen = false
+    }
+    Rectangle {
+        id: dmPanel
+        z: 2500
+        // slide 0 (hidden, fully left of the window) -> 1 (docked at the edge)
+        property real slide: win.dmPanelOpen ? 1 : 0
+        Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        visible: slide > 0.001
+        width: 248
+        height: dmCol.implicitHeight + 24
+        x: (slide - 1) * width
+        y: 8
+        color: Theme.bgAlt
+        border.width: 1
+        border.color: Theme.windowBorder
+
+        Column {
+            id: dmCol
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
+            spacing: 12
+
+            // header: title + close, then the current host it acts on
+            Item {
+                width: parent.width
+                height: dmTitle.implicitHeight
+                PixelText {
+                    id: dmTitle
+                    anchors.left: parent.left
+                    text: "dark mode"
+                    color: Theme.accent
+                }
+                BrowserButton {
+                    anchors.right: parent.right
+                    label: "×"
+                    onClicked: win.dmPanelOpen = false
+                }
+            }
+            PixelText {
+                width: parent.width
+                elide: Text.ElideRight
+                text: win.dmHost !== "" ? win.dmHost : "no page"
+                color: Theme.textDim
+            }
+
+            // global on/off
+            Item {
+                width: parent.width
+                height: 22
+                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "extension"; color: Theme.text }
+                BrowserButton {
+                    anchors.right: parent.right
+                    label: DarkMode.enabled ? "on" : "off"
+                    onClicked: DarkMode.setEnabled(!DarkMode.enabled)
+                }
+            }
+
+            // per-site whitelist toggle (single button, acts on the current host)
+            Item {
+                width: parent.width
+                height: 22
+                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "this site"; color: Theme.text }
+                BrowserButton {
+                    anchors.right: parent.right
+                    enabled: win.dmHost !== ""
+                    label: win.dmSiteOn ? "on" : "off"
+                    onClicked: if (win.current) DarkMode.toggleSite(win.current.url.toString())
+                }
+            }
+
+            // brightness
+            Column {
+                width: parent.width
+                spacing: 4
+                Item {
+                    width: parent.width
+                    height: dmBrLabel.implicitHeight
+                    PixelText { id: dmBrLabel; anchors.left: parent.left; text: "brightness"; color: Theme.text }
+                    PixelText { anchors.right: parent.right; text: DarkMode.brightness + "%"; color: Theme.textDim }
+                }
+                Slider {
+                    width: parent.width
+                    from: 50; to: 150; step: 5
+                    value: DarkMode.brightness
+                    onMoved: (v) => DarkMode.setBrightness(v)
+                }
+            }
+
+            // contrast
+            Column {
+                width: parent.width
+                spacing: 4
+                Item {
+                    width: parent.width
+                    height: dmCoLabel.implicitHeight
+                    PixelText { id: dmCoLabel; anchors.left: parent.left; text: "contrast"; color: Theme.text }
+                    PixelText { anchors.right: parent.right; text: DarkMode.contrast + "%"; color: Theme.textDim }
+                }
+                Slider {
+                    width: parent.width
+                    from: 50; to: 150; step: 5
+                    value: DarkMode.contrast
+                    onMoved: (v) => DarkMode.setContrast(v)
+                }
+            }
         }
     }
 }
