@@ -966,7 +966,10 @@ void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
     // already showing THIS cell — otherwise re-fire when the tooltip is absent,
     // retracting, or belongs to a different cell.
     const bool alreadyShowingHover = m_bTooltipShown && m_ttWantShown && m_ttCell == m_iHoverCell;
-    if (m_iHoverCell != -1 && !m_bMinimized && !alreadyShowingHover &&
+    // Tooltips only on the focused window — an unfocused window's bar shouldn't
+    // pop labels (the cursor is usually just passing over it to click-focus).
+    const bool FOCUSED = m_pWindow.lock() == Desktop::focusState()->window();
+    if (FOCUSED && m_iHoverCell != -1 && !m_bMinimized && !alreadyShowingHover &&
         std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_hoverSince).count() > 450 && !tooltipForCell(m_iHoverCell).empty()) {
         m_ttCell        = m_iHoverCell;
         m_ttWantShown   = true;
@@ -983,6 +986,10 @@ void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
             g_pHyprRenderer->damageBox(CBox{m_tooltipBox});
         }
         damageEntire();
+    } else if (!FOCUSED && m_bTooltipShown && m_ttWantShown) {
+        // Lost focus while a tooltip was out (focus can change without the
+        // cursor leaving our bar) — retract it.
+        hideTooltip();
     }
 }
 
