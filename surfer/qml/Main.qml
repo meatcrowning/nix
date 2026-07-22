@@ -29,19 +29,21 @@ Window {
     // Page zoom, shared by every tab and persisted (Ctrl+scroll to change).
     property real zoomLevel: Prefs.loadZoom()
 
-    // ---- webpage tooltips (title=, etc.) rendered in-window near the cursor,
-    // styled like the panel's tooltips (QtWebEngine's onTooltipRequested).
+    // ---- webpage tooltips (title=, etc.) rendered in-window: they slide out to
+    // the LEFT of the cursor, follow it, and slide back in on hide — like the
+    // hyprvtb titlebar tooltips. Position tracks the live cursor (pageHover, on
+    // the overlay below); the request just carries the text + a show/hide toggle.
     property string tipText: ""
-    property real tipX: 0
-    property real tipY: 0
+    property bool tipShown: false
+    property real tipX: pageHover.point.position.x
+    property real tipY: pageHover.point.position.y
     function showTooltip(request) {
         request.accepted = true;   // suppress the native tooltip; draw our own
         if (request.type === TooltipRequest.Show && request.text.length > 0) {
             tipText = request.text;
-            tipX = request.x;
-            tipY = request.y;
+            tipShown = true;
         } else {
-            tipText = "";
+            tipShown = false;      // keep tipText so it stays legible while retracting
         }
     }
 
@@ -377,27 +379,42 @@ Window {
                     Prefs.saveZoom(win.zoomLevel);
                 }
             }
+            // passive cursor tracking so the webpage tooltip can follow the mouse
+            HoverHandler { id: pageHover }
         }
     }
 
-    // webpage tooltip (rendered near the cursor point the page reported)
-    Rectangle {
+    // webpage tooltip: slides OUT to the left of the cursor (a clipped reveal
+    // growing leftward, OutCubic ~220ms — the same feel as the hyprvtb titlebar
+    // tooltips), follows the live cursor, and slides back in on hide.
+    Item {
         id: tip
-        visible: win.tipText.length > 0
         z: 2000
-        color: Theme.bgAlt
-        border.color: Theme.accent
-        border.width: 1
-        width: Math.min(tipLabel.implicitWidth + 14, win.width - 20)
-        height: tipLabel.implicitHeight + 8
-        x: Math.max(4, Math.min(win.tipX + 12, win.width - width - 4))
-        y: Math.max(4, Math.min(win.tipY + 18, win.height - height - 4))
-        PixelText {
-            id: tipLabel
-            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 7; rightMargin: 7 }
-            elide: Text.ElideRight
-            text: win.tipText
-            color: Theme.text
+        property real slide: (win.tipShown && win.tipText.length > 0) ? 1 : 0
+        Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        readonly property real gap: 14
+        readonly property real fullW: Math.min(tipLabel.implicitWidth + 14, win.width - 40)
+        readonly property real fullH: tipLabel.implicitHeight + 8
+        visible: slide > 0.001
+        clip: true
+        width: fullW * slide            // grows from 0 → fullW as it slides out
+        height: fullH
+        x: (win.tipX - gap) - width     // right edge just left of the cursor; extends left
+        y: Math.max(4, Math.min(win.tipY - fullH / 2, win.height - fullH - 4))
+        Rectangle {
+            width: tip.fullW
+            height: tip.fullH
+            anchors.right: parent.right  // revealed from the right as the clip grows
+            color: Theme.bgAlt
+            border.color: Theme.accent
+            border.width: 1
+            PixelText {
+                id: tipLabel
+                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 7; rightMargin: 7 }
+                elide: Text.ElideRight
+                text: win.tipText
+                color: Theme.text
+            }
         }
     }
 

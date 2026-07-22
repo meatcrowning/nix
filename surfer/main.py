@@ -29,7 +29,8 @@ from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
 from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
-                                     QWebEngineUrlSchemeHandler, QWebEnginePermission)
+                                     QWebEngineUrlSchemeHandler, QWebEnginePermission,
+                                     QWebEngineUrlRequestInterceptor)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 HERE = Path(__file__).resolve().parent
@@ -703,6 +704,68 @@ class Prefs(QObject):
             pass
 
 
+class AdBlocker(QWebEngineUrlRequestInterceptor):
+    """Built-in ad/tracker blocking: a network request interceptor that drops
+    requests to known ad- and tracker-serving hosts (domain-suffix match, so a
+    whole tree like *.doubleclick.net is covered). Installed on the shared
+    profile so it applies to every tab. Extendable/overridable via
+    $XDG_CONFIG_HOME/surfer/blocklist.txt — one host per line, `# comment`, and
+    a leading `!` ALLOW-lists a host the built-in list would otherwise block
+    (escape hatch if a block breaks a site)."""
+
+    _BUILTIN = {
+        # ad serving
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+        "adservice.google.com", "2mdn.net", "amazon-adsystem.com", "adnxs.com",
+        "adsrvr.org", "rubiconproject.com", "pubmatic.com", "openx.net",
+        "criteo.com", "criteo.net", "taboola.com", "outbrain.com", "moatads.com",
+        "serving-sys.com", "casalemedia.com", "bidswitch.net", "sharethrough.com",
+        "teads.tv", "yieldmo.com", "media.net", "zedo.com", "smartadserver.com",
+        "advertising.com", "adform.net", "adcolony.com", "applovin.com",
+        "adsafeprotected.com", "doubleverify.com", "3lift.com", "gumgum.com",
+        "indexww.com", "contextweb.com", "sonobi.com", "districtm.io",
+        # analytics / trackers
+        "google-analytics.com", "googletagmanager.com", "googletagservices.com",
+        "scorecardresearch.com", "quantserve.com", "chartbeat.com", "hotjar.com",
+        "mixpanel.com", "segment.com", "segment.io", "branch.io", "krxd.net",
+        "demdex.net", "omtrdc.net", "everesttech.net", "bluekai.com", "agkn.com",
+        "rlcdn.com", "gemius.pl", "newrelic.com", "nr-data.net", "optimizely.com",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._blocked = set(self._BUILTIN)
+        self._allow = set()
+        self._load_user()
+        self._suffixes = tuple("." + d for d in self._blocked)
+
+    def _load_user(self):
+        cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        try:
+            for line in (cfg / "surfer" / "blocklist.txt").read_text(encoding="utf-8").splitlines():
+                s = line.strip().lower()
+                if not s or s.startswith("#"):
+                    continue
+                if s.startswith("!"):
+                    self._allow.add(s[1:].strip())
+                else:
+                    self._blocked.add(s)
+        except OSError:
+            pass
+
+    def _is_blocked(self, host):
+        if not host or host in self._allow or any(host.endswith("." + a) for a in self._allow):
+            return False
+        return host in self._blocked or host.endswith(self._suffixes)
+
+    def interceptRequest(self, info):
+        try:
+            if self._is_blocked(info.requestUrl().host().lower()):
+                info.block(True)
+        except Exception:
+            pass
+
+
 def main():
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
     # userscripts' GM_xmlhttpRequest goes through it — see GmXhrHandler). Must be
@@ -742,6 +805,7 @@ def main():
     notifier = Notifier(app)
     downloads = Downloads(app)
     prefs = Prefs()
+    adblocker = AdBlocker(app)
     download_dir = str(Path.home() / "Downloads")
     try:
         os.makedirs(download_dir, exist_ok=True)
@@ -789,6 +853,11 @@ def main():
                 # (non-off-the-record), so a site is only prompted once.
                 try:
                     prof.presentNotification.connect(notifier.present)
+                except Exception:
+                    pass
+                # built-in ad/tracker blocking on the shared profile (all tabs)
+                try:
+                    prof.setUrlRequestInterceptor(adblocker)
                 except Exception:
                     pass
                 return
