@@ -18,7 +18,9 @@ import base64
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
@@ -27,7 +29,7 @@ from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
 from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
-                                     QWebEngineUrlSchemeHandler)
+                                     QWebEngineUrlSchemeHandler, QWebEnginePermission)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 HERE = Path(__file__).resolve().parent
@@ -169,6 +171,65 @@ class Clip(QObject):
     @Slot(str)
     def copy(self, text):
         QGuiApplication.clipboard().setText(text)
+
+
+class Perm(QObject):
+    """Turns a QWebEnginePermission.PermissionType enum (passed from QML as a
+    plain int) into human wording for the in-window grant/deny prompt. Done in
+    Python so the mapping keys off the real enum instead of QML enum-name
+    guesswork."""
+
+    @Slot(int, result=str)
+    def what(self, t):
+        PT = QWebEnginePermission.PermissionType
+        return {
+            PT.Notifications.value:            "show notifications",
+            PT.Geolocation.value:              "know your location",
+            PT.MediaAudioCapture.value:        "use your microphone",
+            PT.MediaVideoCapture.value:        "use your camera",
+            PT.MediaAudioVideoCapture.value:   "use your camera & microphone",
+            PT.DesktopVideoCapture.value:      "capture your screen",
+            PT.DesktopAudioVideoCapture.value: "capture your screen & audio",
+            PT.ClipboardReadWrite.value:       "read your clipboard",
+            PT.LocalFontsAccess.value:         "see your installed fonts",
+            PT.MouseLock.value:                "lock your mouse pointer",
+        }.get(int(t), "use a browser feature")
+
+
+class Notifier(QObject):
+    """Presents web notifications on the desktop. Connected to the QML profile's
+    presentNotification signal (see main() — the QML QQuickWebEngineProfile has
+    no setNotificationPresenter, but it DOES emit this signal, which is the
+    equivalent hook). Each granted `new Notification(...)` from a page lands
+    here; we relay it to notify-send so it renders as a normal wal-themed toast
+    through the same Quickshell notification server everything else uses."""
+
+    def _icon_path(self, n):
+        # web notifications often carry an icon (QImage); dump it to a reused
+        # temp PNG for notify-send's -i. Fully optional — any failure omits it.
+        try:
+            img = n.icon()
+            if img is None or img.isNull():
+                return None
+            p = os.path.join(tempfile.gettempdir(), "surfer-notif-icon.png")
+            return p if img.save(p, "PNG") else None
+        except Exception:
+            return None
+
+    def present(self, n):
+        try:
+            n.show()  # tell the page it was displayed (fires its onshow)
+        except Exception:
+            pass
+        args = ["notify-send", "-a", "surfer"]
+        icon = self._icon_path(n)
+        if icon:
+            args += ["-i", icon]
+        args += [n.title() or "surfer", n.message() or ""]
+        try:
+            subprocess.Popen(args)
+        except OSError:
+            pass
 
 
 # A pragmatic GreaseMonkey API shim, prepended to every userscript so real GM
@@ -570,11 +631,14 @@ def main():
     clip = Clip()
     session = Session()
     userscripts = UserScripts()
+    perm = Perm()
+    notifier = Notifier(app)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
     ctx.setContextProperty("UserScripts", userscripts)
+    ctx.setContextProperty("Perm", perm)
     ctx.setContextProperty("startUrl", start_url)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
@@ -595,7 +659,7 @@ def main():
     # per-profile, and the QML WebEngineProfile is the one the views use.
     gmxhr = GmXhrHandler(app)
 
-    def _install_gmxhr():
+    def _wire_profile():
         for ro in engine.rootObjects():
             prof = ro.findChild(QObject, "sharedProfile")
             if prof is not None:
@@ -603,10 +667,17 @@ def main():
                     prof.installUrlSchemeHandler(b"gmxhr", gmxhr)
                 except RuntimeError:
                     pass
+                # route granted web notifications out to notify-send. The QML
+                # profile persists granted/denied permissions to disk itself
+                # (non-off-the-record), so a site is only prompted once.
+                try:
+                    prof.presentNotification.connect(notifier.present)
+                except Exception:
+                    pass
                 return
 
     from PySide6.QtCore import QTimer
-    QTimer.singleShot(0, _install_gmxhr)
+    QTimer.singleShot(0, _wire_profile)
 
     sys.exit(app.exec())
 

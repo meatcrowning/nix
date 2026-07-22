@@ -144,6 +144,28 @@ Window {
         Session.save(urls, currentTab);
     }
 
+    // ---- site permission prompts (notifications, camera, mic, geolocation…) ----
+    // QtWebEngine raises onPermissionRequested for any feature in the "ask"
+    // state; we surface a small allow/block bar over the top of the page.
+    // grant()/deny() persist per-origin in the profile (non-off-the-record), so
+    // each site is only asked once. Requests queue so two of them don't fight
+    // over the single bar. Perm.what() (main.py) gives the human wording.
+    property var permQueue: []
+    property var permCurrent: null
+    property string permMsg: ""
+    function askPermission(perm) {
+        permQueue.push(perm);
+        if (!permCurrent) nextPermission();
+    }
+    function nextPermission() {
+        if (permQueue.length === 0) { permCurrent = null; permMsg = ""; return; }
+        permCurrent = permQueue.shift();
+        var host = ("" + permCurrent.origin).replace(/^[a-z]+:\/\//, "").replace(/\/.*$/, "");
+        permMsg = (host || "this site") + " wants to " + Perm.what(permCurrent.permissionType);
+    }
+    function grantPermission() { if (permCurrent) permCurrent.grant(); nextPermission(); }
+    function denyPermission()  { if (permCurrent) permCurrent.deny();  nextPermission(); }
+
     // ---- hyprvtb titlebar buttons (the browser's real chrome) ----
     readonly property var tbButtons: {
         void tabRev;                    // structural-change dependency
@@ -259,6 +281,10 @@ Window {
                         webview.runJavaScript(win.scrollbarJs());
                 }
 
+                // a site asked to use notifications / camera / mic / location:
+                // queue it for the allow/block bar (win.askPermission)
+                onPermissionRequested: (permission) => win.askPermission(permission)
+
                 onNewWindowRequested: (request) => win.newTab(request.requestedUrl)
                 onFullScreenRequested: (request) => {
                     request.accept();
@@ -267,6 +293,31 @@ Window {
                 // page-initiated close (window.close()) closes its tab
                 onWindowCloseRequested: win.closeTab(index)
             }
+        }
+    }
+
+    // ---- permission prompt bar: allow/block, over the top of the page ----
+    Rectangle {
+        id: permBar
+        visible: win.permCurrent !== null
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: 36
+        color: Theme.bgAlt
+        border.width: 1
+        border.color: Theme.accent
+
+        PixelText {
+            anchors { left: parent.left; leftMargin: 12; right: permBtns.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+            elide: Text.ElideRight
+            text: win.permMsg
+            color: Theme.text
+        }
+        Row {
+            id: permBtns
+            anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+            spacing: 8
+            BrowserButton { label: "allow"; onClicked: win.grantPermission() }
+            BrowserButton { label: "block"; onClicked: win.denyPermission() }
         }
     }
 }
