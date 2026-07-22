@@ -269,7 +269,7 @@ PanelWindow {
         color: Theme.bg
         // pinned widgets read as "unfocused" — inactive border colour
         border.color: root.pinnedOpen ? Theme.windowBorderInactive : Theme.windowBorder
-        border.width: Theme.windowBorderWidth
+        border.width: 0   // borderless desktop widgets (was Theme.windowBorderWidth)
         radius: Theme.windowRounding
 
         MouseArea {
