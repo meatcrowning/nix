@@ -45,10 +45,18 @@ Window {
     Timer { id: nudgeTimer; interval: 32; onTriggered: win.nudging = false }
     function nudgeCurrent() { win.nudging = true; nudgeTimer.restart(); }
 
+    property int dlSeq: 0   // per-download key for download toasts
+
     function newTab(url) {
         tabs.append({ tid: nextTid, seed: url });
         nextTid += 1;
         currentTab = tabs.count - 1;
+        tabRev += 1;
+    }
+    // like newTab but leaves focus on the current tab (middle-click a link)
+    function newTabBg(url) {
+        tabs.append({ tid: nextTid, seed: (url && url !== "") ? url : homeUrl });
+        nextTid += 1;
         tabRev += 1;
     }
     function tabIndexByTid(tid) {
@@ -250,7 +258,27 @@ Window {
         objectName: "sharedProfile"   // Python installs the gmxhr scheme handler on this
         storageName: "surfer"
         offTheRecord: false
-        onDownloadRequested: (download) => download.accept()
+        // downloads land in ~/Downloads; large ones get a live progress toast
+        // (updated in place), every one gets a completion/failure toast — see
+        // the Downloads bridge in main.py.
+        onDownloadRequested: (download) => {
+            download.downloadDirectory = downloadDir;
+            download.accept();
+            var key = "dl" + (win.dlSeq++);
+            var name = download.downloadFileName;
+            download.receivedBytesChanged.connect(function() {
+                if (!download.isFinished && download.totalBytes > 3145728) // >3 MB
+                    Downloads.progress(key, name, download.receivedBytes, download.totalBytes);
+            });
+            download.isFinishedChanged.connect(function() {
+                if (!download.isFinished)
+                    return;
+                if (download.state === WebEngineDownloadRequest.DownloadCompleted)
+                    Downloads.done(key, name);
+                else
+                    Downloads.failed(key, name);
+            });
+        }
     }
 
     // ---- content: one WebEngineView per tab, only the current one visible ----
@@ -285,7 +313,19 @@ Window {
                 // queue it for the allow/block bar (win.askPermission)
                 onPermissionRequested: (permission) => win.askPermission(permission)
 
-                onNewWindowRequested: (request) => win.newTab(request.requestedUrl)
+                // link opening: middle-click (InNewBackgroundTab) opens a new
+                // background tab; everything else (target=_blank, ctrl-click,
+                // window.open) loads in THIS tab — navigating the existing view
+                // instead of a fresh one, which also fixes _blank/JS opens that
+                // used to spawn a tab that never loaded (empty requestedUrl).
+                onNewWindowRequested: (request) => {
+                    if (request.destination === WebEngineNewWindowRequest.InNewBackgroundTab)
+                        win.newTabBg("" + request.requestedUrl);
+                    else if (("" + request.requestedUrl) !== "")
+                        webview.url = request.requestedUrl;
+                    else
+                        win.newTab(win.homeUrl);
+                }
                 onFullScreenRequested: (request) => {
                     request.accept();
                     win.visibility = request.toggleOn ? Window.FullScreen : Window.Windowed;

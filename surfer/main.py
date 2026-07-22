@@ -232,6 +232,74 @@ class Notifier(QObject):
             pass
 
 
+class Downloads(QObject):
+    """Desktop toasts for downloads, driven from Main.qml's onDownloadRequested.
+    A large download gets a live progress toast that updates IN PLACE (notify-send
+    --replace-id) with a CP437 block bar in the body — which the pixel DOS font
+    renders as a real bar; every download gets a completion (or failure) toast.
+    Keyed by an opaque per-download string from QML."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._ids = {}    # key -> notify-send notification id (for --replace-id)
+        self._pct = {}    # key -> last percent shown (throttle to whole-% steps)
+
+    @staticmethod
+    def _human(b):
+        b = float(b)
+        for u in ("B", "K", "M", "G"):
+            if b < 1024 or u == "G":
+                return "%dB" % b if u == "B" else "%.1f%s" % (b, u)
+            b /= 1024
+
+    @staticmethod
+    def _bar(pct, width=16):
+        fill = int(round(pct / 100.0 * width))
+        return "█" * fill + "░" * (width - fill)  # █ filled / ░ empty
+
+    def _send(self, key, title, body, value):
+        # -p prints the notification id so we can --replace-id (-r) it next time,
+        # morphing one toast in place instead of stacking a new one per update.
+        args = ["notify-send", "-a", "surfer", "-p"]
+        rid = self._ids.get(key)
+        if rid is not None:
+            args += ["-r", str(rid)]
+        if value is not None:
+            args += ["-h", "int:value:%d" % int(value)]
+        args += [title, body]
+        try:
+            out = subprocess.run(args, capture_output=True, text=True, timeout=2)
+            nid = out.stdout.strip()
+            if nid.isdigit():
+                self._ids[key] = int(nid)
+        except Exception:
+            pass
+
+    @Slot(str, str, float, float)
+    def progress(self, key, name, received, total):
+        if total <= 0:
+            return
+        pct = int(received * 100 / total)
+        if self._pct.get(key) == pct:
+            return  # throttle: only re-toast on a whole-percent change
+        self._pct[key] = pct
+        body = "%s %d%%\n%s / %s" % (self._bar(pct), pct,
+                                     self._human(received), self._human(total))
+        self._send(key, "downloading " + name, body, pct)
+
+    @Slot(str, str)
+    def done(self, key, name):
+        self._send(key, "download complete", name, 100)  # reuses the progress toast
+        self._ids.pop(key, None)
+        self._pct.pop(key, None)
+
+    @Slot(str, str)
+    def failed(self, key, name):
+        self._send(key, "download failed", name, None)
+        self._ids.pop(key, None)
+        self._pct.pop(key, None)
+
+
 # A pragmatic GreaseMonkey API shim, prepended to every userscript so real GM
 # scripts (4chan X, OneeChan, …) run. GM values are backed by the page's
 # localStorage (per-origin, persisted in the profile). GM_xmlhttpRequest is a
@@ -633,12 +701,20 @@ def main():
     userscripts = UserScripts()
     perm = Perm()
     notifier = Notifier(app)
+    downloads = Downloads(app)
+    download_dir = str(Path.home() / "Downloads")
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+    except OSError:
+        pass
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
     ctx.setContextProperty("UserScripts", userscripts)
     ctx.setContextProperty("Perm", perm)
+    ctx.setContextProperty("Downloads", downloads)
+    ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
