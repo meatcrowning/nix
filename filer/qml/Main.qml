@@ -381,6 +381,12 @@ Window {
                 MouseArea {
                     id: rowMa
                     anchors.fill: parent
+                    // preventStealing: hold the drag ourselves so the ListView's
+                    // Flickable can't grab a press-drag and turn it into a scroll
+                    // — without this the file drag never starts, the list just
+                    // scrolls. Trade-off: a press-drag on a row now ALWAYS drags
+                    // the file out; scroll the list with the wheel/trackpad.
+                    preventStealing: true
                     property real px: 0
                     property real py: 0
                     property bool dragging: false
@@ -391,15 +397,11 @@ Window {
                     onPositionChanged: (m) => {
                         if (rowMa.dragging || !rowMa.pressed)
                             return;
-                        const dx = m.x - rowMa.px, dy = m.y - rowMa.py;
-                        // horizontal-dominant drag = drag the file OUT; a mostly
-                        // vertical drag falls through to the list's flick/scroll.
-                        if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+                        // once the pointer travels past a small threshold (any
+                        // direction), drag this file OUT as a text/uri-list
+                        if (Math.abs(m.x - rowMa.px) + Math.abs(m.y - rowMa.py) > 10) {
                             rowMa.dragging = true;
-                            row.grabToImage(function(res) {
-                                row.Drag.imageSource = res.url;
-                                row.Drag.startDrag(Qt.CopyAction);
-                            });
+                            row.Drag.startDrag(Qt.CopyAction);
                         }
                     }
                     onReleased: rowMa.dragging = false
