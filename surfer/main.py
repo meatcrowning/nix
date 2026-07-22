@@ -15,12 +15,17 @@ SYSTEM python3 + Fedora's python3-pyside6 (nixpkgs Mesa has no Apple Silicon
 GBM driver), on top the nixpkgs build.
 """
 import base64
+import hashlib
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
@@ -783,12 +788,39 @@ class ZoomFilter(QObject):
 
 class AdBlocker(QWebEngineUrlRequestInterceptor):
     """Built-in ad/tracker blocking: a network request interceptor that drops
-    requests to known ad- and tracker-serving hosts (domain-suffix match, so a
-    whole tree like *.doubleclick.net is covered). Installed on the shared
-    profile so it applies to every tab. Extendable/overridable via
-    $XDG_CONFIG_HOME/surfer/blocklist.txt — one host per line, `# comment`, and
-    a leading `!` ALLOW-lists a host the built-in list would otherwise block
-    (escape hatch if a block breaks a site)."""
+    requests to known ad- and tracker-serving hosts. Installed on the shared
+    profile so it applies to every tab.
+
+    Rather than a tiny hand-kept list, this subscribes to the same maintained
+    filter lists that uBlock Origin / Adblock Plus ship with — EasyList,
+    EasyPrivacy and StevenBlack's unified hosts file — cached under
+    $XDG_CACHE_HOME/surfer/filters/ and refreshed in the background every
+    _REFRESH_DAYS. We parse the HOST-ANCHORED subset of Adblock syntax
+    (`||host^`, `@@||host^` exceptions, `$third-party`, and plain hosts-file
+    lines); that's the bulk of what actually stops network requests. Path/URL
+    substring rules (`/ads/*`) and cosmetic element-hiding rules (`example.com##.ad`)
+    are NOT applied — a URL interceptor can't inject CSS, and those need a real
+    filter engine. The small _BUILTIN set is an offline seed so blocking still
+    works on first run before any list has been fetched.
+
+    Matching is domain-suffix (a whole tree like *.doubleclick.net is covered)
+    but done by walking the request host's parent domains against a hash set —
+    O(number of labels) per request, not O(list size) — so it stays fast at the
+    ~150k domains these lists carry.
+
+    Overridable via $XDG_CONFIG_HOME/surfer/blocklist.txt — one host per line,
+    `# comment`, and a leading `!` ALLOW-lists a host the lists would otherwise
+    block (escape hatch if a block breaks a site). Subscription URLs can be
+    replaced by listing them, one per line, in
+    $XDG_CONFIG_HOME/surfer/subscriptions.txt."""
+
+    _SUBSCRIPTIONS = [
+        "https://easylist.to/easylist/easylist.txt",
+        "https://easylist.to/easylist/easyprivacy.txt",
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+    ]
+    _REFRESH_DAYS = 7
+    _HOSTRE = re.compile(r"^[a-z0-9._-]+$")
 
     _BUILTIN = {
         # ad serving
@@ -811,33 +843,163 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._blocked = set(self._BUILTIN)
-        self._allow = set()
-        self._load_user()
-        self._suffixes = tuple("." + d for d in self._blocked)
+        cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "surfer"
+        cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "surfer" / "filters"
+        self._cfg = cfg
+        self._cache = cache
+        self._subs = self._resolve_subs(cfg)
+        # (blocked, third_party_only, allow) — swapped atomically by _compile().
+        self._tables = (frozenset(self._BUILTIN), frozenset(), frozenset())
+        self._compile()                     # load whatever cache exists, instantly
+        threading.Thread(target=self._refresh, daemon=True).start()
 
-    def _load_user(self):
-        cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    # ---- subscription list resolution --------------------------------------
+    def _resolve_subs(self, cfg):
         try:
-            for line in (cfg / "surfer" / "blocklist.txt").read_text(encoding="utf-8").splitlines():
+            subs = []
+            for line in (cfg / "subscriptions.txt").read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if s and not s.startswith("#"):
+                    subs.append(s)
+            if subs:
+                return subs
+        except OSError:
+            pass
+        return list(self._SUBSCRIPTIONS)
+
+    def _cache_path(self, url):
+        return self._cache / (hashlib.sha1(url.encode()).hexdigest()[:16] + ".txt")
+
+    # ---- parsing -----------------------------------------------------------
+    def _add_host(self, host, target):
+        host = host.strip(".").lower()
+        if host and "." in host and "localhost" not in host and self._HOSTRE.match(host):
+            target.add(host)
+
+    def _parse(self, text, blocked, tp, allow):
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line[0] in "!#[":       # comments / hosts-file headers / ABP metadata
+                continue
+            low = line.lower()
+            # hosts-file format: "0.0.0.0 ad.example.com"
+            if low.startswith(("0.0.0.0", "127.0.0.1", "::1", "::", "255.255.255.255")):
+                parts = line.split()
+                if len(parts) >= 2:
+                    self._add_host(parts[1], blocked)
+                continue
+            # Adblock syntax. Cosmetic / scriptlet rules can't be done here — skip.
+            if any(m in line for m in ("##", "#@#", "#?#", "#$#", "#%#")):
+                continue
+            exception = low.startswith("@@")
+            body = line[2:] if exception else line
+            if not body.startswith("||"):          # only host-anchored network rules
+                continue
+            pattern, _, opts = body[2:].partition("$")
+            third = False
+            if opts:
+                optset = set(opts.lower().split(","))
+                if any(o.startswith("domain=") for o in optset):
+                    continue                        # site-specific rule — needs a real engine
+                third = "third-party" in optset or "3p" in optset
+            host = pattern.rstrip("^")
+            if host.endswith("/"):
+                host = host[:-1]
+            if any(c in host for c in "/*^:?="):    # leftover path / wildcard — unsupported
+                continue
+            self._add_host(host, allow if exception else (tp if third else blocked))
+
+    def _parse_user(self, blocked, tp, allow):
+        # blocklist.txt is the plain user override: `host`, `# comment`, `!allow`.
+        try:
+            for line in (self._cfg / "blocklist.txt").read_text(encoding="utf-8").splitlines():
                 s = line.strip().lower()
                 if not s or s.startswith("#"):
                     continue
                 if s.startswith("!"):
-                    self._allow.add(s[1:].strip())
+                    self._add_host(s[1:].strip(), allow)
                 else:
-                    self._blocked.add(s)
+                    self._add_host(s, blocked)
         except OSError:
             pass
 
-    def _is_blocked(self, host):
-        if not host or host in self._allow or any(host.endswith("." + a) for a in self._allow):
-            return False
-        return host in self._blocked or host.endswith(self._suffixes)
+    def _compile(self):
+        blocked = set(self._BUILTIN)
+        tp, allow = set(), set()
+        for url in self._subs:
+            try:
+                text = self._cache_path(url).read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            self._parse(text, blocked, tp, allow)
+        self._parse_user(blocked, tp, allow)
+        tp -= blocked                               # unconditional block wins over 3p-only
+        self._tables = (frozenset(blocked), frozenset(tp), frozenset(allow))
+        sys.stderr.write(
+            f"surfer adblock: {len(blocked)} blocked + {len(tp)} third-party-only, "
+            f"{len(allow)} allowed ({len(self._subs)} lists)\n")
+
+    # ---- background refresh ------------------------------------------------
+    def _fetch(self, url, timeout=25):
+        req = urllib.request.Request(url, headers={"User-Agent": "surfer-adblock/1"})
+        try:
+            return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "ignore")
+        except ssl.SSLError:
+            # Nix python may lack a cert bundle; a filter list over unverified TLS
+            # is low-risk (worst case: over/under-blocking, never code execution).
+            ctx = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=ctx).read().decode("utf-8", "ignore")
+
+    def _refresh(self):
+        changed = False
+        for url in self._subs:
+            path = self._cache_path(url)
+            try:
+                fresh = path.exists() and (time.time() - path.stat().st_mtime) < self._REFRESH_DAYS * 86400
+            except OSError:
+                fresh = False
+            if fresh:
+                continue
+            try:
+                data = self._fetch(url)
+            except Exception:
+                continue                            # keep the stale cache; try again next launch
+            if data:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(data, encoding="utf-8")
+                    changed = True
+                except OSError:
+                    pass
+        if changed:
+            self._compile()                         # atomic swap of self._tables
+
+    # ---- matching ----------------------------------------------------------
+    @staticmethod
+    def _base(host):
+        parts = host.rsplit(".", 2)
+        return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+    def _is_blocked(self, host, third_party):
+        blocked, tp, allow = self._tables
+        labels = host.split(".")
+        suffixes = [".".join(labels[i:]) for i in range(len(labels) - 1)]
+        for s in suffixes:
+            if s in allow:
+                return False
+        for s in suffixes:
+            if s in blocked or (third_party and s in tp):
+                return True
+        return False
 
     def interceptRequest(self, info):
         try:
-            if self._is_blocked(info.requestUrl().host().lower()):
+            host = info.requestUrl().host().lower()
+            if not host:
+                return
+            fp = info.firstPartyUrl().host().lower()
+            third_party = (not fp) or self._base(host) != self._base(fp)
+            if self._is_blocked(host, third_party):
                 info.block(True)
         except Exception:
             pass
