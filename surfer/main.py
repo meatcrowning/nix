@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
-                            QBuffer, QIODevice)
+                            QBuffer, QIODevice, QEvent, Qt)
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
@@ -705,18 +705,12 @@ class Prefs(QObject):
 
 
 class Zoom(QObject):
-    """Shared page zoom (one level across all tabs), persisted to prefs.json.
-
-    Two input paths feed this, because Ctrl+wheel behaves differently per Qt
-    build and NEITHER a QML WheelHandler nor a Python app-event-filter works
-    everywhere (the filter crashes this PySide6/Py3.14 build mid-event-dispatch):
-      - top's Qt: the WebEngineView does NOT zoom on Ctrl+wheel itself, so a QML
-        WheelHandler over the page catches it and calls bump().
-      - air's Qt: Chromium's own Ctrl+wheel zoom is active and eats the wheel
-        before any QML handler — so we instead let it change the view's
-        zoomFactor and persist that via onZoomFactorChanged -> setLevel().
-    Either way the level lands here, is saved, and is shared to the other tabs
-    (levelChanged -> each view re-applies it)."""
+    """The single shared page-zoom level (all tabs), persisted to prefs.json and
+    the source of truth QML re-applies to every view. Ctrl+wheel is captured by
+    ZoomFilter (below) and only ever lands here via bump(); the views NEVER
+    persist their own zoomFactor, because QtWebEngine resets zoomFactor to 1.0 on
+    every navigation and that involuntary change is indistinguishable from a real
+    zoom — persisting it would clobber the saved level on every page load."""
 
     levelChanged = Signal()
 
@@ -738,13 +732,33 @@ class Zoom(QObject):
 
     level = Property(float, _get, _set, notify=levelChanged)
 
-    @Slot(float)
-    def setLevel(self, v):
-        self._set(v)
-
     @Slot(int)
     def bump(self, direction):
         self._set(self._level * (1.1 if direction > 0 else (1.0 / 1.1)))
+
+
+class ZoomFilter(QObject):
+    """Ctrl+wheel -> shared zoom, installed on the top-level WINDOW (not the
+    QApplication — an app-wide event filter segfaults this PySide6/Py3.14 build
+    wrapping transient QObjects during focus events; a window-scoped filter only
+    ever sees `obj == the window`, which is stable). The QQuickWindow receives
+    the wheel from the platform BEFORE it is delivered down to the WebEngineView
+    item, so consuming it here (return True) both drives our zoom AND suppresses
+    Chromium's own Ctrl+wheel zoom — leaving zoomFactor to change only when we
+    set it. Plain wheel falls through untouched."""
+
+    def __init__(self, zoom, parent=None):
+        super().__init__(parent)
+        self._zoom = zoom
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Wheel and (
+                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            dy = event.angleDelta().y()
+            if dy != 0:
+                self._zoom.bump(1 if dy > 0 else -1)
+                return True
+        return False
 
 
 class AdBlocker(QWebEngineUrlRequestInterceptor):
@@ -878,6 +892,12 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
+
+    # Ctrl+wheel zoom: filter installed on the top-level window (the QML Window
+    # root), upstream of the WebEngineView, so it drives our shared zoom and
+    # suppresses Chromium's own Ctrl+wheel zoom. Parented to app so it lives.
+    zoom_filter = ZoomFilter(zoom, app)
+    engine.rootObjects()[0].installEventFilter(zoom_filter)
 
     # Install the gmxhr scheme handler on the QML profile (found by objectName)
     # once the tree is fully built and stable — deferred onto the event loop to

@@ -329,12 +329,17 @@ Window {
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
-                // Shared, persisted zoom (Ctrl+scroll). NOT a binding: a binding
-                // would fight Chromium's native Ctrl+wheel zoom (which mutates
-                // zoomFactor directly on air's Qt). Instead seed it from the saved
-                // level, persist any change (native zoom OR the WheelHandler), and
-                // re-apply when another tab changes the shared level.
-                onZoomFactorChanged: Zoom.setLevel(zoomFactor)
+                // Shared, persisted zoom (Ctrl+scroll). zoomFactor is NOT a
+                // binding and is NEVER persisted from here: the level is owned by
+                // the Zoom bridge (changed only via ZoomFilter -> Zoom.bump), and
+                // each view just mirrors it. QtWebEngine resets zoomFactor to 1.0
+                // on navigation, so we snap it back whenever it drifts — an
+                // involuntary reset, not a real zoom, so it must NOT be saved.
+                onZoomFactorChanged: {
+                    if (Math.abs(zoomFactor - Zoom.level) > 0.001)
+                        zoomFactor = Zoom.level;
+                }
+                // another tab changed the shared level -> mirror it here too
                 Connections {
                     target: Zoom
                     function onLevelChanged() {
@@ -355,8 +360,12 @@ Window {
                 // shim — see UserScripts in main.py); this just themes the
                 // scrollbar once the page has loaded
                 onLoadingChanged: (info) => {
-                    if (info.status === WebEngineView.LoadSucceededStatus)
+                    if (info.status === WebEngineView.LoadSucceededStatus) {
+                        // re-apply the saved zoom after the navigation reset
+                        if (Math.abs(webview.zoomFactor - Zoom.level) > 0.001)
+                            webview.zoomFactor = Zoom.level;
                         webview.runJavaScript(win.scrollbarJs());
+                    }
                 }
 
                 // a site asked to use notifications / camera / mic / location:
@@ -382,19 +391,6 @@ Window {
                 }
                 // page-initiated close (window.close()) closes its tab
                 onWindowCloseRequested: win.closeTab(index)
-            }
-        }
-
-        // Ctrl+scroll zoom for Qt builds where the WebEngineView does NOT zoom
-        // on Ctrl+wheel itself (e.g. top). Topmost, Ctrl-only, so plain scroll
-        // and all mouse/hover fall through to the page. On builds where Chromium
-        // zooms natively (air) this handler simply never sees the wheel — the
-        // view's onZoomFactorChanged persists that path instead. bump() clamps.
-        Item {
-            anchors.fill: parent
-            WheelHandler {
-                acceptedModifiers: Qt.ControlModifier
-                onWheel: (ev) => Zoom.bump(ev.angleDelta.y > 0 ? 1 : -1)
             }
         }
     }
