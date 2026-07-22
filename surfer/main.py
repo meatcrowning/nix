@@ -1016,11 +1016,54 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
         self._cache = cache
         self._subs = self._resolve_subs(cfg)
         self._engine = None                 # adblock-rust Engine when available
+        self._engine_dat = cache / "engine.dat"   # the COMPILED engine, cached
         # (blocked, third_party_only, allow) — the pure-python fallback tables,
-        # swapped atomically by _compile() when there's no engine.
+        # swapped atomically by _compile() when there's no engine. Seeded with the
+        # BUILTIN ad hosts so the ~90 obvious ones are blocked from the first
+        # request, before the full engine has finished loading on the thread below.
         self._tables = (frozenset(self._BUILTIN), frozenset(), frozenset())
-        self._compile()                     # load whatever cache exists, instantly
-        threading.Thread(target=self._refresh, daemon=True).start()
+        # ALL blocklist compilation runs on this daemon thread — none of it is on
+        # the critical path, so the window and page load start immediately. The
+        # engine (self._engine) is published by a single atomic attribute
+        # assignment; the interceptor reads it lock-free and just uses the BUILTIN
+        # host-set until it appears (~166 ms from the compiled cache, one-time
+        # ~900 ms to compile from raw lists on the very first run).
+        threading.Thread(target=self._startup, daemon=True).start()
+
+    def _startup(self):
+        # Fast path: deserialize the pre-compiled engine from cache (~5x faster
+        # than re-parsing the raw lists). Falls back to a fresh compile (which
+        # then seeds the cache) when there's no usable cache yet.
+        if not self._load_engine_cache():
+            self._compile()
+            self._save_engine_cache()
+        self._refresh()
+
+    def _load_engine_cache(self):
+        try:
+            from adblock import Engine, FilterSet
+        except Exception:
+            return False
+        try:
+            if not self._engine_dat.exists():
+                return False
+            eng = Engine(FilterSet())
+            eng.deserialize_from_file(str(self._engine_dat))
+            self._engine = eng
+            sys.stderr.write("surfer adblock: loaded compiled engine from cache\n")
+            return True
+        except Exception:
+            return False
+
+    def _save_engine_cache(self):
+        eng = self._engine
+        if eng is None:
+            return
+        try:
+            self._engine_dat.parent.mkdir(parents=True, exist_ok=True)
+            eng.serialize_to_file(str(self._engine_dat))
+        except Exception:
+            pass
 
     # ---- subscription list resolution --------------------------------------
     def _resolve_subs(self, cfg):
@@ -1182,7 +1225,8 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
                 except OSError:
                     pass
         if changed:
-            self._compile()                         # atomic swap of self._tables
+            self._compile()                         # atomic swap of engine/tables
+            self._save_engine_cache()               # refresh the compiled cache
 
     # ---- matching ----------------------------------------------------------
     @staticmethod

@@ -242,10 +242,10 @@ Window {
               tip: current && current.loading ? "stop loading" : "reload" },
             { id: "copyurl", label: "cu", state: current ? 0 : 2,           tip: "copy url" },
             // dark mode: opens the slide-out config panel (on/off, per-site
-            // whitelist, brightness/contrast). Highlights (state 1) while the
-            // global toggle is on. DarkMode.enabled's notify is `changed`, so
-            // this binding re-evaluates whenever the setting flips.
-            { id: "darkmode", label: "dm", state: DarkMode.enabled ? 1 : 0,  tip: "dark mode" },
+            // whitelist, brightness/contrast). Lit (state 1) only while its
+            // panel is open — like a pressed menu button — not for the whole
+            // time dark mode is enabled.
+            { id: "darkmode", label: "dm", state: dmPanelOpen ? 1 : 0,  tip: "dark mode" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -502,9 +502,11 @@ Window {
         }
     }
 
-    // ---- dark-mode config panel: a drawer that slides in from the left edge
-    // (the side the chrome/titlebar lives on) when the "dm" button is clicked.
-    // A transparent scrim behind it closes it on an outside click.
+    // ---- dark-mode config panel: a drawer that slides out from the "dm"
+    // button. The hyprvtb titlebar (where the button lives) is on the window's
+    // RIGHT edge, and the button sits near the top of that column, so the panel
+    // docks at the top-right and slides in from the right edge toward it. A
+    // transparent scrim behind it closes it on an outside click.
     MouseArea {
         id: dmScrim
         anchors.fill: parent
@@ -515,13 +517,13 @@ Window {
     Rectangle {
         id: dmPanel
         z: 2500
-        // slide 0 (hidden, fully left of the window) -> 1 (docked at the edge)
+        // slide 0 (hidden, fully off the right edge) -> 1 (docked at the edge)
         property real slide: win.dmPanelOpen ? 1 : 0
         Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
         visible: slide > 0.001
         width: 248
         height: dmCol.implicitHeight + 24
-        x: (slide - 1) * width
+        x: win.width - slide * width
         y: 8
         color: Theme.bgAlt
         border.width: 1
