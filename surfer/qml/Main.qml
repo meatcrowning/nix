@@ -161,7 +161,9 @@ Window {
     // already-open pages when the wallpaper palette changes.
     Connections {
         target: WalPalette
-        function onChanged() { win.reinjectScrollbar(); }
+        // recolour open pages' scrollbars, and re-inject the page-style override
+        // (system style pulls the live palette) when the wallpaper changes.
+        function onChanged() { win.reinjectScrollbar(); win.reinjectDark(); }
     }
 
     // ---- dark mode (DarkMode bridge) ----
@@ -691,16 +693,16 @@ Window {
             // divider
             Rectangle { width: parent.width; height: 1; color: Theme.border }
 
-            // system font: force the desktop pixel font on all page text
-            // (independent of dark mode; applies on every site).
+            // system style: reskin every page in the desktop look — system font,
+            // uniform size, and the wallpaper palette. Global; supersedes dark.
             Item {
                 width: parent.width
                 height: 22
-                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system font"; color: Theme.text }
+                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system style"; color: Theme.text }
                 BrowserButton {
                     anchors.right: parent.right
-                    label: DarkMode.systemFont ? "on" : "off"
-                    onClicked: DarkMode.setSystemFont(!DarkMode.systemFont)
+                    label: DarkMode.systemStyle ? "on" : "off"
+                    onClicked: DarkMode.setSystemStyle(!DarkMode.systemStyle)
                 }
             }
         }
