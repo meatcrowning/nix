@@ -1,9 +1,5 @@
-<img width="1920" height="1080" alt="Screenshot_20260719_163518" src="https://github.com/user-attachments/assets/4ba7649d-046b-48cb-b2c7-59ae0ec964ab" />
+<img width="1920" height="1080" alt="Screenshot_20260722_101028" src="https://github.com/user-attachments/assets/cf91ddec-6579-4380-8461-f8a53fee23de" />
 
 # `nixos/hyprland/qs/...`
 
-after a certain point i felt that part of the conversation with my computer should be mediated by language models. initially, this was via `aider` utilizing a multitude of models in a multitude of roles. and then grew into a sort of black hole from which various model and various harnesses have come to visit. im only now looping in git after getting vertical titlebars working. how often do you see that around? 
-
-other stuff bundled 
-
-**see AGENTS.md for more information** 
+included is my **system config**, **desktop enviroment**, **file manager**, and **web browser**. intended for use on my nixos system and MBA running asahi, YMMV. 
