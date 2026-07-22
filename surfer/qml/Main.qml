@@ -380,10 +380,13 @@ Window {
                     else
                         win.newTab(win.homeUrl);
                 }
-                onFullScreenRequested: (request) => {
-                    request.accept();
-                    win.visibility = request.toggleOn ? Window.FullScreen : Window.Windowed;
-                }
+                // A page (YouTube's video fullscreen button, etc.) asked to go
+                // fullscreen: accept it so the video expands to fill the viewport
+                // — which, since the view fills the window, means the video fills
+                // the window — but DO NOT flip the window itself to Window.FullScreen.
+                // "Fullscreen" here means full-*window*, keeping the compositor
+                // titlebar/chrome and the window's size intact.
+                onFullScreenRequested: (request) => request.accept()
                 // page-initiated close (window.close()) closes its tab
                 onWindowCloseRequested: win.closeTab(index)
             }
