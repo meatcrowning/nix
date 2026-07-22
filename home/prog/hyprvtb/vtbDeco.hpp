@@ -142,6 +142,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     int                  m_iEditLines      = 0;        // codepoint lines currently drawn
     Time::steady_tp      m_editBlinkAt     = Time::steadyNow();
     bool                 m_bTitlePressPending = false; // press landed in the title region (click vs drag)
+    bool                 m_bTitlePressFocusOnly = false; // that press only focused an unfocused window — don't edit
     CHyprSignalListener  m_pKeyboardKeyCallback;
 
     // ---- app-button drag-reorder (draggable buttons, e.g. surfer tabs) ----
@@ -212,6 +213,7 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     // title address editor
     bool                 titleEditEnabled();
+    int                  titleTopEff();  // titleTop() + a reserved spinner slot while the page loads
     bool                 inTitleRegion(const Vector2D& localCoords);
     void                 enterEdit();
     void                 exitEdit(bool submit);

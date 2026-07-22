@@ -158,6 +158,20 @@ namespace {
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void handleLoading(SClient& c, const std::string& arg) {
+        if (c.pid <= 0)
+            return;
+        const bool      on = (arg == "1");
+        std::lock_guard lk(g_lk);
+        auto&           reg = g_regs[c.pid];
+        if (g_regFd.find(c.pid) == g_regFd.end())
+            g_regFd[c.pid] = c.fd;
+        if (reg.loading == on)
+            return;
+        reg.loading = on;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
     void handleLine(SClient& c, const std::string& line) {
         if (line.starts_with("REGISTER "))
             handleRegister(c, line.substr(9));
@@ -167,6 +181,8 @@ namespace {
             handleFooter(c, "");
         else if (line.starts_with("TITLEEDIT "))
             handleTitleEdit(c, line.substr(10));
+        else if (line.starts_with("LOADING "))
+            handleLoading(c, line.substr(8));
     }
 
     void dropClient(SClient& c) {

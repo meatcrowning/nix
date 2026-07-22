@@ -82,6 +82,11 @@ Window {
         tabRev += 1;
     }
 
+    // spinner: tell the titlebar plugin whether the current tab is loading, so
+    // it animates a | \ - / spinner above the address bar (see hyprvtb).
+    readonly property bool currentLoading: current ? current.loading : false
+    onCurrentLoadingChanged: Titlebar.setLoading(currentLoading)
+
     // 2-letter tab label from the page title (what the titlebar used to show).
     // Strip a leading notification counter — "(3) ", "[3] ", bullet markers —
     // so a site that blinks its title for unread counts doesn't flip the label
@@ -237,6 +242,7 @@ Window {
 
     Component.onCompleted: {
         Titlebar.setTitleEdit(true);
+        Titlebar.setLoading(currentLoading);
         if (startUrl !== "") {
             newTab(normalize(startUrl));
         } else {

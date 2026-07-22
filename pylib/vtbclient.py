@@ -8,6 +8,7 @@ the server side):
     -> REGISTER <pid> <id>:<label>:<state>:<tip>:<drag>|...  our whole button set
     -> FOOTER <text>                             stacked text at column bottom
     -> TITLEEDIT <0|1>                           title region is an address bar
+    -> LOADING <0|1>                             page loading (draws a spinner)
     <- CLICK <id>                                a button was clicked
     <- REORDER <srcId> <dstId>                   a draggable button was dropped
     <- ADDR <text>                               the title editor was submitted
@@ -53,6 +54,7 @@ class VtbClient:
         self._buttons = []         # last set, guarded by _lock (resent on reconnect)
         self._footer = ""
         self._title_edit = False
+        self._loading = False
         self._stop = False
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -76,6 +78,15 @@ class VtbClient:
         with self._lock:
             self._title_edit = bool(on)
             self._send_title_edit_locked()
+
+    def set_loading(self, on):
+        """Page loading? The plugin draws an animated spinner above the address
+        bar while true (surfer)."""
+        with self._lock:
+            if bool(on) == self._loading:
+                return
+            self._loading = bool(on)
+            self._send_loading_locked()
 
     def close(self):
         self._stop = True
@@ -132,6 +143,9 @@ class VtbClient:
     def _send_title_edit_locked(self):
         self._send_locked("TITLEEDIT " + ("1" if self._title_edit else "0"))
 
+    def _send_loading_locked(self):
+        self._send_locked("LOADING " + ("1" if self._loading else "0"))
+
     # ---- reader / reconnect thread ----
 
     def _loop(self):
@@ -158,6 +172,8 @@ class VtbClient:
                         self._send_footer_locked()
                     if self._title_edit:
                         self._send_title_edit_locked()
+                    if self._loading:
+                        self._send_loading_locked()
             try:
                 data = sock.recv(4096)
             except OSError:

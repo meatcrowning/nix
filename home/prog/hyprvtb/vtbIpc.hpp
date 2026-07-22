@@ -25,6 +25,9 @@
 //         cells) as an editable address bar: clicking it enters an in-bar text
 //         editor (the compositor grabs the keyboard, draws a caret), and Enter
 //         sends the edited text back as ADDR. surfer's URL bar.
+//     LOADING <0|1>
+//         Page loading? While 1 (and titleEdit is on), an animated | \ - /
+//         spinner is drawn in a reserved slot above the address bar. surfer.
 //   server -> client:
 //     CLICK <id>                a button was clicked (fires on release)
 //     REORDER <srcId> <dstId>   draggable button srcId dropped onto dstId's slot
@@ -64,6 +67,7 @@ struct SVtbAppReg {
     std::vector<SVtbAppButton> buttons;
     std::string                footer;
     bool                       titleEdit = false; // title region is an editable address bar
+    bool                       loading   = false; // page loading (spinner above the address bar)
 };
 
 namespace VtbIpc {

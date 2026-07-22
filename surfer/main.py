@@ -164,6 +164,11 @@ class Titlebar(QObject):
         """Mark the stacked title (the outer column) an editable address bar."""
         self._client.set_title_edit(on)
 
+    @Slot(bool)
+    def setLoading(self, on):
+        """Page loading — the plugin draws a spinner above the address bar."""
+        self._client.set_loading(on)
+
 
 class Clip(QObject):
     """Clipboard access for the 'copy url' titlebar button."""

@@ -517,9 +517,10 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     // In edit mode the same region becomes the address editor: it shows the
     // live edit buffer, a caret (or an inverted block when the whole field is
     // selected), instead of the window title.
-    const int    RUNLEN = std::round((DECOBOX.h - titleTop() - VTB_PAD) * SCALE);
+    const int    TITLETOP = titleTopEff();
+    const int    RUNLEN = std::round((DECOBOX.h - TITLETOP - VTB_PAD) * SCALE);
     const double TITLEX = barBox.x + titleTexX() * SCALE;
-    const double TITLEY = barBox.y + titleTop() * SCALE;
+    const double TITLEY = barBox.y + TITLETOP * SCALE;
 
     if (m_bEditing) {
         const size_t selLo  = std::min(m_editSelAnchor, m_editCursor);
@@ -587,6 +588,18 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         }
     }
     m_fLastScale = SCALE;
+
+    // page-loading spinner: in the slot titleTopEff() reserved (below roll-up,
+    // above the address), cycle | \ - / ~8fps while the browser reports loading.
+    {
+        SVtbAppReg lreg;
+        if (VtbIpc::get(appPid(), lreg) && lreg.titleEdit && lreg.loading) {
+            static const char* FRAMES[4] = {"|", "\\", "-", "/"};
+            const long         ms        = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow().time_since_epoch()).count();
+            drawGlyphXY(sysColX(), titleTop(), FRAMES[(ms / 120) % 4], FOCUSED ? accentColor : inactiveColor);
+            damageEntire(); // keep it spinning
+        }
+    }
 
     // ---- inner column: app-registered buttons + stacked footer (vtbIpc) ----
     m_lastIpcSerial = VtbIpc::serial.load(std::memory_order_relaxed);
@@ -1027,10 +1040,20 @@ bool CVtbDeco::titleEditEnabled() {
     return VtbIpc::get(appPid(), reg) && reg.titleEdit;
 }
 
+// titleTop() plus a one-cell spinner slot reserved while a browser window's page
+// is loading (renderPass draws the | \ - / spinner in that slot). Both the title
+// texture and the address-editor hit-testing use this, so they shift down
+// together while loading and stay in sync.
+int CVtbDeco::titleTopEff() {
+    SVtbAppReg reg;
+    const bool spin = VtbIpc::get(appPid(), reg) && reg.titleEdit && reg.loading;
+    return titleTop() + (spin ? (cellSize() + VTB_CELL_GAP) : 0);
+}
+
 // The clickable address-bar region: the outer column band from the title top
 // down (where the stacked title texture is drawn).
 bool CVtbDeco::inTitleRegion(const Vector2D& c) {
-    return c.y >= titleTop() && c.x >= sysColX() && c.x <= sysColX() + cellSize();
+    return c.y >= titleTopEff() && c.x >= sysColX() && c.x <= sysColX() + cellSize();
 }
 
 void CVtbDeco::enterEdit() {
@@ -1085,7 +1108,7 @@ size_t CVtbDeco::editByteAtLocalY(double localY) {
     const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
     const double lineH = (m_iEditLineH > 0) ? m_iEditLineH / scale
                                             : (double)g_pGlobalState->config.fontSize->value();
-    int       row = (int)std::floor((localY - titleTop()) / std::max(1.0, lineH));
+    int       row = (int)std::floor((localY - titleTopEff()) / std::max(1.0, lineH));
     const int nCp = countCp(m_editBuf, m_editBuf.size());
     row           = std::clamp(row, 0, nCp);
     size_t off = 0;
@@ -1683,7 +1706,13 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         return;
     }
 
-    if (Desktop::focusState()->window() != PWINDOW)
+    // Was this window already focused when the press landed? A click on an
+    // UNFOCUSED window's address bar should only focus it (like every other
+    // click-to-focus) — the edit opens on the NEXT click. Captured before we
+    // steal focus just below.
+    const bool WASFOCUSED = Desktop::focusState()->window() == PWINDOW;
+
+    if (!WASFOCUSED)
         Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
 
     if (PWINDOW->m_isFloating)
@@ -1748,9 +1777,12 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     }
 
     // editable title (address bar): a plain click opens the editor; a drag from
-    // here still moves the window (promoted on move), so just arm both.
+    // here still moves the window (promoted on move), so just arm both. But if
+    // this press only focused the window, mark it focus-only so the release
+    // doesn't also open the editor — the user edits on the second click.
     if (titleEditEnabled() && inTitleRegion(COORDS)) {
-        m_bTitlePressPending = true;
+        m_bTitlePressPending   = true;
+        m_bTitlePressFocusOnly = !WASFOCUSED;
         if (!m_bMaximized)
             m_bDragPending = true;
         return;
@@ -1811,16 +1843,19 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
     }
 
     // title-region release: a click (never promoted to a window drag) opens the
-    // address editor.
+    // address editor — unless the press only focused the window (edit on the
+    // next click).
     if (m_bTitlePressPending) {
-        const bool wasDrag   = m_bDraggingThis;
-        m_bTitlePressPending = false;
+        const bool wasDrag     = m_bDraggingThis;
+        const bool focusOnly   = m_bTitlePressFocusOnly;
+        m_bTitlePressPending   = false;
+        m_bTitlePressFocusOnly = false;
         if (m_bDraggingThis) {
             g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
             m_bDraggingThis = false;
         }
         m_bDragPending = false;
-        if (!wasDrag && !m_bEditing)
+        if (!wasDrag && !m_bEditing && !focusOnly)
             enterEdit();
         if (CANCELLED)
             info.cancelled = true;
