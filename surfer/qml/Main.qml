@@ -26,6 +26,25 @@ Window {
 
     readonly property string homeUrl: "https://start.duckduckgo.com/"
 
+    // Page zoom, shared by every tab and persisted (Ctrl+scroll to change).
+    property real zoomLevel: Prefs.loadZoom()
+
+    // ---- webpage tooltips (title=, etc.) rendered in-window near the cursor,
+    // styled like the panel's tooltips (QtWebEngine's onTooltipRequested).
+    property string tipText: ""
+    property real tipX: 0
+    property real tipY: 0
+    function showTooltip(request) {
+        request.accepted = true;   // suppress the native tooltip; draw our own
+        if (request.type === TooltipRequest.Show && request.text.length > 0) {
+            tipText = request.text;
+            tipX = request.x;
+            tipY = request.y;
+        } else {
+            tipText = "";
+        }
+    }
+
     onClosing: { win.saveSession(); Qt.quit(); }
 
     // ---- tabs ----
@@ -301,6 +320,10 @@ Window {
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
+                zoomFactor: win.zoomLevel   // shared, persisted (Ctrl+scroll)
+                // render the page's tooltips ourselves (win.showTooltip), so
+                // title= tooltips actually appear and match the DE
+                onTooltipRequested: (request) => win.showTooltip(request)
                 // userscripts inject via the view's OWN collection (the view
                 // ignores a Python QWebEngineProfile) — GM shim, document-start,
                 // isolated worlds; see UserScripts in main.py
@@ -339,6 +362,42 @@ Window {
                 // page-initiated close (window.close()) closes its tab
                 onWindowCloseRequested: win.closeTab(index)
             }
+        }
+
+        // Ctrl+scroll zoom. Topmost so the wheel reaches this handler; it only
+        // accepts Ctrl+wheel (adjusting the shared, persisted zoom), so plain
+        // scroll and all mouse/hover events fall through to the page below.
+        Item {
+            anchors.fill: parent
+            WheelHandler {
+                acceptedModifiers: Qt.ControlModifier
+                onWheel: (ev) => {
+                    var f = ev.angleDelta.y > 0 ? 1.1 : (1.0 / 1.1);
+                    win.zoomLevel = Math.max(0.3, Math.min(5.0, win.zoomLevel * f));
+                    Prefs.saveZoom(win.zoomLevel);
+                }
+            }
+        }
+    }
+
+    // webpage tooltip (rendered near the cursor point the page reported)
+    Rectangle {
+        id: tip
+        visible: win.tipText.length > 0
+        z: 2000
+        color: Theme.bgAlt
+        border.color: Theme.accent
+        border.width: 1
+        width: Math.min(tipLabel.implicitWidth + 14, win.width - 20)
+        height: tipLabel.implicitHeight + 8
+        x: Math.max(4, Math.min(win.tipX + 12, win.width - width - 4))
+        y: Math.max(4, Math.min(win.tipY + 18, win.height - height - 4))
+        PixelText {
+            id: tipLabel
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 7; rightMargin: 7 }
+            elide: Text.ElideRight
+            text: win.tipText
+            color: Theme.text
         }
     }
 

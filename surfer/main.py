@@ -669,6 +669,40 @@ class Session(QObject):
             return {"tabs": [], "current": 0}
 
 
+class Prefs(QObject):
+    """Small persisted preferences (currently just the page zoom level, shared
+    across all tabs) in $XDG_STATE_HOME/surfer/prefs.json."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+        self._path = state / "surfer" / "prefs.json"
+
+    def _read(self):
+        try:
+            d = json.loads(self._path.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    @Slot(result=float)
+    def loadZoom(self):
+        try:
+            return float(self._read().get("zoom", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+
+    @Slot(float)
+    def saveZoom(self, z):
+        d = self._read()
+        d["zoom"] = float(z)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
+
 def main():
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
     # userscripts' GM_xmlhttpRequest goes through it — see GmXhrHandler). Must be
@@ -707,6 +741,7 @@ def main():
     perm = Perm()
     notifier = Notifier(app)
     downloads = Downloads(app)
+    prefs = Prefs()
     download_dir = str(Path.home() / "Downloads")
     try:
         os.makedirs(download_dir, exist_ok=True)
@@ -719,6 +754,7 @@ def main():
     ctx.setContextProperty("UserScripts", userscripts)
     ctx.setContextProperty("Perm", perm)
     ctx.setContextProperty("Downloads", downloads)
+    ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
 
