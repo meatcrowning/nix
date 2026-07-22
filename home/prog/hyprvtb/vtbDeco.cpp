@@ -474,38 +474,44 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         g_pHyprOpenGL->renderTexture(tex, gbox.round(), {.a = a});
     };
 
-    // the five system cells live in the OUTER column
+    // the five system cells live in the OUTER column. An `active` cell (a held
+    // toggle: maximized / pinned / rolled-up) holds the full inverted look —
+    // solid accent fill + bg glyph, the same as a click-flash but persistent —
+    // so it reads as "stays pressed" until toggled off. Mere hover on a
+    // non-active cell keeps the subtler lit outline instead.
     auto drawCell = [&](int idx, const CHyprColor& hot, bool active) {
         const double y = VTB_PAD + idx * (CELL + VTB_CELL_GAP);
-        drawCellXY(sysColX(), y, hot, m_iHoverCell == idx || active, cellFlashing(idx));
+        const bool hoverLit = m_iHoverCell == idx && !active;
+        drawCellXY(sysColX(), y, hot, hoverLit, cellFlashing(idx) || active);
     };
 
-    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color) {
-        drawGlyphXY(sysColX(), VTB_PAD + idx * (CELL + VTB_CELL_GAP), glyph, cellFlashing(idx) ? bgColor : color);
+    auto drawGlyph = [&](int idx, const std::string& glyph, const CHyprColor& color, bool active = false) {
+        const bool inverted = cellFlashing(idx) || active;
+        drawGlyphXY(sysColX(), VTB_PAD + idx * (CELL + VTB_CELL_GAP), glyph, inverted ? bgColor : color);
     };
 
     // close [x] — crit on hover, like the QS bar had
     drawCell(0, critColor, false);
     drawGlyph(0, "x", m_iHoverCell == 0 ? critColor : textColor);
 
-    // maximize [=] — accent while maximized or hovered
+    // maximize [=] — inverted while maximized (held), accent while hovered
     drawCell(1, accentColor, m_bMaximized);
-    drawGlyph(1, "=", (m_bMaximized || m_iHoverCell == 1) ? accentColor : textColor);
+    drawGlyph(1, "=", (m_bMaximized || m_iHoverCell == 1) ? accentColor : textColor, m_bMaximized);
 
     // minimize [>] — slides the window off to the right
     drawCell(2, accentColor, false);
     drawGlyph(2, ">", m_iHoverCell == 2 ? accentColor : textColor);
 
     // pin [o>] — Hyprland pin: keeps the window on top and on every
-    // workspace. Lit accent while pinned, like maximize while maximized.
+    // workspace. Inverted while pinned, like maximize while maximized.
     const bool PINNED = PWINDOW->m_pinned;
     drawCell(3, accentColor, PINNED);
-    drawGlyph(3, "o>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor);
+    drawGlyph(3, "o>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor, PINNED);
 
     // roll-up — windowshade toggle: [>>] hides the window down to just this
-    // bar; while shaded it shows [<<] to roll it back. Lit accent while shaded.
+    // bar; while shaded it shows [<<] to roll it back. Inverted while shaded.
     drawCell(4, accentColor, m_bRolledUp);
-    drawGlyph(4, m_bRolledUp ? "<<" : ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor);
+    drawGlyph(4, m_bRolledUp ? "<<" : ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor, m_bRolledUp);
 
     // ---- title, a column of upright letters (outer column, under the cells) ----
     // In edit mode the same region becomes the address editor: it shows the
@@ -516,29 +522,45 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     const double TITLEY = barBox.y + titleTop() * SCALE;
 
     if (m_bEditing) {
+        const size_t selLo  = std::min(m_editSelAnchor, m_editCursor);
+        const size_t selHi  = std::max(m_editSelAnchor, m_editCursor);
+        const bool   hasSel = selHi > selLo;
         if (!m_pEditTex) {
             int th = 0, lines = 0;
             // a blank buffer still needs a texture so the caret has a line to sit on
             const std::string SHOWN = m_editBuf.empty() ? std::string(" ") : m_editBuf;
-            m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, m_editSelectAll ? bgColor : textColor, &th, &lines, /*ellipsis=*/false);
+            m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, textColor, &th, &lines, /*ellipsis=*/false);
             m_iEditLineH = lines > 0 ? th / lines : std::round(g_pGlobalState->config.fontSize->value() * SCALE);
             m_iEditLines = lines;
+            // the selected substring, rendered in bg colour; drawn over the
+            // accent highlight so those rows read inverted (rebuilt alongside
+            // the full text — same invalidation)
+            m_pEditSelTex = hasSel
+                ? renderStackedTex(m_editBuf.substr(selLo, selHi - selLo), RUNLEN, SCALE, bgColor, nullptr, nullptr, /*ellipsis=*/false)
+                : nullptr;
         }
+        // highlight block behind the selected rows (accent), then the full text,
+        // then the bg-coloured selected substring on top so those rows invert —
+        // the whole-field look, generalised to an arbitrary range.
+        const int loCp = hasSel ? countCp(m_editBuf, selLo) : 0;
+        const int hiCp = hasSel ? countCp(m_editBuf, selHi) : 0;
         if (m_pEditTex && m_pEditTex->m_texID != 0) {
             const auto TSZ = m_pEditTex->m_size;
-            // whole-field selection: an accent block behind the (bg-coloured)
-            // text, sized to the real text height (not the full column run)
-            if (m_editSelectAll) {
-                const double selH = std::min((double)TSZ.y, (double)(m_iEditLineH * std::max(1, m_iEditLines)));
-                CBox         sel  = {TITLEX, TITLEY, TSZ.x, selH};
-                g_pHyprOpenGL->renderRect(sel.round(), accentColor, {});
+            if (hasSel && m_iEditLineH > 0) {
+                CBox block = {TITLEX, TITLEY + loCp * (double)m_iEditLineH, (double)TSZ.x, (hiCp - loCp) * (double)m_iEditLineH};
+                g_pHyprOpenGL->renderRect(block.round(), accentColor, {});
             }
             CBox tbox = {TITLEX, TITLEY, TSZ.x, TSZ.y};
             g_pHyprOpenGL->renderTexture(m_pEditTex, tbox.round(), {.a = a});
         }
+        if (hasSel && m_pEditSelTex && m_pEditSelTex->m_texID != 0 && m_iEditLineH > 0) {
+            const auto TSZ  = m_pEditSelTex->m_size;
+            CBox       sbox = {TITLEX, TITLEY + loCp * (double)m_iEditLineH, TSZ.x, TSZ.y};
+            g_pHyprOpenGL->renderTexture(m_pEditSelTex, sbox.round(), {.a = a});
+        }
         // caret: a horizontal bar between codepoint rows at the cursor, blinking
-        // ~500ms. Not drawn while the whole field is selected (the block shows it).
-        if (!m_editSelectAll && m_iEditLineH > 0) {
+        // ~500ms. Not drawn while there's a selection (the block shows focus).
+        if (!hasSel && m_iEditLineH > 0) {
             const long ms      = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_editBlinkAt).count();
             const bool blinkOn = (ms / 500) % 2 == 0;
             if (blinkOn) {
@@ -595,15 +617,22 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
             const bool  disabled = b.state == 2;
             const bool  hovered  = m_iHoverCell == (int)(VTB_APPCELL + i);
-            const bool  lit      = !disabled && (hovered || b.state == 1);
+            const bool  active   = !disabled && b.state == 1;    // held selection
+            const bool  hoverLit = !disabled && hovered && !active;
             // lit cells grey to the inactive tone on unfocused windows, like
             // the old in-window strip did (win.fgAccent)
             const auto& litCol   = FOCUSED ? accentColor : inactiveColor;
 
+            // an active (state==1) cell holds the full inverted look — accent
+            // fill + bg glyph — persistently, like a click-flash that never
+            // reverts, so a selected tab / sort field / show-hidden toggle reads
+            // as "held down" until a sibling is picked. Hover on a non-active
+            // cell stays the subtler lit outline.
             const bool flashing = cellFlashing(VTB_APPCELL + (int)i);
-            drawCellXY(innerColX(), y, litCol, lit, flashing);
+            const bool inverted = flashing || active;
+            drawCellXY(innerColX(), y, litCol, hoverLit, inverted);
             // disabled cells dim to the inactive grey, like filer's 0.4-opacity look
-            drawGlyphXY(innerColX(), y, b.label, flashing ? bgColor : (disabled ? inactiveColor : (lit ? litCol : textColor)));
+            drawGlyphXY(innerColX(), y, b.label, inverted ? bgColor : (disabled ? inactiveColor : (hoverLit ? litCol : textColor)));
         });
 
         // footer: short stacked text at the bottom of the inner column (filer's
@@ -1009,10 +1038,12 @@ void CVtbDeco::enterEdit() {
     if (!PWINDOW)
         return;
     m_editBuf       = PWINDOW->m_title; // seed with the current address (surfer sets title = URL)
-    m_editCursor    = m_editBuf.size();
-    m_editSelectAll = true;             // click-to-edit selects the whole field, like a browser
+    m_editCursor    = m_editBuf.size(); // whole field selected on open, like a browser:
+    m_editSelAnchor = 0;                //   anchor 0 .. cursor end
+    m_bEditDragging = false;
     m_bEditing      = true;
     m_pEditTex      = nullptr;
+    m_pEditSelTex   = nullptr;
     m_editBlinkAt   = Time::steadyNow();
     hideTooltip();
     damageEntire();
@@ -1026,9 +1057,41 @@ void CVtbDeco::exitEdit(bool submit) {
         VtbIpc::sendAddr(appPid(), m_editBuf);
     m_editBuf.clear();
     m_editCursor    = 0;
-    m_editSelectAll = false;
+    m_editSelAnchor = 0;
+    m_bEditDragging = false;
     m_pEditTex      = nullptr;
+    m_pEditSelTex   = nullptr;
     damageEntire();
+}
+
+// Erase the current selection (if any), collapsing the caret to its start.
+// Returns whether there was a selection to delete.
+bool CVtbDeco::deleteEditSelection() {
+    if (m_editSelAnchor == m_editCursor)
+        return false;
+    const size_t lo = std::min(m_editSelAnchor, m_editCursor);
+    const size_t hi = std::max(m_editSelAnchor, m_editCursor);
+    m_editBuf.erase(lo, hi - lo);
+    m_editCursor    = lo;
+    m_editSelAnchor = lo;
+    m_pEditTex      = nullptr;
+    return true;
+}
+
+// Map a bar-local Y (logical px) to a byte offset on a codepoint boundary — the
+// row under the cursor in the vertically-stacked address text. Used for
+// click-to-place-caret and click-drag selection.
+size_t CVtbDeco::editByteAtLocalY(double localY) {
+    const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
+    const double lineH = (m_iEditLineH > 0) ? m_iEditLineH / scale
+                                            : (double)g_pGlobalState->config.fontSize->value();
+    int       row = (int)std::floor((localY - titleTop()) / std::max(1.0, lineH));
+    const int nCp = countCp(m_editBuf, m_editBuf.size());
+    row           = std::clamp(row, 0, nCp);
+    size_t off = 0;
+    for (int k = 0; k < row; k++)
+        off = nextCp(m_editBuf, off);
+    return off;
 }
 
 // Keyboard grab while the address editor is open: swallow the keys we act on
@@ -1055,6 +1118,21 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
     const uint32_t     xkbcode = e.keycode + 8; // libinput -> xkb
     const xkb_keysym_t sym     = xkb_state_key_get_one_sym(KB->m_xkbState, xkbcode);
     const uint32_t     mods    = KB->getModifiers();
+
+    // editing Ctrl combos we handle ourselves: Ctrl+A selects the whole field.
+    // (Copy/paste would need wl-clipboard plumbing — not wired yet.) Everything
+    // else with Ctrl/Alt/Super falls through to global keybinds below.
+    if ((mods & HL_MODIFIER_CTRL) && !(mods & (HL_MODIFIER_ALT | HL_MODIFIER_META))
+        && (sym == XKB_KEY_a || sym == XKB_KEY_A)) {
+        info.cancelled = true;
+        if (e.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            m_editSelAnchor = 0;
+            m_editCursor    = m_editBuf.size();
+            m_pEditTex      = nullptr;
+            damageEntire();
+        }
+        return;
+    }
 
     // let global keybinds (Super+…, Ctrl/Alt combos) pass straight through
     if (mods & (HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META))
@@ -1095,54 +1173,61 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
         return;
     }
 
-    // whole-field selection drops on the first edit, replacing/collapsing it
-    if (m_editSelectAll) {
-        switch (sym) {
-            case XKB_KEY_Left:
-            case XKB_KEY_Home: m_editCursor = 0; m_editSelectAll = false; damageEntire(); return;
-            case XKB_KEY_Right:
-            case XKB_KEY_End: m_editCursor = m_editBuf.size(); m_editSelectAll = false; damageEntire(); return;
-            case XKB_KEY_BackSpace:
-            case XKB_KEY_Delete: m_editBuf.clear(); m_editCursor = 0; m_editSelectAll = false; m_pEditTex = nullptr; damageEntire(); return;
-            default: break; // printable: replace the whole field
-        }
-        m_editBuf.clear();
-        m_editCursor    = 0;
-        m_editSelectAll = false;
-        m_pEditTex      = nullptr;
-    }
+    // Shift extends the selection; an unshifted move collapses it. Anchor stays
+    // put while Shift is held, so anchor..cursor is the live selection range.
+    const bool shift = mods & HL_MODIFIER_SHIFT;
 
     switch (sym) {
-        case XKB_KEY_Left: m_editCursor = prevCp(m_editBuf, m_editCursor); damageEntire(); return;
-        case XKB_KEY_Right: m_editCursor = nextCp(m_editBuf, m_editCursor); damageEntire(); return;
-        case XKB_KEY_Home: m_editCursor = 0; damageEntire(); return;
-        case XKB_KEY_End: m_editCursor = m_editBuf.size(); damageEntire(); return;
-        case XKB_KEY_BackSpace: {
-            if (m_editCursor > 0) {
+        case XKB_KEY_Left:
+            if (m_editSelAnchor != m_editCursor && !shift)
+                m_editCursor = std::min(m_editSelAnchor, m_editCursor); // collapse to near edge
+            else
+                m_editCursor = prevCp(m_editBuf, m_editCursor);
+            if (!shift) m_editSelAnchor = m_editCursor;
+            m_pEditTex = nullptr; damageEntire(); return;
+        case XKB_KEY_Right:
+            if (m_editSelAnchor != m_editCursor && !shift)
+                m_editCursor = std::max(m_editSelAnchor, m_editCursor);
+            else
+                m_editCursor = nextCp(m_editBuf, m_editCursor);
+            if (!shift) m_editSelAnchor = m_editCursor;
+            m_pEditTex = nullptr; damageEntire(); return;
+        case XKB_KEY_Home:
+            m_editCursor = 0;
+            if (!shift) m_editSelAnchor = m_editCursor;
+            m_pEditTex = nullptr; damageEntire(); return;
+        case XKB_KEY_End:
+            m_editCursor = m_editBuf.size();
+            if (!shift) m_editSelAnchor = m_editCursor;
+            m_pEditTex = nullptr; damageEntire(); return;
+        case XKB_KEY_BackSpace:
+            if (!deleteEditSelection() && m_editCursor > 0) {
                 const size_t p = prevCp(m_editBuf, m_editCursor);
                 m_editBuf.erase(p, m_editCursor - p);
-                m_editCursor = p;
-                m_pEditTex   = nullptr;
-                damageEntire();
+                m_editCursor    = p;
+                m_editSelAnchor = p;
+                m_pEditTex      = nullptr;
             }
+            damageEntire();
             return;
-        }
-        case XKB_KEY_Delete: {
-            if (m_editCursor < m_editBuf.size()) {
+        case XKB_KEY_Delete:
+            if (!deleteEditSelection() && m_editCursor < m_editBuf.size()) {
                 const size_t nx = nextCp(m_editBuf, m_editCursor);
                 m_editBuf.erase(m_editCursor, nx - m_editCursor);
-                m_pEditTex = nullptr;
-                damageEntire();
+                m_editSelAnchor = m_editCursor;
+                m_pEditTex      = nullptr;
             }
+            damageEntire();
             return;
-        }
         default: break;
     }
 
     if (printable) {
+        deleteEditSelection();               // typing replaces any selection
         m_editBuf.insert(m_editCursor, utf8, n);
-        m_editCursor += n;
-        m_pEditTex = nullptr;
+        m_editCursor    += n;
+        m_editSelAnchor  = m_editCursor;
+        m_pEditTex       = nullptr;
         damageEntire();
     }
 }
@@ -1440,6 +1525,20 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     if (!g_pGlobalState)
         return;
 
+    // selecting in the address editor: drag the cursor end to the row under the
+    // pointer (anchor stays at the press point), extending the highlight.
+    if (m_bEditDragging) {
+        const auto   BOX   = assignedBoxGlobal();
+        const auto   LOCAL = g_pInputManager->getMouseCoordsInternal() - BOX.pos();
+        const size_t at    = editByteAtLocalY(LOCAL.y);
+        if (at != m_editCursor) {
+            m_editCursor = at;
+            m_pEditTex   = nullptr;
+            damageEntire();
+        }
+        return;
+    }
+
     // App-button registration changes are handled by the main-thread timer
     // (mainThreadTick), which pre-warms glyph textures before repainting — see
     // the note there. Doing it here too would repaint WITHOUT that pre-warm and
@@ -1594,11 +1693,16 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     m_bCancelledDown = true;
     hideTooltip(); // a press dismisses the hover label
 
-    // address editor already open: clicking the field re-selects the whole
-    // address; a press anywhere else on the bar cancels the edit and proceeds.
+    // address editor already open: clicking in the field places the caret at
+    // the clicked row and starts a drag-selection from there; a press anywhere
+    // else on the bar cancels the edit and proceeds.
     if (m_bEditing) {
         if (titleEditEnabled() && inTitleRegion(COORDS)) {
-            m_editSelectAll = true;
+            const size_t at = editByteAtLocalY(COORDS.y);
+            m_editCursor    = at;
+            m_editSelAnchor = at;
+            m_bEditDragging = true;
+            m_editBlinkAt   = Time::steadyNow();
             m_pEditTex      = nullptr;
             damageEntire();
             return;
@@ -1668,6 +1772,15 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
     // its press, and always reset.
     const bool CANCELLED = m_bCancelledDown;
     m_bCancelledDown     = false;
+
+    // finishing an address-editor drag-selection: the range is already set (a
+    // plain click left anchor == cursor, i.e. just a caret); clear the flag.
+    if (m_bEditDragging) {
+        m_bEditDragging = false;
+        if (CANCELLED)
+            info.cancelled = true;
+        return;
+    }
 
     // app-button release: a click (no drag) activates via CLICK; a drag drops a
     // reorder via REORDER (draggable buttons only).

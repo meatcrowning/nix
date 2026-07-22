@@ -130,8 +130,14 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_bEditing        = false;
     std::string          m_editBuf;                    // UTF-8 edit buffer
     size_t               m_editCursor      = 0;        // byte offset, codepoint boundary
-    bool                 m_editSelectAll   = false;    // whole field selected (initial state)
-    SP<Render::ITexture> m_pEditTex;                   // rebuilt on every buffer/selection change
+    // selection is the range [min,max] of anchor..cursor; empty (no selection)
+    // when anchor == cursor. Opening the editor selects the whole field
+    // (anchor 0, cursor end); click places a caret, click-drag / Shift+move
+    // extends. Both are byte offsets on codepoint boundaries.
+    size_t               m_editSelAnchor   = 0;
+    bool                 m_bEditDragging   = false;    // mouse selecting in the field
+    SP<Render::ITexture> m_pEditTex;                   // full text (textColor); rebuilt on buffer/selection change
+    SP<Render::ITexture> m_pEditSelTex;                // selected substring (bgColor) overlaid on the highlight
     int                  m_iEditLineH      = 0;        // device-px height of one stacked codepoint
     int                  m_iEditLines      = 0;        // codepoint lines currently drawn
     Time::steady_tp      m_editBlinkAt     = Time::steadyNow();
@@ -210,6 +216,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 enterEdit();
     void                 exitEdit(bool submit);
     void                 onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEvent& e);
+    bool                 deleteEditSelection();          // erase the selected range; true if there was one
+    size_t               editByteAtLocalY(double localY); // bar-local Y -> byte offset (codepoint boundary)
 
     pid_t                appPid();
     int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
