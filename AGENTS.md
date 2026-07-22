@@ -50,10 +50,27 @@ C++ — compositor-side window titlebars + session save/restore).
 
 - **Rebuild alias reality:** `rbhome`/`rbsys`/`update` all run
   `sudo nixos-rebuild switch --flake /home/lam/nix/#top` (home-manager is a
-  NixOS module here; there is no standalone `home-manager switch`). A NOPASSWD
+  NixOS module here; there is no standalone `home-manager switch`, and `rbhome`
+  is NOT a separate/dangerous command — on `top` it's the exact same
+  nixos-rebuild as `rbsys`; see `home/prog/zsh.nix`). A NOPASSWD
   rule allows the sudo. A **new** file must be `git add`-ed before the rebuild
   — the tree is dirty and flake eval ignores untracked files, so a brand-new
   `Foo.qml` is silently missing from the build otherwise.
+
+- **Agents: just rebuild — don't ask, don't wait.** After any `~/nix` change,
+  run the rebuild yourself as the final step, same standing autonomy as
+  commit+push. The rebuild is **passwordless** (NOPASSWD rule in
+  `sys/nixos-rebuild.nix`), so an agent CAN run
+  `sudo nixos-rebuild switch --flake /home/lam/nix/#top` non-interactively —
+  no tty, no prompt. (Optional: pre-build with `nixos-rebuild build --flake …`,
+  which needs no sudo at all, to validate + warm the store first.) For any
+  OTHER sudo command (one NOT covered by a NOPASSWD rule), use **`sudo -A`**:
+  `SUDO_ASKPASS` is wired to a ksshaskpass dialog (`home/prog/askpass.nix`), so
+  `sudo -A <cmd>` pops a password prompt to the user instead of failing on the
+  missing tty. Plain `sudo <cmd>` (no `-A`, not NOPASSWD) just fails in an agent
+  shell. Live-source apps (surfer/filer `.py`/`.qml`) still hot-reload with no
+  rebuild; a rebuild is only needed when a change adds a dep or edits `.nix`
+  packaging.
 
 - **Most `quickshell-files/*` are Nix-store symlinks.** A rebuild swaps the
   symlinks but Quickshell watches the resolved store paths, so the swap does
