@@ -161,9 +161,7 @@ Window {
     // already-open pages when the wallpaper palette changes.
     Connections {
         target: WalPalette
-        // recolour open pages' scrollbars, and re-inject the page-style override
-        // (system style pulls the live palette) when the wallpaper changes.
-        function onChanged() { win.reinjectScrollbar(); win.reinjectDark(); }
+        function onChanged() { win.reinjectScrollbar(); }
     }
 
     // ---- dark mode (DarkMode bridge) ----
@@ -180,6 +178,7 @@ Window {
         return win.dmCurUrl.replace(/^[a-z]+:\/\//, "").replace(/\/.*$/, "");
     }
     readonly property bool dmSiteOn: { void win.dmRev; return DarkMode.isSiteEnabled(win.dmCurUrl); }
+    readonly property bool dmFontOn: { void win.dmRev; return DarkMode.isSystemFontSite(win.dmCurUrl); }
     function reinjectDark() {
         for (var i = 0; i < viewRep.count; i++) {
             var v = viewRep.itemAt(i);
@@ -693,16 +692,17 @@ Window {
             // divider
             Rectangle { width: parent.width; height: 1; color: Theme.border }
 
-            // system style: reskin every page in the desktop look — system font,
-            // uniform size, and the wallpaper palette. Global; supersedes dark.
+            // system font: force the desktop pixel font on this site's text
+            // (family only; per-site, combines with dark mode).
             Item {
                 width: parent.width
                 height: 22
-                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system style"; color: Theme.text }
+                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system font"; color: Theme.text }
                 BrowserButton {
                     anchors.right: parent.right
-                    label: DarkMode.systemStyle ? "on" : "off"
-                    onClicked: DarkMode.setSystemStyle(!DarkMode.systemStyle)
+                    enabled: win.dmHost !== ""
+                    label: win.dmFontOn ? "on" : "off"
+                    onClicked: if (win.current) DarkMode.toggleSystemFontSite(win.current.url.toString())
                 }
             }
         }

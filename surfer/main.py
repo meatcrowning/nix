@@ -828,42 +828,36 @@ class DarkMode(QObject):
         pixel-identical to the original at ANY brightness/contrast — dark mode
         never tints or dims them. Global on/off + a per-site exception list
         (hostnames forced OFF — the "whitelist").
-      * system style — reskin every page in the desktop's own look: force the
-        system pixel font, a uniform system text size, and the live wallpaper
-        palette (background / text / links / form controls). A global toggle
-        (all sites) that SUPERSEDES the dark filter — the palette is already
-        dark, so the invert would only fight it.
+      * system font — force the desktop pixel font on a page's text, so it reads
+        in the same typeface as the rest of the desktop. Per-site (an opt-in set
+        of hostnames); family only, so site font-sizes and layout survive. It
+        combines with dark mode rather than replacing it.
 
     All state persists to the "dark" key of prefs.json. QML calls js(url) on each
     page load and again on every `changed` (live re-inject into open tabs); the
     same call both applies AND strips the combined style, so toggles are clean.
-    System style also re-injects when the wallpaper palette changes.
 
     v1 limit (shared with Dark Reader's filter mode): a full-page CSS filter can
     interfere with `position:fixed` containment on some sites, and injection is
-    at load-finished, so a brief light flash is possible before it lands. System
-    style is a deliberately heavy hammer — one font, one size, one palette — so
-    icon fonts render as glyphs and size-sensitive layouts flatten; that's the
-    point (it makes the web read like the rest of the system)."""
+    at load-finished, so a brief light flash is possible before it lands."""
 
     changed = Signal()
 
-    # The desktop's pixel font + size — match qml/theme/Theme.qml (font/fontSize).
+    # The desktop's pixel font — matches qml/theme/Theme.qml's `font`.
     _SYSTEM_FONT = "More Perfect DOS VGA"
-    _SYSTEM_SIZE = 15
 
-    def __init__(self, prefs, palette, parent=None):
+    def __init__(self, prefs, parent=None):
         super().__init__(parent)
         self._prefs = prefs
-        self._pal = palette
         d = prefs.loadDark()
         self._enabled = bool(d.get("enabled", False))
         self._brightness = self._clamp(d.get("brightness", 100))
         self._contrast = self._clamp(d.get("contrast", 100))
-        self._system_style = bool(d.get("systemStyle", False))
         # hostnames where dark mode is turned OFF (Dark Reader's per-site
         # exceptions) — applied everywhere else when the global toggle is on.
         self._exceptions = set(str(h) for h in d.get("exceptions", []) if h)
+        # hostnames where the system-font override is turned ON (opt-in per site).
+        self._font_sites = set(str(h) for h in d.get("fontSites", []) if h)
 
     @staticmethod
     def _clamp(v):
@@ -884,8 +878,8 @@ class DarkMode(QObject):
             "enabled": self._enabled,
             "brightness": self._brightness,
             "contrast": self._contrast,
-            "systemStyle": self._system_style,
             "exceptions": sorted(self._exceptions),
+            "fontSites": sorted(self._font_sites),
         })
 
     def _get_enabled(self):
@@ -893,10 +887,6 @@ class DarkMode(QObject):
 
     enabled = Property(bool, _get_enabled, notify=changed)
 
-    def _get_system_style(self):
-        return self._system_style
-
-    systemStyle = Property(bool, _get_system_style, notify=changed)
 
     def _get_brightness(self):
         return self._brightness
@@ -935,12 +925,21 @@ class DarkMode(QObject):
         self._persist()
         self.changed.emit()
 
-    @Slot(bool)
-    def setSystemStyle(self, on):
-        on = bool(on)
-        if on == self._system_style:
+    @Slot(str, result=bool)
+    def isSystemFontSite(self, url):
+        """Whether the system-font override is on for this URL's host."""
+        h = self._host(url)
+        return bool(h) and h in self._font_sites
+
+    @Slot(str)
+    def toggleSystemFontSite(self, url):
+        h = self._host(url)
+        if not h:
             return
-        self._system_style = on
+        if h in self._font_sites:
+            self._font_sites.discard(h)
+        else:
+            self._font_sites.add(h)
         self._persist()
         self.changed.emit()
 
@@ -986,44 +985,19 @@ class DarkMode(QObject):
             "hue-rotate(180deg) invert(100%)!important}"
         )
 
-    def _style_css(self):
-        # Reskin the whole page in the desktop look: one font, one size, the live
-        # wallpaper palette. Everything !important to beat the site's own rules.
+    def _font_css(self):
+        # Force the desktop pixel font on all page text (family only — sizes stay
+        # the site's, so layout/heading hierarchy survives).
         f = json.dumps(self._SYSTEM_FONT)
-        sz = str(self._SYSTEM_SIZE)
-        bg = self._pal.hex("bg")
-        bg_alt = self._pal.hex("bgAlt")
-        text = self._pal.hex("text")
-        accent = self._pal.hex("accent")
-        border = self._pal.hex("border")
-        return (
-            # font family + uniform size + system text colour on everything, and
-            # flatten decoration that carries the site's own theme
-            "*,*::before,*::after{"
-            "font-family:" + f + ",monospace!important;"
-            "font-size:" + sz + "px!important;line-height:1.45!important;"
-            "color:" + text + "!important;"
-            "border-color:" + border + "!important;"
-            "text-shadow:none!important;box-shadow:none!important}"
-            # strip per-element backgrounds so one flat system bg shows through
-            "*:not(img):not(video):not(canvas):not(svg){"
-            "background-color:transparent!important;background-image:none!important}"
-            "html,body{background:" + bg + "!important}"
-            # links stand out in the accent; form controls get a system surface
-            "a,a *{color:" + accent + "!important}"
-            "input,textarea,select,button,option{"
-            "background-color:" + bg_alt + "!important;color:" + text + "!important;"
-            "border:1px solid " + border + "!important}"
-        )
+        return "*,*::before,*::after{font-family:" + f + ",monospace!important}"
 
     def _css(self, url):
-        # System style supersedes the dark filter: the forced palette is already
-        # a dark theme, and the invert would only fight it.
-        if self._system_style:
-            return self._style_css()
+        parts = []
         if self._enabled and self.isSiteEnabled(url):
-            return self._dark_css()
-        return ""
+            parts.append(self._dark_css())
+        if self.isSystemFontSite(url):
+            parts.append(self._font_css())
+        return "".join(parts)
 
     @Slot(str, result=str)
     def js(self, url):
@@ -1579,7 +1553,7 @@ def main():
     downloads = Downloads(app)
     prefs = Prefs()
     zoom = Zoom(prefs, app)
-    darkmode = DarkMode(prefs, palette, app)
+    darkmode = DarkMode(prefs, app)
     adblocker = AdBlocker(app)
     cosmetic = Cosmetic(adblocker, app)
     download_dir = str(Path.home() / "Downloads")
