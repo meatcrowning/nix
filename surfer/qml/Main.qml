@@ -189,6 +189,57 @@ Window {
         function onChanged() { win.dmRev += 1; win.reinjectDark(); }
     }
 
+    // A page asked the browser to open a URL in a new foreground tab (currently
+    // only the image-click handler — see imageClickJs / CmdHandler in main.py).
+    Connections {
+        target: PageCmd
+        function onOpenTab(url) { if (url && url !== "") win.newTab(url); }
+    }
+
+    // Build the right-click menu item list from the snapshot the webview handed
+    // us (see onContextMenuRequested) and pop the reusable ContextMenu. Image /
+    // clipboard bits go through the view's own web actions; navigation + search
+    // reuse our tab helpers. request.position is view-relative, and the view
+    // fills the window, so it's already in window coordinates for the overlay.
+    function showContextMenu(view, c) {
+        var items = [];
+        function sep() { if (items.length) items.push({ separator: true }); }
+
+        if (c.link !== "") {
+            items.push({ label: "Open link in new tab",        trigger: function(){ win.newTab(c.link); } });
+            items.push({ label: "Open link in background tab",  trigger: function(){ win.newTabBg(c.link); } });
+            items.push({ label: "Copy link address",           trigger: function(){ Clip.copy(c.link); } });
+        }
+        if (c.isImage && c.media !== "") {
+            sep();
+            items.push({ label: "Open image in new tab",  trigger: function(){ win.newTab(c.media); } });
+            items.push({ label: "Copy image address",     trigger: function(){ Clip.copy(c.media); } });
+            items.push({ label: "Copy image",             trigger: function(){ view.triggerWebAction(WebEngineView.CopyImageToClipboard); } });
+            items.push({ label: "Save image…",            trigger: function(){ view.triggerWebAction(WebEngineView.DownloadImageToDisk); } });
+        }
+        if (c.selection !== "") {
+            sep();
+            items.push({ label: "Copy", trigger: function(){ Clip.copy(c.selection); } });
+            var q = c.selection.length > 24 ? c.selection.substring(0, 24) + "…" : c.selection;
+            items.push({ label: "Search for \"" + q + "\"",
+                         trigger: function(){ win.newTab("https://duckduckgo.com/?q=" + encodeURIComponent(c.selection)); } });
+        }
+        if (c.editable) {
+            sep();
+            items.push({ label: "Cut",   enabled: c.selection !== "", trigger: function(){ view.triggerWebAction(WebEngineView.Cut); } });
+            items.push({ label: "Copy",  enabled: c.selection !== "", trigger: function(){ view.triggerWebAction(WebEngineView.Copy); } });
+            items.push({ label: "Paste",                               trigger: function(){ view.triggerWebAction(WebEngineView.Paste); } });
+        }
+        sep();
+        items.push({ label: "Back",    enabled: view.canGoBack,    trigger: function(){ view.goBack(); } });
+        items.push({ label: "Forward", enabled: view.canGoForward, trigger: function(){ view.goForward(); } });
+        items.push({ label: "Reload",                              trigger: function(){ view.reload(); } });
+        items.push({ separator: true });
+        items.push({ label: "Copy page address", trigger: function(){ Clip.copy("" + view.url); } });
+
+        ctxMenu.open(c.pos.x, c.pos.y, items);
+    }
+
     // Address text -> url: explicit schemes pass through, host-ish strings get
     // https://, anything else becomes a DuckDuckGo search.
     function normalize(t) {
@@ -391,9 +442,11 @@ Window {
                         if (Math.abs(webview.zoomFactor - Zoom.level) > 0.001)
                             webview.zoomFactor = Zoom.level;
                         webview.runJavaScript(win.scrollbarJs());
-                        // dark mode: apply (or strip) the whole-page invert
-                        // filter for this url. No-op unless enabled for the site.
+                        // dark mode + system-font overrides: apply (or strip)
+                        // the page-style <style> for this url. No-op when off.
                         webview.runJavaScript(DarkMode.js("" + webview.url));
+                        // click a plain content image -> open it in a new tab
+                        webview.runJavaScript(imageClickJs);
                         // cosmetic ad-blocking (element hiding) — the half the
                         // network interceptor can't do. Specific (per-site)
                         // rules first; then gather the page's classes/ids and
@@ -413,6 +466,23 @@ Window {
                 // a site asked to use notifications / camera / mic / location:
                 // queue it for the allow/block bar (win.askPermission)
                 onPermissionRequested: (permission) => win.askPermission(permission)
+
+                // right-click: build a context menu from what was clicked (link,
+                // image, selection, editable field) plus the usual page actions,
+                // and show our own themed menu (win.showContextMenu) instead of
+                // Chromium's. The request's fields must be read now — they're
+                // only valid during this call — so we snapshot into locals.
+                onContextMenuRequested: (request) => {
+                    request.accepted = true;   // suppress the native menu
+                    win.showContextMenu(webview, {
+                        pos:       request.position,
+                        link:      "" + request.linkUrl,
+                        media:     "" + request.mediaUrl,
+                        isImage:   request.mediaType === ContextMenuRequest.MediaTypeImage,
+                        selection: ("" + request.selectedText).trim(),
+                        editable:  request.isContentEditable
+                    });
+                }
 
                 // link opening: middle-click (InNewBackgroundTab) opens a new
                 // background tab; everything else (target=_blank, ctrl-click,
@@ -617,6 +687,28 @@ Window {
                     onMoved: (v) => DarkMode.setContrast(v)
                 }
             }
+
+            // divider
+            Rectangle { width: parent.width; height: 1; color: Theme.border }
+
+            // system font: force the desktop pixel font on all page text
+            // (independent of dark mode; applies on every site).
+            Item {
+                width: parent.width
+                height: 22
+                PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system font"; color: Theme.text }
+                BrowserButton {
+                    anchors.right: parent.right
+                    label: DarkMode.systemFont ? "on" : "off"
+                    onClicked: DarkMode.setSystemFont(!DarkMode.systemFont)
+                }
+            }
         }
+    }
+
+    // reusable right-click menu — overlays the whole window, above everything.
+    ContextMenu {
+        id: ctxMenu
+        anchors.fill: parent
     }
 }

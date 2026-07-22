@@ -35,7 +35,8 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
 from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
                                      QWebEngineUrlSchemeHandler, QWebEnginePermission,
-                                     QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo)
+                                     QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo,
+                                     QWebEngineUrlRequestJob)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 HERE = Path(__file__).resolve().parent
@@ -477,6 +478,57 @@ class GmXhrHandler(QWebEngineUrlSchemeHandler):
             pass  # the job (page) went away before we could reply
 
 
+# Injected once per page (main world, load-finished): a delegated capture-phase
+# click listener that opens a plain content image in a new tab. "Plain" =
+# directly-clicked <img>, NOT inside a link/button (those are thumbnails or
+# controls, left to the site) and big enough to be real content, not an icon.
+# It signals the app by fetching the surfercmd:// scheme (CmdHandler); the page
+# never sees a response.
+IMAGE_CLICK_JS = r"""
+(function(){
+  if (window.__surfer_imgclick) return;
+  window.__surfer_imgclick = true;
+  document.addEventListener('click', function(e){
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var img = e.target;
+    if (!img || img.tagName !== 'IMG') return;
+    if (img.closest('a,button,[role="button"],[role="link"]')) return;  // thumbnail/control
+    var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    if (w < 150 || h < 150) return;                                     // icon/spacer
+    var src = img.currentSrc || img.src;
+    if (!src || src.indexOf('http') !== 0 && src.indexOf('data:') !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    try { fetch('surfercmd://open/?u=' + encodeURIComponent(src)).catch(function(){}); } catch(_){}
+  }, true);
+})();
+"""
+
+
+class CmdHandler(QWebEngineUrlSchemeHandler):
+    """Serves ``surfercmd://<verb>/?...`` — a one-way page->app command channel
+    (the page fetches it; there's no meaningful response). Currently just
+    ``open`` (open a URL in a new foreground tab), used by the image-click
+    handler. Emits `openTab` on the GUI thread via a queued signal; QML wires it
+    to win.newTab. Reusable for any future 'page asked the browser to do X'."""
+
+    openTab = Signal(str)
+
+    def requestStarted(self, job):
+        try:
+            u = job.requestUrl()
+            if u.host() == "open":
+                from PySide6.QtCore import QUrlQuery
+                target = QUrlQuery(u).queryItemValue("u", QUrl.ComponentFormattingOption.FullyDecoded)
+                if target:
+                    self.openTab.emit(target)
+        except Exception:
+            pass
+        try:
+            job.fail(QWebEngineUrlRequestJob.Error.RequestAborted)
+        except Exception:
+            pass
+
+
 class UserScripts(QObject):
     """GreaseMonkey-style userscripts: every ``*.js`` in
     $XDG_CONFIG_HOME/surfer/userscripts/ is loaded, its ``// ==UserScript==``
@@ -763,22 +815,31 @@ class Zoom(QObject):
 
 
 class DarkMode(QObject):
-    """Dark-reader-style page dimming. Injects a whole-page CSS filter
-    (invert + hue-rotate, the same approach as Dark Reader's *filter* mode) with
-    adjustable brightness/contrast, and re-inverts media (img/video/canvas/
-    iframe/embed) so photos and embeds still look right.
+    """Page-appearance overrides, injected as one <style> per page:
 
-    State — a global on/off, brightness, contrast, and a per-site exception list
-    (hostnames where it's forced OFF, i.e. the "whitelist") — persists to the
-    "dark" key of prefs.json. QML calls js(url) on each page load and again on
-    every `changed` (live re-inject into open tabs); the same call both applies
-    AND un-applies, so toggling off cleanly strips the style.
+      * dark mode — a whole-page CSS invert+hue-rotate filter (Dark Reader's
+        *filter* mode) with adjustable brightness/contrast. Media (img/video/
+        canvas/iframe/embed) gets the EXACT inverse filter, so images come out
+        pixel-identical to the original at ANY brightness/contrast — dark mode
+        never tints or dims them. Global on/off + a per-site exception list
+        (hostnames forced OFF — the "whitelist").
+      * system font — force the system pixel font on all page text, so the web
+        reads in the same typeface as the rest of the desktop. A simple global
+        toggle (all sites).
 
-    v1 limits (shared with Dark Reader's filter mode): a full-page CSS filter can
+    All state persists to the "dark" key of prefs.json. QML calls js(url) on each
+    page load and again on every `changed` (live re-inject into open tabs); the
+    same call both applies AND strips the combined style, so toggles are clean.
+
+    v1 limit (shared with Dark Reader's filter mode): a full-page CSS filter can
     interfere with `position:fixed` containment on some sites, and injection is
     at load-finished, so a brief light flash is possible before it lands."""
 
     changed = Signal()
+
+    # The desktop's pixel font — matches qml/theme/Theme.qml's `font`. Forced on
+    # page text by the system-font override.
+    _SYSTEM_FONT = "More Perfect DOS VGA"
 
     def __init__(self, prefs, parent=None):
         super().__init__(parent)
@@ -787,6 +848,7 @@ class DarkMode(QObject):
         self._enabled = bool(d.get("enabled", False))
         self._brightness = self._clamp(d.get("brightness", 100))
         self._contrast = self._clamp(d.get("contrast", 100))
+        self._system_font = bool(d.get("systemFont", False))
         # hostnames where dark mode is turned OFF (Dark Reader's per-site
         # exceptions) — applied everywhere else when the global toggle is on.
         self._exceptions = set(str(h) for h in d.get("exceptions", []) if h)
@@ -810,6 +872,7 @@ class DarkMode(QObject):
             "enabled": self._enabled,
             "brightness": self._brightness,
             "contrast": self._contrast,
+            "systemFont": self._system_font,
             "exceptions": sorted(self._exceptions),
         })
 
@@ -817,6 +880,11 @@ class DarkMode(QObject):
         return self._enabled
 
     enabled = Property(bool, _get_enabled, notify=changed)
+
+    def _get_system_font(self):
+        return self._system_font
+
+    systemFont = Property(bool, _get_system_font, notify=changed)
 
     def _get_brightness(self):
         return self._brightness
@@ -855,6 +923,15 @@ class DarkMode(QObject):
         self._persist()
         self.changed.emit()
 
+    @Slot(bool)
+    def setSystemFont(self, on):
+        on = bool(on)
+        if on == self._system_font:
+            return
+        self._system_font = on
+        self._persist()
+        self.changed.emit()
+
     @Slot(str, result=bool)
     def isSiteEnabled(self, url):
         """Whether dark mode applies to this URL's host (host not in the
@@ -874,27 +951,50 @@ class DarkMode(QObject):
         self._persist()
         self.changed.emit()
 
-    def _css(self):
-        # NB: keep this %-free — the literal "100%" in the filter would collide
-        # with str %-formatting, so interpolate by concatenation.
+    def _dark_css(self):
+        # NB: keep this %-free — the literal "100%" would collide with str
+        # %-formatting, so interpolate by concatenation.
+        #
+        # The page filter is  invert · hue · brightness(b) · contrast(c).  Media
+        # gets that filter's EXACT inverse so image = original: each function is
+        # self-/reciprocally-invertible (invert & hue-180 are self-inverse;
+        # brightness(b)->brightness(1/b); contrast(c)->contrast(1/c)) and the
+        # inverse list is the reversed sequence of inverses. Result: images are
+        # untouched at any brightness/contrast, not just at 100/100.
         b = str(self._brightness)
         c = str(self._contrast)
+        inv_b = str(round(10000 / self._brightness))   # 100/b as a percentage
+        inv_c = str(round(10000 / self._contrast))
         return (
             "html{filter:invert(100%) hue-rotate(180deg) "
             "brightness(" + b + "%) contrast(" + c + "%)!important;"
             "background:#181818!important}"
             "img,picture,video,canvas,iframe,embed,object{"
-            "filter:invert(100%) hue-rotate(180deg)!important}"
+            "filter:contrast(" + inv_c + "%) brightness(" + inv_b + "%) "
+            "hue-rotate(180deg) invert(100%)!important}"
         )
+
+    def _font_css(self):
+        # Force the desktop pixel font on all text (family only — sizes stay the
+        # site's, so layout/heading hierarchy survives).
+        f = json.dumps(self._SYSTEM_FONT)
+        return ("*,*::before,*::after{font-family:" + f + ",monospace!important}")
+
+    def _css(self, url):
+        parts = []
+        if self._enabled and self.isSiteEnabled(url):
+            parts.append(self._dark_css())
+        if self._system_font:
+            parts.append(self._font_css())
+        return "".join(parts)
 
     @Slot(str, result=str)
     def js(self, url):
-        """JS that installs OR removes the dark-mode <style> for this url given
+        """JS that installs OR removes the page-style <style> for this url given
         the current state — one call handles both apply and un-apply."""
-        active = self._enabled and self.isSiteEnabled(url)
-        css = self._css() if active else ""
+        css = self._css(url)
         return (
-            "(function(){var id='__surfer_darkmode__';"
+            "(function(){var id='__surfer_pagestyle__';"
             "var s=document.getElementById(id);"
             "var css=%s;"
             "if(!css){if(s)s.remove();return;}"
@@ -1404,6 +1504,17 @@ def main():
                     | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
     QWebEngineUrlScheme.registerScheme(scheme)
 
+    # Register surfercmd:// — the one-way page->app command channel (CmdHandler),
+    # used by the image-click handler. Same flags as gmxhr so a page fetch()
+    # reaches it regardless of the page's CSP.
+    cmdscheme = QWebEngineUrlScheme(b"surfercmd")
+    cmdscheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+    cmdscheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme
+                       | QWebEngineUrlScheme.Flag.CorsEnabled
+                       | QWebEngineUrlScheme.Flag.FetchApiAllowed
+                       | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
+    QWebEngineUrlScheme.registerScheme(cmdscheme)
+
     # Chromium must be initialized before the QGuiApplication exists.
     QtWebEngineQuick.initialize()
 
@@ -1450,6 +1561,9 @@ def main():
     ctx.setContextProperty("Zoom", zoom)
     ctx.setContextProperty("DarkMode", darkmode)
     ctx.setContextProperty("Cosmetic", cosmetic)
+    pagecmd = CmdHandler(app)
+    ctx.setContextProperty("PageCmd", pagecmd)
+    ctx.setContextProperty("imageClickJs", IMAGE_CLICK_JS)
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
 
@@ -1483,6 +1597,7 @@ def main():
             if prof is not None:
                 try:
                     prof.installUrlSchemeHandler(b"gmxhr", gmxhr)
+                    prof.installUrlSchemeHandler(b"surfercmd", pagecmd)
                 except RuntimeError:
                     pass
                 # route granted web notifications out to notify-send. The QML
