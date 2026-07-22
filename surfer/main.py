@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
-                            QBuffer, QIODevice)
+                            QBuffer, QIODevice, QEvent, Qt)
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
@@ -704,6 +704,60 @@ class Prefs(QObject):
             pass
 
 
+class Zoom(QObject):
+    """Shared page zoom (one level across all tabs), the source of truth QML
+    binds every view's zoomFactor to. Ctrl+wheel is caught by ZoomFilter (an
+    app-level event filter), NOT a QML WheelHandler layered over the page: a QML
+    pointer handler over a WebEngineView doesn't reliably receive the wheel on
+    every Qt/QtWebEngine build (Chromium's own ctrl+zoom eats it first, so the
+    change never reaches us and never persists — the symptom seen on air's
+    Fedora PySide6). An application event filter is upstream of both the QML
+    item and Chromium, so it works the same everywhere."""
+
+    levelChanged = Signal()
+
+    def __init__(self, prefs, parent=None):
+        super().__init__(parent)
+        self._prefs = prefs
+        self._level = prefs.loadZoom()
+
+    def _get(self):
+        return self._level
+
+    def _set(self, v):
+        v = max(0.3, min(5.0, float(v)))
+        if abs(v - self._level) < 1e-6:
+            return
+        self._level = v
+        self.levelChanged.emit()
+        self._prefs.saveZoom(v)
+
+    level = Property(float, _get, _set, notify=levelChanged)
+
+    @Slot(int)
+    def bump(self, direction):
+        self._set(self._level * (1.1 if direction > 0 else (1.0 / 1.1)))
+
+
+class ZoomFilter(QObject):
+    """Global Ctrl+wheel -> zoom. Installed on the QApplication so it sees the
+    wheel before the WebEngineView (or Chromium) does; plain wheel falls straight
+    through to the page."""
+
+    def __init__(self, zoom, parent=None):
+        super().__init__(parent)
+        self._zoom = zoom
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Wheel and (
+                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            dy = event.angleDelta().y()
+            if dy != 0:
+                self._zoom.bump(1 if dy > 0 else -1)
+                return True   # consume so Chromium doesn't ALSO zoom
+        return super().eventFilter(obj, event)
+
+
 class AdBlocker(QWebEngineUrlRequestInterceptor):
     """Built-in ad/tracker blocking: a network request interceptor that drops
     requests to known ad- and tracker-serving hosts (domain-suffix match, so a
@@ -805,6 +859,9 @@ def main():
     notifier = Notifier(app)
     downloads = Downloads(app)
     prefs = Prefs()
+    zoom = Zoom(prefs, app)
+    zoom_filter = ZoomFilter(zoom, app)
+    app.installEventFilter(zoom_filter)
     adblocker = AdBlocker(app)
     download_dir = str(Path.home() / "Downloads")
     try:
@@ -819,6 +876,7 @@ def main():
     ctx.setContextProperty("Perm", perm)
     ctx.setContextProperty("Downloads", downloads)
     ctx.setContextProperty("Prefs", prefs)
+    ctx.setContextProperty("Zoom", zoom)
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
 

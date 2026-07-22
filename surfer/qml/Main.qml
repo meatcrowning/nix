@@ -27,20 +27,27 @@ Window {
     readonly property string homeUrl: "https://start.duckduckgo.com/"
 
     // Page zoom, shared by every tab and persisted (Ctrl+scroll to change).
-    property real zoomLevel: Prefs.loadZoom()
+    // Source of truth + persistence live in the Zoom bridge (main.py); Ctrl+wheel
+    // is caught by an app-level event filter there, not a QML handler over the
+    // page (which QtWebEngine/Chromium doesn't reliably let us intercept).
+    readonly property real zoomLevel: Zoom.level
 
     // ---- webpage tooltips (title=, etc.) rendered in-window: they slide out to
-    // the LEFT of the cursor, follow it, and slide back in on hide — like the
-    // hyprvtb titlebar tooltips. Position tracks the live cursor (pageHover, on
-    // the overlay below); the request just carries the text + a show/hide toggle.
+    // the LEFT of the cursor and slide back in on hide — like the hyprvtb
+    // titlebar tooltips. Position comes from the point Chromium reports on the
+    // request (request.x/y, view-relative == window-relative since the view
+    // fills the window); a HoverHandler over the WebEngineView surface doesn't
+    // get fed live hover positions, so the request point is the reliable source.
     property string tipText: ""
     property bool tipShown: false
-    property real tipX: pageHover.point.position.x
-    property real tipY: pageHover.point.position.y
+    property real tipX: 0
+    property real tipY: 0
     function showTooltip(request) {
         request.accepted = true;   // suppress the native tooltip; draw our own
         if (request.type === TooltipRequest.Show && request.text.length > 0) {
             tipText = request.text;
+            tipX = request.x;
+            tipY = request.y;
             tipShown = true;
         } else {
             tipShown = false;      // keep tipText so it stays legible while retracting
@@ -365,28 +372,11 @@ Window {
                 onWindowCloseRequested: win.closeTab(index)
             }
         }
-
-        // Ctrl+scroll zoom. Topmost so the wheel reaches this handler; it only
-        // accepts Ctrl+wheel (adjusting the shared, persisted zoom), so plain
-        // scroll and all mouse/hover events fall through to the page below.
-        Item {
-            anchors.fill: parent
-            WheelHandler {
-                acceptedModifiers: Qt.ControlModifier
-                onWheel: (ev) => {
-                    var f = ev.angleDelta.y > 0 ? 1.1 : (1.0 / 1.1);
-                    win.zoomLevel = Math.max(0.3, Math.min(5.0, win.zoomLevel * f));
-                    Prefs.saveZoom(win.zoomLevel);
-                }
-            }
-            // passive cursor tracking so the webpage tooltip can follow the mouse
-            HoverHandler { id: pageHover }
-        }
     }
 
-    // webpage tooltip: slides OUT to the left of the cursor (a clipped reveal
-    // growing leftward, OutCubic ~220ms — the same feel as the hyprvtb titlebar
-    // tooltips), follows the live cursor, and slides back in on hide.
+    // webpage tooltip: slides OUT to the left of the cursor point the page
+    // reported (a clipped reveal growing leftward, OutCubic ~220ms — the same
+    // feel as the hyprvtb titlebar tooltips), and slides back in on hide.
     Item {
         id: tip
         z: 2000
@@ -395,11 +385,14 @@ Window {
         readonly property real gap: 14
         readonly property real fullW: Math.min(tipLabel.implicitWidth + 14, win.width - 40)
         readonly property real fullH: tipLabel.implicitHeight + 8
+        // fixed right edge just left of the cursor, clamped so the fully-revealed
+        // chip (which extends fullW to the left) stays on-screen at either margin
+        readonly property real rightEdge: Math.max(fullW + 4, Math.min(win.tipX - gap, win.width - 4))
         visible: slide > 0.001
         clip: true
         width: fullW * slide            // grows from 0 → fullW as it slides out
         height: fullH
-        x: (win.tipX - gap) - width     // right edge just left of the cursor; extends left
+        x: rightEdge - width            // reveal grows leftward from the fixed right edge
         y: Math.max(4, Math.min(win.tipY - fullH / 2, win.height - fullH - 4))
         Rectangle {
             width: tip.fullW
