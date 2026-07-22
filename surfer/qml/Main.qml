@@ -26,11 +26,11 @@ Window {
 
     readonly property string homeUrl: "https://start.duckduckgo.com/"
 
-    // Page zoom, shared by every tab and persisted (Ctrl+scroll to change).
-    // Source of truth + persistence live in the Zoom bridge (main.py); Ctrl+wheel
-    // is caught by an app-level event filter there, not a QML handler over the
-    // page (which QtWebEngine/Chromium doesn't reliably let us intercept).
-    readonly property real zoomLevel: Zoom.level
+    // Page zoom, shared by every tab and persisted — the level + persistence
+    // live in the Zoom bridge (main.py). Ctrl+wheel reaches it two ways (see the
+    // WheelHandler below + each view's onZoomFactorChanged): a QML handler for
+    // Qt builds where the view ignores Ctrl+wheel, and the view's own zoomFactor
+    // for builds where Chromium zooms natively and eats the wheel first.
 
     // ---- webpage tooltips (title=, etc.) rendered in-window: they slide out to
     // the LEFT of the cursor and slide back in on hide — like the hyprvtb
@@ -329,7 +329,19 @@ Window {
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
-                zoomFactor: win.zoomLevel   // shared, persisted (Ctrl+scroll)
+                // Shared, persisted zoom (Ctrl+scroll). NOT a binding: a binding
+                // would fight Chromium's native Ctrl+wheel zoom (which mutates
+                // zoomFactor directly on air's Qt). Instead seed it from the saved
+                // level, persist any change (native zoom OR the WheelHandler), and
+                // re-apply when another tab changes the shared level.
+                onZoomFactorChanged: Zoom.setLevel(zoomFactor)
+                Connections {
+                    target: Zoom
+                    function onLevelChanged() {
+                        if (Math.abs(webview.zoomFactor - Zoom.level) > 0.001)
+                            webview.zoomFactor = Zoom.level;
+                    }
+                }
                 // render the page's tooltips ourselves (win.showTooltip), so
                 // title= tooltips actually appear and match the DE
                 onTooltipRequested: (request) => win.showTooltip(request)
@@ -337,7 +349,7 @@ Window {
                 // ignores a Python QWebEngineProfile) — GM shim, document-start,
                 // isolated worlds; see UserScripts in main.py
                 userScripts.collection: UserScripts.scriptObjects
-                Component.onCompleted: url = seed
+                Component.onCompleted: { zoomFactor = Zoom.level; url = seed; }
 
                 // userscripts are injected by the profile (document-start, GM
                 // shim — see UserScripts in main.py); this just themes the
@@ -370,6 +382,19 @@ Window {
                 }
                 // page-initiated close (window.close()) closes its tab
                 onWindowCloseRequested: win.closeTab(index)
+            }
+        }
+
+        // Ctrl+scroll zoom for Qt builds where the WebEngineView does NOT zoom
+        // on Ctrl+wheel itself (e.g. top). Topmost, Ctrl-only, so plain scroll
+        // and all mouse/hover fall through to the page. On builds where Chromium
+        // zooms natively (air) this handler simply never sees the wheel — the
+        // view's onZoomFactorChanged persists that path instead. bump() clamps.
+        Item {
+            anchors.fill: parent
+            WheelHandler {
+                acceptedModifiers: Qt.ControlModifier
+                onWheel: (ev) => Zoom.bump(ev.angleDelta.y > 0 ? 1 : -1)
             }
         }
     }
