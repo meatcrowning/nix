@@ -372,39 +372,60 @@ Window {
                 // Drag-out: hand this file to other apps as a text/uri-list, so
                 // it can be dropped onto a browser upload field, another file
                 // manager, etc. — the standard desktop "drag a file out" gesture.
+                // Binding Drag.active to the MouseArea's drag (which drags an
+                // INVISIBLE proxy, so the row itself stays put) is what actually
+                // starts the real cross-app QDrag under dragType Automatic — a
+                // bare Drag.startDrag() didn't initiate one on Wayland.
+                Drag.active: rowMa.drag.active
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.LinkAction
                 Drag.mimeData: ({ "text/uri-list": "file://" + encodeURI(row.abs) + "\r\n" })
+                Drag.hotSpot.x: 6
+                Drag.hotSpot.y: 6
+
+                // the MouseArea drags THIS (invisible, zero-size) proxy instead
+                // of the row, so drag.active flips on without the row moving.
+                Item { id: dragProxy }
+
+                // the little chip that follows the cursor while dragging: the
+                // filename on a small badge, grabbed into Drag.imageSource on
+                // press (layer + off-screen so grabToImage always renders it).
+                // LATER (file previews): swap this chip's content for a small
+                // thumbnail of the preview.
+                Rectangle {
+                    id: dragBadge
+                    x: -10000
+                    width: Math.min(badgeText.implicitWidth + 16, 320)
+                    height: badgeText.implicitHeight + 10
+                    color: Theme.bgAlt
+                    border.color: Theme.accent
+                    border.width: 1
+                    layer.enabled: true
+                    PixelText {
+                        id: badgeText
+                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
+                        elide: Text.ElideMiddle
+                        text: row.modelData.name
+                        color: Theme.text
+                    }
+                }
 
                 // row-wide select / open / drag-out. Declared first so the expand
                 // toggle (declared last → higher z) wins clicks in its own area.
                 MouseArea {
                     id: rowMa
                     anchors.fill: parent
-                    // preventStealing: hold the drag ourselves so the ListView's
-                    // Flickable can't grab a press-drag and turn it into a scroll
-                    // — without this the file drag never starts, the list just
-                    // scrolls. Trade-off: a press-drag on a row now ALWAYS drags
-                    // the file out; scroll the list with the wheel/trackpad.
+                    // preventStealing so the ListView's Flickable can't grab the
+                    // press-drag and scroll instead of starting the file drag.
+                    // (Scroll the list with the wheel/trackpad.)
                     preventStealing: true
-                    property real px: 0
-                    property real py: 0
-                    property bool dragging: false
+                    drag.target: dragProxy
                     onPressed: (m) => {
                         view.selected = row.abs; view.selectedIsDir = row.modelData.isDir;
-                        rowMa.px = m.x; rowMa.py = m.y; rowMa.dragging = false;
+                        // stage the drag image; ready by the time the drag passes
+                        // the threshold and Drag.active turns on
+                        dragBadge.grabToImage(function(res) { row.Drag.imageSource = res.url; });
                     }
-                    onPositionChanged: (m) => {
-                        if (rowMa.dragging || !rowMa.pressed)
-                            return;
-                        // once the pointer travels past a small threshold (any
-                        // direction), drag this file OUT as a text/uri-list
-                        if (Math.abs(m.x - rowMa.px) + Math.abs(m.y - rowMa.py) > 10) {
-                            rowMa.dragging = true;
-                            row.Drag.startDrag(Qt.CopyAction);
-                        }
-                    }
-                    onReleased: rowMa.dragging = false
                     onDoubleClicked: {
                         if (row.modelData.isDir) view.go(row.abs);
                         else FileOps.execDetached(["xdg-open", row.abs]);
