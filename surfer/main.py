@@ -736,28 +736,48 @@ class Zoom(QObject):
     def bump(self, direction):
         self._set(self._level * (1.1 if direction > 0 else (1.0 / 1.1)))
 
+    @Slot()
+    def reset(self):
+        self._set(1.0)
+
 
 class ZoomFilter(QObject):
-    """Ctrl+wheel -> shared zoom, installed on the top-level WINDOW (not the
-    QApplication — an app-wide event filter segfaults this PySide6/Py3.14 build
-    wrapping transient QObjects during focus events; a window-scoped filter only
-    ever sees `obj == the window`, which is stable). The QQuickWindow receives
-    the wheel from the platform BEFORE it is delivered down to the WebEngineView
-    item, so consuming it here (return True) both drives our zoom AND suppresses
-    Chromium's own Ctrl+wheel zoom — leaving zoomFactor to change only when we
-    set it. Plain wheel falls through untouched."""
+    """Ctrl+wheel and Ctrl +/-/0 -> shared zoom, installed on the top-level
+    WINDOW (not the QApplication — an app-wide event filter segfaults this
+    PySide6/Py3.14 build wrapping transient QObjects during focus events; a
+    window-scoped filter only ever sees `obj == the window`, which is stable).
+    The QQuickWindow receives input from the platform BEFORE it is delivered
+    down to the WebEngineView item, so consuming it here (return True) both
+    drives our zoom AND suppresses Chromium's own Ctrl+wheel / Ctrl+/- zoom —
+    leaving zoomFactor to change only when we set it. Plain input falls through
+    untouched."""
+
+    _ZOOM_IN_KEYS = (Qt.Key.Key_Plus, Qt.Key.Key_Equal)  # Ctrl++ and Ctrl+=
 
     def __init__(self, zoom, parent=None):
         super().__init__(parent)
         self._zoom = zoom
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Wheel and (
-                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            dy = event.angleDelta().y()
-            if dy != 0:
-                self._zoom.bump(1 if dy > 0 else -1)
-                return True
+        t = event.type()
+        if t == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                dy = event.angleDelta().y()
+                if dy != 0:
+                    self._zoom.bump(1 if dy > 0 else -1)
+                    return True
+        elif t == QEvent.Type.KeyPress:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                k = event.key()
+                if k in self._ZOOM_IN_KEYS:
+                    self._zoom.bump(1)
+                    return True
+                if k == Qt.Key.Key_Minus:
+                    self._zoom.bump(-1)
+                    return True
+                if k == Qt.Key.Key_0:
+                    self._zoom.reset()
+                    return True
         return False
 
 
@@ -824,6 +844,16 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
 
 
 def main():
+    # air (Fedora/Asahi) has no working VA-API or Vulkan (the GPU logs show
+    # vaInitialize failing + Vulkan disabled), and Chromium's GPU compositing of
+    # video frames corrupts them there — every video "glitches out". Composite in
+    # software on air ONLY (detected by the system-python launcher path; top's
+    # GPU is fine and keeps full acceleration); page raster stays GPU-accelerated.
+    # Must be set before QtWebEngine initializes.
+    if os.path.realpath(sys.executable).startswith("/usr/"):
+        _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " --disable-gpu-compositing").strip()
+
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
     # userscripts' GM_xmlhttpRequest goes through it — see GmXhrHandler). Must be
     # done before QtWebEngine initializes. FetchApiAllowed lets fetch() target

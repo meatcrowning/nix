@@ -329,17 +329,12 @@ Window {
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
-                // Shared, persisted zoom (Ctrl+scroll). zoomFactor is NOT a
-                // binding and is NEVER persisted from here: the level is owned by
-                // the Zoom bridge (changed only via ZoomFilter -> Zoom.bump), and
-                // each view just mirrors it. QtWebEngine resets zoomFactor to 1.0
-                // on navigation, so we snap it back whenever it drifts — an
-                // involuntary reset, not a real zoom, so it must NOT be saved.
-                onZoomFactorChanged: {
-                    if (Math.abs(zoomFactor - Zoom.level) > 0.001)
-                        zoomFactor = Zoom.level;
-                }
-                // another tab changed the shared level -> mirror it here too
+                // Shared, persisted zoom (Ctrl+wheel or Ctrl +/-/0). zoomFactor
+                // is NOT a binding and is NEVER persisted from here: the level is
+                // owned by the Zoom bridge (changed only via ZoomFilter), and each
+                // view just mirrors it — seeded on create, re-applied after a
+                // page's navigation reset (onLoadingChanged), and updated live
+                // when any tab changes it (Connections below).
                 Connections {
                     target: Zoom
                     function onLevelChanged() {
