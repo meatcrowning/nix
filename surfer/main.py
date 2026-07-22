@@ -815,9 +815,17 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
     $XDG_CONFIG_HOME/surfer/subscriptions.txt."""
 
     _SUBSCRIPTIONS = [
+        # Adblock-syntax network lists (same ones uBlock/ABP enable by default).
         "https://easylist.to/easylist/easylist.txt",
         "https://easylist.to/easylist/easyprivacy.txt",
+        # StevenBlack's unified hosts (folds in Peter Lowe's + a dozen others).
         "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+        # oisd big — a hosts/DNS-blocklist curated for exactly this domain-suffix
+        # model, low false-positive, adds ~260k domains the others miss.
+        "https://big.oisd.nl/",
+        # URLhaus — active malware/phishing hosts (a security dimension the
+        # ad/tracker lists don't cover).
+        "https://urlhaus.abuse.ch/downloads/hostfile/",
     ]
     _REFRESH_DAYS = 7
     _HOSTRE = re.compile(r"^[a-z0-9._-]+$")
