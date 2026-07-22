@@ -360,6 +360,19 @@ Window {
                         if (Math.abs(webview.zoomFactor - Zoom.level) > 0.001)
                             webview.zoomFactor = Zoom.level;
                         webview.runJavaScript(win.scrollbarJs());
+                        // cosmetic ad-blocking (element hiding) — the half the
+                        // network interceptor can't do. Specific (per-site)
+                        // rules first; then gather the page's classes/ids and
+                        // inject the matching generic rules. No-op when the
+                        // adblock-rust engine isn't available. See Cosmetic in main.py.
+                        var u = "" + webview.url;
+                        var sj = Cosmetic.specificJs(u);
+                        if (sj) webview.runJavaScript(sj);
+                        webview.runJavaScript(Cosmetic.collectorJs(), (ci) => {
+                            if (!ci) return;
+                            var gj = Cosmetic.genericJs(u, ci.c || [], ci.i || []);
+                            if (gj) webview.runJavaScript(gj);
+                        });
                     }
                 }
 

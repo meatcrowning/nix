@@ -12,9 +12,15 @@
 #     Qt env so QtWebEngine finds its resources.
 #
 # Both run the LIVE source at ~/nix/surfer/main.py — day-to-day edits need no
-# rebuild on either machine.
+# rebuild on either machine. (Adding a Python dep like `adblock` below is the
+# exception: it needs one `rbhome` to land in pyEnv. On air the ad blocker
+# looks for `adblock` in the system python — `pip install --user adblock` to
+# get the full engine there; without it, it falls back to domain-only blocking.)
+#
+# `adblock` is Brave's adblock-rust engine (the uBlock-Origin-class filter
+# engine) — surfer uses it for full network + cosmetic filtering.
 let
-  pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
+  pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.adblock ]);
 
   surfer =
     if host == "air" then

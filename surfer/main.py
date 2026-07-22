@@ -35,7 +35,7 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
 from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
                                      QWebEngineUrlSchemeHandler, QWebEnginePermission,
-                                     QWebEngineUrlRequestInterceptor)
+                                     QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 HERE = Path(__file__).resolve().parent
@@ -787,31 +787,31 @@ class ZoomFilter(QObject):
 
 
 class AdBlocker(QWebEngineUrlRequestInterceptor):
-    """Built-in ad/tracker blocking: a network request interceptor that drops
-    requests to known ad- and tracker-serving hosts. Installed on the shared
-    profile so it applies to every tab.
+    """Ad/tracker blocking via Brave's adblock-rust engine (the `adblock` pip
+    package) — the same filter engine class uBlock Origin is, so it applies the
+    FULL Adblock rule syntax, not just host blocking: host-anchored rules,
+    path/URL patterns (`/pagead/`, `||site.com/adframe.js`), resource-type
+    options (`$script,image,third-party`), and exceptions. Cosmetic
+    element-hiding (`##`) from the same engine is applied separately by the
+    Cosmetic bridge (injected CSS) — together that's ~uBO-parity blocking.
 
-    Rather than a tiny hand-kept list, this subscribes to the same maintained
-    filter lists that uBlock Origin / Adblock Plus ship with — EasyList,
-    EasyPrivacy and StevenBlack's unified hosts file — cached under
+    Subscribes to the same lists uBO/ABP ship — EasyList, EasyPrivacy,
+    StevenBlack's unified hosts, oisd big, URLhaus — cached under
     $XDG_CACHE_HOME/surfer/filters/ and refreshed in the background every
-    _REFRESH_DAYS. We parse the HOST-ANCHORED subset of Adblock syntax
-    (`||host^`, `@@||host^` exceptions, `$third-party`, and plain hosts-file
-    lines); that's the bulk of what actually stops network requests. Path/URL
-    substring rules (`/ads/*`) and cosmetic element-hiding rules (`example.com##.ad`)
-    are NOT applied — a URL interceptor can't inject CSS, and those need a real
-    filter engine. The small _BUILTIN set is an offline seed so blocking still
-    works on first run before any list has been fetched.
+    _REFRESH_DAYS. The raw list text is fed straight to the engine, so every
+    rule type is honoured.
 
-    Matching is domain-suffix (a whole tree like *.doubleclick.net is covered)
-    but done by walking the request host's parent domains against a hash set —
-    O(number of labels) per request, not O(list size) — so it stays fast at the
-    ~150k domains these lists carry.
+    Fallback: if the `adblock` module isn't importable (e.g. air's Fedora
+    system-python before `pip install --user adblock`), it degrades to a
+    pure-Python domain-suffix blocker built from the host-anchored subset of the
+    same lists — still ~450k domains, just no path/cosmetic rules. The _BUILTIN
+    set seeds both paths so blocking works on first run before any list has
+    been fetched.
 
     Overridable via $XDG_CONFIG_HOME/surfer/blocklist.txt — one host per line,
     `# comment`, and a leading `!` ALLOW-lists a host the lists would otherwise
-    block (escape hatch if a block breaks a site). Subscription URLs can be
-    replaced by listing them, one per line, in
+    block (escape hatch if a block breaks a site; becomes an `@@||host^` rule
+    under the engine). Subscription URLs can be replaced, one per line, in
     $XDG_CONFIG_HOME/surfer/subscriptions.txt."""
 
     _SUBSCRIPTIONS = [
@@ -856,7 +856,9 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
         self._cfg = cfg
         self._cache = cache
         self._subs = self._resolve_subs(cfg)
-        # (blocked, third_party_only, allow) — swapped atomically by _compile().
+        self._engine = None                 # adblock-rust Engine when available
+        # (blocked, third_party_only, allow) — the pure-python fallback tables,
+        # swapped atomically by _compile() when there's no engine.
         self._tables = (frozenset(self._BUILTIN), frozenset(), frozenset())
         self._compile()                     # load whatever cache exists, instantly
         threading.Thread(target=self._refresh, daemon=True).start()
@@ -917,21 +919,31 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
                 continue
             self._add_host(host, allow if exception else (tp if third else blocked))
 
-    def _parse_user(self, blocked, tp, allow):
-        # blocklist.txt is the plain user override: `host`, `# comment`, `!allow`.
+    def _user_rules(self):
+        # blocklist.txt user overrides as (host, is_exception) pairs.
         try:
-            for line in (self._cfg / "blocklist.txt").read_text(encoding="utf-8").splitlines():
-                s = line.strip().lower()
-                if not s or s.startswith("#"):
-                    continue
-                if s.startswith("!"):
-                    self._add_host(s[1:].strip(), allow)
-                else:
-                    self._add_host(s, blocked)
+            lines = (self._cfg / "blocklist.txt").read_text(encoding="utf-8").splitlines()
         except OSError:
-            pass
+            return
+        for line in lines:
+            s = line.strip().lower()
+            if not s or s.startswith("#"):
+                continue
+            if s.startswith("!"):
+                h = s[1:].strip()
+                if h:
+                    yield (h, True)
+            else:
+                yield (s, False)
+
+    def _parse_user(self, blocked, tp, allow):
+        for host, exc in self._user_rules():
+            self._add_host(host, allow if exc else blocked)
 
     def _compile(self):
+        # Prefer the real engine; fall back to the pure-python host-set.
+        if self._build_engine():
+            return
         blocked = set(self._BUILTIN)
         tp, allow = set(), set()
         for url in self._subs:
@@ -944,8 +956,39 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
         tp -= blocked                               # unconditional block wins over 3p-only
         self._tables = (frozenset(blocked), frozenset(tp), frozenset(allow))
         sys.stderr.write(
-            f"surfer adblock: {len(blocked)} blocked + {len(tp)} third-party-only, "
-            f"{len(allow)} allowed ({len(self._subs)} lists)\n")
+            f"surfer adblock: host-set fallback — {len(blocked)} blocked + "
+            f"{len(tp)} third-party-only, {len(allow)} allowed ({len(self._subs)} lists)\n")
+
+    def _build_engine(self):
+        """Build an adblock-rust Engine from the raw cached lists. Returns True
+        on success (self._engine set), False if `adblock` isn't importable or
+        the build fails (caller then uses the pure-python fallback)."""
+        try:
+            from adblock import Engine, FilterSet
+        except Exception:
+            return False
+        try:
+            fs = FilterSet(debug=False)
+            # seed so first run (empty cache) still blocks the obvious ad hosts
+            fs.add_filter_list("\n".join("||%s^" % d for d in self._BUILTIN))
+            n = 0
+            for url in self._subs:
+                try:
+                    fs.add_filter_list(
+                        self._cache_path(url).read_text(encoding="utf-8", errors="ignore"))
+                    n += 1
+                except OSError:
+                    continue
+            for host, exc in self._user_rules():    # blocklist.txt overrides
+                fs.add_filter_list(("@@||%s^" if exc else "||%s^") % host)
+            self._engine = Engine(filter_set=fs)
+            sys.stderr.write(
+                f"surfer adblock: adblock-rust engine from {n} lists "
+                f"(network + cosmetic, ~uBO parity)\n")
+            return True
+        except Exception as e:
+            sys.stderr.write(f"surfer adblock: engine build failed ({e}); host-set fallback\n")
+            return False
 
     # ---- background refresh ------------------------------------------------
     def _fetch(self, url, timeout=25):
@@ -1002,6 +1045,15 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
 
     def interceptRequest(self, info):
         try:
+            eng = self._engine
+            if eng is not None:
+                url = info.requestUrl().toString()
+                fp = info.firstPartyUrl().toString() or url
+                res = eng.check_network_urls(url, fp, _res_type(info))
+                if res.matched and not res.exception:
+                    info.block(True)
+                return
+            # pure-python fallback (no engine)
             host = info.requestUrl().host().lower()
             if not host:
                 return
@@ -1011,6 +1063,119 @@ class AdBlocker(QWebEngineUrlRequestInterceptor):
                 info.block(True)
         except Exception:
             pass
+
+
+# Qt request-type enum -> adblock-rust request_type string, built lazily (the
+# enum is cheap but needs QtWebEngineCore imported, which it is by here).
+_RES_TYPE = None
+
+
+def _res_type(info):
+    global _RES_TYPE
+    if _RES_TYPE is None:
+        E = QWebEngineUrlRequestInfo.ResourceType
+        names = {
+            "ResourceTypeMainFrame": "document", "ResourceTypeSubFrame": "sub_frame",
+            "ResourceTypeStylesheet": "stylesheet", "ResourceTypeScript": "script",
+            "ResourceTypeImage": "image", "ResourceTypeFontResource": "font",
+            "ResourceTypeObject": "object", "ResourceTypeMedia": "media",
+            "ResourceTypeXhr": "xmlhttprequest", "ResourceTypePing": "ping",
+            "ResourceTypeCspReport": "csp_report", "ResourceTypePluginResource": "object",
+            "ResourceTypeWebSocket": "websocket", "ResourceTypeFavicon": "image",
+            "ResourceTypeWorker": "other", "ResourceTypeSharedWorker": "other",
+            "ResourceTypeServiceWorker": "other", "ResourceTypePrefetch": "other",
+            "ResourceTypeSubResource": "other", "ResourceTypeUnknown": "other",
+        }
+        _RES_TYPE = {getattr(E, k).value: v for k, v in names.items() if hasattr(E, k)}
+    return _RES_TYPE.get(info.resourceType().value, "other")
+
+
+# JS that gathers the class tokens and ids present in the page, so the generic
+# cosmetic filters can be narrowed to only the selectors that can actually match
+# (uBlock's approach — see Cosmetic.genericJs).
+COSMETIC_COLLECTOR_JS = (
+    "(function(){var c={},i={},a=document.querySelectorAll('[class],[id]');"
+    "for(var k=0;k<a.length;k++){var e=a[k];if(e.id)i[e.id]=1;"
+    "var cl=e.classList;if(cl)for(var j=0;j<cl.length;j++)c[cl[j]]=1;}"
+    "return {c:Object.keys(c),i:Object.keys(i)};})();")
+
+
+class Cosmetic(QObject):
+    """Element-hiding (cosmetic) filtering — the half a URL interceptor can't do.
+    Pulls per-site hide selectors + scriptlets from the same adblock-rust engine
+    AdBlocker uses and hands QML the JS to inject them as a <style> on each page
+    load. Specific (per-hostname) rules go in immediately; generic (`##.ad`)
+    rules are resolved against the classes/ids actually on the page
+    (adblock-rust's hidden_class_id_selectors — uBO's design) so only matchable
+    selectors ship. All slots return "" when the engine isn't available, so the
+    QML side is a harmless no-op under the pure-python fallback.
+
+    Known v1 limits vs uBO: injection is at load-finished (a brief flash is
+    possible), and it doesn't re-run on SPA route changes / infinite-scroll DOM
+    mutations. Enough to clear the ad blocks host-only blocking leaves behind."""
+
+    _CHUNK = 100
+
+    def __init__(self, blocker, parent=None):
+        super().__init__(parent)
+        self._b = blocker
+
+    def _css(self, hide, style):
+        # chunk the display:none group so one invalid selector only kills its
+        # chunk (CSS drops the entire comma-separated rule on a single error).
+        sels = [s for s in hide if s]
+        rules = [",".join(sels[i:i + self._CHUNK]) + "{display:none!important}"
+                 for i in range(0, len(sels), self._CHUNK)]
+        if style:
+            try:
+                for sel, decls in style.items():
+                    rules.append("%s{%s}" % (sel, ";".join(decls)))
+            except Exception:
+                pass
+        return "\n".join(rules)
+
+    def _inject(self, css, script):
+        if not css and not script:
+            return ""
+        js = ("(function(){try{var css=%s;if(css){"
+              "var s=document.getElementById('surfer-cosmetic')||document.createElement('style');"
+              "s.id='surfer-cosmetic';s.textContent=(s.textContent||'')+css;"
+              "(document.head||document.documentElement).appendChild(s);}"
+              % json.dumps(css))
+        if script:
+            js += "try{%s}catch(e){}" % script
+        return js + "}catch(e){}})();"
+
+    @Slot(str, result=str)
+    def specificJs(self, url):
+        eng = self._b._engine
+        if eng is None or not url:
+            return ""
+        try:
+            r = eng.url_cosmetic_resources(url)
+        except Exception:
+            return ""
+        return self._inject(self._css(r.hide_selectors, getattr(r, "style_selectors", None) or {}),
+                            getattr(r, "injected_script", "") or "")
+
+    @Slot(result=str)
+    def collectorJs(self):
+        return COSMETIC_COLLECTOR_JS
+
+    @Slot(str, "QVariantList", "QVariantList", result=str)
+    def genericJs(self, url, classes, ids):
+        eng = self._b._engine
+        if eng is None or not url:
+            return ""
+        try:
+            r = eng.url_cosmetic_resources(url)
+            if r.generichide:                       # site opted out of generic hiding
+                return ""
+            sels = eng.hidden_class_id_selectors(
+                [str(c) for c in classes], [str(i) for i in ids], r.exceptions)
+        except Exception:
+            return ""
+        return self._inject(self._css(sels, {}), "")
 
 
 def main():
@@ -1064,6 +1229,7 @@ def main():
     prefs = Prefs()
     zoom = Zoom(prefs, app)
     adblocker = AdBlocker(app)
+    cosmetic = Cosmetic(adblocker, app)
     download_dir = str(Path.home() / "Downloads")
     try:
         os.makedirs(download_dir, exist_ok=True)
@@ -1078,6 +1244,7 @@ def main():
     ctx.setContextProperty("Downloads", downloads)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Zoom", zoom)
+    ctx.setContextProperty("Cosmetic", cosmetic)
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
 
