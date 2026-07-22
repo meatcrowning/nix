@@ -225,6 +225,7 @@ Window {
     // localStorage-backed, so it must persist). Downloads land in ~/Downloads.
     WebEngineProfile {
         id: sharedProfile
+        objectName: "sharedProfile"   // Python installs the gmxhr scheme handler on this
         storageName: "surfer"
         offTheRecord: false
         onDownloadRequested: (download) => download.accept()

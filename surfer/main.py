@@ -14,17 +14,21 @@ Host support mirrors filer (home/prog/surfer.nix): on air this runs the
 SYSTEM python3 + Fedora's python3-pyside6 (nixpkgs Mesa has no Apple Silicon
 GBM driver), on top the nixpkgs build.
 """
+import base64
 import json
 import os
 import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property
+from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
+                            QBuffer, QIODevice)
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
-from PySide6.QtWebEngineCore import QWebEngineScript
+from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
+                                     QWebEngineUrlSchemeHandler)
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -188,20 +192,25 @@ function GM_addStyle(css){ var s=document.createElement("style"); s.textContent=
 function GM_openInTab(url, opts){ try{ return window.open(url, "_blank"); }catch(e){ return null; } }
 function GM_setClipboard(text){ try{ navigator.clipboard.writeText(text); }catch(e){} }
 function GM_xmlhttpRequest(o){
-  o = o||{}; var ctrl = new AbortController();
-  var init = { method:(o.method||"GET"), headers:(o.headers||{}), signal:ctrl.signal, credentials:(o.anonymous?"omit":"include"), mode:"cors" };
-  if(o.data!=null) init.body = o.data;
-  fetch(o.url, init).then(function(r){
+  // Routed through the gmxhr:// scheme -> Python does the real request outside
+  // the page's origin (no CORS block). SCOPED: only this reaches Python; normal
+  // page fetches stay CORS-guarded. The reply is a JSON envelope (body base64).
+  o = o||{};
+  var spec = { url:o.url, method:(o.method||"GET"), headers:(o.headers||{}), data:(o.data!=null?String(o.data):null) };
+  var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(spec)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  var ctrl = new AbortController();
+  fetch('gmxhr://gm/'+b64, {signal:ctrl.signal}).then(function(r){ return r.text(); }).then(function(txt){
+    var env; try{ env=JSON.parse(txt); }catch(e){ if(o.onerror) o.onerror({error:'gmxhr bad envelope', status:0, readyState:4}); return; }
+    if(env.__error){ if(o.onerror) o.onerror({error:env.__error, status:0, readyState:4}); return; }
+    var bytes = Uint8Array.from(atob(env.body||''), function(c){ return c.charCodeAt(0); });
+    var resp = { readyState:4, status:env.status, statusText:env.statusText||'', finalUrl:env.finalUrl||o.url, responseHeaders:env.headers||'' };
     var rt = o.responseType;
-    var body = (rt==="arraybuffer")? r.arrayBuffer() : (rt==="blob")? r.blob() : r.text();
-    return Promise.resolve(body).then(function(b){
-      var hdr=""; try{ r.headers.forEach(function(v,k){ hdr += k+": "+v+"\r\n"; }); }catch(e){}
-      var resp = { readyState:4, status:r.status, statusText:r.statusText, finalUrl:r.url, responseHeaders:hdr };
-      if(rt==="arraybuffer"||rt==="blob"){ resp.response=b; resp.responseText=""; }
-      else if(rt==="json"){ try{ resp.response=JSON.parse(b); }catch(e){ resp.response=null; } resp.responseText=b; }
-      else { resp.response=b; resp.responseText=b; }
-      if(o.onload) o.onload(resp);
-    });
+    if(rt==="arraybuffer"){ resp.response=bytes.buffer; resp.responseText=""; }
+    else if(rt==="blob"){ resp.response=new Blob([bytes]); resp.responseText=""; }
+    else { var text=new TextDecoder('utf-8').decode(bytes);
+      if(rt==="json"){ try{ resp.response=JSON.parse(text); }catch(e){ resp.response=null; } resp.responseText=text; }
+      else { resp.response=text; resp.responseText=text; } }
+    if(o.onload) o.onload(resp);
   }).catch(function(e){ if(o.onerror) o.onerror({error:String(e), status:0, readyState:4}); });
   return { abort:function(){ try{ctrl.abort();}catch(e){} } };
 }
@@ -229,6 +238,103 @@ try {
   __W.GM_xmlhttpRequest=GM_xmlhttpRequest; __W.GM_info=GM_info; if(!__W.GM) __W.GM=GM;
 } catch(e){}
 """
+
+
+def _b64url_decode(s):
+    s += "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s.encode("ascii"))
+
+
+class GmXhrHandler(QWebEngineUrlSchemeHandler):
+    """Serves ``gmxhr://gm/<b64url spec>`` — the SCOPED CORS bypass for
+    userscripts' GM_xmlhttpRequest. The page's fetch to this custom scheme
+    (FetchApiAllowed + CorsEnabled) lands here; we do the real HTTP request with
+    QNetworkAccessManager — outside any page origin, so the same-origin policy
+    doesn't apply — and return a JSON envelope (body base64-encoded). Ordinary
+    page fetches never touch this, so web security stays on everywhere else.
+
+    Limitation: requests go through a separate network stack from the browser,
+    so the browser's cookies aren't attached (fine for 4chan X's public GETs)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._nam = QNetworkAccessManager(self)
+
+    def requestStarted(self, job):
+        try:
+            spec = json.loads(_b64url_decode(job.requestUrl().path().lstrip("/")).decode("utf-8"))
+        except Exception:
+            self._send(job, {"__error": "bad gmxhr request"})
+            return
+        method = (spec.get("method") or "GET").upper()
+        req = QNetworkRequest(QUrl(spec.get("url") or ""))
+        req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
+                         QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+        for k, v in (spec.get("headers") or {}).items():
+            try:
+                req.setRawHeader(str(k).encode(), str(v).encode())
+            except Exception:
+                pass
+        data = spec.get("data")
+        body = data.encode("utf-8") if isinstance(data, str) else b""
+        if method == "GET":
+            reply = self._nam.get(req)
+        elif method == "POST":
+            reply = self._nam.post(req, body)
+        elif method == "HEAD":
+            reply = self._nam.head(req)
+        else:
+            reply = self._nam.sendCustomRequest(req, method.encode(), body)
+
+        state = {"done": False}
+
+        def finish():
+            if state["done"]:
+                return
+            state["done"] = True
+            self._reply(job, reply)
+            reply.deleteLater()
+
+        def gone():
+            if state["done"]:
+                return
+            state["done"] = True
+            reply.abort()
+            reply.deleteLater()
+
+        reply.finished.connect(finish)
+        job.destroyed.connect(gone)
+
+    def _reply(self, job, reply):
+        try:
+            status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            reason = reply.attribute(QNetworkRequest.Attribute.HttpReasonPhraseAttribute)
+            raw = bytes(reply.readAll().data())
+            headers = ""
+            try:
+                for h in reply.rawHeaderList():
+                    headers += "%s: %s\r\n" % (bytes(h.data()).decode("latin1"),
+                                               bytes(reply.rawHeader(h).data()).decode("latin1"))
+            except Exception:
+                pass
+            if status is None:
+                env = {"__error": reply.errorString() or "network error"}
+            else:
+                env = {"status": int(status), "statusText": reason or "",
+                       "finalUrl": reply.url().toString(), "headers": headers,
+                       "body": base64.b64encode(raw).decode("ascii")}
+        except Exception as e:
+            env = {"__error": str(e)}
+        self._send(job, env)
+
+    def _send(self, job, env):
+        try:
+            buf = QBuffer(job)
+            buf.setData(json.dumps(env).encode("utf-8"))
+            buf.open(QIODevice.OpenModeFlag.ReadOnly)
+            job.reply(b"application/json", buf)
+        except RuntimeError:
+            pass  # the job (page) went away before we could reply
 
 
 class UserScripts(QObject):
@@ -430,14 +536,17 @@ class Session(QObject):
 
 
 def main():
-    # CORS bypass for userscripts' GM_xmlhttpRequest (a fetch shim): disable the
-    # same-origin policy so cross-origin requests (4chan X archives, media title
-    # lookups, etc.) aren't blocked. NB this lowers security browser-wide — it's
-    # a deliberate trade-off for a personal userscript-running browser. Must be
-    # set before QtWebEngine initializes.
-    _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-    if "disable-web-security" not in _flags:
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " --disable-web-security").strip()
+    # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
+    # userscripts' GM_xmlhttpRequest goes through it — see GmXhrHandler). Must be
+    # done before QtWebEngine initializes. FetchApiAllowed lets fetch() target
+    # it; CorsEnabled lets the page read the cross-origin response.
+    scheme = QWebEngineUrlScheme(b"gmxhr")
+    scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+    scheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme
+                    | QWebEngineUrlScheme.Flag.CorsEnabled
+                    | QWebEngineUrlScheme.Flag.FetchApiAllowed
+                    | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
+    QWebEngineUrlScheme.registerScheme(scheme)
 
     # Chromium must be initialized before the QGuiApplication exists.
     QtWebEngineQuick.initialize()
@@ -479,6 +588,25 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
+
+    # Install the gmxhr scheme handler on the QML profile (found by objectName)
+    # once the tree is fully built and stable — deferred onto the event loop to
+    # avoid a during-load reference being reported deleted. Handlers are
+    # per-profile, and the QML WebEngineProfile is the one the views use.
+    gmxhr = GmXhrHandler(app)
+
+    def _install_gmxhr():
+        for ro in engine.rootObjects():
+            prof = ro.findChild(QObject, "sharedProfile")
+            if prof is not None:
+                try:
+                    prof.installUrlSchemeHandler(b"gmxhr", gmxhr)
+                except RuntimeError:
+                    pass
+                return
+
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(0, _install_gmxhr)
 
     sys.exit(app.exec())
 
