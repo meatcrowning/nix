@@ -2392,7 +2392,20 @@ void CVtbDeco::hideRolledWindow(PHLWINDOW PWINDOW) {
     for (auto& w : g_pCompositor->m_windows) {
         if (w == PWINDOW || !w->m_isMapped || w->isHidden() || w->m_workspace != PWINDOW->m_workspace)
             continue;
-        next = w;
+        // Skip minimized windows. A minimized window is still mapped and NOT
+        // hidden — just slid off-screen — so it passes the filter above, but
+        // focusing it here would trip its restore-on-focus (onFocusGained) and
+        // pop it back on every roll-up. minimizeWindow's handoff skips them for
+        // the same reason.
+        bool minimized = false;
+        for (auto& b : g_pGlobalState->bars) {
+            if (b && b->getOwner() == w && b->m_bMinimized) {
+                minimized = true;
+                break;
+            }
+        }
+        if (!minimized)
+            next = w;
     }
     if (next)
         Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_CLICK);
