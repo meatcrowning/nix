@@ -39,7 +39,17 @@
     };
     kernelPackages = pkgs.linuxPackages_latest;
     plymouth.enable = false;
+    # Root SSD runs full; wipe /tmp on boot so build temp dirs don't accumulate.
+    # (cleanOnBoot rather than useTmpfs: local LLMs + heavy CUDA builds shouldn't
+    # compete with a RAM-backed /tmp.)
+    tmp.cleanOnBoot = true;
   };
+
+  # Disk / SSD hygiene for the perpetually-full root:
+  services.fstrim.enable = true;                            # periodic TRIM
+  services.journald.extraConfig = "SystemMaxUse=500M";      # cap journal growth
+  zramSwap.enable = true;                                   # RAM-compressed swap
+                                                            # ahead of the on-disk swapfile
 
   time.timeZone = "Etc/UTC";
   i18n.defaultLocale = "en_US.UTF-8";
