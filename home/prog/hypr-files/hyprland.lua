@@ -183,10 +183,14 @@ hl.config({
         no_warps = true,
         warp_on_change_workspace = 0,
         warp_on_toggle_special = 0,
-        -- NVIDIA's hardware cursor plane leaves a static ghost cursor behind
-        -- on this GPU (RTX 5070) — force the software cursor unconditionally
-        -- instead of relying on Hyprland's auto-detection.
-        no_hardware_cursors = true,
+        -- Per-host (see hypr-host.nix -> host.lua): the software cursor is
+        -- forced only where the hardware cursor plane misbehaves (top's NVIDIA
+        -- RTX 5070 leaves a static ghost). On air (Apple/Asahi) the hardware
+        -- cursor is used, because its plane updates immediately on
+        -- `hyprctl setcursor` — so the wal accent re-tint shows at once instead
+        -- of only after a hover (the software cursor doesn't re-rasterise the
+        -- on-screen shape on a live theme change).
+        no_hardware_cursors = host.no_hardware_cursors,
     },
     general = {
         gaps_in  = 5,

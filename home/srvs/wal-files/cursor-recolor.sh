@@ -84,18 +84,18 @@ pin_env() {
     sed -i -E 's/(hl\.env\("XCURSOR_THEME", ")GoogleDot-[^"]*(")/\1'"$NAME"'\2/' "$LUA"
     sed -i -E 's/(hl\.env\("HYPRCURSOR_THEME", ")GoogleDot-[^"]*(")/\1'"$NAME"'\2/' "$LUA"
 }
-# setcursor swaps the theme, but Hyprland keeps compositing the cursor buffer it
-# already has until the pointer's shape next changes — i.e. until you hover onto
-# a new surface — so the fresh tint doesn't show until you move the mouse over
-# something. Issue the real set, then bounce the size by 1px and back: a size
-# change forces hyprcursor to re-rasterise and re-upload the buffer NOW, which
-# repaints the on-screen cursor immediately without waiting for a hover. The
-# final call restores the correct size, so the 1px blip lasts one IPC round-trip.
-apply() {
-    hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true
-    hyprctl setcursor "$NAME" "$((SIZE + 1))" >/dev/null 2>&1 || true
-    hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true
-}
+# Point the compositor at the new theme. NOTE: setcursor updates the theme used
+# for the NEXT cursor-shape request, but it does NOT re-rasterise the cursor
+# buffer already on screen — Hyprland keeps compositing the cached shape until a
+# client re-requests its cursor (i.e. until you hover something that changes the
+# shape). So the fresh tint doesn't appear until the next hover. This was
+# verified empirically (screenshot diffing the software cursor): NONE of
+# setcursor / a size bounce / cursor warp / force_renderer_reload /
+# no_hardware_cursors toggle / cursor zoom bounce repaint the current buffer —
+# only a genuine client shape re-request does. There is no known IPC on this
+# Hyprland build (0.55.4, lua config) that forces it, so we don't fake one; the
+# recolour is fast now and the next hover picks it up.
+apply() { hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true; }
 
 # Drop stale per-accent themes (keep the current one and the GoogleDot-Black
 # base). Match only the 6-hex accent suffix so "GoogleDot-Black" is never hit.
