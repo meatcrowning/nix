@@ -2486,11 +2486,30 @@ void CVtbDeco::beginRollReveal() {
     PWINDOW->setHidden(false);
     g_pCompositor->changeWindowZOrder(PWINDOW, true);
     Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+    warpBorderToFocused(PWINDOW);
     VtbIpc::sendWake(appPid());
     // paint the live window (still under the snapshot) as one full frame
     CBox full = PWINDOW->getFullWindowBoundingBox();
     full.expand(VTB_SHADOW_SIZE + 4);
     g_pHyprRenderer->damageBox(full);
+}
+
+// Snap a just-un-hidden window's border straight to its focused colour instead
+// of letting it EASE there. Hyprland doesn't tick the border-fade animation
+// while a window is hidden, so on un-hide the fade starts from the stale
+// (inactive) tint and crossfades to active over ~185ms — which read as "the
+// border only turns focused a beat AFTER the unroll finished", even though focus
+// was already stolen at roll-out start. onFocusAnimUpdate re-points the fade at
+// the active colour for the now-focused window; warping it to its goal completes
+// the crossfade instantly, so the active border is already there under the
+// snapshot and matches the snapshot's own (captured-focused) border through the
+// whole slide.
+void CVtbDeco::warpBorderToFocused(PHLWINDOW pWindow) {
+    if (!pWindow)
+        return;
+    pWindow->onFocusAnimUpdate();
+    if (pWindow->m_borderFadeAnimationProgress)
+        pWindow->m_borderFadeAnimationProgress->setValueAndWarp(pWindow->m_borderFadeAnimationProgress->goal());
 }
 
 void CVtbDeco::finishRollAnim() {
@@ -2516,6 +2535,7 @@ void CVtbDeco::finishRollAnim() {
             PWINDOW->setHidden(false);
             g_pCompositor->changeWindowZOrder(PWINDOW, true);
             Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+            warpBorderToFocused(PWINDOW); // border already active from the hold; keep it snapped
             // the surface was hidden; nudge the client to repaint (QtWebEngine
             // presents black after its surface is un-hidden until it redraws)
             VtbIpc::sendWake(appPid());

@@ -303,6 +303,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 startRollAnim(eRollAnim dir);
     void                 stepRollAnim();                       // advance progress by dt; finalize at 1
     void                 beginRollReveal();                    // roll-out landed: un-hide the window under the held snapshot
+    void                 warpBorderToFocused(PHLWINDOW pWindow); // snap border to active on reveal (no post-unroll fade)
     void                 finishRollAnim();                     // commit the end state
     void                 startBarFade();                       // begin the close animation's tail bar fade-out
     void                 hideRolledWindow(PHLWINDOW);          // setHidden + focus handoff
