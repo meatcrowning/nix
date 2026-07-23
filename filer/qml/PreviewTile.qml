@@ -24,15 +24,34 @@ Rectangle {
     border.width: 1
     border.color: selected ? (winActive ? Theme.accent : Theme.inactive) : Theme.border
 
-    // image preview: the file itself, downscaled by sourceSize so a huge photo
-    // doesn't decode at full resolution just to fill a 96px cell. encodeURI on
-    // the path matches the drag-out mime code — spaces/most metachars survive.
+    // Drag-out: same cross-app text/uri-list gesture as the file rows, so a
+    // thumbnail can be dropped onto a browser upload field, another file
+    // manager, etc. Drag.active is bound to the MouseArea dragging an INVISIBLE
+    // proxy (so the tile itself stays put) — that's what starts the real QDrag
+    // under dragType Automatic (a bare startDrag() doesn't fire one on Wayland).
+    // encodeURI matches PreviewTile's Image source and the row drag code.
+    Drag.active: tileMa.drag.active
+    Drag.dragType: Drag.Automatic
+    Drag.supportedActions: Qt.CopyAction | Qt.LinkAction
+    Drag.mimeData: ({ "text/uri-list": "file://" + encodeURI(tile.entry.path) + "\r\n" })
+    Drag.hotSpot.x: 6
+    Drag.hotSpot.y: 6
+
+    // the MouseArea drags THIS (invisible, zero-size) proxy instead of the tile,
+    // so drag.active flips on without the tile moving.
+    Item { id: dragProxy }
+
+    // image preview: served by the `image://thumb/` provider (main.py), which
+    // reads/writes the shared freedesktop thumbnail cache so a big photo is
+    // decoded once (across all runs, and shared with Dolphin) rather than every
+    // time this dir is opened. encodeURI leaves the path's slashes intact and
+    // escapes spaces/metachars; the provider re-adds the leading slash Qt strips.
     Image {
         id: thumb
         anchors.fill: parent
         anchors.margins: 3
         visible: tile.entry.kind === "image"
-        source: tile.entry.kind === "image" ? ("file://" + encodeURI(tile.entry.path)) : ""
+        source: tile.entry.kind === "image" ? ("image://thumb" + encodeURI(tile.entry.path)) : ""
         sourceSize.width: tile.tileSize * 2
         sourceSize.height: tile.tileSize * 2
         fillMode: Image.PreserveAspectFit
@@ -71,8 +90,18 @@ Rectangle {
     }
 
     MouseArea {
+        id: tileMa
         anchors.fill: parent
-        onPressed: (mouse) => tile.clicked(mouse.modifiers)
+        // preventStealing so an enclosing Flickable can't grab the press-drag
+        // and scroll instead of starting the file drag.
+        preventStealing: true
+        drag.target: dragProxy
+        onPressed: (mouse) => {
+            tile.clicked(mouse.modifiers);
+            // stage the drag image from the tile itself (thumbnail + name), so
+            // it's ready by the time the drag passes the threshold.
+            tile.grabToImage(function(res) { tile.Drag.imageSource = res.url; });
+        }
         onDoubleClicked: tile.opened()
     }
 }

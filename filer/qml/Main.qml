@@ -177,9 +177,40 @@ Window {
         property var expandedPaths: new Set()
 
         // Image entries of the CURRENT dir, pulled out of `rows` and shown in a
-        // thumbnail grid pinned above the list (the ListView header). Only the
+        // thumbnail grid pinned above the list (the preview panel). Only the
         // current dir — images inside expanded subdirs stay inline as rows.
         property var images: []
+        readonly property bool hasImages: images.length > 0
+        // Whether the list has anything (dirs, non-image files, expanded subtrees).
+        // When a dir is nothing but images, `rows` is empty and the bottom section
+        // + splitter are hidden so the preview grid takes the whole window.
+        readonly property bool hasRows: rows.length > 0
+
+        // Height (px) of the preview panel above the list. User-adjustable by
+        // dragging the splitter between the panel and the list; persisted across
+        // runs (Settings "gridPanelH"). The panel caps at its own content height,
+        // so a dir with only a few images shows a snug panel, not empty space.
+        property int gridPanelH: startGridPanelH
+
+        // Reusable slim vertical scrollbar (the list and the preview grid share
+        // it): only visible when its Flickable overflows (size < 1) — the handle
+        // stays put at rest, brightening on hover/drag; accent while pressed.
+        component VScroll: ScrollBar {
+            id: vb
+            policy: ScrollBar.AsNeeded
+            width: 9
+            contentItem: Rectangle {
+                implicitWidth: 9
+                color: vb.pressed ? Theme.accent : Theme.textDim
+                opacity: vb.size < 1 ? (vb.active ? 0.9 : 0.5) : 0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+            }
+            background: Rectangle {
+                color: Theme.bgAlt
+                opacity: vb.size < 1 && vb.active ? 0.4 : 0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+            }
+        }
 
         // Open a file with the right thing for its kind: images go to `viewer`
         // (the standalone image/media viewer — it scans the file's directory
@@ -330,41 +361,85 @@ Window {
         readonly property string footerStr: dirSizeStr
         onFooterStrChanged: Titlebar.setFooter(footerStr)
 
+        // ---- preview panel: the current dir's images, in a VIRTUALIZED grid
+        // above the list. A GridView (not the old Flow+Repeater, which realised
+        // every tile up front) so only the cells on screen exist and only their
+        // thumbnails are requested — a folder of thousands of images stays cheap,
+        // the way Dolphin recycles item widgets. `cacheBuffer` prefetches ~2 rows
+        // for smooth scrolling without an unbounded request storm.
+        GridView {
+            id: pgrid
+            anchors { top: parent.top; left: parent.left; right: parent.right; margins: 2 }
+            // no list below → the panel takes the whole window; otherwise it's the
+            // user's splitter height, capped at the grid's own content height.
+            height: !view.hasImages ? 0
+                    : !view.hasRows ? (view.height - 4)
+                    : Math.min(view.gridPanelH, contentHeight)
+            visible: view.hasImages
+            clip: true
+            model: view.images
+            cellWidth: 100
+            cellHeight: 100
+            cacheBuffer: cellHeight * 2
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: VScroll {}
+
+            delegate: Item {
+                id: cell
+                required property var modelData
+                width: pgrid.cellWidth
+                height: pgrid.cellHeight
+                PreviewTile {
+                    anchors.centerIn: parent
+                    entry: cell.modelData
+                    winActive: win.active
+                    selected: view.selection.indexOf(cell.modelData.path) >= 0
+                    onClicked: (mods) => view.clickSelect(cell.modelData.path, false, mods)
+                    onOpened: view.openFile(cell.modelData.path, cell.modelData.kind)
+                }
+            }
+        }
+
+        // splitter: drag to trade height between the preview panel and the list.
+        // Sets gridPanelH to the pointer's y (in `view` coords), clamped so both
+        // areas keep a usable minimum; the new height is persisted on release.
+        MouseArea {
+            id: splitter
+            anchors { top: pgrid.bottom; left: parent.left; right: parent.right }
+            height: (view.hasImages && view.hasRows) ? 7 : 0
+            visible: view.hasImages && view.hasRows
+            hoverEnabled: true
+            cursorShape: Qt.SplitVCursor
+            preventStealing: true
+            onPositionChanged: (m) => {
+                if (!pressed) return;
+                const y = splitter.mapToItem(view, m.x, m.y).y;
+                view.gridPanelH = Math.max(pgrid.cellHeight / 2,
+                                           Math.min(y - 2, view.height - 90));
+            }
+            onReleased: Settings.set("gridPanelH", view.gridPanelH)
+            Rectangle {
+                anchors.fill: parent
+                color: splitter.pressed ? Theme.highlight : "transparent"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 28; height: 2
+                    color: (splitter.containsMouse || splitter.pressed) ? Theme.accent : Theme.border
+                }
+            }
+        }
+
         // ---- tree list ----
         // (No in-window location bar any more — the editable path lives in the
         // titlebar address bar, and "up" is the "^" titlebar button.)
         ListView {
             id: list
-            anchors { top: parent.top; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
+            anchors { top: splitter.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
+            visible: view.hasRows
             clip: true
             model: view.rows
             boundsBehavior: Flickable.StopAtBounds
-
-            // ---- preview grid: the current dir's images, above the rows ----
-            // Scrolls with the list (it's the header), so it reads as the top of
-            // the directory. Collapses to nothing when the dir has no images.
-            header: Item {
-                width: list.width
-                visible: view.images.length > 0
-                height: visible ? grid.implicitHeight + 8 : 0
-
-                Flow {
-                    id: grid
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 4; rightMargin: 4; topMargin: 4 }
-                    spacing: 4
-                    Repeater {
-                        model: view.images
-                        PreviewTile {
-                            required property var modelData
-                            entry: modelData
-                            winActive: win.active
-                            selected: view.selection.indexOf(modelData.path) >= 0
-                            onClicked: (mods) => view.clickSelect(modelData.path, false, mods)
-                            onOpened: view.openFile(modelData.path, modelData.kind)
-                        }
-                    }
-                }
-            }
+            ScrollBar.vertical: VScroll {}
 
             delegate: Rectangle {
                 id: row

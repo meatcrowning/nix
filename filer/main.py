@@ -20,16 +20,21 @@ can't read context properties, and a Theme.qml next to the components would
 shadow the name as a type — so Theme lives in qml/theme/ and is injected here.
 (Likewise the palette is "WalPalette", not "Palette", which is a built-in type.)
 """
+import hashlib
 import json
 import os
 import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot, Signal, Property, QProcess, QUrl, QFileSystemWatcher
-from PySide6.QtGui import QGuiApplication, QColor
+from PySide6.QtCore import (QObject, Slot, Signal, Property, QProcess, QUrl,
+                            QFileSystemWatcher, Qt, QThreadPool, QRunnable)
+from PySide6.QtGui import QGuiApplication, QColor, QImage, QImageReader, QImageWriter
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQuick import (QQuickAsyncImageProvider, QQuickImageResponse,
+                             QQuickTextureFactory)
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -54,6 +59,177 @@ def preview_kind(name, is_dir):
     if ext in IMAGE_EXTS:
         return "image"
     return "file"
+
+
+# ---- thumbnails -------------------------------------------------------------
+# filer serves preview-grid thumbnails through the freedesktop.org *Thumbnail
+# Managing Standard* — the same shared, per-user cache Dolphin/Thunar/Nautilus
+# use — instead of re-decoding each original on every visit. That cache lives at
+# ~/.cache/thumbnails/{normal(128px),large(256px)}/, one PNG per file named
+# md5(file-URI).png, carrying the source's mtime in a Thumb::MTime tEXt chunk so
+# a stale thumbnail is regenerated when the file changes. Because the naming is
+# the shared standard, a warm hit (the common case — KDE has usually thumbnailed
+# the file already) is a near-instant read of a tiny PNG; a miss decodes once,
+# writes back into the shared cache (so Dolphin benefits too), and is instant
+# ever after. The heavy work runs off the GUI thread (see ThumbProvider).
+THUMB_ROOT = Path.home() / ".cache" / "thumbnails"
+THUMB_MAX = 256  # the "large" band; tiles are 96px, so 256 is crisp with headroom
+THUMB_MAX_SRC = 128 * 1024 * 1024  # skip generating for sources above this (see make_thumb)
+
+
+def _thumb_uri(path):
+    # Must match the URI other thumbnailers hash: the canonical, percent-encoded
+    # absolute file:// URI (Path.as_uri() == QUrl's fully-encoded form).
+    return Path(os.path.abspath(path)).as_uri()
+
+
+def _thumb_hash(path):
+    return hashlib.md5(_thumb_uri(path).encode("utf-8")).hexdigest()
+
+
+def _fail_path(path):
+    # Per-app failure marker: a file we couldn't decode (truncated download,
+    # bogus extension, …). Caching the failure stops us re-attempting the
+    # expensive decode on every revisit. Keyed by mtime like a real thumbnail.
+    return THUMB_ROOT / "fail" / "filer" / (_thumb_hash(path) + ".png")
+
+
+def _valid_for(fp, mtime):
+    """Load the cached PNG at fp iff its Thumb::MTime still matches the source's
+    current mtime; else None (missing/stale/corrupt → caller regenerates)."""
+    if not fp.exists():
+        return None
+    img = QImageReader(str(fp)).read()
+    if img.isNull():
+        return None
+    stored = img.text("Thumb::MTime")
+    return img if stored.strip() == str(int(mtime)) else None
+
+
+def _atomic_write(img, dest, texts):
+    """Write img to dest as PNG with the given Thumb:: tEXt metadata, via a
+    temp file + rename so a reader never sees a half-written thumbnail."""
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(dest.parent, 0o700)  # spec: the thumbnails dir is private
+    except OSError:
+        pass
+    fd, tmp = tempfile.mkstemp(prefix=".filer-", suffix=".png", dir=str(dest.parent))
+    os.close(fd)
+    # set the Thumb:: metadata on the image itself — the PNG handler writes an
+    # image's embedded text as tEXt chunks reliably (QImageWriter.setText did
+    # not round-trip here). This is what makes a thumbnail re-validatable.
+    for k, v in texts.items():
+        img.setText(k, v)
+    writer = QImageWriter(tmp, b"png")
+    if not writer.write(img):
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return
+    try:
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, dest)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _generate(path, mtime):
+    """Decode the original scaled down to THUMB_MAX, cache it, and return it.
+    On decode failure, drop a fail marker and return a null image."""
+    reader = QImageReader(path)
+    reader.setAutoTransform(True)  # honour EXIF orientation
+    size = reader.size()
+    if size.isValid() and (size.width() > THUMB_MAX or size.height() > THUMB_MAX):
+        reader.setScaledSize(size.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio))
+    img = reader.read()
+    uri = _thumb_uri(path)
+    meta = {"Thumb::URI": uri, "Thumb::MTime": str(int(mtime)), "Software": "filer"}
+    if img.isNull():
+        _atomic_write(QImage(1, 1, QImage.Format_ARGB32), _fail_path(path), meta)
+        return QImage()
+    # formats that don't honour setScaledSize (e.g. size wasn't known up front)
+    # still need bounding to the standard's max edge.
+    if img.width() > THUMB_MAX or img.height() > THUMB_MAX:
+        img = img.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    try:
+        meta["Thumb::Size"] = str(os.path.getsize(path))
+    except OSError:
+        pass
+    _atomic_write(img, THUMB_ROOT / "large" / (_thumb_hash(path) + ".png"), meta)
+    return img
+
+
+def make_thumb(path):
+    """A ready-to-display thumbnail QImage for `path` (≤THUMB_MAX px), or a null
+    QImage if it can't be produced. Prefers the shared cache; regenerates on a
+    miss/stale entry; short-circuits known failures. Safe to call off-thread."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return QImage()
+    mtime = st.st_mtime
+    h = _thumb_hash(path)
+    for band in ("large", "normal"):
+        hit = _valid_for(THUMB_ROOT / band / (h + ".png"), mtime)
+        if hit is not None:
+            return hit
+    if _valid_for(_fail_path(path), mtime) is not None:
+        return QImage()
+    # oversized-source guard (cf. Dolphin's "max preview size"): don't tie up a
+    # pool thread fully decoding a monster file — render the no-preview marker
+    # instead. Placed after the cache lookup so an already-thumbnailed big file
+    # still shows instantly.
+    if st.st_size > THUMB_MAX_SRC:
+        return QImage()
+    return _generate(path, mtime)
+
+
+class ThumbResponse(QQuickImageResponse, QRunnable):
+    """One in-flight `image://thumb/<path>` request. Runs make_thumb() on a
+    thread-pool worker (QRunnable), then hands the result back to the QML render
+    thread via textureFactory — so decoding a big image never stalls the UI."""
+
+    def __init__(self, path):
+        QQuickImageResponse.__init__(self)
+        QRunnable.__init__(self)
+        self.setAutoDelete(False)  # QML owns the response's lifetime, not the pool
+        self._path = path
+        self._image = QImage()
+
+    def run(self):
+        try:
+            self._image = make_thumb(self._path)
+        except Exception:
+            self._image = QImage()
+        self.finished.emit()
+
+    def textureFactory(self):
+        return QQuickTextureFactory.textureFactoryForImage(self._image)
+
+
+class ThumbProvider(QQuickAsyncImageProvider):
+    """Serves `image://thumb/<abs-path>`. Async so the engine gets a response
+    handle immediately and the decode happens on the pool. `image_id` arrives
+    percent-decoded and with the URL path's leading slash stripped — restore it
+    to recover the absolute path."""
+
+    def __init__(self):
+        super().__init__()
+        self._pool = QThreadPool()
+        # leave cores for the UI/render thread + file ops; thumbnailing is not
+        # the only thing filer does.
+        self._pool.setMaxThreadCount(max(2, (os.cpu_count() or 4) // 2))
+
+    def requestImageResponse(self, image_id, requested_size):
+        path = image_id if image_id.startswith("/") else "/" + image_id
+        resp = ThumbResponse(path)
+        self._pool.start(resp)
+        return resp
 
 
 # The panel's palette file, rewritten by wal-set.sh between the wal markers.
@@ -270,17 +446,28 @@ class Settings(QObject):
     def value(self, key, default=None):
         return self._data.get(key, default)
 
+    def _flush(self):
+        try:
+            STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STATE_PATH.write_text(json.dumps(self._data), encoding="utf-8")
+        except OSError:
+            pass
+
+    @Slot(str, "QVariant")
+    def set(self, key, val):
+        """Persist a single UI-state key (e.g. the preview-panel height). Kept
+        separate from save() so QML can store one-off bits without the fixed
+        nav/sort tuple."""
+        self._data[key] = val
+        self._flush()
+
     @Slot(str, str, bool, bool)
     def save(self, directory, sort_field, sort_asc, show_hidden):
         self._data["dir"] = directory
         self._data["sortField"] = sort_field
         self._data["sortAsc"] = bool(sort_asc)
         self._data["showHidden"] = bool(show_hidden)
-        try:
-            STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            STATE_PATH.write_text(json.dumps(self._data), encoding="utf-8")
-        except OSError:
-            pass
+        self._flush()
 
 
 class Titlebar(QObject):
@@ -365,6 +552,12 @@ def main():
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
+    # thumbnails via the shared freedesktop cache (see make_thumb / ThumbProvider).
+    # The engine takes ownership of the provider; keep this local ref alive too so
+    # the Python-side virtual override isn't collected while exec() runs.
+    thumb_provider = ThumbProvider()
+    engine.addImageProvider("thumb", thumb_provider)
+
     ops = FileOps()
     palette = Palette(PANEL_THEME)
     winctl = WinCtl()
@@ -382,6 +575,8 @@ def main():
     ctx.setContextProperty("startSortField", settings.value("sortField", "name"))
     ctx.setContextProperty("startSortAsc", bool(settings.value("sortAsc", True)))
     ctx.setContextProperty("startShowHidden", bool(settings.value("showHidden", True)))
+    # last preview-panel height (px), restored into view.gridPanelH on startup.
+    ctx.setContextProperty("startGridPanelH", int(settings.value("gridPanelH", 200) or 200))
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
