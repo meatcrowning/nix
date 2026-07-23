@@ -355,7 +355,7 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
                 if (match->maximized)
                     thisDeco->toggleMaximize();
                 else if (match->rolled)
-                    thisDeco->toggleRollup();
+                    thisDeco->toggleRollup(false); // snap to rolled state, no animation
                 else if (match->minimized)
                     thisDeco->minimizeWindow();
             }
@@ -367,6 +367,12 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
             Config::Actions::resize(IT->second.size(), false, window);
             Config::Actions::move(IT->second.pos(), false, window);
         }
+
+        // Play the open reveal: only titlebar fades in, then the window rolls out
+        // and takes focus. Reached only for a genuinely new, normally-shown
+        // floating window (session-restore of a special state returned above).
+        if (thisDeco)
+            thisDeco->startOpenReveal();
     }
 }
 
@@ -667,11 +673,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         for (auto& b : g_pGlobalState->bars) {
             if (!b)
                 continue;
-            // shade bar UNDER windows (pre); hover tooltip OVER windows (post)
-            if (stage == RENDER_PRE_WINDOWS)
-                b->renderShadeIfRolled(PMONITOR);
-            else
+            // Shade bar UNDER windows (pre); hover tooltip OVER windows (post).
+            // Exception: a window on its way to the foreground — sliding OUT
+            // (un-shading) or playing its open reveal — draws OVER windows from
+            // the first frame, otherwise it animates behind everything and only
+            // pops on top when it lands and the real window is un-hidden/raised.
+            const bool aboveWindows = b->isRollingOut() || b->isOpening();
+            if (stage == RENDER_PRE_WINDOWS) {
+                if (!aboveWindows)
+                    b->renderShadeIfRolled(PMONITOR);
+            } else {
+                if (aboveWindows)
+                    b->renderShadeIfRolled(PMONITOR);
                 b->enqueueTooltip(PMONITOR);
+            }
         }
     }));
 
@@ -713,6 +728,28 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
     }
 
+    // TEMP TEST DISPATCHER (remove after verifying the roll animation): roll a
+    // window up/down via `hyprctl dispatch hyprvtbtestroll 0x<addr>` (empty =
+    // active window). Targeting by address lets a script roll a still-hidden
+    // (already-rolled) window back out, which the focus-based path can't reach.
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprvtbtestroll", [](std::string arg) -> SDispatchResult {
+        if (!g_pGlobalState)
+            return {};
+        CVtbDeco* deco = nullptr;
+        if (arg.starts_with("0x")) {
+            const uintptr_t want = std::strtoull(arg.c_str(), nullptr, 16);
+            for (auto& b : g_pGlobalState->bars)
+                if (b && (uintptr_t)b->getOwner().get() == want) {
+                    deco = b.get();
+                    break;
+                }
+        } else
+            deco = activeDeco();
+        if (deco)
+            deco->toggleRollup();
+        return {};
+    });
+
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
         if (g_pGlobalState)
             onConfigReloaded();
@@ -741,7 +778,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.32"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.34"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

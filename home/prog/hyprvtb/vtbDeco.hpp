@@ -53,6 +53,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     PHLWINDOW                          getOwner();
     void                               onConfigReloaded();
     bool                               isMaximized() const { return m_bMaximized; } // for the sibling shadow deco
+    bool                               isRollingOut() const { return m_rollAnim == ROLL_OUT; } // slide-out draws OVER windows
+    bool                               isOpening() const { return m_bOpening; }                // open reveal also draws OVER windows
     bool                               isMinimized() const { return m_bMinimized; } // for session snapshot
     bool                               isRolledUp() const { return m_bRolledUp; }   // for session snapshot
 
@@ -71,7 +73,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     // (panel icon click minimizes the active window, hyprvtb:rollup, etc.).
     void                               minimizeWindow();
     void                               toggleMaximize();
-    void                               toggleRollup();
+    void                               toggleRollup(bool animate = true);
+    void                               startOpenReveal(); // open animation: fade titlebar in, then roll out to reveal + focus
 
     // Called from main.cpp's window.active listener: focusing a minimized
     // window slides it back in.
@@ -113,7 +116,43 @@ class CVtbDeco : public IHyprWindowDecoration {
     CBox                 m_savedGeometry;
 
     bool                 m_bRolledUp = false;
-    CBox                 m_rollBox; // on-screen bar box captured when shaded (for render + hit-test while hidden)
+    CBox                 m_rollBox; // raised (undropped) bar box captured when shaded (for render + hit-test while hidden)
+
+    // ---- roll-up / roll-out slide+setdown animation ----
+    // Rolling a window up plays as two beats: the window's content slides right
+    // into the bar — a snapshot, clipped at the bar's left edge, so it vanishes
+    // behind the bar like a closing drawer, its shadow trailing — then the bar
+    // "sets down" into the desktop: it drops by the shadow offset while the drop
+    // shadow collapses from its 24px float to nothing (swallowed by the bar) and
+    // the tint crossfades focused->unfocused. Roll-out is the exact reverse. The
+    // window is hidden for the whole animation; the snapshot captured at shade
+    // time carries its pixels through both directions (it can't change while
+    // hidden). The static rolled state is the end of roll-up: bar dropped by the
+    // shadow offset, no shadow.
+    enum eRollAnim { ROLL_NONE, ROLL_UP, ROLL_OUT };
+    eRollAnim            m_rollAnim         = ROLL_NONE;
+    float                m_rollProgress     = 0.f;            // 0..1 along the current direction
+    bool                 m_rollFinishing    = false;          // progress hit 1; finalize deferred out of the render
+    Time::steady_tp      m_rollAnimAt       = Time::steadyNow(); // last frame stamp (dt clock)
+    SP<Render::ITexture> m_rollSnapTex;                       // window content, held across the shade
+    CBox                 m_rollWinBox;                        // client box (global logical) at shade time
+    Vector2D             m_rollSnapOrigin;                    // window's top-left within the (monitor-sized) snapshot texture, device px
+
+    // Window-close animation: the [x] button rolls the window up, then fades the
+    // lone bar out, and only THEN asks the client to close — so the whole thing
+    // plays while the window (and this deco) are still alive. Client-initiated
+    // closes bypass this and just vanish.
+    bool                 m_bClosing        = false;
+    bool                 m_bBarFading      = false; // tail fade-out phase active
+    float                m_barFadeProgress = 0.f;   // 0 = opaque .. 1 = gone
+    Time::steady_tp      m_barFadeAt       = Time::steadyNow();
+    bool                 m_bCloseReady     = false; // fade done; sendClose() pending
+
+    // Window-open animation: a freshly-mapped window is captured + hidden, its
+    // lone titlebar fades IN, then it rolls OUT to reveal the content and takes
+    // focus — the mirror image of the close animation.
+    bool                 m_bOpening        = false;
+    bool                 m_bBarFadingIn    = false; // opening: the initial bar fade-in phase
 
     bool                 m_bMinimized = false;
     Vector2D             m_minSavedPos;
@@ -257,6 +296,21 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 togglePin();
     void                 restoreFromMinimize();
     CBox                 maximizeTarget();
+
+    // roll animation
+    void                 startRollAnim(eRollAnim dir);
+    void                 stepRollAnim();                       // advance progress by dt; finalize at 1
+    void                 finishRollAnim();                     // commit the end state
+    void                 startBarFade();                       // begin the close animation's tail bar fade-out
+    void                 hideRolledWindow(PHLWINDOW);          // setHidden + focus handoff
+    bool                 rollAnimSubProgress(float& slideT, float& downT); // eased pair; false when idle
+    float                downTNow();                           // 0 raised (full shadow) .. 1 set down (no shadow)
+    // The animation's two behind-the-bar pieces. The shadow is drawn BEFORE the
+    // bar (so the bar/snapshot occlude its centre, leaving only the L-overhang);
+    // the sliding snapshot AFTER (clipped at the bar's left edge). Both take the
+    // bar's device-space box (already dropped by the set-down).
+    void                 drawRollShadow(const CBox& barBoxDev, float scale, float slideT, float downT, float a);
+    void                 drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a);
 
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();

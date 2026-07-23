@@ -8,6 +8,7 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/protocols/LayerShell.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -16,12 +17,14 @@
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 
 #include <pango/pangocairo.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cmath>
 #include <chrono>
+#include <cstdio>
 #include <format>
 
 #include "globals.hpp"
@@ -54,6 +57,25 @@ static constexpr float VTB_FLASH_MS = 220.f;
 // window: a solid rectangle offset this many logical px down and left, behind
 // the window.
 static constexpr int VTB_SHADOW_SIZE = 24;
+
+// roll-up / roll-out animation timing: the whole two-beat animation runs over
+// VTB_ROLL_DURATION seconds, of which the drawer slide takes the first
+// VTB_ROLL_SLIDE_FRAC and the "set down" the rest (reversed for roll-out).
+static constexpr float VTB_ROLL_DURATION   = 0.26f;
+static constexpr float VTB_ROLL_SLIDE_FRAC = 0.55f;
+
+// The lone-bar fade at the tail of a window-close animation (after the roll-up).
+static constexpr float VTB_FADE_DURATION = 0.16f;
+
+static float rollRemap(float x, float a, float b) {
+    return std::clamp((x - a) / (b - a), 0.f, 1.f);
+}
+static float rollEaseOutCubic(float t) {
+    return 1.f - std::pow(1.f - t, 3.f);
+}
+static float rollEaseInOut(float t) {
+    return t < 0.5f ? 4.f * t * t * t : 1.f - std::pow(-2.f * t + 2.f, 3.f) / 2.f;
+}
 
 // One column's width (the bar_width config value) and the full double-wide
 // bar. The system column starts at colW() in bar-local coordinates.
@@ -236,9 +258,15 @@ CBox CVtbDeco::assignedBoxGlobal() {
 
 // While shaded the window is hidden and its geometry is frozen, so the bar is
 // drawn/hit-tested against the box captured at shade time; otherwise it tracks
-// the live decoration position.
+// the live decoration position. The shaded bar sits DROPPED by the current
+// set-down fraction (a fully rolled bar rests a shadow-offset lower than the
+// raised captured box — that's the "set down" resting state).
 CBox CVtbDeco::effectiveBoxGlobal() {
-    return m_bRolledUp ? m_rollBox : assignedBoxGlobal();
+    if (!m_bRolledUp && m_rollAnim == ROLL_NONE)
+        return assignedBoxGlobal();
+    CBox b = m_rollBox;
+    b.y += VTB_SHADOW_SIZE * downTNow();
+    return b;
 }
 
 PHLWINDOW CVtbDeco::getOwner() {
@@ -388,11 +416,26 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     auto       inactiveColor = configColor(g_pGlobalState->config.inactiveColor->value());
     bgColor.a *= a;
     bgAltColor.a *= a;
-    borderColor.a *= a;
+    // NB: borderColor is NOT pre-multiplied by `a` here — drawCellXY applies `a`
+    // to the outline colour itself (so the non-pre-multiplied `hot` case fades
+    // right). Pre-multiplying here too made the button outlines fade as a^2,
+    // vanishing faster than the bar during the close fade-out.
 
     // Buttons + title follow the window's frame: accent (active-border
     // colour) when focused, the inactive-border grey otherwise.
-    const auto textColor = FOCUSED ? accentColor : inactiveColor;
+    auto textColor = FOCUSED ? accentColor : inactiveColor;
+
+    // During the roll animation the tint crossfades focused->unfocused in step
+    // with the set-down beat (rollDownT: 0 focused .. 1 unfocused), independent
+    // of the real focus state (which was handed away the moment we shaded).
+    float      rollSlideT = 0.f, rollDownT = 0.f;
+    const bool ROLLANIM   = rollAnimSubProgress(rollSlideT, rollDownT);
+    if (ROLLANIM) {
+        auto lerp = [](const CHyprColor& x, const CHyprColor& y, float t) {
+            return CHyprColor{x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, x.a + (y.a - x.a) * t};
+        };
+        textColor = lerp(accentColor, inactiveColor, rollDownT);
+    }
 
     if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)textColor.getAsHex() || m_bLastFocus != FOCUSED) {
         m_glyphCache.clear();
@@ -430,6 +473,12 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
 
     if (barBox.w < 1 || barBox.h < 1)
         return;
+
+    // roll animation: the drop shadow goes down first, so the opaque bar (and
+    // the sliding snapshot, drawn at the end) occlude its centre — only the
+    // bottom-left L-overhang shows, collapsing to nothing as the bar sets down.
+    if (ROLLANIM)
+        drawRollShadow(barBox, SCALE, rollSlideT, rollDownT, a);
 
     // background
     g_pHyprOpenGL->renderRect(barBox, bgColor, {});
@@ -728,11 +777,60 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
             m_flashCell = -1;
     }
 
+    // roll animation: the window snapshot sliding into / out of the bar, drawn
+    // over the bar's own draws but clipped to the left of the bar column (the
+    // drop shadow was already drawn before the background, above).
+    if (ROLLANIM)
+        drawRollSnapshot(barBox, SCALE, rollSlideT, a);
+
     // NOTE: the hover tooltip is NOT drawn here — this pass element is an
     // UNDER-layer decoration (drawn before the window surface), and the tooltip
     // overhangs the window to the left, so drawing it here would put it behind
     // the window. It's enqueued separately at RENDER_POST_WINDOWS; see
     // enqueueTooltip / drawTooltipPass.
+}
+
+// The collapsing drop shadow of the visible composite (remaining client + bar),
+// offset down+left by the current float height; at downT 1 the offset is 0, so
+// the bar/snapshot sit flush over it and it vanishes ("set down"). Drawn before
+// the bar so only the L-overhang survives the occlusion.
+void CVtbDeco::drawRollShadow(const CBox& barBoxDev, float scale, float slideT, float downT, float a) {
+    const double shadowOff = VTB_SHADOW_SIZE * (1.f - downT) * scale;
+    if (shadowOff <= 0.5)
+        return;
+    const double clientW  = m_rollWinBox.w * scale;
+    const double barRight = barBoxDev.x + barBoxDev.w;
+    // left edge of the still-visible content as it tucks right into the bar
+    const double visLeft   = barBoxDev.x - clientW * (1.f - slideT);
+    CBox         shadowBox = {visLeft - shadowOff, barBoxDev.y + shadowOff, barRight - visLeft, barBoxDev.h};
+    CHyprColor   sc        = {0.0, 0.0, 0.0, 0.6 * a};
+    g_pHyprOpenGL->renderRect(shadowBox.round(), sc, {});
+}
+
+// The window snapshot sliding right into the bar (or back out), clipped at the
+// bar's left edge so it disappears behind the bar like a closing drawer. Drawn
+// after the bar; the clip keeps it from painting over the bar column.
+void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a) {
+    if (!m_rollSnapTex || m_rollSnapTex->m_texID == 0 || slideT >= 0.999f)
+        return;
+    const double clientW = m_rollWinBox.w * scale;
+    if (clientW < 1.0)
+        return;
+
+    // The snapshot is a MONITOR-sized texture with the window at m_rollSnapOrigin,
+    // so we can't just stretch the whole thing into the content box (that shrinks
+    // the entire screen into the bar). Instead draw the full texture 1:1, offset so
+    // the window's sub-rect lands exactly where the content should be, and clip to
+    // the still-visible strip (its sliding left edge to the bar's left edge) so no
+    // neighbouring desktop leaks in and the drawer-into-bar occlusion is preserved.
+    const double                        contentLeft = barBoxDev.x - clientW * (1.f - slideT);
+    CBox                                fullBox     = {contentLeft - m_rollSnapOrigin.x, barBoxDev.y - m_rollSnapOrigin.y,
+                                                       m_rollSnapTex->m_size.x, m_rollSnapTex->m_size.y};
+    CRegion                             clip        = CBox{contentLeft, barBoxDev.y, barBoxDev.x - contentLeft, barBoxDev.h}.round();
+    CHyprOpenGLImpl::STextureRenderData data;
+    data.a          = a;
+    data.clipRegion = clip;
+    g_pHyprOpenGL->renderTexture(m_rollSnapTex, fullBox.round(), data);
 }
 
 // Hover text for a cell: fixed strings for the five system cells, the
@@ -940,6 +1038,18 @@ void CVtbDeco::enqueueTooltip(PHLMONITOR pMonitor) {
 }
 
 void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
+    // Reliable roll-animation finalize. stepRollAnim kicks finishRollAnim via
+    // doLater with a captured weak `self`, but that weak-ref lock()s to null a
+    // tick later — the deco's self-ref is orphaned when its owning UP is moved
+    // into addWindowDecoration — so finishRollAnim never runs and m_rollAnim
+    // stays stuck at ROLL_UP/OUT. That made every click read as "inert mid-
+    // animation" and skipped the rolled-up hover path (buttons unclickable, hover
+    // lit the wrong cell). The tick reaches this live deco through the `bars`
+    // weak-ref that DOES resolve, and runs off the render loop — exactly the safe
+    // context finishRollAnim needs — so drive the finalize from here too.
+    if (m_rollFinishing && m_rollAnim != ROLL_NONE)
+        finishRollAnim();
+
     if (!validMapped(m_pWindow))
         return;
 
@@ -1607,12 +1717,17 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
             return;
         }
         if (m_bRolledUp) {
-            handleRolledUp(info);
+            if (m_rollAnim == ROLL_NONE)
+                handleRolledUp(info);
             return;
         }
         handleUpEvent(info);
         return;
     }
+
+    // clicks are inert while a roll animation plays (the bar is in motion)
+    if (m_rollAnim != ROLL_NONE)
+        return;
 
     // A shaded window is hidden, so the normal inputIsValid() path (which needs
     // the window under the cursor / focused) never accepts — hit-test the
@@ -1660,8 +1775,8 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     }
 
     // shaded window: either drag its floating bar (relocating the hidden
-    // window) or just hover-test it — no resize cursor.
-    if (m_bRolledUp) {
+    // window) or just hover-test it — no resize cursor. Inert mid-animation.
+    if (m_bRolledUp && m_rollAnim == ROLL_NONE) {
         if (m_bRollDragPending || m_bRollDragging) {
             const auto DELTA = g_pInputManager->getMouseCoordsInternal() - m_rollDragMouseStart;
             if (!m_bRollDragging && (std::abs(DELTA.x) + std::abs(DELTA.y)) > 4)
@@ -1687,8 +1802,17 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
             return;
         }
 
-        const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - m_rollBox.pos();
-        const int  cell  = VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h) ? cellAt(LOCAL) : -1;
+        // Hit-test the bar where it's actually DRAWN. renderPass draws it at
+        // effectiveBoxGlobal() (the DROPPED resting box — m_rollBox is the raised
+        // capture, VTB_SHADOW_SIZE too high) translated by the window's floating
+        // offset. Hit-testing against raw m_rollBox was off by both, so the wrong
+        // cell lit (or none) — and clicks (which use effectiveBoxGlobal) missed
+        // by the floating offset too; fold both in so all three agree.
+        const auto     HIT = effectiveBoxGlobal();
+        const auto     PW  = m_pWindow.lock();
+        const Vector2D OFF = PW ? PW->m_floatingOffset : Vector2D();
+        const auto     LOCAL = g_pInputManager->getMouseCoordsInternal() - (HIT.pos() + OFF);
+        const int      cell  = VECINRECT(LOCAL, 0, 0, HIT.w, HIT.h) ? cellAt(LOCAL) : -1;
         if (cell != m_iHoverCell) {
             m_iHoverCell = cell;
             m_hoverSince = Time::steadyNow(); // the main-thread tick pops the tooltip after the dwell
@@ -1970,9 +2094,14 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
         return;
 
+    // hit-test the bar where it's actually drawn: dropped by the set-down
+    // (effectiveBoxGlobal) AND shifted by the window's floating offset, exactly
+    // as renderPass positions it — otherwise a restored window's non-zero
+    // floating offset slid the buttons out from under the click.
+    const auto BAR   = effectiveBoxGlobal();
     const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
-    const auto LOCAL = MOUSE - m_rollBox.pos();
-    if (!VECINRECT(LOCAL, 0, 0, m_rollBox.w, m_rollBox.h))
+    const auto LOCAL = MOUSE - (BAR.pos() + PWINDOW->m_floatingOffset);
+    if (!VECINRECT(LOCAL, 0, 0, BAR.w, BAR.h))
         return; // not on the bar — let the click pass through to what's behind
 
     info.cancelled   = true;
@@ -2025,8 +2154,78 @@ void CVtbDeco::handleRolledUp(Event::SCallbackInfo& info) {
 
 void CVtbDeco::closeWindow() {
     const auto PWINDOW = m_pWindow.lock();
-    if (PWINDOW)
+    if (!PWINDOW)
+        return;
+    if (m_bClosing)
+        return; // animation already running
+
+    // Only the ordinary floating case gets the roll-up + fade close animation;
+    // tiled / minimized / maximized windows just close. The window stays alive
+    // (and so does this deco) for the whole animation — we hold sendClose() until
+    // the bar has faded out.
+    if (!PWINDOW->m_isFloating || m_bMinimized || m_bMaximized) {
         PWINDOW->sendClose();
+        return;
+    }
+
+    m_bClosing = true;
+    if (m_bRolledUp)
+        startBarFade();               // already shaded -> straight to the fade-out
+    else
+        startRollAnim(ROLL_UP);       // roll it up first; finishRollAnim kicks the fade
+}
+
+// Begin the tail of the close animation: the lone (shaded) bar fades to nothing.
+void CVtbDeco::startBarFade() {
+    m_bBarFading      = true;
+    m_barFadeProgress = 0.f;
+    m_barFadeAt       = Time::steadyNow();
+    damageEntire();
+}
+
+// Begin the open animation for a freshly-mapped floating window: snapshot +
+// hide it (so only the bar shows), then fade the bar in. renderShadeIfRolled
+// starts the roll-out reveal once the fade-in completes. Runs from window.open
+// (dispatch path), so makeSnapshot is safe here (not mid render-stage).
+void CVtbDeco::startOpenReveal() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bRolledUp || m_rollAnim != ROLL_NONE)
+        return;
+
+    // A freshly-mapped window is still mid open-animation (value() != goal()), so
+    // warp it straight to its settled geometry first — otherwise makeSnapshot
+    // captures the half-animated frame and m_rollSnapOrigin (computed off goal())
+    // wouldn't line up with where the pixels actually landed in the FB.
+    PWINDOW->m_realPosition->setValueAndWarp(PWINDOW->m_realPosition->goal());
+    PWINDOW->m_realSize->setValueAndWarp(PWINDOW->m_realSize->goal());
+
+    CBox       g   = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+    const auto WS  = PWINDOW->m_workspace;
+    const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
+    g.translate(OFF);
+    m_rollWinBox = g;
+
+    // The decoration positioner hasn't run yet at window.open, so assignedBoxGlobal()
+    // is still 0x0 here — build the bar box directly: it sits on the content's right
+    // edge, totalBarW() wide and the window's full height (mirrors frameBox()).
+    m_rollBox = {m_rollWinBox.x + m_rollWinBox.w, m_rollWinBox.y, (double)totalBarW(), m_rollWinBox.h};
+
+    g_pHyprRenderer->makeSnapshot(PWINDOW);
+    if (PWINDOW->m_snapshotFB && PWINDOW->m_snapshotFB->isAllocated())
+        m_rollSnapTex = PWINDOW->m_snapshotFB->getTexture();
+    const auto SNAPMON = PWINDOW->m_monitor.lock();
+    if (SNAPMON)
+        m_rollSnapOrigin = (m_rollWinBox.pos() - SNAPMON->m_position) * SNAPMON->m_scale;
+
+    m_bRolledUp = true;
+    hideRolledWindow(PWINDOW);
+
+    // fade the lone bar in; on completion renderShadeIfRolled rolls it out
+    m_bOpening        = true;
+    m_bBarFadingIn    = true;
+    m_barFadeProgress = 0.f;
+    m_barFadeAt       = Time::steadyNow();
+    damageEntire();
 }
 
 // Edge-to-edge across the monitor's usable area (panel exclusive zones
@@ -2099,36 +2298,11 @@ void CVtbDeco::togglePin() {
 // key detail — restoring is just an un-hide: the window reappears exactly
 // where it is now, never snapping back to some pre-shade position. Floating
 // only, and mutually exclusive with maximize/minimize (guarded there too).
-void CVtbDeco::toggleRollup() {
-    const auto PWINDOW = m_pWindow.lock();
-    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized || m_bMaximized)
-        return;
-
-    if (m_bRolledUp) {
-        // un-shade in place
-        m_bRolledUp        = false;
-        m_iHoverCell       = -1;
-        m_bRollDragPending = false;
-        m_bRollDragging    = false;
-        g_pHyprRenderer->damageBox(m_rollBox); // clear the floating bar
-        PWINDOW->setHidden(false);
-        g_pCompositor->changeWindowZOrder(PWINDOW, true);
-        Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
-        // the window's surface was hidden; nudge the client to repaint (QtWebEngine
-        // presents black after its surface is un-hidden until it redraws)
-        VtbIpc::sendWake(appPid());
-        damageEntire();
-        return;
-    }
-
-    // shade: remember where the bar sits (for render + hit-test while hidden),
-    // clear the area the window occupied, then hide it
-    m_rollBox          = assignedBoxGlobal();
-    m_bRolledUp        = true;
-    m_iHoverCell       = -1;
-    m_bRollDragPending = false;
-    m_bRollDragging    = false;
-
+// Hide a window being shaded and hand focus to another window on its workspace.
+// Split out of the roll-up path because the animation defers the hide to the
+// first render frame (the snapshot has to be grabbed while the window is still
+// visible).
+void CVtbDeco::hideRolledWindow(PHLWINDOW PWINDOW) {
     // Damage the FULL bounding box — border + drop shadow, not just the client
     // rect. Hiding the window stops it (and its shadow decoration) drawing, but
     // only the region we damage gets repainted with what's behind; damaging the
@@ -2149,15 +2323,189 @@ void CVtbDeco::toggleRollup() {
         Desktop::focusState()->fullWindowFocus(next, Desktop::FOCUS_REASON_CLICK);
     else
         Desktop::focusState()->resetWindowFocus();
-
-    damageEntire(); // draws the bar at m_rollBox
 }
 
-// Enqueue the shaded window's bar into the current frame's render pass. Called
-// per-monitor from main.cpp's RENDER_POST_WINDOWS hook (a hidden window gets no
-// draw() of its own). Skips monitors/workspaces the shade isn't showing on.
+// Eased sub-progress for the two beats. slideT: 0 = content fully out/visible,
+// 1 = tucked entirely behind the bar. downT: 0 = raised with full shadow, 1 =
+// set down with no shadow. Roll-out runs the beats in the reverse order (lift
+// the bar / re-grow the shadow first, then slide the content back out). Returns
+// false when no animation is in flight.
+bool CVtbDeco::rollAnimSubProgress(float& slideT, float& downT) {
+    if (m_rollAnim == ROLL_NONE)
+        return false;
+    const float g = std::clamp(m_rollProgress, 0.f, 1.f);
+    if (m_rollAnim == ROLL_UP) {
+        slideT = rollEaseOutCubic(rollRemap(g, 0.f, VTB_ROLL_SLIDE_FRAC));
+        downT  = rollEaseInOut(rollRemap(g, VTB_ROLL_SLIDE_FRAC, 1.f));
+    } else {
+        downT  = 1.f - rollEaseInOut(rollRemap(g, 0.f, 1.f - VTB_ROLL_SLIDE_FRAC));
+        slideT = 1.f - rollEaseOutCubic(rollRemap(g, 1.f - VTB_ROLL_SLIDE_FRAC, 1.f));
+    }
+    return true;
+}
+
+// Current set-down fraction: the live animation value, else 1 for a window that
+// rests fully rolled up and 0 for one that isn't (drives the bar's dropped
+// resting position in effectiveBoxGlobal).
+float CVtbDeco::downTNow() {
+    float slideT = 0.f, downT = 0.f;
+    if (rollAnimSubProgress(slideT, downT))
+        return downT;
+    return m_bRolledUp ? 1.f : 0.f;
+}
+
+void CVtbDeco::startRollAnim(eRollAnim dir) {
+    m_rollAnim         = dir;
+    m_rollProgress     = 0.f;
+    m_rollFinishing    = false;
+    m_rollAnimAt       = Time::steadyNow();
+    m_iHoverCell       = -1;
+    m_bRollDragPending = false;
+    m_bRollDragging    = false;
+
+    if (dir == ROLL_UP) {
+        const auto PWINDOW = m_pWindow.lock();
+        m_rollBox          = assignedBoxGlobal(); // raised bar position
+        if (PWINDOW) {
+            // client box in the same global-logical frame the shadow/snapshot use
+            CBox       g   = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+            const auto WS  = PWINDOW->m_workspace;
+            const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
+            g.translate(OFF);
+            m_rollWinBox = g;
+
+            // Capture the window's pixels NOW, while it's still visible and we're
+            // OUTSIDE the render loop (this runs from the input / dispatch path,
+            // the same context Hyprland snapshots closing windows from). Doing it
+            // mid render-stage re-enters the renderer and corrupts the in-flight
+            // frame -> hard crash. m_rollSnapTex keeps the texture alive for the
+            // whole shade (both the roll-up slide and the eventual roll-out).
+            g_pHyprRenderer->makeSnapshot(PWINDOW);
+            if (PWINDOW->m_snapshotFB && PWINDOW->m_snapshotFB->isAllocated())
+                m_rollSnapTex = PWINDOW->m_snapshotFB->getTexture();
+            // makeSnapshot renders into a MONITOR-sized framebuffer, so the window
+            // is only a sub-rect of the texture; remember its device-px top-left
+            // there so drawRollSnapshot can sample just the window, not the whole
+            // screen scaled down into the bar.
+            const auto SNAPMON = PWINDOW->m_monitor.lock();
+            if (SNAPMON)
+                m_rollSnapOrigin = (m_rollWinBox.pos() - SNAPMON->m_position) * SNAPMON->m_scale;
+        }
+        m_bRolledUp = true; // the bar is now the standalone floating bar
+        if (PWINDOW)
+            hideRolledWindow(PWINDOW);
+    }
+    // ROLL_OUT: the window is already hidden and m_rollSnapTex still holds its
+    // (frozen) pixels from roll-up — nothing to capture.
+    damageEntire();
+}
+
+void CVtbDeco::stepRollAnim() {
+    if (m_rollAnim == ROLL_NONE || m_rollFinishing)
+        return;
+    const auto  now = Time::steadyNow();
+    const float dt  = std::chrono::duration<float>(now - m_rollAnimAt).count();
+    m_rollAnimAt    = now;
+    m_rollProgress += dt / VTB_ROLL_DURATION;
+    if (m_rollProgress >= 1.f) {
+        m_rollProgress  = 1.f;
+        m_rollFinishing = true;
+        // finalize OUT of the render loop — finishRollAnim un-hides / refocuses /
+        // reorders the window, none of which is safe to do mid render-stage. The
+        // frame(s) until it fires render the terminal look (progress==1), which
+        // is visually identical to the settled state, so there's no seam.
+        WP<CVtbDeco> self = m_self;
+        g_pEventLoopManager->doLater([self]() {
+            if (auto d = self.lock())
+                d->finishRollAnim();
+        });
+    }
+}
+
+void CVtbDeco::finishRollAnim() {
+    const auto      PWINDOW = m_pWindow.lock();
+    const eRollAnim dir     = m_rollAnim;
+    m_rollAnim              = ROLL_NONE;
+    m_rollProgress          = 1.f;
+    m_rollFinishing         = false;
+
+    if (dir == ROLL_OUT) {
+        // the window comes back to life at its original geometry
+        m_bRolledUp        = false;
+        m_iHoverCell       = -1;
+        m_bRollDragPending = false;
+        m_bRollDragging    = false;
+        m_bOpening         = false; // open reveal (if any) is done
+        m_rollSnapTex      = nullptr;
+        if (PWINDOW) {
+            g_pHyprRenderer->damageBox(m_rollBox);
+            PWINDOW->setHidden(false);
+            g_pCompositor->changeWindowZOrder(PWINDOW, true);
+            Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+            // the surface was hidden; nudge the client to repaint (QtWebEngine
+            // presents black after its surface is un-hidden until it redraws)
+            VtbIpc::sendWake(appPid());
+        }
+    }
+    // ROLL_UP: the window stays hidden; the bar simply settles into its dropped
+    // resting state (downTNow() now reads 1 off m_bRolledUp). If this roll-up was
+    // the first half of a close, start the tail bar fade-out now.
+    if (dir == ROLL_UP && m_bClosing)
+        startBarFade();
+
+    damageEntire();
+}
+
+// Roll-up windowshade toggle. Animated by default (drawer slide + set-down);
+// the session-restore path passes animate=false to snap straight to the rolled
+// state at login. Floating only, mutually exclusive with maximize/minimize.
+// Re-entry while an animation is in flight is ignored.
+void CVtbDeco::toggleRollup(bool animate) {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || !PWINDOW->m_isFloating || m_bMinimized || m_bMaximized)
+        return;
+    if (m_rollAnim != ROLL_NONE)
+        return;
+
+    if (animate) {
+        startRollAnim(m_bRolledUp ? ROLL_OUT : ROLL_UP);
+        return;
+    }
+
+    // instant path (no animation): straight to the target state
+    if (m_bRolledUp) {
+        m_bRolledUp        = false;
+        m_iHoverCell       = -1;
+        m_bRollDragPending = false;
+        m_bRollDragging    = false;
+        m_rollSnapTex      = nullptr;
+        g_pHyprRenderer->damageBox(m_rollBox);
+        PWINDOW->setHidden(false);
+        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+        Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+        VtbIpc::sendWake(appPid());
+        damageEntire();
+        return;
+    }
+
+    m_rollBox          = assignedBoxGlobal();
+    m_bRolledUp        = true;
+    m_iHoverCell       = -1;
+    m_bRollDragPending = false;
+    m_bRollDragging    = false;
+    hideRolledWindow(PWINDOW);
+    damageEntire(); // draws the bar at its dropped resting position
+}
+
+// Enqueue the shaded window's bar (and, mid-animation, its sliding snapshot +
+// drop shadow) into the current frame's render pass. Called per-monitor from
+// main.cpp's render-stage hook (a hidden window gets no draw() of its own), and
+// also drives the roll-up / roll-out animation clock. Skips monitors/workspaces
+// the shade isn't showing on.
 void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
-    if (!m_bRolledUp || !g_pGlobalState || !g_pGlobalState->config.enabled->value())
+    if (!g_pGlobalState || !g_pGlobalState->config.enabled->value())
+        return;
+    if (!m_bRolledUp && m_rollAnim == ROLL_NONE)
         return;
 
     const auto PWINDOW = m_pWindow.lock();
@@ -2166,7 +2514,55 @@ void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
     if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
         return;
 
-    auto data = CVtbPassElement::SVtbData{this, 1.F};
+    stepRollAnim();
+
+    // roll-out just landed: the window is live again, nothing here to draw (it
+    // renders its own decorations this same frame, past this render stage)
+    if (!m_bRolledUp && m_rollAnim == ROLL_NONE)
+        return;
+
+    // keep frames coming until the animation lands: damage the whole reach of
+    // the slide + shadow so the next frame repaints it
+    if (m_rollAnim != ROLL_NONE) {
+        const double L = m_rollWinBox.x - VTB_SHADOW_SIZE;
+        const double R = m_rollBox.x + m_rollBox.w;
+        const double H = std::max(m_rollBox.h, m_rollWinBox.h) + 2 * VTB_SHADOW_SIZE;
+        g_pHyprRenderer->damageBox(CBox{L, m_rollBox.y - VTB_SHADOW_SIZE, R - L, H});
+    }
+
+    // Lone-bar fade, shared by open (fade IN, then roll out) and close (roll up,
+    // then fade OUT and ask the client to close). Only one is ever active.
+    float barA = 1.f;
+    if (m_bBarFadingIn || m_bBarFading) {
+        const auto  now = Time::steadyNow();
+        const float dt  = std::chrono::duration<float>(now - m_barFadeAt).count();
+        m_barFadeAt     = now;
+        m_barFadeProgress = std::min(1.f, m_barFadeProgress + dt / VTB_FADE_DURATION);
+        barA              = m_bBarFadingIn ? m_barFadeProgress : (1.f - m_barFadeProgress);
+
+        if (m_barFadeProgress < 1.f) {
+            g_pHyprRenderer->damageBox(CBox{m_rollBox}.expand(VTB_SHADOW_SIZE)); // keep frames coming
+        } else if (m_bBarFadingIn) {
+            // open: bar is fully in — now roll the content out to reveal it. The
+            // roll-out reuses the snapshot captured in startOpenReveal.
+            m_bBarFadingIn = false;
+            barA           = 1.f;
+            startRollAnim(ROLL_OUT);
+        } else if (!m_bCloseReady) {
+            // close: bar has faded to nothing — actually close the window now,
+            // deferred off the render loop (the window's own weak-ref is reliable,
+            // unlike our self-ref).
+            m_bCloseReady = true;
+            g_pHyprRenderer->damageBox(CBox{m_rollBox}.expand(VTB_SHADOW_SIZE)); // final clear of the bar
+            PHLWINDOWREF w = m_pWindow;
+            g_pEventLoopManager->doLater([w]() {
+                if (auto win = w.lock())
+                    win->sendClose();
+            });
+        }
+    }
+
+    auto data = CVtbPassElement::SVtbData{this, barA};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CVtbPassElement>(data));
 }
 
