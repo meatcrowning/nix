@@ -807,14 +807,15 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     if (ROLLANIM)
         drawRollSnapshot(barBox, SCALE, rollSlideT, a);
 
-    // roll animation: the window border, crossfading focused<->unfocused in step
-    // with the SLIDE (not the set-down), so unrolling looks like the window
-    // "coming to focus" as it emerges and rolling up looks like it dimming as it
-    // tucks away. The snapshot is clipped to the bare client rect (no border in
-    // it), and the hidden window draws none, so this is the only border shown for
-    // the whole animation — it hands off seamlessly to the live window's own
-    // (warped-active) border the instant the roll-out lands.
-    if (ROLLANIM)
+    // roll-OUT only: the emerging window's border, crossfading unfocused->focused
+    // in step with the SLIDE, so unrolling looks like the window "coming to focus"
+    // as it emerges. The snapshot is clipped to the bare client rect (no border in
+    // it) and the hidden window draws none, so this is the only border shown for
+    // the whole reveal — it hands off to the live window's own border as it lands.
+    // NOT drawn on roll-UP: there the window ends hidden with no live border to
+    // hand off to, so the last frame's outline had nothing to clear it and sat
+    // stale until the bar was moved.
+    if (ROLLANIM && m_rollAnim == ROLL_OUT)
         drawRollBorder(barBox, SCALE, rollSlideT, accentColor, inactiveColor, a);
 
     // NOTE: the hover tooltip is NOT drawn here — this pass element is an
@@ -2623,7 +2624,12 @@ void CVtbDeco::finishRollAnim() {
     if (dir == ROLL_UP && m_bClosing)
         startBarFade();
 
-    damageEntire();
+    // Clear the last animation frame's drawRollBorder outline: it sat bs px
+    // OUTSIDE the bar box, so a plain damageEntire() (bar box only) left a stale
+    // left/edge strip that trailed until the bar was moved. Damage the bar box
+    // grown by the shadow + border reach.
+    const double M = VTB_SHADOW_SIZE + (PWINDOW ? PWINDOW->getRealBorderSize() : 0) + 2;
+    g_pHyprRenderer->damageBox(CBox{effectiveBoxGlobal()}.expand(M));
 }
 
 // Roll-up windowshade toggle. Animated by default (drawer slide + set-down);
@@ -2692,12 +2698,18 @@ void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
         return;
 
     // keep frames coming until the animation lands: damage the whole reach of
-    // the slide + shadow so the next frame repaints it
+    // the slide + shadow + drawRollBorder overhang so the next frame repaints it.
+    // The margin MUST include the border size: drawRollBorder frames the visible
+    // frame bs px OUTSIDE effectiveBoxGlobal on every side, so a box that stopped
+    // at the bar edges left the border's outer strip un-repainted — it trailed /
+    // flashed and, on the final frame, sat as a stale outline until the next move.
     if (m_rollAnim != ROLL_NONE) {
-        const double L = m_rollWinBox.x - VTB_SHADOW_SIZE;
-        const double R = m_rollBox.x + m_rollBox.w;
-        const double H = std::max(m_rollBox.h, m_rollWinBox.h) + 2 * VTB_SHADOW_SIZE;
-        g_pHyprRenderer->damageBox(CBox{L, m_rollBox.y - VTB_SHADOW_SIZE, R - L, H});
+        const double M = VTB_SHADOW_SIZE + PWINDOW->getRealBorderSize() + 2;
+        const double L = std::min(m_rollWinBox.x, m_rollBox.x) - M;
+        const double R = m_rollBox.x + m_rollBox.w + M;
+        const double T = m_rollBox.y - M;
+        const double B = m_rollBox.y + std::max(m_rollBox.h, m_rollWinBox.h) + M;
+        g_pHyprRenderer->damageBox(CBox{L, T, R - L, B - T});
     }
 
     // Lone-bar fade, shared by open (fade IN, then roll out) and close (roll up,
