@@ -41,9 +41,18 @@ def main():
     if avg_sat < 0.15:
         s = min(s, 0.12)   # stay grey/silver
     else:
-        s = max(s, 0.55)   # guarantee a vivid, legible accent
+        s = max(s, 0.55)   # keep a defined hue to derive the palette from
 
-    accent = hsv_hex(h, min(s, 1.0), max(v, 0.80))
+    # Pastel, not fluorescent: a bright surface with high saturation reads as
+    # neon on the black panel. Pastels keep the brightness but wash the chroma
+    # out, so cap saturation low on the light surfaces (accent/text/status) and
+    # push their value up. The dark structural tones (DIM/BORDER/BGALT) sit at
+    # low value where high chroma doesn't glow, so they keep more saturation to
+    # stay distinguishable. PASTEL folds in the grey/silver case (s already <=
+    # 0.12 there, so the cap is a no-op and silver stays silver).
+    PASTEL = min(s, 0.34)
+
+    accent = hsv_hex(h, PASTEL, max(v, 0.90))
     out = {
         "ACCENT":    accent,
         # Body text IS the accent colour (not a brighter tint of it), so the
@@ -51,18 +60,20 @@ def main():
         # and the KDE/Qt apps' normal text — every "focused" surface is one
         # colour. TEXTDIM below still gives an inactive/secondary tier.
         "TEXT":      accent,
-        "TEXTDIM":   hsv_hex(h, min(s, 0.60), 0.55),
+        "TEXTDIM":   hsv_hex(h, min(s, 0.40), 0.60),
         "DIM":       hsv_hex(h, min(s, 0.50), 0.33),
         "BORDER":    hsv_hex(h, min(s, 0.60), 0.22),
         "BGALT":     hsv_hex(h, min(s, 0.55), 0.07),
         "HIGHLIGHT": hsv_hex(h, min(s, 0.60), 0.13),
         "BG":        "000000",
         # Status colours kept on the accent hue (monochrome look) but varied in
-        # brightness so battery/wifi levels still read at a glance.
-        "OK":        hsv_hex(h, min(s, 0.55), 0.88),
-        "WARN":      hsv_hex(h, min(s, 0.70), 0.72),
-        "CRIT":      hsv_hex(h, min(s, 0.95), 0.98),
-        "INFO":      hsv_hex(h, min(s, 0.50), 0.68),
+        # brightness so battery/wifi levels still read at a glance. Softened to
+        # match the pastel accent — CRIT keeps a little more chroma so an alarm
+        # still stands out.
+        "OK":        hsv_hex(h, PASTEL, 0.92),
+        "WARN":      hsv_hex(h, min(s, 0.44), 0.80),
+        "CRIT":      hsv_hex(h, min(s, 0.55), 0.98),
+        "INFO":      hsv_hex(h, min(s, 0.34), 0.72),
     }
     for k, val in out.items():
         print("%s=%s" % (k, val))
