@@ -433,7 +433,14 @@ class GmXhrHandler(QWebEngineUrlSchemeHandler):
             self._send(job, {"__error": "bad gmxhr request"})
             return
         method = (spec.get("method") or "GET").upper()
-        req = QNetworkRequest(QUrl(spec.get("url") or ""))
+        target = QUrl(spec.get("url") or "")
+        # Only ever proxy http(s). QNetworkAccessManager otherwise happily serves
+        # file:// (turning this into an arbitrary local-file read for any page
+        # that reaches the handler) and could hit localhost/LAN services (SSRF).
+        if target.scheme().lower() not in ("http", "https"):
+            self._send(job, {"__error": "gmxhr: only http/https targets are allowed"})
+            return
+        req = QNetworkRequest(target)
         req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
                          QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
         has_ua = False
@@ -549,7 +556,10 @@ class CmdHandler(QWebEngineUrlSchemeHandler):
             if u.host() == "open":
                 from PySide6.QtCore import QUrlQuery
                 target = QUrlQuery(u).queryItemValue("u", QUrl.ComponentFormattingOption.FullyDecoded)
-                if target:
+                # Any page can fetch surfercmd://open, so only honour schemes the
+                # image-click JS actually emits (http/https/data); never let a
+                # page force-open a file:// (local-file display) or other scheme.
+                if target and QUrl(target).scheme().lower() in ("http", "https", "data"):
                     self.openTab.emit(target)
         except Exception:
             pass
