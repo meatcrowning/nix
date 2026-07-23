@@ -2291,8 +2291,11 @@ SDecorationPositioningInfo CVtbShadowDeco::getPositioningInfo() {
     info.edges    = DECORATION_EDGE_LEFT | DECORATION_EDGE_BOTTOM;
     info.priority = 5;      // below the titlebar; order among non-solid decos is irrelevant
     info.reserved = false;  // must NOT inset the window — this is just a shadow
-    // Declare the shadow's reach so a moving window's damage box includes it.
-    info.desiredExtents = {{(double)VTB_SHADOW_SIZE, 0.0}, {0.0, (double)VTB_SHADOW_SIZE}};
+    // Declare the shadow's reach so a moving window's damage box includes it:
+    // left + bottom for the L-overhang, and right for the titlebar strip the
+    // shadow now spans (so its under-bar bottom edge doesn't trail on moves).
+    const double BARW = g_pGlobalState && g_pGlobalState->config.enabled->value() ? (double)totalBarW() : 0.0;
+    info.desiredExtents = {{(double)VTB_SHADOW_SIZE, 0.0}, {BARW, (double)VTB_SHADOW_SIZE}};
     return info;
 }
 
@@ -2331,10 +2334,14 @@ void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
     if (local.w < 1 || local.h < 1)
         return;
 
-    // Window-sized rect offset down and left; NON_SOLID + BOTTOM layer means the
-    // window covers its centre and only the sharp L-overhang shows.
-    const double N = VTB_SHADOW_SIZE * SCALE;
-    CBox         shadowBox = {local.x - N, local.y + N, local.w, local.h};
+    // Frame-sized rect offset down and left; NON_SOLID + BOTTOM layer means the
+    // window (and its titlebar) covers the centre and only the sharp L-overhang
+    // shows. m_realSize is the client surface only — the titlebar is a reserved
+    // deco on the RIGHT edge, so the visible frame is that much wider; widen the
+    // shadow to match or the whole bar column casts nothing.
+    const double N    = VTB_SHADOW_SIZE * SCALE;
+    const double BARW = totalBarW() * SCALE;
+    CBox         shadowBox = {local.x - N, local.y + N, local.w + BARW, local.h};
     shadowBox.round();
 
     CHyprColor color = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
@@ -2351,9 +2358,11 @@ void CVtbShadowDeco::damageEntire() {
         return;
     const auto PWINDOW = m_pWindow.lock();
     CBox       g = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
-    const double N = VTB_SHADOW_SIZE;
-    // window box grown by the shadow's left + bottom overhang
-    g_pHyprRenderer->damageBox(CBox{g.x - N, g.y, g.w + N, g.h + N});
+    const double N    = VTB_SHADOW_SIZE;
+    const double BARW = g_pGlobalState && g_pGlobalState->config.enabled->value() ? (double)totalBarW() : 0.0;
+    // window box grown by the shadow's left + bottom overhang, plus the titlebar
+    // strip on the right (the shadow now spans it too)
+    g_pHyprRenderer->damageBox(CBox{g.x - N, g.y, g.w + N + BARW, g.h + N});
 }
 
 eDecorationType CVtbShadowDeco::getDecorationType() {
