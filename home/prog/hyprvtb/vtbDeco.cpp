@@ -2707,10 +2707,15 @@ void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
     if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault() || PWINDOW->isFullscreen())
         return;
 
-    // no shadow on our custom-maximized windows (the sibling titlebar knows)
+    // no shadow on our custom-maximized windows, nor on a rolled-up one (the
+    // sibling titlebar knows). A rolled-up window is hidden and its lone bar
+    // casts no shadow at rest — but this bottom-layer deco still gets drawn for
+    // the hidden window, so without this guard dragging the bar drags a stale
+    // hard shadow that trails and flashes. isRolledUp() stays true across the
+    // whole roll-up/roll-out animation too, where drawRollShadow owns the shadow.
     for (auto& b : g_pGlobalState->bars) {
         if (b && b->getOwner() == PWINDOW) {
-            if (b->isMaximized())
+            if (b->isMaximized() || b->isRolledUp())
                 return;
             break;
         }
