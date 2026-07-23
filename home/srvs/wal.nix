@@ -33,6 +33,10 @@ in
       source = walExtract;
       executable = true;
     };
+    "scripts/wal-repo-sync.sh" = {
+      source = ./wal-files/wal-repo-sync.sh;
+      executable = true;
+    };
   };
 
   # The wallpaper set is versioned in the repo (./wal-files/wallpapers) so it's
@@ -86,6 +90,29 @@ in
 
   systemd.user.paths.wal-prepare = {
     Unit.Description = "Watch ~/Pictures/wall and pre-cache any new wallpaper's tile/theme";
+    Path.PathModified = "%h/Pictures/wall";
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  # Auto-version wallpapers dropped into ~/Pictures/wall: copy them into the
+  # repo's wallpaper set and commit + push (see wal-repo-sync.sh for the paranoid
+  # git handling). PATH is pinned so the service finds git + gh (the credential
+  # helper is `!gh auth git-credential`, so gh must be resolvable) without
+  # depending on the ambient systemd-user PATH.
+  systemd.user.services.wal-repo-sync = {
+    Unit = {
+      Description = "Commit + push wallpapers dropped into ~/Pictures/wall to the nix repo";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      Environment = [ "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.coreutils ]}" ];
+      ExecStart = "%h/.config/scripts/wal-repo-sync.sh";
+    };
+  };
+
+  systemd.user.paths.wal-repo-sync = {
+    Unit.Description = "Watch ~/Pictures/wall and sync new wallpapers into the nix repo";
     Path.PathModified = "%h/Pictures/wall";
     Install.WantedBy = [ "default.target" ];
   };
