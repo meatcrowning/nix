@@ -89,6 +89,19 @@ PanelWindow {
         }
     }
 
+    // wf-recorder outlives quickshell reloads — a wallpaper/theme change
+    // rewrites Theme.qml and recreates this whole tree, wiping `recording`
+    // while the recorder keeps running. Re-detect a live recording on startup
+    // so the toast comes back instead of silently vanishing mid-record.
+    Component.onCompleted: recCheckProc.running = true
+    Process {
+        id: recCheckProc
+        command: ["pgrep", "-x", "wf-recorder"]
+        stdout: StdioCollector {
+            onStreamFinished: root.recording = this.text.trim().length > 0
+        }
+    }
+
     // Window rects for window mode, from hyprctl (global coordinates).
     // Offscreen (minimized) windows are naturally unreachable — their rects
     // are outside the output.

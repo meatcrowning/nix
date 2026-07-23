@@ -20,7 +20,9 @@ PanelWindow {
 
     anchors { top: true; right: true }
     margins { top: Theme.gap; right: Theme.gap }
-    implicitWidth: 180
+    // Size to the text rather than a fixed slab — just enough padding around
+    // "recording..." to breathe.
+    implicitWidth: label.implicitWidth + 32
     implicitHeight: 44
     exclusiveZone: 0
 
