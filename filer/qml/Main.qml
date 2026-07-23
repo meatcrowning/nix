@@ -46,6 +46,19 @@ Window {
     // state: 0 normal, 1 active/lit, 2 disabled ("-" spacers dropped — the
     // column reads cleaner as one uniform grid).
     readonly property var tbButtons: {
+        // In the image viewer the strip becomes viewer controls: flip through
+        // the dir's images, zoom, fit, and close back to browsing.
+        if (view.viewerOpen) {
+            const multi = view.viewerImages.length > 1 ? 0 : 2;
+            return [
+                { id: "vprev",    label: "‹",   state: multi, tip: "previous image" },
+                { id: "vnext",    label: "›",   state: multi, tip: "next image" },
+                { id: "vzoomout", label: "−",   state: 0,     tip: "zoom out" },
+                { id: "vzoomin",  label: "+",   state: 0,     tip: "zoom in" },
+                { id: "vfit",     label: "fit", state: 0,     tip: "fit to window" },
+                { id: "vclose",   label: "×",   state: 0,     tip: "close viewer" },
+            ];
+        }
         const sort = (f, l, tip) => ({ id: "sort-" + f,
                                        label: view.sortField === f ? l + (view.sortAsc ? "↑" : "↓") : l,
                                        state: view.sortField === f ? 1 : 0, tip: tip });
@@ -69,6 +82,15 @@ Window {
     Connections {
         target: Titlebar
         function onClicked(id) {
+            // viewer controls (only registered while the viewer is open)
+            switch (id) {
+            case "vprev":    view.viewerPrev();    return;
+            case "vnext":    view.viewerNext();    return;
+            case "vzoomout": imageViewer.zoomBy(0.8);  return;
+            case "vzoomin":  imageViewer.zoomBy(1.25); return;
+            case "vfit":     imageViewer.fit();    return;
+            case "vclose":   view.closeViewer();   return;
+            }
             if (id.startsWith("sort-")) { view.setSort(id.substring(5)); return; }
             switch (id) {
             case "new":    newDlg.open(); break;
@@ -120,12 +142,45 @@ Window {
         // current dir — images inside expanded subdirs stay inline as rows.
         property var images: []
 
-        // Open a file with the right app for its kind: images go to feh, the
-        // rest to xdg-open. (Dirs are handled by go(), not here.)
+        // Open a file with the right thing for its kind: images go to the
+        // built-in viewer (below), the rest to xdg-open. (Dirs → go(), not here.)
         function openFile(p, kind) {
-            if (kind === "image") FileOps.execDetached(["feh", "--", p]);
+            if (kind === "image") openImage(p);
             else FileOps.execDetached(["xdg-open", p]);
         }
+
+        // ---- built-in image viewer state ----
+        // viewerImages is the flip-through set (the images of the dir CONTAINING
+        // the opened file, in the current sort order); viewerIndex points into
+        // it, and -1 means the viewer is closed. The ImageViewer overlay binds
+        // to viewerPath and the prev/next/close intents drive the index.
+        property var viewerImages: []
+        property int viewerIndex: -1
+        readonly property bool viewerOpen: viewerIndex >= 0 && viewerIndex < viewerImages.length
+        readonly property string viewerPath: viewerOpen ? viewerImages[viewerIndex].path : ""
+
+        // the image entries of one dir, in sort order, honouring the hidden toggle
+        function imagesIn(dir) {
+            const es = sortEntries(FileOps.listDir(dir));
+            const out = [];
+            for (let i = 0; i < es.length; i++) {
+                const e = es[i];
+                if (!showHidden && e.hidden) continue;
+                if (e.kind === "image") out.push(e);
+            }
+            return out;
+        }
+        function openImage(p) {
+            const imgs = imagesIn(parentOf(p));
+            let idx = -1;
+            for (let i = 0; i < imgs.length; i++) if (imgs[i].path === p) { idx = i; break; }
+            if (idx < 0) { imgs.push({ name: dirNameOf(p), path: p, kind: "image" }); idx = imgs.length - 1; }
+            selected = p;
+            viewerImages = imgs; viewerIndex = idx;
+        }
+        function viewerNext() { if (viewerImages.length) viewerIndex = (viewerIndex + 1) % viewerImages.length; }
+        function viewerPrev() { if (viewerImages.length) viewerIndex = (viewerIndex - 1 + viewerImages.length) % viewerImages.length; }
+        function closeViewer() { viewerIndex = -1; }
 
         // sort state (driven by the header sort buttons). Grouping is always
         // hidden → dirs → files; sortField/sortAsc order within each group.
@@ -242,7 +297,7 @@ Window {
 
         function go(p) { path = p; selected = ""; rebuild(); refreshDirSize(); persist(); }
 
-        Component.onCompleted: { rebuild(); refreshDirSize(); Titlebar.setFooter(dirSizeStr); }
+        Component.onCompleted: { rebuild(); refreshDirSize(); Titlebar.setFooter(footerStr); }
 
         // integer byte size -> compact string (delegate helper)
         function sizeStr(b) {
@@ -269,9 +324,13 @@ Window {
         // buttons, dir-size readout — moved into the REAL compositor titlebar:
         // see tbButtons/Connections up top, and the dirSizeStr footer below.)
 
-        // dir-size readout: stacked at the bottom of the titlebar's inner
-        // column, drawn by the plugin (FOOTER message).
-        onDirSizeStrChanged: Titlebar.setFooter(dirSizeStr)
+        // titlebar footer readout (drawn by the plugin at the bottom of the
+        // inner column): the dir's total size while browsing, or the image
+        // position ("3/15  name") while the viewer is open.
+        readonly property string footerStr: viewerOpen
+            ? ((viewerIndex + 1) + "/" + viewerImages.length + "  " + dirNameOf(viewerPath))
+            : dirSizeStr
+        onFooterStrChanged: Titlebar.setFooter(footerStr)
 
         // ---- header: up + editable location bar ----
         Rectangle {
@@ -531,6 +590,22 @@ Window {
                     }
                 }
             }
+        }
+
+        // ---- built-in image viewer (overlay, above the tree) ----
+        // Covers the browser while an image is open; nav/zoom/close come from
+        // the titlebar buttons (tbButtons/onClicked above) and its own keys.
+        ImageViewer {
+            id: imageViewer
+            anchors.fill: parent
+            z: 100
+            visible: view.viewerOpen
+            winActive: win.active
+            source: view.viewerPath !== "" ? ("file://" + encodeURI(view.viewerPath)) : ""
+            name: view.dirNameOf(view.viewerPath)
+            onNext: view.viewerNext()
+            onPrev: view.viewerPrev()
+            onCloseRequested: view.closeViewer()
         }
 
         // ---- modal dialogs (simple centered prompts) ----

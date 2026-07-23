@@ -16,7 +16,7 @@
           src = ./.;
 
           nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-          buildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyside6 ])) pkgs.qt6.qtdeclarative ];
+          buildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyside6 ])) pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
 
           dontWrapQtApps = true; # we wrap the python launcher ourselves, below
           installPhase = ''
@@ -45,6 +45,8 @@
           packages = [
             (pkgs.python3.withPackages (ps: [ ps.pyside6 ]))
             pkgs.qt6.qtdeclarative
+            pkgs.qt6.qtimageformats
+            pkgs.qt6.qtsvg
           ];
         };
       });

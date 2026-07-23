@@ -36,7 +36,11 @@ let
         dontUnpack = true;
 
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative ];
+        # qtimageformats/qtsvg add the extra image plugins (webp, tiff, svg, …)
+        # the built-in viewer decodes beyond qtbase's png/jpg/gif — wrapQtAppsHook
+        # puts them on QT_PLUGIN_PATH. (On `air` filer runs Fedora's system Qt,
+        # which already ships these, so this only matters for `top`.)
+        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''

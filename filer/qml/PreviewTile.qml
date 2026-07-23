@@ -41,13 +41,16 @@ Rectangle {
         smooth: false
     }
 
-    // placeholder glyph for a previewable kind whose real preview isn't wired
-    // yet (and for an image still decoding / failed to load).
+    // placeholder glyph: a previewable kind whose real preview isn't wired yet
+    // (▢), an image still decoding (…), or one that failed to decode — e.g. a
+    // truncated/misnamed download (✕).
     PixelText {
         anchors.centerIn: parent
         visible: tile.entry.kind !== "image" || thumb.status !== Image.Ready
-        text: tile.entry.kind === "image" ? "…" : "▢"
-        color: tile.winActive ? Theme.textDim : Theme.inactive
+        text: tile.entry.kind !== "image" ? "▢"
+            : thumb.status === Image.Error ? "✕" : "…"
+        color: (tile.entry.kind === "image" && thumb.status === Image.Error)
+               ? Theme.crit : (tile.winActive ? Theme.textDim : Theme.inactive)
     }
 
     // filename ribbon across the bottom, over a translucent scrim so it stays
