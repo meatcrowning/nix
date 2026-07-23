@@ -36,6 +36,25 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 
+# Preview classification. `kind` is the scaffold for file previews: the QML side
+# groups/renders entries by it (images get a thumbnail grid at the top of the
+# dir; everything else stays a plain row). Extend this — a new extension set and
+# a new kind — to teach filer to preview more types (video poster frames, PDFs,
+# …); the matching render branch lives in qml/PreviewTile.qml.
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
+              ".avif", ".jxl", ".tif", ".tiff", ".ico", ".ppm", ".pgm"}
+
+
+def preview_kind(name, is_dir):
+    """Coarse type of an entry, for the preview layer. "dir" | "image" | "file"."""
+    if is_dir:
+        return "dir"
+    ext = os.path.splitext(name)[1].lower()
+    if ext in IMAGE_EXTS:
+        return "image"
+    return "file"
+
+
 # The panel's palette file, rewritten by wal-set.sh between the wal markers.
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
 PALETTE_KEYS = ["bg", "bgAlt", "border", "accent", "dim", "text", "textDim",
@@ -148,7 +167,7 @@ class FileOps(QObject):
     @Slot(str, result="QVariantList")
     def listDir(self, path):
         """One directory level, for the tree model. Returns a list of
-        {name, path, isDir, size, created, modified, hidden}. created/modified
+        {name, path, isDir, kind, size, created, modified, hidden}. created/modified
         are epoch seconds — created is st_birthtime where the platform/filesystem
         exposes it, else st_ctime. Hidden entries are included (the QML side sorts
         and orders them). Unreadable dirs return an empty list."""
@@ -170,6 +189,7 @@ class FileOps(QObject):
             except OSError:
                 size = modified = created = 0
             items.append({"name": e.name, "path": e.path, "isDir": is_dir,
+                          "kind": preview_kind(e.name, is_dir),
                           "size": size, "created": created, "modified": modified,
                           "hidden": e.name.startswith(".")})
         return items

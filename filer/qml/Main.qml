@@ -115,6 +115,18 @@ Window {
         property var rows: []
         property var expandedPaths: new Set()
 
+        // Image entries of the CURRENT dir, pulled out of `rows` and shown in a
+        // thumbnail grid pinned above the list (the ListView header). Only the
+        // current dir — images inside expanded subdirs stay inline as rows.
+        property var images: []
+
+        // Open a file with the right app for its kind: images go to feh, the
+        // rest to xdg-open. (Dirs are handled by go(), not here.)
+        function openFile(p, kind) {
+            if (kind === "image") FileOps.execDetached(["feh", "--", p]);
+            else FileOps.execDetached(["xdg-open", p]);
+        }
+
         // sort state (driven by the header sort buttons). Grouping is always
         // hidden → dirs → files; sortField/sortAsc order within each group.
         property string sortField: startSortField   // "name" | "created" | "size"
@@ -190,20 +202,27 @@ Window {
         }
 
         // Recursively flatten `dir` into `out`, descending into any subdir whose
-        // path is in expandedPaths. Reassigning `rows` at the end drives the view.
-        function buildRows(dir, depth, out) {
+        // path is in expandedPaths. At depth 0 (the current dir) images are
+        // diverted into `imgOut` instead of `out` — they render in the preview
+        // grid, not the list. Reassigning `rows`/`images` at the end drives the view.
+        function buildRows(dir, depth, out, imgOut) {
             const entries = sortEntries(FileOps.listDir(dir));
             for (let i = 0; i < entries.length; i++) {
                 const e = entries[i];
                 if (!view.showHidden && e.hidden) continue;   // "h" toggle: drop dotfiles
+                if (depth === 0 && e.kind === "image") { imgOut.push(e); continue; }
                 const exp = e.isDir && view.expandedPaths.has(e.path);
-                out.push({ name: e.name, path: e.path, isDir: e.isDir,
+                out.push({ name: e.name, path: e.path, isDir: e.isDir, kind: e.kind,
                            size: e.size, created: e.created, modified: e.modified,
                            depth: depth, expanded: exp });
-                if (exp) buildRows(e.path, depth + 1, out);
+                if (exp) buildRows(e.path, depth + 1, out, imgOut);
             }
         }
-        function rebuild() { const out = []; buildRows(path, 0, out); rows = out; }
+        function rebuild() {
+            const out = [], imgs = [];
+            buildRows(path, 0, out, imgs);
+            rows = out; images = imgs;
+        }
         function refresh() { rebuildKeepScroll(); }
 
         // Reassigning the model resets ListView.contentY to 0, which is right for
@@ -359,6 +378,32 @@ Window {
             model: view.rows
             boundsBehavior: Flickable.StopAtBounds
 
+            // ---- preview grid: the current dir's images, above the rows ----
+            // Scrolls with the list (it's the header), so it reads as the top of
+            // the directory. Collapses to nothing when the dir has no images.
+            header: Item {
+                width: list.width
+                visible: view.images.length > 0
+                height: visible ? grid.implicitHeight + 8 : 0
+
+                Flow {
+                    id: grid
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 4; rightMargin: 4; topMargin: 4 }
+                    spacing: 4
+                    Repeater {
+                        model: view.images
+                        PreviewTile {
+                            required property var modelData
+                            entry: modelData
+                            winActive: win.active
+                            selected: view.selected === modelData.path
+                            onClicked: { view.selected = modelData.path; view.selectedIsDir = false; }
+                            onOpened: view.openFile(modelData.path, modelData.kind)
+                        }
+                    }
+                }
+            }
+
             delegate: Rectangle {
                 id: row
                 required property var modelData
@@ -428,7 +473,7 @@ Window {
                     }
                     onDoubleClicked: {
                         if (row.modelData.isDir) view.go(row.abs);
-                        else FileOps.execDetached(["xdg-open", row.abs]);
+                        else view.openFile(row.abs, row.modelData.kind);
                     }
                 }
 
