@@ -254,11 +254,25 @@ CBox CVtbDeco::assignedBoxGlobal() {
     if (!validMapped(m_pWindow))
         return {};
 
-    CBox box = m_bAssignedBox;
-    box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_RIGHT, m_pWindow.lock()));
+    const auto PWINDOW = m_pWindow.lock();
+    CBox       box     = m_bAssignedBox;
+    box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(DECORATION_EDGE_RIGHT, PWINDOW));
 
-    const auto PWORKSPACE      = m_pWindow->m_workspace;
-    const auto WORKSPACEOFFSET = PWORKSPACE && !m_pWindow->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D();
+    // Fallback when the positioner hasn't handed us a box yet: right after a
+    // roll-out lands the window un-hides and the deco positioner needs a frame
+    // to re-run, leaving m_bAssignedBox at 0x0 — so the bar box collapses and
+    // renderPass early-returns (barBox.w < 1), which blinked the titlebar out
+    // for a frame the instant the animation finished, then back once the
+    // positioner caught up. Derive the box straight off the window geometry
+    // (content's right edge, totalBarW wide, full height — mirrors frameBox()).
+    if (box.w < 1 || box.h < 1) {
+        const auto POS = PWINDOW->m_realPosition->value();
+        const auto SZ  = PWINDOW->m_realSize->value();
+        box            = {POS.x + SZ.x, POS.y, (double)totalBarW(), SZ.y};
+    }
+
+    const auto PWORKSPACE      = PWINDOW->m_workspace;
+    const auto WORKSPACEOFFSET = PWORKSPACE && !PWINDOW->m_pinned ? PWORKSPACE->m_renderOffset->value() : Vector2D();
 
     return box.translate(WORKSPACEOFFSET);
 }
@@ -432,16 +446,19 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     // colour) when focused, the inactive-border grey otherwise.
     auto textColor = FOCUSED ? accentColor : inactiveColor;
 
-    // During the roll animation the tint crossfades focused->unfocused in step
-    // with the set-down beat (rollDownT: 0 focused .. 1 unfocused), independent
-    // of the real focus state (which was handed away the moment we shaded).
+    // During the roll animation the tint crossfades focused<->unfocused in step
+    // with the SLIDE (rollSlideT: 0 fully out/focused .. 1 tucked/unfocused),
+    // independent of the real focus state (handed away the moment we shaded). Tied
+    // to the slide, not the set-down beat, so the bar text comes to focus in step
+    // with the window border (drawRollBorder) and the emerging content — the bar
+    // used to change tint during the early lift beat, out of sync with everything.
     float      rollSlideT = 0.f, rollDownT = 0.f;
     const bool ROLLANIM   = rollAnimSubProgress(rollSlideT, rollDownT);
     if (ROLLANIM) {
         auto lerp = [](const CHyprColor& x, const CHyprColor& y, float t) {
             return CHyprColor{x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, x.a + (y.a - x.a) * t};
         };
-        textColor = lerp(accentColor, inactiveColor, rollDownT);
+        textColor = lerp(accentColor, inactiveColor, rollSlideT);
     }
 
     if (m_fLastScale != SCALE || m_lastTextColor != (uint64_t)textColor.getAsHex() || m_bLastFocus != FOCUSED) {
