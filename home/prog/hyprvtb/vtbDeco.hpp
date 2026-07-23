@@ -315,6 +315,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     // bar's device-space box (already dropped by the set-down).
     void                 drawRollShadow(const CBox& barBoxDev, float scale, float slideT, float downT, float a);
     void                 drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a);
+    void                 drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a);
 
     Vector2D             cursorRelativeToBar();
     CBox                 assignedBoxGlobal();
@@ -348,4 +349,5 @@ class CVtbShadowDeco : public IHyprWindowDecoration {
   private:
     PHLWINDOWREF m_pWindow;
     CBox         m_bAssignedBox;
+    CBox         m_lastCoverBox; // last drawn footprint (global logical); self-damage its move so it doesn't trail
 };

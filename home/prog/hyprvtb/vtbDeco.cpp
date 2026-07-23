@@ -790,6 +790,16 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     if (ROLLANIM)
         drawRollSnapshot(barBox, SCALE, rollSlideT, a);
 
+    // roll animation: the window border, crossfading focused<->unfocused in step
+    // with the SLIDE (not the set-down), so unrolling looks like the window
+    // "coming to focus" as it emerges and rolling up looks like it dimming as it
+    // tucks away. The snapshot is clipped to the bare client rect (no border in
+    // it), and the hidden window draws none, so this is the only border shown for
+    // the whole animation — it hands off seamlessly to the live window's own
+    // (warped-active) border the instant the roll-out lands.
+    if (ROLLANIM)
+        drawRollBorder(barBox, SCALE, rollSlideT, accentColor, inactiveColor, a);
+
     // NOTE: the hover tooltip is NOT drawn here — this pass element is an
     // UNDER-layer decoration (drawn before the window surface), and the tooltip
     // overhangs the window to the left, so drawing it here would put it behind
@@ -838,6 +848,39 @@ void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT
     data.a          = a;
     data.clipRegion = clip;
     g_pHyprOpenGL->renderTexture(m_rollSnapTex, fullBox.round(), data);
+}
+
+// The emerging window's border during a roll animation, drawn on the three sides
+// of the still-visible content strip that aren't against the bar (left, top,
+// bottom). Colour crossfades unfocused->focused with how far the content has
+// slid OUT (revealT: 0 fully tucked .. 1 fully out) — independent of the real
+// focus state, which was handed away when the window shaded. Ties the fade to
+// the slide so it runs across the whole visible motion and lands on the focused
+// tint exactly as the window does.
+void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a) {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+    const double bs = PWINDOW->getRealBorderSize() * scale;
+    if (bs < 1.0)
+        return;
+
+    const double clientW = m_rollWinBox.w * scale;
+    if (clientW < 1.0)
+        return;
+    const double cl = barBoxDev.x - clientW * (1.f - slideT); // content left, sliding
+    const double cr = barBoxDev.x;                            // content right (bar's left edge)
+    const double ct = barBoxDev.y;                            // content top
+    const double ch = barBoxDev.h;                            // content height (== window height)
+
+    const float  revealT = 1.f - slideT; // 0 tucked .. 1 out
+    CHyprColor   bc      = {unfocused.r + (focused.r - unfocused.r) * revealT, unfocused.g + (focused.g - unfocused.g) * revealT,
+                            unfocused.b + (focused.b - unfocused.b) * revealT, unfocused.a + (focused.a - unfocused.a) * revealT};
+    bc.a *= a;
+
+    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct - bs, (cr - cl) + bs, bs}.round(), bc, {});   // top
+    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct + ch, (cr - cl) + bs, bs}.round(), bc, {});   // bottom
+    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs}.round(), bc, {});      // left
 }
 
 // Hover text for a cell: fixed strings for the five system cells, the
@@ -2847,6 +2890,21 @@ void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
     const double BARW = totalBarW() * SCALE;
     CBox         shadowBox = {local.x - N, local.y + N, local.w + BARW, local.h};
     shadowBox.round();
+
+    // Self-damage on motion. Hyprland's per-frame drag/animation damage covers
+    // the window + border but NOT this custom bottom-layer deco's left+bottom
+    // overhang (the now-disabled native drop shadow used to incidentally cover
+    // it), so a moving window trailed the hard shadow's left edge. Whenever the
+    // footprint moves, damage its old ∪ new (global-logical, incl. the drag's
+    // floatingOffset) so the trailing edge repaints. Stable when the window is.
+    const auto&  FO     = PWINDOW->m_floatingOffset;
+    CBox         coverG = {g.x + FO.x - VTB_SHADOW_SIZE, g.y + FO.y, g.w + VTB_SHADOW_SIZE + totalBarW(), g.h + VTB_SHADOW_SIZE};
+    if (coverG.x != m_lastCoverBox.x || coverG.y != m_lastCoverBox.y || coverG.w != m_lastCoverBox.w || coverG.h != m_lastCoverBox.h) {
+        if (m_lastCoverBox.w > 0)
+            g_pHyprRenderer->damageBox(CBox{m_lastCoverBox}.expand(2));
+        g_pHyprRenderer->damageBox(CBox{coverG}.expand(2));
+        m_lastCoverBox = coverG;
+    }
 
     CHyprColor color = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
     color.a *= a;
