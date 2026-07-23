@@ -10,6 +10,15 @@ let
     substitute ${./wal-files/wal-extract.py} $out \
       --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3"
   '';
+  # cursor-recolor.sh needs xcur2png/xcursorgen/magick, which aren't on the bare
+  # system PATH it inherits when Quickshell spawns wal-set.sh. Bake their store
+  # bin dirs into the script's PATH (@toolPath@ placeholder) so it always resolves.
+  cursorTools = lib.makeBinPath [ pkgs.xcur2png pkgs.xcursorgen pkgs.imagemagick ];
+  cursorRecolor = pkgs.runCommand "cursor-recolor.sh" { } ''
+    substitute ${./wal-files/cursor-recolor.sh} $out \
+      --replace-fail "@toolPath@" "${cursorTools}"
+    chmod +x $out
+  '';
 in
 {
   xdg.configFile = {
@@ -38,7 +47,7 @@ in
       executable = true;
     };
     "scripts/cursor-recolor.sh" = {
-      source = ./wal-files/cursor-recolor.sh;
+      source = cursorRecolor;
       executable = true;
     };
   };

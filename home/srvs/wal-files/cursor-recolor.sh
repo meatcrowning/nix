@@ -29,6 +29,14 @@
 # (~25MB each). Decompile is ~1s (once ever); the per-accent recolour is ~2.5s.
 set -u
 
+# xcur2png/xcursorgen/magick live in the Nix profile, not on the bare system
+# PATH. wal-set.sh is often spawned from Quickshell (the wallpaper picker's
+# commit), whose PATH is only /usr/bin etc. — so these tools would be "missing"
+# and the whole cursor step would silently skip. @toolPath@ is substituted at
+# build time (see home/srvs/wal.nix) with their store bin dirs; prepend it so we
+# always find them regardless of the ambient PATH.
+PATH="@toolPath@:$PATH"
+
 ACCENT="${1:-}"
 SIZE="${2:-${XCURSOR_SIZE:-22}}"
 case "$ACCENT" in

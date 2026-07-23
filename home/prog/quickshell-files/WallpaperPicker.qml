@@ -65,6 +65,12 @@ PanelWindow {
 
     function trySyncSelection() {
         if (images.length === 0) return;
+        // Once the user has intentionally flipped, list.currentIndex is the
+        // source of truth — do NOT let a late async refresh (the on-open
+        // listProc/currentProc, or the 3s poll) yank the selection back to the
+        // still-active wallpaper. That race is what made the first pick after
+        // opening get discarded, so the theme only changed on the *second* pick.
+        if (dirty) return;
         const idx = currentPath ? images.indexOf(currentPath) : -1;
         initializing = true;
         list.currentIndex = idx >= 0 ? idx : 0;
@@ -76,7 +82,13 @@ PanelWindow {
         command: ["sh", "-c", root.listScriptPath]
         stdout: StdioCollector {
             onStreamFinished: {
-                root.images = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+                const next = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+                // Only reassign when the set actually changed: assigning a new
+                // array (even an identical one) resets the ListView, which
+                // clobbers currentIndex and would fire a spurious re-preview on
+                // every 3s poll while browsing.
+                if (next.length !== root.images.length || next.some((v, i) => v !== root.images[i]))
+                    root.images = next;
                 root.trySyncSelection();
             }
         }
@@ -166,7 +178,7 @@ PanelWindow {
     // Debounced so holding an arrow key doesn't queue a wal-set.sh per repeat.
     Timer {
         id: applyTimer
-        interval: 180
+        interval: 90
         onTriggered: {
             const item = list.currentItem;
             if (!item) return;

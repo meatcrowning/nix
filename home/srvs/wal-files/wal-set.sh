@@ -111,16 +111,33 @@ if ! pgrep -x hyprpaper >/dev/null 2>&1; then
 fi
 
 # apply live. hyprpaper's IPC occasionally answers "invalid request" under a
-# burst, so we don't gate on a probe — we issue the real commands, retrying by
-# exit code (a successful set prints nothing). NOTE: `hyprpaper unload`/
-# `listloaded` return "invalid hyprpaper request" unconditionally on this
-# hyprpaper build (0.8.4) regardless of syntax (tested: "all", a specific
-# path, comma-separated) — so it's deliberately not called here; retrying it
-# would just burn the full 5-attempt budget for nothing every single run.
-# Skipping it only means old preloaded images linger in hyprpaper's memory.
-retry() { for _ in 1 2 3 4 5; do "$@" >/dev/null 2>&1 && return 0; sleep 0.1; done; return 1; }
-printf '%s' "$PRELOADS"  | while read -r p; do [ -n "$p" ] && retry hyprctl hyprpaper preload "$p"; done
-printf '%s' "$WALLLINES" | while read -r l; do [ -n "$l" ] && retry hyprctl hyprpaper wallpaper "$l"; done
+# burst, so we don't gate on a probe — we issue the real commands and gate on
+# the `wallpaper` set's exit code (a successful set prints nothing). NOTE:
+# `hyprpaper unload`/`listloaded` return "invalid hyprpaper request"
+# unconditionally on this hyprpaper build (0.8.4) regardless of syntax (tested:
+# "all", a specific path, comma-separated) — so they're deliberately not called
+# here; retrying them would just burn the attempt budget for nothing.
+#
+# IMPORTANT: `preload` of an ALREADY-loaded image ALSO returns "invalid request"
+# (exit 1) on this build. Preloading is best-effort (one shot, failure ignored)
+# and only the `wallpaper` set is retried — otherwise every re-visit of an
+# already-loaded image (i.e. almost every picker preview) would sleep the full
+# 5×0.1s preload budget for nothing, which is exactly what made previews lag
+# ~0.5s. The set is what actually needs to land, and it returns 0 once the image
+# is loaded, so on a truly-fresh image the retry re-attempts preload+set until
+# the set sticks.
+printf '%s' "$PRELOADS" | while read -r p; do
+    [ -n "$p" ] && hyprctl hyprpaper preload "$p" >/dev/null 2>&1
+done
+printf '%s' "$WALLLINES" | while read -r l; do
+    [ -z "$l" ] && continue
+    p="${l#*,}"
+    for _ in 1 2 3 4 5; do
+        hyprctl hyprpaper wallpaper "$l" >/dev/null 2>&1 && break
+        hyprctl hyprpaper preload "$p" >/dev/null 2>&1   # fresh image: get it loaded, then retry the set
+        sleep 0.1
+    done
+done
 
 if [ "$WALLPAPER_ONLY" = 1 ]; then
     echo "wal-set: wallpaper-only, skipping theme apply"
