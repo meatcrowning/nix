@@ -134,11 +134,18 @@ hl.config({
 
 hl.env("XCURSOR_SIZE", "22")
 hl.env("HYPRCURSOR_SIZE", "22")
--- Same cursor theme as the Plasma install (~/.icons/GoogleDot-Black,
--- kcminputrc's cursorTheme). hyprcursor falls back to loading it as a plain
--- XCursor theme since it's not a native .hyprcursor theme.
-hl.env("XCURSOR_THEME", "GoogleDot-Black")
-hl.env("HYPRCURSOR_THEME", "GoogleDot-Black")
+-- GoogleDot-Accent is cursor-recolor.sh's copy of the Plasma-install base theme
+-- (~/.icons/GoogleDot-Black) with its white outline tinted to the wallpaper
+-- accent (black core kept); it's regenerated on every wal-set.sh apply. Loading
+-- it here via env (not just a runtime `hyprctl setcursor`) is what makes the
+-- accent cursor survive a re-login — Hyprland loads it natively at startup
+-- instead of us racing to override the compositor's own cursor init afterwards.
+-- On a first-ever boot the accent copy doesn't exist yet, so the built-in
+-- default cursor shows until wal-set.sh's first run builds GoogleDot-Accent and
+-- setcursor's it — it self-heals within seconds. hyprcursor loads it as a plain
+-- XCursor theme (it's not a native .hyprcursor theme).
+hl.env("XCURSOR_THEME", "GoogleDot-Accent")
+hl.env("HYPRCURSOR_THEME", "GoogleDot-Accent")
 
 -- Route Qt apps through the KDE platform plugin (KDEPlasmaPlatformTheme) so
 -- they read their palette, fonts and icon theme from ~/.config/kdeglobals —

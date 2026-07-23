@@ -69,8 +69,10 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/build" "$DST/cursors"
 
 # One mogrify recolours every extracted frame at once; -path writes the copies
-# into WORK so the cached grey master is left untouched.
-magick mogrify -path "$WORK/build" +level-colors "black,#$ACCENT" "$MASTER"/*.png
+# into WORK so the cached grey master is left untouched. `-channel RGB ...
+# +channel` is CRITICAL: without it +level-colors also levels the alpha channel
+# and forces every pixel opaque, which renders the cursor as a black box.
+magick mogrify -path "$WORK/build" -channel RGB +level-colors "black,#$ACCENT" +channel "$MASTER"/*.png
 cp "$MASTER"/*.conf "$WORK/build/"
 # xcursorgen reads the PNG basenames from each .conf, so run it in that dir.
 ( cd "$WORK/build"
