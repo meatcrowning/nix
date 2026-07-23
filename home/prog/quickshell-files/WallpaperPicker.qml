@@ -47,6 +47,22 @@ PanelWindow {
     // must NOT re-apply the theme.
     property bool dirty: false
 
+    // The path of the highlighted thumbnail, kept in sync with list.currentIndex
+    // by updateSelected() below. This is deliberately NOT read off
+    // list.currentItem: a GridView/ListView updates currentItem ASYNCHRONOUSLY
+    // (on its next polish/layout pass), so right after `list.currentIndex = i`
+    // — which is exactly when a click both selects AND closes the picker —
+    // currentItem still points at the PREVIOUS delegate. Reading it there made
+    // the commit apply the previously-highlighted wallpaper: the cursor accent
+    // and ~/.cache/wal/current both ended up one pick behind, so you had to pick
+    // the same wallpaper twice for it to "take". images[currentIndex] resolves
+    // synchronously off the model, so it's always the wallpaper you're on.
+    property string selectedPath: ""
+    function updateSelected() {
+        selectedPath = (list.currentIndex >= 0 && list.currentIndex < images.length)
+            ? images[list.currentIndex] : "";
+    }
+
     function toFileUrl(p) {
         return "file://" + encodeURI(p);
     }
@@ -75,6 +91,7 @@ PanelWindow {
         const idx = currentPath ? images.indexOf(currentPath) : -1;
         initializing = true;
         list.currentIndex = idx >= 0 ? idx : 0;
+        updateSelected();
         initializing = false;
         // Land the view ON the current wallpaper, centred — opening the picker
         // should show where you already are, not the top of the list. Do it now
@@ -187,11 +204,10 @@ PanelWindow {
     // A close with no flips is a no-op (see `dirty`).
     function commitFinal() {
         if (!dirty || commitProc.running) return;
-        const item = list.currentItem;
-        if (!item) return;
+        if (!root.selectedPath) return;
         commitProc.command = ["sh", "-c",
             "touch \"" + root.suppressMarker + "\"; exec \"" + root.wallSetPath + "\" \"$1\" >>\"$HOME/.cache/wal/wallpaper-picker.log\" 2>&1",
-            "_", item.path];
+            "_", root.selectedPath];
         commitProc.running = true;
     }
 
@@ -200,9 +216,8 @@ PanelWindow {
         id: applyTimer
         interval: 90
         onTriggered: {
-            const item = list.currentItem;
-            if (!item) return;
-            root.previewPath(item.path);
+            if (root.selectedPath)
+                root.previewPath(root.selectedPath);
         }
     }
 
@@ -269,6 +284,10 @@ PanelWindow {
             cacheBuffer: 800   // keep a couple of off-screen rows warm for smooth scroll
             onCurrentIndexChanged: {
                 positionViewAtIndex(currentIndex, GridView.Contain);
+                // Keep selectedPath in lockstep with the index (synchronously —
+                // see the property's note); the commit/preview read it, never
+                // the async currentItem.
+                root.updateSelected();
                 if (!root.initializing) {
                     root.dirty = true;
                     applyTimer.restart();
