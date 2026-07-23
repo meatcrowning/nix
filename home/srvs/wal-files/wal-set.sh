@@ -284,6 +284,13 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     fi
 fi
 
+# ---- 6b. Cursor: tint GoogleDot-Black's white outline to the accent ----------
+# Regenerate ~/.icons/GoogleDot-Accent from the base theme, recoloured to this
+# wallpaper's accent, and setcursor it live (see cursor-recolor.sh). Runs before
+# step 7 because that Quickshell reload can tear this script down mid-run. Cheap
+# (~9ms) when the accent is unchanged; ~2.5s when it actually has to re-tint.
+"$SCRIPTS/cursor-recolor.sh" "$ACCENT" "${XCURSOR_SIZE:-22}" || true
+
 # ---- 7. Quickshell palette (spliced into Theme.qml; panel hot-reloads) -------
 # MUST BE THE LAST apply step — see the note where step 4 used to be. Writing
 # Theme.qml makes Quickshell hot-reload and tear down the QML tree (and, from

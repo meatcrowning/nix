@@ -37,7 +37,16 @@ in
       source = ./wal-files/wal-repo-sync.sh;
       executable = true;
     };
+    "scripts/cursor-recolor.sh" = {
+      source = ./wal-files/cursor-recolor.sh;
+      executable = true;
+    };
   };
+
+  # cursor-recolor.sh (called from wal-set.sh) decompiles the GoogleDot-Black
+  # cursor theme with xcur2png, recolours the frames with ImageMagick (in
+  # home/pkgs/media/process.nix), and recompiles with xcursorgen.
+  home.packages = with pkgs; [ xcur2png xcursorgen ];
 
   # The wallpaper set is versioned in the repo (./wal-files/wallpapers) so it's
   # shared across machines. We *copy* (not symlink) each into ~/Pictures/wall on
