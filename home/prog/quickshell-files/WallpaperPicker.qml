@@ -41,10 +41,10 @@ PanelWindow {
 
     property var images: []          // absolute paths, name-sorted
     property string currentPath: ""  // the wallpaper active when the picker opened
-    property bool initializing: false
     // True once the user actually flipped to a different wallpaper this
     // session — opening and closing the picker without touching anything
-    // must NOT re-apply the theme.
+    // must NOT re-apply the theme. Set ONLY by userNav()/the click handler, so
+    // the view's own model-driven index resets can never mark the picker dirty.
     property bool dirty: false
 
     // The path of the highlighted thumbnail, kept in sync with list.currentIndex
@@ -89,10 +89,8 @@ PanelWindow {
         // opening get discarded, so the theme only changed on the *second* pick.
         if (dirty) return;
         const idx = currentPath ? images.indexOf(currentPath) : -1;
-        initializing = true;
         list.currentIndex = idx >= 0 ? idx : 0;
         updateSelected();
-        initializing = false;
         // Land the view ON the current wallpaper, centred — opening the picker
         // should show where you already are, not the top of the list. Do it now
         // AND once more after layout settles (positionViewAtIndex is a no-op if
@@ -282,23 +280,35 @@ PanelWindow {
             model: root.images
             boundsBehavior: Flickable.StopAtBounds
             cacheBuffer: 800   // keep a couple of off-screen rows warm for smooth scroll
+            // Index changes ONLY keep the highlight path in sync and scroll the
+            // view. Crucially, dirty/preview are NOT set here: a GridView fires
+            // this handler on its OWN model-driven resets too — most importantly
+            // the -1 -> 0 jump when the model goes from empty to populated on the
+            // first open after a hot-reload. Marking dirty there made
+            // trySyncSelection's `if (dirty) return` bail, so the selection never
+            // synced to the active wallpaper and sat on the first entry (the
+            // "reopen jumps back to the first wallpaper" bug). dirty is set
+            // exclusively by real user input, via userNav()/the click handler.
             onCurrentIndexChanged: {
                 positionViewAtIndex(currentIndex, GridView.Contain);
-                // Keep selectedPath in lockstep with the index (synchronously —
-                // see the property's note); the commit/preview read it, never
-                // the async currentItem.
                 root.updateSelected();
-                if (!root.initializing) {
-                    root.dirty = true;
-                    applyTimer.restart();
-                }
+            }
+
+            // A genuine user flip: mark dirty (so it commits on close) and queue
+            // the debounced live preview. Everything else that moves currentIndex
+            // (model resets, trySyncSelection) deliberately goes around this.
+            function userNav(idx) {
+                currentIndex = Math.max(0, Math.min(idx, count - 1));
+                root.updateSelected();
+                root.dirty = true;
+                applyTimer.restart();
             }
 
             // Grid navigation: left/right step one thumbnail, up/down jump a row.
-            Keys.onLeftPressed:  currentIndex = Math.max(currentIndex - 1, 0)
-            Keys.onRightPressed: currentIndex = Math.min(currentIndex + 1, count - 1)
-            Keys.onUpPressed:    currentIndex = Math.max(currentIndex - columns, 0)
-            Keys.onDownPressed:  currentIndex = Math.min(currentIndex + columns, count - 1)
+            Keys.onLeftPressed:  userNav(currentIndex - 1)
+            Keys.onRightPressed: userNav(currentIndex + 1)
+            Keys.onUpPressed:    userNav(currentIndex - columns)
+            Keys.onDownPressed:  userNav(currentIndex + columns)
             Keys.onEscapePressed: root.open = false
             Keys.onReturnPressed: root.open = false
             Keys.onEnterPressed: root.open = false
@@ -356,7 +366,7 @@ PanelWindow {
                         // caused accidental re-themes just from mousing past.)
                         onClicked: {
                             applyTimer.stop();
-                            list.currentIndex = cell.index;
+                            list.userNav(cell.index);   // marks dirty so it commits on close
                             root.open = false;
                         }
                     }
