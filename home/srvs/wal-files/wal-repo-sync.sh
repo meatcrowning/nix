@@ -50,6 +50,17 @@ cd "$REPO" || { echo "cd failed"; exit 0; }
 
 base=$(git rev-parse HEAD 2>/dev/null) || { echo "no HEAD"; exit 0; }
 
+# Bring the REAL index up to the current HEAD for exactly the paths HEAD advanced
+# over since $base (the wallpapers we added, plus anything a rebase pulled in
+# from the remote). The commit was assembled in a throwaway index, so the real
+# index still sits at $base and would otherwise make `git status` report those
+# paths as phantom staged deletions. Scoped by pathspec and index-only (never the
+# working tree), so the user's unrelated staged/dirty edits survive as ordinary
+# modifications. NUL-delimited so spaced filenames are safe.
+sync_index() {
+  git diff -z --name-only "$base" HEAD | xargs -0 -r git reset -q --
+}
+
 idx=$(mktemp)
 export GIT_INDEX_FILE="$idx"
 git read-tree "$base"
@@ -76,8 +87,24 @@ else
   exit 0
 fi
 
+sync_index    # clear phantom staged deletions of the just-committed wallpapers
+
 if git push -q; then
   echo "pushed"
 else
-  echo "push FAILED — commit is local; will retry on next drop or resolve manually"
+  # Push rejected — most likely the remote advanced from another machine (the
+  # exact multi-host case this feature exists for). Without integrating it the
+  # stale local commit would wedge EVERY future drop. Rebase our auto-commit
+  # onto the new remote head and retry once. --autostash tucks the user's
+  # uncommitted edits away for the rebase and restores them after — it never
+  # discards them (a rare truly-conflicting hunk is left as a recoverable stash,
+  # not lost) — and the rebase advances HEAD, index and working tree together so
+  # `git status` stays consistent (no phantom deletions of the pulled-in files).
+  echo "push rejected — pull --rebase --autostash then retry"
+  if git pull -q --rebase --autostash && git push -q; then
+    echo "pushed after rebase"
+  else
+    git rebase --abort 2>/dev/null   # back out cleanly if a rebase is mid-flight
+    echo "auto-rebase failed — commit is local; resolve manually (check: git stash list)"
+  fi
 fi
