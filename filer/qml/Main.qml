@@ -101,8 +101,9 @@ Window {
             }
         }
         // the in-bar path editor was submitted: navigate if it's a directory
+        // (expanding a leading ~ / ~user first).
         function onAddrSubmitted(text) {
-            const p = text.trim();
+            const p = FileOps.expandUser(text.trim());
             if (p !== "" && FileOps.isDir(p)) view.go(p);
         }
     }

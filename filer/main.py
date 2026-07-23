@@ -23,6 +23,7 @@ shadow the name as a type — so Theme lives in qml/theme/ and is injected here.
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -140,6 +141,22 @@ class Palette(QObject):
     def info(self): return self._c("info")
 
 
+def _resolve(prog):
+    """Absolute path for a program name. QProcess resolves a bare name against
+    the launcher's PATH, which — when filer is started from the Quickshell runner
+    / a .desktop entry — need not include ~/.nix-profile/bin, so a nix-profile
+    binary like `viewer` would be "not found" even though it's installed. Resolve
+    it ourselves, falling back to the nix profile, so opening an image works
+    regardless of how filer itself was launched."""
+    if os.path.isabs(prog):
+        return prog
+    found = shutil.which(prog)
+    if found:
+        return found
+    cand = os.path.expanduser("~/.nix-profile/bin/" + prog)
+    return cand if os.path.exists(cand) else prog
+
+
 class FileOps(QObject):
     """Backend for shell-outs. argv arrays only — never string interpolation —
     so paths containing spaces or shell metacharacters are safe."""
@@ -157,12 +174,17 @@ class FileOps(QObject):
 
         proc.finished.connect(done)
         proc.errorOccurred.connect(done)
-        proc.start(argv[0], argv[1:])
+        proc.start(_resolve(argv[0]), argv[1:])
 
     @Slot(list)
     def execDetached(self, argv):
         argv = [str(a) for a in argv]
-        QProcess.startDetached(argv[0], argv[1:])
+        QProcess.startDetached(_resolve(argv[0]), argv[1:])
+
+    @Slot(str, result=str)
+    def expandUser(self, path):
+        """~ / ~user expansion for the address bar (os.path.expanduser)."""
+        return os.path.expanduser(str(path))
 
     @Slot(str, result="QVariantList")
     def listDir(self, path):
