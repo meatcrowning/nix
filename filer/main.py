@@ -396,6 +396,12 @@ class FileOps(QObject):
     def isDir(self, path):
         return os.path.isdir(path)
 
+    @Slot(str, result=bool)
+    def pathExists(self, path):
+        """Whether something already lives at `path` (broken symlinks count).
+        Used to guard paste/rename against silently clobbering an existing name."""
+        return os.path.lexists(str(path))
+
     @Slot(str, result="QVariantList")
     def completePath(self, text):
         """Directory completions for the location bar. Given a partial absolute

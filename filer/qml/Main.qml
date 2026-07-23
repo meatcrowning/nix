@@ -86,14 +86,21 @@ Window {
             case "paste": {
                 if (view.clip === null) break;
                 const paths = view.clip.paths, cut = view.clip.op === "cut";
+                // Split into names that are free vs. already-taken at the target.
+                // Free ones go immediately; conflicts wait for an overwrite OK so
+                // a paste can never silently clobber an existing file.
+                const clear = [], conflicts = [];
                 for (let i = 0; i < paths.length; i++) {
                     const src = paths[i];
                     const dst = view.join(view.path, view.dirNameOf(src));
-                    const reselect = i === paths.length - 1 ? dst : "";
-                    if (cut) FileOps.run(["mv", "--", src, dst], reselect);
-                    else     FileOps.run(["cp", "-a", "--", src, dst], reselect);
+                    (FileOps.pathExists(dst) ? conflicts : clear).push({ src: src, dst: dst });
                 }
-                if (cut) view.clip = null;
+                view.runPaste(clear, cut, true);
+                if (conflicts.length) {
+                    view.pendingPaste = { items: conflicts, cut: cut };
+                    overwriteDlg.text = conflicts.length + " item(s) already exist here — overwrite?";
+                    overwriteDlg.open();
+                } else if (cut) view.clip = null;
                 break;
             }
             case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
@@ -137,6 +144,21 @@ Window {
         property string anchor: ""          // shift-range anchor
         property bool selectedIsDir: false
         property var clip: null             // { op:"copy"|"cut", paths:[...] }
+        property var pendingPaste: null     // conflicting {src,dst} items awaiting overwrite confirm
+        property var pendingRename: null     // {src,dst} awaiting overwrite confirm
+
+        // Run a batch of {src,dst} moves/copies. `overwrite` false adds the
+        // no-clobber flag so an existing target is skipped rather than replaced
+        // (the safe default); true lets mv/cp replace it (after the user OK'd it).
+        function runPaste(items, cut, overwrite) {
+            for (let i = 0; i < items.length; i++) {
+                const reselect = i === items.length - 1 ? items[i].dst : "";
+                if (cut) FileOps.run(overwrite ? ["mv", "--", items[i].src, items[i].dst]
+                                               : ["mv", "-n", "--", items[i].src, items[i].dst], reselect);
+                else     FileOps.run(overwrite ? ["cp", "-a", "--", items[i].src, items[i].dst]
+                                               : ["cp", "-an", "--", items[i].src, items[i].dst], reselect);
+            }
+        }
 
         function clearSelection() { selection = []; selected = ""; anchor = ""; }
         function isSelected(p) { return selection.indexOf(p) >= 0; }
@@ -582,14 +604,49 @@ Window {
             id: renameDlg
             title: "rename to"
             onAccepted: (t) => {
-                if (t) {
-                    const dst = view.join(view.parentOf(view.selected), t);
+                if (!t) return;
+                const dst = view.join(view.parentOf(view.selected), t);
+                if (dst === view.selected) return;               // unchanged name
+                if (FileOps.pathExists(dst)) {                    // don't clobber silently
+                    view.pendingRename = { src: view.selected, dst: dst };
+                    renameOverwriteDlg.text = "\"" + t + "\" already exists — overwrite?";
+                    renameOverwriteDlg.open();
+                } else {
                     FileOps.run(["mv", "--", view.selected, dst], dst);
                 }
             }
         }
+        // Overwrite confirmations for paste / rename: only reached when a target
+        // name is already taken, so a file op can never silently destroy data.
+        BrowserConfirm {
+            id: overwriteDlg
+            danger: true
+            confirmLabel: "overwrite"
+            onConfirmed: {
+                if (view.pendingPaste) {
+                    view.runPaste(view.pendingPaste.items, view.pendingPaste.cut, true);
+                    if (view.pendingPaste.cut) view.clip = null;
+                    view.pendingPaste = null;
+                }
+            }
+            onDismissed: { if (view.pendingPaste && view.pendingPaste.cut) view.clip = null; view.pendingPaste = null; }
+        }
+        BrowserConfirm {
+            id: renameOverwriteDlg
+            danger: true
+            confirmLabel: "overwrite"
+            onConfirmed: {
+                if (view.pendingRename) {
+                    FileOps.run(["mv", "--", view.pendingRename.src, view.pendingRename.dst], view.pendingRename.dst);
+                    view.pendingRename = null;
+                }
+            }
+            onDismissed: view.pendingRename = null
+        }
         BrowserConfirm {
             id: delDlg
+            danger: true
+            confirmLabel: "delete"
             text: "permanently delete?\n" + view.dirNameOf(view.selected)
             onConfirmed: { FileOps.run(["rm", "-rf", "--", view.selected], ""); view.selected = ""; }
         }
