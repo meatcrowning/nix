@@ -24,7 +24,10 @@ Window {
     readonly property color fgAccent: win.active ? Theme.accent : Theme.inactive
     readonly property color fgText:   win.active ? Theme.text  : Theme.inactive
 
-    title: "browse: " + view.dirName
+    // The window title IS the address bar: the hyprvtb plugin renders it as an
+    // editable path field (setTitleEdit below), same as surfer's URL bar. It
+    // mirrors the current directory and, on submit, navigates there.
+    title: view.path
     width: 720
     height: 460
     minimumWidth: 540
@@ -46,29 +49,20 @@ Window {
     // state: 0 normal, 1 active/lit, 2 disabled ("-" spacers dropped — the
     // column reads cleaner as one uniform grid).
     readonly property var tbButtons: {
-        // In the image viewer the strip becomes viewer controls: flip through
-        // the dir's images, zoom, fit, and close back to browsing.
-        if (view.viewerOpen) {
-            const multi = view.viewerImages.length > 1 ? 0 : 2;
-            return [
-                { id: "vprev",    label: "‹",   state: multi, tip: "previous image" },
-                { id: "vnext",    label: "›",   state: multi, tip: "next image" },
-                { id: "vzoomout", label: "−",   state: 0,     tip: "zoom out" },
-                { id: "vzoomin",  label: "+",   state: 0,     tip: "zoom in" },
-                { id: "vfit",     label: "fit", state: 0,     tip: "fit to window" },
-                { id: "vclose",   label: "×",   state: 0,     tip: "close viewer" },
-            ];
-        }
         const sort = (f, l, tip) => ({ id: "sort-" + f,
                                        label: view.sortField === f ? l + (view.sortAsc ? "↑" : "↓") : l,
                                        state: view.sortField === f ? 1 : 0, tip: tip });
-        const sel = view.selected !== "" ? 0 : 2;
+        // enabled when anything's selected; rename needs exactly one.
+        const sel = view.selection.length > 0 ? 0 : 2;
+        const selOne = view.selection.length === 1 ? 0 : 2;
         return [
+            // up-a-directory, pinned above the sort/op grid (disabled at "/").
+            { id: "up", label: "^", state: view.path === "/" ? 2 : 0, tip: "up a directory" },
             sort("name", "n", "sort by name"),
             sort("created", "c", "sort by created date"),
             sort("size", "s", "sort by size"),
             { id: "new",    label: "+",  state: 0,                             tip: "new file or folder" },
-            { id: "rename", label: "r",  state: sel,                           tip: "rename selected" },
+            { id: "rename", label: "r",  state: selOne,                        tip: "rename selected" },
             { id: "copy",   label: "cp", state: sel,                           tip: "copy selected" },
             { id: "cut",    label: "cx", state: sel,                           tip: "cut selected" },
             { id: "paste",  label: "p",  state: view.clip !== null ? 0 : 2,    tip: "paste" },
@@ -77,37 +71,39 @@ Window {
         ];
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
-    Component.onCompleted: Titlebar.setButtons(tbButtons)
+    Component.onCompleted: { Titlebar.setTitleEdit(true); Titlebar.setButtons(tbButtons); }
 
     Connections {
         target: Titlebar
         function onClicked(id) {
-            // viewer controls (only registered while the viewer is open)
-            switch (id) {
-            case "vprev":    view.viewerPrev();    return;
-            case "vnext":    view.viewerNext();    return;
-            case "vzoomout": imageViewer.zoomBy(0.8);  return;
-            case "vzoomin":  imageViewer.zoomBy(1.25); return;
-            case "vfit":     imageViewer.fit();    return;
-            case "vclose":   view.closeViewer();   return;
-            }
             if (id.startsWith("sort-")) { view.setSort(id.substring(5)); return; }
             switch (id) {
+            case "up":     view.go(view.parentOf(view.path)); break;
             case "new":    newDlg.open(); break;
-            case "rename": if (view.selected) { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); } break;
-            case "copy":   if (view.selected) view.clip = { op: "copy", path: view.selected }; break;
-            case "cut":    if (view.selected) view.clip = { op: "cut", path: view.selected }; break;
+            case "rename": if (view.selection.length === 1) { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); } break;
+            case "copy":   if (view.selection.length) view.clip = { op: "copy", paths: view.selection.slice() }; break;
+            case "cut":    if (view.selection.length) view.clip = { op: "cut",  paths: view.selection.slice() }; break;
             case "paste": {
                 if (view.clip === null) break;
-                const src = view.clip.path;
-                const dst = view.join(view.path, view.dirNameOf(src));
-                if (view.clip.op === "copy") FileOps.run(["cp", "-a", "--", src, dst], dst);
-                else { FileOps.run(["mv", "--", src, dst], dst); view.clip = null; }
+                const paths = view.clip.paths, cut = view.clip.op === "cut";
+                for (let i = 0; i < paths.length; i++) {
+                    const src = paths[i];
+                    const dst = view.join(view.path, view.dirNameOf(src));
+                    const reselect = i === paths.length - 1 ? dst : "";
+                    if (cut) FileOps.run(["mv", "--", src, dst], reselect);
+                    else     FileOps.run(["cp", "-a", "--", src, dst], reselect);
+                }
+                if (cut) view.clip = null;
                 break;
             }
-            case "trash":  if (view.selected) { FileOps.run(["gio", "trash", "--", view.selected], ""); view.selected = ""; } break;
+            case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
             case "hidden": view.toggleHidden(); break;
             }
+        }
+        // the in-bar path editor was submitted: navigate if it's a directory
+        function onAddrSubmitted(text) {
+            const p = text.trim();
+            if (p !== "" && FileOps.isDir(p)) view.go(p);
         }
     }
 
@@ -116,7 +112,7 @@ Window {
         target: FileOps
         function onFinished(reselect) {
             view.refresh();
-            if (reselect) view.selected = reselect;
+            if (reselect) { view.selection = [reselect]; view.selected = reselect; view.anchor = reselect; }
             view.refreshDirSize();   // an op changed what the dir holds
         }
     }
@@ -127,9 +123,51 @@ Window {
         color: Theme.bg
 
         property string path: win.startPath
-        property string selected: ""        // absolute path of the selected row
+
+        // ---- selection ----
+        // `selection` is the full set of selected absolute paths (an array, so
+        // the delegates can bind `indexOf` reactively); `selected` is the
+        // primary/anchor path used by single-item ops (rename) and titlebar
+        // state; `anchor` is where a shift-range extends FROM. Range selection
+        // works across the whole view — the preview grid's images then the tree
+        // rows, in `orderPaths()` order — so shift-clicking spans both.
+        property var selection: []
+        property string selected: ""        // primary (anchor) selected path
+        property string anchor: ""          // shift-range anchor
         property bool selectedIsDir: false
-        property var clip: null             // { op:"copy"|"cut", path }
+        property var clip: null             // { op:"copy"|"cut", paths:[...] }
+
+        function clearSelection() { selection = []; selected = ""; anchor = ""; }
+        function isSelected(p) { return selection.indexOf(p) >= 0; }
+
+        // The flat top-to-bottom order of every selectable item: the preview
+        // grid's images (Flow order == array order) followed by the tree rows.
+        function orderPaths() {
+            const out = [];
+            for (let i = 0; i < images.length; i++) out.push(images[i].path);
+            for (let i = 0; i < rows.length; i++) out.push(rows[i].path);
+            return out;
+        }
+        function selectSingle(p, isDir) { selection = [p]; selected = p; anchor = p; selectedIsDir = isDir; }
+        function selectToggle(p, isDir) {
+            const s = selection.slice(), i = s.indexOf(p);
+            if (i >= 0) s.splice(i, 1); else s.push(p);
+            selection = s; selected = p; anchor = p; selectedIsDir = isDir;
+        }
+        function selectRange(p, isDir) {
+            if (anchor === "") { selectSingle(p, isDir); return; }
+            const ord = orderPaths(), a = ord.indexOf(anchor), b = ord.indexOf(p);
+            if (a < 0 || b < 0) { selectSingle(p, isDir); return; }
+            selection = ord.slice(Math.min(a, b), Math.max(a, b) + 1);
+            selected = p; selectedIsDir = isDir;   // anchor left where it was
+        }
+        // A click on an item: plain replaces, Shift extends the range from the
+        // anchor, Ctrl toggles the one item — the usual file-manager gestures.
+        function clickSelect(p, isDir, mods) {
+            if (mods & Qt.ShiftModifier) selectRange(p, isDir);
+            else if (mods & Qt.ControlModifier) selectToggle(p, isDir);
+            else selectSingle(p, isDir);
+        }
 
         // tree state: the flat list of currently-visible rows, plus the set of
         // directory paths the user has expanded (persisted across refreshes so
@@ -142,45 +180,13 @@ Window {
         // current dir — images inside expanded subdirs stay inline as rows.
         property var images: []
 
-        // Open a file with the right thing for its kind: images go to the
-        // built-in viewer (below), the rest to xdg-open. (Dirs → go(), not here.)
+        // Open a file with the right thing for its kind: images go to `viewer`
+        // (the standalone image/media viewer — it scans the file's directory
+        // itself for the flip-through set), the rest to xdg-open. (Dirs → go().)
         function openFile(p, kind) {
-            if (kind === "image") openImage(p);
+            if (kind === "image") FileOps.execDetached(["viewer", p]);
             else FileOps.execDetached(["xdg-open", p]);
         }
-
-        // ---- built-in image viewer state ----
-        // viewerImages is the flip-through set (the images of the dir CONTAINING
-        // the opened file, in the current sort order); viewerIndex points into
-        // it, and -1 means the viewer is closed. The ImageViewer overlay binds
-        // to viewerPath and the prev/next/close intents drive the index.
-        property var viewerImages: []
-        property int viewerIndex: -1
-        readonly property bool viewerOpen: viewerIndex >= 0 && viewerIndex < viewerImages.length
-        readonly property string viewerPath: viewerOpen ? viewerImages[viewerIndex].path : ""
-
-        // the image entries of one dir, in sort order, honouring the hidden toggle
-        function imagesIn(dir) {
-            const es = sortEntries(FileOps.listDir(dir));
-            const out = [];
-            for (let i = 0; i < es.length; i++) {
-                const e = es[i];
-                if (!showHidden && e.hidden) continue;
-                if (e.kind === "image") out.push(e);
-            }
-            return out;
-        }
-        function openImage(p) {
-            const imgs = imagesIn(parentOf(p));
-            let idx = -1;
-            for (let i = 0; i < imgs.length; i++) if (imgs[i].path === p) { idx = i; break; }
-            if (idx < 0) { imgs.push({ name: dirNameOf(p), path: p, kind: "image" }); idx = imgs.length - 1; }
-            selected = p;
-            viewerImages = imgs; viewerIndex = idx;
-        }
-        function viewerNext() { if (viewerImages.length) viewerIndex = (viewerIndex + 1) % viewerImages.length; }
-        function viewerPrev() { if (viewerImages.length) viewerIndex = (viewerIndex - 1 + viewerImages.length) % viewerImages.length; }
-        function closeViewer() { viewerIndex = -1; }
 
         // sort state (driven by the header sort buttons). Grouping is always
         // hidden → dirs → files; sortField/sortAsc order within each group.
@@ -212,12 +218,6 @@ Window {
             let t = 0;
             for (let i = 0; i < es.length; i++) t += es[i].size;
             dirBytes = t;
-        }
-
-        readonly property string dirName: {
-            const p = path.replace(/\/+$/, "");
-            const i = p.lastIndexOf("/");
-            return i >= 0 ? (p.substring(i + 1) || "/") : p;
         }
 
         function join(dir, name) { return dir.replace(/\/+$/, "") + "/" + name; }
@@ -295,7 +295,7 @@ Window {
             rebuildKeepScroll();
         }
 
-        function go(p) { path = p; selected = ""; rebuild(); refreshDirSize(); persist(); }
+        function go(p) { path = p; clearSelection(); rebuild(); refreshDirSize(); persist(); }
 
         Component.onCompleted: { rebuild(); refreshDirSize(); Titlebar.setFooter(footerStr); }
 
@@ -325,114 +325,16 @@ Window {
         // see tbButtons/Connections up top, and the dirSizeStr footer below.)
 
         // titlebar footer readout (drawn by the plugin at the bottom of the
-        // inner column): the dir's total size while browsing, or the image
-        // position ("3/15  name") while the viewer is open.
-        readonly property string footerStr: viewerOpen
-            ? ((viewerIndex + 1) + "/" + viewerImages.length + "  " + dirNameOf(viewerPath))
-            : dirSizeStr
+        // inner column): the current dir's total size.
+        readonly property string footerStr: dirSizeStr
         onFooterStrChanged: Titlebar.setFooter(footerStr)
 
-        // ---- header: up + editable location bar ----
-        Rectangle {
-            id: header
-            anchors { top: parent.top; left: parent.left; right: parent.right }
-            height: 30
-            color: Theme.bgAlt
-            border.color: Theme.border
-            border.width: 1
-
-            BrowserButton {
-                id: upBtn
-                anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
-                label: "↑ up"
-                winActive: win.active
-                onClicked: view.go(view.parentOf(view.path))
-            }
-
-            // editable path field with Tab-completion. The button's label is a
-            // PixelText centred in a 22px box; the field's text is a TextInput
-            // centred in a 22px box at the same header centre — so they align.
-            // (verticalCenterOffset trims the ~1px Text-vs-TextInput metric gap.)
-            Rectangle {
-                id: pathBox
-                anchors { left: upBtn.right; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
-                height: 22
-                clip: true
-                color: Theme.bg
-                border.width: 1
-                border.color: pathField.activeFocus ? Theme.accent : Theme.border
-
-                TextInput {
-                    id: pathField
-                    anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; verticalCenterOffset: -1; leftMargin: 6; rightMargin: 6 }
-                    color: win.active ? Theme.text : Theme.inactive
-                    font.family: Theme.font
-                    font.pixelSize: Theme.fontSize
-                    font.hintingPreference: Font.PreferFullHinting
-                    renderType: Text.NativeRendering
-                    antialiasing: false
-                    clip: true
-                    selectByMouse: true
-
-                    property var completions: []
-
-                    // Track view.path without a plain binding (which typing would
-                    // break): mirror it into `text` whenever it changes.
-                    property string bound: view.path
-                    onBoundChanged: { text = bound; completions = []; }
-                    Component.onCompleted: text = view.path
-
-                    function refreshCompletions() { completions = FileOps.completePath(text); }
-                    // longest common prefix of the candidate paths
-                    function common(arr) {
-                        if (arr.length === 0) return "";
-                        let p = arr[0];
-                        for (let i = 1; i < arr.length; i++) {
-                            const s = arr[i]; let j = 0;
-                            while (j < p.length && j < s.length && p[j] === s[j]) j++;
-                            p = p.substring(0, j);
-                        }
-                        return p;
-                    }
-
-                    onTextEdited: refreshCompletions()
-                    Keys.onPressed: (e) => {
-                        if (e.key === Qt.Key_Tab) {
-                            if (completions.length > 0) {
-                                const c = common(completions);
-                                if (c.length >= text.length) { text = c; cursorPosition = text.length; }
-                                refreshCompletions();
-                            }
-                            e.accepted = true;
-                        }
-                    }
-                    onAccepted: {
-                        const p = text.trim();
-                        if (p !== "" && FileOps.isDir(p)) view.go(p);
-                        else text = view.path;   // revert on a non-directory
-                        completions = [];
-                    }
-                    Keys.onEscapePressed: { text = view.path; completions = []; focus = false; }
-                }
-
-                // ghost completion: greyed suffix of the top candidate, drawn
-                // right after the typed text (Tab accepts it).
-                PixelText {
-                    id: ghost
-                    anchors { verticalCenter: pathField.verticalCenter }
-                    x: pathField.x + pathField.contentWidth
-                    color: win.active ? Theme.textDim : Theme.inactive
-                    visible: pathField.activeFocus && text !== ""
-                    text: (pathField.completions.length > 0 && pathField.completions[0].indexOf(pathField.text) === 0)
-                          ? pathField.completions[0].substring(pathField.text.length) : ""
-                }
-            }
-        }
-
         // ---- tree list ----
+        // (No in-window location bar any more — the editable path lives in the
+        // titlebar address bar, and "up" is the "^" titlebar button.)
         ListView {
             id: list
-            anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
+            anchors { top: parent.top; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
             clip: true
             model: view.rows
             boundsBehavior: Flickable.StopAtBounds
@@ -455,8 +357,8 @@ Window {
                             required property var modelData
                             entry: modelData
                             winActive: win.active
-                            selected: view.selected === modelData.path
-                            onClicked: { view.selected = modelData.path; view.selectedIsDir = false; }
+                            selected: view.selection.indexOf(modelData.path) >= 0
+                            onClicked: (mods) => view.clickSelect(modelData.path, false, mods)
                             onOpened: view.openFile(modelData.path, modelData.kind)
                         }
                     }
@@ -471,7 +373,7 @@ Window {
                 height: 22
                 readonly property string abs: modelData.path
                 readonly property int indent: modelData.depth * 14
-                color: view.selected === abs ? Theme.highlight : "transparent"
+                color: view.selection.indexOf(abs) >= 0 ? Theme.highlight : "transparent"
 
                 // Drag-out: hand this file to other apps as a text/uri-list, so
                 // it can be dropped onto a browser upload field, another file
@@ -525,7 +427,7 @@ Window {
                     preventStealing: true
                     drag.target: dragProxy
                     onPressed: (m) => {
-                        view.selected = row.abs; view.selectedIsDir = row.modelData.isDir;
+                        view.clickSelect(row.abs, row.modelData.isDir, m.modifiers);
                         // stage the drag image; ready by the time the drag passes
                         // the threshold and Drag.active turns on
                         dragBadge.grabToImage(function(res) { row.Drag.imageSource = res.url; });
@@ -590,22 +492,6 @@ Window {
                     }
                 }
             }
-        }
-
-        // ---- built-in image viewer (overlay, above the tree) ----
-        // Covers the browser while an image is open; nav/zoom/close come from
-        // the titlebar buttons (tbButtons/onClicked above) and its own keys.
-        ImageViewer {
-            id: imageViewer
-            anchors.fill: parent
-            z: 100
-            visible: view.viewerOpen
-            winActive: win.active
-            source: view.viewerPath !== "" ? ("file://" + encodeURI(view.viewerPath)) : ""
-            name: view.dirNameOf(view.viewerPath)
-            onNext: view.viewerNext()
-            onPrev: view.viewerPrev()
-            onCloseRequested: view.closeViewer()
         }
 
         // ---- modal dialogs (simple centered prompts) ----

@@ -1,10 +1,11 @@
 import QtQuick
 
-// Full-window image viewer overlaid on the browser — the gwenview-style reader
-// filer opens instead of shelling out to feh. Two wins over feh: it uses Qt's
-// image stack (far more formats than feh's Imlib2, and a graceful error card
-// instead of a console warning on a broken/undecodable file), and it lives in
-// filer's own window, so the hyprvtb titlebar drives it (prev/next/zoom/close).
+// The gwenview-style image surface of `viewer` (its own window/process — filer
+// shells out to `viewer <path>` instead of opening this inline). Two wins over
+// feh: it uses Qt's image stack (far more formats than feh's Imlib2, and a
+// graceful error card instead of a console warning on a broken/undecodable
+// file), and the hyprvtb titlebar drives it (prev/next/zoom/close — wired in
+// Main.qml). Main.qml swaps `source` to flip through the folder's images.
 //
 // Scaling: the image is fit to the window by default (zoom 1.0 = fit); the wheel
 // zooms IN from there (fit is the floor), and dragging pans once zoomed. Flip /

@@ -1,6 +1,7 @@
 import QtQuick
 
-// Small themed button for the file browser header (the ↑ up button). Greys its
+// Small themed button used by filer's modal dialogs (the new-folder / rename /
+// confirm prompts' ok/cancel). Greys its
 // accent/text to the titlebar's inactive tone when the window is unfocused —
 // the parent passes the window's active state in via `winActive` (the same
 // `win.active` source the rest of filer uses), rather than the Window.active

@@ -268,13 +268,19 @@ class Titlebar(QObject):
     QML pushes the full button set whenever any label/state changes, and
     receives clicks back through the `clicked` signal. VtbClient's callback
     fires on its reader thread; emitting a Signal from there is safe — Qt
-    queues the delivery onto the main thread for the QML Connections item."""
+    queues the delivery onto the main thread for the QML Connections item.
+
+    The window title is also the editable address bar: `setTitleEdit(True)`
+    marks the plugin's title region an in-bar path editor (same as surfer's URL
+    bar), and submitting it (Enter) bounces back through `addrSubmitted`."""
 
     clicked = Signal(str)
+    addrSubmitted = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._client = VtbClient(on_click=self.clicked.emit)
+        self._client = VtbClient(on_click=self.clicked.emit,
+                                 on_addr=self.addrSubmitted.emit)
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
@@ -290,6 +296,11 @@ class Titlebar(QObject):
     @Slot(str)
     def setFooter(self, text):
         self._client.set_footer(text)
+
+    @Slot(bool)
+    def setTitleEdit(self, on):
+        """Mark the title region an editable address bar (the path bar)."""
+        self._client.set_title_edit(on)
 
 
 class WinCtl(QObject):

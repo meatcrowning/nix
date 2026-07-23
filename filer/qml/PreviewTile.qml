@@ -15,7 +15,7 @@ Rectangle {
     property bool winActive: true
     property int tileSize: 96
 
-    signal clicked()
+    signal clicked(int mods)   // mods: the keyboard modifiers at press (shift/ctrl)
     signal opened()
 
     width: tileSize
@@ -72,7 +72,7 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
-        onPressed: tile.clicked()
+        onPressed: (mouse) => tile.clicked(mouse.modifiers)
         onDoubleClicked: tile.opened()
     }
 }
