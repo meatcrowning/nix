@@ -10,10 +10,9 @@
   #my.aerotheme.enable = true;
 
   networking.hostName = "top";
-  networking.firewall = {
-    allowedUDPPorts = [ 38899 ];
-    allowedTCPPorts = [ 38899 ];
-  };
+  # 38899 is WiZ smart-bulb control, which is UDP and outbound — nothing on this
+  # host listens on TCP 38899, so only the UDP rule is needed.
+  networking.firewall.allowedUDPPorts = [ 38899 ];
 
   swapDevices = [{
     device = "/var/lib/swapfile";
