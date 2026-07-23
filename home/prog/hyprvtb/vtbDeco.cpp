@@ -64,6 +64,13 @@ static constexpr int VTB_SHADOW_SIZE = 24;
 static constexpr float VTB_ROLL_DURATION   = 0.26f;
 static constexpr float VTB_ROLL_SLIDE_FRAC = 0.55f;
 
+// After a roll-out's slide lands, the window is un-hidden but kept covered by
+// its (still-drawn) snapshot for this long, so the client — QtWebEngine (surfer)
+// presents black on the first frame after its surface un-hides — has time to
+// repaint into its buffer before the snapshot is dropped. Without the hold that
+// black first frame showed as the whole window flashing once the unroll landed.
+static constexpr float VTB_ROLL_REVEAL_HOLD = 0.09f;
+
 // The lone-bar fade at the tail of a window-close animation (after the roll-up).
 static constexpr float VTB_FADE_DURATION = 0.16f;
 
@@ -2401,13 +2408,18 @@ void CVtbDeco::startRollAnim(eRollAnim dir) {
             hideRolledWindow(PWINDOW);
     }
     // ROLL_OUT: the window is already hidden and m_rollSnapTex still holds its
-    // (frozen) pixels from roll-up — nothing to capture. Wake the client NOW, at
-    // the very start of the reveal, so it has the whole roll-out animation to
-    // repaint into its buffer before it's shown. Waking only at finish (below)
-    // left QtWebEngine (surfer) presenting one black frame right after un-hide —
-    // the "whole window flashes once the unroll finishes" glitch.
-    if (dir == ROLL_OUT && m_pWindow.lock())
-        VtbIpc::sendWake(appPid());
+    // (frozen) pixels from roll-up — nothing to capture. Focus it NOW, at the
+    // very start of the reveal, so Hyprland's border-colour fade animates to the
+    // focused/active tint DURING the roll-out (the anim ticks even while the
+    // window is hidden) instead of only snapping active after it lands. Also wake
+    // the client early so it starts repainting.
+    if (dir == ROLL_OUT) {
+        m_bRollReveal = false;
+        if (const auto PWINDOW = m_pWindow.lock()) {
+            Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+            VtbIpc::sendWake(appPid());
+        }
+    }
 
     damageEntire();
 }
@@ -2420,7 +2432,31 @@ void CVtbDeco::stepRollAnim() {
     m_rollAnimAt    = now;
     m_rollProgress += dt / VTB_ROLL_DURATION;
     if (m_rollProgress >= 1.f) {
-        m_rollProgress  = 1.f;
+        m_rollProgress = 1.f;
+
+        // Roll-out reveal hold: the slide has landed (slideT==0, so the snapshot
+        // now fully covers the content at its final resting spot). Un-hide the
+        // real window UNDER that still-drawn snapshot so it repaints while hidden
+        // behind it, and keep covering it for VTB_ROLL_REVEAL_HOLD before dropping
+        // the snapshot — otherwise the client's black first-frame flashed through.
+        if (m_rollAnim == ROLL_OUT) {
+            if (!m_bRollReveal) {
+                // un-hiding / refocusing / reordering isn't safe mid render-stage
+                // (same reason finishRollAnim is deferred), so arm the guard and
+                // hold clock now and do the window work on the next loop turn.
+                m_bRollReveal  = true;
+                m_rollRevealAt = now;
+                WP<CVtbDeco> self = m_self;
+                g_pEventLoopManager->doLater([self]() {
+                    if (auto d = self.lock())
+                        d->beginRollReveal();
+                });
+                return; // stay in ROLL_OUT; the hold elapses over the next frames
+            }
+            if (std::chrono::duration<float>(now - m_rollRevealAt).count() < VTB_ROLL_REVEAL_HOLD)
+                return; // still covering; let the client finish painting
+        }
+
         m_rollFinishing = true;
         // finalize OUT of the render loop — finishRollAnim un-hides / refocuses /
         // reorders the window, none of which is safe to do mid render-stage. The
@@ -2434,6 +2470,29 @@ void CVtbDeco::stepRollAnim() {
     }
 }
 
+// Roll-out slide has landed: bring the window back to life NOW, under the still-
+// drawn snapshot, so it repaints before the snapshot is dropped (see the hold
+// note above). Deferred out of stepRollAnim via doLater — the un-hide/focus/
+// reorder here is not safe mid render-stage. Everything except dropping the
+// snapshot mirrors the ROLL_OUT branch of finishRollAnim; that runs after the
+// hold to tear the snapshot down. m_bRollReveal / m_rollRevealAt were already
+// set by the caller so the hold clock starts when it armed, not when this fires.
+void CVtbDeco::beginRollReveal() {
+    if (m_rollAnim != ROLL_OUT) // superseded (e.g. re-rolled) before this fired
+        return;
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+    PWINDOW->setHidden(false);
+    g_pCompositor->changeWindowZOrder(PWINDOW, true);
+    Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+    VtbIpc::sendWake(appPid());
+    // paint the live window (still under the snapshot) as one full frame
+    CBox full = PWINDOW->getFullWindowBoundingBox();
+    full.expand(VTB_SHADOW_SIZE + 4);
+    g_pHyprRenderer->damageBox(full);
+}
+
 void CVtbDeco::finishRollAnim() {
     const auto      PWINDOW = m_pWindow.lock();
     const eRollAnim dir     = m_rollAnim;
@@ -2442,8 +2501,12 @@ void CVtbDeco::finishRollAnim() {
     m_rollFinishing         = false;
 
     if (dir == ROLL_OUT) {
-        // the window comes back to life at its original geometry
+        // the window comes back to life at its original geometry. It was already
+        // un-hidden/focused during the reveal hold (beginRollReveal); dropping
+        // the snapshot here is the last step — the client has repainted under it
+        // by now, so no black frame shows through.
         m_bRolledUp        = false;
+        m_bRollReveal      = false;
         m_iHoverCell       = -1;
         m_bRollDragPending = false;
         m_bRollDragging    = false;
