@@ -1,4 +1,4 @@
-<img width="1920" height="1080" alt="Screenshot_20260722_101028" src="https://github.com/user-attachments/assets/cf91ddec-6579-4380-8461-f8a53fee23de" />
+https://github.com/user-attachments/assets/0d0aaba8-1345-4357-af69-cd8feb9ddc7b
 
 # `nixos/hyprland/qs/...`
 
