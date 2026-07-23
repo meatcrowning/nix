@@ -3,9 +3,10 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 
-// Wallpaper picker: a vertical stack of previews from ~/Pictures/wall that
-// slides out like the Launcher/Cheatsheet. Flipping through it with the arrow
-// keys (or hovering with the mouse) *is* setting the wallpaper — each
+// Wallpaper picker: a two-column grid of previews from ~/Pictures/wall that
+// slides out like the Launcher/Cheatsheet. On open it lands on (and centres)
+// the wallpaper you're already using. Flipping through it with the arrow
+// keys (or clicking a thumbnail) *is* setting the wallpaper — each
 // highlight change actually runs wal-set.sh on that image (debounced so key
 // repeat doesn't hammer it), which tiles/scales exactly like every other
 // wallpaper change in this config and regenerates the theme. There is no
@@ -23,7 +24,7 @@ PanelWindow {
 
     anchors { top: true; bottom: true; right: true }
     margins { top: Theme.gap; bottom: Theme.gap; right: Theme.gap }
-    implicitWidth: 260
+    implicitWidth: 460   // two thumbnail columns (see the GridView below)
     exclusiveZone: 0
 
     WlrLayershell.layer: WlrLayer.Overlay
@@ -75,6 +76,25 @@ PanelWindow {
         initializing = true;
         list.currentIndex = idx >= 0 ? idx : 0;
         initializing = false;
+        // Land the view ON the current wallpaper, centred — opening the picker
+        // should show where you already are, not the top of the list. Do it now
+        // AND once more after layout settles (positionViewAtIndex is a no-op if
+        // the grid hasn't laid its delegates out yet, which it often hasn't on
+        // the very first frame after the model is (re)assigned).
+        list.positionViewAtIndex(list.currentIndex, GridView.Center);
+        centerTimer.restart();
+    }
+
+    // Deferred re-centre: fires after the current event loop turn so the grid
+    // has had a chance to instantiate delegates for positionViewAtIndex to act
+    // on. See trySyncSelection above.
+    Timer {
+        id: centerTimer
+        interval: 0
+        onTriggered: {
+            if (list.count > 0)
+                list.positionViewAtIndex(list.currentIndex, GridView.Center);
+        }
     }
 
     Process {
@@ -229,7 +249,7 @@ PanelWindow {
             color: Theme.accent
         }
 
-        ListView {
+        GridView {
             id: list
             focus: true
             anchors {
@@ -238,73 +258,88 @@ PanelWindow {
                 margins: 10
             }
             clip: true
-            spacing: 8
+            // Two columns. cellWidth is derived from the live width so the grid
+            // always fills the card exactly (no ragged right gutter); cellHeight
+            // keeps the ~16:9 thumbnail plus a little vertical breathing room.
+            readonly property int columns: 2
+            cellWidth: Math.floor(width / columns)
+            cellHeight: 140
             model: root.images
             boundsBehavior: Flickable.StopAtBounds
+            cacheBuffer: 800   // keep a couple of off-screen rows warm for smooth scroll
             onCurrentIndexChanged: {
-                positionViewAtIndex(currentIndex, ListView.Contain);
+                positionViewAtIndex(currentIndex, GridView.Contain);
                 if (!root.initializing) {
                     root.dirty = true;
                     applyTimer.restart();
                 }
             }
 
-            Keys.onDownPressed: currentIndex = Math.min(currentIndex + 1, count - 1)
-            Keys.onUpPressed: currentIndex = Math.max(currentIndex - 1, 0)
+            // Grid navigation: left/right step one thumbnail, up/down jump a row.
+            Keys.onLeftPressed:  currentIndex = Math.max(currentIndex - 1, 0)
+            Keys.onRightPressed: currentIndex = Math.min(currentIndex + 1, count - 1)
+            Keys.onUpPressed:    currentIndex = Math.max(currentIndex - columns, 0)
+            Keys.onDownPressed:  currentIndex = Math.min(currentIndex + columns, count - 1)
             Keys.onEscapePressed: root.open = false
             Keys.onReturnPressed: root.open = false
             Keys.onEnterPressed: root.open = false
 
-            delegate: Rectangle {
-                id: delegateRoot
+            delegate: Item {
+                id: cell
                 required property string modelData
                 required property int index
                 readonly property string path: modelData
 
-                width: list.width
-                height: 130
-                color: Theme.bgAlt
-                radius: 0
-                border.width: index === list.currentIndex ? 2 : 1
-                border.color: index === list.currentIndex ? Theme.accent : Theme.border
-
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: delegateRoot.border.width + 2
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    clip: true
-                    sourceSize.width: 240
-                    sourceSize.height: 130
-                    source: root.toFileUrl(delegateRoot.path)
-                }
+                width: list.cellWidth
+                height: list.cellHeight
 
                 Rectangle {
-                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                    anchors.margins: delegateRoot.border.width + 2
-                    height: 18
-                    color: Qt.rgba(0, 0, 0, 0.55)
-
-                    PixelText {
-                        anchors.centerIn: parent
-                        width: parent.width - 8
-                        elide: Text.ElideMiddle
-                        horizontalAlignment: Text.AlignHCenter
-                        text: root.fileName(delegateRoot.path)
-                        color: Theme.text
-                    }
-                }
-
-                MouseArea {
+                    id: delegateRoot
                     anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    // Click = pick it: select, apply the full theme, close.
-                    // (Hover deliberately does NOT flip the selection — it
-                    // caused accidental re-themes just from mousing past.)
-                    onClicked: {
-                        applyTimer.stop();
-                        list.currentIndex = delegateRoot.index;
-                        root.open = false;
+                    anchors.margins: 4   // gutter between cells
+                    color: Theme.bgAlt
+                    radius: 0
+                    border.width: cell.index === list.currentIndex ? 2 : 1
+                    border.color: cell.index === list.currentIndex ? Theme.accent : Theme.border
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: delegateRoot.border.width + 2
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        clip: true
+                        sourceSize.width: 260
+                        sourceSize.height: 150
+                        source: root.toFileUrl(cell.path)
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        anchors.margins: delegateRoot.border.width + 2
+                        height: 18
+                        color: Qt.rgba(0, 0, 0, 0.55)
+
+                        PixelText {
+                            anchors.centerIn: parent
+                            width: parent.width - 8
+                            elide: Text.ElideMiddle
+                            horizontalAlignment: Text.AlignHCenter
+                            text: root.fileName(cell.path)
+                            color: Theme.text
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        // Click = pick it: select, apply the full theme, close.
+                        // (Hover deliberately does NOT flip the selection — it
+                        // caused accidental re-themes just from mousing past.)
+                        onClicked: {
+                            applyTimer.stop();
+                            list.currentIndex = cell.index;
+                            root.open = false;
+                        }
                     }
                 }
             }

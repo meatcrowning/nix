@@ -303,10 +303,21 @@ fi
 
 # ---- 6b. Cursor: tint GoogleDot-Black's white outline to the accent ----------
 # Regenerate ~/.icons/GoogleDot-Accent from the base theme, recoloured to this
-# wallpaper's accent, and setcursor it live (see cursor-recolor.sh). Runs before
-# step 7 because that Quickshell reload can tear this script down mid-run. Cheap
-# (~9ms) when the accent is unchanged; ~2.5s when it actually has to re-tint.
-"$SCRIPTS/cursor-recolor.sh" "$ACCENT" "${XCURSOR_SIZE:-22}" || true
+# wallpaper's accent, and setcursor it live (see cursor-recolor.sh). Cheap (~9ms)
+# when the accent is unchanged; ~2.9s when it actually has to re-tint — and that
+# re-tint is pure ImageMagick/xcursorgen work the rest of the theme apply does
+# NOT depend on. It used to run inline right here, so a wallpaper switch to a new
+# accent stalled the whole desktop recolor (panel/kitty/borders) ~3s waiting on
+# the cursor. Now it's fired DETACHED (setsid → its own session), so:
+#   * it can't block step 7 (the Quickshell palette write) — the panel, kitty and
+#     borders land in ~0.2s and the cursor catches up a couple seconds later; and
+#   * it survives the step-7 hot-reload that tears this script down mid-run
+#     (setsid puts it outside this script's process group, so the reload's
+#     teardown can't kill it — which is why it no longer has to run *before*
+#     step 7). cursor-recolor.sh flocks itself, so overlapping fires serialise
+#     and still converge on the last accent.
+setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "${XCURSOR_SIZE:-22}" \
+    >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
 
 # ---- 7. Quickshell palette (spliced into Theme.qml; panel hot-reloads) -------
 # MUST BE THE LAST apply step — see the note where step 4 used to be. Writing

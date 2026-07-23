@@ -37,6 +37,17 @@ set -u
 # always find them regardless of the ambient PATH.
 PATH="@toolPath@:$PATH"
 
+# Serialise concurrent runs. wal-set.sh now fires this DETACHED (setsid &) on
+# every theme apply, so a burst of wallpaper switches can overlap two of these,
+# both recolouring into ~/.icons and pruning each other's dirs. Take an flock
+# (blocking) up front so they run one-at-a-time and converge on the last accent;
+# if flock is somehow missing, fall through and run unguarded rather than fail.
+if command -v flock >/dev/null 2>&1 && [ "${_WAL_CURSOR_LOCKED:-}" != 1 ]; then
+    mkdir -p "$HOME/.cache/wal"
+    export _WAL_CURSOR_LOCKED=1
+    exec flock "$HOME/.cache/wal/.cursor-recolor.lock" "$0" "$@"
+fi
+
 ACCENT="${1:-}"
 SIZE="${2:-${XCURSOR_SIZE:-22}}"
 case "$ACCENT" in
