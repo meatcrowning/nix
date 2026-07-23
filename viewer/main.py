@@ -39,6 +39,12 @@ def is_image(name):
     return os.path.splitext(name)[1].lower() in IMAGE_EXTS
 
 
+def natkey(name):
+    """Natural sort key: split digit runs so img2 < img10 (not img10 < img2),
+    case-insensitively — matches how a person expects a folder to flip through."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
 def images_for(argv):
     """(list of {name, path}, start index) for the given argv.
 
@@ -50,7 +56,7 @@ def images_for(argv):
         target = paths[0]
         d = os.path.dirname(target)
         try:
-            names = sorted(e.name for e in os.scandir(d) if e.is_file() and is_image(e.name))
+            names = sorted((e.name for e in os.scandir(d) if e.is_file() and is_image(e.name)), key=natkey)
         except OSError:
             names = [os.path.basename(target)]
         entries = [{"name": n, "path": os.path.join(d, n)} for n in names]
