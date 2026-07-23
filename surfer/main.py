@@ -36,7 +36,7 @@ from PySide6.QtWebEngineQuick import QtWebEngineQuick
 from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
                                      QWebEngineUrlSchemeHandler, QWebEnginePermission,
                                      QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo,
-                                     QWebEngineUrlRequestJob)
+                                     QWebEngineUrlRequestJob, QWebEngineProfile)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 HERE = Path(__file__).resolve().parent
@@ -400,11 +400,31 @@ class GmXhrHandler(QWebEngineUrlSchemeHandler):
     page fetches never touch this, so web security stays on everywhere else.
 
     Limitation: requests go through a separate network stack from the browser,
-    so the browser's cookies aren't attached (fine for 4chan X's public GETs)."""
+    so the browser's cookies aren't attached (fine for 4chan X's public GETs).
+
+    User-Agent: these go out through QNetworkAccessManager, whose default UA is
+    NOT a browser one — and a Cloudflare-fronted host (e.g. 4chan's i.4cdn.org)
+    answers a non-browser UA with `429 Too Many Requests`. A userscript that
+    saves the reply as a file (4chan X's image download) then writes a 17-byte
+    "Too Many Requests" file instead of the image. Real userscript managers send
+    the browser's UA on GM_xmlhttpRequest, so we do too (unless the script set
+    its own), which makes these fetches look like the page's own requests."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
+        # Browser UA to stamp on requests that don't carry one. Seeded from the
+        # default profile now; _wire_profile() overwrites it with the actual
+        # shared profile's UA once the QML tree is up (they match today, but this
+        # stays correct if the UA is ever customised).
+        try:
+            self._ua = QWebEngineProfile.defaultProfile().httpUserAgent() or ""
+        except Exception:
+            self._ua = ""
+
+    def set_user_agent(self, ua):
+        if ua:
+            self._ua = ua
 
     def requestStarted(self, job):
         try:
@@ -416,11 +436,16 @@ class GmXhrHandler(QWebEngineUrlSchemeHandler):
         req = QNetworkRequest(QUrl(spec.get("url") or ""))
         req.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
                          QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+        has_ua = False
         for k, v in (spec.get("headers") or {}).items():
             try:
+                if str(k).lower() == "user-agent":
+                    has_ua = True
                 req.setRawHeader(str(k).encode(), str(v).encode())
             except Exception:
                 pass
+        if not has_ua and self._ua:   # else Cloudflare 429s the non-browser UA
+            req.setRawHeader(b"User-Agent", self._ua.encode())
         data = spec.get("data")
         body = data.encode("utf-8") if isinstance(data, str) else b""
         if method == "GET":
@@ -1610,6 +1635,12 @@ def main():
                     prof.installUrlSchemeHandler(b"gmxhr", gmxhr)
                     prof.installUrlSchemeHandler(b"surfercmd", pagecmd)
                 except RuntimeError:
+                    pass
+                # give gmxhr the SAME UA the views send, so userscript fetches
+                # aren't 429'd as non-browser traffic (see GmXhrHandler docstring)
+                try:
+                    gmxhr.set_user_agent(prof.property("httpUserAgent"))
+                except Exception:
                     pass
                 # route granted web notifications out to notify-send. The QML
                 # profile persists granted/denied permissions to disk itself
