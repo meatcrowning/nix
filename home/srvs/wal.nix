@@ -35,10 +35,19 @@ in
     };
   };
 
-  # ~/Pictures/wall doesn't come with the migration snapshot (no images were
-  # carried over) — just create it so the path watcher below has something to
-  # watch; real images get dropped in by hand afterward.
-  home.file."Pictures/wall/.keep".text = "";
+  # The wallpaper set is versioned in the repo (./wal-files/wallpapers) so it's
+  # shared across machines. We *copy* (not symlink) each into ~/Pictures/wall on
+  # activation, so the directory stays a real writable dir: the picker's live
+  # rescan and the "drop a new wallpaper in" workflow (wal-prepare.path) keep
+  # working, and the store copies aren't read-only symlinks. Existing files are
+  # left untouched (`[ -e ] ||`), so hand-added or edited wallpapers survive.
+  home.activation.seedWallpapers = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    mkdir -p "$HOME/Pictures/wall"
+    for f in ${./wal-files/wallpapers}/*; do
+      dest="$HOME/Pictures/wall/$(basename "$f")"
+      [ -e "$dest" ] || install -m644 "$f" "$dest"
+    done
+  '';
 
   # wall.png is the "drop a new wallpaper here" trigger wal-set.path watches
   # for manual overwrites (cp/mv over it) — needs to be a real writable file
