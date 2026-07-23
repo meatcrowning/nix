@@ -1783,7 +1783,12 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
                 m_bRollDragging = true;
             if (m_bRollDragging) {
                 const auto PWINDOW = m_pWindow.lock();
-                g_pHyprRenderer->damageBox(m_rollBox); // clear the bar's old spot
+                // Clear the bar's old spot at the box it was actually DRAWN in:
+                // effectiveBoxGlobal() is m_rollBox dropped by VTB_SHADOW_SIZE, so
+                // damaging raw m_rollBox left the bottom shadow-strip of the bar
+                // un-repainted — a dark trail that read as a shadow smear behind
+                // a moving rolled-up window.
+                g_pHyprRenderer->damageBox(CBox{effectiveBoxGlobal()}.expand(2));
                 m_rollBox.x  = m_rollDragBoxStart.x + DELTA.x;
                 m_rollBox.y  = m_rollDragBoxStart.y + DELTA.y;
                 m_iHoverCell = -1;
@@ -1797,7 +1802,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
                     PWINDOW->m_position = NEWPOS;
                     PWINDOW->m_realPosition->setValueAndWarp(NEWPOS);
                 }
-                damageEntire();
+                g_pHyprRenderer->damageBox(CBox{effectiveBoxGlobal()}.expand(2)); // new spot, same cushion
             }
             return;
         }
@@ -2396,7 +2401,14 @@ void CVtbDeco::startRollAnim(eRollAnim dir) {
             hideRolledWindow(PWINDOW);
     }
     // ROLL_OUT: the window is already hidden and m_rollSnapTex still holds its
-    // (frozen) pixels from roll-up — nothing to capture.
+    // (frozen) pixels from roll-up — nothing to capture. Wake the client NOW, at
+    // the very start of the reveal, so it has the whole roll-out animation to
+    // repaint into its buffer before it's shown. Waking only at finish (below)
+    // left QtWebEngine (surfer) presenting one black frame right after un-hide —
+    // the "whole window flashes once the unroll finishes" glitch.
+    if (dir == ROLL_OUT && m_pWindow.lock())
+        VtbIpc::sendWake(appPid());
+
     damageEntire();
 }
 
@@ -2438,13 +2450,21 @@ void CVtbDeco::finishRollAnim() {
         m_bOpening         = false; // open reveal (if any) is done
         m_rollSnapTex      = nullptr;
         if (PWINDOW) {
-            g_pHyprRenderer->damageBox(m_rollBox);
             PWINDOW->setHidden(false);
             g_pCompositor->changeWindowZOrder(PWINDOW, true);
             Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
             // the surface was hidden; nudge the client to repaint (QtWebEngine
             // presents black after its surface is un-hidden until it redraws)
             VtbIpc::sendWake(appPid());
+            // Damage the FULL frame as one region — client body, the right-edge
+            // titlebar deco, the border wrapping both, and the drop shadow — so
+            // every side repaints on the same frame. Damaging only the bar box
+            // (m_rollBox) left the border/titlebar on the wide right edge to
+            // repaint a frame or two late, so it flashed / appeared after the
+            // other three sides.
+            CBox full = PWINDOW->getFullWindowBoundingBox();
+            full.expand(VTB_SHADOW_SIZE + 4);
+            g_pHyprRenderer->damageBox(full);
         }
     }
     // ROLL_UP: the window stays hidden; the bar simply settles into its dropped
