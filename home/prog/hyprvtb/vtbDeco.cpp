@@ -867,13 +867,13 @@ void CVtbDeco::drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT
     g_pHyprOpenGL->renderTexture(m_rollSnapTex, fullBox.round(), data);
 }
 
-// The emerging window's border during a roll animation, drawn on the three sides
-// of the still-visible content strip that aren't against the bar (left, top,
-// bottom). Colour crossfades unfocused->focused with how far the content has
-// slid OUT (revealT: 0 fully tucked .. 1 fully out) — independent of the real
-// focus state, which was handed away when the window shaded. Ties the fade to
-// the slide so it runs across the whole visible motion and lands on the focused
-// tint exactly as the window does.
+// The emerging window's border during a roll animation, framing the WHOLE
+// visible frame — the sliding content AND the titlebar it's tucked against (the
+// window border wraps client + titlebar as one). Colour crossfades
+// unfocused->focused with how far the content has slid OUT (revealT: 0 fully
+// tucked .. 1 fully out) — independent of the real focus state, which was handed
+// away when the window shaded. Ties the fade to the slide so it runs across the
+// whole visible motion and lands on the focused tint exactly as the window does.
 void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a) {
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW)
@@ -885,19 +885,21 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
     const double clientW = m_rollWinBox.w * scale;
     if (clientW < 1.0)
         return;
-    const double cl = barBoxDev.x - clientW * (1.f - slideT); // content left, sliding
-    const double cr = barBoxDev.x;                            // content right (bar's left edge)
-    const double ct = barBoxDev.y;                            // content top
-    const double ch = barBoxDev.h;                            // content height (== window height)
+    const double cl = barBoxDev.x - clientW * (1.f - slideT); // frame left (content), sliding
+    const double cr = barBoxDev.x + barBoxDev.w;              // frame right (titlebar's right edge)
+    const double ct = barBoxDev.y;                            // frame top
+    const double ch = barBoxDev.h;                            // frame height (== window height)
+    const double fw = cr - cl;                                // visible frame width (content + bar)
 
     const float  revealT = 1.f - slideT; // 0 tucked .. 1 out
     CHyprColor   bc      = {unfocused.r + (focused.r - unfocused.r) * revealT, unfocused.g + (focused.g - unfocused.g) * revealT,
                             unfocused.b + (focused.b - unfocused.b) * revealT, unfocused.a + (focused.a - unfocused.a) * revealT};
     bc.a *= a;
 
-    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct - bs, (cr - cl) + bs, bs}.round(), bc, {});   // top
-    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct + ch, (cr - cl) + bs, bs}.round(), bc, {});   // bottom
-    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs}.round(), bc, {});      // left
+    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct - bs, fw + 2 * bs, bs}.round(), bc, {});   // top
+    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct + ch, fw + 2 * bs, bs}.round(), bc, {});   // bottom
+    g_pHyprOpenGL->renderRect(CBox{cl - bs, ct - bs, bs, ch + 2 * bs}.round(), bc, {});   // left
+    g_pHyprOpenGL->renderRect(CBox{cr, ct - bs, bs, ch + 2 * bs}.round(), bc, {});        // right (bar's outer edge)
 }
 
 // Hover text for a cell: fixed strings for the five system cells, the
@@ -2546,6 +2548,11 @@ void CVtbDeco::beginRollReveal() {
     PWINDOW->setHidden(false);
     g_pCompositor->changeWindowZOrder(PWINDOW, true);
     Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+    // Re-register Hyprland's own decorations (border/shadow) for the freshly
+    // un-hidden window. Without this an INITIAL open reveal came up with no
+    // window border at all until the first move (which repositions the decos and
+    // re-adds them); a move is exactly what this call stands in for.
+    PWINDOW->updateWindowDecos();
     warpBorderToFocused(PWINDOW);
     VtbIpc::sendWake(appPid());
     // paint the live window (still under the snapshot) as one full frame
@@ -2558,18 +2565,17 @@ void CVtbDeco::beginRollReveal() {
 // of letting it EASE there. Hyprland doesn't tick the border-fade animation
 // while a window is hidden, so on un-hide the fade starts from the stale
 // (inactive) tint and crossfades to active over ~185ms — which read as "the
-// border only turns focused a beat AFTER the unroll finished", even though focus
-// was already stolen at roll-out start. onFocusAnimUpdate re-points the fade at
-// the active colour for the now-focused window; warping it to its goal completes
-// the crossfade instantly, so the active border is already there under the
-// snapshot and matches the snapshot's own (captured-focused) border through the
-// whole slide.
+// border only turns focused a beat AFTER the unroll finished", even though the
+// window was focused when it un-hid. The fullWindowFocus that precedes each call
+// already re-pointed the fade at the active colour; we just complete it in place
+// by warping the progress to its goal. (We deliberately do NOT call
+// onFocusAnimUpdate here — on a freshly-mapped window it left the border colour
+// in a state Hyprland wouldn't render until the next move, so the initial
+// window opened with no border at all.)
 void CVtbDeco::warpBorderToFocused(PHLWINDOW pWindow) {
-    if (!pWindow)
+    if (!pWindow || !pWindow->m_borderFadeAnimationProgress)
         return;
-    pWindow->onFocusAnimUpdate();
-    if (pWindow->m_borderFadeAnimationProgress)
-        pWindow->m_borderFadeAnimationProgress->setValueAndWarp(pWindow->m_borderFadeAnimationProgress->goal());
+    pWindow->m_borderFadeAnimationProgress->setValueAndWarp(pWindow->m_borderFadeAnimationProgress->goal());
 }
 
 void CVtbDeco::finishRollAnim() {
@@ -2595,6 +2601,7 @@ void CVtbDeco::finishRollAnim() {
             PWINDOW->setHidden(false);
             g_pCompositor->changeWindowZOrder(PWINDOW, true);
             Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+            PWINDOW->updateWindowDecos(); // re-add Hyprland's border/shadow (see beginRollReveal)
             warpBorderToFocused(PWINDOW); // border already active from the hold; keep it snapped
             // the surface was hidden; nudge the client to repaint (QtWebEngine
             // presents black after its surface is un-hidden until it redraws)
