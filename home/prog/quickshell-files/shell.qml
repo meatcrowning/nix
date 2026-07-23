@@ -74,9 +74,17 @@ Scope {
         id: wallpaperPicker
     }
 
-    // The Spectacle-style screenshot overlay (Meta+Shift+S).
+    // The Spectacle-style screenshot / screen-recording overlay (Meta+Shift+S).
     Screenshot {
         id: screenshot
+    }
+
+    // The "recording..." toast, top-right, shown while a recording is running.
+    // Lives outside the overlay so it survives the overlay closing; clicking it
+    // stops the recording (SIGINT -> wf-recorder finalises the file).
+    RecordingToast {
+        recording: screenshot.recording
+        onStopRequested: screenshot.stopRecording()
     }
 
     // The month calendar that slides out when hovering the panel date.

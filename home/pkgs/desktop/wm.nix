@@ -30,5 +30,9 @@
     quickshell
     # screenshots (Screenshot.qml overlay drives grim) + clipboard history
     wl-clipboard
+    # screen recording (Screenshot.qml overlay drives wf-recorder in record
+    # mode) — lightweight wlroots screencopy grabber, no audio, matches the
+    # display refresh rate
+    wf-recorder
     ];
 }
