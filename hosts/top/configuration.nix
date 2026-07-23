@@ -33,7 +33,6 @@
   };
 
   security.rtkit.enable = true;
-  virtualisation.vmware.host.enable = true;
 
   programs.kdeconnect.enable = true;
 

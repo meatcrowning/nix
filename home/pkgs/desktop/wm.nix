@@ -6,8 +6,6 @@
     swaybg
     networkmanagerapplet
     pamixer
-    labwc
-    noctalia-shell
     cliphist
   # already native on air (this Fedora install, including the Hyprland this
   # very session is running under) — skip duplicating there. Tried swapping

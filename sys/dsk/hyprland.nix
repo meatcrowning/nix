@@ -2,7 +2,6 @@
 
 {
   programs.hyprland.enable = true;
-  programs.labwc.enable = true;
 
   # xdg-desktop-portal routing for the Hyprland session. programs.hyprland
   # already enables xdg.portal + the hyprland backend; without an explicit
