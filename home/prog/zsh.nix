@@ -8,16 +8,17 @@
     syntaxHighlighting.enable = true;
     #bindkey "''${key[Up]}" up-line-or-search;
     shellAliases =
-      # `top` is a full NixOS system, so update/rbsys/rbhome all go through
-      # `nixos-rebuild` (passwordless via sys/nixos-rebuild.nix, which only
-      # exists on top). `air` is plain Fedora with standalone home-manager —
-      # there's no NixOS layer, so these just drive `home-manager switch`
-      # against the `air` flake output instead, and `trash` isn't set up
-      # passwordless there.
+      # `top` is a full NixOS system, so update/rbsys/rbhome all go through the
+      # `rebuild-top` wrapper (passwordless via sys/nixos-rebuild.nix, which only
+      # exists on top — it hardcodes `switch --flake /home/lam/nix#top`, so no
+      # NOPASSWD-on-arbitrary-flake escalation). `air` is plain Fedora with
+      # standalone home-manager — there's no NixOS layer, so these just drive
+      # `home-manager switch` against the `air` flake output instead, and `trash`
+      # isn't set up passwordless there.
       if host == "top" then {
-        update = "sudo nixos-rebuild switch --upgrade --flake /home/lam/nix/#top";
-        rbsys = "sudo nixos-rebuild switch --flake /home/lam/nix/#top";
-        rbhome = "sudo nixos-rebuild switch --flake /home/lam/nix/#top";
+        update = "sudo rebuild-top --upgrade";
+        rbsys = "sudo rebuild-top";
+        rbhome = "sudo rebuild-top";
         trash = "sudo nix-collect-garbage";
       } else {
         update = "nix flake update --flake /home/lam/nix && home-manager switch --flake /home/lam/nix#air";

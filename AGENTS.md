@@ -49,22 +49,29 @@ C++ — compositor-side window titlebars + session save/restore).
 
 **Applying edits + reloading (READ THIS before editing panel/hypr config):**
 
-- **Rebuild alias reality:** `rbhome`/`rbsys`/`update` all run
-  `sudo nixos-rebuild switch --flake /home/lam/nix/#top` (home-manager is a
-  NixOS module here; there is no standalone `home-manager switch`, and `rbhome`
-  is NOT a separate/dangerous command — on `top` it's the exact same
-  nixos-rebuild as `rbsys`; see `home/prog/zsh.nix`). A NOPASSWD
-  rule allows the sudo. A **new** file must be `git add`-ed before the rebuild
+- **Rebuild alias reality:** `rbhome`/`rbsys`/`update` all run `sudo rebuild-top`
+  (a `writeShellScriptBin` wrapper that hardcodes
+  `nixos-rebuild switch --flake /home/lam/nix#top`; `update` = `sudo rebuild-top
+  --upgrade`). home-manager is a NixOS module here; there is no standalone
+  `home-manager switch`, and `rbhome` is NOT a separate/dangerous command — on
+  `top` it's the exact same rebuild as `rbsys`; see `home/prog/zsh.nix`. A
+  NOPASSWD rule (`sys/nixos-rebuild.nix`) allows only that wrapper — **bare
+  `sudo nixos-rebuild switch …` now PROMPTS** (the wrapper hard-scopes the
+  flake/host so a NOPASSWD rule can't be abused into arbitrary-root). A **new**
+  file must be `git add`-ed before the rebuild
   — the tree is dirty and flake eval ignores untracked files, so a brand-new
   `Foo.qml` is silently missing from the build otherwise.
 
 - **Agents: just rebuild — don't ask, don't wait.** After any `~/nix` change,
   run the rebuild yourself as the final step, same standing autonomy as
   commit+push. The rebuild is **passwordless** (NOPASSWD rule in
-  `sys/nixos-rebuild.nix`), so an agent CAN run
-  `sudo nixos-rebuild switch --flake /home/lam/nix/#top` non-interactively —
-  no tty, no prompt. (Optional: pre-build with `nixos-rebuild build --flake …`,
-  which needs no sudo at all, to validate + warm the store first.) For any
+  `sys/nixos-rebuild.nix`), so an agent CAN run **`sudo rebuild-top`**
+  (or `sudo rebuild-top --upgrade`) non-interactively — no tty, no prompt. Note
+  the NOPASSWD now covers **only the `rebuild-top` wrapper**, not bare
+  `nixos-rebuild`, so use the wrapper — `sudo nixos-rebuild switch --flake …`
+  will hang/fail on the missing tty. (Optional: pre-build with
+  `nixos-rebuild build --flake …`, which needs no sudo at all, to validate +
+  warm the store first.) For any
   OTHER sudo command (one NOT covered by a NOPASSWD rule), use **`sudo -A`**:
   `SUDO_ASKPASS` is wired to a ksshaskpass dialog (`home/prog/askpass.nix`), so
   `sudo -A <cmd>` pops a password prompt to the user instead of failing on the
