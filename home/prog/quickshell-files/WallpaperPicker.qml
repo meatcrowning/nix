@@ -39,7 +39,8 @@ PanelWindow {
     readonly property string wallSetPath: "$HOME/.config/scripts/wal-set.sh"
     readonly property string listScriptPath: "$HOME/.config/quickshell/scripts/list-wallpapers.sh"
 
-    property var images: []          // absolute paths, name-sorted
+    property var images: []          // absolute source paths, name-sorted
+    property var thumbs: []          // cached thumbnail path per image (parallel to images)
     property string currentPath: ""  // the wallpaper active when the picker opened
     // True once the user actually flipped to a different wallpaper this
     // session — opening and closing the picker without touching anything
@@ -117,13 +118,30 @@ PanelWindow {
         command: ["sh", "-c", root.listScriptPath]
         stdout: StdioCollector {
             onStreamFinished: {
-                const next = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);
-                // Only reassign when the set actually changed: assigning a new
-                // array (even an identical one) resets the ListView, which
-                // clobbers currentIndex and would fire a spurious re-preview on
-                // every 3s poll while browsing.
-                if (next.length !== root.images.length || next.some((v, i) => v !== root.images[i]))
-                    root.images = next;
+                // Each line is "source\tthumbnail" (see list-wallpapers.sh).
+                const lines = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+                const nextImages = [];
+                const nextThumbs = [];
+                for (const line of lines) {
+                    const tab = line.indexOf("\t");
+                    if (tab >= 0) {
+                        nextImages.push(line.substring(0, tab));
+                        nextThumbs.push(line.substring(tab + 1));
+                    } else {
+                        nextImages.push(line);
+                        nextThumbs.push(line);
+                    }
+                }
+                // Only reassign `images` when the source set actually changed:
+                // assigning a new array (even an identical one) resets the
+                // GridView, clobbering currentIndex. `thumbs` is always refreshed
+                // — reassigning it does NOT reset the view (the model is
+                // `images`), so a thumbnail that finished generating between
+                // polls swaps in live without disturbing the selection.
+                if (nextImages.length !== root.images.length
+                        || nextImages.some((v, i) => v !== root.images[i]))
+                    root.images = nextImages;
+                root.thumbs = nextThumbs;
                 root.trySyncSelection();
             }
         }
@@ -318,6 +336,9 @@ PanelWindow {
                 required property string modelData
                 required property int index
                 readonly property string path: modelData
+                // Cached thumbnail (parallel `thumbs` array); falls back to the
+                // full-res source if its thumbnail hasn't been generated yet.
+                readonly property string thumb: (root.thumbs && root.thumbs[index]) || modelData
 
                 width: list.cellWidth
                 height: list.cellHeight
@@ -339,7 +360,7 @@ PanelWindow {
                         clip: true
                         sourceSize.width: 260
                         sourceSize.height: 150
-                        source: root.toFileUrl(cell.path)
+                        source: root.toFileUrl(cell.thumb)
                     }
 
                     Rectangle {

@@ -75,4 +75,21 @@ if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ]; then
     "$SCRIPTS/wal-extract.py" "$WALL" > "$THEMEFILE"
 fi
 
+# ---- picker thumbnail -----------------------------------------------------
+# A small, persistent thumbnail so WallpaperPicker.qml's grid paints instantly
+# instead of decoding the full-res original (some are 4000px+) on every open —
+# the picker's QML tree is torn down and rebuilt on every apply's hot-reload, so
+# without this the big decodes happen again each time. Same idea as filer's
+# thumbnail cache, keyed by the KEY (md5 of the realpath) this script already
+# uses, so list-wallpapers.sh can point the grid straight at it. Cheap and
+# cached; regenerated only when the source is newer. `[0]` takes the first frame
+# (harmless for the single-frame formats the picker lists); JPEG since wallpapers
+# are opaque photos/textures and it decodes faster/smaller than PNG.
+THUMBS="$CACHE/thumbs"
+THUMB="$THUMBS/$KEY.jpg"
+mkdir -p "$THUMBS"
+if [ ! -f "$THUMB" ] || [ "$WALL" -nt "$THUMB" ]; then
+    magick "${WALL}[0]" -auto-orient -strip -thumbnail '400x400>' -quality 82 "$THUMB" 2>/dev/null || true
+fi
+
 echo "wal-prepare: $WALL ready (mode=$MODE, ${IW}x${IH})"

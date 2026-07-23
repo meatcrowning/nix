@@ -126,23 +126,41 @@ fi
 # ~0.5s. The set is what actually needs to land, and it returns 0 once the image
 # is loaded, so on a truly-fresh image the retry re-attempts preload+set until
 # the set sticks.
-printf '%s' "$PRELOADS" | while read -r p; do
-    [ -n "$p" ] && hyprctl hyprpaper preload "$p" >/dev/null 2>&1
-done
-printf '%s' "$WALLLINES" | while read -r l; do
-    [ -z "$l" ] && continue
-    p="${l#*,}"
-    for _ in 1 2 3 4 5; do
-        hyprctl hyprpaper wallpaper "$l" >/dev/null 2>&1 && break
-        hyprctl hyprpaper preload "$p" >/dev/null 2>&1   # fresh image: get it loaded, then retry the set
-        sleep 0.1
+hyprpaper_apply() {
+    printf '%s' "$PRELOADS" | while read -r p; do
+        [ -n "$p" ] && hyprctl hyprpaper preload "$p" >/dev/null 2>&1
     done
-done
+    printf '%s' "$WALLLINES" | while read -r l; do
+        [ -z "$l" ] && continue
+        p="${l#*,}"
+        for _ in 1 2 3 4 5; do
+            hyprctl hyprpaper wallpaper "$l" >/dev/null 2>&1 && break
+            hyprctl hyprpaper preload "$p" >/dev/null 2>&1   # fresh image: get it loaded, then retry the set
+            sleep 0.1
+        done
+    done
+}
 
 if [ "$WALLPAPER_ONLY" = 1 ]; then
+    # Preview: setting the wallpaper IS the whole job, so do it synchronously.
+    hyprpaper_apply
     echo "wal-set: wallpaper-only, skipping theme apply"
     exit 0
 fi
+
+# Full apply: set the wallpaper image in the BACKGROUND so it overlaps the theme
+# steps below instead of gating them. Those steps (kitty/borders/KDE/cursor/
+# panel) are what the user reads as "windows and programs changed", and the
+# retry loop above can occasionally spend up to ~0.5s when hyprpaper is mid-burst
+# — running it first made the whole desktop recolour wait on it intermittently
+# ("usually instant, sometimes not"). Nothing below depends on the wallpaper
+# being live (from the picker it's already up from the preview), so background
+# it and move on. If the step-7 reload tears this script down before the set
+# finishes,
+# that only happens on a picker commit — where the preview already set it — so
+# the final wallpaper is still correct; standalone/startup runs aren't torn down
+# and complete it normally.
+hyprpaper_apply &
 
 # ---- 3. load the palette (already extracted by wal-prepare.sh above) ---------
 eval "$(cat "$THEMES/$KEY.env")"

@@ -84,7 +84,18 @@ pin_env() {
     sed -i -E 's/(hl\.env\("XCURSOR_THEME", ")GoogleDot-[^"]*(")/\1'"$NAME"'\2/' "$LUA"
     sed -i -E 's/(hl\.env\("HYPRCURSOR_THEME", ")GoogleDot-[^"]*(")/\1'"$NAME"'\2/' "$LUA"
 }
-apply() { hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true; }
+# setcursor swaps the theme, but Hyprland keeps compositing the cursor buffer it
+# already has until the pointer's shape next changes — i.e. until you hover onto
+# a new surface — so the fresh tint doesn't show until you move the mouse over
+# something. Issue the real set, then bounce the size by 1px and back: a size
+# change forces hyprcursor to re-rasterise and re-upload the buffer NOW, which
+# repaints the on-screen cursor immediately without waiting for a hover. The
+# final call restores the correct size, so the 1px blip lasts one IPC round-trip.
+apply() {
+    hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true
+    hyprctl setcursor "$NAME" "$((SIZE + 1))" >/dev/null 2>&1 || true
+    hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true
+}
 
 # Drop stale per-accent themes (keep the current one and the GoogleDot-Black
 # base). Match only the 6-hex accent suffix so "GoogleDot-Black" is never hit.
@@ -119,16 +130,37 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/cursor-recolor.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/build" "$WORK/theme/cursors"
 
-# One mogrify recolours every extracted frame at once; -path writes the copies
-# into WORK so the cached grey master is left untouched. `-channel RGB ...
-# +channel` keeps the alpha intact (see the header note on the black box).
-magick mogrify -path "$WORK/build" -channel RGB +level-colors "black,#$ACCENT" +channel "$MASTER"/*.png
+# Recolour every extracted frame with `+level-colors black,#accent` (black core
+# -> black, white outline -> accent). `-channel RGB ... +channel` keeps the alpha
+# intact (see the header note on the black box); -path writes the copies into
+# WORK so the cached grey master is left untouched.
+#
+# This is the whole cost of a re-tint (~2.4s single-threaded over the master's
+# ~1800 frames). mogrify itself is one process, so split the frames across all
+# cores with xargs -P — each batch is an independent mogrify writing its own
+# basenames into the same -path dir, no collisions — which cuts it to ~0.6s. Fall
+# back to a single mogrify if nproc/xargs somehow aren't around.
+JOBS="$(nproc 2>/dev/null || echo 1)"
+if command -v xargs >/dev/null 2>&1 && [ "$JOBS" -gt 1 ]; then
+    printf '%s\n' "$MASTER"/*.png \
+        | xargs -P "$JOBS" -n 64 magick mogrify -path "$WORK/build" -channel RGB +level-colors "black,#$ACCENT" +channel
+else
+    magick mogrify -path "$WORK/build" -channel RGB +level-colors "black,#$ACCENT" +channel "$MASTER"/*.png
+fi
 cp "$MASTER"/*.conf "$WORK/build/"
-# xcursorgen reads the PNG basenames from each .conf, so run it in that dir.
+# Recompile each cursor. xcursorgen reads the PNG basenames from each .conf, so
+# run it in that dir; parallelise across cores too (cheap, but free). The conf
+# names are our own extracted cursor names, so splicing WORK into the child is
+# safe.
 ( cd "$WORK/build"
-  for c in *.conf; do
-      xcursorgen "$c" "$WORK/theme/cursors/${c%.conf}" 2>/dev/null || true
-  done )
+  if command -v xargs >/dev/null 2>&1 && [ "$JOBS" -gt 1 ]; then
+      printf '%s\n' *.conf | xargs -P "$JOBS" -I{} sh -c \
+          'c="$1"; xcursorgen "$c" "'"$WORK"'/theme/cursors/${c%.conf}" 2>/dev/null || true' _ {}
+  else
+      for c in *.conf; do
+          xcursorgen "$c" "$WORK/theme/cursors/${c%.conf}" 2>/dev/null || true
+      done
+  fi )
 # Copy the alias symlinks (pointer -> left_ptr, the hashed names, ...) verbatim.
 for l in $(find "$SRC/cursors" -maxdepth 1 -type l -printf '%f\n'); do
     cp -a "$SRC/cursors/$l" "$WORK/theme/cursors/$l" 2>/dev/null || true
