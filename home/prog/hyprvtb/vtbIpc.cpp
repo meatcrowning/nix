@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -118,10 +119,14 @@ namespace {
         }
 
         std::lock_guard lk(g_lk);
-        // keep an existing footer / title-edit flag across button re-registrations
+        // keep an existing footer / title-edit flag / scrub bar across button
+        // re-registrations (viewer re-registers its button set on every
+        // image<->video switch, and again would clobber the live PLAYBAR)
         if (auto it = g_regs.find(pid); it != g_regs.end()) {
             reg.footer    = it->second.footer;
             reg.titleEdit = it->second.titleEdit;
+            reg.playbar   = it->second.playbar;
+            reg.playPos   = it->second.playPos;
         }
         c.pid          = pid;
         g_regs[pid]    = std::move(reg);
@@ -158,6 +163,29 @@ namespace {
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void handlePlaybar(SClient& c, const std::string& args) {
+        if (c.pid <= 0)
+            return;
+        // "<0|1> <pos>": scrub bar visibility + playback fraction
+        const size_t sp    = args.find(' ');
+        const bool   shown = args.substr(0, sp) == "1";
+        float        pos   = 0.f;
+        if (sp != std::string::npos) {
+            try {
+                pos = std::clamp(std::stof(args.substr(sp + 1)), 0.f, 1.f);
+            } catch (...) {}
+        }
+        std::lock_guard lk(g_lk);
+        auto&           reg = g_regs[c.pid];
+        if (g_regFd.find(c.pid) == g_regFd.end())
+            g_regFd[c.pid] = c.fd;
+        if (reg.playbar == shown && reg.playPos == pos)
+            return;
+        reg.playbar = shown;
+        reg.playPos = pos;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
     void handleLoading(SClient& c, const std::string& arg) {
         if (c.pid <= 0)
             return;
@@ -183,6 +211,8 @@ namespace {
             handleTitleEdit(c, line.substr(10));
         else if (line.starts_with("LOADING "))
             handleLoading(c, line.substr(8));
+        else if (line.starts_with("PLAYBAR "))
+            handlePlaybar(c, line.substr(8));
     }
 
     void dropClient(SClient& c) {
@@ -363,6 +393,13 @@ void VtbIpc::sendReorder(pid_t pid, const std::string& srcId, const std::string&
 void VtbIpc::sendAddr(pid_t pid, const std::string& text) {
     std::lock_guard lk(g_lk);
     sendLineLocked(pid, "ADDR " + text); // text is the rest of the line (no newline inserted)
+}
+
+void VtbIpc::sendSeek(pid_t pid, float frac) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.5f", std::clamp(frac, 0.f, 1.f));
+    std::lock_guard lk(g_lk);
+    sendLineLocked(pid, std::string("SEEK ") + buf);
 }
 
 void VtbIpc::sendWake(pid_t pid) {

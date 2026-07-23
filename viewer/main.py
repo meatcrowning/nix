@@ -34,9 +34,24 @@ from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
               ".avif", ".jxl", ".tif", ".tiff", ".ico", ".ppm", ".pgm"}
 
+# Video/animation formats played through QtMultimedia (ffmpeg backend). Mixed in
+# with the images when scanning a folder so ‹ / › (skip prev/next) flip across
+# both; the QML tells video from image by extension and swaps the surface + the
+# titlebar controls (play/pause + scrub bar) accordingly.
+VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mpg",
+              ".mpeg", ".wmv", ".flv", ".ts", ".ogv", ".3gp", ".m2ts"}
+
 
 def is_image(name):
     return os.path.splitext(name)[1].lower() in IMAGE_EXTS
+
+
+def is_video(name):
+    return os.path.splitext(name)[1].lower() in VIDEO_EXTS
+
+
+def is_media(name):
+    return is_image(name) or is_video(name)
 
 
 def natkey(name):
@@ -48,20 +63,20 @@ def natkey(name):
 def images_for(argv):
     """(list of {name, path}, start index) for the given argv.
 
-    One existing image → the name-sorted images of its directory, positioned on
-    it. Several paths → exactly those, in the order given. Anything else that
+    One existing media file → the name-sorted media of its directory, positioned
+    on it. Several paths → exactly those, in the order given. Anything else that
     exists → just itself."""
     paths = [os.path.abspath(a) for a in argv if os.path.exists(a)]
     if len(paths) == 1 and os.path.isfile(paths[0]):
         target = paths[0]
         d = os.path.dirname(target)
         try:
-            names = sorted((e.name for e in os.scandir(d) if e.is_file() and is_image(e.name)), key=natkey)
+            names = sorted((e.name for e in os.scandir(d) if e.is_file() and is_media(e.name)), key=natkey)
         except OSError:
             names = [os.path.basename(target)]
         entries = [{"name": n, "path": os.path.join(d, n)} for n in names]
         idx = next((i for i, e in enumerate(entries) if e["path"] == target), -1)
-        if idx < 0:  # target isn't a recognised image ext — show it anyway
+        if idx < 0:  # target isn't a recognised media ext — show it anyway
             entries.insert(0, {"name": os.path.basename(target), "path": target})
             idx = 0
         return entries, idx
@@ -151,15 +166,20 @@ class Palette(QObject):
 
 
 class Titlebar(QObject):
-    """hyprvtb app-button bridge — the viewer controls (prev/next/zoom/fit/close)
-    live in the compositor's inner titlebar column. QML pushes the button set;
-    clicks bounce back through `clicked`. See filer/main.py for the pattern."""
+    """hyprvtb app-button bridge — the viewer controls (prev/next/zoom/fit/close,
+    or play/pause + skip for video) live in the compositor's inner titlebar
+    column, and so does the video scrub bar. QML pushes the button set + scrub
+    position; clicks and scrub seeks bounce back through `clicked` / `seek`. See
+    filer/main.py for the pattern. The vtb callbacks fire on the client's I/O
+    thread — the Signals hop them onto the GUI thread (queued)."""
 
     clicked = Signal(str)
+    seek = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._client = VtbClient(on_click=self.clicked.emit)
+        self._client = VtbClient(on_click=self.clicked.emit,
+                                 on_seek=self.seek.emit)
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
@@ -175,6 +195,10 @@ class Titlebar(QObject):
     @Slot(str)
     def setFooter(self, text):
         self._client.set_footer(text)
+
+    @Slot(bool, float)
+    def setPlaybar(self, shown, pos):
+        self._client.set_playbar(shown, pos)
 
 
 def main():

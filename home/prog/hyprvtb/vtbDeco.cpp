@@ -50,6 +50,13 @@ static constexpr int VTB_CELLS    = 5;
 static constexpr int VTB_SEP_H    = 12;   // spacer height between app-button groups
 static constexpr int VTB_APPCELL  = 1000; // m_iHoverCell base for app cells (0-4 = system)
 
+// media scrub bar (viewer video): the vertical track's groove width, its thumb
+// notch height, and the logical length reserved for it below the footer text.
+static constexpr double VTB_PLAYBAR_W       = 4;
+static constexpr double VTB_PLAYBAR_THUMB_H = 3;
+static constexpr double VTB_PLAYBAR_RESERVE = 90;
+static constexpr double VTB_PLAYBAR_MIN     = 14; // don't draw/hit a track shorter than this
+
 // How long a clicked cell stays inverted as activation feedback.
 static constexpr float VTB_FLASH_MS = 220.f;
 
@@ -748,11 +755,16 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
             drawGlyphXY(innerColX(), y, b.label, inverted ? bgColor : (disabled ? inactiveColor : (hoverLit ? litCol : textColor)));
         });
 
-        // footer: short stacked text at the bottom of the inner column (filer's
-        // dir-size readout), kept ABOVE any bottom-anchored buttons. Rendered
-        // with the same pango path as the title; skipped if too short to fit.
-        const double BH     = bottomGroupH(reg.buttons);
-        const int    FRUNLEN = std::round((CONTENTH - appBottom - BH - VTB_PAD * 2) * SCALE);
+        // footer: short stacked text in the lower inner column (filer's dir-size
+        // readout / viewer's position+name). Normally bottom-anchored, ABOVE any
+        // bottom-anchored buttons. When a media scrub bar is shown it instead
+        // TOP-anchors just under the top button group so the vertical track has
+        // room below it (bounded run length reserves that track space).
+        const double BH      = bottomGroupH(reg.buttons);
+        const double lowerTop = appBottom + VTB_PAD;              // top of the lower area (logical)
+        const double lowerBot = CONTENTH - BH - VTB_PAD;          // bottom (above the bottom group)
+        const double lowerH   = lowerBot - lowerTop;
+        const int    FRUNLEN = std::round((reg.playbar ? std::max(0.0, lowerH - VTB_PLAYBAR_RESERVE) : lowerH) * SCALE);
         if (reg.footer != m_szLastFooter || FRUNLEN != m_iLastFooterRun || !m_pFooterTex) {
             m_szLastFooter   = reg.footer;
             m_iLastFooterRun = FRUNLEN;
@@ -762,10 +774,35 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
         if (m_pFooterTex && m_pFooterTex->m_texID != 0) {
             // the texture's glyphs start at its top; bottom-anchor using the real
             // pango text height so the readout hugs the bar's bottom edge (above
-            // the bottom-anchored group, if any)
-            const auto TSZ  = m_pFooterTex->m_size;
-            CBox       fbox = {barBox.x + footerTexX() * SCALE, barBox.y + barBox.h - (VTB_PAD + BH) * SCALE - m_iFooterTextH, TSZ.x, TSZ.y};
+            // the bottom-anchored group, if any) — or top-anchor for the scrub bar
+            const auto   TSZ  = m_pFooterTex->m_size;
+            const double fy   = reg.playbar ? (barBox.y + lowerTop * SCALE)
+                                            : (barBox.y + barBox.h - (VTB_PAD + BH) * SCALE - m_iFooterTextH);
+            CBox         fbox = {barBox.x + footerTexX() * SCALE, fy, TSZ.x, TSZ.y};
             g_pHyprOpenGL->renderTexture(m_pFooterTex, fbox.round(), {.a = a});
+        }
+
+        // media scrub bar: a vertical progress track filling top->bottom with the
+        // playback fraction, drawn below the footer. Click/drag/scroll it seeks
+        // (handled in the mouse hooks); while dragging the fill follows the cursor.
+        CBox track;
+        if (playbarTrackLocal(reg, CONTENTH, SCALE, track)) {
+            const double frac  = std::clamp(m_bPlaybarDragging ? m_playbarDragFrac : (double)reg.playPos, 0.0, 1.0);
+            const double cx    = innerColX() + CELL / 2.0;
+            const double trkX  = cx - VTB_PLAYBAR_W / 2.0;
+            const auto   fillC = FOCUSED ? accentColor : inactiveColor;
+            auto         grooveC = borderColor;
+
+            grooveC.a *= a;
+            g_pHyprOpenGL->renderRect(localBox(trkX, track.y, VTB_PLAYBAR_W, track.h), grooveC, {});
+            auto fc = fillC;
+            fc.a *= a;
+            g_pHyprOpenGL->renderRect(localBox(trkX, track.y, VTB_PLAYBAR_W, track.h * frac), fc, {});
+            // thumb: a wider notch at the fill boundary so the position reads and grabs
+            const double thumbW = CELL * 0.55;
+            double       thumbY = track.y + track.h * frac - VTB_PLAYBAR_THUMB_H / 2.0;
+            thumbY = std::clamp(thumbY, track.y, track.y + track.h - VTB_PLAYBAR_THUMB_H);
+            g_pHyprOpenGL->renderRect(localBox(cx - thumbW / 2.0, thumbY, thumbW, VTB_PLAYBAR_THUMB_H), fc, {});
         }
 
         // drag-reorder feedback: an accent insertion bar at the target slot and
@@ -1193,6 +1230,32 @@ int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
     return hit;
 }
 
+// The media scrub track in bar-local LOGICAL px (see the .hpp). Mirrors the
+// renderPass layout: below the top button group, below the top-anchored footer
+// text (its measured height carried in m_iFooterTextH, device px). The returned
+// width is the full inner-column cell width — a fat, easy click/scroll target
+// even though the drawn groove is thin. False if no scrub bar or too short.
+bool CVtbDeco::playbarTrackLocal(const SVtbAppReg& reg, double contentH, double scale, CBox& out) {
+    if (!reg.playbar)
+        return false;
+    double appBottom = VTB_PAD;
+    walkAppLayout(reg.buttons, contentH, [&](size_t i, double y) {
+        const auto& b = reg.buttons[i];
+        if (b.bottom)
+            return;
+        appBottom = std::max(appBottom, y + (b.isSep() ? VTB_SEP_H : cellSize()));
+    });
+    const double lowerTop = appBottom + VTB_PAD;
+    const double lowerBot = contentH - bottomGroupH(reg.buttons) - VTB_PAD;
+    const double footerH  = scale > 0 ? m_iFooterTextH / scale : 0;
+    const double trackTop = lowerTop + footerH + VTB_PAD;
+    const double trackLen = lowerBot - trackTop;
+    if (trackLen < VTB_PLAYBAR_MIN)
+        return false;
+    out = {(double)innerColX(), trackTop, (double)cellSize(), trackLen};
+    return true;
+}
+
 // Render this window's app-button glyph textures into the cache NOW, from the
 // main-thread timer — a GPU submission separate from (and before) the frame
 // that samples them. Fixes a flash-blank on Apple-Silicon/Asahi: when several
@@ -1365,6 +1428,27 @@ void CVtbDeco::ensureEditCaretVisible() {
 // page (we own the keyboard grab; owning the wheel too keeps a long URL
 // navigable). Only the focused/editing window's deco consumes it.
 void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEvent& e) {
+    // scroll over the media scrub bar seeks it (viewer video). Only the deco
+    // whose track actually sits under the cursor acts; everyone else passes the
+    // wheel through untouched.
+    if (!m_bEditing && e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0) {
+        const auto   PW  = m_pWindow.lock();
+        const auto   MON = PW ? PW->m_monitor.lock() : nullptr;
+        const double scl = MON ? MON->m_scale : 1.0;
+        SVtbAppReg   reg;
+        CBox         track;
+        const auto   LOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
+        if (PW && VtbIpc::get(appPid(), reg) && reg.playbar &&
+            playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) &&
+            VECINRECT(LOCAL, track.x, track.y, track.w, track.h)) {
+            info.cancelled    = true; // scrub, don't hand the wheel to the app
+            const double step = 0.03;
+            const double f    = std::clamp((double)reg.playPos + (e.delta > 0 ? step : -step), 0.0, 1.0);
+            VtbIpc::sendSeek(appPid(), (float)f);
+            return;
+        }
+    }
+
     if (!m_bEditing)
         return;
     const auto PWINDOW = m_pWindow.lock();
@@ -1820,6 +1904,27 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
     if (!g_pGlobalState)
         return;
 
+    // scrubbing the media bar: seek to the fraction under the cursor and keep the
+    // fill following it (the client echoes PLAYBAR, but the local drag frac drives
+    // the render so it never lags the pointer).
+    if (m_bPlaybarDragging) {
+        const auto   PWINDOW = m_pWindow.lock();
+        const auto   MON     = PWINDOW ? PWINDOW->m_monitor.lock() : nullptr;
+        const double scl     = MON ? MON->m_scale : 1.0;
+        SVtbAppReg   reg;
+        CBox         track;
+        const auto   LOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
+        if (PWINDOW && VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track)) {
+            const double f = std::clamp((LOCAL.y - track.y) / track.h, 0.0, 1.0);
+            if (f != m_playbarDragFrac) {
+                m_playbarDragFrac = f;
+                VtbIpc::sendSeek(appPid(), (float)f);
+                damageEntire();
+            }
+        }
+        return;
+    }
+
     // selecting in the address editor: drag the cursor end to the row under the
     // pointer (anchor stays at the press point), extending the highlight.
     if (m_bEditDragging) {
@@ -2062,6 +2167,23 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         }
     }
 
+    // inner column: media scrub bar. A press jumps the fill to the cursor and
+    // begins a scrub-drag (onMouseMove tracks it, seeking live via SEEK).
+    {
+        SVtbAppReg   reg;
+        CBox         track;
+        const auto   MON = PWINDOW->m_monitor.lock();
+        const double scl = MON ? MON->m_scale : 1.0;
+        if (VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, BOX.h, scl, track) &&
+            VECINRECT(COORDS, track.x, track.y, track.w, track.h)) {
+            m_bPlaybarDragging = true;
+            m_playbarDragFrac  = std::clamp((COORDS.y - track.y) / track.h, 0.0, 1.0);
+            VtbIpc::sendSeek(appPid(), (float)m_playbarDragFrac);
+            damageEntire();
+            return;
+        }
+    }
+
     // editable title (address bar): a plain click opens the editor; a drag from
     // here still moves the window (promoted on move), so just arm both. But if
     // this press only focused the window, mark it focus-only so the release
@@ -2090,6 +2212,17 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
     // its press, and always reset.
     const bool CANCELLED = m_bCancelledDown;
     m_bCancelledDown     = false;
+
+    // finishing a media scrub-drag: the seek already fired on press/move; just
+    // drop the drag so the render reverts to the client's echoed position.
+    if (m_bPlaybarDragging) {
+        m_bPlaybarDragging = false;
+        m_bDragPending     = false;
+        damageEntire();
+        if (CANCELLED)
+            info.cancelled = true;
+        return;
+    }
 
     // finishing an address-editor drag-selection: the range is already set (a
     // plain click left anchor == cursor, i.e. just a caret); clear the flag.

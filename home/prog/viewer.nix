@@ -28,7 +28,10 @@ let
         dontUnpack = true;
 
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
-        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
+        # qtmultimedia adds the QtMultimedia QML module + its FFmpeg backend so
+        # viewer can play videos (the scrub bar / play-pause controls live in the
+        # hyprvtb titlebar); qtimageformats/qtsvg add the webp/tiff/svg plugins.
+        buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg pkgs.qt6.qtmultimedia ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''
@@ -51,12 +54,12 @@ in
     [Desktop Entry]
     Type=Application
     Name=viewer
-    GenericName=Image Viewer
-    Comment=Standalone image viewer for the top desktop
+    GenericName=Media Viewer
+    Comment=Standalone image and video viewer for the top desktop
     Exec=${viewer}/bin/viewer %F
     Icon=image-x-generic
     Terminal=false
-    Categories=Graphics;Viewer;
-    MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;image/avif;image/tiff;
+    Categories=Graphics;Viewer;AudioVideo;
+    MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;image/avif;image/tiff;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;
   '';
 }

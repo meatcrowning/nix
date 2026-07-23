@@ -200,6 +200,15 @@ class CVtbDeco : public IHyprWindowDecoration {
     Vector2D             m_appDragMouseStart;
     int                  m_iAppDragTarget    = -1;     // reg index the drag currently hovers
 
+    // ---- media scrub bar (viewer video; vtbIpc PLAYBAR/SEEK) ----
+    // A vertical progress track drawn in the inner column below the footer while
+    // a client (viewer) is playing a video. Pressing/dragging it scrubs (sends
+    // SEEK with the fraction under the cursor); scrolling nudges. While dragging
+    // the fill follows the cursor immediately (m_playbarDragFrac) instead of
+    // waiting for the client's echoed PLAYBAR.
+    bool                 m_bPlaybarDragging = false;
+    double               m_playbarDragFrac  = 0.0;
+
     // Click-activation flash: the clicked cell briefly inverts (fills with its
     // highlight colour, label drawn in the bar background) so a press reads as
     // "activated". Same cell-id space as m_iHoverCell.
@@ -269,6 +278,10 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     pid_t                appPid();
     int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
+    // The media scrub track, bar-local LOGICAL px (x,y = top of the track, w =
+    // the full inner-column width used as the click/scroll hit region, h = track
+    // length). False when no scrub bar is shown or the window is too short.
+    bool                 playbarTrackLocal(const SVtbAppReg& reg, double contentH, double scale, CBox& out);
     int                  appDropSlot(const Vector2D& localCoords, const SVtbAppReg& reg); // nearest draggable slot to cursor Y
     void                 prewarmGlyphs(); // upload app-button glyph textures ahead of the render (Asahi tiler race)
     std::string          tooltipForCell(int cell); // "" = none

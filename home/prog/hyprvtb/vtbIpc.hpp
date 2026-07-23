@@ -28,10 +28,17 @@
 //     LOADING <0|1>
 //         Page loading? While 1 (and titleEdit is on), an animated | \ - /
 //         spinner is drawn in a reserved slot above the address bar. surfer.
+//     PLAYBAR <0|1> <pos>
+//         Media scrub bar. While 1, a VERTICAL progress track is drawn in the
+//         inner column below the footer (position/name) readout; <pos> is the
+//         playback fraction 0..1 (fill runs top->bottom). Clicking/dragging or
+//         scrolling the track sends SEEK back. 0 hides it (viewer's images).
 //   server -> client:
 //     CLICK <id>                a button was clicked (fires on release)
 //     REORDER <srcId> <dstId>   draggable button srcId dropped onto dstId's slot
 //     ADDR <text>               the title editor was submitted with <text>
+//     SEEK <frac>               the media scrub bar was dragged/scrolled to frac
+//                               (0..1); the client seeks and echoes a new PLAYBAR
 //     WAKE                      the window was just un-hidden (roll-up restore);
 //                               a cue to force a repaint (QtWebEngine goes black
 //                               after its surface is hidden until it redraws)
@@ -68,6 +75,8 @@ struct SVtbAppReg {
     std::string                footer;
     bool                       titleEdit = false; // title region is an editable address bar
     bool                       loading   = false; // page loading (spinner above the address bar)
+    bool                       playbar   = false; // media scrub bar shown (viewer video)
+    float                      playPos   = 0.f;   // playback fraction 0..1 (fill length)
 };
 
 namespace VtbIpc {
@@ -86,6 +95,7 @@ namespace VtbIpc {
     // submitted, the window was un-hidden.
     void sendReorder(pid_t pid, const std::string& srcId, const std::string& dstId);
     void sendAddr(pid_t pid, const std::string& text);
+    void sendSeek(pid_t pid, float frac);
     void sendWake(pid_t pid);
 
     // Bumped on every registration/footer/disconnect change.

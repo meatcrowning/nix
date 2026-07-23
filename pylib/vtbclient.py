@@ -9,9 +9,11 @@ the server side):
     -> FOOTER <text>                             stacked text at column bottom
     -> TITLEEDIT <0|1>                           title region is an address bar
     -> LOADING <0|1>                             page loading (draws a spinner)
+    -> PLAYBAR <0|1> <pos>                       media scrub bar + playback fraction
     <- CLICK <id>                                a button was clicked
     <- REORDER <srcId> <dstId>                   a draggable button was dropped
     <- ADDR <text>                               the title editor was submitted
+    <- SEEK <frac>                               the scrub bar was dragged/scrolled
     <- WAKE                                       the window was just un-hidden
 
 Buttons are (id, label, state[, tooltip[, draggable[, bottom]]]) tuples —
@@ -26,9 +28,9 @@ the plugin, so a "|" or ":" glyph label survives intact.
 
 All I/O runs on a daemon thread that reconnects forever (start the app before
 the plugin loads and the buttons appear once it does; plugin reloads re-register
-automatically). on_click/on_reorder/on_addr/on_wake fire ON THAT THREAD — Qt
-apps should bounce them through a Signal (queued across threads) before touching
-any UI.
+automatically). on_click/on_reorder/on_addr/on_seek/on_wake fire ON THAT THREAD
+— Qt apps should bounce them through a Signal (queued across threads) before
+touching any UI.
 """
 import os
 import socket
@@ -43,11 +45,12 @@ def _sock_path():
 
 class VtbClient:
     def __init__(self, on_click=None, pid=None, on_reorder=None, on_addr=None,
-                 on_wake=None):
+                 on_wake=None, on_seek=None):
         self._on_click = on_click
         self._on_reorder = on_reorder
         self._on_addr = on_addr
         self._on_wake = on_wake
+        self._on_seek = on_seek
         self._pid = pid or os.getpid()
         self._lock = threading.Lock()
         self._sock = None          # guarded by _lock
@@ -55,6 +58,7 @@ class VtbClient:
         self._footer = ""
         self._title_edit = False
         self._loading = False
+        self._playbar = None       # (shown, pos) or None if never set
         self._stop = False
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -87,6 +91,17 @@ class VtbClient:
                 return
             self._loading = bool(on)
             self._send_loading_locked()
+
+    def set_playbar(self, shown, pos=0.0):
+        """Media scrub bar: when shown, the plugin draws a vertical progress
+        track below the footer at fraction `pos` (0..1); dragging/scrolling it
+        sends SEEK back (viewer's video). Hidden for still images."""
+        state = (bool(shown), float(pos))
+        with self._lock:
+            if state == self._playbar:
+                return
+            self._playbar = state
+            self._send_playbar_locked()
 
     def close(self):
         self._stop = True
@@ -146,6 +161,12 @@ class VtbClient:
     def _send_loading_locked(self):
         self._send_locked("LOADING " + ("1" if self._loading else "0"))
 
+    def _send_playbar_locked(self):
+        if self._playbar is None:
+            return
+        shown, pos = self._playbar
+        self._send_locked("PLAYBAR %d %.5f" % (1 if shown else 0, pos))
+
     # ---- reader / reconnect thread ----
 
     def _loop(self):
@@ -174,6 +195,8 @@ class VtbClient:
                         self._send_title_edit_locked()
                     if self._loading:
                         self._send_loading_locked()
+                    if self._playbar is not None:
+                        self._send_playbar_locked()
             try:
                 data = sock.recv(4096)
             except OSError:
@@ -200,6 +223,11 @@ class VtbClient:
                             self._on_reorder(rest[0], rest[1])
                     elif text.startswith("ADDR ") and self._on_addr:
                         self._on_addr(text[5:])
+                    elif text.startswith("SEEK ") and self._on_seek:
+                        try:
+                            self._on_seek(float(text[5:]))
+                        except ValueError:
+                            pass
                     elif text == "WAKE" and self._on_wake:
                         self._on_wake()
                 except Exception:

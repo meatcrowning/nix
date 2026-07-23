@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 
 // The gwenview-style image surface of `viewer` (its own window/process — filer
 // shells out to `viewer <path>` instead of opening this inline). Two wins over
@@ -26,6 +27,32 @@ Rectangle {
     focus: visible
 
     readonly property real maxZoom: 8
+
+    // A VIDEO_EXTS file plays through QtMultimedia (the video surface + the
+    // play/pause controls + scrub bar); everything else is a still/animated
+    // image in the Flickable. Extension decides. Main.qml reads these to swap the
+    // titlebar controls and drive the scrub bar.
+    readonly property bool isVideo: {
+        const s = source.toString().toLowerCase();
+        return s.endsWith(".mp4") || s.endsWith(".mkv") || s.endsWith(".webm")
+            || s.endsWith(".mov") || s.endsWith(".avi") || s.endsWith(".m4v")
+            || s.endsWith(".mpg") || s.endsWith(".mpeg") || s.endsWith(".wmv")
+            || s.endsWith(".flv") || s.endsWith(".ts") || s.endsWith(".ogv")
+            || s.endsWith(".3gp") || s.endsWith(".m2ts");
+    }
+    readonly property bool videoPlaying:  player.playbackState === MediaPlayer.PlayingState
+    readonly property int  videoPosition: player.position
+    readonly property int  videoDuration: player.duration
+
+    function togglePlay() {
+        if (!isVideo) return;
+        if (player.playbackState === MediaPlayer.PlayingState) player.pause();
+        else player.play();
+    }
+    function seekFraction(f) {
+        if (isVideo && player.duration > 0)
+            player.position = Math.max(0, Math.min(1, f)) * player.duration;
+    }
 
     // status of whichever delegate (Image / AnimatedImage) is currently loaded,
     // for the loading/error card below; Image.Loading until the Loader has an item.
@@ -108,7 +135,9 @@ Rectangle {
                 anchors.centerIn: parent
                 width:  flick.width  * flick.zoom
                 height: flick.height * flick.zoom
+                // null for videos — those play on the VideoOutput below, not here
                 sourceComponent: {
+                    if (viewer.isVideo) return null;
                     const s = viewer.source.toString().toLowerCase();
                     return (s.endsWith(".gif") || s.endsWith(".webp")
                          || s.endsWith(".apng") || s.endsWith(".mng"))
@@ -119,25 +148,56 @@ Rectangle {
 
         WheelHandler {
             target: null
+            enabled: !viewer.isVideo   // the wheel scrubs the titlebar bar for video
             acceptedModifiers: Qt.NoModifier
             onWheel: (e) => viewer.zoomAround(e.angleDelta.y > 0 ? 1.2 : 1 / 1.2, e.x, e.y)
         }
     }
 
-    // loading / error state, centred over the (empty) canvas
+    // ---- video surface (VIDEO_EXTS) ----
+    // Fit to the window and looped forever (MediaPlayer.Infinite). The titlebar's
+    // play/pause + scrub bar drive it (via Main.qml); source flips with the
+    // folder like the images do. Audio plays through the default output.
+    AudioOutput { id: audioOut }
+    MediaPlayer {
+        id: player
+        source: viewer.isVideo ? viewer.source : ""
+        videoOutput: videoOut
+        audioOutput: audioOut
+        loops: MediaPlayer.Infinite
+        // autoplay on load / on flipping to a new clip
+        onSourceChanged: if (viewer.isVideo && source != "") play()
+    }
+    VideoOutput {
+        id: videoOut
+        anchors.fill: parent
+        visible: viewer.isVideo
+        fillMode: VideoOutput.PreserveAspectFit
+    }
+
+    // loading / error state, centred over the (empty) canvas. For images it
+    // tracks the Image/AnimatedImage status; for video, the MediaPlayer's.
     PixelText {
         anchors.centerIn: parent
         horizontalAlignment: Text.AlignHCenter
-        visible: viewer.imgStatus !== Image.Ready
-        text: viewer.imgStatus === Image.Error ? ("can't display\n" + viewer.name)
-            : viewer.imgStatus === Image.Loading ? "loading…" : ""
+        visible: viewer.isVideo
+            ? (player.error !== MediaPlayer.NoError)
+            : (viewer.imgStatus !== Image.Ready)
+        text: viewer.isVideo
+            ? (player.error !== MediaPlayer.NoError ? ("can't play\n" + viewer.name) : "")
+            : (viewer.imgStatus === Image.Error ? ("can't display\n" + viewer.name)
+              : viewer.imgStatus === Image.Loading ? "loading…" : "")
         color: viewer.winActive ? Theme.textDim : Theme.inactive
     }
 
     Keys.onPressed: (e) => {
         switch (e.key) {
         case Qt.Key_Left:                      viewer.prev(); e.accepted = true; break;
-        case Qt.Key_Right: case Qt.Key_Space:  viewer.next(); e.accepted = true; break;
+        case Qt.Key_Right:                     viewer.next(); e.accepted = true; break;
+        // Space plays/pauses a video, else advances to the next image
+        case Qt.Key_Space:
+            if (viewer.isVideo) viewer.togglePlay(); else viewer.next();
+            e.accepted = true; break;
         case Qt.Key_Escape:                    viewer.closeRequested(); e.accepted = true; break;
         case Qt.Key_Plus: case Qt.Key_Equal:   viewer.zoomBy(1.25); e.accepted = true; break;
         case Qt.Key_Minus:                     viewer.zoomBy(0.8);  e.accepted = true; break;

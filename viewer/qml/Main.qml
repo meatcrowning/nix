@@ -33,9 +33,20 @@ Window {
     function prev() { if (images.length) index = (index - 1 + images.length) % images.length; }
 
     // ---- hyprvtb titlebar buttons: the viewer controls ----
-    // state: 0 normal, 2 disabled (flip greys out on a single image).
+    // state: 0 normal, 2 disabled (flip greys out on a single item). A video
+    // swaps the zoom/fit controls for play/pause (‹ / › stay as skip prev/next);
+    // the scrub bar (below) replaces them for scrubbing.
     readonly property var tbButtons: {
         const multi = images.length > 1 ? 0 : 2;
+        if (viewer.isVideo) {
+            return [
+                { id: "playpause", label: viewer.videoPlaying ? "‖" : "▶", state: 0,
+                  tip: viewer.videoPlaying ? "pause" : "play" },
+                { id: "prev",  label: "‹", state: multi, tip: "previous" },
+                { id: "next",  label: "›", state: multi, tip: "next" },
+                { id: "close", label: "×", state: 0,     tip: "close" },
+            ];
+        }
         return [
             { id: "prev",    label: "‹",   state: multi, tip: "previous image" },
             { id: "next",    label: "›",   state: multi, tip: "next image" },
@@ -47,24 +58,48 @@ Window {
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
-    // footer readout at the bottom of the inner column: position + name.
+    // footer readout at the bottom of the inner column: position + name. (The
+    // live playback time isn't put here — a fast-changing footer would re-raster
+    // the stacked text every tick; the scrub bar shows position instead.)
     readonly property string footerStr: has ? ((index + 1) + "/" + images.length + "  " + curName) : ""
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
-    Component.onCompleted: { Titlebar.setButtons(tbButtons); Titlebar.setFooter(footerStr); }
+    // Push the scrub bar: shown at the current fraction for a video, hidden for
+    // an image. Driven by a timer while playing (position moves) and immediately
+    // on any switch into/out of video.
+    function pushPlaybar() {
+        if (viewer.isVideo && viewer.videoDuration > 0)
+            Titlebar.setPlaybar(true, viewer.videoPosition / viewer.videoDuration);
+        else
+            Titlebar.setPlaybar(false, 0);
+    }
+    Timer {
+        interval: 250; repeat: true
+        running: viewer.isVideo
+        onTriggered: win.pushPlaybar()
+    }
+    Connections {
+        target: viewer
+        function onIsVideoChanged() { win.pushPlaybar(); }
+    }
+
+    Component.onCompleted: { Titlebar.setButtons(tbButtons); Titlebar.setFooter(footerStr); win.pushPlaybar(); }
 
     Connections {
         target: Titlebar
         function onClicked(id) {
             switch (id) {
-            case "prev":    win.prev();               break;
-            case "next":    win.next();               break;
-            case "zoomout": viewer.zoomBy(0.8);       break;
-            case "zoomin":  viewer.zoomBy(1.25);      break;
-            case "fit":     viewer.fit();             break;
-            case "close":   Qt.quit();                break;
+            case "prev":      win.prev();            break;
+            case "next":      win.next();            break;
+            case "playpause": viewer.togglePlay();   break;
+            case "zoomout":   viewer.zoomBy(0.8);    break;
+            case "zoomin":    viewer.zoomBy(1.25);   break;
+            case "fit":       viewer.fit();          break;
+            case "close":     Qt.quit();             break;
             }
         }
+        // scrub bar dragged/scrolled in the titlebar → seek the player
+        function onSeek(frac) { viewer.seekFraction(frac); }
     }
 
     ImageViewer {
