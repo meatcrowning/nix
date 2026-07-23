@@ -27,6 +27,42 @@ Rectangle {
 
     readonly property real maxZoom: 8
 
+    // status of whichever delegate (Image / AnimatedImage) is currently loaded,
+    // for the loading/error card below; Image.Loading until the Loader has an item.
+    readonly property int imgStatus: imgLoader.item ? imgLoader.item.status : Image.Loading
+
+    // Static path: EXIF auto-rotation (so portrait photos match filer's upright
+    // thumbnails) + a capped decode so a 50-megapixel file doesn't blow up memory.
+    Component {
+        id: staticComp
+        Image {
+            anchors.fill: parent
+            fillMode: Image.PreserveAspectFit
+            source: viewer.source
+            autoTransform: true
+            sourceSize.width: 3840
+            sourceSize.height: 3840
+            asynchronous: true
+            cache: false          // one big image at a time — don't hoard
+            smooth: true
+            mipmap: true
+        }
+    }
+
+    Component {
+        id: animatedComp
+        AnimatedImage {
+            anchors.fill: parent
+            fillMode: Image.PreserveAspectFit
+            source: viewer.source
+            asynchronous: true
+            cache: false
+            smooth: true
+            mipmap: true
+            playing: true
+        }
+    }
+
     // reset to fit whenever the shown image changes
     onSourceChanged: fit()
     onVisibleChanged: if (visible) forceActiveFocus()
@@ -64,21 +100,20 @@ Rectangle {
             width:  Math.max(flick.width,  flick.width  * flick.zoom)
             height: Math.max(flick.height, flick.height * flick.zoom)
 
-            Image {
-                id: img
+            // AnimatedImage for formats that can animate (GIF/WebP/APNG/MNG) so
+            // they play instead of freezing on frame 1; a plain Image — EXIF
+            // auto-rotated and decode-capped — for everything else.
+            Loader {
+                id: imgLoader
                 anchors.centerIn: parent
                 width:  flick.width  * flick.zoom
                 height: flick.height * flick.zoom
-                fillMode: Image.PreserveAspectFit
-                source: viewer.source
-                // cap the decode so a 50-megapixel file doesn't blow up memory
-                // just to fill the window; plenty of detail for a 4K panel.
-                sourceSize.width: 3840
-                sourceSize.height: 3840
-                asynchronous: true
-                cache: false          // one big image at a time — don't hoard
-                smooth: true
-                mipmap: true
+                sourceComponent: {
+                    const s = viewer.source.toString().toLowerCase();
+                    return (s.endsWith(".gif") || s.endsWith(".webp")
+                         || s.endsWith(".apng") || s.endsWith(".mng"))
+                        ? animatedComp : staticComp;
+                }
             }
         }
 
@@ -93,9 +128,9 @@ Rectangle {
     PixelText {
         anchors.centerIn: parent
         horizontalAlignment: Text.AlignHCenter
-        visible: img.status !== Image.Ready
-        text: img.status === Image.Error ? ("can't display\n" + viewer.name)
-            : img.status === Image.Loading ? "loading…" : ""
+        visible: viewer.imgStatus !== Image.Ready
+        text: viewer.imgStatus === Image.Error ? ("can't display\n" + viewer.name)
+            : viewer.imgStatus === Image.Loading ? "loading…" : ""
         color: viewer.winActive ? Theme.textDim : Theme.inactive
     }
 
