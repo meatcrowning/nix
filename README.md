@@ -2,4 +2,4 @@
 
 # `nixos/hyprland/qs/...`
 
-included is my **system config**, **desktop enviroment**, **file manager**, **web browser**, and **image viewer**. intended for use on my nixos system and MBA running asahi, YMMV. 
+included is my **system config**, **desktop**, **file manager**, **web browser**, and **image viewer**. intended for use on my nixos system and MBA running asahi, YMMV. 
