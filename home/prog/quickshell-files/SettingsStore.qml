@@ -94,7 +94,7 @@ Singleton {
             property string themeMode: "auto"          // auto (wal) | manual
             property string accentOverride: "#5c9fcc"  // used when themeMode = manual
             property string fontFamily: "More Perfect DOS VGA"
-            property int    fontSize: 16
+            property int    fontSize: 15               // matches kitty's on-screen cell (11pt@96dpi ≈ 14.67px); see Theme.qml
             property int    paletteColorCount: 16      // wal quantize cluster count
             property bool   pureBlackBg: true
             property int    windowBorderWidth: 2
@@ -213,7 +213,7 @@ Singleton {
     readonly property var defaults: ({
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
-        fontSize: 16, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
+        fontSize: 15, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
