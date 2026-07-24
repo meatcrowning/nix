@@ -22,8 +22,9 @@
 #   -y, --yes            skip the confirmation prompt (for scripts)
 #   -h, --help           this help
 #
-# `tasks` targets agents in a finished state (done/failed); a still-running
-# (working) or input-blocked agent is never listed.
+# `tasks` targets agents in a finished state (done/failed) plus input-blocked
+# agents that read as "Needs input" (blocked); a still-running (working) agent
+# is never listed.
 
 set -euo pipefail
 
@@ -136,7 +137,7 @@ if [ "$MODE" = "empty-trash" ]; then
 fi
 
 # ==========================================================================
-# tasks — completed background agents under ~/.claude/jobs
+# tasks — finished/input-blocked background agents under ~/.claude/jobs
 # ==========================================================================
 if [ "$MODE" = "tasks" ]; then
   [ -d "$JOBS" ] || { echo "No background tasks found."; exit 0; }
@@ -152,7 +153,7 @@ if [ "$MODE" = "tasks" ]; then
   while IFS= read -r sf; do
     d=$(dirname "$sf")
     state=$(jq -r '.state // "?"' "$sf" 2>/dev/null || echo "?")
-    case "$state" in done|failed) ;; *) continue ;; esac
+    case "$state" in done|failed|blocked) ;; *) continue ;; esac
     cwd=$(jq -r '.cwd // ""' "$sf" 2>/dev/null || echo "")
     mt=$(stat -c %Y "$sf" 2>/dev/null || echo 0)
     [ -n "$OLDER_THAN" ] && [ "$mt" -ge "$cutoff" ] && continue
@@ -164,7 +165,7 @@ if [ "$MODE" = "tasks" ]; then
     printf '  %-3s  %-16s  %-8s  %-20s  %s\n' "$i" "$when" "$state" "$proj" "$label"
   done < <(find "$JOBS" -mindepth 2 -maxdepth 2 -name 'state.json' | sort)
   echo
-  [ "$i" -gt 0 ] || { echo "No completed background tasks to clean."; exit 0; }
+  [ "$i" -gt 0 ] || { echo "No finished or input-blocked background tasks to clean."; exit 0; }
 
   declare -a PICK=()
   if [ "$ASSUME_YES" -eq 1 ]; then
