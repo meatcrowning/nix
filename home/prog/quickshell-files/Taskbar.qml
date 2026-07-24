@@ -68,12 +68,18 @@ Column {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                // Clicking the ACTIVE program's icon minimizes it (hyprvtb
-                // slides it off-screen); clicking any other icon focuses it,
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                // Left-click the ACTIVE program's icon to minimize it (hyprvtb
+                // slides it off-screen); left-click any other icon to focus it,
                 // which also slides a minimized window back in. The
                 // minimize-on-click is gated on taskbarClickMinimizes — when
-                // off, clicking the focused icon is a no-op.
-                onClicked: {
+                // off, clicking the focused icon is a no-op. Right-click opens
+                // the Close / Force Quit menu.
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.RightButton) {
+                        cellMenu.open();
+                        return;
+                    }
                     if (cell.modelData.activated) {
                         if (SettingsStore.d.taskbarClickMinimizes)
                             Quickshell.execDetached(["hyprctl", "eval", "hl.plugin.hyprvtb.minimize_active()"]);
@@ -85,8 +91,14 @@ Column {
 
             Tooltip {
                 target: cell
-                visible: cellMouse.containsMouse
+                visible: cellMouse.containsMouse && !cellMenu.visible
                 text: (cell.modelData.title || cell.modelData.appId || "?")
+            }
+
+            TaskMenu {
+                id: cellMenu
+                target: cell
+                toplevel: cell.modelData
             }
         }
     }

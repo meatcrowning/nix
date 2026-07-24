@@ -75,6 +75,12 @@ in
       source = ./quickshell-files/scripts/disk-smart.sh;
       executable = true;
     };
+    # taskbar right-click "Force Quit": resolves a window's pid via hyprctl and
+    # SIGKILLs it (TaskMenu.qml / Taskbar.qml)
+    "quickshell/scripts/force-quit.sh" = {
+      source = ./quickshell-files/scripts/force-quit.sh;
+      executable = true;
+    };
     # Per-host branch point for the panel (e.g. the default desktop-widget set
     # in shell.qml's _defaultWidgets). A generated singleton, mirroring
     # hypr/host.lua — regenerated every switch rather than a seeded-once file,
