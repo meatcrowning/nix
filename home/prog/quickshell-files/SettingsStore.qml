@@ -49,6 +49,27 @@ Singleton {
         onTriggered: file.writeAdapter()
     }
 
+    // Cross-process live updates. watchChanges alone does NOT reliably deliver
+    // external edits here: the Settings window writes atomically (temp file +
+    // rename), which swaps settings.json's inode out from under the inotify
+    // watch, so the panel never gets the notification and your change never
+    // reaches the desktop. An explicit file.reload() DOES pick up the new
+    // values (verified), so the reader polls: a few times a second, re-read the
+    // file and let the bindings update. blockLoading makes each reload cheap and
+    // synchronous, so an edit lands on Theme's bindings within one tick — on the
+    // fly, no config reload, no flash.
+    //
+    // Gated on saveTimer so the WRITER (the Settings window) never reverts a
+    // control mid-drag: while you are editing, a save is pending and we skip the
+    // reload; the panel never has a pending save, so it always reloads. Both
+    // instances run this, but only the reader ever acts on it.
+    Timer {
+        interval: 350
+        running: true
+        repeat: true
+        onTriggered: if (!saveTimer.running) file.reload()
+    }
+
     FileView {
         id: file
         path: Quickshell.shellDir + "/settings.json"
