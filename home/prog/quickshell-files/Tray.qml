@@ -26,16 +26,18 @@ Column {
             // Tray icons come from the icon theme, so Theme.* colours don't
             // reach them; MultiEffect tints them to the wallpaper accent while
             // keeping the icon's own light/dark detail (colorization = 1.0).
+            // With "tint tray icons" off, show the icons in their own colours.
             IconImage {
                 id: trayIcon
                 anchors.centerIn: parent
                 implicitSize: Theme.cell - 18
                 source: entry.item.icon
-                visible: false
+                visible: !SettingsStore.d.trayTint
             }
             MultiEffect {
                 anchors.fill: trayIcon
                 source: trayIcon
+                visible: SettingsStore.d.trayTint
                 colorization: 1.0
                 colorizationColor: Theme.accent
             }

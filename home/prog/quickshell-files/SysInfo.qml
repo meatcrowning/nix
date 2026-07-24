@@ -63,7 +63,7 @@ Singleton {
     property real _prevTx: -1
     property real _prevCpuTotal: -1
     property real _prevCpuIdle: -1
-    readonly property real intervalSec: 2
+    readonly property real intervalSec: SettingsStore.d.monPollSec
 
     readonly property string scriptPath:
         Qt.resolvedUrl("scripts/sysinfo.sh").toString().replace("file://", "")
@@ -141,7 +141,7 @@ Singleton {
     function adjustVolume(step) {
         if (volume < 0) volume = 50;
         volume = Math.max(0, Math.min(100, volume + step));
-        Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@",
+        Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", SettingsStore.d.audioSink,
             Math.abs(step) + "%" + (step >= 0 ? "+" : "-")]);
         Sounds.playThrottled(SettingsStore.d.soundVolume, 250);
     }
@@ -153,7 +153,8 @@ Singleton {
         v = Math.round(Math.max(0, Math.min(100, v)));
         if (v === volume) return;
         volume = v;
-        Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", v + "%"]);
+        Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", SettingsStore.d.audioSink, v + "%"]);
+        // (audioSink defaults to "@DEFAULT_AUDIO_SINK@" — the system default.)
         Sounds.playThrottled(SettingsStore.d.soundVolume, 250);
     }
 
