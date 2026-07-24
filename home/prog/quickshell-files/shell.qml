@@ -358,8 +358,8 @@ Scope {
     // panel update + wpctl + the Vista ding, no OSD.
     IpcHandler {
         target: "volume"
-        function up(): void { SysInfo.adjustVolume(5); }
-        function down(): void { SysInfo.adjustVolume(-5); }
+        function up(): void { SysInfo.adjustVolume(SettingsStore.d.volumeStep); }
+        function down(): void { SysInfo.adjustVolume(-SettingsStore.d.volumeStep); }
     }
 
     // Hardware brightness keys (hypr/hyprland.lua) routed through

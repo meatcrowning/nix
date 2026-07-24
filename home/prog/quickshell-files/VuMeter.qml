@@ -107,6 +107,6 @@ Item {
         onExited: root.hovered(false)
         onPressed: (mouse) => setFromY(mouse.y)
         onPositionChanged: (mouse) => { if (pressed) setFromY(mouse.y); }
-        onWheel: (wheel) => SysInfo.adjustVolume(wheel.angleDelta.y > 0 ? 5 : -5)
+        onWheel: (wheel) => SysInfo.adjustVolume(wheel.angleDelta.y > 0 ? SettingsStore.d.volumeStep : -SettingsStore.d.volumeStep)
     }
 }
