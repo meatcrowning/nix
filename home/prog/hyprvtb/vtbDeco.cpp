@@ -2847,10 +2847,22 @@ void CVtbDeco::finishRollAnim() {
     m_rollFinishing         = false;
 
     if (dir == ROLL_OUT) {
-        // the window comes back to life at its original geometry. It was already
-        // un-hidden/focused during the reveal hold (beginRollReveal); dropping
-        // the snapshot here is the last step — the client has repainted under it
-        // by now, so no black frame shows through.
+        // the window comes back to life at its original geometry. In the normal
+        // path it was ALREADY fully revived during the reveal hold
+        // (beginRollReveal un-hid it, refocused it, re-added its decos, woke the
+        // client and let it repaint) — all UNDER the still-drawn snapshot. So the
+        // only thing left is to drop the snapshot and let that already-settled
+        // window show through.
+        //
+        // Repeating the revival here was the post-unroll flash: the moment the
+        // snapshot is gone, a SECOND sendWake re-nudged the now-uncovered
+        // WebEngineView (its `visible` binding blanks it for the nudge frame ->
+        // the webpage flash), and a SECOND updateWindowDecos re-registered
+        // Hyprland's border deco (-> the border-outline flash). Neither is needed:
+        // the window has been alive and painting behind the snapshot for the whole
+        // ~90ms hold. Only fall back to the full revival if the reveal never ran
+        // (e.g. the window was gone when beginRollReveal fired).
+        const bool revealed = m_bRollReveal;
         m_bRolledUp        = false;
         m_bRollReveal      = false;
         m_iHoverCell       = -1;
@@ -2859,20 +2871,22 @@ void CVtbDeco::finishRollAnim() {
         m_bOpening         = false; // open reveal (if any) is done
         m_rollSnapTex      = nullptr;
         if (PWINDOW) {
-            PWINDOW->setHidden(false);
-            g_pCompositor->changeWindowZOrder(PWINDOW, true);
-            Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
-            PWINDOW->updateWindowDecos(); // re-add Hyprland's border/shadow (see beginRollReveal)
-            warpBorderToFocused(PWINDOW); // border already active from the hold; keep it snapped
-            // the surface was hidden; nudge the client to repaint (QtWebEngine
-            // presents black after its surface is un-hidden until it redraws)
-            VtbIpc::sendWake(appPid());
+            if (!revealed) {
+                PWINDOW->setHidden(false);
+                g_pCompositor->changeWindowZOrder(PWINDOW, true);
+                Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
+                PWINDOW->updateWindowDecos(); // re-add Hyprland's border/shadow (see beginRollReveal)
+                warpBorderToFocused(PWINDOW);  // snap border straight to focused tint
+                // the surface was hidden; nudge the client to repaint (QtWebEngine
+                // presents black after its surface is un-hidden until it redraws)
+                VtbIpc::sendWake(appPid());
+            }
             // Damage the FULL frame as one region — client body, the right-edge
             // titlebar deco, the border wrapping both, and the drop shadow — so
-            // every side repaints on the same frame. Damaging only the bar box
-            // (m_rollBox) left the border/titlebar on the wide right edge to
-            // repaint a frame or two late, so it flashed / appeared after the
-            // other three sides.
+            // every side repaints on the same frame as the snapshot is dropped.
+            // Damaging only the bar box (m_rollBox) left the border/titlebar on
+            // the wide right edge to repaint a frame or two late, so it flashed /
+            // appeared after the other three sides.
             CBox full = PWINDOW->getFullWindowBoundingBox();
             full.expand(VTB_SHADOW_SIZE + 4);
             g_pHyprRenderer->damageBox(full);
