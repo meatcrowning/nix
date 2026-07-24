@@ -2,6 +2,23 @@
 
 let
   qmlDir = ./quickshell-files;
+
+  # `settings` — launcher for the standalone Settings program (Settings.qml).
+  # It is its OWN Quickshell instance, run from the same config directory as the
+  # panel (so it reuses the Theme/PixelText/SettingsStore singletons and
+  # recolours with the wallpaper) but selected by path with `-p`. Kept resident
+  # and shown/hidden over IPC so toggling is instant; first invocation starts the
+  # daemon (the window shows on launch). `-n` guards against a second instance.
+  #   settings           -> toggle (the keybind)
+  #   settings show|hide -> explicit (the .desktop entry uses `show`)
+  settings = pkgs.writeShellScriptBin "settings" ''
+    QML="$HOME/.config/quickshell/Settings.qml"
+    ACTION="''${1:-toggle}"
+    if qs -p "$QML" ipc call settings "$ACTION" >/dev/null 2>&1; then
+      exit 0
+    fi
+    exec qs -d -n -p "$QML"
+  '';
   # Theme.qml gets its "wal palette" block rewritten in place at runtime by
   # wal-set.sh (in place, not via rename — Quickshell's hot-reload watches by
   # inode) so it's excluded here and seeded as a real writable file below,
@@ -52,6 +69,24 @@ in
       }
     '';
   };
+
+  home.packages = [ settings ];
+
+  # Desktop entry so the Settings program is discoverable in the Quickshell
+  # runner (DesktopEntries), same approach as filer.nix (xdg.enable is off, so
+  # this goes via home.file). `show` — not `toggle` — so launching from the
+  # runner always opens it.
+  home.file.".local/share/applications/quickshell-settings.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=settings
+    GenericName=Desktop Settings
+    Comment=Configure the Quickshell desktop
+    Exec=${settings}/bin/settings show
+    Icon=preferences-desktop
+    Terminal=false
+    Categories=Settings;DesktopSettings;
+  '';
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     [ -e "$HOME/.config/quickshell/Theme.qml" ] || install -D -m644 ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml"

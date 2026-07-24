@@ -407,6 +407,10 @@ hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggle"), { de
 -- drag-select / window pick, delay + exit in the bottom menu; saves to
 -- ~/Pictures/Screenshots and copies to the clipboard.
 hl.bind(mainMod .. " + SHIFT + S", hl.dsp.exec_cmd("qs ipc call screenshot toggle"), { description = "Screenshot" })
+-- Settings program: its own Quickshell instance (quickshell/Settings.qml),
+-- toggled via the `settings` wrapper (it targets that instance by path, not the
+-- panel's IPC). Meta+comma, the usual "preferences" chord.
+hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("settings"), { description = "Settings" })
 -- Bare Super tap opens the Quickshell runner (fires on release of Super).
 hl.bind(mainMod .. " + Super_L", hl.dsp.exec_cmd("qs ipc call launcher toggle"), { release = true })
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo(), { description = "Pseudo-tile" })
