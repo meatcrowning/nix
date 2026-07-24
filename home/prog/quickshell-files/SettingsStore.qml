@@ -195,10 +195,10 @@ Singleton {
             property string weatherPlace: "juneau"
             property string weatherUnit: "F"           // F | C
             property int    weatherRefreshMin: 20
-            property string tz1: "America/Indiana/Indianapolis"
-            property string tz2: "America/New_York"
-            property string tz3: "Europe/London"
-            property string tz4: "Asia/Tokyo"
+            // world-clock zones, top-to-bottom under the analog clock popup.
+            // A free-length list (Settings adds/removes rows); each entry is an
+            // Olson TZ name (e.g. "Europe/London").
+            property var    worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"]
 
             // ---- Display & Brightness ----
             property int    brightnessStep: 5
@@ -237,8 +237,8 @@ Singleton {
         keyRepeatDelay: 300, keyRepeatRate: 40, pointerSpeed: 0.0, naturalScroll: false,
         tapToClick: true, clock24h: false, weekStartsMonday: false, weatherLat: 58.3019,
         weatherLon: -134.4197, weatherPlace: "juneau", weatherUnit: "F", weatherRefreshMin: 20,
-        tz1: "America/Indiana/Indianapolis", tz2: "America/New_York", tz3: "Europe/London",
-        tz4: "Asia/Tokyo", brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
+        worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
+        brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
         nightTemp: 4000
     })
 }
