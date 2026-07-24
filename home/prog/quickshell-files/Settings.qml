@@ -21,8 +21,14 @@ import Quickshell.Io
 Scope {
     id: root
 
-    // window visibility, driven by IPC (kept resident between shows)
-    property bool shown: true
+    // NON-RESIDENT by design. A hidden FloatingWindow does not reliably re-map
+    // in Quickshell (setting visible=true after a hide leaves it unmapped —
+    // that was the "can't reopen Settings without logging out" bug), so instead
+    // of keeping one instance resident and toggling its visibility, we run one
+    // instance PER open: the window is shown for the whole life of the process,
+    // and closing it (the titlebar X, Escape, or the toggle keybind) QUITS the
+    // process. The launcher starts a fresh instance next time — a freshly
+    // created window always maps. Launch is a fraction of a second.
 
     // this quickshell process's PID (== the window's getPID() hyprvtb reads) and
     // the button socket path, both discovered once at startup below.
@@ -54,9 +60,12 @@ Scope {
 
     IpcHandler {
         target: "settings"
-        function toggle(): void { root.shown = !root.shown; }
-        function show(): void { root.shown = true; }
-        function hide(): void { root.shown = false; }
+        // An IPC call only reaches us when we're already running, so toggle and
+        // hide both mean "close" -> quit; a fresh launch is what re-opens us.
+        // show is a no-op (the window is already up).
+        function toggle(): void { Qt.quit(); }
+        function show(): void {}
+        function hide(): void { Qt.quit(); }
     }
 
     // ---- hyprvtb titlebar buttons ----------------------------------------
@@ -128,17 +137,17 @@ Scope {
         implicitWidth: 640
         implicitHeight: 580
         minimumSize: Qt.size(460, 380)
-        visible: root.shown
+        visible: true
         color: Theme.bg
 
-        onClosed: root.shown = false
+        onClosed: Qt.quit()
         onVisibleChanged: if (visible) content.forceActiveFocus()
 
         Item {
             id: content
             anchors.fill: parent
             focus: true
-            Keys.onEscapePressed: root.shown = false
+            Keys.onEscapePressed: Qt.quit()
 
             // slim page-name header (orientation only — navigation is in the
             // titlebar). Not a button row.
