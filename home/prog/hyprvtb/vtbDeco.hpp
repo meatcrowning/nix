@@ -272,6 +272,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 exitEdit(bool submit);
     void                 onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEvent& e);
     bool                 deleteEditSelection();          // erase the selected range; true if there was one
+    void                 pasteIntoEdit();                // read the wl clipboard and insert it at the caret (async)
+    void                 insertEditText(const std::string& text); // sanitize + insert text at the caret, replacing any selection
     size_t               editByteAtLocalY(double localY); // bar-local Y -> byte offset (codepoint boundary)
     int                  editVisibleRows();              // codepoint rows that fit in the editor
     void                 ensureEditCaretVisible();       // scroll so the caret row is on-screen
