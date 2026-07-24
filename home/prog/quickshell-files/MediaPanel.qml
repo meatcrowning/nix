@@ -97,7 +97,9 @@ SlidePopup {
     Process {
         id: cavaProc
         running: root.open
-        command: ["sh", "-c", "exec cava -p \"$HOME/.config/quickshell/scripts/cava-spectrum.conf\""]
+        // see VuMeter.qml: prepend ~/.nix-profile/bin so the session's bare PATH
+        // can find the nix-installed cava, else the spectrum never spawns.
+        command: ["sh", "-c", "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; exec cava -p \"$HOME/.config/quickshell/scripts/cava-spectrum.conf\""]
         stdout: SplitParser {
             onRead: data => {
                 const parts = data.split(";");
