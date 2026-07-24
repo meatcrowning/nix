@@ -1664,6 +1664,23 @@ def main():
                     prof.setUrlRequestInterceptor(adblocker)
                 except Exception:
                     pass
+                # Spell-checking. MUST be set here, imperatively, and NOT as QML
+                # properties on the WebEngineProfile: a QQuickWebEngineProfile
+                # drops spellCheckEnabled/spellCheckLanguages set at construction
+                # (the spellcheck adapter isn't wired yet), so misspellings never
+                # get marked — no red squiggle, no right-click suggestions.
+                # Calling the setters now (tree built) makes it stick. Languages
+                # first, then enable. Dictionaries come from the en-US .bdic on
+                # QTWEBENGINE_DICTIONARIES_PATH (set by surfer.nix's wrapper).
+                try:
+                    prof.setSpellCheckLanguages(["en-US"])
+                    prof.setSpellCheckEnabled(True)
+                    sys.stderr.write(
+                        "surfer spellcheck: en-US enabled=%s\n"
+                        % prof.isSpellCheckEnabled()
+                    )
+                except Exception as e:
+                    sys.stderr.write(f"surfer spellcheck: setup failed ({e})\n")
                 return
 
     from PySide6.QtCore import QTimer
