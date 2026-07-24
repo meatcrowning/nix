@@ -33,6 +33,20 @@
       if config.my.aerotheme.enable then "aerothemeplasma" else "hyprland";
   };
 
+  # Mask DrKonqi's crash-reporter units. Under Hyprland (not a Plasma/X
+  # session) the coredump *launcher* is spawned by systemd-coredump with no
+  # graphical env — WAYLAND_DISPLAY/QT_QPA_PLATFORM are absent from the unit
+  # — so its QGuiApplication can't init a Qt platform plugin and qFatal()s
+  # on startup. That abort produces its own coredump, which gets re-processed
+  # into another launcher, which aborts again: a self-amplifying loop that
+  # accounted for ~75% of all recorded coredumps on this box. Masking these
+  # (enable = false on a package-provided unit → Nix symlinks it to
+  # /dev/null) stops the reporter from ever launching. systemd-coredump is
+  # left intact, so crashes are still recorded and `coredumpctl` still works.
+  systemd.services."drkonqi-coredump-processor@".enable = false;
+  systemd.user.services."drkonqi-coredump-launcher@".enable = false;
+  systemd.user.sockets."drkonqi-coredump-launcher".enable = false;
+
   programs.aeroshell = lib.mkIf config.my.aerotheme.enable {
     enable = true;
     fonts.segoe.enable = true;
