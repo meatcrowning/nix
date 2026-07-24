@@ -22,10 +22,12 @@
 #   -y, --yes            skip the confirmation prompt (for scripts)
 #   -h, --help           this help
 #
-# `tasks` targets agents in a finished state (done/failed), input-blocked
-# agents that read as "Needs input" (blocked), never-prompted "new session"
-# shells (idle), and half-created dirs with no state.json (orphan). A
-# genuinely-running agent (working, with a real prompt) is never listed.
+# `tasks` targets agents in a terminal state written to disk: finished
+# (done/failed) or input-blocked / "Needs input" (blocked). Live sessions are
+# never listed — including the daemon's warm "bg" pool of pre-spawned idle
+# shells, which are backed by running processes and cannot be cleaned by
+# trashing their folder (the daemon just respawns them). To clear those, close
+# them from Claude Code's session list or restart the daemon.
 
 set -euo pipefail
 
@@ -138,8 +140,8 @@ if [ "$MODE" = "empty-trash" ]; then
 fi
 
 # ==========================================================================
-# tasks — finished / input-blocked / idle / orphaned background agents
-#         under ~/.claude/jobs
+# tasks — terminal-state (done/failed/blocked) background agents under
+#         ~/.claude/jobs. Live sessions (incl. the daemon's warm bg pool) skipped.
 # ==========================================================================
 if [ "$MODE" = "tasks" ]; then
   [ -d "$JOBS" ] || { echo "No background tasks found."; exit 0; }
@@ -152,43 +154,25 @@ if [ "$MODE" = "tasks" ]; then
   printf '  %-3s  %-16s  %-8s  %-20s  %s\n' "#" "UPDATED" "STATE" "PROJECT" "TASK"
   printf '  '; printf '─%.0s' {1..84}; echo
   i=0
-  while IFS= read -r d; do
-    sf="$d/state.json"
-    # Decide whether this job dir is a cleanup candidate and how to label it.
-    #   done/failed          — finished agents
-    #   blocked              — input-blocked, reads as "Needs input"
-    #   idle                 — a "new session" shell that was never prompted
-    #                          (empty intent + no terminal ever attached)
-    #   orphan               — a half-created dir with no state.json at all
-    # A genuinely-running agent (working, with a real prompt) is skipped.
-    if [ -f "$sf" ]; then
-      state=$(jq -r '.state // "?"' "$sf" 2>/dev/null || echo "?")
-      cwd=$(jq -r '.cwd // ""' "$sf" 2>/dev/null || echo "")
-      disp="$state"; label=""
-      case "$state" in
-        done|failed|blocked)
-          label=$(jq -r '(.name // .intent // "(no label)")' "$sf" 2>/dev/null | tr '\n' ' ') ;;
-        *)
-          # Only surface never-started shells; skip real in-progress work.
-          idle=$(jq -r 'if ((.intent // "") == "") and ((.firstTerminalAt // null) == null) then "y" else "n" end' "$sf" 2>/dev/null || echo n)
-          [ "$idle" = "y" ] || continue
-          disp="idle"; label="(idle — never prompted)" ;;
-      esac
-      mt=$(stat -c %Y "$sf" 2>/dev/null || echo 0)
-    else
-      disp="orphan"; cwd=""; label="(no state.json — orphaned shell)"
-      mt=$(stat -c %Y "$d" 2>/dev/null || echo 0)
-    fi
+  while IFS= read -r sf; do
+    d=$(dirname "$sf")
+    state=$(jq -r '.state // "?"' "$sf" 2>/dev/null || echo "?")
+    # Only terminal states are safe to trash: done/failed are finished, blocked
+    # reads as "Needs input". Anything else (working/running/idle) is a live,
+    # daemon-managed session — trashing its dir just makes the daemon respawn it.
+    case "$state" in done|failed|blocked) ;; *) continue ;; esac
+    cwd=$(jq -r '.cwd // ""' "$sf" 2>/dev/null || echo "")
+    mt=$(stat -c %Y "$sf" 2>/dev/null || echo 0)
     [ -n "$OLDER_THAN" ] && [ "$mt" -ge "$cutoff" ] && continue
     [ -n "$here" ] && [ "$cwd" != "$here" ] && continue
     i=$((i+1)); IDX_JOB[$i]="$d"
     when=$(date -d "@$mt" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')
     proj=$(basename "${cwd:-?}"); proj="${proj:0:20}"
-    label="${label:0:44}"
-    printf '  %-3s  %-16s  %-8s  %-20s  %s\n' "$i" "$when" "$disp" "$proj" "$label"
-  done < <(find "$JOBS" -mindepth 1 -maxdepth 1 -type d | sort)
+    label=$(jq -r '(.name // .intent // "(no label)")' "$sf" 2>/dev/null | tr '\n' ' '); label="${label:0:44}"
+    printf '  %-3s  %-16s  %-8s  %-20s  %s\n' "$i" "$when" "$state" "$proj" "$label"
+  done < <(find "$JOBS" -mindepth 2 -maxdepth 2 -name 'state.json' | sort)
   echo
-  [ "$i" -gt 0 ] || { echo "No finished, input-blocked, idle, or orphaned background tasks to clean."; exit 0; }
+  [ "$i" -gt 0 ] || { echo "No finished or input-blocked background tasks to clean."; exit 0; }
 
   declare -a PICK=()
   if [ "$ASSUME_YES" -eq 1 ]; then
