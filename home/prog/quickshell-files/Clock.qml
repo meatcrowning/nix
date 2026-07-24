@@ -13,8 +13,13 @@ Column {
 
     function refresh() {
         const d = clock.date;
-        let h = d.getHours() % 12;
-        if (h === 0) h = 12;          // 12-hour format, no leading-zero drop
+        let h;
+        if (SettingsStore.d.clock24h) {
+            h = d.getHours();         // 24-hour, zero-padded
+        } else {
+            h = d.getHours() % 12;
+            if (h === 0) h = 12;      // 12-hour format, no leading-zero drop
+        }
         root.hh = pad(h);
         root.mm = pad(d.getMinutes());
     }
@@ -23,6 +28,13 @@ Column {
         id: clock
         precision: SystemClock.Minutes
         onDateChanged: root.refresh()
+    }
+
+    // Re-render immediately when the 12/24h setting is toggled in Settings,
+    // instead of waiting for the next minute tick.
+    Connections {
+        target: SettingsStore.d
+        function onClock24hChanged() { root.refresh(); }
     }
 
     Component.onCompleted: refresh()

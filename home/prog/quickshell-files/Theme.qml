@@ -3,8 +3,16 @@ import Quickshell
 import QtQuick
 
 Singleton {
-    // Everything uses the same pixel font kitty uses.
-    readonly property string font: "More Perfect DOS VGA"
+    // Everything uses the same pixel font kitty uses. Font, panel geometry and
+    // window-chrome sizes are read from SettingsStore (the Settings program's
+    // on-disk model) rather than hardcoded here, so editing them in Settings
+    // takes effect live: this file is a singleton in the panel instance too, so
+    // when settings.json changes the panel's SettingsStore reloads and every
+    // widget bound to Theme.* rebinds in place — the same no-reload, no-flash
+    // path a wallpaper recolour already uses. The values below are the shipped
+    // defaults (mirrored in SettingsStore); the palette block further down is
+    // still owned by wal-set.sh.
+    readonly property string font: SettingsStore.d.fontFamily
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to
@@ -12,14 +20,14 @@ Singleton {
     // is 16px, so 15 is slightly off-grid and a touch softer than 16 would be —
     // intentional, it's the price of matching kitty rather than the pixel grid.
     // See PixelText.qml.
-    readonly property int fontSize: 15
-    readonly property int clockSize: 15   // same size as the rest of the panel
+    readonly property int fontSize: SettingsStore.d.fontSize
+    readonly property int clockSize: SettingsStore.d.fontSize   // same size as the rest of the panel
 
     // Panel geometry (logical px)
-    readonly property int barWidth: 48
-    readonly property int cell: 40          // square size for launcher button / tray
+    readonly property int barWidth: SettingsStore.d.barWidth
+    readonly property int cell: SettingsStore.d.barCell     // square size for launcher button / tray
     readonly property int wsCell: 32        // workspace squares (a touch smaller)
-    readonly property int gap: 8
+    readonly property int gap: SettingsStore.d.barGap
 
     // Palette DERIVED FROM THE WALLPAPER. The block between the two markers is
     // rewritten by ~/.config/scripts/wal-set.sh every time the wallpaper
@@ -49,6 +57,6 @@ Singleton {
     readonly property color windowBorder:      Qt.rgba(accent.r, accent.g, accent.b, 0xee / 255)
     // hypr general.col.inactive_border — rgba(595959aa), static (not wal-derived).
     readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
-    readonly property int   windowBorderWidth: 2
-    readonly property int   windowRounding:    0
+    readonly property int   windowBorderWidth: SettingsStore.d.windowBorderWidth
+    readonly property int   windowRounding:    SettingsStore.d.windowRounding
 }

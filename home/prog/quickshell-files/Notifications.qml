@@ -12,11 +12,11 @@ Singleton {
 
     // How long a non-critical toast lingers before auto-expiring (ms). Critical
     // (urgency 2) toasts never auto-expire; they stay until clicked.
-    readonly property int timeoutMs: 5000
+    readonly property int timeoutMs: SettingsStore.d.notifTimeoutMs
 
     // Cap how many stack at once. Extra arrivals push the oldest non-critical
     // one out so a burst can't march off the top of the screen.
-    readonly property int maxVisible: 4
+    readonly property int maxVisible: SettingsStore.d.notifMaxVisible
 
     // What the toasts observe.
     readonly property var model: server.trackedNotifications

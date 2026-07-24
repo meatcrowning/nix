@@ -12,9 +12,16 @@ import Quickshell.Io
 // Defaults are declared inline on the JsonAdapter so the on-disk schema is
 // self-describing, and mirrored once in `defaults` so "restore defaults" can
 // reset the live object without re-reading the file. Writes are atomic and
-// debounced (save()), so dragging a slider doesn't hammer the disk. We do NOT
-// watchChanges: the app is the only writer, and watching would turn our own
-// writeAdapter() into a reload->change->write loop.
+// debounced (save()), so dragging a slider doesn't hammer the disk.
+//
+// watchChanges IS on — deliberately. This singleton lives in TWO Quickshell
+// instances: the Settings window (the writer) and the panel (`qs -d`, the
+// reader). The panel binds widgets to SettingsStore.d.<key> (via Theme and
+// friends), so when the Settings window writes settings.json the panel's
+// FileView reloads and those bindings update IN PLACE — settings apply live,
+// with no panel reload and therefore no flash. In the writer instance the
+// self-write reloads the same values straight back: nothing calls save() on a
+// programmatic adapter change, so there is no write loop.
 Singleton {
     id: root
 
@@ -46,6 +53,7 @@ Singleton {
         id: file
         path: Quickshell.shellDir + "/settings.json"
         atomicWrites: true
+        watchChanges: true
         printErrors: false
         // First run: no file yet — seed it with the declared defaults.
         onLoadFailed: (err) => { if (err === FileViewError.FileNotFound) file.writeAdapter(); }
@@ -57,7 +65,7 @@ Singleton {
             property string themeMode: "auto"          // auto (wal) | manual
             property string accentOverride: "#5c9fcc"  // used when themeMode = manual
             property string fontFamily: "More Perfect DOS VGA"
-            property int    fontSize: 15
+            property int    fontSize: 16
             property int    paletteColorCount: 16      // wal quantize cluster count
             property bool   pureBlackBg: true
             property int    windowBorderWidth: 2
@@ -176,7 +184,7 @@ Singleton {
     readonly property var defaults: ({
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
-        fontSize: 15, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
+        fontSize: 16, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,

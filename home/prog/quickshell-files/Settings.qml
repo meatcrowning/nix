@@ -83,14 +83,15 @@ Scope {
         return String(s).replace(/%/g, "%25").replace(/:/g, "%3A")
             .replace(/\|/g, "%7C").replace(/\n/g, "%0A").replace(/\r/g, "%0D");
     }
-    // Build one REGISTER line: every page (lit when current), then reload and
+    // Build one REGISTER line: every page (lit when current), then
     // restore-defaults pinned to the bottom of the column (the 6th field = 1).
+    // No reload/apply button: edits apply live (see the header note), so a
+    // reload would only flash the window for no gain.
     function buildRegister() {
         const parts = [];
         for (const p of pages)
             parts.push(_enc(p.key) + ":" + _enc(p.glyph) + ":" + (current === p.key ? 1 : 0)
                        + ":" + _enc(p.label) + ":0:0");
-        parts.push("reload:rl:0:" + _enc("reload from disk") + ":0:1");
         parts.push("reset:rd:0:" + _enc("restore defaults") + ":0:1");
         return "REGISTER " + myPid + " " + parts.join("|");
     }
@@ -101,7 +102,6 @@ Scope {
         const s = (line || "").trim();
         if (s.indexOf("CLICK ") === 0) {
             const id = s.substring(6).trim();
-            if (id === "reload") { Quickshell.reload(false); return; }
             if (id === "reset") { confirmReset.open(); return; }
             for (const p of pages) if (p.key === id) { root.current = id; return; }
         } else if (s === "WAKE") {

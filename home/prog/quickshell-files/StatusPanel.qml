@@ -120,14 +120,14 @@ Column {
             PixelText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + ""
-                color: SysInfo.cpuUsage >= 90 ? Theme.crit
-                     : SysInfo.cpuUsage >= 75 ? Theme.warn : Theme.text
+                color: SysInfo.cpuUsage >= SettingsStore.d.cpuCrit ? Theme.crit
+                     : SysInfo.cpuUsage >= SettingsStore.d.cpuWarn ? Theme.warn : Theme.text
             }
             PixelText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + ""
-                color: SysInfo.cpuTemp >= 80 ? Theme.crit
-                     : SysInfo.cpuTemp >= 65 ? Theme.warn : Theme.textDim
+                color: SysInfo.cpuTemp >= SettingsStore.d.tempCrit ? Theme.crit
+                     : SysInfo.cpuTemp >= SettingsStore.d.tempWarn ? Theme.warn : Theme.textDim
             }
         }
         MouseArea {
@@ -159,14 +159,14 @@ Column {
             PixelText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + ""
-                color: SysInfo.gpuUsage >= 90 ? Theme.crit
-                     : SysInfo.gpuUsage >= 75 ? Theme.warn : Theme.text
+                color: SysInfo.gpuUsage >= SettingsStore.d.cpuCrit ? Theme.crit
+                     : SysInfo.gpuUsage >= SettingsStore.d.cpuWarn ? Theme.warn : Theme.text
             }
             PixelText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: SysInfo.gpuTemp < 0 ? "--" : SysInfo.gpuTemp + ""
-                color: SysInfo.gpuTemp >= 80 ? Theme.crit
-                     : SysInfo.gpuTemp >= 65 ? Theme.warn : Theme.textDim
+                color: SysInfo.gpuTemp >= SettingsStore.d.tempCrit ? Theme.crit
+                     : SysInfo.gpuTemp >= SettingsStore.d.tempWarn ? Theme.warn : Theme.textDim
             }
         }
         MouseArea {
@@ -182,8 +182,8 @@ Column {
     Stat {
         label: "disk"
         value: SysInfo.fmtSize(SysInfo.diskFreeKb)
-        valueColor: SysInfo.diskUsePct >= 90 ? Theme.crit
-                  : SysInfo.diskUsePct >= 75 ? Theme.warn : Theme.text
+        valueColor: SysInfo.diskUsePct >= SettingsStore.d.diskCrit ? Theme.crit
+                  : SysInfo.diskUsePct >= SettingsStore.d.diskWarn ? Theme.warn : Theme.text
         onHovered: (h, cy) => root.diskHovered(h, cy)
     }
 
