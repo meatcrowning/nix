@@ -21,6 +21,7 @@ Item {
         panel.x = x;
         panel.y = y;
         root.visible = true;
+        panel.remeasure();
         panel.clampIntoView();
         focusSink.forceActiveFocus();
     }
@@ -45,11 +46,31 @@ Item {
 
     Rectangle {
         id: panel
-        width: col.implicitWidth + 2
+        // Width tracks the WIDEST row's natural (text-derived) width, remeasured
+        // imperatively from the delegates' implicitWidth. It deliberately does
+        // NOT bind to col.implicitWidth: a Column derives its own implicitWidth
+        // from its children's *actual* width, and each row's width is bound back
+        // to this panel (so rows fill it edge-to-edge for the hover highlight).
+        // That made the size self-referential — the text-derived width never
+        // propagated and the panel collapsed to ~2px ("menu smaller than the
+        // cursor"). implicitWidth is text-only and independent of the filled
+        // width, so measuring it directly breaks the loop.
+        width: contentWidth + 2
         height: col.implicitHeight + 2
         color: Theme.bgAlt
         border.width: 1
         border.color: Theme.windowBorder
+
+        property real contentWidth: 24
+        function remeasure() {
+            var w = 24;
+            for (var i = 0; i < menuRepeater.count; i++) {
+                var it = menuRepeater.itemAt(i);
+                if (it && it.implicitWidth > w)
+                    w = it.implicitWidth;
+            }
+            contentWidth = w;
+        }
 
         function clampIntoView() {
             if (x + width > root.width - 4) x = Math.max(4, root.width - width - 4);
@@ -57,22 +78,30 @@ Item {
             if (x < 4) x = 4;
             if (y < 4) y = 4;
         }
+        // the panel grows as the rows' text finishes laying out; keep the (now
+        // wider/taller) menu fully on-screen as that settles.
+        onWidthChanged:  if (root.visible) clampIntoView();
+        onHeightChanged: if (root.visible) clampIntoView();
 
         Column {
             id: col
             anchors { top: parent.top; left: parent.left; margins: 1 }
 
             Repeater {
+                id: menuRepeater
                 model: root.items
+                onCountChanged: panel.remeasure()
                 delegate: Item {
                     id: rowItem
                     required property var modelData
-                    // natural width drives the panel; actual width fills it so
-                    // the hover highlight spans edge to edge (no feedback loop:
-                    // implicitWidth is text-derived, width flows down from panel)
+                    // implicitWidth is text-derived and drives the panel width
+                    // (via panel.remeasure); actual width fills the panel so the
+                    // hover highlight spans edge to edge. The two are decoupled —
+                    // implicitWidth never depends on width — so there's no loop.
                     implicitWidth: rowText.implicitWidth + 24
-                    width: panel.width - 2
+                    width: panel.contentWidth
                     height: modelData.separator === true ? 7 : 22
+                    onImplicitWidthChanged: panel.remeasure()
 
                     readonly property bool en: modelData.enabled !== false
 

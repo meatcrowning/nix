@@ -22,6 +22,20 @@
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.adblock ]);
 
+  # Spell-check dictionaries for QtWebEngine. Chromium doesn't read Hunspell
+  # .dic/.aff directly — it wants them compiled to its own .bdic format, which
+  # qwebengine_convert_dict (shipped inside qtwebengine) produces. The top
+  # wrapper points QTWEBENGINE_DICTIONARIES_PATH here; Main.qml's profile sets
+  # spellCheckEnabled + spellCheckLanguages ["en-US"]. The file MUST be named by
+  # the exact BCP-47 tag Chromium looks up (en-US.bdic), NOT the Hunspell locale
+  # (en_US). Without this dir the engine simply reports no suggestions.
+  spellDicts = pkgs.runCommand "surfer-spellcheck-dicts" { } ''
+    mkdir -p "$out"
+    ${pkgs.qt6.qtwebengine}/libexec/qwebengine_convert_dict \
+      ${pkgs.hunspellDicts.en_US}/share/hunspell/en_US.dic \
+      "$out/en-US.bdic"
+  '';
+
   surfer =
     if host == "air" then
       pkgs.writeShellScriptBin "surfer" ''
@@ -42,6 +56,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/surfer \
             --add-flags /home/lam/nix/surfer/main.py \
+            --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';

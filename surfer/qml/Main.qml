@@ -206,37 +206,65 @@ Window {
         var items = [];
         function sep() { if (items.length) items.push({ separator: true }); }
 
+        // Spelling suggestions for a misspelled word under the cursor in an
+        // editable field (Chromium fills request.spellCheckerSuggestions). Each
+        // suggestion rewrites the word in place via replaceMisspelledWord; if the
+        // checker has no guesses we still show a greyed marker so the feature is
+        // visibly present. Capped so a long list can't dominate the menu.
+        if (c.editable && c.misspelled !== "") {
+            if (c.suggestions && c.suggestions.length > 0) {
+                var n = Math.min(c.suggestions.length, 6);
+                for (var si = 0; si < n; si++)
+                    items.push({ label: c.suggestions[si],
+                                 trigger: (function(w){ return function(){ view.replaceMisspelledWord(w); }; })(c.suggestions[si]) });
+            } else {
+                items.push({ label: "No spelling suggestions", enabled: false });
+            }
+            items.push({ separator: true });
+        }
+
         if (c.link !== "") {
             items.push({ label: "Open link in new tab",        trigger: function(){ win.newTab(c.link); } });
             items.push({ label: "Open link in background tab",  trigger: function(){ win.newTabBg(c.link); } });
             items.push({ label: "Copy link address",           trigger: function(){ Clip.copy(c.link); } });
+            items.push({ label: "Save link as…",               trigger: function(){ view.triggerWebAction(WebEngineView.DownloadLinkToDisk); } });
         }
         if (c.isImage && c.media !== "") {
             sep();
             items.push({ label: "Open image in new tab",  trigger: function(){ win.newTab(c.media); } });
-            items.push({ label: "Copy image address",     trigger: function(){ Clip.copy(c.media); } });
-            items.push({ label: "Copy image",             trigger: function(){ view.triggerWebAction(WebEngineView.CopyImageToClipboard); } });
             items.push({ label: "Save image…",            trigger: function(){ view.triggerWebAction(WebEngineView.DownloadImageToDisk); } });
+            items.push({ label: "Copy image",             trigger: function(){ view.triggerWebAction(WebEngineView.CopyImageToClipboard); } });
+            items.push({ label: "Copy image address",     trigger: function(){ Clip.copy(c.media); } });
         }
         if (c.selection !== "") {
             sep();
-            items.push({ label: "Copy", trigger: function(){ Clip.copy(c.selection); } });
+            items.push({ label: "Copy", trigger: function(){ view.triggerWebAction(WebEngineView.Copy); } });
             var q = c.selection.length > 24 ? c.selection.substring(0, 24) + "…" : c.selection;
             items.push({ label: "Search for \"" + q + "\"",
                          trigger: function(){ win.newTab("https://duckduckgo.com/?q=" + encodeURIComponent(c.selection)); } });
         }
         if (c.editable) {
             sep();
+            items.push({ label: "Undo", trigger: function(){ view.triggerWebAction(WebEngineView.Undo); } });
+            items.push({ label: "Redo", trigger: function(){ view.triggerWebAction(WebEngineView.Redo); } });
+            items.push({ separator: true });
             items.push({ label: "Cut",   enabled: c.selection !== "", trigger: function(){ view.triggerWebAction(WebEngineView.Cut); } });
             items.push({ label: "Copy",  enabled: c.selection !== "", trigger: function(){ view.triggerWebAction(WebEngineView.Copy); } });
             items.push({ label: "Paste",                               trigger: function(){ view.triggerWebAction(WebEngineView.Paste); } });
+            items.push({ label: "Paste as plain text",                 trigger: function(){ view.triggerWebAction(WebEngineView.PasteAndMatchStyle); } });
+            items.push({ label: "Select all",                          trigger: function(){ view.triggerWebAction(WebEngineView.SelectAll); } });
         }
         sep();
         items.push({ label: "Back",    enabled: view.canGoBack,    trigger: function(){ view.goBack(); } });
         items.push({ label: "Forward", enabled: view.canGoForward, trigger: function(){ view.goForward(); } });
         items.push({ label: "Reload",                              trigger: function(){ view.reload(); } });
         items.push({ separator: true });
+        items.push({ label: "Save page as…",    trigger: function(){ view.triggerWebAction(WebEngineView.SavePage); } });
+        items.push({ label: "View page source", trigger: function(){ win.newTab("view-source:" + view.url); } });
+        items.push({ separator: true });
         items.push({ label: "Copy page address", trigger: function(){ Clip.copy("" + view.url); } });
+        if (!c.editable)
+            items.push({ label: "Select all", trigger: function(){ view.triggerWebAction(WebEngineView.SelectAll); } });
 
         ctxMenu.open(c.pos.x, c.pos.y, items);
     }
@@ -375,6 +403,13 @@ Window {
         objectName: "sharedProfile"   // Python installs the gmxhr scheme handler on this
         storageName: "surfer"
         offTheRecord: false
+        // Spell-checking for editable fields: Chromium red-underlines misspelled
+        // words and, on right-click, hands us request.spellCheckerSuggestions
+        // (surfaced in showContextMenu). Needs the en-US Hunspell dictionary
+        // compiled to a .bdic on QTWEBENGINE_DICTIONARIES_PATH — surfer.nix builds
+        // it and points the wrapper there; without it Chromium just no-ops.
+        spellCheckEnabled: true
+        spellCheckLanguages: ["en-US"]
         // downloads land in ~/Downloads; large ones get a live progress toast
         // (updated in place), every one gets a completion/failure toast — see
         // the Downloads bridge in main.py.
@@ -476,12 +511,14 @@ Window {
                 onContextMenuRequested: (request) => {
                     request.accepted = true;   // suppress the native menu
                     win.showContextMenu(webview, {
-                        pos:       request.position,
-                        link:      "" + request.linkUrl,
-                        media:     "" + request.mediaUrl,
-                        isImage:   request.mediaType === ContextMenuRequest.MediaTypeImage,
-                        selection: ("" + request.selectedText).trim(),
-                        editable:  request.isContentEditable
+                        pos:         request.position,
+                        link:        "" + request.linkUrl,
+                        media:       "" + request.mediaUrl,
+                        isImage:     request.mediaType === ContextMenuRequest.MediaTypeImage,
+                        selection:   ("" + request.selectedText).trim(),
+                        editable:    request.isContentEditable,
+                        misspelled:  "" + request.misspelledWord,
+                        suggestions: request.spellCheckerSuggestions
                     });
                 }
 
