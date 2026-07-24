@@ -181,7 +181,7 @@ PanelWindow {
         const audio = SettingsStore.d.recordingAudio ? "-a" : "";
         Quickshell.execDetached(["sh", "-c",
             'sleep 0.2; ' +
-            'd="$5"; case "$d" in "~"*) d="$HOME${d#~}";; esac; mkdir -p "$d"; ' +
+            'd="$5"; case "$d" in "~"*) d="$HOME${d#"~"}";; esac; mkdir -p "$d"; ' +
             'f="$d/Recording_$(date +%Y%m%d_%H%M%S).mp4"; ' +
             'if wf-recorder $4 -r "$1" "$2" "$3" -f "$f"; then ' +
             '  notify-send -a recording Recording "$(basename "$f") saved"; ' +
@@ -210,7 +210,7 @@ PanelWindow {
         root.open = false;
         Quickshell.execDetached(["sh", "-c",
             'sleep ' + wait + '; ' +
-            'd="$1"; case "$d" in "~"*) d="$HOME${d#~}";; esac; mkdir -p "$d"; ' +
+            'd="$1"; case "$d" in "~"*) d="$HOME${d#"~"}";; esac; mkdir -p "$d"; ' +
             'f="$d/Screenshot_$(date +%Y%m%d_%H%M%S).png"; ' +
             'if grim -g "$2" "$f"; then ' +
             '  if [ "$3" = "1" ]; then wl-copy < "$f"; msg="saved + copied"; else msg="saved"; fi; ' +
