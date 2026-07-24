@@ -29,9 +29,11 @@
       exec ${open-webui}/bin/open-webui "$@"
     '')
     claude-code
-    # No built-in way to prune old Claude Code sessions (~/.claude/projects/*.jsonl);
-    # this adds an interactive `claude-sessions` picker. readFile keeps the bash
-    # verbatim so its ${...} expansions need no nix escaping.
+    # No built-in way to prune old Claude Code sessions (~/.claude/projects/*.jsonl)
+    # or finished background agents (~/.claude/jobs/*); this adds an interactive
+    # `claude-sessions` picker (sessions | tasks | restore | empty-trash) that
+    # trashes rather than hard-deletes. readFile keeps the bash verbatim so its
+    # ${...} expansions need no nix escaping.
     (writeShellScriptBin "claude-sessions" (builtins.readFile ./claude-sessions.sh))
 
     #kde-material-you-colors-latest
