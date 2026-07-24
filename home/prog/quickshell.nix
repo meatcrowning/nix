@@ -18,15 +18,24 @@ let
     if qs -p "$QML" ipc call settings "$ACTION" >/dev/null 2>&1; then
       exit 0
     fi
-    # Not running — start it. Launch as an INDEPENDENT transient user service,
-    # not a bare `qs -d`: the Quickshell runner's DesktopEntry.execute() runs us
-    # inside a transient systemd *scope*, and a daemonized child gets reaped when
-    # that scope's leader (this script) exits — which is why it launched from a
-    # terminal but not from the runner. A `systemd-run` service is its own unit,
-    # so it survives. reset-failed clears any stale unit so the name is free.
+    # Not running — start it as an INDEPENDENT transient user service (its own
+    # cgroup), NOT a bare `qs -d`. Two things this gets right that a plain daemon
+    # didn't:
+    #   * The Quickshell runner's DesktopEntry.execute() runs us inside a
+    #     transient systemd *scope*; a daemonized child is reaped when that scope
+    #     tears down. A `systemd-run` unit lives in its own scope and survives.
+    #   * `systemd-run --user` runs the command in the *service manager's*
+    #     environment, which may not have a live WAYLAND_DISPLAY — so qs would
+    #     start, fail to reach the compositor, and exit (then --collect removes
+    #     the unit, leaving nothing). Forward the session vars with --setenv so
+    #     it connects regardless of who launched us (runner or keybind).
+    # reset-failed frees the unit name if a previous run crashed.
     if command -v systemd-run >/dev/null 2>&1; then
       systemctl --user reset-failed qs-settings.service 2>/dev/null || true
-      exec systemd-run --user --quiet --collect --unit=qs-settings -- qs -p "$QML"
+      exec systemd-run --user --quiet --collect --unit=qs-settings \
+        --setenv=WAYLAND_DISPLAY --setenv=HYPRLAND_INSTANCE_SIGNATURE \
+        --setenv=XDG_RUNTIME_DIR --setenv=XDG_CURRENT_DESKTOP --setenv=PATH \
+        -- qs -p "$QML"
     fi
     exec qs -d -n -p "$QML"
   '';

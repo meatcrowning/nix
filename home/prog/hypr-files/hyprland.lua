@@ -409,8 +409,9 @@ hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggle"), { de
 hl.bind(mainMod .. " + SHIFT + S", hl.dsp.exec_cmd("qs ipc call screenshot toggle"), { description = "Screenshot" })
 -- Settings program: its own Quickshell instance (quickshell/Settings.qml),
 -- toggled via the `settings` wrapper (it targets that instance by path, not the
--- panel's IPC). Meta+comma, the usual "preferences" chord.
-hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("settings"), { description = "Settings" })
+-- panel's IPC). Meta+comma, the usual "preferences" chord. Absolute path — the
+-- wrapper lives in the nix profile, which is NOT on Hyprland's exec PATH.
+hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("$HOME/.nix-profile/bin/settings"), { description = "Settings" })
 -- Bare Super tap opens the Quickshell runner (fires on release of Super).
 hl.bind(mainMod .. " + Super_L", hl.dsp.exec_cmd("qs ipc call launcher toggle"), { release = true })
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo(), { description = "Pseudo-tile" })
