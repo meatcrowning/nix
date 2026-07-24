@@ -10,6 +10,9 @@ import Quickshell.Io
 Item {
     id: root
 
+    // hovering the VU bar activates the media widget popup (wired in StatusPanel)
+    signal hovered(bool h)
+
     property int levelL: 0 // 0-100
     property int levelR: 0
 
@@ -96,9 +99,12 @@ Item {
     // set the level, scroll to nudge it — you don't have to land on the bars.
     MouseArea {
         anchors.fill: parent
+        hoverEnabled: true
         function setFromY(y) {
             SysInfo.setVolume(100 * (1 - y / height));
         }
+        onEntered: root.hovered(true)
+        onExited: root.hovered(false)
         onPressed: (mouse) => setFromY(mouse.y)
         onPositionChanged: (mouse) => { if (pressed) setFromY(mouse.y); }
         onWheel: (wheel) => SysInfo.adjustVolume(wheel.angleDelta.y > 0 ? 5 : -5)

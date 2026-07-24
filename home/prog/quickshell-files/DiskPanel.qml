@@ -11,6 +11,7 @@ SlidePopup {
 
     popupNamespace: "qs-disk"
     persistKey: "disk"
+    tileRank: 0     // always rightmost in the tiled row
     implicitWidth: 300
     implicitHeight: content.implicitHeight + 20
 

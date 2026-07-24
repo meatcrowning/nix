@@ -11,6 +11,7 @@ Column {
     // centerY = the module's scene-Y center, so its popup lines up with it
     signal weatherHovered(bool hovering, real centerY)
     signal diskHovered(bool hovering, real centerY)
+    signal mediaHovered(bool hovering)
     signal cpuHovered(bool hovering, real centerY)
     signal gpuHovered(bool hovering, real centerY)
     signal ethHovered(bool hovering, real centerY)
@@ -213,7 +214,10 @@ Column {
 
     // ---------- Stereo output VU (left / right channel) ----------
     // Full bar width like the other modules; its bars/line stay centred.
-    VuMeter {}
+    // Hovering it slides out the media widget popup.
+    VuMeter {
+        onHovered: (h) => root.mediaHovered(h)
+    }
 
     // ---------- Volume ----------
     Stat {

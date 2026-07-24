@@ -53,17 +53,16 @@ Singleton {
     function unpin(who) {
         pinned = pinned.filter(w => w !== who);
     }
-    // right-margin offset: the disk widget is ALWAYS rightmost (offset 0);
-    // every other tiled widget sits to its left, in pin order.
+    // right-margin offset: tiled widgets sit in a FIXED left-to-right order by
+    // tileRank (disk = rank 0, always rightmost), independent of pin insertion
+    // order — so a widget always lands in the same slot regardless of when it
+    // was pinned or revealed. A widget's offset is the summed width of every
+    // pinned tiled widget ranked to its right (smaller rank).
     function offsetFor(who) {
-        if (who.isDisk) return 0;
         let x = 0;
-        for (const w of pinned)
-            if (w.isDisk) { x += w.implicitWidth + Theme.gap; break; }
         for (const w of pinned) {
-            if (w === who) break;
-            if (w.isDisk) continue;
-            x += w.implicitWidth + Theme.gap;
+            if (w === who) continue;
+            if (w.tileRank < who.tileRank) x += w.implicitWidth + Theme.gap;
         }
         return x;
     }

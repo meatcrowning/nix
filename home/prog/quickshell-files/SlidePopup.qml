@@ -32,6 +32,10 @@ PanelWindow {
     property bool aboveDiskWhenPinned: false
     property bool pinInPlace: false
     property string persistKey: ""   // stable id for save/restore of pins
+    // Fixed left-to-right slot for tiled widgets: lower rank sits further RIGHT
+    // (disk = 0, always rightmost). Tiling reads this, NOT pin order, so a
+    // widget lands in the same slot no matter when it was pinned/revealed.
+    property int tileRank: 100
 
     // Fan reveal (vertical emerge), used ONLY by the reveal-all fan for the
     // in-place stackables (gpu/cpu/eth): instead of sliding in horizontally

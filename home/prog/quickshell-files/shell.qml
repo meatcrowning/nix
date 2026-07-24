@@ -489,6 +489,8 @@ Scope {
                 // disk slides out at the BOTTOM (anchorCenterY stays -1) — it's
                 // tall, so bottom-anchoring reads better than centering
                 onDiskHovered: (h, cy) => diskPanel.hoverChanged(h)
+                // hovering the VU/volume bar slides out the media widget
+                onMediaHovered: (h) => mediaPanel.hoverChanged(h)
                 onCpuHovered: (h, cy) => { if (h) cpuPanel.anchorCenterY = cy; cpuPanel.hoverChanged(h); }
                 onGpuHovered: (h, cy) => { if (h) gpuPanel.anchorCenterY = cy; gpuPanel.hoverChanged(h); }
                 onEthHovered: (h, cy) => { if (h) ethPanel.anchorCenterY = cy; ethPanel.hoverChanged(h); }
