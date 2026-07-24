@@ -34,8 +34,13 @@
     #ventoy-full-qt
     #kquitapp6
     #okay maybe a little media
-  # already native on air (this Fedora install) — skip duplicating there.
-  ] ++ lib.optionals (host != "air") [
+
+    # These used to be gated off `air` to avoid duplicating Fedora's copies,
+    # but there's no real reason to keep the CLI layer on dnf — let nix own it
+    # on both hosts. The dnf copies stay installed (many are pulled in as KDE/
+    # Asahi metapackage deps and can't cleanly `dnf remove`) but nix wins on
+    # PATH. GUI/GPU apps stay on Fedora — nixpkgs' Mesa lacks Asahi (Honeykrisp)
+    # support, so those render in software here.
     btop
     tree
     unzip

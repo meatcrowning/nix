@@ -9,8 +9,8 @@
     nodejs
     rustc
     cargo
-  # already native on air (this Fedora install) — skip duplicating there.
-  ] ++ lib.optionals (host != "air") [
+    # Let nix own the toolchain on both hosts too (was gated off air to avoid
+    # duplicating Fedora's copies — no real reason to keep it on dnf).
     gcc
     python3
   ];
