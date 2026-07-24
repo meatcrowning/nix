@@ -11,6 +11,13 @@ Column {
 
     property var d: SettingsStore.d
 
+    // world-clock list mutators — a JsonAdapter `var` only emits a change (so the
+    // panel's clock and this Repeater update) when the whole array is REASSIGNED,
+    // never on in-place edits, so each helper works on a copy and assigns it back.
+    function _wcSet(i, tz) { const a = (d.worldClocks || []).slice(); a[i] = tz; d.worldClocks = a; SettingsStore.save(); }
+    function _wcAdd()      { const a = (d.worldClocks || []).slice(); a.push(""); d.worldClocks = a; SettingsStore.save(); }
+    function _wcRemove(i)  { const a = (d.worldClocks || []).slice(); a.splice(i, 1); d.worldClocks = a; SettingsStore.save(); }
+
     SetSection {
         title: "desktop widgets"
         SetRow {
@@ -225,35 +232,68 @@ Column {
     SetSection {
         title: "world clocks"
         SetRow {
-            label: "zone 1"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz1
-                onCommitted: (t) => { page.d.tz1 = t; SettingsStore.save(); }
+            label: "zones"
+            desc: "Olson names (e.g. Europe/London), top-to-bottom in the clock popup"
+        }
+
+        // one editable row per zone: the TZ field + a remove button. Reassigning
+        // page.d.worldClocks rebuilds this Repeater in place.
+        Repeater {
+            model: page.d.worldClocks
+            Row {
+                id: wcRow
+                required property int index
+                required property var modelData
+                spacing: 6
+                bottomPadding: 4
+
+                SetTextField {
+                    fieldWidth: 240
+                    placeholder: "Region/City"
+                    value: wcRow.modelData
+                    onCommitted: (t) => page._wcSet(wcRow.index, t.trim())
+                }
+                // remove this zone
+                Rectangle {
+                    width: 24; height: 24
+                    color: rmMa.containsMouse ? Theme.bgAlt : "transparent"
+                    border.width: 1
+                    border.color: rmMa.containsMouse ? Theme.crit : Theme.border
+                    PixelText {
+                        anchors.centerIn: parent
+                        text: "−"
+                        color: rmMa.containsMouse ? Theme.crit : Theme.textDim
+                    }
+                    MouseArea {
+                        id: rmMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: page._wcRemove(wcRow.index)
+                    }
+                }
             }
         }
-        SetRow {
-            label: "zone 2"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz2
-                onCommitted: (t) => { page.d.tz2 = t; SettingsStore.save(); }
+
+        // add a new (blank) zone row
+        Rectangle {
+            width: addT.implicitWidth + 20
+            height: 24
+            color: addMa.containsMouse ? Theme.bgAlt : "transparent"
+            border.width: 1
+            border.color: addMa.containsMouse ? Theme.accent : Theme.border
+            PixelText {
+                id: addT
+                anchors.centerIn: parent
+                text: "+ add zone"
+                color: addMa.containsMouse ? Theme.accent : Theme.text
             }
-        }
-        SetRow {
-            label: "zone 3"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz3
-                onCommitted: (t) => { page.d.tz3 = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "zone 4"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz4
-                onCommitted: (t) => { page.d.tz4 = t; SettingsStore.save(); }
+            MouseArea {
+                id: addMa
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: page._wcAdd()
             }
         }
     }
