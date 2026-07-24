@@ -121,80 +121,35 @@ SlidePopup {
         return m + ":" + (ss < 10 ? "0" : "") + ss;
     }
 
-    // ---- a transport button: crisp Canvas-drawn icon, themed frame -------
+    // ---- a transport button: pixel-font glyph, themed frame -------------
     component MediaButton: Rectangle {
         id: btn
         property string kind: "play"   // prev | next | play | pause | shuffle | repeat
         property bool active: true
         property bool toggled: false   // lit accent even without hover (repeat/shuffle on)
-        property int variant: 0        // repeat: 0 = plain loop, 1 = repeat-one (adds "1")
         signal clicked()
+
+        // glyph per kind: skip << >>, play/pause > ||, shuffle *, repeat o
+        readonly property string glyph: kind === "prev" ? "<<"
+            : kind === "next" ? ">>"
+            : kind === "pause" ? "||"
+            : kind === "shuffle" ? "*"
+            : kind === "repeat" ? "o"
+            : ">"   // play
 
         width: 26
         height: 26
         // toggled (repeat/shuffle on) inverts like the titlebar roll button:
-        // accent fill + background-colored icon. Hover is the lighter bgAlt tint.
+        // accent fill + background-colored glyph. Hover is the lighter bgAlt tint.
         color: btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
         border.width: 1
         border.color: !active ? Theme.border : ((btn.toggled || mba.containsMouse) ? Theme.accent : Theme.border)
         opacity: active ? 1 : 0.4
 
-        onKindChanged: icon.requestPaint()
-        onVariantChanged: icon.requestPaint()
-
-        Canvas {
-            id: icon
+        PixelText {
             anchors.centerIn: parent
-            width: 12
-            height: 12
-            property color col: btn.toggled ? Theme.bg : ((mba.containsMouse && btn.active) ? Theme.accent : Theme.text)
-            onColChanged: requestPaint()
-            onPaint: {
-                const ctx = getContext("2d");
-                ctx.reset();
-                ctx.clearRect(0, 0, width, height);
-                ctx.fillStyle = col;
-                ctx.strokeStyle = col;
-                const w = width, h = height;
-                if (btn.kind === "play") {
-                    ctx.beginPath(); ctx.moveTo(1, 0); ctx.lineTo(w - 1, h / 2); ctx.lineTo(1, h); ctx.closePath(); ctx.fill();
-                } else if (btn.kind === "pause") {
-                    ctx.fillRect(1, 0, 3, h); ctx.fillRect(w - 4, 0, 3, h);
-                } else if (btn.kind === "next") {
-                    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(w - 3, h / 2); ctx.lineTo(0, h); ctx.closePath(); ctx.fill();
-                    ctx.fillRect(w - 2, 0, 2, h);
-                } else if (btn.kind === "prev") {
-                    ctx.fillRect(0, 0, 2, h);
-                    ctx.beginPath(); ctx.moveTo(w, 0); ctx.lineTo(3, h / 2); ctx.lineTo(w, h); ctx.closePath(); ctx.fill();
-                } else if (btn.kind === "shuffle") {
-                    // two crossing paths with arrowheads on the right
-                    ctx.lineWidth = 1.4; ctx.lineCap = "round";
-                    ctx.beginPath(); ctx.moveTo(1, 2.5); ctx.lineTo(w - 3, h - 2.5); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(1, h - 2.5); ctx.lineTo(w - 3, 2.5); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(w, h - 2.5); ctx.lineTo(w - 4, h - 4.5); ctx.lineTo(w - 4, h - 0.5); ctx.closePath(); ctx.fill();
-                    ctx.beginPath(); ctx.moveTo(w, 2.5); ctx.lineTo(w - 4, 0.5); ctx.lineTo(w - 4, 4.5); ctx.closePath(); ctx.fill();
-                } else if (btn.kind === "repeat") {
-                    // rounded loop: top & bottom bars joined by short verticals,
-                    // arrowheads pointing down (right) and up (left)
-                    ctx.lineWidth = 1.4; ctx.lineCap = "round";
-                    ctx.beginPath();
-                    ctx.moveTo(w * 0.2, h * 0.28); ctx.lineTo(w * 0.72, h * 0.28);
-                    ctx.lineTo(w * 0.72, h * 0.5); ctx.stroke();
-                    ctx.beginPath();
-                    ctx.moveTo(w * 0.72 - 2, h * 0.5); ctx.lineTo(w * 0.72 + 2, h * 0.5);
-                    ctx.lineTo(w * 0.72, h * 0.5 + 2.5); ctx.closePath(); ctx.fill();
-                    ctx.beginPath();
-                    ctx.moveTo(w * 0.8, h * 0.72); ctx.lineTo(w * 0.28, h * 0.72);
-                    ctx.lineTo(w * 0.28, h * 0.5); ctx.stroke();
-                    ctx.beginPath();
-                    ctx.moveTo(w * 0.28 - 2, h * 0.5); ctx.lineTo(w * 0.28 + 2, h * 0.5);
-                    ctx.lineTo(w * 0.28, h * 0.5 - 2.5); ctx.closePath(); ctx.fill();
-                    if (btn.variant === 1) {   // repeat-one: a small "1" in the middle
-                        ctx.fillRect(w / 2 - 0.7, h * 0.42, 1.4, h * 0.18);
-                        ctx.fillRect(w / 2 - 1.6, h * 0.44, 0.9, 1);
-                    }
-                }
-            }
+            text: btn.glyph
+            color: btn.toggled ? Theme.bg : ((mba.containsMouse && btn.active) ? Theme.accent : Theme.text)
         }
 
         MouseArea {
@@ -393,7 +348,6 @@ SlidePopup {
                 kind: "repeat"
                 active: root.canRepeat
                 toggled: root.repeatMode !== 0
-                variant: root.repeatMode === 1 ? 1 : 0   // "1" glyph for repeat-track
                 onClicked: root.cycleRepeat()
             }
         }
