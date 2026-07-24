@@ -46,6 +46,12 @@
   systemd.services."drkonqi-coredump-processor@".enable = false;
   systemd.user.services."drkonqi-coredump-launcher@".enable = false;
   systemd.user.sockets."drkonqi-coredump-launcher".enable = false;
+  # Also kill the Sentry telemetry poster — with the reporter masked there's
+  # nothing to submit, and it otherwise phones crash data home to KDE's
+  # Sentry. Mask its trigger (.path/.timer) and the service itself.
+  systemd.user.services."drkonqi-sentry-postman".enable = false;
+  systemd.user.paths."drkonqi-sentry-postman".enable = false;
+  systemd.user.timers."drkonqi-sentry-postman".enable = false;
 
   programs.aeroshell = lib.mkIf config.my.aerotheme.enable {
     enable = true;
