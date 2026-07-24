@@ -27,6 +27,8 @@ in
     };
     # cava config for the panel's stereo VU bars (VuMeter.qml)
     "quickshell/scripts/cava-vu.conf".source = ./quickshell-files/scripts/cava-vu.conf;
+    # cava config for the media widget's spectrum analyser (MediaPanel.qml)
+    "quickshell/scripts/cava-spectrum.conf".source = ./quickshell-files/scripts/cava-spectrum.conf;
     # disk-hover data providers (DiskPanel.qml)
     "quickshell/scripts/disk-usage.sh" = {
       source = ./quickshell-files/scripts/disk-usage.sh;

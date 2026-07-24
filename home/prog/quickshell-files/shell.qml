@@ -109,6 +109,10 @@ Scope {
     GpuPanel { id: gpuPanel }
     EthPanel { id: ethPanel }
 
+    // The MPRIS media widget — a tiled desktop widget that fans out just left
+    // of the disk (i.e. between the disk and clock widgets in the row).
+    MediaPanel { id: mediaPanel }
+
     // File-browser windows (real FloatingWindows, hyprvtb-decorated), one per
     // open entry in the Browsers registry — spawned by a drive's "open".
     Variants {
@@ -124,9 +128,10 @@ Scope {
     // desktop widgets, restoring whatever was pinned before on toggle-off.
     //
     // The reveal/hide is STAGED into a little fan rather than flipping every
-    // pin at once. Reveal order (out): disk; then clock+gpu; then weather+cpu;
-    // then calendar+eth — the tiled row fans out leftward from the disk while
-    // the stack fans upward above it. Hide runs the same stages in reverse.
+    // pin at once. Reveal order (out): disk+media; then clock+gpu; then
+    // weather+cpu; then calendar+eth — the tiled row fans out leftward from the
+    // disk (disk rightmost, then media, then clock/weather/calendar) while the
+    // stack fans upward above it. Hide runs the same stages in reverse.
     // Each stage is ~_fanStepMs after the last, so widgets cascade in/out
     // instead of popping together. Whatever was pinned BEFORE a reveal is kept
     // pinned on the following hide (_savedPins), so the toggle is lossless.
@@ -136,8 +141,8 @@ Scope {
     // every pinnable widget, and the two fan orders. The stack order (gpu
     // before cpu before eth) also fixes their bottom-up stacking above the
     // disk; the tiled order (clock/weather/calendar) fixes the row's left fan.
-    readonly property var _allWidgets: [calendar, analogClock, weatherPanel, diskPanel, cpuPanel, gpuPanel, ethPanel]
-    readonly property var _fanOut: [[diskPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
+    readonly property var _allWidgets: [calendar, analogClock, weatherPanel, diskPanel, mediaPanel, cpuPanel, gpuPanel, ethPanel]
+    readonly property var _fanOut: [[diskPanel, mediaPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
 
     // The desktop widgets fanned out at login when nothing has been saved yet
     // (first boot / cleared state). persistKeys, NOT widget refs — declarative
@@ -146,8 +151,8 @@ Scope {
     // Host.qml singleton (see quickshell.nix): top pins gpu alongside the core
     // set; book (air) keeps eth instead.
     readonly property var _defaultWidgets: Host.name === "air"
-        ? ["clock", "weather", "disk", "cpu", "eth"]
-        : ["clock", "weather", "disk", "cpu", "gpu"]
+        ? ["clock", "weather", "disk", "media", "cpu", "eth"]
+        : ["clock", "weather", "disk", "media", "cpu", "gpu"]
 
     // one stage every _fanStepMs — set to just past a single widget's full
     // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a
@@ -218,7 +223,7 @@ Scope {
     // pin order for the instant (reload) path: same layout order the reveal
     // uses so tiling (disk rightmost, clock/weather/calendar left) and stacking
     // (gpu/cpu/eth bottom-up) land right regardless of saved key order.
-    readonly property var _pinOrder: [diskPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
+    readonly property var _pinOrder: [diskPanel, mediaPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
 
     // text is two lines: "<space-separated keys>\n<login|reload>".
     function applyWidgetState(text) {
