@@ -403,13 +403,14 @@ Window {
         objectName: "sharedProfile"   // Python installs the gmxhr scheme handler on this
         storageName: "surfer"
         offTheRecord: false
-        // Spell-checking for editable fields: Chromium red-underlines misspelled
-        // words and, on right-click, hands us request.spellCheckerSuggestions
-        // (surfaced in showContextMenu). Needs the en-US Hunspell dictionary
-        // compiled to a .bdic on QTWEBENGINE_DICTIONARIES_PATH — surfer.nix builds
-        // it and points the wrapper there; without it Chromium just no-ops.
-        spellCheckEnabled: true
-        spellCheckLanguages: ["en-US"]
+        // Spell-checking (red squiggle + right-click suggestions in
+        // showContextMenu) is enabled IMPERATIVELY in main.py's _wire_profile,
+        // NOT declaratively here: setting spellCheckEnabled/spellCheckLanguages
+        // as QML properties on a QQuickWebEngineProfile at construction time is
+        // silently dropped (the spellcheck adapter isn't ready yet) — the words
+        // never get marked. Calling the setters once the tree is built makes it
+        // stick. Needs the en-US Hunspell dict compiled to .bdic on
+        // QTWEBENGINE_DICTIONARIES_PATH (surfer.nix builds it + points there).
         // downloads land in ~/Downloads; large ones get a live progress toast
         // (updated in place), every one gets a completion/failure toast — see
         // the Downloads bridge in main.py.
