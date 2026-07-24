@@ -16,14 +16,22 @@ PanelWindow {
     readonly property var items: [
         // Each command is user-configurable via SettingsStore; run through
         // `sh -c` so the stored string can be an arbitrary shell command.
-        // Root cause, finally confirmed directly: `hyprctl dispatch exit`
-        // (the classic dispatch string) is rejected outright by this
-        // Lua-config build — same restriction Workspaces.qml already found
-        // for workspace switching (see Hyprland.dispatch calls there) — it
-        // just fails silently under Quickshell.execDetached, which doesn't
-        // surface stderr anywhere, so it read as "does nothing". Needs the
-        // Lua dispatcher form like every other dispatch in this config —
-        // hence the default cmdLogout of "hyprctl dispatch hl.dsp.exit()".
+        // Logout kills the compositor directly (`pkill Hyprland`), NOT via
+        // hyprctl or loginctl — both proved to fail SILENTLY under
+        // Quickshell.execDetached (which surfaces no stderr, so it reads as
+        // "does nothing"):
+        //   - `hyprctl dispatch exit` (classic string) is rejected by this
+        //     Lua-config build (same restriction Workspaces.qml hit for
+        //     workspace switching); the Lua form `hyprctl dispatch
+        //     hl.dsp.exit()` worked for a while but later regressed to a
+        //     silent no-op (pinned here after direct testing).
+        //   - `loginctl terminate-user/-session` needs polkit `login1.manage`,
+        //     which is `auth_admin_keep` here (pkcheck → challenge), so it
+        //     would pop an admin prompt that execDetached can't answer.
+        // A plain SIGTERM to the process is dispatch- and polkit-free; nixpkgs
+        // wraps the binary (comm `.Hyprland-wrapped`), and pkill's default
+        // comm-substring match hits exactly that one process — robust to the
+        // wrapper/version name and it won't match the `sh -c` running it.
         { label: "logout",   cmd: SettingsStore.d.cmdLogout },
         { label: "sleep",    cmd: SettingsStore.d.cmdSleep },
         { label: "reboot",   cmd: SettingsStore.d.cmdReboot },

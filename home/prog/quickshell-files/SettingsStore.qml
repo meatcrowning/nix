@@ -176,7 +176,7 @@ Singleton {
             property string lockPamService: "quickshell-lock"
             property int    autoLockMin: 5             // 0 = never
             property bool   lockOnSuspend: true
-            property string cmdLogout: "hyprctl dispatch hl.dsp.exit()"
+            property string cmdLogout: "pkill Hyprland"   // SIGTERM the compositor; see PowerMenu.qml for why not hyprctl/loginctl
             property string cmdSleep: "systemctl suspend"
             property string cmdReboot: "systemctl reboot"
             property string cmdPoweroff: "systemctl poweroff"
@@ -232,7 +232,7 @@ Singleton {
         screenshotDir: "~/Pictures/Screenshots", screenshotCopy: true,
         recordingDir: "~/Videos/Screen Recordings", recordingAudio: false, recordingFps: 60,
         lockClock24h: false, lockPamService: "quickshell-lock", autoLockMin: 5, lockOnSuspend: true,
-        cmdLogout: "hyprctl dispatch hl.dsp.exit()", cmdSleep: "systemctl suspend",
+        cmdLogout: "pkill Hyprland", cmdSleep: "systemctl suspend",
         cmdReboot: "systemctl reboot", cmdPoweroff: "systemctl poweroff", lidCloseAction: "suspend",
         keyRepeatDelay: 300, keyRepeatRate: 40, pointerSpeed: 0.0, naturalScroll: false,
         tapToClick: true, clock24h: false, weekStartsMonday: false, weatherLat: 58.3019,
