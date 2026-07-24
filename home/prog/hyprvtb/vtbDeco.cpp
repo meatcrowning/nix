@@ -18,6 +18,7 @@
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/protocols/types/DataDevice.hpp>
 
 #include <pango/pangocairo.h>
 #include <xkbcommon/xkbcommon.h>
@@ -26,6 +27,11 @@
 #include <chrono>
 #include <cstdio>
 #include <format>
+#include <algorithm>
+#include <functional>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "globals.hpp"
 #include "VtbPassElement.hpp"
@@ -1380,6 +1386,99 @@ bool CVtbDeco::deleteEditSelection() {
     return true;
 }
 
+// Insert clipboard/typed text at the caret, replacing any selection. Newlines
+// and control bytes are stripped — an address bar is a single line, and pasting
+// a copied URL that trailed a newline shouldn't submit or wrap it.
+void CVtbDeco::insertEditText(const std::string& text) {
+    std::string clean;
+    clean.reserve(text.size());
+    for (unsigned char c : text) {
+        if (c == '\n' || c == '\r' || c == '\t')
+            continue;            // collapse whitespace that would break a URL line
+        if (c < 0x20 || c == 0x7f)
+            continue;            // drop other C0 controls / DEL (keep UTF-8 high bytes)
+        clean.push_back((char)c);
+    }
+    if (clean.empty())
+        return;
+    deleteEditSelection();       // paste replaces any selection, like typing
+    m_editBuf.insert(m_editCursor, clean);
+    m_editCursor    += clean.size();
+    m_editSelAnchor  = m_editCursor;
+    m_pEditTex       = nullptr;
+    damageEntire();
+}
+
+// Ctrl+V / Shift+Insert: pull the current wl_data_device selection (the
+// clipboard) and drop it into the field at the caret. The owning client writes
+// the data to a pipe asynchronously, so we hand the read end to the event loop
+// (doOnReadable) and accumulate until EOF rather than blocking the compositor.
+// A weak self-ref guards the deferred insert against the deco/window dying while
+// the read is in flight.
+void CVtbDeco::pasteIntoEdit() {
+    const auto SOURCE = g_pSeatManager->m_selection.currentSelection.lock();
+    if (!SOURCE)
+        return; // empty clipboard
+
+    // pick the best text mime the source advertises (prefer explicit UTF-8)
+    const auto MIMES = SOURCE->mimes();
+    std::string mime;
+    for (const char* want : {"text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "TEXT", "STRING"}) {
+        if (std::find(MIMES.begin(), MIMES.end(), want) != MIMES.end()) {
+            mime = want;
+            break;
+        }
+    }
+    if (mime.empty()) // no text flavour on offer (e.g. an image-only clipboard)
+        return;
+
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0)
+        return;
+    Hyprutils::OS::CFileDescriptor readFd{fds[0]};
+    // hand the write end to the source; it forwards to the owning client, which
+    // writes then closes — giving us readable data and eventually EOF.
+    SOURCE->send(mime, Hyprutils::OS::CFileDescriptor{fds[1]});
+
+    // shared context carried across the (possibly repeated) readable callbacks
+    struct SPasteCtx {
+        WP<CVtbDeco>                   self;
+        Hyprutils::OS::CFileDescriptor fd;
+        std::string                    acc;
+    };
+    auto ctx  = makeShared<SPasteCtx>();
+    ctx->self = m_self;
+    ctx->fd   = std::move(readFd);
+
+    auto pump = makeShared<std::function<void()>>();
+    *pump     = [ctx, pump]() {
+        char buf[4096];
+        while (true) {
+            const ssize_t n = read(ctx->fd.get(), buf, sizeof(buf));
+            if (n > 0) {
+                ctx->acc.append(buf, n);
+                continue;
+            }
+            if (n < 0 && errno == EINTR)
+                continue;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                // nothing more yet — re-arm on the same pipe (dup, since the
+                // waiter takes ownership of the fd it polls) and wait again.
+                g_pEventLoopManager->doOnReadable(ctx->fd.duplicate(), [pump]() { (*pump)(); });
+                return;
+            }
+            // EOF (n == 0) or a hard error: commit whatever we got, if the deco
+            // is still alive and still editing this field.
+            const auto DECO = ctx->self.lock();
+            if (DECO && DECO->m_bEditing && !ctx->acc.empty())
+                DECO->insertEditText(ctx->acc);
+            return;
+        }
+    };
+    // seed the first wait with a dup so the master fd in ctx stays ours to read.
+    g_pEventLoopManager->doOnReadable(ctx->fd.duplicate(), [pump]() { (*pump)(); });
+}
+
 // Map a bar-local Y (logical px) to a byte offset on a codepoint boundary — the
 // row under the cursor in the vertically-stacked address text. Used for
 // click-to-place-caret and click-drag selection.
@@ -1493,9 +1592,9 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
     const xkb_keysym_t sym     = xkb_state_key_get_one_sym(KB->m_xkbState, xkbcode);
     const uint32_t     mods    = KB->getModifiers();
 
-    // editing Ctrl combos we handle ourselves: Ctrl+A selects the whole field.
-    // (Copy/paste would need wl-clipboard plumbing — not wired yet.) Everything
-    // else with Ctrl/Alt/Super falls through to global keybinds below.
+    // editing Ctrl combos we handle ourselves: Ctrl+A selects the whole field,
+    // Ctrl+V pastes the clipboard. Everything else with Ctrl/Alt/Super falls
+    // through to global keybinds below.
     if ((mods & HL_MODIFIER_CTRL) && !(mods & (HL_MODIFIER_ALT | HL_MODIFIER_META))
         && (sym == XKB_KEY_a || sym == XKB_KEY_A)) {
         info.cancelled = true;
@@ -1504,6 +1603,15 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
             m_editCursor    = m_editBuf.size();
             m_pEditTex      = nullptr;
             damageEntire();
+        }
+        return;
+    }
+    if ((mods & HL_MODIFIER_CTRL) && !(mods & (HL_MODIFIER_ALT | HL_MODIFIER_META))
+        && (sym == XKB_KEY_v || sym == XKB_KEY_V)) {
+        info.cancelled = true;
+        if (e.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            m_editBlinkAt = Time::steadyNow();
+            pasteIntoEdit();
         }
         return;
     }
@@ -1527,6 +1635,7 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
         case XKB_KEY_Right:
         case XKB_KEY_Home:
         case XKB_KEY_End: ours = true; break;
+        case XKB_KEY_Insert: ours = (mods & HL_MODIFIER_SHIFT); break; // Shift+Insert = paste
         default: break;
     }
     if (!ours) // modifiers, F-keys, etc. — leave for the normal pipeline
@@ -1550,6 +1659,11 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
     // Shift extends the selection; an unshifted move collapses it. Anchor stays
     // put while Shift is held, so anchor..cursor is the live selection range.
     const bool shift = mods & HL_MODIFIER_SHIFT;
+
+    if (sym == XKB_KEY_Insert) { // reached only with Shift held (see the `ours` switch)
+        pasteIntoEdit();
+        return;
+    }
 
     switch (sym) {
         case XKB_KEY_Left:
