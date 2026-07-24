@@ -132,7 +132,9 @@ SlidePopup {
 
         width: 26
         height: 26
-        color: (btn.toggled || (mba.containsMouse && active)) ? Theme.bgAlt : "transparent"
+        // toggled (repeat/shuffle on) inverts like the titlebar roll button:
+        // accent fill + background-colored icon. Hover is the lighter bgAlt tint.
+        color: btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
         border.width: 1
         border.color: !active ? Theme.border : ((btn.toggled || mba.containsMouse) ? Theme.accent : Theme.border)
         opacity: active ? 1 : 0.4
@@ -145,7 +147,7 @@ SlidePopup {
             anchors.centerIn: parent
             width: 12
             height: 12
-            property color col: (btn.toggled || (mba.containsMouse && btn.active)) ? Theme.accent : Theme.text
+            property color col: btn.toggled ? Theme.bg : ((mba.containsMouse && btn.active) ? Theme.accent : Theme.text)
             onColChanged: requestPaint()
             onPaint: {
                 const ctx = getContext("2d");
