@@ -54,6 +54,14 @@ Singleton {
         path: Quickshell.shellDir + "/settings.json"
         atomicWrites: true
         watchChanges: true
+        // Load synchronously. Without this the initial read is async and the
+        // JsonAdapter's values don't propagate to bindings that were evaluated
+        // at construction (Theme reads SettingsStore.d.* the instant the panel
+        // starts) — every consumer would see the inline defaults forever, never
+        // the on-disk values. blockLoading also makes the watchChanges reload
+        // synchronous, so an edit in the Settings window lands on the panel's
+        // bindings in the same frame. The file is tiny; the block is imperceptible.
+        blockLoading: true
         printErrors: false
         // First run: no file yet — seed it with the declared defaults.
         onLoadFailed: (err) => { if (err === FileViewError.FileNotFound) file.writeAdapter(); }
