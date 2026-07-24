@@ -26,6 +26,16 @@
       url = "github:benapetr/TuxManager";
       inputs.nixpkgs.follows = "nixpkgs"; # deduplicates, keeps it on your nixpkgs
   };
+
+    # Official hyprpaper, off nixpkgs' pinned 0.8.4: that build aborts
+    # (SIGABRT in hyprtoolkit's CBackend::enterLoop, mid async image decode)
+    # on live wallpaper swaps, and its `unload`/`listloaded` IPC verbs return
+    # "invalid hyprpaper request" outright. Pull straight from hyprwm to get a
+    # version where both are fixed. Follows our nixpkgs so hypr* deps dedupe.
+    hyprpaper = {
+      url = "github:hyprwm/hyprpaper";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = { nixpkgs, home-manager, plasma-manager, aerothemeplasma-nix, ... }@inputs:
