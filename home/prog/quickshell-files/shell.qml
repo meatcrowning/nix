@@ -384,7 +384,7 @@ Scope {
     }
 
     // The accent stripes bookending the desktop: the left screen edge (2px,
-    // opposite the bar's own left-edge accent) plus 1px lines across the top
+    // opposite the bar's own left-edge accent) plus 2px lines across the top
     // and bottom edges. One of each per monitor.
     Variants {
         model: Quickshell.screens

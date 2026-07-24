@@ -23,9 +23,11 @@ PanelWindow {
 
     // Which screen edge to hug: "left" (default), "top", or "bottom".
     property string edge: "left"
-    // Stripe thickness. The left side is 2px (matching the window-border width);
-    // the top/bottom stripes are 1px.
-    property int thickness: edge === "left" ? 2 : 1
+    // Stripe thickness: a flat 2px on every edge (matching the window-border
+    // width). A 1px top/bottom line vanishes on a scale-1.0 1080p monitor — it's
+    // a single physical pixel pinned to the screen edge — whereas 2px stays
+    // visible there and matches the left/right stripe.
+    property int thickness: 2
 
     anchors {
         left: edge !== "right"
