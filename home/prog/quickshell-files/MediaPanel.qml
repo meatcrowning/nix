@@ -8,9 +8,12 @@ import Quickshell.Services.Mpris
 // Everything interactive comes from MPRIS (Quickshell.Services.Mpris): the
 // active player drives the title/artist/art, the transport buttons, and the
 // draggable seekbar. The spectrum below the artwork is a second cava instance
-// (scripts/cava-spectrum.conf, 16 mono bars) — same plumbing as the bar's VU
-// meter (VuMeter.qml), reacting to whatever's on the output sink regardless of
-// which app is the MPRIS source.
+// (scripts/cava-spectrum.conf) — same plumbing as the bar's VU meter
+// (VuMeter.qml), reacting to whatever's on the output sink regardless of which
+// app is the MPRIS source. cava's bucket count is config-only, so the bar count
+// (mediaSpectrumBars) is patched into a runtime copy of the conf and cava is
+// bounced whenever it changes — otherwise raising it past the file's baked
+// count leaves the extra bars flat (only the first N buckets ever get data).
 SlidePopup {
     id: root
 
@@ -98,8 +101,15 @@ SlidePopup {
         id: cavaProc
         running: root.open
         // see VuMeter.qml: prepend ~/.nix-profile/bin so the session's bare PATH
-        // can find the nix-installed cava, else the spectrum never spawns.
-        command: ["sh", "-c", "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; exec cava -p \"$HOME/.config/quickshell/scripts/cava-spectrum.conf\""]
+        // can find the nix-installed cava, else the spectrum never spawns. cava
+        // has no CLI for the bar count, so patch `bars` into a runtime copy of
+        // the conf (from mediaSpectrumBars) and run cava against that.
+        command: ["sh", "-c",
+            "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; "
+            + "src=\"$HOME/.config/quickshell/scripts/cava-spectrum.conf\"; "
+            + "cfg=\"${XDG_RUNTIME_DIR:-/tmp}/qs-cava-spectrum.conf\"; "
+            + "sed \"s/^bars *=.*/bars = " + SettingsStore.d.mediaSpectrumBars + "/\" \"$src\" > \"$cfg\" && "
+            + "exec cava -p \"$cfg\""]
         stdout: SplitParser {
             onRead: data => {
                 const parts = data.split(";");
@@ -108,12 +118,37 @@ SlidePopup {
                 root.spectrumLevels = out;
             }
         }
-        onExited: cavaRestart.restart()
+        // A bar-count change stops cava so it respawns with the new bucket count
+        // (cavaBouncing path); any other exit is a crash — back off and retry.
+        onExited: {
+            if (root.cavaBouncing) {
+                root.cavaBouncing = false;
+                // re-arm the open-bound lifecycle: evaluates true (we're open),
+                // so cava restarts now with the patched conf, and a later close
+                // still stops it (the plain `= true` below would break that).
+                cavaProc.running = Qt.binding(() => root.open);
+            } else {
+                cavaRestart.restart();
+            }
+        }
     }
     Timer {
         id: cavaRestart
         interval: 2000
-        onTriggered: if (root.open) cavaProc.running = true
+        onTriggered: if (root.open) cavaProc.running = Qt.binding(() => root.open)
+    }
+
+    // cava's bucket count is fixed at spawn, so restart it when mediaSpectrumBars
+    // changes. Debounced: a slider drag fires many changes; bounce once it settles.
+    property bool cavaBouncing: false
+    Timer {
+        id: cavaBounce
+        interval: 250
+        onTriggered: if (root.open && cavaProc.running) { root.cavaBouncing = true; cavaProc.running = false; }
+    }
+    Connections {
+        target: SettingsStore.d
+        function onMediaSpectrumBarsChanged() { if (root.open) cavaBounce.restart(); }
     }
 
     function fmtTime(s) {
@@ -164,7 +199,7 @@ SlidePopup {
         }
     }
 
-    // ---- spectrum: 16 vertical bars, driven by spectrumLevels ------------
+    // ---- spectrum: mediaSpectrumBars vertical bars, driven by spectrumLevels --
     component Spectrum: Item {
         id: spec
         readonly property int nbars: SettingsStore.d.mediaSpectrumBars
