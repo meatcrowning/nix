@@ -81,6 +81,13 @@ in
       source = ./quickshell-files/scripts/force-quit.sh;
       executable = true;
     };
+    # Power-menu graceful exit (PowerMenu.qml): snapshot the session + "click the
+    # [x]" on every window (hyprvtb dispatcher) and wait for them to close, so
+    # logout/reboot/poweroff let apps save and the next login restores positions.
+    "quickshell/scripts/session-exit.sh" = {
+      source = ./quickshell-files/scripts/session-exit.sh;
+      executable = true;
+    };
     # Per-host branch point for the panel (e.g. the default desktop-widget set
     # in shell.qml's _defaultWidgets). A generated singleton, mirroring
     # hypr/host.lua — regenerated every switch rather than a seeded-once file,

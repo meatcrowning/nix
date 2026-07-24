@@ -32,10 +32,14 @@ PanelWindow {
         // wraps the binary (comm `.Hyprland-wrapped`), and pkill's default
         // comm-substring match hits exactly that one process — robust to the
         // wrapper/version name and it won't match the `sh -c` running it.
-        { label: "logout",   cmd: SettingsStore.d.cmdLogout },
-        { label: "sleep",    cmd: SettingsStore.d.cmdSleep },
-        { label: "reboot",   cmd: SettingsStore.d.cmdReboot },
-        { label: "poweroff", cmd: SettingsStore.d.cmdPoweroff },
+        // endSession: run scripts/session-exit.sh FIRST (snapshot the session +
+        // "click the [x]" on every window so apps save and the next login
+        // restores their positions — see confirm()). sleep is NOT an
+        // end-of-session: windows stay open across suspend, so it runs bare.
+        { label: "logout",   cmd: SettingsStore.d.cmdLogout,   endSession: true },
+        { label: "sleep",    cmd: SettingsStore.d.cmdSleep,    endSession: false },
+        { label: "reboot",   cmd: SettingsStore.d.cmdReboot,   endSession: true },
+        { label: "poweroff", cmd: SettingsStore.d.cmdPoweroff, endSession: true },
     ]
 
     // Stay mapped through the slide-out, then hide once the card has travelled
@@ -68,7 +72,17 @@ PanelWindow {
     function confirm(index) {
         const item = items[index];
         if (!item) return;
-        Quickshell.execDetached(["sh", "-c", item.cmd]);
+        let cmd = item.cmd;
+        if (item.endSession) {
+            // Snapshot the session + gracefully close every window (blocks until
+            // they're gone, so apps get to save), THEN run the power action.
+            // Chained with `;` not `&&`: the power action MUST fire even if the
+            // save/close step hiccups — logout/poweroff can never silently do
+            // nothing (session-exit.sh exits 0 anyway; this is belt-and-braces).
+            const exitScript = Qt.resolvedUrl("scripts/session-exit.sh").toString().replace("file://", "");
+            cmd = "'" + exitScript + "' ; " + item.cmd;
+        }
+        Quickshell.execDetached(["sh", "-c", cmd]);
         close();
     }
 
