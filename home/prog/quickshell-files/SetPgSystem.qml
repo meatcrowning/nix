@@ -1,8 +1,8 @@
 import QtQuick
 import Quickshell.Io
 
-// Input & System — keyboard/pointer, the clock/calendar/weather data the bar
-// shows, world-clock zones, and the read-only machine profile.
+// Input & System — keyboard/pointer and the read-only machine profile. The
+// clock/calendar, weather, and world-clock data live on the Widgets page.
 Column {
     id: page
     width: parent ? parent.width : 480
@@ -65,106 +65,6 @@ Column {
             SetToggle {
                 checked: page.d.tapToClick
                 onToggled: (v) => { page.d.tapToClick = v; SettingsStore.save(); }
-            }
-        }
-    }
-
-    SetSection {
-        title: "clock & calendar"
-        SetRow {
-            label: "24-hour clock"
-            desc: "applies to the bar clock everywhere"
-            SetToggle {
-                checked: page.d.clock24h
-                onToggled: (v) => { page.d.clock24h = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "week starts monday"
-            SetToggle {
-                checked: page.d.weekStartsMonday
-                onToggled: (v) => { page.d.weekStartsMonday = v; SettingsStore.save(); }
-            }
-        }
-    }
-
-    SetSection {
-        title: "weather"
-        SetRow {
-            label: "place name"
-            SetTextField {
-                fieldWidth: 160
-                value: page.d.weatherPlace
-                onCommitted: (t) => { page.d.weatherPlace = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "latitude"
-            SetTextField {
-                fieldWidth: 120; numeric: true
-                value: "" + page.d.weatherLat
-                onCommitted: (t) => { const n = parseFloat(t); if (!isNaN(n)) { page.d.weatherLat = n; SettingsStore.save(); } }
-            }
-        }
-        SetRow {
-            label: "longitude"
-            SetTextField {
-                fieldWidth: 120; numeric: true
-                value: "" + page.d.weatherLon
-                onCommitted: (t) => { const n = parseFloat(t); if (!isNaN(n)) { page.d.weatherLon = n; SettingsStore.save(); } }
-            }
-        }
-        SetRow {
-            label: "units"
-            SetSelect {
-                options: ["F", "C"]
-                labels: ({ F: "°F", C: "°C" })
-                value: page.d.weatherUnit
-                onChanged: (v) => { page.d.weatherUnit = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "refresh every"
-            SetSlider {
-                from: 5; to: 120; step: 5; unit: "min"
-                value: page.d.weatherRefreshMin
-                onMoved: (v) => { page.d.weatherRefreshMin = v; SettingsStore.save(); }
-            }
-        }
-    }
-
-    SetSection {
-        title: "world clocks"
-        SetRow {
-            label: "zone 1"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz1
-                onCommitted: (t) => { page.d.tz1 = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "zone 2"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz2
-                onCommitted: (t) => { page.d.tz2 = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "zone 3"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz3
-                onCommitted: (t) => { page.d.tz3 = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "zone 4"
-            SetTextField {
-                fieldWidth: 240
-                value: page.d.tz4
-                onCommitted: (t) => { page.d.tz4 = t; SettingsStore.save(); }
             }
         }
     }

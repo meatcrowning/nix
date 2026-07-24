@@ -1,7 +1,7 @@
 import QtQuick
 
-// Panel & Widgets = the bar surface + the desktop-widget set + the monitoring
-// widget's thresholds/sensors (its detail pane folds in here).
+// Panel = the bar surface and its taskbar. The desktop-widget set, the
+// monitoring widget's thresholds/sensors, etc. live on the Widgets page.
 Column {
     id: page
     width: parent ? parent.width : 480
@@ -47,30 +47,6 @@ Column {
     }
 
     SetSection {
-        title: "desktop widgets"
-        SetRow {
-            label: "shown at login"
-            desc: "which widgets fan out on a fresh session"
-            // full-width chips wrap below the label on narrow layouts
-        }
-        SetChips {
-            options: ["clock", "weather", "disk", "media", "cpu", "gpu", "eth", "calendar"]
-            selected: page.d.defaultWidgets
-            onChanged: (vs) => { page.d.defaultWidgets = vs; SettingsStore.save(); }
-        }
-        Item { width: 1; height: 6 }
-        SetRow {
-            label: "fan step"
-            desc: "delay between cascade stages when revealing all"
-            SetSlider {
-                from: 100; to: 600; step: 10; unit: "ms"
-                value: page.d.fanStepMs
-                onMoved: (v) => { page.d.fanStepMs = v; SettingsStore.save(); }
-            }
-        }
-    }
-
-    SetSection {
         title: "taskbar"
         SetRow {
             label: "click active minimizes"
@@ -78,109 +54,6 @@ Column {
             SetToggle {
                 checked: page.d.taskbarClickMinimizes
                 onToggled: (v) => { page.d.taskbarClickMinimizes = v; SettingsStore.save(); }
-            }
-        }
-    }
-
-    SetSection {
-        title: "monitoring"
-        SetRow {
-            label: "poll interval"
-            desc: "how often sensors refresh"
-            SetSlider {
-                from: 1; to: 10; step: 1; unit: "s"
-                value: page.d.monPollSec
-                onMoved: (v) => { page.d.monPollSec = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "cpu / gpu usage warn"
-            SetSlider {
-                from: 40; to: 100; step: 1; unit: "%"
-                value: page.d.cpuWarn
-                onMoved: (v) => { page.d.cpuWarn = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "cpu / gpu usage critical"
-            SetSlider {
-                from: 40; to: 100; step: 1; unit: "%"
-                value: page.d.cpuCrit
-                onMoved: (v) => { page.d.cpuCrit = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "temperature warn"
-            SetSlider {
-                from: 40; to: 100; step: 1; unit: "°C"
-                value: page.d.tempWarn
-                onMoved: (v) => { page.d.tempWarn = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "temperature critical"
-            SetSlider {
-                from: 40; to: 110; step: 1; unit: "°C"
-                value: page.d.tempCrit
-                onMoved: (v) => { page.d.tempCrit = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "disk usage warn"
-            SetSlider {
-                from: 40; to: 100; step: 1; unit: "%"
-                value: page.d.diskWarn
-                onMoved: (v) => { page.d.diskWarn = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "disk usage critical"
-            SetSlider {
-                from: 40; to: 100; step: 1; unit: "%"
-                value: page.d.diskCrit
-                onMoved: (v) => { page.d.diskCrit = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "battery low warn"
-            SetSlider {
-                from: 5; to: 60; step: 1; unit: "%"
-                value: page.d.batteryWarn
-                onMoved: (v) => { page.d.batteryWarn = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "battery low critical"
-            SetSlider {
-                from: 1; to: 40; step: 1; unit: "%"
-                value: page.d.batteryCrit
-                onMoved: (v) => { page.d.batteryCrit = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "network interface"
-            desc: "auto picks the default route"
-            SetTextField {
-                fieldWidth: 120
-                value: page.d.netInterface
-                onCommitted: (t) => { page.d.netInterface = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "disk mount"
-            desc: "filesystem shown in the bar's free/used readout"
-            SetTextField {
-                fieldWidth: 120
-                value: page.d.rootMount
-                onCommitted: (t) => { page.d.rootMount = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "SMART on SSD/NVMe only"
-            desc: "skip health polling on spinning disks"
-            SetToggle {
-                checked: page.d.smartSsdOnly
-                onToggled: (v) => { page.d.smartSsdOnly = v; SettingsStore.save(); }
             }
         }
     }

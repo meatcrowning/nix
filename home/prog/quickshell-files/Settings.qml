@@ -40,6 +40,7 @@ Scope {
     readonly property var pages: [
         { key: "appearance", label: "appearance", glyph: "ap", src: "SetPgAppearance.qml" },
         { key: "panel",      label: "panel",      glyph: "pn", src: "SetPgPanel.qml" },
+        { key: "widgets",    label: "widgets",    glyph: "wg", src: "SetPgWidgets.qml" },
         { key: "audio",      label: "audio",      glyph: "au", src: "SetPgAudio.qml" },
         { key: "notifs",     label: "notifs",     glyph: "nf", src: "SetPgNotifs.qml" },
         { key: "apps",       label: "apps",       glyph: "ut", src: "SetPgApps.qml" },
