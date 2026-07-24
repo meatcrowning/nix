@@ -27,7 +27,8 @@ SlidePopup {
         if (!Mpris.players) return null;
         const ps = Mpris.players.values;
         if (!ps || ps.length === 0) return null;
-        for (let i = 0; i < ps.length; i++) if (ps[i].isPlaying) return ps[i];
+        if (SettingsStore.d.mediaPreferPlaying)
+            for (let i = 0; i < ps.length; i++) if (ps[i].isPlaying) return ps[i];
         for (let i = 0; i < ps.length; i++) if (ps[i].canControl) return ps[i];
         return ps[0];
     }
@@ -101,7 +102,7 @@ SlidePopup {
             onRead: data => {
                 const parts = data.split(";");
                 const out = [];
-                for (let i = 0; i < 16; i++) out.push(Math.min(100, parseInt(parts[i], 10) || 0));
+                for (let i = 0; i < SettingsStore.d.mediaSpectrumBars; i++) out.push(Math.min(100, parseInt(parts[i], 10) || 0));
                 root.spectrumLevels = out;
             }
         }
@@ -164,7 +165,7 @@ SlidePopup {
     // ---- spectrum: 16 vertical bars, driven by spectrumLevels ------------
     component Spectrum: Item {
         id: spec
-        readonly property int nbars: 16
+        readonly property int nbars: SettingsStore.d.mediaSpectrumBars
         Row {
             anchors.fill: parent
             spacing: 2

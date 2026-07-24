@@ -70,12 +70,16 @@ Column {
                 cursorShape: Qt.PointingHandCursor
                 // Clicking the ACTIVE program's icon minimizes it (hyprvtb
                 // slides it off-screen); clicking any other icon focuses it,
-                // which also slides a minimized window back in.
+                // which also slides a minimized window back in. The
+                // minimize-on-click is gated on taskbarClickMinimizes — when
+                // off, clicking the focused icon is a no-op.
                 onClicked: {
-                    if (cell.modelData.activated)
-                        Quickshell.execDetached(["hyprctl", "eval", "hl.plugin.hyprvtb.minimize_active()"]);
-                    else
+                    if (cell.modelData.activated) {
+                        if (SettingsStore.d.taskbarClickMinimizes)
+                            Quickshell.execDetached(["hyprctl", "eval", "hl.plugin.hyprvtb.minimize_active()"]);
+                    } else {
                         cell.modelData.activate();
+                    }
                 }
             }
 

@@ -42,23 +42,29 @@ Singleton {
         id: server
         keepOnReload: false
 
-        // Only advertise what we actually render: plain-text body, nothing else.
-        // (Apps use these flags to decide what to send.)
+        // Only advertise what we actually render: plain-text body, plus
+        // whatever the user has opted into. (Apps use these flags to decide
+        // what to send.)
         bodySupported: true
         bodyMarkupSupported: false
         bodyHyperlinksSupported: false
-        bodyImagesSupported: false
-        imageSupported: false
-        actionsSupported: false
-        actionIconsSupported: false
+        bodyImagesSupported: SettingsStore.d.notifImages
+        imageSupported: SettingsStore.d.notifImages
+        actionsSupported: SettingsStore.d.notifActions
+        actionIconsSupported: SettingsStore.d.notifActions
         inlineReplySupported: false
         persistenceSupported: false
 
         onNotification: function (n) {
+            // Do Not Disturb: suppress toasts, but let critical (urgency 2)
+            // through — standard DND behaviour.
+            if (SettingsStore.d.doNotDisturb && n.urgency !== 2)
+                return;
+
             n.tracked = true;
 
-            // Vista sounds: Exclamation for critical toasts, Balloon otherwise.
-            Sounds.playThrottled(n.urgency === 2 ? "Windows Exclamation.wav" : "Windows Balloon.wav", 300);
+            // Vista sounds: critical vs. normal, both user-configurable.
+            Sounds.playThrottled(n.urgency === 2 ? SettingsStore.d.soundCritical : SettingsStore.d.soundNotify, 300);
 
             // Enforce maxVisible: retire the oldest non-critical toast (lowest
             // id == earliest). If everything on screen is critical, drop the

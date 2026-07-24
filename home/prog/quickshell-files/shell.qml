@@ -48,6 +48,10 @@ Scope {
         }
     }
 
+    // Applies settings that live outside Quickshell's surfaces: Hyprland input
+    // (key repeat, pointer, scroll, tap) and the night-light filter.
+    SettingsApply {}
+
     // The runner overlay.
     Launcher {
         id: launcher
@@ -172,7 +176,7 @@ Scope {
     // one stage every _fanStepMs — set to just past a single widget's full
     // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a
     // stage finishes animating before the next one starts.
-    readonly property int _fanStepMs: 300
+    readonly property int _fanStepMs: SettingsStore.d.fanStepMs
     property var _fanStages: []
     property int _fanIndex: 0
     property bool _fanRevealing: true
@@ -369,8 +373,8 @@ Scope {
     // the key would otherwise stack up several ~1.5s DDC calls).
     IpcHandler {
         target: "brightness"
-        function up(): void { SysInfo.adjustBrightness(5); }
-        function down(): void { SysInfo.adjustBrightness(-5); }
+        function up(): void { SysInfo.adjustBrightness(SettingsStore.d.brightnessStep); }
+        function down(): void { SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep); }
     }
 
     // The volume/brightness OSD popup, one per monitor.
@@ -384,7 +388,9 @@ Scope {
     // and bottom edges. One of each per monitor.
     Variants {
         model: Quickshell.screens
-        EdgeAccent { edge: "left" }
+        // the 2px stripe that sits OPPOSITE the bar — flips to the right screen
+        // edge when the bar is moved to the left.
+        EdgeAccent { edge: SettingsStore.d.barEdge === "left" ? "right" : "left" }
     }
     Variants {
         model: Quickshell.screens
@@ -415,7 +421,11 @@ Scope {
             required property var modelData
             screen: modelData
 
-            anchors { top: true; bottom: true; right: true }
+            // barEdge picks which screen edge the bar hugs; the accent strip
+            // below moves to the opposite (inner) edge to match.
+            readonly property bool barLeft: SettingsStore.d.barEdge === "left"
+
+            anchors { top: true; bottom: true; left: bar.barLeft; right: !bar.barLeft }
             implicitWidth: Theme.barWidth
             // Reserve one window-border less than the bar's real width. The bar
             // still occupies its full barWidth (it's anchored right and this
@@ -432,10 +442,16 @@ Scope {
 
             WlrLayershell.namespace: "qs-bar"
 
-            // accent strip down the left edge — same width as the window border
+            // accent strip down the bar's inner edge — same width as the window
+            // border. Sits on the left when the bar is anchored right, and flips
+            // to the right when barEdge moves the bar to the left screen edge.
             Rectangle {
                 z: 1
-                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                anchors {
+                    top: parent.top; bottom: parent.bottom
+                    left: bar.barLeft ? undefined : parent.left
+                    right: bar.barLeft ? parent.right : undefined
+                }
                 width: 2
                 color: Theme.accent
             }

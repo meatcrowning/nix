@@ -10,11 +10,12 @@ import Quickshell.Wayland
 // toggle flips the whole overlay between "shot" and "rec".
 //
 //   shot: region drag / window click / fullscreen click captures immediately.
-//         Saved to ~/Pictures/Screenshots/ AND copied to the clipboard.
+//         Saved to the configured screenshot dir, and (optionally) copied to
+//         the clipboard.
 //   rec:  region / window / fullscreen only SELECT a target; a "record"
-//         button (right of exit) then starts wf-recorder on it. Recording
-//         has no audio and runs at the display's refresh rate; the file goes
-//         to ~/Videos/Screen Recordings/. A separate top-right toast
+//         button (right of exit) then starts wf-recorder on it. Audio,
+//         framerate and the output dir come from settings; the file goes
+//         to the configured recording dir. A separate top-right toast
 //         (RecordingToast.qml, driven by root.recording) is clicked to stop.
 //
 // The overlay itself must not appear in the shot, so capture/record closes
@@ -151,8 +152,9 @@ PanelWindow {
     }
 
     // Start wf-recorder on the current mode's target, then close the overlay.
-    // No audio (never pass -a); constant framerate at the display rate (-r).
-    // The file is finalised when RecordingToast stops us with SIGINT.
+    // Audio (-a) and framerate (-r) come from settings; so does the output
+    // dir (~ expands to $HOME in the shell). The file is finalised when
+    // RecordingToast stops us with SIGINT.
     function startRecording() {
         // -g "x,y WxH" region, or -o <output> for fullscreen.
         let flag, val;
@@ -174,15 +176,17 @@ PanelWindow {
 
         root.open = false;
         root.recording = true;
-        // fps/flag/geometry go through argv ($1/$2/$3), never interpolated.
+        // fps/flag/geometry/audio/dir go through argv, never interpolated.
+        // $4 (audio) is intentionally unquoted so "" contributes no argument.
+        const audio = SettingsStore.d.recordingAudio ? "-a" : "";
         Quickshell.execDetached(["sh", "-c",
             'sleep 0.2; ' +
-            'dir="$HOME/Videos/Screen Recordings"; mkdir -p "$dir"; ' +
-            'f="$dir/Recording_$(date +%Y%m%d_%H%M%S).mp4"; ' +
-            'if wf-recorder -r "$1" "$2" "$3" -f "$f"; then ' +
+            'd="$5"; case "$d" in "~"*) d="$HOME${d#~}";; esac; mkdir -p "$d"; ' +
+            'f="$d/Recording_$(date +%Y%m%d_%H%M%S).mp4"; ' +
+            'if wf-recorder $4 -r "$1" "$2" "$3" -f "$f"; then ' +
             '  notify-send -a recording Recording "$(basename "$f") saved"; ' +
             'else notify-send -u critical -a recording Recording "recording failed"; fi',
-            "_", String(fps), flag, val]);
+            "_", String(SettingsStore.d.recordingFps), flag, val, audio, SettingsStore.d.recordingDir]);
     }
 
     // Stop the running recording: SIGINT lets wf-recorder flush and finalise
@@ -202,16 +206,17 @@ PanelWindow {
     function capture(gx, gy, gw, gh) {
         const g = Math.round(gx) + "," + Math.round(gy) + " " + Math.round(gw) + "x" + Math.round(gh);
         const wait = 0.2 + delaySec;
+        const copy = SettingsStore.d.screenshotCopy ? "1" : "0";
         root.open = false;
         Quickshell.execDetached(["sh", "-c",
             'sleep ' + wait + '; ' +
-            'dir="$HOME/Pictures/Screenshots"; mkdir -p "$dir"; ' +
-            'f="$dir/Screenshot_$(date +%Y%m%d_%H%M%S).png"; ' +
-            'if grim -g "$1" "$f"; then ' +
-            '  wl-copy < "$f"; ' +
-            '  notify-send -a screenshot Screenshot "$(basename "$f") saved + copied"; ' +
+            'd="$1"; case "$d" in "~"*) d="$HOME${d#~}";; esac; mkdir -p "$d"; ' +
+            'f="$d/Screenshot_$(date +%Y%m%d_%H%M%S).png"; ' +
+            'if grim -g "$2" "$f"; then ' +
+            '  if [ "$3" = "1" ]; then wl-copy < "$f"; msg="saved + copied"; else msg="saved"; fi; ' +
+            '  notify-send -a screenshot Screenshot "$(basename "$f") $msg"; ' +
             'else notify-send -u critical -a screenshot Screenshot "capture failed"; fi',
-            "_", g]);
+            "_", SettingsStore.d.screenshotDir, g, copy]);
     }
 
     function captureLocalRect(r) {

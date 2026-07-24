@@ -29,7 +29,14 @@ Singleton {
     // instant; the periodic poll here just corrects for drift (e.g. the
     // monitor's own physical buttons).
     property int    brightness: -1      // 0-100, or -1 until first poll
-    property bool   useBacklight: false // detected at startup, see below
+    // Which brightness backend to drive. "auto" uses whatever was detected at
+    // startup (_hasBacklight); the Settings "brightness backend" override forces
+    // backlight (brightnessctl) or ddc (ddcutil) regardless of detection.
+    property bool   _hasBacklight: false
+    readonly property bool useBacklight: {
+        const be = SettingsStore.d.brightnessBackend;
+        return be === "backlight" ? true : be === "ddc" ? false : _hasBacklight;
+    }
 
     // throughput history for the sparkline (bytes/s totals)
     property var history: []
@@ -136,7 +143,7 @@ Singleton {
         volume = Math.max(0, Math.min(100, volume + step));
         Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@",
             Math.abs(step) + "%" + (step >= 0 ? "+" : "-")]);
-        Sounds.playThrottled("Windows Ding.wav", 250);
+        Sounds.playThrottled(SettingsStore.d.soundVolume, 250);
     }
 
     // Absolute set — the VU meter's draggable level line. Optimistic like
@@ -147,7 +154,7 @@ Singleton {
         if (v === volume) return;
         volume = v;
         Quickshell.execDetached(["wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", v + "%"]);
-        Sounds.playThrottled("Windows Ding.wav", 250);
+        Sounds.playThrottled(SettingsStore.d.soundVolume, 250);
     }
 
     // Optimistic local update (instant panel feedback) + a debounced actual
@@ -237,7 +244,7 @@ Singleton {
         command: ["sh", "-c", "ls /sys/class/backlight/*/brightness 2>/dev/null | head -n1"]
         running: true
         stdout: StdioCollector {
-            onStreamFinished: root.useBacklight = text.trim() !== ""
+            onStreamFinished: root._hasBacklight = text.trim() !== ""
         }
     }
 

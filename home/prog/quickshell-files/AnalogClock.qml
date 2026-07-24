@@ -21,12 +21,17 @@ SlidePopup {
 
     onOpened: { face.requestPaint(); tzProc.running = true; }
 
-    // label + Olson TZ, in the order asked: indiana, new york, uk, japan
+    // short label derived from the Olson TZ (last path segment); the four
+    // zones themselves come from Settings (tz1..tz4), so this stays live.
+    function tzLabel(tz) {
+        const p = tz.split("/");
+        return p[p.length - 1].replace(/_/g, " ").toLowerCase();
+    }
     readonly property var zones: [
-        { label: "indiana",  tz: "America/Indiana/Indianapolis" },
-        { label: "new york", tz: "America/New_York" },
-        { label: "uk",       tz: "Europe/London" },
-        { label: "japan",    tz: "Asia/Tokyo" },
+        { label: root.tzLabel(SettingsStore.d.tz1), tz: SettingsStore.d.tz1 },
+        { label: root.tzLabel(SettingsStore.d.tz2), tz: SettingsStore.d.tz2 },
+        { label: root.tzLabel(SettingsStore.d.tz3), tz: SettingsStore.d.tz3 },
+        { label: root.tzLabel(SettingsStore.d.tz4), tz: SettingsStore.d.tz4 },
     ]
     property var times: ["--", "--", "--", "--"]
 
@@ -44,7 +49,9 @@ SlidePopup {
         // exists rather than hardcoding one — a wrong/missing TZDIR makes every
         // TZ=... silently fall back to UTC, so all four world clocks read alike.
         command: ["sh", "-c",
-            "for d in /usr/share/zoneinfo /etc/zoneinfo; do [ -d \"$d\" ] && export TZDIR=\"$d\" && break; done; for z in America/Indiana/Indianapolis America/New_York Europe/London Asia/Tokyo; do TZ=$z date +%H:%M; done"]
+            "for d in /usr/share/zoneinfo /etc/zoneinfo; do [ -d \"$d\" ] && export TZDIR=\"$d\" && break; done; for z in "
+            + SettingsStore.d.tz1 + " " + SettingsStore.d.tz2 + " " + SettingsStore.d.tz3 + " " + SettingsStore.d.tz4
+            + "; do TZ=$z date +%H:%M; done"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const lines = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);
@@ -57,6 +64,16 @@ SlidePopup {
         running: root.open
         repeat: true
         onTriggered: { tzProc.running = false; tzProc.running = true; }
+    }
+
+    // Re-fetch the world-clock times immediately when a zone changes in
+    // Settings (the labels rebind live; the times come from the Process).
+    Connections {
+        target: SettingsStore.d
+        function onTz1Changed() { tzProc.running = false; tzProc.running = true; }
+        function onTz2Changed() { tzProc.running = false; tzProc.running = true; }
+        function onTz3Changed() { tzProc.running = false; tzProc.running = true; }
+        function onTz4Changed() { tzProc.running = false; tzProc.running = true; }
     }
 
     Column {

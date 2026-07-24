@@ -9,10 +9,15 @@ import Quickshell.Wayland
 PanelWindow {
     id: win
 
-    anchors { bottom: true; right: true }
-    margins { bottom: Theme.gap; right: Theme.gap }
+    // Which corner the toast stack lives in, decoded from notifCorner
+    // ("bottom-right" | "bottom-left" | "top-right" | "top-left").
+    readonly property bool _top: SettingsStore.d.notifCorner.indexOf("top") === 0
+    readonly property bool _left: SettingsStore.d.notifCorner.indexOf("left") >= 0
 
-    implicitWidth: 300
+    anchors { top: win._top; bottom: !win._top; left: win._left; right: !win._left }
+    margins { top: Theme.gap; bottom: Theme.gap; left: Theme.gap; right: Theme.gap }
+
+    implicitWidth: SettingsStore.d.notifWidth
     implicitHeight: Math.max(1, col.implicitHeight)
     color: "transparent"
     exclusiveZone: 0
@@ -27,12 +32,19 @@ PanelWindow {
 
     Column {
         id: col
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        // stack from the anchored corner's vertical edge (top corners grow down,
+        // bottom corners grow up)
+        anchors {
+            left: parent.left; right: parent.right
+            top: win._top ? parent.top : undefined
+            bottom: win._top ? undefined : parent.bottom
+        }
         spacing: Theme.gap
 
-        // slide new toasts in from the right; ease the stack when one leaves
+        // slide new toasts in from the bar-facing (outer) edge; ease the stack
+        // when one leaves
         add: Transition {
-            NumberAnimation { properties: "x"; from: 48; duration: 180; easing.type: Easing.OutCubic }
+            NumberAnimation { properties: "x"; from: win._left ? -48 : 48; duration: 180; easing.type: Easing.OutCubic }
         }
         move: Transition {
             NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic }

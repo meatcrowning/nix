@@ -198,9 +198,11 @@ Column {
         // the pack is near full and the normal colour is already light).
         label: SysInfo.batteryCharging ? "chg" : "bat"
         value: SysInfo.batteryPct + ""
+        // battery is "lower is worse" — crit/warn below their thresholds,
+        // mirroring the cpu/disk stats above
         valueColor: SysInfo.batteryCharging ? Theme.ok
-                  : SysInfo.batteryPct <= 15 ? Theme.crit
-                  : SysInfo.batteryPct <= 30 ? Theme.warn : Theme.text
+                  : SysInfo.batteryPct <= SettingsStore.d.batteryCrit ? Theme.crit
+                  : SysInfo.batteryPct <= SettingsStore.d.batteryWarn ? Theme.warn : Theme.text
     }
 
     // ---------- Brightness ----------
@@ -208,8 +210,8 @@ Column {
         label: "bri"
         value: SysInfo.brightness < 0 ? "--" : SysInfo.brightness + ""
         valueColor: Theme.text
-        onWheelUp: () => SysInfo.adjustBrightness(5)
-        onWheelDown: () => SysInfo.adjustBrightness(-5)
+        onWheelUp: () => SysInfo.adjustBrightness(SettingsStore.d.brightnessStep)
+        onWheelDown: () => SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep)
     }
 
     // ---------- Stereo output VU (left / right channel) ----------
