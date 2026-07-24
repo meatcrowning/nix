@@ -100,12 +100,12 @@ Item {
                     // implicitWidth never depends on width — so there's no loop.
                     implicitWidth: rowText.implicitWidth + 24
                     width: panel.contentWidth
-                    // Row height hugs the font's line box (Theme.fontSize; this
-                    // pixel font has leading 0, so lineSpacing == fontSize) plus a
-                    // couple of px so the cursor has something to hit — kitty-tight
-                    // rather than the old fixed 22px, which left ~9px of dead space
-                    // between glyph rows. Separators keep a small deliberate gap.
-                    height: modelData.separator === true ? 7 : Theme.fontSize + 2
+                    // Row height IS the font's line box (Theme.fontSize; this
+                    // pixel font has leading 0, so lineSpacing == fontSize and the
+                    // glyph fills the cell exactly) — kitty-exact, one cell per
+                    // row with no dead space, vs the old fixed 22px. Separators
+                    // keep their small deliberate gap.
+                    height: modelData.separator === true ? 7 : Theme.fontSize
                     onImplicitWidthChanged: panel.remeasure()
 
                     readonly property bool en: modelData.enabled !== false

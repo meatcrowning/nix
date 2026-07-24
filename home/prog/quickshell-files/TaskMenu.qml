@@ -100,9 +100,9 @@ PopupWindow {
                 signal activated()
                 width: box.width
                 implicitWidth: rowText.implicitWidth + 24
-                // kitty-tight menu row: hug the text line box (+4) instead of the
-                // old +12, which left a lot of dead space above/below each label
-                implicitHeight: rowText.implicitHeight + 4
+                // kitty-exact menu row: the text line box itself (no padding),
+                // vs the old +12 that left dead space above/below each label
+                implicitHeight: rowText.implicitHeight
                 color: rowMouse.containsMouse ? Theme.bg : "transparent"
                 PixelText {
                     id: rowText
