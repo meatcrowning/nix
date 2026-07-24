@@ -71,7 +71,11 @@ EOF
 fi
 
 # ---- colour palette -------------------------------------------------------
-if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ]; then
+# Regenerate when the cache is missing, the wallpaper changed, OR the extractor
+# itself changed — otherwise a palette cached by an older wal-extract.py (e.g.
+# before the pastel-saturation pass) sticks forever and the desktop keeps the
+# old, harsher colours for that wallpaper.
+if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ] || [ "$SCRIPTS/wal-extract.py" -nt "$THEMEFILE" ]; then
     "$SCRIPTS/wal-extract.py" "$WALL" > "$THEMEFILE"
 fi
 
