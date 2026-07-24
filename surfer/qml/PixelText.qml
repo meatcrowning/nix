@@ -19,4 +19,13 @@ Text {
     font.hintingPreference: Font.PreferFullHinting
     renderType: Text.NativeRendering
     antialiasing: false
+
+    // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
+    // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per
+    // line), so multi-line/wrapped text leads ~1px wider than kitty's 15px cell
+    // and it compounds down a paragraph. Pin the per-line height to the pixel
+    // size (== kitty's cell) so every line sits flush like a terminal row.
+    // (filer/viewer/qs PixelText already do this — surfer's was the odd one out.)
+    lineHeight: Theme.fontSize
+    lineHeightMode: Text.FixedHeight
 }

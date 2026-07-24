@@ -468,7 +468,9 @@ Window {
                 required property var modelData
                 required property int index
                 width: list.width
-                height: 22
+                // terminal-style file list: one tight row per entry (text-only),
+                // hugging the font line box rather than the old fixed 22px
+                height: Theme.fontSize + 4
                 readonly property string abs: modelData.path
                 readonly property int indent: modelData.depth * 14
                 color: view.selection.indexOf(abs) >= 0 ? Theme.highlight : "transparent"

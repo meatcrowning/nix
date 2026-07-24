@@ -112,7 +112,9 @@ FloatingWindow {
                 required property bool fileIsDir
                 required property int fileSize
                 width: list.width
-                height: 22
+                // terminal-style file list: one tight row per entry (text-only),
+                // hugging the font line box rather than the old fixed 22px
+                height: Theme.fontSize + 4
                 readonly property string abs: view.fromUrl(filePath)
                 color: view.selected === abs ? Theme.highlight : "transparent"
 
