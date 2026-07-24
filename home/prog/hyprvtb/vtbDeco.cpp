@@ -2737,7 +2737,8 @@ void CVtbDeco::startRollAnim(eRollAnim dir) {
     // window is hidden) instead of only snapping active after it lands. Also wake
     // the client early so it starts repainting.
     if (dir == ROLL_OUT) {
-        m_bRollReveal = false;
+        m_bRollReveal  = false;
+        m_bRollRevived = false;
         if (const auto PWINDOW = m_pWindow.lock()) {
             Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
             VtbIpc::sendWake(appPid());
@@ -2816,6 +2817,13 @@ void CVtbDeco::beginRollReveal() {
     PWINDOW->updateWindowDecos();
     warpBorderToFocused(PWINDOW);
     VtbIpc::sendWake(appPid());
+    // Mark that the revival actually happened, so finishRollAnim knows it can
+    // skip repeating these ops (repeating them is the post-unroll flash). If
+    // this method never runs — its doLater `self` weak-ref is orphaned to null
+    // for freshly-mapped open-reveal windows, same failure the mainThreadTick
+    // finalize works around — the flag stays false and finishRollAnim does the
+    // un-hide itself, so the window is never left hidden (transparent).
+    m_bRollRevived = true;
     // paint the live window (still under the snapshot) as one full frame
     CBox full = PWINDOW->getFullWindowBoundingBox();
     full.expand(VTB_SHADOW_SIZE + 4);
@@ -2860,18 +2868,25 @@ void CVtbDeco::finishRollAnim() {
         // the webpage flash), and a SECOND updateWindowDecos re-registered
         // Hyprland's border deco (-> the border-outline flash). Neither is needed:
         // the window has been alive and painting behind the snapshot for the whole
-        // ~90ms hold. Only fall back to the full revival if the reveal never ran
-        // (e.g. the window was gone when beginRollReveal fired).
-        const bool revealed = m_bRollReveal;
+        // ~90ms hold. Only fall back to the full revival if beginRollReveal never
+        // ACTUALLY ran — which is gated on m_bRollRevived (set INSIDE it), NOT on
+        // m_bRollReveal: the latter is set when the hold is *armed*, before the
+        // deferred beginRollReveal, whose orphan-prone `self` weak-ref may never
+        // fire for freshly-mapped open-reveal windows. Gating on m_bRollReveal
+        // here left those windows hidden (setHidden(true) never undone) →
+        // completely transparent after the open animation. Gating on
+        // m_bRollRevived guarantees the un-hide happens exactly once, either way.
+        const bool revived = m_bRollRevived;
         m_bRolledUp        = false;
         m_bRollReveal      = false;
+        m_bRollRevived     = false;
         m_iHoverCell       = -1;
         m_bRollDragPending = false;
         m_bRollDragging    = false;
         m_bOpening         = false; // open reveal (if any) is done
         m_rollSnapTex      = nullptr;
         if (PWINDOW) {
-            if (!revealed) {
+            if (!revived) {
                 PWINDOW->setHidden(false);
                 g_pCompositor->changeWindowZOrder(PWINDOW, true);
                 Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
