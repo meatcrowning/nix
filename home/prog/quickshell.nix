@@ -14,8 +14,19 @@ let
   settings = pkgs.writeShellScriptBin "settings" ''
     QML="$HOME/.config/quickshell/Settings.qml"
     ACTION="''${1:-toggle}"
+    # Already running? Just show/hide/toggle it over IPC and leave.
     if qs -p "$QML" ipc call settings "$ACTION" >/dev/null 2>&1; then
       exit 0
+    fi
+    # Not running — start it. Launch as an INDEPENDENT transient user service,
+    # not a bare `qs -d`: the Quickshell runner's DesktopEntry.execute() runs us
+    # inside a transient systemd *scope*, and a daemonized child gets reaped when
+    # that scope's leader (this script) exits — which is why it launched from a
+    # terminal but not from the runner. A `systemd-run` service is its own unit,
+    # so it survives. reset-failed clears any stale unit so the name is free.
+    if command -v systemd-run >/dev/null 2>&1; then
+      systemctl --user reset-failed qs-settings.service 2>/dev/null || true
+      exec systemd-run --user --quiet --collect --unit=qs-settings -- qs -p "$QML"
     fi
     exec qs -d -n -p "$QML"
   '';
