@@ -39,8 +39,12 @@ SlidePopup {
     // one process prints all four zone times, newline-separated, in order
     Process {
         id: tzProc
+        // TZDIR differs per host: Fedora (air/book) ships the zone db at
+        // /usr/share/zoneinfo, NixOS (top) at /etc/zoneinfo. Probe for whichever
+        // exists rather than hardcoding one — a wrong/missing TZDIR makes every
+        // TZ=... silently fall back to UTC, so all four world clocks read alike.
         command: ["sh", "-c",
-            "export TZDIR=/etc/zoneinfo; for z in America/Indiana/Indianapolis America/New_York Europe/London Asia/Tokyo; do TZ=$z date +%H:%M; done"]
+            "for d in /usr/share/zoneinfo /etc/zoneinfo; do [ -d \"$d\" ] && export TZDIR=\"$d\" && break; done; for z in America/Indiana/Indianapolis America/New_York Europe/London Asia/Tokyo; do TZ=$z date +%H:%M; done"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const lines = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);

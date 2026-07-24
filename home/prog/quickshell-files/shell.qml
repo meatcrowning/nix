@@ -95,17 +95,26 @@ Scope {
     // The analog clock that slides out when hovering the digital clock.
     AnalogClock {
         id: analogClock
+        // On air the clock is the TOP of the bottom-right stack (above eth), not
+        // a tiled row widget — so it stacks in place instead of tiling.
+        aboveDiskWhenPinned: Host.name === "air"
+        pinInPlace: Host.name === "air"
     }
 
     // The 7-day forecast that slides out when hovering the weather block.
     WeatherPanel {
         id: weatherPanel
+        // air row, left→right: media, weather, cpu-stack. weather must rank
+        // ABOVE media (lower rank = further right) so it lands right of media.
+        tileRank: Host.name === "air" ? 20 : 30
     }
 
     // Status-metric popups: per-drive usage + SMART, CPU usage/temp history,
     // network throughput history — each opened by hovering its bar block.
     DiskPanel { id: diskPanel }
-    CpuPanel { id: cpuPanel }
+    // On air, cpu is the base of the bottom-right stack (eth, then clock, above
+    // it) — it bottom-anchors to the corner where the disk sits on top.
+    CpuPanel { id: cpuPanel; stackFloor: Host.name === "air" }
     GpuPanel { id: gpuPanel }
     EthPanel { id: ethPanel }
 
@@ -138,20 +147,26 @@ Scope {
     property bool allRevealed: false
     property var _savedPins: []
 
-    // every pinnable widget, and the two fan orders. The stack order (gpu
-    // before cpu before eth) also fixes their bottom-up stacking above the
-    // disk; the tiled order (clock/weather/calendar) fixes the row's left fan.
-    readonly property var _allWidgets: [calendar, analogClock, weatherPanel, diskPanel, mediaPanel, cpuPanel, gpuPanel, ethPanel]
-    readonly property var _fanOut: [[diskPanel, mediaPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
+    // every pinnable widget, and the two fan orders. The stack order fixes the
+    // bottom-up stacking (each stackable sits above the ones pinned before it);
+    // the tiled order fixes the row's left fan. Branched per host: top anchors
+    // the stack on the disk (disk→gpu→cpu→eth); air has no disk — cpu is the
+    // corner floor with eth then clock stacked above it, media+weather tiled left.
+    readonly property var _allWidgets: Host.name === "air"
+        ? [analogClock, weatherPanel, mediaPanel, cpuPanel, ethPanel]
+        : [calendar, analogClock, weatherPanel, diskPanel, mediaPanel, cpuPanel, gpuPanel, ethPanel]
+    readonly property var _fanOut: Host.name === "air"
+        ? [[cpuPanel], [ethPanel, weatherPanel], [analogClock, mediaPanel]]
+        : [[diskPanel, mediaPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
 
     // The desktop widgets fanned out at login when nothing has been saved yet
     // (first boot / cleared state). persistKeys, NOT widget refs — declarative
     // so this stays a trivial one-line edit, and a saved set (Meta+Ctrl+S writes
     // the live pins) always overrides it. Branched per host via the generated
-    // Host.qml singleton (see quickshell.nix): top pins gpu alongside the core
-    // set; book (air) keeps eth instead.
+    // Host.qml singleton (see quickshell.nix): top keeps the disk-anchored set;
+    // air is the corner stack (cpu/eth/clock) plus media+weather tiled to its left.
     readonly property var _defaultWidgets: Host.name === "air"
-        ? ["clock", "weather", "disk", "media", "cpu", "eth"]
+        ? ["media", "weather", "cpu", "eth", "clock"]
         : ["clock", "weather", "disk", "media", "cpu", "gpu"]
 
     // one stage every _fanStepMs — set to just past a single widget's full
@@ -220,10 +235,12 @@ Scope {
             "d=\"$HOME/.local/state/quickshell\"; mkdir -p \"$d\"; printf '%s\\n' \"$1\" > \"$d/widgets\"",
             "_", keys]);
     }
-    // pin order for the instant (reload) path: same layout order the reveal
-    // uses so tiling (disk rightmost, clock/weather/calendar left) and stacking
-    // (gpu/cpu/eth bottom-up) land right regardless of saved key order.
-    readonly property var _pinOrder: [diskPanel, mediaPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
+    // pin order for the instant (reload) path: stackables first, in bottom-up
+    // order, so each reads the already-pinned one below it; tiled widgets after
+    // (their slot is fixed by tileRank, not pin order). air: cpu→eth→clock.
+    readonly property var _pinOrder: Host.name === "air"
+        ? [cpuPanel, ethPanel, analogClock, weatherPanel, mediaPanel]
+        : [diskPanel, mediaPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
 
     // text is two lines: "<space-separated keys>\n<login|reload>".
     function applyWidgetState(text) {

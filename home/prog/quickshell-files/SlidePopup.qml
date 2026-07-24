@@ -31,6 +31,10 @@ PanelWindow {
     property bool isDisk: false
     property bool aboveDiskWhenPinned: false
     property bool pinInPlace: false
+    // A stackable that is the BASE of a stack with no disk below it (air's cpu):
+    // bottom-anchors to the corner (the role the disk plays on top) so eth/clock
+    // stack above it, and reserves its width so the tiled row sits to its left.
+    property bool stackFloor: false
     property string persistKey: ""   // stable id for save/restore of pins
     // Fixed left-to-right slot for tiled widgets: lower rank sits further RIGHT
     // (disk = 0, always rightmost). Tiling reads this, NOT pin order, so a
@@ -102,6 +106,12 @@ PanelWindow {
         if (aboveDiskWhenPinned) {
             const o = Popups.stackObstacleTop(root);
             if (o >= 0) return Math.max(Theme.gap, Math.round(o - Theme.gap - implicitHeight));
+            // floor stackable with nothing below: sit at the bottom-right corner
+            // (same slot the disk occupies on top) — the base others stack on
+            if (stackFloor && frozenTop) {
+                const sh = screen ? screen.height : 1080;
+                return Math.max(Theme.gap, Math.round(sh - Theme.gap - implicitHeight));
+            }
         }
         if (anchorCenterY >= 0)
             return Math.max(Theme.gap, Math.round(anchorCenterY - implicitHeight / 2));
@@ -148,6 +158,9 @@ PanelWindow {
         // let the stackables distinguish a pinned disk (which should push them
         // up as it grows) from a merely transient disk hover
         if (isDisk) Popups.diskPinned = pinnedOpen;
+        // a pinned floor stackable reserves the rightmost bottom column so the
+        // tiled row (Popups.offsetFor) lays out to its left instead of under it
+        if (stackFloor) Popups.tiledFloorWidth = pinnedOpen ? implicitWidth : 0;
         // Recreate the surface AFTER the layer binding settles (a synchronous
         // map reads the old layer). The deferred remap re-files it at the new
         // one. Only when it should be on-screen — a plain close needs no remap.

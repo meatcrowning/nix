@@ -28,6 +28,11 @@ Singleton {
     property bool diskPinned: false
     property real diskTopY: 0
 
+    // Width reserved at the right edge for a pinned stackable FLOOR (air's cpu,
+    // which sits bottom-right with eth/clock stacked above it). 0 when the floor
+    // is a tiled widget already in `pinned` (top's disk) or nothing is pinned.
+    property real tiledFloorWidth: 0
+
     function claim(who) {
         if (who.pinnedOpen) return 0; // pinned widgets open independently
         if (current && current !== who && (current.open || current.wantOpen)) {
@@ -64,6 +69,9 @@ Singleton {
             if (w === who) continue;
             if (w.tileRank < who.tileRank) x += w.implicitWidth + Theme.gap;
         }
+        // a pinned stackable floor (air's cpu) holds the rightmost column, so
+        // every tiled widget is pushed left of it
+        if (tiledFloorWidth > 0) x += tiledFloorWidth + Theme.gap;
         return x;
     }
 
