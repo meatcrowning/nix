@@ -18,9 +18,14 @@ Singleton {
     id: root
 
     function play(file) {
-        // argv-splice, no interpolation — filenames contain spaces.
+        // Master toggle: when sounds are disabled, do nothing.
+        if (!SettingsStore.d.soundsEnabled)
+            return;
+        // argv-splice, no interpolation — filenames contain spaces. The theme
+        // directory ($2) is the configured sound set (default "vista"), so the
+        // path resolves under ~/.local/share/sounds/<theme>/.
         Quickshell.execDetached(["sh", "-c",
-            'exec pw-play "$HOME/.local/share/sounds/vista/$1" 2>/dev/null', "_", file]);
+            'exec pw-play "$HOME/.local/share/sounds/$2/$1" 2>/dev/null', "_", file, SettingsStore.d.soundTheme]);
     }
 
     // For rapid-fire events (volume key repeat): at most one play per window.

@@ -12,14 +12,29 @@ Singleton {
     id: root
 
     readonly property string url:
-        "https://api.open-meteo.com/v1/forecast?latitude=58.3019&longitude=-134.4197" +
+        "https://api.open-meteo.com/v1/forecast?latitude=" + SettingsStore.d.weatherLat +
+        "&longitude=" + SettingsStore.d.weatherLon +
         "&current_weather=true" +
         "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code" +
-        "&temperature_unit=fahrenheit&precipitation_unit=inch&timezone=America%2FJuneau&forecast_days=7"
+        "&temperature_unit=" + (SettingsStore.d.weatherUnit === "C" ? "celsius" : "fahrenheit") +
+        "&precipitation_unit=" + (SettingsStore.d.weatherUnit === "C" ? "mm" : "inch") +
+        "&timezone=auto&forecast_days=7"
 
     property int tempF: -999
     property string cond: "--"
     property var days: [] // [{name, hi, lo, precip, prob, cond}]
+
+    function refetch() { fetchProc.running = false; fetchProc.running = true; }
+
+    // Re-fetch immediately when the location or unit changes in Settings,
+    // instead of waiting for the next refresh tick (url is a live binding, but
+    // the curl Process must be re-run for the new url to take effect).
+    Connections {
+        target: SettingsStore.d
+        function onWeatherLatChanged()  { root.refetch(); }
+        function onWeatherLonChanged()  { root.refetch(); }
+        function onWeatherUnitChanged() { root.refetch(); }
+    }
 
     // WMO weather codes -> short lowercase words that fit the pixel column
     function condName(code) {
@@ -66,13 +81,10 @@ Singleton {
     }
 
     Timer {
-        interval: 20 * 60 * 1000
+        interval: SettingsStore.d.weatherRefreshMin * 60 * 1000
         running: true
         repeat: true
-        onTriggered: {
-            fetchProc.running = false;
-            fetchProc.running = true;
-        }
+        onTriggered: root.refetch()
     }
     Component.onCompleted: fetchProc.running = true
 }

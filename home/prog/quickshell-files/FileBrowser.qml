@@ -15,7 +15,7 @@ FloatingWindow {
     id: win
 
     property int browserId: 0
-    property string startPath: "/home/lam"
+    property string startPath: SettingsStore.d.fileBrowserStart
 
     title: "browse: " + view.dirName
     implicitWidth: 620
@@ -55,8 +55,8 @@ FloatingWindow {
         FolderListModel {
             id: folder
             folder: view.toUrl(view.path)
-            showDirsFirst: true
-            showHidden: false
+            showDirsFirst: SettingsStore.d.fileBrowserDirsFirst
+            showHidden: SettingsStore.d.fileBrowserHidden
             sortField: FolderListModel.Name
         }
 
@@ -192,7 +192,11 @@ FloatingWindow {
                 }
                 BrowserButton {
                     label: "delete"; danger: true; enabled: view.selected !== ""
-                    onClicked: delDlg.open()
+                    // Confirm dialog is optional; when off, delete immediately.
+                    onClicked: {
+                        if (SettingsStore.d.fileBrowserConfirmDelete) delDlg.open();
+                        else { view.run(["rm", "-rf", "--", view.selected], ""); view.selected = ""; }
+                    }
                 }
             }
         }

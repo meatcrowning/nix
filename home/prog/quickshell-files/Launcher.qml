@@ -40,23 +40,36 @@ PanelWindow {
 
     function rebuild() {
         const q = input.text.trim().toLowerCase();
-        const apps = DesktopEntries.applications.values;
         let list = [];
-        for (let i = 0; i < apps.length; i++) {
-            const a = apps[i];
-            if (a.noDisplay) continue;
-            const name = (a.name || "").toLowerCase();
-            if (q === "" || name.includes(q))
-                list.push(a);
+        // Desktop-apps provider (toggleable).
+        if (SettingsStore.d.launcherProviderApps) {
+            const apps = DesktopEntries.applications.values;
+            for (let i = 0; i < apps.length; i++) {
+                const a = apps[i];
+                if (a.noDisplay) continue;
+                const name = (a.name || "").toLowerCase();
+                if (q === "" || name.includes(q))
+                    list.push(a);
+            }
+            list.sort((x, y) => (x.name || "").localeCompare(y.name || ""));
         }
-        list.sort((x, y) => (x.name || "").localeCompare(y.name || ""));
+        // Cap the result count (0 = unlimited).
+        const cap = SettingsStore.d.launcherMaxResults;
+        if (cap > 0 && list.length > cap)
+            list = list.slice(0, cap);
         results = list;
         selected = 0;
     }
 
     function launch(entry) {
         if (!entry) return;
-        entry.execute();
+        // Terminal apps launch inside the configured terminal emulator; the
+        // rest run directly. entry.command is the parsed argv (field codes
+        // stripped), spliced after the terminal's exec flag.
+        if (entry.runInTerminal)
+            Quickshell.execDetached([SettingsStore.d.launcherTerminal, "-e"].concat(entry.command));
+        else
+            entry.execute();
         close();
     }
 
@@ -158,7 +171,7 @@ PanelWindow {
                         PixelText {
                             anchors.verticalCenter: parent.verticalCenter
                             visible: input.text === ""
-                            text: "search programs"
+                            text: SettingsStore.d.launcherPlaceholder
                             font: input.font
                             color: Theme.textDim
                         }

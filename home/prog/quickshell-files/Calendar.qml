@@ -16,6 +16,12 @@ SlidePopup {
 
     onOpened: refresh()
 
+    // rebuild the grid live when the week-start preference is toggled
+    Connections {
+        target: SettingsStore.d
+        function onWeekStartsMondayChanged() { root.refresh(); }
+    }
+
     property string title: ""
     property int today: 0
     property var cells: [] // flat 7xN day numbers, 0 = blank pad cell
@@ -24,7 +30,9 @@ SlidePopup {
         const now = new Date();
         today = now.getDate();
         title = Qt.formatDate(now, "MMMM yyyy").toLowerCase();
-        const startDow = new Date(now.getFullYear(), now.getMonth(), 1).getDay(); // 0 = sunday
+        let startDow = new Date(now.getFullYear(), now.getMonth(), 1).getDay(); // 0 = sunday
+        // shift so Monday is column 0 when the week starts on Monday
+        if (SettingsStore.d.weekStartsMonday) startDow = (startDow + 6) % 7;
         const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
         let c = [];
         for (let i = 0; i < startDow; i++) c.push(0);
@@ -49,7 +57,9 @@ SlidePopup {
             anchors.horizontalCenter: parent.horizontalCenter
 
             Repeater {
-                model: ["s", "m", "t", "w", "t", "f", "s"]
+                model: SettingsStore.d.weekStartsMonday
+                       ? ["m", "t", "w", "t", "f", "s", "s"]
+                       : ["s", "m", "t", "w", "t", "f", "s"]
                 Item {
                     required property string modelData
                     width: 26

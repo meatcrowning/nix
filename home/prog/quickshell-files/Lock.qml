@@ -33,10 +33,15 @@ Scope {
     function pad(n) { return (n < 10 ? "0" : "") + n }
     function refreshTime() {
         const d = sysClock.date;
+        const m = root.pad(d.getMinutes());
+        if (SettingsStore.d.lockClock24h) {
+            root.timeText = root.pad(d.getHours()) + ":" + m;
+            return;
+        }
         let h = d.getHours();
         const ampm = h < 12 ? "AM" : "PM";
         h = h % 12; if (h === 0) h = 12;
-        root.timeText = h + ":" + root.pad(d.getMinutes()) + " " + ampm;
+        root.timeText = h + ":" + m + " " + ampm;
     }
     SystemClock {
         id: sysClock
@@ -80,7 +85,7 @@ Scope {
             PamContext {
                 id: pam
                 configDirectory: "/etc/pam.d"
-                config: "quickshell-lock"
+                config: SettingsStore.d.lockPamService
 
                 // PAM prompts for the password once the conversation starts;
                 // hand it whatever's in the field.

@@ -14,17 +14,20 @@ PanelWindow {
     property int selected: 0
 
     readonly property var items: [
+        // Each command is user-configurable via SettingsStore; run through
+        // `sh -c` so the stored string can be an arbitrary shell command.
         // Root cause, finally confirmed directly: `hyprctl dispatch exit`
         // (the classic dispatch string) is rejected outright by this
         // Lua-config build — same restriction Workspaces.qml already found
         // for workspace switching (see Hyprland.dispatch calls there) — it
         // just fails silently under Quickshell.execDetached, which doesn't
         // surface stderr anywhere, so it read as "does nothing". Needs the
-        // Lua dispatcher form like every other dispatch in this config.
-        { label: "logout",   cmd: ["hyprctl", "dispatch", "hl.dsp.exit()"] },
-        { label: "sleep",    cmd: ["systemctl", "suspend"] },
-        { label: "reboot",   cmd: ["systemctl", "reboot"] },
-        { label: "poweroff", cmd: ["systemctl", "poweroff"] },
+        // Lua dispatcher form like every other dispatch in this config —
+        // hence the default cmdLogout of "hyprctl dispatch hl.dsp.exit()".
+        { label: "logout",   cmd: SettingsStore.d.cmdLogout },
+        { label: "sleep",    cmd: SettingsStore.d.cmdSleep },
+        { label: "reboot",   cmd: SettingsStore.d.cmdReboot },
+        { label: "poweroff", cmd: SettingsStore.d.cmdPoweroff },
     ]
 
     // Stay mapped through the slide-out, then hide once the card has travelled
@@ -57,7 +60,7 @@ PanelWindow {
     function confirm(index) {
         const item = items[index];
         if (!item) return;
-        Quickshell.execDetached(item.cmd);
+        Quickshell.execDetached(["sh", "-c", item.cmd]);
         close();
     }
 

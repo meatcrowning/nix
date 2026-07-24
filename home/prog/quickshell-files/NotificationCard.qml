@@ -16,7 +16,7 @@ Rectangle {
                                 : urgency === 0 ? Theme.info
                                 : Theme.accent
 
-    width: 300
+    width: SettingsStore.d.notifWidth
     implicitHeight: Math.max(Theme.cell, content.implicitHeight + 20)
     radius: 0
     color: Theme.bgAlt

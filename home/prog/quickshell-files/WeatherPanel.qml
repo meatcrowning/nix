@@ -20,7 +20,7 @@ SlidePopup {
 
         PixelText {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "juneau"
+            text: SettingsStore.d.weatherPlace
             color: Theme.accent
         }
 
