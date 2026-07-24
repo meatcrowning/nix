@@ -137,7 +137,8 @@ class CVtbDeco : public IHyprWindowDecoration {
     SP<Render::ITexture> m_rollSnapTex;                       // window content, held across the shade
     CBox                 m_rollWinBox;                        // client box (global logical) at shade time
     Vector2D             m_rollSnapOrigin;                    // window's top-left within the (monitor-sized) snapshot texture, device px
-    bool                 m_bRollReveal   = false;             // roll-out slide landed; window un-hidden under the still-held snapshot
+    bool                 m_bRollReveal   = false;             // roll-out slide landed; reveal hold ARMED (set before the deferred beginRollReveal — NOT proof it ran)
+    bool                 m_bRollRevived  = false;             // beginRollReveal ACTUALLY ran (un-hid/refocused/re-decorated the window). Its doLater uses the orphan-prone `self` weak-ref, so for freshly-mapped (open-reveal) windows it may never fire — this flag, set INSIDE it, lets finishRollAnim know whether it still needs to do the revival itself
     Time::steady_tp      m_rollRevealAt  = Time::steadyNow(); // when the reveal hold began (client-repaint grace period)
 
     // Window-close animation: the [x] button rolls the window up, then fades the
