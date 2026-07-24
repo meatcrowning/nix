@@ -379,10 +379,20 @@ Scope {
         OsdWindow {}
     }
 
-    // The accent stripe on the true left edge of the screen, one per monitor.
+    // The accent stripes bookending the desktop: the left screen edge (2px,
+    // opposite the bar's own left-edge accent) plus 1px lines across the top
+    // and bottom edges. One of each per monitor.
     Variants {
         model: Quickshell.screens
-        EdgeAccent {}
+        EdgeAccent { edge: "left" }
+    }
+    Variants {
+        model: Quickshell.screens
+        EdgeAccent { edge: "top" }
+    }
+    Variants {
+        model: Quickshell.screens
+        EdgeAccent { edge: "bottom" }
     }
 
     // Window titlebars are NOT drawn by quickshell: they're compositor-side

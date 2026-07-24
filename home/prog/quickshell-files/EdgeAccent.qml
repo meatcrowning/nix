@@ -2,11 +2,13 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 
-// A thin accent-coloured stripe on the true left edge of the screen — the
-// mirror of the accent stripe drawn on the bar's own left edge (see shell.qml),
-// so the desktop reads as bookended by the same accent line on both sides.
-// No exclusive zone: hyprland.lua's gaps_out (35px) keeps tiled windows well
-// clear of the screen edges, so this is always visible without reserving
+// A thin accent-coloured stripe on one true edge of the screen — the mirror of
+// the accent stripe drawn on the bar's own left edge (see shell.qml), so the
+// desktop reads as bookended by the same accent line on every side. `edge`
+// picks which screen edge: "left" (default) is the vertical stripe opposite the
+// bar; "top"/"bottom" are the horizontal stripes across the desktop's top and
+// bottom. No exclusive zone: hyprland.lua's gaps_out (35px) keeps tiled windows
+// well clear of the screen edges, so this is always visible without reserving
 // space or covering anything.
 //
 // Deliberately Bottom, not Background: hyprpaper's own surface is Background,
@@ -19,8 +21,20 @@ PanelWindow {
     required property var modelData
     screen: modelData
 
-    anchors { left: true; top: true; bottom: true }
-    implicitWidth: 2
+    // Which screen edge to hug: "left" (default), "top", or "bottom".
+    property string edge: "left"
+    // Stripe thickness. The left side is 2px (matching the window-border width);
+    // the top/bottom stripes are 1px.
+    property int thickness: edge === "left" ? 2 : 1
+
+    anchors {
+        left: edge !== "right"
+        right: edge !== "left"
+        top: edge !== "bottom"
+        bottom: edge !== "top"
+    }
+    implicitWidth: thickness
+    implicitHeight: thickness
     color: Theme.accent
     exclusiveZone: 0
 
