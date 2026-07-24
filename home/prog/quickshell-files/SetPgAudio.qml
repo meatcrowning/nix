@@ -1,7 +1,7 @@
 import QtQuick
 
-// Audio & Media = output/volume, the panel VU meter, and the media widget's
-// spectrum + player selection (all share the cava backend).
+// Audio = output/volume and the panel VU meter (both share the cava backend).
+// The media widget's spectrum + player selection live on the Widgets page.
 Column {
     id: page
     width: parent ? parent.width : 480
@@ -56,26 +56,6 @@ Column {
                 from: 15; to: 144; step: 1; unit: "fps"
                 value: page.d.vuFramerate
                 onMoved: (v) => { page.d.vuFramerate = v; SettingsStore.save(); }
-            }
-        }
-    }
-
-    SetSection {
-        title: "media widget"
-        SetRow {
-            label: "spectrum bars"
-            SetSlider {
-                from: 4; to: 32; step: 1
-                value: page.d.mediaSpectrumBars
-                onMoved: (v) => { page.d.mediaSpectrumBars = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "prefer playing source"
-            desc: "auto-follow whichever player is actively playing"
-            SetToggle {
-                checked: page.d.mediaPreferPlaying
-                onToggled: (v) => { page.d.mediaPreferPlaying = v; SettingsStore.save(); }
             }
         }
     }
