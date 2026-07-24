@@ -16,7 +16,7 @@ SlidePopup {
 
     popupNamespace: "qs-media"
     persistKey: "media"
-    tileRank: 10    // between the disk (0) and clock (20)
+    tileRank: 25    // between the clock (20) and weather (30)
     implicitWidth: 300
     implicitHeight: content.implicitHeight + 20
 
