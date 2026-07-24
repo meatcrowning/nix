@@ -30,7 +30,10 @@ Item {
     Process {
         id: cavaProc
         running: true
-        command: ["sh", "-c", "exec cava -p \"$HOME/.config/quickshell/scripts/cava-vu.conf\""]
+        // quickshell is launched from the Fedora session with a bare PATH that
+        // omits ~/.nix-profile/bin, where cava (a nix pkg) lives — so prepend it
+        // or every spawn dies with "cava: not found" and the bars go dead.
+        command: ["sh", "-c", "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; exec cava -p \"$HOME/.config/quickshell/scripts/cava-vu.conf\""]
         stdout: SplitParser {
             onRead: data => {
                 const parts = data.split(";");
