@@ -226,7 +226,9 @@ PanelWindow {
                     delegate: Column {
                         required property var modelData
                         width: 300
-                        spacing: 4
+                        // tighter line packing between keybinding rows (was 4 —
+                        // compounded into a lot of slack down a long cheatsheet)
+                        spacing: 2
 
                         PixelText {
                             text: modelData.title

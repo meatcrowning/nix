@@ -641,7 +641,7 @@ Window {
         Column {
             id: dmCol
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
-            spacing: 12
+            spacing: 8
 
             // header: title + close, then the current host it acts on
             Item {
