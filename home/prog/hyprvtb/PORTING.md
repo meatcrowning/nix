@@ -68,17 +68,23 @@ overriding them would reintroduce the version skew the pin exists to remove.
 2. `nixos-rebuild build --flake ~/nix#top` (no sudo needed). The plugin is a
    hard dependency of the system closure, so an **Axis A** break fails here and
    the current generation stays bootable. Fix it in `vtbCompat.hpp`.
-3. `./tools/nested-smoke.sh` — runs a nested Hyprland with the freshly built
-   plugin and exercises decorate → roll up → roll down → close, then checks the
-   nested compositor exited cleanly. This is the **Axis B** gate: v2.48
-   compiled fine and only died at runtime, in the roll animation's `doLater`
-   callback, so a smoke test that never rolls a window would have missed it.
-4. `sudo rebuild-top`, then **log out and back in** (see AGENTS.md: `hyprctl
-   plugin unload/load` on 0.56 drops `plugin:hyprvtb:col.*` config values).
-5. Visual checklist (the user does this — see AGENTS.md): titlebars present,
+3. `sudo rebuild-top`.
+4. `./tools/nested-smoke.sh` — starts a **second, nested Hyprland** (as a
+   window on the current session, ~20s) with the newly installed plugin and
+   exercises decorate → roll up → roll down → save → close, then checks that
+   compositor is still alive and its log has no assert/abort/safe-mode. This is
+   the **Axis B** gate: v2.48 compiled fine and only died at runtime, in the
+   roll animation's `doLater` callback, so a smoke test that never rolls a
+   window would have missed it. It talks only to the nested instance
+   (`hyprctl -i`) and never touches the live session. Pass a store path to test
+   a build you haven't installed yet.
+5. **Log out and back in** — do NOT hot-load. On 0.56 `hyprctl plugin
+   unload/load` drops the `plugin:hyprvtb:col.*` values and you get an
+   "unknown config key" overlay with no titlebars (see AGENTS.md).
+6. Visual checklist (the user does this — see AGENTS.md): titlebars present,
    roll-up/unroll animation, open/close animation, maximize/minimize/pin,
    stacked titles, app-button column, edge resize, alt-tab, session restore.
-6. Commit the bump alone.
+7. Commit the bump alone.
 
 ## Worth exporting
 
