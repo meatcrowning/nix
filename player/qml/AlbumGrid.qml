@@ -9,14 +9,15 @@ import QtQuick.Controls.Basic
 Item {
     id: root
     signal opened(int albumId)
+    signal searchArtist(string artist)
 
     GridView {
         id: grid
         anchors.fill: parent
         clip: true
-        // Fit as many ~190px covers as the width allows, then stretch them so
-        // the row is flush left and right (covers scale, gaps stay 0).
-        readonly property int cols: Math.max(1, Math.floor(width / 190))
+        // Seven covers across, whatever the window width — covers scale so the
+        // rows stay flush left and right with 0px gaps.
+        readonly property int cols: 7
         cellWidth: Math.floor(width / cols)
         cellHeight: cellWidth
         cacheBuffer: 600
@@ -90,12 +91,29 @@ Item {
                 id: tileMouse
                 anchors.fill: parent
                 hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 onClicked: function(m) {
-                    if (m.button === Qt.MiddleButton) Player.queueAlbum(albumId);
-                    else root.opened(albumId);
+                    if (m.button === Qt.MiddleButton) {
+                        Player.queueAlbum(albumId);
+                    } else if (m.button === Qt.RightButton) {
+                        var p = tileMouse.mapToItem(root, m.x, m.y);
+                        var aid = albumId, art = artist;
+                        ctxMenu.open(p.x, p.y, [
+                            { label: "play",          trigger: function() { Player.playAlbum(aid, 0); } },
+                            { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, 0); } },
+                            { label: "add to queue",  trigger: function() { Player.queueAlbum(aid); } },
+                            { separator: true },
+                            { label: "open album",    trigger: function() { root.opened(aid); } },
+                            { label: "search artist", enabled: art !== "",
+                              trigger: function() { root.searchArtist(art); } },
+                        ]);
+                    } else {
+                        root.opened(albumId);
+                    }
                 }
-                onDoubleClicked: Player.playAlbum(albumId, 0)
+                onDoubleClicked: function(m) {
+                    if (m.button === Qt.LeftButton) Player.playAlbum(albumId, 0);
+                }
             }
         }
     }
@@ -105,5 +123,10 @@ Item {
         visible: grid.count === 0
         text: "no albums — is the library drive mounted?"
         color: Theme.textDim
+    }
+
+    ContextMenu {
+        id: ctxMenu
+        anchors.fill: parent
     }
 }
