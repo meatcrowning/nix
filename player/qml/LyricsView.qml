@@ -90,6 +90,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.line
                 wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
                 color: index === root.currentLine ? Theme.text : Theme.textDim
             }
             MouseArea {
@@ -122,6 +123,7 @@ Item {
             width: plainFlick.width - 12
             text: root.lyricsData.text
             wrapMode: Text.Wrap
+            horizontalAlignment: Text.AlignHCenter
             color: Theme.textDim
         }
     }

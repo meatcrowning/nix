@@ -11,10 +11,15 @@ Item {
 
     readonly property var cur: Player.current
 
-    // ---- right: art + identity ----
+    // Both splits are user-draggable and persisted: the art column's width
+    // and the queue/lyrics fraction.
+    property real sideW: Number(Prefs.get("npSideWidth", 268))
+    property real lyricsFrac: Number(Prefs.get("npLyricsFrac", 0.5))
+
+    // ---- right: art + identity (cover scales with the column) ----
     Item {
         id: side
-        width: 268
+        width: Math.max(160, Math.min(root.width * 0.6, root.sideW))
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
@@ -24,8 +29,8 @@ Item {
             anchors.top: parent.top
             anchors.topMargin: 12
             anchors.horizontalCenter: parent.horizontalCenter
-            width: 244
-            height: 244
+            width: parent.width - 24
+            height: width
             color: Theme.bgAlt
             border.color: Theme.border
             border.width: 1
@@ -36,8 +41,8 @@ Item {
                 source: root.cur.artPath ? "file://" + root.cur.artPath : ""
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
-                sourceSize.width: 488
-                sourceSize.height: 488
+                sourceSize.width: 1024
+                sourceSize.height: 1024
                 visible: status === Image.Ready
             }
             PixelText {
@@ -128,6 +133,23 @@ Item {
         width: 1
         color: Theme.border
     }
+    Item {   // drag handle over the column split
+        x: sep1.x - 3
+        width: 7
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        z: 10
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.SplitHCursor
+            onPositionChanged: function(mouse) {
+                if (!pressed) return;
+                var gx = mapToItem(root, mouse.x, 0).x;
+                root.sideW = Math.max(160, Math.min(root.width * 0.6, root.width - gx));
+            }
+            onReleased: Prefs.set("npSideWidth", root.sideW)
+        }
+    }
 
     // ---- left column, top: queue (full height when the track has no lyrics) ----
     Item {
@@ -165,6 +187,24 @@ Item {
         visible: lyricsView.hasContent
         color: Theme.border
     }
+    Item {   // drag handle over the queue/lyrics split
+        anchors.left: parent.left
+        anchors.right: sep1.left
+        y: sep2.y - 3
+        height: 7
+        z: 10
+        visible: lyricsView.hasContent
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.SplitVCursor
+            onPositionChanged: function(mouse) {
+                if (!pressed) return;
+                var gy = mapToItem(root, 0, mouse.y).y;
+                root.lyricsFrac = Math.max(0.1, Math.min(0.85, 1 - gy / root.height));
+            }
+            onReleased: Prefs.set("npLyricsFrac", root.lyricsFrac)
+        }
+    }
 
     // ---- left column, bottom: lyrics — zero height until the track has some ----
     LyricsView {
@@ -173,7 +213,7 @@ Item {
         anchors.left: parent.left
         anchors.right: sep1.left
         anchors.bottom: parent.bottom
-        height: hasContent ? parent.height * 0.5 : 0
+        height: hasContent ? parent.height * root.lyricsFrac : 0
         visible: hasContent
         clip: true
         trackId: root.cur.id !== undefined ? root.cur.id : -1
