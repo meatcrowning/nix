@@ -132,6 +132,58 @@ struct SGlobalState {
 
 inline UP<SGlobalState> g_pGlobalState;
 
+// Read the plugin's config values through here, never
+// `g_pGlobalState->config.foo->value()` at the call site.
+//
+// `Config::Values::C*Value` is new and still moving upstream, and `->value()`
+// is the shape of it that leaks everywhere — 32 sites' worth. Returning `auto`
+// means not even the value types are named outside this block, so a change to
+// either only has to be absorbed here. Same containment idea as vtbCompat.hpp
+// (see PORTING.md), for config instead of compositor internals.
+//
+// Callers that can run with the plugin state torn down still have to check
+// g_pGlobalState first — these do not, deliberately: a silent default would
+// hide the bug rather than crash on it.
+namespace Vtb::Cfg {
+    inline auto enabled() {
+        return g_pGlobalState->config.enabled->value();
+    }
+    inline auto barWidth() {
+        return g_pGlobalState->config.barWidth->value();
+    }
+    inline auto fontSize() {
+        return g_pGlobalState->config.fontSize->value();
+    }
+    inline auto maximizeGap() {
+        return g_pGlobalState->config.maximizeGap->value();
+    }
+    inline auto font() {
+        return g_pGlobalState->config.font->value();
+    }
+    inline auto bgColor() {
+        return g_pGlobalState->config.bgColor->value();
+    }
+    inline auto bgAltColor() {
+        return g_pGlobalState->config.bgAltColor->value();
+    }
+    inline auto textColor() {
+        return g_pGlobalState->config.textColor->value();
+    }
+    inline auto buttonBorderColor() {
+        return g_pGlobalState->config.buttonBorderColor->value();
+    }
+    inline auto accentColor() {
+        return g_pGlobalState->config.accentColor->value();
+    }
+    inline auto critColor() {
+        return g_pGlobalState->config.critColor->value();
+    }
+    inline auto inactiveColor() {
+        return g_pGlobalState->config.inactiveColor->value();
+    }
+}
+namespace Cfg = Vtb::Cfg;
+
 std::string vtbStatePath();
 void        vtbLoadGeometry();
 void        vtbSaveGeometry();

@@ -9,9 +9,8 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 #include "globals.hpp"
 #include "vtbIpc.hpp"
-// Every volatile Hyprland internal this plugin touches goes through here
-// (including the #define private public InputManager include that
-// inputIsValid() needs) — see vtbCompat.hpp and PORTING.md.
+// Every volatile Hyprland internal this plugin touches goes through here —
+// see vtbCompat.hpp and PORTING.md.
 #include "vtbCompat.hpp"
 
 namespace Event {

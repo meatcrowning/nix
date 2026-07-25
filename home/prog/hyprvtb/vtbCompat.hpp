@@ -43,15 +43,14 @@
 #include <hyprland/src/protocols/types/DataDevice.hpp>
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 
-// inputIsValid() reads InputManager::m_exclusiveLSes, which is private — the
-// same #define private public trick hyprbars uses. It lives here, once, so the
-// rest of the plugin neither repeats it nor touches InputManager directly.
-// (Any header that pulls in InputManager.hpp normally BEFORE this one would
-// silently win the include guard and break the access, so this file is the
-// place to keep it.)
-#define private public
+// Plain include: the plugin no longer needs the `#define private public`
+// trick hyprbars uses. It was there for m_currentlyHeldButtons, which has a
+// public accessor (hasHeldButtons(), literally `return
+// !m_currentlyHeldButtons.empty()`); m_exclusiveLSes, the other member read
+// here, is public already. Reaching into a class through the preprocessor is
+// the most fragile access there is — an unrelated header that included
+// InputManager.hpp first silently broke it — so it is worth not needing.
 #include <hyprland/src/managers/input/InputManager.hpp>
-#undef private
 
 // Call sites say Hl::something() — see the alias at the bottom of this file.
 namespace Vtb::Hl {
@@ -158,7 +157,7 @@ namespace Vtb::Hl {
     // No mouse button is currently down anywhere — the plugin only re-evaluates
     // resize-edge hover when the user isn't already dragging something.
     inline bool noButtonsHeld() {
-        return g_pInputManager->m_currentlyHeldButtons.empty();
+        return !g_pInputManager->hasHeldButtons();
     }
     // An exclusive-focus layer surface (a lock screen, a fullscreen launcher)
     // owns all input: the titlebars must not react at all while one is up.
