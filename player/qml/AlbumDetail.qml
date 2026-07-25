@@ -21,9 +21,12 @@ Item {
         function onScanStatus() { root.refresh(); }  // art may have just landed
     }
 
+    // The split is draggable and persisted; the cover scales with the column.
+    property real sideW: Number(Prefs.get("adSideWidth", 268))
+
     Item {
         id: side
-        width: 268
+        width: Math.max(160, Math.min(root.width * 0.6, root.sideW))
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
@@ -33,8 +36,8 @@ Item {
             anchors.top: parent.top
             anchors.topMargin: 12
             anchors.horizontalCenter: parent.horizontalCenter
-            width: 244
-            height: 244
+            width: parent.width - 24
+            height: width
             color: Theme.bgAlt
             border.color: Theme.border
             border.width: 1
@@ -45,8 +48,8 @@ Item {
                 source: root.info.fullArt ? "file://" + root.info.fullArt : ""
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
-                sourceSize.width: 488
-                sourceSize.height: 488
+                sourceSize.width: 1024
+                sourceSize.height: 1024
                 visible: status === Image.Ready
             }
             PixelText {
@@ -107,11 +110,29 @@ Item {
     }
 
     Rectangle {
+        id: sep
         anchors.right: side.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
         color: Theme.border
+    }
+    Item {   // drag handle over the column split
+        x: sep.x - 3
+        width: 7
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        z: 10
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.SplitHCursor
+            onPositionChanged: function(mouse) {
+                if (!pressed) return;
+                var gx = mapToItem(root, mouse.x, 0).x;
+                root.sideW = Math.max(160, Math.min(root.width * 0.6, root.width - gx));
+            }
+            onReleased: Prefs.set("adSideWidth", root.sideW)
+        }
     }
 
     TrackList {
