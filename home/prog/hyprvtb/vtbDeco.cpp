@@ -596,9 +596,13 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     drawGlyph(3, "o>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor, PINNED);
 
     // roll-up — windowshade toggle: [>>] hides the window down to just this
-    // bar; while shaded it shows [<<] to roll it back. Inverted while shaded.
-    drawCell(4, accentColor, m_bRolledUp);
-    drawGlyph(4, m_bRolledUp ? "<<" : ">>", (m_bRolledUp || m_iHoverCell == 4) ? accentColor : textColor, m_bRolledUp);
+    // bar; while shaded it shows [<<] to roll it back. Inverted while shaded —
+    // but NOT during the open/close animations, which borrow the roll-up
+    // machinery (m_bRolledUp goes true mid-animation) without the user having
+    // shaded anything.
+    const bool SHADED = m_bRolledUp && !m_bOpening && !m_bClosing;
+    drawCell(4, accentColor, SHADED);
+    drawGlyph(4, SHADED ? "<<" : ">>", (SHADED || m_iHoverCell == 4) ? accentColor : textColor, SHADED);
 
     // ---- title, a column of upright letters (outer column, under the cells) ----
     // In edit mode the same region becomes the address editor: it shows the
