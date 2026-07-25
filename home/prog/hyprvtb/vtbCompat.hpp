@@ -27,6 +27,7 @@
 // vtb socket a zero-height playbar), so the guard belongs at the seam where
 // every computed rect passes through, not at each of the 36 call sites.
 
+#include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/state/ViewState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -52,6 +53,7 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #undef private
 
+// Call sites say Hl::something() — see the alias at the bottom of this file.
 namespace Vtb::Hl {
 
     // ---- window geometry ---------------------------------------------------
@@ -92,6 +94,11 @@ namespace Vtb::Hl {
 
     // ---- window set / z-order / hit testing / focus ------------------------
 
+    // Is the compositor up at all? PLUGIN_INIT can run at config-parse time,
+    // before it exists.
+    inline bool compositorReady() {
+        return (bool)g_pCompositor;
+    }
     inline const std::vector<PHLWINDOW>& windows() {
         return Desktop::viewState()->windows();
     }
@@ -148,6 +155,11 @@ namespace Vtb::Hl {
     inline Vector2D mouse() {
         return g_pInputManager->getMouseCoordsInternal();
     }
+    // No mouse button is currently down anywhere — the plugin only re-evaluates
+    // resize-edge hover when the user isn't already dragging something.
+    inline bool noButtonsHeld() {
+        return g_pInputManager->m_currentlyHeldButtons.empty();
+    }
     // An exclusive-focus layer surface (a lock screen, a fullscreen launcher)
     // owns all input: the titlebars must not react at all while one is up.
     inline bool inputExclusive() {
@@ -172,7 +184,7 @@ namespace Vtb::Hl {
     inline void dispatch(const std::string& name, const std::string& arg) {
         g_pKeybindManager->m_dispatchers[name](arg);
     }
-    inline void setCursorOverride(eHyprCursorShape shape) {
+    inline void setCursorOverride(const std::string& shape) {
         Pointer::Cursor::overrideController->setOverride(shape, Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
     }
     inline void clearCursorOverride() {
@@ -196,12 +208,12 @@ namespace Vtb::Hl {
     inline void rect(const CBox& box, const CHyprColor& col, Render::GL::CHyprOpenGLImpl::SRectRenderData data = {}) {
         if (degenerate(box)) // GUARD (see file header)
             return;
-        g_pHyprOpenGL->renderRect(box, col, data);
+        Render::GL::g_pHyprOpenGL->renderRect(box, col, data);
     }
     inline void texture(SP<Render::ITexture> tex, const CBox& box, Render::GL::CHyprOpenGLImpl::STextureRenderData data = {}) {
         if (!tex || degenerate(box)) // GUARD (see file header)
             return;
-        g_pHyprOpenGL->renderTexture(tex, box, data);
+        Render::GL::g_pHyprOpenGL->renderTexture(tex, box, data);
     }
 
     // The monitor currently being rendered, and its damage region. Only valid
@@ -222,10 +234,34 @@ namespace Vtb::Hl {
         g_pHyprRenderer->m_renderPass.removeAllOfType(type);
     }
 
+    // Texture / text / framebuffer helpers off the renderer.
+    inline SP<Render::ITexture> textureFromCairo(cairo_surface_t* surface) {
+        return g_pHyprRenderer->createTexture(surface);
+    }
+    inline SP<Render::ITexture> renderText(const std::string& text, const CHyprColor& col, int size, bool italic, const std::string& font, int maxWidth) {
+        return g_pHyprRenderer->renderText(text, col, size, italic, font, maxWidth);
+    }
+    inline SP<Render::IFramebuffer> createFB(const std::string& name) {
+        return g_pHyprRenderer->createFB(name);
+    }
+    inline auto bindTempFB(SP<Render::IFramebuffer> fb) {
+        return g_pHyprRenderer->bindTempFB(fb);
+    }
+
+    // Position of the monitor currently being rendered — pass elements report
+    // their bounding box in monitor-local coordinates.
+    inline Vector2D renderMonitorPos() {
+        return g_pHyprRenderer->m_renderData.pMonitor->m_position;
+    }
+
     // Snapshot a window into a framebuffer — used to keep drawing a window
     // that has been hidden (roll-up / close animations).
-    inline SP<IFramebuffer> snapshotFB(PHLWINDOW w) {
+    inline SP<Render::IFramebuffer> snapshotFB(PHLWINDOW w) {
         return g_pHyprRenderer->makeSnapshotFB(w);
     }
 
 }
+
+// Short alias: the seam is called on nearly every other line of vtbDeco.cpp,
+// and `Hl::` keeps those call sites as readable as the raw globals were.
+namespace Hl = Vtb::Hl;
