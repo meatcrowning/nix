@@ -128,6 +128,15 @@ before touching the plugin or the pin.
   (this bit us: a stale `focus workspace 50` line lived on in the live file long
   after it was removed from source, scattering windows across two workspaces).
 
+- **`hyprvtb` plugin (C++) — where to edit.** Hyprland comes from a *pinned*
+  flake input (`hyprland.url = github:hyprwm/Hyprland/vX.Y.Z`), and the plugin
+  is built against that exact package; bumping it is a deliberate act with a
+  ritual — `home/prog/hyprvtb/PORTING.md`. Two containment rules the nix
+  `checkPhase` enforces: volatile Hyprland internals may be named only in
+  `vtbCompat.hpp` (everything else calls `Hl::…`), and a weak ref to a
+  decoration must be a `CDecoRef`, never a raw `WP<CVtbDeco>` (a `lock()` over
+  a unique-owned deco aborts the compositor).
+
 - **`hyprvtb` plugin (C++) reload after a source edit:** `git add` the changed
   files (flake eval ignores untracked), `rbsys` to recompile (the symlink
   `~/.config/hypr/plugins/libhyprvtb.so` repoints to the new store path), then
