@@ -36,14 +36,41 @@ Window {
 
     onClosing: Qt.quit()
 
+    // View history for the mouse back/forward buttons (browser-style: going
+    // somewhere new clears the forward stack).
+    property var histBack: []
+    property var histForward: []
+
+    function _here() { return { view: view, albumId: detailAlbumId }; }
+    function _apply(s) {
+        detailAlbumId = s.albumId;
+        if (s.view === "detail" && s.albumId > 0)
+            Library.openAlbum(s.albumId);
+        view = s.view;
+    }
+    function goBack() {
+        if (histBack.length === 0) return;
+        histForward.push(_here());
+        _apply(histBack.pop());
+    }
+    function goForward() {
+        if (histForward.length === 0) return;
+        histBack.push(_here());
+        _apply(histForward.pop());
+    }
+    function _navigate(s) {
+        histBack.push(_here());
+        if (histBack.length > 50) histBack.shift();
+        histForward = [];
+        _apply(s);
+    }
+
     function openAlbum(albumId) {
-        detailAlbumId = albumId;
-        Library.openAlbum(albumId);
-        view = "detail";
+        _navigate({ view: "detail", albumId: albumId });
     }
 
     function setView(v) {
-        view = v;
+        _navigate({ view: v, albumId: detailAlbumId });
         Prefs.set("view", v === "detail" ? "albums" : v);
     }
 
@@ -238,6 +265,18 @@ Window {
                 text: "search…"
                 color: Theme.dim
             }
+        }
+    }
+
+    // Mouse back/forward buttons navigate the view history. Only these two
+    // buttons are accepted, so every other press passes to the views.
+    MouseArea {
+        anchors.fill: parent
+        z: 90
+        acceptedButtons: Qt.BackButton | Qt.ForwardButton
+        onClicked: function(mouse) {
+            if (mouse.button === Qt.BackButton) win.goBack();
+            else win.goForward();
         }
     }
 

@@ -690,6 +690,10 @@ class Library(QObject):
     def __init__(self, tagwriter, parent=None):
         super().__init__(parent)
         self._con = open_db()
+        # One-time hygiene: purge cached lyrics that predate the embedded-tag
+        # size cap (whole scraped webpages) so they re-resolve cleanly.
+        self._con.execute("DELETE FROM lyrics WHERE length(body) > 6000")
+        self._con.commit()
         self._tagwriter = tagwriter
         self._scanner = None
         self._search_rows = None  # lazy [(casefolded haystack, id)]
@@ -1384,6 +1388,12 @@ def embedded_lyrics(path):
         elif tags is not None:
             text = _vorbis_get(tags, "lyrics", "unsyncedlyrics", "unsynced lyrics")
         if not text or not text.strip():
+            return None, False
+        # Sanity cap: some taggers stuff entire scraped lyrics-site WEBPAGES
+        # (menus, ads, inline JS) into the lyrics tag. Real lyrics are a few
+        # KB at most — treat anything huge as garbage and fall through to
+        # .lrc / LRCLIB.
+        if len(text) > 6000:
             return None, False
         return text, bool(LRC_LINE.search(text))
     except Exception:
