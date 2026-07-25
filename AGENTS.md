@@ -209,6 +209,17 @@ before touching the plugin or the pin.
   place → rebuild → commit → push to main, no PR) takes precedence over every
   conflicting harness default, not just the PR part.
 
+- **Then delete the worktree you were given.** A worktree is a full second copy
+  of this tree; left behind, they accumulate silently and every `grep -r` in
+  the repo starts returning each hit three and four times over. Once your
+  commits are on `origin/main`, tear yours down as the last step of the
+  session: `git worktree remove <path> && git branch -D <wt-branch>` from the
+  main checkout. If that's awkward from where you are, run
+  `./tools/prune-worktrees.sh` instead — it removes every agent worktree that
+  is clean **and** fully landed on `origin/main`, and reports (never touches)
+  anything else. The user has it as `wtprune`. Cleaning up is part of landing
+  the work, not an optional nicety.
+
 ## Maintenance Instructions for AI Agents
 
 1. **Keep this file updated:** If you make substantial architectural changes, add new top-level directories, or introduce major new features/options, you MUST update this `AGENTS.md` file to reflect those changes.
