@@ -58,6 +58,33 @@
     # pin exists to remove. Bump with the ritual in PORTING.md.
     hyprland.url = "github:hyprwm/Hyprland/v0.56.0";
 
+    # Quickshell, frozen the same way and for the same reason as Hyprland
+    # above — it is the other half of this desktop (the panel, the lock
+    # screen, the power menu, the screenshot overlay, the OSDs), and the QML
+    # under home/prog/quickshell-files is written against a specific
+    # Quickshell API. A minor release moves that API; upstream is pre-1.0 and
+    # says so. Off unstable, a Firefox update could carry 0.3 -> 0.4 in and
+    # leave the session with no shell at all.
+    #
+    # This is a whole *nixpkgs* pinned to one revision, not the upstream
+    # quickshell flake, and the difference is deliberate:
+    #
+    #  * upstream's flake is a source build with no binary cache, and it
+    #    `follows` nothing — so with `inputs.nixpkgs.follows = "nixpkgs"` the
+    #    panel would still be rebuilt from source (and silently re-linked
+    #    against a new Qt) on every unstable Qt bump. Freezing the package
+    #    but not its Qt only half-solves it; Qt regressions break QML too.
+    #  * pinned to the exact revision the running system was built from, this
+    #    evaluates to the store path already installed. Zero rebuild, zero
+    #    download, provably no behaviour change on the day it lands, and the
+    #    shell's entire closure — Qt included — now moves only when this line
+    #    is edited.
+    #
+    # Cost is ~2 GiB of store held at the frozen closure once the main
+    # nixpkgs' Qt moves past it. Bump deliberately (`nix flake update
+    # nixpkgs-quickshell`), then relog and check the panel.
+    nixpkgs-quickshell.url = "github:NixOS/nixpkgs/e2587caef70cea85dd97d7daab492899902dbf5d";
+
     # Anthropic ships new Claude Code builds faster than they reach nixpkgs
     # (nixos-unstable lags by days). numtide/llm-agents.nix repackages the
     # official prebuilt binary, auto-updates daily, and has a binary cache

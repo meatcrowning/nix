@@ -143,6 +143,18 @@ before touching the plugin or the pin.
   decoration must be a `CDecoRef`, never a raw `WP<CVtbDeco>` (a `lock()` over
   a unique-owned deco aborts the compositor).
 
+- **The desktop's two moving parts are pinned; the rest of nixpkgs is not.**
+  `nixpkgs` tracks `nixos-unstable`, but the compositor (`hyprland`, an exact
+  upstream tag) and the shell (`nixpkgs-quickshell`, a whole nixpkgs frozen to
+  one revision) do not — so a routine `nix flake update` can no longer carry
+  in a new Hyprland or a new Quickshell and leave the session with no
+  titlebars or no panel. Both inputs carry their full rationale in
+  `flake.nix`; read it before touching either. Everything else — mesa, the
+  NVIDIA driver, the kernel, Qt/PySide6, kitty, Plasma — still rolls, and
+  still can break things, so `nixos-rebuild build` before `switch` and keep
+  the previous generation in mind. Bump a pin **on its own commit**, never
+  alongside other changes.
+
 - **`hyprvtb` plugin (C++) reload after a source edit:** `git add` the changed
   files (flake eval ignores untracked), `rbsys` to recompile (the symlink
   `~/.config/hypr/plugins/libhyprvtb.so` repoints to the new store path), then
