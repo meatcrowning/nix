@@ -125,6 +125,14 @@ Window {
         }
     }
 
+    // external change in a watched dir (something added/removed by another
+    // process — a finishing download, a shell mv, …): same keep-scroll refresh
+    // as a file op. DirWatch debounces, so a burst of writes lands as one.
+    Connections {
+        target: DirWatch
+        function onChanged() { view.refresh(); view.refreshDirSize(); }
+    }
+
     Rectangle {
         id: view
         anchors.fill: parent
@@ -331,6 +339,10 @@ Window {
             const out = [], imgs = [];
             buildRows(path, 0, out, imgs);
             rows = out; images = imgs;
+            // keep the watch set in lock-step with what's on screen: the
+            // current dir + every expanded subdir (deleted ones are dropped
+            // python-side; a stale expandedPaths entry is harmless).
+            DirWatch.setDirs([path].concat(Array.from(expandedPaths)));
         }
         function refresh() { rebuildKeepScroll(); }
 
