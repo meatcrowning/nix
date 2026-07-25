@@ -800,6 +800,21 @@ class Prefs(QObject):
         except OSError:
             pass
 
+    # the in-window file picker's last-used folder ("pickerDir"), so a page's
+    # <input type=file> reopens where the last pick came from (see Files).
+    def loadPickerDir(self):
+        p = self._read().get("pickerDir", "")
+        return str(p) if isinstance(p, str) else ""
+
+    def savePickerDir(self, path):
+        d = self._read()
+        d["pickerDir"] = str(path)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
     # dark-mode settings live under the "dark" key of the same prefs.json (the
     # DarkMode bridge owns the shape — global on/off, brightness, contrast, and
     # the per-site exception list).
@@ -815,6 +830,71 @@ class Prefs(QObject):
             self._path.write_text(json.dumps(d), encoding="utf-8")
         except OSError:
             pass
+
+
+class Files(QObject):
+    """Filesystem access for the in-window file picker (FilePicker.qml), which
+    serves a page's ``<input type=file>`` / upload button.
+
+    QtWebEngine has no built-in picker for the QML view: with no
+    onFileDialogRequested handler Chromium auto-rejects the request and the
+    picker simply never opens (the click registers, `onchange` never fires). We
+    draw our own — hence a directory lister here rather than QtQuick.Dialogs'
+    FileDialog, which would pop an unthemed GTK/portal window."""
+
+    def __init__(self, prefs, parent=None):
+        super().__init__(parent)
+        self._prefs = prefs
+
+    @Slot(str, result="QVariantList")
+    def listDir(self, path):
+        """One directory level as {name, path, isDir, size, hidden}. Unreadable
+        dirs (and unstat-able entries) degrade to empty/zero rather than raising
+        — the picker must never take the window down."""
+        try:
+            entries = list(os.scandir(path))
+        except OSError:
+            return []
+        items = []
+        for e in entries:
+            try:
+                is_dir = e.is_dir()
+            except OSError:
+                is_dir = False
+            try:
+                size = 0 if is_dir else e.stat(follow_symlinks=False).st_size
+            except OSError:
+                size = 0
+            items.append({"name": e.name, "path": e.path, "isDir": is_dir,
+                          "size": size, "hidden": e.name.startswith(".")})
+        return items
+
+    @Slot(str, result=str)
+    def parentOf(self, path):
+        return str(Path(str(path)).parent)
+
+    @Slot(str, result=bool)
+    def isDir(self, path):
+        return os.path.isdir(str(path))
+
+    @Slot(str, str, result=str)
+    def join(self, directory, name):
+        return str(Path(str(directory)) / str(name))
+
+    @Slot(result=str)
+    def startDir(self):
+        """Where to open: the last folder a pick came from, else ~/Downloads
+        (what a page most often wants back), else $HOME."""
+        last = self._prefs.loadPickerDir()
+        if last and os.path.isdir(last):
+            return last
+        dl = str(Path.home() / "Downloads")
+        return dl if os.path.isdir(dl) else str(Path.home())
+
+    @Slot(str)
+    def rememberDir(self, path):
+        if path and os.path.isdir(str(path)):
+            self._prefs.savePickerDir(str(path))
 
 
 class Zoom(QObject):
@@ -1587,6 +1667,7 @@ def main():
     notifier = Notifier(app)
     downloads = Downloads(app)
     prefs = Prefs()
+    files = Files(prefs, app)
     zoom = Zoom(prefs, app)
     darkmode = DarkMode(prefs, app)
     adblocker = AdBlocker(app)
@@ -1604,6 +1685,7 @@ def main():
     ctx.setContextProperty("Perm", perm)
     ctx.setContextProperty("Downloads", downloads)
     ctx.setContextProperty("Prefs", prefs)
+    ctx.setContextProperty("Files", files)
     ctx.setContextProperty("Zoom", zoom)
     ctx.setContextProperty("DarkMode", darkmode)
     ctx.setContextProperty("Cosmetic", cosmetic)
