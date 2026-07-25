@@ -337,6 +337,14 @@ fi
 setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "${XCURSOR_SIZE:-22}" \
     >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
 
+# ---- 6c. RGB hardware: DRAM sticks + motherboard headers on the accent -------
+# rgb-set.py pushes ACCENT to every controller via the system openrgb.service
+# SDK server (a no-op if that's down). Detached for the same reasons as the
+# cursor: the ENE DRAM SMBus writes aren't instant, nothing later depends on
+# them, and setsid keeps it alive through the step-7 Quickshell reload.
+setsid "$SCRIPTS/rgb-set.py" "$ACCENT" \
+    >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+
 # ---- 7. Quickshell palette (spliced into Theme.qml; panel hot-reloads) -------
 # MUST BE THE LAST apply step — see the note where step 4 used to be. Writing
 # Theme.qml makes Quickshell hot-reload and tear down the QML tree (and, from

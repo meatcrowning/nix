@@ -19,6 +19,16 @@ let
       --replace-fail "@toolPath@" "${cursorTools}"
     chmod +x $out
   '';
+  # rgb-set.py drives the OpenRGB SDK server (openrgb.service, enabled via
+  # hardware.openrgb.enable on top) to keep the DRAM/motherboard RGB on the
+  # wallpaper accent. Same shebang trick as wal-extract.py: exec'd directly
+  # from wal-set.sh, so bake an interpreter that has openrgb-python.
+  rgbPython = pkgs.python3.withPackages (ps: [ ps.openrgb-python ]);
+  rgbSet = pkgs.runCommand "rgb-set.py" { } ''
+    substitute ${./wal-files/rgb-set.py} $out \
+      --replace-fail "/usr/bin/env python3" "${rgbPython}/bin/python3"
+    chmod +x $out
+  '';
 in
 {
   xdg.configFile = {
@@ -48,6 +58,10 @@ in
     };
     "scripts/cursor-recolor.sh" = {
       source = cursorRecolor;
+      executable = true;
+    };
+    "scripts/rgb-set.py" = {
+      source = rgbSet;
       executable = true;
     };
   };
