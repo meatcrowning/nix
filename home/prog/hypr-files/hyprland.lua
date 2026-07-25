@@ -389,7 +389,9 @@ local mainMod = "SUPER" -- Sets "Windows" key as main modifier
 
 -- Example binds, see https://wiki.hypr.land/Configuring/Basics/Binds/ for more
 hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal), { description = "Open terminal" })
-local closeWindowBind = hl.bind(mainMod .. " + C", hl.dsp.window.close(), { description = "Close window" })
+-- Close via the hyprvtb close path (roll-up + fade close animation, exactly as
+-- if the titlebar [x] were clicked) instead of Hyprland's plain window.close.
+local closeWindowBind = hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("hyprctl dispatch hyprvtbclose"), { description = "Close window" })
 -- closeWindowBind:set_enabled(false)
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager), { description = "File manager" })
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
@@ -424,9 +426,7 @@ hl.bind(mainMod .. " + up",    hl.dsp.focus({ direction = "up" }),    { descript
 hl.bind(mainMod .. " + down",  hl.dsp.focus({ direction = "down" }),  { description = "Focus window" })
 
 -- Move the focused window within the layout with mainMod + SHIFT + arrow keys
--- (same swap-toward-the-neighbor behaviour as mainMod + CTRL + arrow below;
--- resizing now lives in the dedicated resize mode — see mainMod + R).
-local resizeStep = 40
+-- (same swap-toward-the-neighbor behaviour as mainMod + CTRL + arrow below).
 hl.bind(mainMod .. " + SHIFT + left",  hl.dsp.window.move({ direction = "left" }),  { description = "Move window" })
 hl.bind(mainMod .. " + SHIFT + right", hl.dsp.window.move({ direction = "right" }), { description = "Move window" })
 hl.bind(mainMod .. " + SHIFT + up",    hl.dsp.window.move({ direction = "up" }),    { description = "Move window" })
@@ -439,32 +439,10 @@ hl.bind(mainMod .. " + CTRL + right", hl.dsp.window.move({ direction = "right" }
 hl.bind(mainMod .. " + CTRL + up",    hl.dsp.window.move({ direction = "up" }),    { description = "Move window" })
 hl.bind(mainMod .. " + CTRL + down",  hl.dsp.window.move({ direction = "down" }),  { description = "Move window" })
 
--- i3-style resize mode: mainMod + R enters it, mainMod + R again exits it.
--- These binds only take effect while the "resize" submap is active, so bare
--- arrow keys are left alone (passed through to apps) the rest of the time.
--- While active: bare arrow keys resize the focused window, mainMod + arrow
--- keys move it instead of the usual focus-cycling. A notify-send toast (the
--- same path every other toast in this config uses, see scripts/resize-mode-
--- notify.sh) confirms the mode, driven off the keybinds.submap event below.
-hl.define_submap("resize", function()
-    hl.bind("left",  hl.dsp.window.resize({ x = -resizeStep, y = 0,           relative = true }), { repeating = true, description = "Resize window" })
-    hl.bind("right", hl.dsp.window.resize({ x =  resizeStep, y = 0,           relative = true }), { repeating = true, description = "Resize window" })
-    hl.bind("up",    hl.dsp.window.resize({ x = 0,           y = -resizeStep, relative = true }), { repeating = true, description = "Resize window" })
-    hl.bind("down",  hl.dsp.window.resize({ x = 0,           y =  resizeStep, relative = true }), { repeating = true, description = "Resize window" })
-
-    hl.bind(mainMod .. " + left",  hl.dsp.window.move({ direction = "left" }),  { description = "Move window" })
-    hl.bind(mainMod .. " + right", hl.dsp.window.move({ direction = "right" }), { description = "Move window" })
-    hl.bind(mainMod .. " + up",    hl.dsp.window.move({ direction = "up" }),    { description = "Move window" })
-    hl.bind(mainMod .. " + down",  hl.dsp.window.move({ direction = "down" }),  { description = "Move window" })
-
-    hl.bind(mainMod .. " + R", hl.dsp.submap("reset"), { description = "Exit resize mode" })
-end)
-
-hl.bind(mainMod .. " + R", hl.dsp.submap("resize"), { description = "Enter resize mode" })
-
-hl.on("keybinds.submap", function(name)
-    hl.exec_cmd("$HOME/.config/scripts/resize-mode-notify.sh " .. (name == "resize" and "enter" or "leave"))
-end)
+-- meta + R rolls the active window's hyprvtb titlebar up/down (shade) — the
+-- same toggle the titlebar's roll-up button issues, reachable from the
+-- keyboard via the plugin's hyprvtbroll dispatcher.
+hl.bind(mainMod .. " + R", hl.dsp.exec_cmd("hyprctl dispatch hyprvtbroll"), { description = "Roll window up/down" })
 
 -- Workspace switching removed: this desktop is locked to ONE workspace.
 -- Windows are managed through the panel taskbar (program icons) and the

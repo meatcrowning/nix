@@ -778,6 +778,26 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         return {};
     });
 
+    // `hyprctl dispatch hyprvtbroll` — roll the active window up/down (same
+    // toggle the titlebar's roll-up button issues). Bound to a keybind so the
+    // shade animation is reachable from the keyboard, not just the button.
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprvtbroll", [](std::string arg) -> SDispatchResult {
+        if (auto d = activeDeco())
+            d->toggleRollup();
+        return {};
+    });
+
+    // `hyprctl dispatch hyprvtbclose` — close the active window exactly as if
+    // its titlebar [x] were clicked: closeWindow() runs the roll-up + fade-out
+    // close animation for ordinary floating windows (and falls back to a plain
+    // sendClose for tiled/min/max), vs. Hyprland's own window.close which just
+    // tears the window down with no plugin animation.
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprvtbclose", [](std::string arg) -> SDispatchResult {
+        if (auto d = activeDeco())
+            d->closeWindow();
+        return {};
+    });
+
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
         if (g_pGlobalState)
             onConfigReloaded();
@@ -806,7 +826,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.50"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.51"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
