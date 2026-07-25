@@ -238,7 +238,7 @@ Window {
             const n = selection.length > 1 ? " (" + selection.length + ")" : "";
             return [
                 { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind) },
-                { label: "open with…", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
+                { label: "open with...", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
                 { separator: true },
                 { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },
                 { label: "copy" + n, trigger: () => { clip = { op: "copy", paths: selection.slice() }; } },
@@ -246,18 +246,18 @@ Window {
                   trigger: () => pasteInto(e.isDir ? e.path : path) },
                 { separator: true },
                 { label: "copy path", trigger: () => FileOps.copyText(selection.join("\n")) },
-                { label: "rename…", enabled: one,
+                { label: "rename...", enabled: one,
                   trigger: () => { renameDlg.value = dirNameOf(selected); renameDlg.open(); } },
                 { separator: true },
                 { label: "trash" + n, trigger: () => { FileOps.run(["gio", "trash", "--"].concat(selection), ""); clearSelection(); } },
-                { label: "delete…" + n, trigger: () => delDlg.open() },
+                { label: "delete..." + n, trigger: () => delDlg.open() },
             ];
         }
 
         // Menu over empty space: dir-level actions.
         function bgMenuItems() {
             return [
-                { label: "new…", trigger: () => newDlg.open() },
+                { label: "new...", trigger: () => newDlg.open() },
                 { label: "paste", enabled: clip !== null, trigger: () => pasteInto(path) },
                 { separator: true },
                 { label: "select all", enabled: rows.length + images.length > 0, trigger: () => selectAll() },
@@ -674,7 +674,7 @@ Window {
                     onClicked: view.toggleExpand(row.abs)
                     PixelText {
                         anchors.centerIn: parent
-                        text: row.modelData.expanded ? "−" : "+"
+                        text: row.modelData.expanded ? "-" : "+"
                         color: !win.active ? Theme.inactive : Theme.accent
                     }
                 }
