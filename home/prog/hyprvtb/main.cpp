@@ -599,6 +599,31 @@ static int luaToggleScratch(lua_State* L) {
     return 0;
 }
 
+// lua: hyprvtb.save_close() — the graceful session-exit primitive used by the
+// power menu (logout / reboot / poweroff via quickshell-files/scripts/
+// session-exit.sh). First snapshot the session (so the next fresh login
+// relaunches everything at its saved geometry — see vtbRestoreSession), then
+// "click the [x]" on every decorated non-scratch window: a plain sendClose()
+// is the same graceful xdg-toplevel close the titlebar button issues, giving
+// each app a chance to persist its own state before the compositor is torn
+// down (vs. pkill Hyprland, which just drops the socket). sendClose only
+// *requests* the close — the client goes away asynchronously (window.close
+// fires later), so iterating the bar list here is safe and the caller waits
+// for the windows to actually vanish before pulling the plug.
+static int luaSaveClose(lua_State* L) {
+    if (!g_pGlobalState)
+        return 0;
+    vtbSaveSession();
+    for (auto& b : g_pGlobalState->bars) {
+        if (!b)
+            continue;
+        const auto w = b->getOwner();
+        if (w && w->m_isMapped && w->m_class != SCRATCH_CLASS)
+            w->sendClose();
+    }
+    return 0;
+}
+
 // lua: hyprvtb.save_session() — snapshot the current windows (position +
 // min/roll/max state + relaunch command) so the next fresh login restores
 // them. Bind to a key (Meta+Ctrl+S); pops a confirmation notification.
@@ -755,6 +780,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.critColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.inactiveColor);
 
+    // Every plugin action is exposed as a Lua function and nothing else.
+    // `addDispatcherV2` is deliberately NOT used: under the Lua config,
+    // `hyprctl dispatch X` *evaluates X as a Lua expression*, so a registered
+    // dispatcher name resolves to an undefined global and silently does
+    // nothing (that's how `hyprctl dispatch hyprvtbsaveclose` in
+    // session-exit.sh spent its whole life as a no-op). Scripts call these
+    // with `hyprctl eval "hl.plugin.hyprvtb.<fn>()"`, keybinds with
+    // `hl.plugin.hyprvtb.<fn>()` directly. See PORTING.md.
     if (Config::mgr()->type() != Config::CONFIG_LEGACY) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
@@ -764,54 +797,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_close", ::luaSaveClose);
     }
-
-    // TEMP TEST DISPATCHER (remove after verifying the roll animation): roll a
-    // window up/down via `hyprctl dispatch hyprvtbtestroll 0x<addr>` (empty =
-    // active window). Targeting by address lets a script roll a still-hidden
-    // (already-rolled) window back out, which the focus-based path can't reach.
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprvtbtestroll", [](std::string arg) -> SDispatchResult {
-        if (!g_pGlobalState)
-            return {};
-        CVtbDeco* deco = nullptr;
-        if (arg.starts_with("0x")) {
-            const uintptr_t want = std::strtoull(arg.c_str(), nullptr, 16);
-            for (auto& b : g_pGlobalState->bars)
-                if (b && (uintptr_t)b->getOwner().get() == want) {
-                    deco = b.get();
-                    break;
-                }
-        } else
-            deco = activeDeco();
-        if (deco)
-            deco->toggleRollup();
-        return {};
-    });
-
-    // `hyprctl dispatch hyprvtbsaveclose` — the graceful session-exit primitive
-    // used by the power menu (logout / reboot / poweroff via scripts/
-    // session-exit.sh). First snapshot the session (so the next fresh login
-    // relaunches everything at its saved geometry — see vtbRestoreSession), then
-    // "click the [x]" on every decorated non-scratch window: a plain
-    // sendClose() is the same graceful xdg-toplevel close the titlebar button
-    // issues, giving each app a chance to persist its own state before the
-    // compositor is torn down (vs. pkill Hyprland, which just drops the socket).
-    // sendClose only *requests* the close — the client goes away asynchronously
-    // (window.close fires later), so iterating the bar list here is safe and the
-    // caller waits for the windows to actually vanish before pulling the plug.
-    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprvtbsaveclose", [](std::string arg) -> SDispatchResult {
-        if (!g_pGlobalState)
-            return {};
-        vtbSaveSession();
-        for (auto& b : g_pGlobalState->bars) {
-            if (!b)
-                continue;
-            const auto w = b->getOwner();
-            if (w && w->m_isMapped && w->m_class != SCRATCH_CLASS)
-                w->sendClose();
-        }
-        return {};
-    });
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
         if (g_pGlobalState)
@@ -841,7 +828,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.53"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.54"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

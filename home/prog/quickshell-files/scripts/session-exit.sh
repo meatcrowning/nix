@@ -4,10 +4,16 @@
 # Before the compositor is torn down, "click the [x]" on every open window so
 # each app quits cleanly and persists its own state — and snapshot the session
 # so the next fresh login relaunches every window at the position it was closed
-# in. Both halves live in the hyprvtb plugin: `hyprctl dispatch hyprvtbsaveclose`
-# saves the snapshot (~/.local/state/hyprvtb/session.tsv, replayed by
-# vtbRestoreSession at the next login) and then sends a graceful xdg close to
-# every decorated window (see main.cpp).
+# in. Both halves live in the hyprvtb plugin, behind one Lua entry point:
+# hyprvtb.save_close() saves the snapshot (~/.local/state/hyprvtb/session.tsv,
+# replayed by vtbRestoreSession at the next login) and then sends a graceful
+# xdg close to every decorated window (see main.cpp).
+#
+# It must be invoked with `hyprctl eval`, NOT `hyprctl dispatch`: under the Lua
+# config, `hyprctl dispatch X` evaluates X as a Lua expression and then demands
+# a dispatcher object back, so the old `hyprctl dispatch hyprvtbsaveclose`
+# (a plugin dispatcher name) resolved to an undefined global and silently did
+# nothing — logout neither saved the session nor closed anything gracefully.
 #
 # sendClose only *requests* the close; clients go away asynchronously, so we
 # then wait for the windows to actually vanish — giving apps time to flush —
@@ -17,7 +23,7 @@
 # otherwise refuses to close) must not wedge shutdown forever — after ~4s we
 # proceed regardless and the power action reaps whatever is left.
 
-hyprctl dispatch hyprvtbsaveclose >/dev/null 2>&1
+hyprctl eval "hl.plugin.hyprvtb.save_close()" >/dev/null 2>&1
 
 # Count still-open, real windows: mapped, on a normal (non-special/scratchpad)
 # workspace, excluding the slide-in scratch terminal.
