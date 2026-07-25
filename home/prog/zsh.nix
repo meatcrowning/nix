@@ -15,7 +15,12 @@
       # standalone home-manager — there's no NixOS layer, so these just drive
       # `home-manager switch` against the `air` flake output instead, and `trash`
       # isn't set up passwordless there.
-      if host == "top" then {
+      #
+      # The parens around the conditional are load-bearing: an `if/then/else`
+      # extends as far right as it can, so `if … then {A} else {B} // {C}`
+      # parses as `else ({B} // {C})` — the shared aliases silently applied to
+      # `air` only, and `ll`/`tree` did not exist on `top` at all.
+      (if host == "top" then {
         update = "sudo rebuild-top --upgrade";
         rbsys = "sudo rebuild-top";
         rbhome = "sudo rebuild-top";
@@ -25,9 +30,15 @@
         rbsys = "home-manager switch --flake /home/lam/nix#air";
         rbhome = "home-manager switch --flake /home/lam/nix#air";
         trash = "nix-collect-garbage";
-      } // {
+      }) // {
         ll = "ls -l";
         tree = "tree --dirsfirst";
+        # Background agent sessions branch into ~/nix/.claude/worktrees/<name>
+        # and never clean up, so full copies of the tree accumulate (and make
+        # every `grep -r` here return each hit three times). This removes only
+        # the ones that are clean AND fully landed on origin/main; see the
+        # script header. `wtprune --dry-run` to look first.
+        wtprune = "/home/lam/nix/tools/prune-worktrees.sh";
       };
     initContent = ''
       # Set your default prompt
