@@ -97,6 +97,7 @@ Item {
         clip: true
         model: Math.max(0, Math.ceil(AlbumsModel.count / root.safeCols))
         cacheBuffer: 900
+        interactive: false     // scrollbar + wheel only — no drag-flicking
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll { id: vbar }
 
@@ -312,6 +313,14 @@ Item {
                 }
             }
         }
+    }
+
+    // Wheel notches move whole cover rows; nothing drag-flicks.
+    WheelScroll {
+        view: list
+        lines: 1
+        step: root.cellW
+        onScrolled: list.rememberPos()   // wheel scrolling counts as browsing
     }
 
     PixelText {
