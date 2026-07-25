@@ -1,0 +1,9 @@
+# Managed by home/srvs/claude-memory.nix; edits here are overwritten.
+#
+# Union-merge every memory file. When both machines edit the same memory (very
+# likely for MEMORY.md, the index that gains a line per new memory), git keeps
+# BOTH sides' lines rather than raising a conflict. Duplicated text in a memory
+# file is trivial to clean up; a memory silently lost to a botched conflict
+# resolution is not — and an unresolvable conflict would wedge the sync for
+# every other memory too. Union is the right trade here.
+*.md merge=union
