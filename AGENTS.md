@@ -124,15 +124,30 @@ before touching the plugin or the pin.
 
 - **Seed-once mutable files are NOT updated by rebuild:** `Theme.qml`,
   `hyprland.lua`, `hyprpaper.conf` are installed only if absent (they're
-  rewritten in place at runtime by `wal-set.sh`). To change one, edit BOTH the
-  nix source AND the live `~/.config/...` file **in place** (targeted string
-  edit — never overwrite wholesale or you reset the live wal palette/border).
-  Apply `hyprland.lua` keybind changes with **`hyprctl reload`** (re-runs the
-  live Lua, re-registers `hl.bind`s, does not disturb the session). **Trap:** a
-  fix applied to the nix `hyprland.lua` source does nothing until it's ALSO put
-  in the live file — the running system keeps the old behaviour indefinitely
-  (this bit us: a stale `focus workspace 50` line lived on in the live file long
-  after it was removed from source, scattering windows across two workspaces).
+  rewritten in place at runtime by `wal-set.sh` / `cursor-recolor.sh` /
+  hyprpaper). To change one, edit BOTH the nix source AND the live
+  `~/.config/...` file **in place** (targeted string edit — never overwrite
+  wholesale or you reset the live wal palette/border). Apply `hyprland.lua`
+  changes with **`hyprctl reload`** (re-runs the live Lua, re-registers
+  `hl.bind`s, does not disturb the session).
+
+  **Run `tools/seed-drift.sh` whenever you touch one of these — before you
+  start (to see what's already stale) and after you finish (to prove both
+  copies moved).** It diffs each source/live pair with the runtime-owned values
+  masked, so anything it prints is real drift; exit 1 = drift, `--quiet` for
+  scripting. Adding a new seed-once file means adding it to the `PAIRS` list in
+  that script.
+
+  **Trap:** a fix applied to the nix source does nothing until it's ALSO put in
+  the live file — the running system keeps the old behaviour indefinitely, and
+  the reverse (live-only edit) is silently lost on the next fresh install.
+  Editing only one side is the single most common way a change here appears to
+  do nothing. This has bitten us repeatedly: a stale `focus workspace 50` line
+  lived on in the live file long after it was removed from source, scattering
+  windows across two workspaces; and as of 2026-07-25 both `hyprland.lua` (the
+  whole per-host `host.lua` mechanism) and `Theme.qml` (the entire
+  `SettingsStore` binding — the live file still hardcodes `fontSize: 15`,
+  `barWidth: 48`) are stale on `top`, so those features are not actually live.
 
 - **`hyprvtb` plugin (C++) — where to edit.** Hyprland comes from a *pinned*
   flake input (`hyprland.url = github:hyprwm/Hyprland/vX.Y.Z`), and the plugin
