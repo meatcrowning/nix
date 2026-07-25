@@ -50,9 +50,7 @@ Window {
 
     function _here() { return { view: view, albumId: openAlbumId }; }
     function _apply(s) {
-        openAlbumId = s.albumId;
-        if (s.albumId > 0)
-            Library.openAlbum(s.albumId);   // fills AlbumTracksModel for the panel
+        openAlbumId = s.albumId;   // the AlbumPanel loads that album's tracks itself
         view = s.view;
     }
     function goBack() {

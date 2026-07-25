@@ -138,10 +138,15 @@ Item {
             required property int index
             readonly property bool expanded: root.expandedRow === rowItem.index
 
+            // How much of the section is revealed. Animating THIS (rather than
+            // just unloading) is what makes closing mirror opening: the panel
+            // stays alive, clipped, until it has slid back up under the covers.
+            property real panelH: expanded ? panelLoader.panelHeight : 0
+            Behavior on panelH { NumberAnimation { duration: 130; easing.type: Easing.OutQuad } }
+
             width: list.width
-            height: root.cellW + panelLoader.height
+            height: root.cellW + panelH
             clip: true
-            Behavior on height { NumberAnimation { duration: 110; easing.type: Easing.OutQuad } }
 
             Row {
                 id: tiles
@@ -262,17 +267,31 @@ Item {
             }
 
             // The inline album section — only the open row instantiates one.
-            Loader {
-                id: panelLoader
+            // The panel keeps its full height inside this clip, so the reveal
+            // slides it out from under the covers instead of squashing it.
+            Item {
+                id: panelClip
                 anchors.top: tiles.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                active: rowItem.expanded
-                sourceComponent: Component {
-                    AlbumPanel {
-                        objectName: "albumPanel"
-                        albumId: root.expandedAlbumId
-                        onClosed: root.opened(0)
+                height: rowItem.panelH
+                clip: true
+
+                Loader {
+                    id: panelLoader
+                    width: parent.width
+                    // A Loader takes its implicit size from the loaded item, so
+                    // this is the panel's own implicitHeight (0 when unloaded).
+                    height: implicitHeight
+                    readonly property real panelHeight: implicitHeight
+                    // Stays loaded until the slide-up has finished.
+                    active: rowItem.expanded || rowItem.panelH > 0.5
+                    sourceComponent: Component {
+                        AlbumPanel {
+                            objectName: "albumPanel"
+                            albumId: root.expandedAlbumId
+                            onClosed: root.opened(0)
+                        }
                     }
                 }
             }
