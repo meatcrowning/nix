@@ -1,6 +1,8 @@
 import QtQuick
 
-// Reusable right-click menu. Deliberately generic — no web/file specifics — so
+// Reusable right-click menu (surfer's ContextMenu, renamed: QtQuick.Controls
+// — imported for ScrollBar — ships a non-creatable ContextMenu type that
+// shadows the file component). Deliberately generic — no web/file specifics — so
 // filer and the desktop can reuse it verbatim. Populate + show with
 // open(x, y, items), where items is a JS array of plain objects:
 //   { label, enabled?, separator?, trigger? }

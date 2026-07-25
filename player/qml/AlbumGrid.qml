@@ -125,7 +125,7 @@ Item {
         color: Theme.textDim
     }
 
-    ContextMenu {
+    CtxMenu {
         id: ctxMenu
         anchors.fill: parent
     }
