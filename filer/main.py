@@ -30,7 +30,8 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QProcess, QUrl,
-                            QFileSystemWatcher, Qt, QThreadPool, QRunnable)
+                            QFileSystemWatcher, Qt, QThreadPool, QRunnable,
+                            QTimer)
 from PySide6.QtGui import QGuiApplication, QColor, QImage, QImageReader, QImageWriter
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import (QQuickAsyncImageProvider, QQuickImageResponse,
@@ -433,6 +434,43 @@ class FileOps(QObject):
         return out
 
 
+class DirWatch(QObject):
+    """Watches the directories the view is showing (the current dir plus any
+    expanded subdirs) and emits `changed` when an entry is added/removed in one
+    of them, so the tree picks up external changes — a download landing in the
+    viewed folder, another app deleting a file — without navigating away.
+
+    QML pushes the watch set on every rebuild via setDirs(). Kernel events are
+    coalesced through a short single-shot timer so a burst (a big copy arriving
+    file-by-file) triggers one rebuild, not hundreds. Content edits to existing
+    files don't fire directoryChanged — that's fine, the list shows names."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.directoryChanged.connect(self._on_dir_change)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(200)
+        self._timer.timeout.connect(self.changed)
+
+    @Slot("QVariantList")
+    def setDirs(self, dirs):
+        old = self._watcher.directories()
+        if old:
+            self._watcher.removePaths(old)
+        add = [str(d) for d in dirs if os.path.isdir(str(d))]
+        if add:
+            self._watcher.addPaths(add)
+
+    def _on_dir_change(self, _path):
+        # If a watched dir was deleted+recreated the watch is gone; setDirs()
+        # re-adds it on the rebuild this triggers.
+        self._timer.start()
+
+
 STATE_PATH = Path.home() / ".local" / "state" / "filer" / "state.json"
 
 
@@ -568,10 +606,12 @@ def main():
     palette = Palette(PANEL_THEME)
     winctl = WinCtl()
     titlebar = Titlebar()
+    dirwatch = DirWatch()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
     # Quick type name and would shadow the context property.
     # WalPalette first, so Theme's bindings resolve it when Theme is instantiated.
     ctx.setContextProperty("FileOps", ops)
+    ctx.setContextProperty("DirWatch", dirwatch)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("WinCtl", winctl)
     ctx.setContextProperty("Titlebar", titlebar)
