@@ -68,13 +68,15 @@ Item {
                     PixelText {
                         width: parent.width
                         text: album
-                        elide: Text.ElideRight
+                        clip: true
+                        height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                         color: Theme.text
                     }
                     PixelText {
                         width: parent.width
                         text: (year > 0 ? year + "  " : "") + artist
-                        elide: Text.ElideRight
+                        clip: true
+                        height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                         color: Theme.textDim
                     }
                 }

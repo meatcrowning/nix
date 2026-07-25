@@ -73,19 +73,20 @@ Item {
                 text: root.cur.title || "nothing playing"
                 wrapMode: Text.Wrap
                 maximumLineCount: 2
-                elide: Text.ElideRight
                 color: root.cur.title ? Theme.text : Theme.textDim
             }
             PixelText {
                 width: parent.width
                 text: root.cur.artist || ""
-                elide: Text.ElideRight
+                clip: true
+                height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                 color: Theme.textDim
             }
             PixelText {
                 width: parent.width
                 text: root.cur.album || ""
-                elide: Text.ElideRight
+                clip: true
+                height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                 color: Theme.textDim
             }
             Item { width: 1; height: 6 }

@@ -75,13 +75,13 @@ Item {
                 text: root.info.album || ""
                 wrapMode: Text.Wrap
                 maximumLineCount: 3
-                elide: Text.ElideRight
                 color: Theme.text
             }
             PixelText {
                 width: parent.width
                 text: root.info.artist || ""
-                elide: Text.ElideRight
+                clip: true
+                height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                 color: Theme.textDim
             }
             PixelText {
