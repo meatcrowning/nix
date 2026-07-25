@@ -1,11 +1,13 @@
-{ pkgs, host, ... }:
+{ pkgs, host, inputs, ... }:
 
 let
   # Compositor-side vertical titlebars — see ./hyprvtb/ for the C++ source
   # and why this exists (titlebars locked to windows, which no layer-shell
-  # client can do). Built against the same nixpkgs hyprland the system runs;
-  # the plugin refuses to load on a version hash mismatch, so after a
-  # hyprland bump this rebuilds and keeps working automatically.
+  # client can do). Built against the exact same hyprland the system runs:
+  # the *pinned* `hyprland` flake input (see flake.nix), not pkgs.hyprland,
+  # so a stray `nix flake update` can no longer move the compositor out from
+  # under the plugin. The plugin refuses to load on a version hash mismatch,
+  # so a deliberate pin bump rebuilds this and keeps the two in lockstep.
   #
   # On air, Hyprland comes from Fedora's rpm, not nix (see
   # home/pkgs/desktop/wm.nix), and that build has no git metadata baked in —
@@ -22,18 +24,26 @@ let
   # override wouldn't be needed) — it crashes on startup, nixpkgs' Mesa
   # lacks working Apple Silicon GBM driver support that Fedora Asahi's
   # patched Mesa has. Reverted; back to this override.
-  pkgsForVtb = if host == "air" then pkgs.extend (final: prev: {
-    hyprland = prev.hyprland.overrideAttrs (old: {
-      env = (old.env or { }) // {
-        GIT_BRANCH = "unknown";
-        GIT_COMMIT_DATE = "unknown";
-        GIT_COMMIT_HASH = "unknown";
-        GIT_COMMIT_MESSAGE = "unknown";
-        GIT_TAG = "unknown";
-      };
-    });
-  }) else pkgs;
-  hyprvtb = pkgsForVtb.callPackage ./hyprvtb { };
+  hyprlandPinned = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+
+  hyprlandForVtb = if host == "air" then hyprlandPinned.overrideAttrs (old: {
+    env = (old.env or { }) // {
+      GIT_BRANCH = "unknown";
+      GIT_COMMIT_DATE = "unknown";
+      GIT_COMMIT_HASH = "unknown";
+      GIT_COMMIT_MESSAGE = "unknown";
+      GIT_TAG = "unknown";
+    };
+  }) else hyprlandPinned;
+
+  # nixpkgs' hyprlandPlugins set is itself callPackage'd with a `hyprland`
+  # argument (mkHyprlandPlugin builds with *that* hyprland's stdenv), so the
+  # pinned compositor has to be threaded through the set, not just handed to
+  # ./hyprvtb — otherwise the plugin would compile against nixpkgs' headers.
+  hyprvtb = pkgs.callPackage ./hyprvtb {
+    hyprland = hyprlandForVtb;
+    hyprlandPlugins = pkgs.hyprlandPlugins.override { hyprland = hyprlandForVtb; };
+  };
 in
 {
   # Stable path for hyprland.lua's hl.plugin.load() — the store path moves
