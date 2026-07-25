@@ -7,6 +7,7 @@
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 
+#include <chrono>
 #include <map>
 #include <string>
 
@@ -88,6 +89,14 @@ struct SGlobalState {
     // Windows queued for layout after a login relaunch; drained by onNewWindow
     // as each relaunched window maps. Empty except briefly at startup.
     std::vector<SSessionEntry> pendingRestore;
+
+    // ...and dropped wholesale once this passes. An entry whose app never
+    // showed up (crashed, slow, closed before it mapped) used to sit here for
+    // the rest of the session and then get claimed by the next window of that
+    // class you opened BY HAND — which took the restore path, so it landed at
+    // the snapshot geometry with no open animation. A restore that hasn't
+    // happened within the window below is never going to happen.
+    std::chrono::steady_clock::time_point restoreUntil{};
 
     // Event-bus listeners live in the state object — NOT function-local
     // statics — so PLUGIN_EXIT tearing down the state also deregisters

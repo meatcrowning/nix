@@ -51,14 +51,20 @@ C++ — compositor-side window titlebars + session save/restore).
 **Graceful session exit (logout / reboot / poweroff):** the power menu
 (`PowerMenu.qml`) runs `quickshell-files/scripts/session-exit.sh` *before* the
 power command for any `endSession` item. That script runs
-`hyprctl eval "hl.plugin.hyprvtb.save_close()"`, which (1) snapshots the session
-(`vtbSaveSession` → `~/.local/state/hyprvtb/session.tsv`) and (2) sends a
-graceful `sendClose()` to every decorated non-scratch window — i.e. "clicks the
-[x]" so each app saves its own state — then waits (bounded ~4s) for the windows
-to actually close before returning and letting the power action fire. On the
-next fresh login `vtbRestoreSession` relaunches every window at its saved
-geometry, so windows come back where they were. `sleep` is NOT an `endSession`
-item (windows stay across suspend).
+`hyprctl eval "hl.plugin.hyprvtb.close_all()"`, which sends a graceful
+`sendClose()` to every decorated non-scratch window — i.e. "clicks the [x]" —
+then waits (bounded ~4s) for them to actually close before returning and
+letting the power action fire. **That is its only job**: each app gets to save
+its own state, and the plugin's `window.close` handler records the window's
+geometry, which is what makes the app reopen where you left it next time.
+It deliberately does NOT snapshot a session — logging in must not spawn
+anything. `sleep` is NOT an `endSession` item (windows stay across suspend).
+
+Session *snapshots* (`~/.local/state/hyprvtb/session.tsv`, relaunched by
+`vtbRestoreSession` at the next fresh login) are a separate, deliberate act:
+`hl.plugin.hyprvtb.save_session()` on Meta+Ctrl+S. Never call it from a script
+— an unexpected snapshot means the next login spawns a pile of windows, and
+restored windows skip the open-reveal animation by design.
 
 **Plugin actions are Lua functions, never dispatchers.** `addDispatcherV2` is
 useless under the Lua config: `hyprctl dispatch X` *evaluates X as a Lua

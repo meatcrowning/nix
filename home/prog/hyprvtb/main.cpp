@@ -218,6 +218,7 @@ void vtbRestoreSession() {
     }
 
     g_pGlobalState->pendingRestore = std::move(entries);
+    g_pGlobalState->restoreUntil   = std::chrono::steady_clock::now() + std::chrono::seconds(60);
     for (auto& e : g_pGlobalState->pendingRestore)
         Config::Supplementary::executor()->spawn(e.cmd);
 }
@@ -592,21 +593,25 @@ static int luaToggleScratch(lua_State* L) {
     return 0;
 }
 
-// lua: hyprvtb.save_close() — the graceful session-exit primitive used by the
+// lua: hyprvtb.close_all() — the graceful session-exit primitive used by the
 // power menu (logout / reboot / poweroff via quickshell-files/scripts/
-// session-exit.sh). First snapshot the session (so the next fresh login
-// relaunches everything at its saved geometry — see vtbRestoreSession), then
-// "click the [x]" on every decorated non-scratch window: a plain sendClose()
-// is the same graceful xdg-toplevel close the titlebar button issues, giving
-// each app a chance to persist its own state before the compositor is torn
-// down (vs. pkill Hyprland, which just drops the socket). sendClose only
-// *requests* the close — the client goes away asynchronously (window.close
-// fires later), so iterating the bar list here is safe and the caller waits
-// for the windows to actually vanish before pulling the plug.
-static int luaSaveClose(lua_State* L) {
+// session-exit.sh). "Clicks the [x]" on every decorated non-scratch window: a
+// plain sendClose() is the same graceful xdg-toplevel close the titlebar
+// button issues, giving each app a chance to persist its own state — and
+// giving the plugin's own window.close handler a chance to record the
+// window's geometry — before the compositor is torn down (vs. pkill Hyprland,
+// which just drops the socket). THAT is the whole point of this: apps and
+// per-class geometry remember where the window was. It deliberately does NOT
+// snapshot a session for relaunch; logging in should not spawn anything.
+// (Session snapshots are a separate, explicit thing — hyprvtb.save_session()
+// on Meta+Ctrl+S.)
+//
+// sendClose only *requests* the close — the client goes away asynchronously
+// (window.close fires later), so iterating the bar list here is safe and the
+// caller waits for the windows to actually vanish before pulling the plug.
+static int luaCloseAll(lua_State* L) {
     if (!g_pGlobalState)
         return 0;
-    vtbSaveSession();
     for (auto& b : g_pGlobalState->bars) {
         if (!b)
             continue;
@@ -662,6 +667,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                        [](SP<CEventLoopTimer> self, void*) {
                                                            if (!g_pGlobalState)
                                                                return;
+                                                           // Stale restore entries stop being restore entries (see
+                                                           // SGlobalState::restoreUntil).
+                                                           if (!g_pGlobalState->pendingRestore.empty() &&
+                                                               std::chrono::steady_clock::now() > g_pGlobalState->restoreUntil)
+                                                               g_pGlobalState->pendingRestore.clear();
                                                            const auto SERIAL = VtbIpc::serial.load(std::memory_order_relaxed);
                                                            for (auto& b : g_pGlobalState->bars) {
                                                                if (b)
@@ -790,7 +800,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
-        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_close", ::luaSaveClose);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_all", ::luaCloseAll);
     }
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
@@ -821,7 +831,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.58"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.59"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
