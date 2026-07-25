@@ -34,12 +34,12 @@ def vivid(hexstr):
     a washed-out near-white "tint" (tested on the box: 2x saturation was
     still read as "basically white", warm hues especially need near-full
     saturation to register as a colour at all). Keep the hue, push
-    saturation hard (2.8x, capped) and value to full. Near-grey accents
-    stay near-grey (2.8x of almost nothing is still almost nothing).
+    saturation hard (2.8x, capped) and set value to BRIGHTNESS. Near-grey
+    accents stay near-grey (2.8x of almost nothing is still almost nothing).
     """
     r, g, b = (int(hexstr[i : i + 2], 16) / 255 for i in (0, 2, 4))
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
-    r, g, b = colorsys.hsv_to_rgb(h, min(1.0, s * 2.8), 1.0)
+    r, g, b = colorsys.hsv_to_rgb(h, min(1.0, s * 2.8), BRIGHTNESS)
     return RGBColor(round(r * 255), round(g * 255), round(b * 255))
 
 # ARGB (addressable) headers are write-only — OpenRGB can't detect how many
@@ -53,6 +53,11 @@ ZONE_RESIZE = {
     "JRAINBOW1": 120,
     "JRAINBOW2": 120,
 }
+
+# Overall LED brightness, 0..1. These modes expose no hardware brightness
+# knob (checked: brightness=None on every device), so it's applied as the
+# HSV value in vivid() — full-value output was uncomfortably bright.
+BRIGHTNESS = 0.30
 
 
 def main():
