@@ -1,8 +1,8 @@
 import QtQuick
 
-// One album: big art + metadata + play/queue actions on the left, the track
-// list on the right. Tracks come from AlbumTracksModel (loaded by
-// Library.openAlbum before this view is shown).
+// One album: the track list on the left, big art + metadata + play/queue
+// actions on the right (toward the titlebar edge). Tracks come from
+// AlbumTracksModel (loaded by Library.openAlbum before this view is shown).
 Item {
     id: root
     property int albumId: 0
@@ -26,7 +26,7 @@ Item {
         width: 268
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.left: parent.left
+        anchors.right: parent.right
 
         Rectangle {
             id: artBox
@@ -107,7 +107,7 @@ Item {
     }
 
     Rectangle {
-        anchors.left: side.right
+        anchors.right: side.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
@@ -115,11 +115,11 @@ Item {
     }
 
     TrackList {
-        anchors.left: side.right
-        anchors.leftMargin: 1
+        anchors.left: parent.left
         anchors.top: parent.top
         anchors.topMargin: 8
-        anchors.right: parent.right
+        anchors.right: side.left
+        anchors.rightMargin: 1
         anchors.bottom: parent.bottom
         model: AlbumTracksModel
         showArtist: false

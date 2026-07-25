@@ -1,21 +1,22 @@
 import QtQuick
 
-// Now playing: art + track identity + rating/favourite on the left, the play
-// queue in the middle, lyrics on the right. Lyrics are requested per track
-// change and delivered async by the LyricsProvider (embedded → .lrc → LRCLIB).
+// Now playing: the play queue on the left, lyrics in the middle, art + track
+// identity + rating/favourite on the right (toward the titlebar edge). Lyrics
+// are requested per track change and delivered async by the LyricsProvider
+// (embedded → .lrc → LRCLIB).
 Item {
     id: root
     signal openAlbum(int albumId)
 
     readonly property var cur: Player.current
 
-    // ---- left: art + identity ----
+    // ---- right: art + identity ----
     Item {
         id: side
         width: 268
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.left: parent.left
+        anchors.right: parent.right
 
         Rectangle {
             id: artBox
@@ -120,17 +121,17 @@ Item {
 
     Rectangle {
         id: sep1
-        anchors.left: side.right
+        anchors.right: side.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
         color: Theme.border
     }
 
-    // ---- middle: queue ----
+    // ---- left: queue ----
     Item {
         id: queuePane
-        anchors.left: sep1.right
+        anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: Math.max(260, (parent.width - side.width) * 0.45)
@@ -163,11 +164,11 @@ Item {
         color: Theme.border
     }
 
-    // ---- right: lyrics ----
+    // ---- middle: lyrics ----
     LyricsView {
         anchors.left: sep2.right
         anchors.top: parent.top
-        anchors.right: parent.right
+        anchors.right: sep1.left
         anchors.bottom: parent.bottom
         trackId: root.cur.id !== undefined ? root.cur.id : -1
         active: root.visible
