@@ -2,6 +2,10 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/state/ViewState.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/MiscFunctions.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
@@ -16,7 +20,7 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
-#include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
+#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/protocols/types/DataDevice.hpp>
 
@@ -235,7 +239,7 @@ static int countCp(const std::string& s, size_t byteLen) {
 
 CVtbDeco::~CVtbDeco() {
     if (m_bCursorOverridden)
-        Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
     if (g_pGlobalState)
         std::erase(g_pGlobalState->bars, m_self);
 }
@@ -279,8 +283,8 @@ CBox CVtbDeco::assignedBoxGlobal() {
     // positioner caught up. Derive the box straight off the window geometry
     // (content's right edge, totalBarW wide, full height — mirrors frameBox()).
     if (box.w < 1 || box.h < 1) {
-        const auto POS = PWINDOW->m_realPosition->value();
-        const auto SZ  = PWINDOW->m_realSize->value();
+        const auto POS = PWINDOW->positionAnimation()->value();
+        const auto SZ  = PWINDOW->sizeAnimation()->value();
         box            = {POS.x + SZ.x, POS.y, (double)totalBarW(), SZ.y};
     }
 
@@ -317,8 +321,8 @@ CBox CVtbDeco::memorableGeometry() {
 
     // (a shaded window keeps its real geometry — it's hidden, not resized —
     // so the normal path below already reports the right box)
-    const auto POS  = m_bMinimized ? m_minSavedPos : PWINDOW->m_realPosition->goal();
-    const auto SIZE = PWINDOW->m_realSize->goal();
+    const auto POS  = m_bMinimized ? m_minSavedPos : PWINDOW->positionAnimation()->goal();
+    const auto SIZE = PWINDOW->sizeAnimation()->goal();
     return {POS, SIZE};
 }
 
@@ -495,7 +499,7 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     // back — maximized means immovable until unmaximized.
     if (m_bMaximized && !m_bMinimized && PWINDOW->m_isFloating) {
         const auto T = maximizeTarget();
-        if (PWINDOW->m_realPosition->goal() != T.pos() || PWINDOW->m_realSize->goal() != T.size()) {
+        if (PWINDOW->positionAnimation()->goal() != T.pos() || PWINDOW->sizeAnimation()->goal() != T.size()) {
             // resize BEFORE move: Actions::resize keeps the window's centre,
             // so a move-then-resize lands off-target
             Config::Actions::resize(T.size(), false, PWINDOW);
@@ -1552,7 +1556,7 @@ void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEven
         // what's on top, not the track underneath.
         const bool   occluded = m_bRolledUp
               ? shadeOccludedAt(MOUSE)
-              : g_pCompositor->vectorToWindowUnified(MOUSE, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING) != PW;
+              : Desktop::viewState()->hitTest().windowAt(MOUSE, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING) != PW;
         if (PW && !occluded && VtbIpc::get(appPid(), reg) && reg.playbar &&
             playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) &&
             VECINRECT(LOCAL, track.x, track.y, track.w, track.h)) {
@@ -1746,7 +1750,7 @@ bool CVtbDeco::inputIsValid() {
         (g_pSeatManager->m_seatGrab && !g_pSeatManager->m_seatGrab->accepts(m_pWindow->wlSurface()->resource())))
         return false;
 
-    const auto WINDOWATCURSOR = g_pCompositor->vectorToWindowUnified(g_pInputManager->getMouseCoordsInternal(),
+    const auto WINDOWATCURSOR = Desktop::viewState()->hitTest().windowAt(g_pInputManager->getMouseCoordsInternal(),
                                                                      Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
 
     auto       focusState = Desktop::focusState();
@@ -1767,11 +1771,11 @@ bool CVtbDeco::inputIsValid() {
     PHLLS    foundSurface = nullptr;
     Vector2D surfaceCoords;
 
-    g_pCompositor->vectorToLayerSurface(g_pInputManager->getMouseCoordsInternal(), &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &foundSurface);
+    Desktop::viewState()->hitTest().layerSurfaceAt(g_pInputManager->getMouseCoordsInternal(), &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &foundSurface);
     if (foundSurface)
         return false;
 
-    g_pCompositor->vectorToLayerSurface(g_pInputManager->getMouseCoordsInternal(), &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords,
+    Desktop::viewState()->hitTest().layerSurfaceAt(g_pInputManager->getMouseCoordsInternal(), &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords,
                                         &foundSurface);
     if (foundSurface)
         return false;
@@ -1788,17 +1792,17 @@ bool CVtbDeco::inputIsValid() {
 // press/hover inside its box: it ate clicks aimed at a webpage above it, and
 // a grab on an overlap of two titlebars dragged both windows at once.
 bool CVtbDeco::shadeOccludedAt(const Vector2D& mouse) {
-    if (g_pCompositor->vectorToWindowUnified(mouse, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING))
+    if (Desktop::viewState()->hitTest().windowAt(mouse, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING))
         return true;
 
-    const auto PMONITOR = g_pCompositor->getMonitorFromVector(mouse);
+    const auto PMONITOR = State::monitorState()->query().vec(mouse).run();
     if (PMONITOR) {
         PHLLS    foundSurface = nullptr;
         Vector2D surfaceCoords;
-        g_pCompositor->vectorToLayerSurface(mouse, &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &foundSurface);
+        Desktop::viewState()->hitTest().layerSurfaceAt(mouse, &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &foundSurface);
         if (foundSurface)
             return true;
-        g_pCompositor->vectorToLayerSurface(mouse, &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &foundSurface);
+        Desktop::viewState()->hitTest().layerSurfaceAt(mouse, &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &foundSurface);
         if (foundSurface)
             return true;
     }
@@ -1853,7 +1857,7 @@ int CVtbDeco::cellAt(const Vector2D& c) {
 
 // The visual frame: window + our (double-wide) bar, wrapped by one border.
 static CBox frameBox(PHLWINDOW w) {
-    CBox box = {w->m_realPosition->value(), w->m_realSize->value()};
+    CBox box = {w->positionAnimation()->value(), w->sizeAnimation()->value()};
     if (g_pGlobalState->config.enabled->value())
         box.w += totalBarW();
     return box;
@@ -1949,7 +1953,7 @@ uint32_t CVtbDeco::interiorResizeZone(const Vector2D& M) {
 
 bool CVtbDeco::tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e) {
     const auto PWINDOW = m_pWindow.lock();
-    if (!validMapped(m_pWindow) || !PWINDOW->m_isFloating || PWINDOW->isFullscreen() || m_bMinimized || m_bMaximized || m_bRolledUp)
+    if (!validMapped(m_pWindow) || !PWINDOW->m_isFloating || Fullscreen::controller()->isFullscreen(PWINDOW) || m_bMinimized || m_bMaximized || m_bRolledUp)
         return false;
 
     const auto MOUSE = g_pInputManager->getMouseCoordsInternal();
@@ -1965,12 +1969,12 @@ bool CVtbDeco::tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SB
 
     if (Desktop::focusState()->window() != PWINDOW)
         Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
-    g_pCompositor->changeWindowZOrder(PWINDOW, true);
+    Desktop::windowState()->raise(PWINDOW);
 
     m_bEdgeResizing  = true;
     m_resizeEdges    = edges;
     m_resStartMouse  = MOUSE;
-    m_resStartBox    = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
+    m_resStartBox    = {PWINDOW->positionAnimation()->goal(), PWINDOW->sizeAnimation()->goal()};
     info.cancelled   = true; // keep native (quadrant-corner) border resize out of it
     m_bCancelledDown = true;
     return true;
@@ -2144,13 +2148,12 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
                 m_iHoverCell = -1;
                 if (PWINDOW) {
                     // Move the hidden window so it reappears here on restore.
-                    // Update BOTH the logical box (m_position) and the animated
-                    // draw position: warping only m_realPosition left m_position
-                    // stale, so a later real drag snapped back to the pre-shade
-                    // spot before following the cursor (the "skips positions" bug).
+                    // setValueAndWarp sets both value and goal, so the logical
+                    // position (position(GEOMETRIC_GOAL)) tracks it too — a later
+                    // real drag no longer snaps back to the pre-shade spot before
+                    // following the cursor (the "skips positions" bug).
                     const Vector2D NEWPOS = m_rollDragWinStart + DELTA;
-                    PWINDOW->m_position = NEWPOS;
-                    PWINDOW->m_realPosition->setValueAndWarp(NEWPOS);
+                    PWINDOW->positionAnimation()->setValueAndWarp(NEWPOS);
                 }
                 g_pHyprRenderer->damageBox(CBox{effectiveBoxGlobal()}.expand(2)); // new spot, same cushion
             }
@@ -2238,16 +2241,16 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
             // was misleading (the press is already rejected by inputIsValid's
             // same window-at-cursor test). vectorToWindowUnified honours z-order;
             // a null result is empty space, where a halo edge-grab is still valid.
-            const auto WINDOWATCURSOR = g_pCompositor->vectorToWindowUnified(
+            const auto WINDOWATCURSOR = Desktop::viewState()->hitTest().windowAt(
                 MOUSE, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
             const bool occluded = WINDOWATCURSOR && WINDOWATCURSOR != m_pWindow;
             const auto Z        = occluded ? 0u : borderResizeZone(MOUSE);
             if (Z & RS_EDGE_R) {
                 const char* shape = (Z & RS_EDGE_T) ? "top_right_corner" : (Z & RS_EDGE_B) ? "bottom_right_corner" : "right_side";
-                Cursor::overrideController->setOverride(shape, Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+                Pointer::Cursor::overrideController->setOverride(shape, Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
                 m_bCursorOverridden = true;
             } else if (m_bCursorOverridden) {
-                Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+                Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
                 m_bCursorOverridden = false;
             }
         }
@@ -2285,7 +2288,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
 
     if (PWINDOW->m_isFloating)
-        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+        Desktop::windowState()->raise(PWINDOW);
 
     info.cancelled   = true;
     m_bCancelledDown = true;
@@ -2521,7 +2524,7 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     m_iRollPressCell     = CELL;
     m_rollDragMouseStart = MOUSE;
     m_rollDragBoxStart   = m_rollBox;
-    m_rollDragWinStart   = PWINDOW->m_position; // logical box, same as a real drag reads
+    m_rollDragWinStart   = PWINDOW->positionAnimation()->goal(); // logical box, same as a real drag reads
 }
 
 void CVtbDeco::handleRolledUp(Event::SCallbackInfo& info) {
@@ -2590,10 +2593,10 @@ void CVtbDeco::startOpenReveal() {
     // warp it straight to its settled geometry first — otherwise makeSnapshot
     // captures the half-animated frame and m_rollSnapOrigin (computed off goal())
     // wouldn't line up with where the pixels actually landed in the FB.
-    PWINDOW->m_realPosition->setValueAndWarp(PWINDOW->m_realPosition->goal());
-    PWINDOW->m_realSize->setValueAndWarp(PWINDOW->m_realSize->goal());
+    PWINDOW->positionAnimation()->setValueAndWarp(PWINDOW->positionAnimation()->goal());
+    PWINDOW->sizeAnimation()->setValueAndWarp(PWINDOW->sizeAnimation()->goal());
 
-    CBox       g   = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+    CBox       g   = {PWINDOW->positionAnimation()->value(), PWINDOW->sizeAnimation()->value()};
     const auto WS  = PWINDOW->m_workspace;
     const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
     g.translate(OFF);
@@ -2604,9 +2607,9 @@ void CVtbDeco::startOpenReveal() {
     // edge, totalBarW() wide and the window's full height (mirrors frameBox()).
     m_rollBox = {m_rollWinBox.x + m_rollWinBox.w, m_rollWinBox.y, (double)totalBarW(), m_rollWinBox.h};
 
-    g_pHyprRenderer->makeSnapshot(PWINDOW);
-    if (PWINDOW->m_snapshotFB && PWINDOW->m_snapshotFB->isAllocated())
-        m_rollSnapTex = PWINDOW->m_snapshotFB->getTexture();
+    const auto SNAPFB = g_pHyprRenderer->makeSnapshotFB(PWINDOW);
+    if (SNAPFB && SNAPFB->isAllocated())
+        m_rollSnapTex = SNAPFB->getTexture();
     const auto SNAPMON = PWINDOW->m_monitor.lock();
     if (SNAPMON)
         m_rollSnapOrigin = (m_rollWinBox.pos() - SNAPMON->m_position) * SNAPMON->m_scale;
@@ -2656,7 +2659,7 @@ void CVtbDeco::toggleMaximize() {
         Config::Actions::resize(m_savedGeometry.size(), false, PWINDOW);
         Config::Actions::move(m_savedGeometry.pos(), false, PWINDOW);
     } else {
-        m_savedGeometry = {PWINDOW->m_realPosition->goal(), PWINDOW->m_realSize->goal()};
+        m_savedGeometry = {PWINDOW->positionAnimation()->goal(), PWINDOW->sizeAnimation()->goal()};
 
         const auto T = maximizeTarget();
         if (T.w < 50 || T.h < 50)
@@ -2708,7 +2711,7 @@ void CVtbDeco::hideRolledWindow(PHLWINDOW PWINDOW) {
 
     // hand focus to another visible, non-hidden window on this workspace
     PHLWINDOW next = nullptr;
-    for (auto& w : g_pCompositor->m_windows) {
+    for (auto& w : Desktop::viewState()->windows()) {
         if (w == PWINDOW || !w->m_isMapped || w->isHidden() || w->m_workspace != PWINDOW->m_workspace)
             continue;
         // Skip minimized windows. A minimized window is still mapped and NOT
@@ -2775,7 +2778,7 @@ void CVtbDeco::startRollAnim(eRollAnim dir) {
         m_rollBox          = assignedBoxGlobal(); // raised bar position
         if (PWINDOW) {
             // client box in the same global-logical frame the shadow/snapshot use
-            CBox       g   = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+            CBox       g   = {PWINDOW->positionAnimation()->value(), PWINDOW->sizeAnimation()->value()};
             const auto WS  = PWINDOW->m_workspace;
             const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
             g.translate(OFF);
@@ -2787,9 +2790,9 @@ void CVtbDeco::startRollAnim(eRollAnim dir) {
             // mid render-stage re-enters the renderer and corrupts the in-flight
             // frame -> hard crash. m_rollSnapTex keeps the texture alive for the
             // whole shade (both the roll-up slide and the eventual roll-out).
-            g_pHyprRenderer->makeSnapshot(PWINDOW);
-            if (PWINDOW->m_snapshotFB && PWINDOW->m_snapshotFB->isAllocated())
-                m_rollSnapTex = PWINDOW->m_snapshotFB->getTexture();
+            const auto SNAPFB = g_pHyprRenderer->makeSnapshotFB(PWINDOW);
+            if (SNAPFB && SNAPFB->isAllocated())
+                m_rollSnapTex = SNAPFB->getTexture();
             // makeSnapshot renders into a MONITOR-sized framebuffer, so the window
             // is only a sub-rect of the texture; remember its device-px top-left
             // there so drawRollSnapshot can sample just the window, not the whole
@@ -2880,7 +2883,7 @@ void CVtbDeco::beginRollReveal() {
     if (!PWINDOW)
         return;
     PWINDOW->setHidden(false);
-    g_pCompositor->changeWindowZOrder(PWINDOW, true);
+    Desktop::windowState()->raise(PWINDOW);
     Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
     // Re-register Hyprland's own decorations (border/shadow) for the freshly
     // un-hidden window. Without this an INITIAL open reveal came up with no
@@ -2960,7 +2963,7 @@ void CVtbDeco::finishRollAnim() {
         if (PWINDOW) {
             if (!revived) {
                 PWINDOW->setHidden(false);
-                g_pCompositor->changeWindowZOrder(PWINDOW, true);
+                Desktop::windowState()->raise(PWINDOW);
                 Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
                 PWINDOW->updateWindowDecos(); // re-add Hyprland's border/shadow (see beginRollReveal)
                 warpBorderToFocused(PWINDOW);  // snap border straight to focused tint
@@ -3018,7 +3021,7 @@ void CVtbDeco::toggleRollup(bool animate) {
         m_rollSnapTex      = nullptr;
         g_pHyprRenderer->damageBox(m_rollBox);
         PWINDOW->setHidden(false);
-        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+        Desktop::windowState()->raise(PWINDOW);
         Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
         VtbIpc::sendWake(appPid());
         damageEntire();
@@ -3118,7 +3121,7 @@ void CVtbDeco::minimizeWindow() {
     if (!PMONITOR)
         return;
 
-    m_minSavedPos = PWINDOW->m_realPosition->goal();
+    m_minSavedPos = PWINDOW->positionAnimation()->goal();
     m_bMinimized  = true;
     m_minimizedAt = Time::steadyNow();
 
@@ -3130,7 +3133,7 @@ void CVtbDeco::minimizeWindow() {
     // hand focus to another window on the workspace; focusing the minimized
     // window again (e.g. via its panel icon) is the restore trigger
     PHLWINDOW next = nullptr;
-    for (auto& w : g_pCompositor->m_windows) {
+    for (auto& w : Desktop::viewState()->windows()) {
         if (w == PWINDOW || !w->m_isMapped || w->isHidden() || w->m_workspace != PWINDOW->m_workspace)
             continue;
         // skip other minimized windows
@@ -3157,7 +3160,7 @@ void CVtbDeco::minimizeWindow() {
     // once it's off-screen its z-order no longer matters, and restore re-raises
     // it anyway.
     if (PWINDOW->m_isFloating)
-        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+        Desktop::windowState()->raise(PWINDOW);
 }
 
 void CVtbDeco::restoreFromMinimize() {
@@ -3168,7 +3171,7 @@ void CVtbDeco::restoreFromMinimize() {
     m_bMinimized = false;
     Config::Actions::move(m_minSavedPos, false, PWINDOW);
     if (PWINDOW->m_isFloating)
-        g_pCompositor->changeWindowZOrder(PWINDOW, true);
+        Desktop::windowState()->raise(PWINDOW);
     damageEntire();
 }
 
@@ -3247,7 +3250,7 @@ void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
         return;
 
     const auto PWINDOW = m_pWindow.lock();
-    if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault() || PWINDOW->isFullscreen())
+    if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault() || Fullscreen::controller()->isFullscreen(PWINDOW))
         return;
 
     // no shadow on our custom-maximized windows, nor on a rolled-up one (the
@@ -3268,7 +3271,7 @@ void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
 
     // Global window box with the same workspace-slide + floating-drag offsets
     // the titlebar uses, so the shadow tracks the window through animations.
-    CBox       g   = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+    CBox       g   = {PWINDOW->positionAnimation()->value(), PWINDOW->sizeAnimation()->value()};
     const auto WS  = PWINDOW->m_workspace;
     const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
     g.translate(OFF);
@@ -3316,7 +3319,7 @@ void CVtbShadowDeco::damageEntire() {
     if (!validMapped(m_pWindow))
         return;
     const auto PWINDOW = m_pWindow.lock();
-    CBox       g = {PWINDOW->m_realPosition->value(), PWINDOW->m_realSize->value()};
+    CBox       g = {PWINDOW->positionAnimation()->value(), PWINDOW->sizeAnimation()->value()};
     const double N    = VTB_SHADOW_SIZE;
     const double BARW = g_pGlobalState && g_pGlobalState->config.enabled->value() ? (double)totalBarW() : 0.0;
     // window box grown by the shadow's left + bottom overhang, plus the titlebar

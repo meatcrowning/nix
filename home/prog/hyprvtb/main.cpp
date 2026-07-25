@@ -7,6 +7,9 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/state/ViewState.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
+#include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/supplementary/executor/Executor.hpp>
@@ -216,7 +219,7 @@ void vtbRestoreSession() {
     // Only relaunch on a genuinely fresh session. If any non-scratch window is
     // already open, this is a mid-session (re)init, not a login — relaunching
     // would double everything, so bail without spawning or queuing.
-    for (auto& w : g_pCompositor->m_windows) {
+    for (auto& w : Desktop::viewState()->windows()) {
         if (w && w->m_isMapped && !w->m_class.empty() && w->m_class != SCRATCH_CLASS)
             return;
     }
@@ -230,7 +233,7 @@ void vtbRestoreSession() {
 // (SCRATCH_CLASS is defined above, ahead of the session-snapshot helpers.)
 
 static PHLWINDOW scratchWindow() {
-    for (auto& w : g_pCompositor->m_windows) {
+    for (auto& w : Desktop::viewState()->windows()) {
         if (w->m_isMapped && !w->isHidden() && w->m_class == SCRATCH_CLASS)
             return w;
     }
@@ -261,11 +264,11 @@ static void showScratch(PHLWINDOW w, bool warpFromOffscreen) {
         return;
 
     if (warpFromOffscreen)
-        w->m_realPosition->setValueAndWarp(Vector2D(T.x - T.w - 16, T.y));
+        w->positionAnimation()->setValueAndWarp(Vector2D(T.x - T.w - 16, T.y));
 
     Config::Actions::resize(T.size(), false, w);
     Config::Actions::move(T.pos(), false, w);
-    g_pCompositor->changeWindowZOrder(w, false); // always at the BOTTOM
+    Desktop::windowState()->lower(w); // always at the BOTTOM
     Desktop::focusState()->fullWindowFocus(w, Desktop::FOCUS_REASON_CLICK);
     g_pGlobalState->scratchVisible = true;
 }
@@ -276,7 +279,7 @@ static void hideScratch(PHLWINDOW w) {
     g_pGlobalState->scratchVisible = false;
 
     // hand focus back to some other window
-    for (auto& o : g_pCompositor->m_windows) {
+    for (auto& o : Desktop::viewState()->windows()) {
         if (o != w && o->m_isMapped && !o->isHidden() && o->m_workspace == w->m_workspace) {
             Desktop::focusState()->fullWindowFocus(o, Desktop::FOCUS_REASON_CLICK);
             return;
@@ -403,14 +406,14 @@ static void onWindowFocus(PHLWINDOW window) {
 
     // the scratchpad never rises above other windows, even focused
     if (window->m_class == SCRATCH_CLASS) {
-        g_pCompositor->changeWindowZOrder(window, false);
+        Desktop::windowState()->lower(window);
         return;
     }
 
     // focus raises floating windows — so activating from the taskbar or
     // alt-tab actually brings the window forward, not just recolours it
     if (window->m_isFloating)
-        g_pCompositor->changeWindowZOrder(window, true);
+        Desktop::windowState()->raise(window);
 
     for (auto& b : g_pGlobalState->bars) {
         if (b && b->getOwner() == window) {
@@ -640,10 +643,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         const auto W = scratchWindow();
         if (!W)
             return;
-        const auto  DRAGW = W->m_realSize->goal().x;
+        const auto  DRAGW = W->sizeAnimation()->goal().x;
         auto        T     = scratchTarget(W);
         T.w               = DRAGW;
-        if (W->m_realPosition->goal() != T.pos() || W->m_realSize->goal().y != T.h) {
+        if (W->positionAnimation()->goal() != T.pos() || W->sizeAnimation()->goal().y != T.h) {
             Config::Actions::resize(T.size(), false, W);
             Config::Actions::move(T.pos(), false, W);
         }
@@ -783,7 +786,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // decorate windows that already exist (none when loaded at config-parse
     // time during compositor startup — the window.open listener covers those)
     if (g_pCompositor) {
-        for (auto& w : g_pCompositor->m_windows) {
+        for (auto& w : Desktop::viewState()->windows()) {
             if (w->isHidden() || !w->m_isMapped)
                 continue;
             onNewWindow(w, false); // already open — decorate only, don't move it
@@ -803,7 +806,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.46"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.47"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -817,7 +820,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         g_pGlobalState->tick.reset();
     }
 
-    for (auto& m : g_pCompositor->m_monitors)
+    for (auto& m : State::monitorState()->monitors())
         m->m_scheduledRecalc = true;
 
     g_pHyprRenderer->m_renderPass.removeAllOfType("CVtbPassElement");
