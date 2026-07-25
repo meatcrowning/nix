@@ -194,7 +194,9 @@ PanelWindow {
                     required property var modelData
                     required property int index
                     width: list.width
-                    height: 32
+                    // hug the (now 18px) app icon — was a fixed 32 around a 22px
+                    // icon, i.e. ~10px of dead vertical space per result row
+                    height: Theme.fontSize + 5
                     color: index === launcher.selected ? Theme.highlight : "transparent"
                     radius: 2
 
@@ -205,7 +207,7 @@ PanelWindow {
 
                         IconImage {
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitSize: 22
+                            implicitSize: 18
                             source: Quickshell.iconPath(modelData.icon, "application-x-executable")
                         }
                         PixelText {
