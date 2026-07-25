@@ -9,11 +9,10 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 #include "globals.hpp"
 #include "vtbIpc.hpp"
-
-// inputIsValid() pokes at InputManager internals, same as hyprbars does.
-#define private public
-#include <hyprland/src/managers/input/InputManager.hpp>
-#undef private
+// Every volatile Hyprland internal this plugin touches goes through here
+// (including the #define private public InputManager include that
+// inputIsValid() needs) — see vtbCompat.hpp and PORTING.md.
+#include "vtbCompat.hpp"
 
 namespace Event {
     struct SCallbackInfo;
