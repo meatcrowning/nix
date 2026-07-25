@@ -7,10 +7,10 @@
       url = "github:nix-community/home-manager/release-25.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    ollama-src = {
-      url = "github:ollama/ollama";
-      flake = false;
-    };
+    # ollama-src = {
+    #  url = "github:ollama/ollama";
+    #  flake = false;
+    #};
     plasma-manager = {
       url = "github:nix-community/plasma-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -49,17 +49,17 @@
       });
     });
 
-    ollama-overlay = (final: prev: {
-      ollama-latest-cuda = (prev.ollama.override {
-        acceleration = "cuda";
-        buildGoModule = prev.buildGo126Module;
-      }).overrideAttrs (oldAttrs: rec {
-        version = "git";
-        src = inputs.ollama-src;
-        vendorHash = "sha256-lZdGzGb9xRjTm1Rm7/wHjqM490gLznLEndmb4mNbCX0=";
-        doCheck = false;
-      });
-    });
+    #ollama-overlay = (final: prev: {
+    #  ollama-latest-cuda = (prev.ollama.override {
+    #    acceleration = "cuda";
+    #    buildGoModule = prev.buildGo126Module;
+    #  }).overrideAttrs (oldAttrs: rec {
+    #    version = "git";
+    #    src = inputs.ollama-src;
+    #    vendorHash = "sha256-lZdGzGb9xRjTm1Rm7/wHjqM490gLznLEndmb4mNbCX0=";
+    #    doCheck = false;
+    #  });
+    #});
 
     # Square off Breeze: its widget corner radius is a hardcoded compile-time
     # constant (kstyle/breezemetrics.h), with no runtime/breezerc setting — so
@@ -82,7 +82,8 @@
       };
     });
 
-    overlays = [ vcv-rack-overlay ollama-overlay breeze-square-overlay ];
+    # re add ollama-overlay im taking it out after updating lock and not backing up lole
+    overlays = [ vcv-rack-overlay breeze-square-overlay ];
 
     mkPkgs = system: overlays: import nixpkgs {
       inherit system overlays;
@@ -96,7 +97,9 @@
     # from source. Skipped for air (for now, see home/pkgs/desktop/kde.nix)
     # by leaving the overlay out of its pkgs entirely — corners just stay
     # round there until this gets added back.
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ollama-overlay ];
+
+    #also readd ollama-overlay here 
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ];
 
   in
   {
@@ -108,7 +111,7 @@
             nixpkgs.overlays = overlays;
             environment.systemPackages = [
               #koboldcpp-latest
-              pkgs.ollama-latest-cuda
+              # pkgs.ollama-latest-cuda
               # ollama-qwen35-9b
               inputs.tuxmanager.packages.${system}.default
 
