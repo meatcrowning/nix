@@ -90,7 +90,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     // position if it's currently minimized, its live goal otherwise).
     CBox                               memorableGeometry();
 
-    WP<CVtbDeco>                       m_self;
+    CDecoRef                           m_self;
 
   private:
     PHLWINDOWREF         m_pWindow;

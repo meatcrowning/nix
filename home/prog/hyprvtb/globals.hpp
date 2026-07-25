@@ -17,6 +17,58 @@ inline HANDLE PHANDLE = nullptr;
 
 class CVtbDeco;
 
+// Weak reference to a decoration — deliberately NOT a bare WP<CVtbDeco>.
+//
+// Hyprland owns window decorations through a CUniquePointer, and hyprutils
+// 0.14.0 added an assert to CWeakPointer::lock() forbidding a lock over a
+// unique-owned object. That's what v2.48 was: the plugin compiled cleanly and
+// then aborted the compositor a few seconds into login, from the roll
+// animation's deferred open-reveal callback on the session-restore path. No
+// compat shim can absorb a semantics change like that, so the fix is a type
+// that simply does not offer the illegal operation.
+//
+// Reach the live object with `operator->`, gated on the liveness predicate —
+// which is exactly what lock() used to check before handing back a SP.
+// Shared-owned refs (PHLWINDOWREF, monitors, keyboards) are unaffected by all
+// of this and keep using .lock() normally. See PORTING.md ("Axis B").
+class CDecoRef {
+  public:
+    CDecoRef() = default;
+    // Implicit from the owning UP, so `bars.emplace_back(bar)` / `m_self = bar`
+    // read the same as they did with a raw WP.
+    CDecoRef(const UP<CVtbDeco>& owner) : m_w(owner) {}
+
+    // valid(): the object still exists. Mirrors WP's own operator bool, so
+    // `if (!ref)` keeps its exact previous meaning at every call site.
+    explicit operator bool() const {
+        return m_w.valid();
+    }
+    // alive(): not expired — stricter than valid(), it also excludes an object
+    // that is mid-destruction. This is lock()'s old precondition, and it is the
+    // guard to use before dereferencing a ref that was captured into a deferred
+    // callback (doLater / doOnReadable), where the deco may have died in the
+    // meantime.
+    bool alive() const {
+        return !m_w.expired();
+    }
+
+    CVtbDeco* operator->() const {
+        return m_w.get();
+    }
+    CVtbDeco* get() const {
+        return m_w.get();
+    }
+    void reset() {
+        m_w.reset();
+    }
+    bool operator==(const CDecoRef& rhs) const {
+        return m_w == rhs.m_w;
+    }
+
+  private:
+    WP<CVtbDeco> m_w; // private on purpose: no lock() can escape
+};
+
 // One saved window from a session snapshot (see vtbSaveSession /
 // vtbRestoreSession in main.cpp): what to relaunch, where to place it, and
 // which exclusive state to put it back into.
@@ -31,7 +83,7 @@ struct SSessionEntry {
 };
 
 struct SGlobalState {
-    std::vector<WP<CVtbDeco>> bars;
+    std::vector<CDecoRef>      bars;
 
     // Windows queued for layout after a login relaunch; drained by onNewWindow
     // as each relaunched window maps. Empty except briefly at startup.

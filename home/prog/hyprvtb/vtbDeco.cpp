@@ -1552,7 +1552,7 @@ void CVtbDeco::pasteIntoEdit() {
 
     // shared context carried across the (possibly repeated) readable callbacks
     struct SPasteCtx {
-        WP<CVtbDeco>                   self;
+        CDecoRef                       self;
         Hyprutils::OS::CFileDescriptor fd;
         std::string                    acc;
     };
@@ -1578,12 +1578,10 @@ void CVtbDeco::pasteIntoEdit() {
                 return;
             }
             // EOF (n == 0) or a hard error: commit whatever we got, if the deco
-            // is still alive and still editing this field.
-            // NB: ctx->self is a weak-over-UNIQUE (Hyprland owns the deco via a
-            // UP), so .lock() is illegal under hyprutils 0.14.0 (asserts, and
-            // returns empty regardless). Reach the live object via operator->,
-            // gated by !expired() — exactly lock()'s old liveness predicate.
-            if (!ctx->self.expired() && ctx->self->m_bEditing && !ctx->acc.empty())
+            // is still alive and still editing this field. CDecoRef has no
+            // lock() to reach for (see globals.hpp) — alive() + operator-> is
+            // the whole vocabulary.
+            if (ctx->self.alive() && ctx->self->m_bEditing && !ctx->acc.empty())
                 ctx->self->insertEditText(ctx->acc);
             return;
         }
@@ -2946,11 +2944,10 @@ void CVtbDeco::stepRollAnim() {
                 // hold clock now and do the window work on the next loop turn.
                 m_bRollReveal  = true;
                 m_rollRevealAt = now;
-                WP<CVtbDeco> self = m_self;
+                CDecoRef self = m_self;
                 g_pEventLoopManager->doLater([self]() {
-                    // weak-over-UNIQUE: .lock() asserts under hyprutils 0.14.0,
-                    // so gate on !expired() and reach via operator-> instead.
-                    if (!self.expired())
+                    // CDecoRef: alive() + operator->, no lock() to get wrong.
+                    if (self.alive())
                         self->beginRollReveal();
                 });
                 return; // stay in ROLL_OUT; the hold elapses over the next frames
@@ -2964,11 +2961,10 @@ void CVtbDeco::stepRollAnim() {
         // reorders the window, none of which is safe to do mid render-stage. The
         // frame(s) until it fires render the terminal look (progress==1), which
         // is visually identical to the settled state, so there's no seam.
-        WP<CVtbDeco> self = m_self;
+        CDecoRef self = m_self;
         g_pEventLoopManager->doLater([self]() {
-            // weak-over-UNIQUE: .lock() asserts under hyprutils 0.14.0, so gate
-            // on !expired() and reach via operator-> instead.
-            if (!self.expired())
+            // CDecoRef: alive() + operator->, no lock() to get wrong.
+            if (self.alive())
                 self->finishRollAnim();
         });
     }
