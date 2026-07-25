@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, inputs, ... }:
 
 {
   home.packages = with pkgs; [
@@ -28,7 +28,10 @@
       fi
       exec ${open-webui}/bin/open-webui "$@"
     '')
-    claude-code
+    # claude-code, off numtide/llm-agents.nix instead of nixpkgs so it tracks
+    # Anthropic's releases (nixpkgs' copy lags days behind). system is derived
+    # from pkgs so this resolves on both `top` (x86_64) and `air` (aarch64).
+    inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
     # No built-in way to prune old Claude Code sessions (~/.claude/projects/*.jsonl)
     # or finished background agents (~/.claude/jobs/*); this adds an interactive
     # `claude-sessions` picker (sessions | tasks | restore | empty-trash) that
