@@ -60,6 +60,7 @@ Window {
             { id: "up", label: "^", state: view.path === "/" ? 2 : 0, tip: "up a directory" },
             sort("name", "n", "sort by name"),
             sort("created", "c", "sort by created date"),
+            sort("modified", "m", "sort by modified date"),
             sort("size", "s", "sort by size"),
             { id: "new",    label: "+",  state: 0,                             tip: "new file or folder" },
             { id: "rename", label: "r",  state: selOne,                        tip: "rename selected" },
@@ -585,8 +586,16 @@ Window {
                     id: modifiedText
                     width: 146
                     elide: Text.ElideRight
-                    anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    anchors { right: createdText.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
                     text: "m: " + view.fmtRel(row.modelData.modified)
+                    color: !win.active ? Theme.inactive : Theme.textDim
+                }
+                PixelText {
+                    id: createdText
+                    width: 146
+                    elide: Text.ElideRight
+                    anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    text: "c: " + view.fmtRel(row.modelData.created)
                     color: !win.active ? Theme.inactive : Theme.textDim
                 }
 
