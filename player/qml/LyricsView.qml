@@ -78,6 +78,7 @@ Item {
         visible: root.lyricsData.synced
         clip: true
         model: root.lyricsData.synced ? root.lyricsData.lines : []
+        interactive: false     // scrollbar + wheel only — no drag-flicking
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll {}
 
@@ -112,6 +113,7 @@ Item {
         visible: !root.lyricsData.synced && root.lyricsData.text.length > 0
         clip: true
         contentHeight: plainText.implicitHeight
+        interactive: false     // scrollbar + wheel only — no drag-flicking
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll {}
 
@@ -126,6 +128,15 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             color: Theme.textDim
         }
+    }
+
+    WheelScroll {
+        anchors.fill: lyricsList
+        view: lyricsList.visible ? lyricsList : null
+    }
+    WheelScroll {
+        anchors.fill: plainFlick
+        view: plainFlick.visible ? plainFlick : null
     }
 
     PixelText {

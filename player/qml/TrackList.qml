@@ -10,6 +10,10 @@ Item {
     property alias model: list.model
     property bool showArtist: true
     property bool showNumber: true
+    // false where the owner sizes itself to hold every row (the gallery's
+    // inline album section): no scrollbar, and wheel notches pass through to
+    // whatever is behind, so the page underneath scrolls instead.
+    property bool scrollable: true
     property int currentTrackId: Player.current.id !== undefined ? Player.current.id : -1
     signal played(int index)
 
@@ -17,8 +21,9 @@ Item {
         id: list
         anchors.fill: parent
         clip: true
+        interactive: false     // scrollbar + wheel only — no drag-flicking
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: VScroll {}
+        ScrollBar.vertical: VScroll { visible: root.scrollable }
 
         delegate: Rectangle {
             id: row
@@ -101,5 +106,9 @@ Item {
                 onDoubleClicked: root.played(index)
             }
         }
+    }
+
+    WheelScroll {
+        view: root.scrollable ? list : null
     }
 }

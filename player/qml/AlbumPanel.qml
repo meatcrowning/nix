@@ -30,14 +30,12 @@ Item {
     readonly property int metaX: pad + artSide + 12
     readonly property int metaW: Math.max(80, stacked ? width - metaX - pad
                                                       : Math.min(260, width - metaX - 212))
-    // The list's own height when stacked; side by side it just fills the panel.
-    readonly property int listH: Math.max(60, Math.min(stacked ? 220 : 406,
-                                                       AlbumTracksModel.count * rowH + 6))
+    // The section shows EVERY track — it never scrolls internally, it just
+    // gets as tall as the album needs and the gallery scrolls past it.
+    readonly property int listH: Math.max(20, AlbumTracksModel.count * rowH + 6)
 
-    // Tall enough for the art, and for the track list up to a sane cap — a
-    // 30-track album shouldn't push the whole gallery off screen.
     implicitHeight: stacked ? pad + artSide + 8 + listH + 8
-                            : Math.max(232, Math.min(430, 24 + AlbumTracksModel.count * rowH))
+                            : Math.max(232, listH + 16)
 
     onAlbumIdChanged: load()
     Component.onCompleted: load()
@@ -157,6 +155,7 @@ Item {
         height: Math.max(1, root.height - y - 8)
         model: AlbumTracksModel
         showArtist: false
+        scrollable: false      // the panel is sized to hold every row
         onPlayed: function(index) { Player.playAlbum(root.albumId, index); }
     }
     PixelText {
