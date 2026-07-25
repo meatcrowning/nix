@@ -171,7 +171,8 @@ class Titlebar(QObject):
                 out.append("-")  # spacer
             else:
                 out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
-                            str(b.get("tip", ""))))
+                            str(b.get("tip", "")), bool(b.get("drag", False)),
+                            bool(b.get("bottom", False))))
         self._client.set_buttons(out)
 
     @Slot(str)
@@ -955,6 +956,7 @@ class Player(QObject):
     shuffleChanged = Signal()
     loopChanged = Signal()
     volumeChanged = Signal()
+    seeked = Signal(float)  # explicit seeks only (not per-tick) — MPRIS Seeked
 
     _sigPos = Signal(float)
     _sigDur = Signal(float)
@@ -1233,6 +1235,7 @@ class Player(QObject):
             self._mpv.command("seek", secs, "absolute")
             self._position = secs
             self.positionChanged.emit()
+            self.seeked.emit(secs)
         except Exception:
             pass
 
@@ -1812,10 +1815,15 @@ def start_mpris(player, app):
         server.interfaces = (server.root, server.player)
         events = EventAdapter(root=server.root, player=server.player)
         player.playingChanged.connect(events.on_playpause)
+        # on_title emits the Metadata PropertiesChanged consumers actually
+        # watch — without it the panel widget shows a stale track (it never
+        # re-polls; busctl-style fresh reads hid this).
+        player.currentChanged.connect(events.on_title)
         player.currentChanged.connect(events.on_playback)
         player.shuffleChanged.connect(events.on_options)
         player.loopChanged.connect(events.on_options)
         player.volumeChanged.connect(events.on_volume)
+        player.seeked.connect(lambda s: events.on_seek(int(s * 1_000_000)))
         server.publish()
         return server
     except Exception as e:
