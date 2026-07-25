@@ -391,7 +391,9 @@ local mainMod = "SUPER" -- Sets "Windows" key as main modifier
 hl.bind(mainMod .. " + Q", hl.dsp.exec_cmd(terminal), { description = "Open terminal" })
 -- Close via the hyprvtb close path (roll-up + fade close animation, exactly as
 -- if the titlebar [x] were clicked) instead of Hyprland's plain window.close.
-local closeWindowBind = hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("hyprctl dispatch hyprvtbclose"), { description = "Close window" })
+local closeWindowBind = hl.bind(mainMod .. " + C", function()
+    hl.plugin.hyprvtb.close_active()
+end, { description = "Close window" })
 -- closeWindowBind:set_enabled(false)
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager), { description = "File manager" })
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
@@ -440,9 +442,10 @@ hl.bind(mainMod .. " + CTRL + up",    hl.dsp.window.move({ direction = "up" }), 
 hl.bind(mainMod .. " + CTRL + down",  hl.dsp.window.move({ direction = "down" }),  { description = "Move window" })
 
 -- meta + R rolls the active window's hyprvtb titlebar up/down (shade) — the
--- same toggle the titlebar's roll-up button issues, reachable from the
--- keyboard via the plugin's hyprvtbroll dispatcher.
-hl.bind(mainMod .. " + R", hl.dsp.exec_cmd("hyprctl dispatch hyprvtbroll"), { description = "Roll window up/down" })
+-- same toggle the titlebar's roll-up button issues (plugin's rollup lua fn).
+hl.bind(mainMod .. " + R", function()
+    hl.plugin.hyprvtb.rollup()
+end, { description = "Roll window up/down" })
 
 -- Workspace switching removed: this desktop is locked to ONE workspace.
 -- Windows are managed through the panel taskbar (program icons) and the
