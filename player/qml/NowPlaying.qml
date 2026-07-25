@@ -168,6 +168,7 @@ Item {
     // ---- middle: lyrics — zero width until the current track has some ----
     LyricsView {
         id: lyricsView
+        objectName: "lyricsPane"
         anchors.right: sep1.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom

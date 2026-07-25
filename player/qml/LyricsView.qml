@@ -10,18 +10,18 @@ Item {
     id: root
     property int trackId: -1
     property bool active: true    // only fetch while the pane is on screen
-    property var data: ({ source: "", synced: false, lines: [], text: "" })
+    property var lyricsData: ({ source: "", synced: false, lines: [], text: "" })
     property int currentLine: -1
     // Whether there is anything to show — the now-playing view collapses this
     // pane entirely when a track has no lyrics.
-    readonly property bool hasContent: data.synced || data.text.length > 0
+    readonly property bool hasContent: lyricsData.synced || lyricsData.text.length > 0
 
     onTrackIdChanged: refetch()
     onActiveChanged: if (active) refetch()
 
     function refetch() {
         currentLine = -1;
-        data = { source: "", synced: false, lines: [], text: "" };
+        lyricsData = { source: "", synced: false, lines: [], text: "" };
         if (active && trackId >= 0)
             Library.requestLyrics(trackId);
     }
@@ -30,16 +30,16 @@ Item {
         target: Lyrics
         function onReady(tid, result) {
             if (tid === root.trackId)
-                root.data = result;
+                root.lyricsData = result;
         }
     }
 
     // Follow playback: binary-search the current line for the position.
     Connections {
         target: Player
-        enabled: root.active && root.data.synced
+        enabled: root.active && root.lyricsData.synced
         function onPositionChanged() {
-            var lines = root.data.lines;
+            var lines = root.lyricsData.lines;
             if (!lines || lines.length === 0)
                 return;
             var pos = Player.position;
@@ -61,8 +61,8 @@ Item {
         id: head
         x: 8
         y: 8
-        text: "lyrics" + (root.data.source && root.data.source !== "none"
-                          ? "  ·  " + root.data.source : "")
+        text: "lyrics" + (root.lyricsData.source && root.lyricsData.source !== "none"
+                          ? "  ·  " + root.lyricsData.source : "")
         color: Theme.textDim
     }
 
@@ -75,9 +75,9 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 8
-        visible: root.data.synced
+        visible: root.lyricsData.synced
         clip: true
-        model: root.data.synced ? root.data.lines : []
+        model: root.lyricsData.synced ? root.lyricsData.lines : []
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll {}
 
@@ -101,13 +101,14 @@ Item {
 
     // ---- plain ----
     Flickable {
+        id: plainFlick
         anchors.top: head.bottom
         anchors.topMargin: 4
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 8
-        visible: !root.data.synced && root.data.text.length > 0
+        visible: !root.lyricsData.synced && root.lyricsData.text.length > 0
         clip: true
         contentHeight: plainText.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
@@ -115,8 +116,11 @@ Item {
 
         PixelText {
             id: plainText
-            width: parent.width
-            text: root.data.text
+            // NOT parent.width: parent is the Flickable's contentItem, whose
+            // width stays 0 when only contentHeight is set — bind to the
+            // Flickable itself (minus the scrollbar).
+            width: plainFlick.width - 12
+            text: root.lyricsData.text
             wrapMode: Text.Wrap
             color: Theme.textDim
         }
@@ -124,8 +128,8 @@ Item {
 
     PixelText {
         anchors.centerIn: parent
-        visible: !root.data.synced && root.data.text.length === 0
-        text: root.trackId < 0 ? "" : (root.data.source === "none" ? "no lyrics found" : "…")
+        visible: !root.lyricsData.synced && root.lyricsData.text.length === 0
+        text: root.trackId < 0 ? "" : (root.lyricsData.source === "none" ? "no lyrics found" : "…")
         color: Theme.dim
     }
 }
