@@ -19,6 +19,12 @@
 # is a wholly separate compositor: it never touches the live session, its own
 # windows, or its plugin instance.
 #
+# The nested compositor runs with HOME pointed at a scratch dir. That is not
+# hygiene, it is correctness: the plugin keeps its per-class geometry and its
+# session snapshot under $HOME/.local/state/hyprvtb, so without it a smoke run
+# would restore the real saved session into the nested compositor and then
+# overwrite the real session.tsv with the nested window set (ask me how I know).
+#
 # Usage: ./nested-smoke.sh [path/to/libhyprvtb.so]
 # Default plugin: whatever the last `nixos-rebuild switch` installed.
 
@@ -44,10 +50,21 @@ case "$WAYLAND_DISPLAY" in
 esac
 
 cleanup() {
-  [ -n "${HYPRPID:-}" ] && kill "$HYPRPID" 2>/dev/null
-  sleep 0.5
+  # Kill by CONFIG PATH, not by $! — the Hyprland launcher hands off to a
+  # child, so killing the pid we started leaves the compositor running. That
+  # mistake stacked up ten orphaned nested sessions before it was noticed. The
+  # path is unique per run, so this can never touch the live session.
+  pkill -9 -f "Hyprland -c $RUN/hyprland.lua" 2>/dev/null
   [ -n "${HYPRPID:-}" ] && kill -9 "$HYPRPID" 2>/dev/null
+  sleep 0.5
   rm -rf "$RUN"
+  # The nested compositor appears to the LIVE session as a window of class
+  # "aquamarine", so the live plugin remembers per-class geometry for it when
+  # it closes. Drop that entry — it is an artefact of the test, not the desktop.
+  G="$HOME/.local/state/hyprvtb/geometry.tsv"
+  if [ -f "$G" ] && grep -q '^aquamarine	' "$G"; then
+    grep -v '^aquamarine	' "$G" > "$G.tmp" && mv "$G.tmp" "$G"
+  fi
 }
 trap cleanup EXIT
 
@@ -78,8 +95,10 @@ LUA
 
 step "starting a nested Hyprland (a window on this session, ~20s)"
 BEFORE=$(hyprctl instances -j 2>/dev/null | grep -o '"instance": *"[^"]*"' | cut -d'"' -f4 | sort)
+mkdir -p "$RUN/home"
 env -u HYPRLAND_INSTANCE_SIGNATURE \
     WAYLAND_DISPLAY="$PARENT_WL" \
+    HOME="$RUN/home" \
     Hyprland -c "$RUN/hyprland.lua" >"$LOGDIR/hyprland.log" 2>&1 &
 HYPRPID=$!
 
@@ -112,27 +131,47 @@ else
 fi
 
 step "opening a window (it must get decorated)"
-hc dispatch "hl.dsp.exec('kitty --class hyprvtb-smoke')" >/dev/null 2>&1 || \
-  hc dispatch exec "kitty --class hyprvtb-smoke" >/dev/null 2>&1
+# hl.exec_cmd is the Lua spawn entry point (there is no hl.dsp.exec), and it
+# has to go through `eval` — `dispatch` wants a dispatcher object back.
+hc eval "hl.exec_cmd('kitty --class hyprvtb-smoke')" >/dev/null
 for _ in $(seq 1 40); do
   sleep 0.5
-  ADDR=$(hc clients -j | grep -B20 'hyprvtb-smoke' | grep -o '"address": *"[^"]*"' | head -1 | cut -d'"' -f4)
+  ADDR=$(hc clients -j | jq -r '.[]|select(.class=="hyprvtb-smoke" and .mapped)|.address' | head -1)
   [ -n "$ADDR" ] && break
 done
 [ -n "$ADDR" ] || { bad "the test window never mapped"; tail -30 "$LOGDIR/hyprland.log"; exit 1; }
 ok "window $ADDR"
 
-alive() { kill -0 "$HYPRPID" 2>/dev/null && hc version >/dev/null 2>&1; }
+# Float it: roll-up, minimize, maximize and the edge-resize halo all bail on a
+# tiled window (see CVtbDeco::toggleRollup), and the nested compositor tiles by
+# default where the real session floats everything. Without this the roll calls
+# below return successfully having done nothing at all.
+hc dispatch "hl.dsp.window.float({ action = 'toggle' })" >/dev/null
+sleep 1
+if [ "$(hc clients -j | jq -r --arg a "$ADDR" '.[]|select(.address==$a)|.floating')" = "true" ]; then
+  ok "window is floating"
+else
+  bad "could not float the test window — the roll tests below would be vacuous"
+  exit 1
+fi
+
+alive()  { kill -0 "$HYPRPID" 2>/dev/null && hc version >/dev/null 2>&1; }
+# A rolled-up (shaded) window is genuinely hidden, not resized — so `hidden`
+# is the observable that says the roll actually happened, rather than "the
+# call returned and nothing crashed".
+hidden() { [ "$(hc clients -j | jq -r --arg a "$ADDR" '.[]|select(.address==$a)|.hidden')" = "true" ]; }
 
 step "roll up (the v2.48 abort path: deferred callback over a deco weak ref)"
 hc eval "hl.plugin.hyprvtb.rollup('address:$ADDR')" >/dev/null
 sleep 2
 alive && ok "compositor survived the roll-up" || bad "compositor died during roll-up"
+hidden && ok "window is hidden (it really rolled up)" || bad "window is not hidden — the roll did not happen"
 
 step "roll back out (open-reveal -> beginRollReveal doLater)"
 hc eval "hl.plugin.hyprvtb.rollup('address:$ADDR')" >/dev/null
 sleep 2
 alive && ok "compositor survived the roll-out" || bad "compositor died during roll-out"
+hidden && bad "window is still hidden — it never rolled back out" || ok "window is visible again"
 
 step "session save"
 hc eval "hl.plugin.hyprvtb.save_session()" >/dev/null
@@ -140,9 +179,31 @@ sleep 1
 alive && ok "compositor survived save_session" || bad "compositor died during save_session"
 
 step "graceful close (the animated close path)"
+# close_active works on the FOCUSED window, and a rolled-up window is hidden
+# (hence unfocusable) — so this has to run with the window rolled back out,
+# which the roll-out step above left it as, refocused by toggleRollup.
 hc eval "hl.plugin.hyprvtb.close_active()" >/dev/null
 sleep 2
 alive && ok "compositor survived the close" || bad "compositor died during the close"
+# The close is animated: roll the window up, fade the bar out, THEN sendClose.
+# The roll-up half is observable at once (the window goes hidden) and is what
+# this asserts. The fade half only advances while the compositor renders, and a
+# nested compositor whose window is occluded on the parent gets no frame
+# callbacks — so the client actually exiting is checked but only warned about.
+if hidden; then
+  ok "close animation started (window hidden)"
+else
+  bad "close_active did nothing — the window never even rolled up"
+fi
+for _ in 1 2 3 4 5 6 7 8; do
+  sleep 1
+  hc clients -j | jq -e --arg a "$ADDR" 'any(.[]; .address==$a)' >/dev/null || break
+done
+if hc clients -j | jq -e --arg a "$ADDR" 'any(.[]; .address==$a)' >/dev/null; then
+  printf '   \033[33mnote\033[0m the client had not exited after 8s — expected when the nested\n         window is occluded (no frames -> the fade never finishes)\n'
+else
+  ok "window is gone (the close ran end to end)"
+fi
 
 step "log check"
 if grep -qiE 'ASSERTION FAILED|Aborting|terminate called|Segmentation fault|safe mode' "$LOGDIR/hyprland.log"; then
