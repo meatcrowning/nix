@@ -1481,9 +1481,12 @@ void CVtbDeco::pasteIntoEdit() {
             }
             // EOF (n == 0) or a hard error: commit whatever we got, if the deco
             // is still alive and still editing this field.
-            const auto DECO = ctx->self.lock();
-            if (DECO && DECO->m_bEditing && !ctx->acc.empty())
-                DECO->insertEditText(ctx->acc);
+            // NB: ctx->self is a weak-over-UNIQUE (Hyprland owns the deco via a
+            // UP), so .lock() is illegal under hyprutils 0.14.0 (asserts, and
+            // returns empty regardless). Reach the live object via operator->,
+            // gated by !expired() — exactly lock()'s old liveness predicate.
+            if (!ctx->self.expired() && ctx->self->m_bEditing && !ctx->acc.empty())
+                ctx->self->insertEditText(ctx->acc);
             return;
         }
     };
@@ -2847,8 +2850,10 @@ void CVtbDeco::stepRollAnim() {
                 m_rollRevealAt = now;
                 WP<CVtbDeco> self = m_self;
                 g_pEventLoopManager->doLater([self]() {
-                    if (auto d = self.lock())
-                        d->beginRollReveal();
+                    // weak-over-UNIQUE: .lock() asserts under hyprutils 0.14.0,
+                    // so gate on !expired() and reach via operator-> instead.
+                    if (!self.expired())
+                        self->beginRollReveal();
                 });
                 return; // stay in ROLL_OUT; the hold elapses over the next frames
             }
@@ -2863,8 +2868,10 @@ void CVtbDeco::stepRollAnim() {
         // is visually identical to the settled state, so there's no seam.
         WP<CVtbDeco> self = m_self;
         g_pEventLoopManager->doLater([self]() {
-            if (auto d = self.lock())
-                d->finishRollAnim();
+            // weak-over-UNIQUE: .lock() asserts under hyprutils 0.14.0, so gate
+            // on !expired() and reach via operator-> instead.
+            if (!self.expired())
+                self->finishRollAnim();
         });
     }
 }
