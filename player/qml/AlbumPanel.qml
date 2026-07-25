@@ -4,8 +4,11 @@ import QtQuick
 // holding the clicked cover (AlbumGrid instantiates one for the open row and
 // grows that row to fit it) — it carries what the old separate album page did:
 // big art, album/artist/year, play + queue actions, and the album's tracks.
-// Tracks come from AlbumTracksModel, loaded by Library.openAlbum before the
-// panel is shown.
+//
+// The panel LOADS ITS OWN tracks (Library.openAlbum fills the shared
+// AlbumTracksModel) rather than trusting whoever opened it to have done so —
+// it is created on every open, including a delegate rebuilt after scrolling
+// away and back, so the track list can never come up empty/stale.
 Item {
     id: root
     property int albumId: 0
@@ -15,18 +18,27 @@ Item {
     // Tall enough for the art, and for the track list up to a sane cap — a
     // 30-track album shouldn't push the whole gallery off screen.
     readonly property int rowH: Theme.fontSize + 2
-    implicitHeight: Math.max(212, Math.min(430, 24 + AlbumTracksModel.count * rowH))
+    implicitHeight: Math.max(232, Math.min(430, 24 + AlbumTracksModel.count * rowH))
 
-    onAlbumIdChanged: refresh()
-    Component.onCompleted: refresh()
+    onAlbumIdChanged: load()
+    Component.onCompleted: load()
 
-    function refresh() {
-        if (albumId > 0)
-            info = Library.albumInfo(albumId);
+    property int _loadedId: 0
+
+    function load() {
+        // Both the initial binding and onCompleted land here — load once.
+        if (albumId <= 0 || albumId === _loadedId)
+            return;
+        _loadedId = albumId;
+        Library.openAlbum(albumId);   // fills AlbumTracksModel for this album
+        info = Library.albumInfo(albumId);
     }
     Connections {
         target: Library
-        function onScanStatus() { root.refresh(); }  // art may have just landed
+        function onScanStatus() {     // art / tracks may have just landed
+            if (root.albumId > 0)
+                root.info = Library.albumInfo(root.albumId);
+        }
     }
 
     Rectangle {
@@ -120,7 +132,14 @@ Item {
         }
     }
 
+    PixelText {
+        anchors.centerIn: tracks
+        visible: AlbumTracksModel.count === 0
+        text: "no tracks"
+        color: Theme.dim
+    }
     TrackList {
+        id: tracks
         anchors.left: meta.right
         anchors.leftMargin: 12
         anchors.right: parent.right
