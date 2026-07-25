@@ -66,6 +66,26 @@ void vtbSaveGeometry() {
         f << cls << '\t' << (int)box.x << ' ' << (int)box.y << ' ' << (int)box.w << ' ' << (int)box.h << '\n';
 }
 
+// A remembered position can outlive the layout it was recorded on — a monitor
+// that got unplugged, a resolution change, or a window that was dragged mostly
+// off-screen before it was closed. Restoring it verbatim puts the window
+// somewhere the user can never see or grab it (and, because onCloseWindow
+// re-saves whatever box the window had, that state round-trips forever). Pull
+// the restored position back onto the target monitor's usable area; windows
+// wider/taller than the monitor just pin to its top-left.
+static CBox clampToMonitor(const CBox& box, PHLWINDOW w) {
+    const auto PMONITOR = w && w->m_monitor ? w->m_monitor.lock() : Hl::focusedMonitor();
+    if (!PMONITOR)
+        return box;
+
+    const CBox usable = PMONITOR->m_reservedArea.apply(CBox{PMONITOR->m_position, PMONITOR->m_size});
+
+    CBox       out    = box;
+    out.x             = box.w <= usable.w ? std::clamp(box.x, usable.x, usable.x + usable.w - box.w) : usable.x;
+    out.y             = box.h <= usable.h ? std::clamp(box.y, usable.y, usable.y + usable.h - box.h) : usable.y;
+    return out;
+}
+
 // The slide-in scratchpad terminal's window class (defined here, ahead of the
 // scratchpad section, because the session snapshot below also skips it).
 static constexpr const char* SCRATCH_CLASS = "hyprvtb-scratch";
@@ -362,7 +382,7 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
         const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
         if (IT != g_pGlobalState->savedGeometry.end()) {
             Config::Actions::resize(IT->second.size(), false, window);
-            Config::Actions::move(IT->second.pos(), false, window);
+            Config::Actions::move(clampToMonitor(IT->second, window).pos(), false, window);
         }
 
         // Play the open reveal: only titlebar fades in, then the window rolls out
@@ -831,7 +851,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.60"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.61"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
