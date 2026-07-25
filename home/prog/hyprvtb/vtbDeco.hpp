@@ -74,6 +74,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                               minimizeWindow();
     void                               toggleMaximize();
     void                               toggleRollup(bool animate = true);
+    void                               closeWindow(); // titlebar [x] / hyprvtbclose dispatcher: roll-up + fade close animation
     void                               startOpenReveal(); // open animation: fade titlebar in, then roll out to reveal + focus
 
     // Called from main.cpp's window.active listener: focusing a minimized
@@ -313,7 +314,6 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 updateEdgeResize();
     void                 endEdgeResize();
 
-    void                 closeWindow();
     void                 togglePin();
     void                 restoreFromMinimize();
     CBox                 maximizeTarget();
