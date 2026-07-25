@@ -7,8 +7,9 @@ import QtQuick.Window
 // ALL chrome lives in the hyprvtb titlebar (the same bridge viewer uses):
 // transport (<< >/|| >> shuffle repeat), the view switcher (a/p/n), the sort
 // cycler, a search toggle whose bar slides in from the titlebar edge, and a
-// bottom-anchored rescan — no in-window header row. Window close is the outer
-// titlebar's standard [x]. Everything flows through the context properties
+// bottom-anchored settings button whose drawer slides out from that edge
+// (rescan + the gallery's column count) — no in-window header row. Window
+// close is the outer titlebar's standard [x]. Everything flows through the context properties
 // main.py installs: Library (the Bridge), Player, the *Model list models,
 // Prefs, Titlebar.
 Window {
@@ -27,6 +28,21 @@ Window {
     property string sortMode: Prefs.get("sort", "orig_year")
     property string scanStatus: ""
     property bool scanning: false
+
+    // ---- settings drawer (the bottom-anchored "st" titlebar button) ----
+    property bool settingsOpen: false
+    readonly property int minAlbumCols: 2
+    readonly property int maxAlbumCols: 12
+    property int albumCols: Math.max(minAlbumCols, Math.min(maxAlbumCols,
+                                     Number(Prefs.get("albumCols", 7)) || 7))
+
+    function setAlbumCols(n) {
+        n = Math.max(minAlbumCols, Math.min(maxAlbumCols, Math.round(n)));
+        if (n === albumCols)
+            return;
+        albumCols = n;            // the grid retiles off this binding, live
+        Prefs.set("albumCols", n);
+    }
 
     readonly property bool act: win.active
 
@@ -118,7 +134,7 @@ Window {
         function onScanRunning(on) { win.scanning = on; }
     }
 
-    // ---- hyprvtb titlebar: transport + views + sort + search + rescan ----
+    // ---- hyprvtb titlebar: transport + views + sort + search + settings ----
     readonly property var tbButtons: {
         const has = Player.queueLength > 0 ? 0 : 2;
         const sortLabel = sortMode === "orig_year" ? "yr" : (sortMode === "artist" ? "ar" : "al");
@@ -138,7 +154,7 @@ Window {
             "-",
             { id: "sort",      label: sortLabel, state: 0, tip: sortTip },
             { id: "search",    label: "/", state: win.searchOpen ? 1 : 0, tip: "search" },
-            { id: "rescan",    label: "rs", state: win.scanning ? 2 : 0, tip: "rescan library", bottom: true },
+            { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings", bottom: true },
         ];
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
@@ -182,7 +198,7 @@ Window {
             case "now":       win.setView("now");                 break;
             case "sort":      win.cycleSort();                    break;
             case "search":    win.searchOpen ? win.closeSearch() : win.openSearch(); break;
-            case "rescan":    Library.rescan();                   break;
+            case "settings":  win.settingsOpen = !win.settingsOpen; break;
             }
         }
         function onSeek(frac) { Player.seekFrac(frac); }
@@ -199,6 +215,7 @@ Window {
             visible: win.view === "albums"
             filtered: searchInput.text !== ""
             expandedAlbumId: win.openAlbumId
+            cols: win.albumCols
             onOpened: function(albumId) { win.openAlbum(albumId); }
             onSearchArtist: function(artist) {
                 win.openSearch();
@@ -272,6 +289,21 @@ Window {
         }
     }
 
+    // ---- settings drawer, slid out by the bottom "st" titlebar button ----
+    SettingsPanel {
+        anchors.fill: parent
+        z: 70
+        open: win.settingsOpen
+        columns: win.albumCols
+        minColumns: win.minAlbumCols
+        maxColumns: win.maxAlbumCols
+        scanStatus: win.scanStatus
+        scanning: win.scanning
+        onCloseRequested: win.settingsOpen = false
+        onColumnsRequested: function(n) { win.setAlbumCols(n); }
+        onRescanRequested: Library.rescan()
+    }
+
     // Mouse back/forward buttons navigate the view history. Only these two
     // buttons are accepted, so every other press passes to the views.
     MouseArea {
@@ -319,7 +351,8 @@ Window {
         sequence: "Escape"
         enabled: !searchInput.activeFocus
         onActivated: {
-            if (win.searching || win.searchOpen) win.closeSearch();
+            if (win.settingsOpen) win.settingsOpen = false;
+            else if (win.searching || win.searchOpen) win.closeSearch();
             else if (win.openAlbumId > 0) win.openAlbum(0);   // close the inline section
         }
     }
