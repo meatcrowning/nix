@@ -1544,8 +1544,16 @@ void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEven
         const double scl = MON ? MON->m_scale : 1.0;
         SVtbAppReg   reg;
         CBox         track;
-        const auto   LOCAL = g_pInputManager->getMouseCoordsInternal() - assignedBoxGlobal().pos();
-        if (PW && VtbIpc::get(appPid(), reg) && reg.playbar &&
+        const auto   MOUSE = g_pInputManager->getMouseCoordsInternal();
+        const auto   LOCAL = MOUSE - assignedBoxGlobal().pos();
+        // ...and only when the track is the topmost thing at the cursor: a
+        // shaded bar draws under every window, and an unshaded bar can have
+        // another window stacked over it — either way the wheel belongs to
+        // what's on top, not the track underneath.
+        const bool   occluded = m_bRolledUp
+              ? shadeOccludedAt(MOUSE)
+              : g_pCompositor->vectorToWindowUnified(MOUSE, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING) != PW;
+        if (PW && !occluded && VtbIpc::get(appPid(), reg) && reg.playbar &&
             playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) &&
             VECINRECT(LOCAL, track.x, track.y, track.w, track.h)) {
             info.cancelled    = true; // scrub, don't hand the wheel to the app
@@ -1769,6 +1777,51 @@ bool CVtbDeco::inputIsValid() {
         return false;
 
     return true;
+}
+
+// Whether the point over this SHADED bar is covered by something drawn above
+// it. The shade bar renders at RENDER_PRE_WINDOWS — beneath every visible
+// window and beneath top/overlay layer surfaces — so any of those at the
+// cursor occludes it and owns the event; among overlapping shade bars, later
+// entries in the bars list paint later (on top), so a later rolled bar
+// covering the point wins too. Without this test a hidden bar accepted any
+// press/hover inside its box: it ate clicks aimed at a webpage above it, and
+// a grab on an overlap of two titlebars dragged both windows at once.
+bool CVtbDeco::shadeOccludedAt(const Vector2D& mouse) {
+    if (g_pCompositor->vectorToWindowUnified(mouse, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING))
+        return true;
+
+    const auto PMONITOR = g_pCompositor->getMonitorFromVector(mouse);
+    if (PMONITOR) {
+        PHLLS    foundSurface = nullptr;
+        Vector2D surfaceCoords;
+        g_pCompositor->vectorToLayerSurface(mouse, &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &foundSurface);
+        if (foundSurface)
+            return true;
+        g_pCompositor->vectorToLayerSurface(mouse, &PMONITOR->m_layerSurfaceLayers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &foundSurface);
+        if (foundSurface)
+            return true;
+    }
+
+    bool after = false;
+    for (auto& b : g_pGlobalState->bars) {
+        if (!b)
+            continue;
+        if (b.get() == this) {
+            after = true;
+            continue;
+        }
+        if (!after || !b->m_bRolledUp || b->m_rollAnim != ROLL_NONE)
+            continue;
+        const auto PW = b->m_pWindow.lock();
+        if (!PW || (!PW->m_pinned && (!PW->m_workspace || !PW->m_workspace->isVisible())))
+            continue;
+        const auto BAR   = b->effectiveBoxGlobal();
+        const auto LOCAL = mouse - (BAR.pos() + PW->m_floatingOffset);
+        if (VECINRECT(LOCAL, 0, 0, BAR.w, BAR.h))
+            return true;
+    }
+    return false;
 }
 
 Vector2D CVtbDeco::cursorRelativeToBar() {
@@ -2113,8 +2166,11 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         const auto     HIT = effectiveBoxGlobal();
         const auto     PW  = m_pWindow.lock();
         const Vector2D OFF = PW ? PW->m_floatingOffset : Vector2D();
-        const auto     LOCAL = g_pInputManager->getMouseCoordsInternal() - (HIT.pos() + OFF);
-        const int      cell  = VECINRECT(LOCAL, 0, 0, HIT.w, HIT.h) ? cellAt(LOCAL) : -1;
+        const auto     MOUSE = g_pInputManager->getMouseCoordsInternal();
+        const auto     LOCAL = MOUSE - (HIT.pos() + OFF);
+        // no hover feedback through whatever's drawn over the bar (matches the
+        // press path's occlusion test — the visible thing on top owns the point)
+        const int      cell  = VECINRECT(LOCAL, 0, 0, HIT.w, HIT.h) && !shadeOccludedAt(MOUSE) ? cellAt(LOCAL) : -1;
         if (cell != m_iHoverCell) {
             m_iHoverCell = cell;
             m_hoverSince = Time::steadyNow(); // the main-thread tick pops the tooltip after the dwell
@@ -2433,6 +2489,14 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     const auto LOCAL = MOUSE - (BAR.pos() + PWINDOW->m_floatingOffset);
     if (!VECINRECT(LOCAL, 0, 0, BAR.w, BAR.h))
         return; // not on the bar — let the click pass through to what's behind
+
+    // On the bar's box, but the bar itself draws UNDER every visible window —
+    // if one is stacked over this point (another titlebar, a webpage), it's
+    // what the user sees and clicked; swallowing the press here co-dragged
+    // both windows / stole the page's clicks. Same for a shade bar drawn over
+    // ours. Decline and let the event reach the thing on top.
+    if (shadeOccludedAt(MOUSE))
+        return;
 
     info.cancelled   = true;
     m_bCancelledDown = true;
