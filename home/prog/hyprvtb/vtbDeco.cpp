@@ -89,7 +89,7 @@ static float rollEaseInOut(float t) {
 // One column's width (the bar_width config value) and the full double-wide
 // bar. The system column starts at colW() in bar-local coordinates.
 static int colW() {
-    return g_pGlobalState->config.barWidth->value();
+    return Cfg::barWidth();
 }
 static int totalBarW() {
     return colW() * 2;
@@ -243,7 +243,7 @@ CVtbDeco::~CVtbDeco() {
 }
 
 SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
-    const auto                 ENABLED = g_pGlobalState->config.enabled->value();
+    const auto                 ENABLED = Cfg::enabled();
 
     SDecorationPositioningInfo info;
     info.policy   = DECORATION_POSITION_STICKY;
@@ -325,7 +325,7 @@ CBox CVtbDeco::memorableGeometry() {
 }
 
 void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
-    if (!validMapped(m_pWindow) || !g_pGlobalState->config.enabled->value())
+    if (!validMapped(m_pWindow) || !Cfg::enabled())
         return;
 
     const auto PWINDOW = m_pWindow.lock();
@@ -354,8 +354,8 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 // used for the title (outer column) and the app footer (inner column).
 SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outTextH, int* outLines,
                                                 bool ellipsis) {
-    const auto FONT  = g_pGlobalState->config.font->value();
-    const int  SIZE  = std::round(g_pGlobalState->config.fontSize->value() * scale);
+    const auto FONT  = Cfg::font();
+    const int  SIZE  = std::round(Cfg::fontSize() * scale);
     const int  BARW  = std::round(colW() * scale);
 
     if (runLenPx < SIZE || text.empty())
@@ -436,8 +436,8 @@ SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprCol
     if (it != m_glyphCache.end() && it->second)
         return it->second;
 
-    const auto FONT = g_pGlobalState->config.font->value();
-    const int  SIZE = std::round(g_pGlobalState->config.fontSize->value() * scale);
+    const auto FONT = Cfg::font();
+    const int  SIZE = std::round(Cfg::fontSize() * scale);
 
     auto       tex = Hl::renderText(glyph, color, SIZE, false, FONT, 0);
     m_glyphCache[key] = tex;
@@ -513,12 +513,12 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     const auto SCALE   = pMonitor->m_scale;
     const bool FOCUSED = PWINDOW == Hl::focusedWindow();
 
-    auto       bgColor       = configColor(g_pGlobalState->config.bgColor->value());
-    auto       bgAltColor    = configColor(g_pGlobalState->config.bgAltColor->value());
-    auto       borderColor   = configColor(g_pGlobalState->config.buttonBorderColor->value());
-    auto       accentColor   = configColor(g_pGlobalState->config.accentColor->value());
-    auto       critColor     = configColor(g_pGlobalState->config.critColor->value());
-    auto       inactiveColor = configColor(g_pGlobalState->config.inactiveColor->value());
+    auto       bgColor       = configColor(Cfg::bgColor());
+    auto       bgAltColor    = configColor(Cfg::bgAltColor());
+    auto       borderColor   = configColor(Cfg::buttonBorderColor());
+    auto       accentColor   = configColor(Cfg::accentColor());
+    auto       critColor     = configColor(Cfg::critColor());
+    auto       inactiveColor = configColor(Cfg::inactiveColor());
     bgColor.a *= a;
     bgAltColor.a *= a;
     // NB: borderColor is NOT pre-multiplied by `a` here — drawCellXY applies `a`
@@ -719,7 +719,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             // surface, so nothing is drawn below the bar
             const std::string SHOWN = m_editBuf.empty() ? std::string(" ") : m_editBuf.substr(visStart);
             m_pEditTex   = renderStackedTex(SHOWN, RUNLEN, SCALE, textColor, &th, &lines, /*ellipsis=*/false);
-            m_iEditLineH = lines > 0 ? th / lines : std::round(g_pGlobalState->config.fontSize->value() * SCALE);
+            m_iEditLineH = lines > 0 ? th / lines : std::round(Cfg::fontSize() * SCALE);
             m_iEditLines = lines;
             // the selected substring (bg colour, drawn over the accent block so
             // those rows invert), clamped to the visible window: it starts at
@@ -1130,16 +1130,16 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     if (TEXT.empty() || CY < 0)
         return;
 
-    auto bgColor   = configColor(g_pGlobalState->config.bgColor->value());
-    auto accent    = configColor(g_pGlobalState->config.accentColor->value());
-    auto textCol   = configColor(g_pGlobalState->config.textColor->value());
+    auto bgColor   = configColor(Cfg::bgColor());
+    auto accent    = configColor(Cfg::accentColor());
+    auto textCol   = configColor(Cfg::textColor());
 
     const float E = easeOutCubic(m_ttPhase); // eased slide amount (no fade — it emerges from behind the bar)
     bgColor.a *= a;
     accent.a *= a;
 
-    const auto FONT = g_pGlobalState->config.font->value();
-    const int  SIZE = std::round(g_pGlobalState->config.fontSize->value() * SCALE);
+    const auto FONT = Cfg::font();
+    const int  SIZE = std::round(Cfg::fontSize() * SCALE);
     const auto KEY  = TEXT + "|" + std::format("{:08x}", textCol.getAsHex());
 
     auto       it  = m_tooltipCache.find(KEY);
@@ -1233,7 +1233,7 @@ void CVtbDeco::drawTooltipPass(PHLMONITOR pMonitor, float a) {
 // main.cpp's RENDER_POST_WINDOWS hook; no-ops unless a tooltip is showing for
 // a window on this monitor.
 void CVtbDeco::enqueueTooltip(PHLMONITOR pMonitor) {
-    if (!m_bTooltipShown || !g_pGlobalState || !g_pGlobalState->config.enabled->value())
+    if (!m_bTooltipShown || !g_pGlobalState || !Cfg::enabled())
         return;
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW || !pMonitor || PWINDOW->m_monitor.lock() != pMonitor)
@@ -1373,9 +1373,9 @@ void CVtbDeco::prewarmGlyphs() {
     const float SCALE   = PMONITOR->m_scale;
     const bool  FOCUSED = PWINDOW == Hl::focusedWindow();
 
-    const auto accentColor   = configColor(g_pGlobalState->config.accentColor->value());
-    const auto inactiveColor = configColor(g_pGlobalState->config.inactiveColor->value());
-    const auto bgColor       = configColor(g_pGlobalState->config.bgColor->value());
+    const auto accentColor   = configColor(Cfg::accentColor());
+    const auto inactiveColor = configColor(Cfg::inactiveColor());
+    const auto bgColor       = configColor(Cfg::bgColor());
     const auto textColor     = FOCUSED ? accentColor : inactiveColor;
 
     SVtbAppReg reg;
@@ -1580,7 +1580,7 @@ void CVtbDeco::pasteIntoEdit() {
 size_t CVtbDeco::editByteAtLocalY(double localY) {
     const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
     const double lineH = (m_iEditLineH > 0) ? m_iEditLineH / scale
-                                            : (double)g_pGlobalState->config.fontSize->value();
+                                            : (double)Cfg::fontSize();
     const int displayRow = (int)std::floor((localY - titleTopEff()) / std::max(1.0, lineH));
     const int nCp = countCp(m_editBuf, m_editBuf.size());
     // the on-screen rows start at m_editScrollCp, so add it back to the click row
@@ -1597,7 +1597,7 @@ int CVtbDeco::editVisibleRows() {
     const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
     const double avail = (effectiveBoxGlobal().h - titleTopEff() - VTB_PAD) * scale;
     const double lineH = m_iEditLineH > 0 ? (double)m_iEditLineH
-                                          : (g_pGlobalState->config.fontSize->value() * scale);
+                                          : (Cfg::fontSize() * scale);
     return std::max(1, (int)std::floor(avail / std::max(1.0, lineH)));
 }
 
@@ -1826,7 +1826,7 @@ void CVtbDeco::onKeyboardKey(Event::SCallbackInfo& info, const IKeyboard::SKeyEv
 // ---- input ----------------------------------------------------------------
 
 bool CVtbDeco::inputIsValid() {
-    if (!g_pGlobalState->config.enabled->value())
+    if (!Cfg::enabled())
         return false;
 
     if (!m_pWindow->m_workspace || !m_pWindow->m_workspace->isVisible() || Hl::inputExclusive() ||
@@ -1938,7 +1938,7 @@ int CVtbDeco::cellAt(const Vector2D& c) {
 // The visual frame: window + our (double-wide) bar, wrapped by one border.
 static CBox frameBox(PHLWINDOW w) {
     CBox box = Hl::boxValue(w);
-    if (g_pGlobalState->config.enabled->value())
+    if (Cfg::enabled())
         box.w += totalBarW();
     return box;
 }
@@ -2712,7 +2712,7 @@ CBox CVtbDeco::maximizeTarget() {
     if (!PMONITOR)
         return {};
 
-    const auto GAP    = g_pGlobalState->config.maximizeGap->value();
+    const auto GAP    = Cfg::maximizeGap();
     const auto BARW   = totalBarW();
     // Inset by the border width so the window frame stays visible against
     // the screen edges / panel when maximized.
@@ -3125,7 +3125,7 @@ void CVtbDeco::toggleRollup(bool animate) {
 // also drives the roll-up / roll-out animation clock. Skips monitors/workspaces
 // the shade isn't showing on.
 void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
-    if (!g_pGlobalState || !g_pGlobalState->config.enabled->value())
+    if (!g_pGlobalState || !Cfg::enabled())
         return;
     if (!m_bRolledUp && m_rollAnim == ROLL_NONE)
         return;
@@ -3318,7 +3318,7 @@ SDecorationPositioningInfo CVtbShadowDeco::getPositioningInfo() {
     // Declare the shadow's reach so a moving window's damage box includes it:
     // left + bottom for the L-overhang, and right for the titlebar strip the
     // shadow now spans (so its under-bar bottom edge doesn't trail on moves).
-    const double BARW = g_pGlobalState && g_pGlobalState->config.enabled->value() ? (double)totalBarW() : 0.0;
+    const double BARW = g_pGlobalState && Cfg::enabled() ? (double)totalBarW() : 0.0;
     info.desiredExtents = {{(double)VTB_SHADOW_SIZE, 0.0}, {BARW, (double)VTB_SHADOW_SIZE}};
     return info;
 }
@@ -3328,7 +3328,7 @@ void CVtbShadowDeco::onPositioningReply(const SDecorationPositioningReply& reply
 }
 
 void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
-    if (!validMapped(m_pWindow) || !g_pGlobalState || !g_pGlobalState->config.enabled->value())
+    if (!validMapped(m_pWindow) || !g_pGlobalState || !Cfg::enabled())
         return;
 
     const auto PWINDOW = m_pWindow.lock();
@@ -3403,7 +3403,7 @@ void CVtbShadowDeco::damageEntire() {
     const auto PWINDOW = m_pWindow.lock();
     CBox       g = Hl::boxValue(PWINDOW);
     const double N    = VTB_SHADOW_SIZE;
-    const double BARW = g_pGlobalState && g_pGlobalState->config.enabled->value() ? (double)totalBarW() : 0.0;
+    const double BARW = g_pGlobalState && Cfg::enabled() ? (double)totalBarW() : 0.0;
     // window box grown by the shadow's left + bottom overhang, plus the titlebar
     // strip on the right (the shadow now spans it too)
     Hl::damage(CBox{g.x - N, g.y, g.w + N + BARW, g.h + N});

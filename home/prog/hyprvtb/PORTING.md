@@ -26,6 +26,18 @@ compiles cleanly. v2.48 was this: hyprutils 0.14.0 added an assert forbidding
 `lock()`, so the illegal call cannot be written. Shared-owned refs
 (`PHLWINDOWREF`, monitors, keyboards) are unaffected and use `.lock()` normally.
 
+**What the seam covers, and what it deliberately doesn't.** Four `checkPhase`
+greps hold the line: no volatile internal outside `vtbCompat.hpp`, no
+`#define private` anywhere, no raw `WP<CVtbDeco>`, no
+`config.foo->value()` outside the `Cfg::` accessors in `globals.hpp`. Two
+surfaces the plan flagged turned out to need no work: all drawing already goes
+through `CVtbPassElement` (the `Hl::rect`/`Hl::texture` calls run inside its
+`draw()`, enqueued with `Hl::addPass`), and `layerSurfaceAt` genuinely requires
+the monitor's raw `m_layerSurfaceLayers` array — the hit-test API takes it as a
+parameter, so there is no better call to make. One did: the `#define private
+public` InputManager hack is gone, because `hasHeldButtons()` is public and is
+literally `return !m_currentlyHeldButtons.empty()`.
+
 **A note on dispatchers (Axis C).** Under this Hyprland's Lua config,
 `hyprctl dispatch X` evaluates `X` as a Lua expression, so a plugin dispatcher
 name registered with `addDispatcherV2` resolves to an undefined global and does

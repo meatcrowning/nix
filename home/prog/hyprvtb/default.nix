@@ -50,6 +50,16 @@ hyprlandPlugins.mkHyprlandPlugin {
       fail=1
     fi
 
+    if grep -rn --include=\*.cpp --include=\*.hpp -E '^[[:space:]]*#define[[:space:]]+private' .; then
+      echo "SEAM VIOLATION: no reaching into Hyprland classes through the preprocessor — find the public accessor (see PORTING.md)."
+      fail=1
+    fi
+
+    if grep -rn --include=\*.cpp --include=\*.hpp 'config\.[a-zA-Z]*->value()' . | grep -v '^\./globals\.hpp:'; then
+      echo "SEAM VIOLATION: read config through the Cfg:: accessors in globals.hpp (see PORTING.md)."
+      fail=1
+    fi
+
     if grep -rn --include=\*.cpp --include=\*.hpp 'WP<CVtbDeco>' . | grep -v '^\./globals\.hpp:'; then
       echo "SEAM VIOLATION: use CDecoRef, not a raw WP<CVtbDeco> — lock() over a unique-owned deco aborts the compositor (see PORTING.md)."
       fail=1
