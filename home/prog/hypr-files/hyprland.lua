@@ -111,7 +111,23 @@ end)
 -- (locked), which no layer-shell client could do; this replaced the old
 -- quickshell titlebars and the in-compositor geometry event stream that
 -- fed them.
-hl.plugin.load("/home/lam/.config/hypr/plugins/libhyprvtb.so")
+-- Load the RESOLVED /nix/store path, not the symlink — this is what makes
+-- `hyprctl reload` hot-swap a rebuilt plugin instead of needing a relog.
+-- Hyprland tracks config-loaded plugins by the literal path STRING passed
+-- here, and `CPluginSystem::updateConfigPlugins` early-returns unless that
+-- list CHANGES between reloads. Pass the symlink and the string is constant
+-- forever, so reload is a no-op and the stale .so stays mapped. Pass the
+-- resolved store path and every rebuild yields a new string, so reload does
+-- the swap itself: unload-old -> load-new -> re-parse (correct order, no
+-- orphaned instance, no `plugin:hyprvtb:col.*` key collision).
+local VTB_SO = "/home/lam/.config/hypr/plugins/libhyprvtb.so"
+local vtb_p  = io.popen("readlink -f " .. VTB_SO)
+local vtb_real
+if vtb_p then
+    vtb_real = vtb_p:read("l")
+    vtb_p:close()
+end
+hl.plugin.load((vtb_real and vtb_real ~= "") and vtb_real or VTB_SO)
 hl.config({
     plugin = {
         hyprvtb = {

@@ -155,24 +155,40 @@ before touching the plugin or the pin.
   the previous generation in mind. Bump a pin **on its own commit**, never
   alongside other changes.
 
-- **`hyprvtb` plugin (C++) reload after a source edit:** `git add` the changed
-  files (flake eval ignores untracked), `rbsys` to recompile (the symlink
-  `~/.config/hypr/plugins/libhyprvtb.so` repoints to the new store path), then
-  live-reload — but `hyprctl plugin load <the symlink>` does NOT pick up the new
-  build: `dlopen` caches by the path string, which never changes, so it returns
-  the stale mapping. Load the **resolved** store path instead:
-  `real=$(readlink -f ~/.config/hypr/plugins/libhyprvtb.so); hyprctl plugin
-  unload "$real"; hyprctl plugin load "$real"`. Bump the version string in
-  `main.cpp` per change and confirm `hyprctl plugin list` shows a **new
-  Handle + Version** and **exactly one** hyprvtb. Unload matches by exact path
-  string, so stale copies linger as a second plugin → double titlebars; to clear
-  them unload BOTH the symlink (what the LOGIN `hl.plugin.load` used — a
-  resolved-path unload won't match it) AND any old `/nix/store/*-hyprvtb-0.1/…/
-  libhyprvtb.so` (a prior resolved-path load; harmless no-ops if not loaded),
-  then re-check the count is 1. (`plugin list -j` gives handle+version but not
-  the path, so you can't unload by handle.) Reloading is safe (session save/
-  restore) but
-  briefly re-decorates every window.
+- **`hyprvtb` plugin (C++) reload after a source edit — `rbsys` then
+  `hyprctl reload`. That is the whole procedure. NO relog, and never
+  `hyprctl plugin load/unload`.** Bump the version string in `main.cpp` per
+  change, then confirm `hyprctl plugin list` shows the **new Version**,
+  **exactly one** hyprvtb, and `hyprctl configerrors` is empty. It briefly
+  re-decorates every window (the plugin does session save/restore, so this is
+  safe). If the tree is dirty, `git add` the changed files first — flake eval
+  ignores untracked ones.
+
+  This works because `hyprland.lua` passes `hl.plugin.load` the **resolved**
+  `/nix/store/...` path (via `readlink -f`), not the stable symlink. Hyprland
+  tracks config-loaded plugins by that literal path **string**, and
+  `CPluginSystem::updateConfigPlugins` early-returns unless the string list
+  *changes* between reloads. With the symlink the string was constant forever,
+  so `hyprctl reload` was a no-op and the stale `.so` stayed mapped — which is
+  what made everyone reach for manual `plugin load` and, historically, a relog.
+  With the resolved path, each `rbsys` yields a new string and Hyprland does the
+  swap itself, in the right order and with the right bookkeeping.
+
+  **Do not go back to manual `hyprctl plugin load`/`unload`.** It is the source
+  of every "hot reload is unstable" report:
+  - `loadPluginInternal` rejects a path that is already loaded, but a *different*
+    string for the same `.so` loads a **second instance**. The second one's
+    `registerPluginValue` calls then all fail with `name collision: already
+    registered`, so it owns no config keys.
+  - Unloading either instance runs `onPluginUnload`, which erases the
+    `plugin:hyprvtb:col.*` keys from `m_configValues` outright. Now nobody owns
+    them, the next parse of `hyprland.lua` throws `unknown config key`, the Error
+    Overlay trips and titlebars lose their colours. **`hyprctl reload` cannot fix
+    this** — only a plugin *load* re-registers keys, and the lua config manager
+    has no `m_failedPluginConfigValues` grace list like the legacy one.
+  - Unload matches by exact path string and `plugin list -j` does not print
+    paths, so a stale instance can become unreachable (its store path may even be
+    GC'd) — at which point a relog really is the only way out.
 
 - **`surfer`/`filer` (standalone PySide6 apps) run the LIVE source** at
   `~/nix/{surfer,filer}/main.py` — `.py`/`.qml` edits need NO rebuild, but there
