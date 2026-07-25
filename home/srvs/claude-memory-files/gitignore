@@ -1,0 +1,18 @@
+# ~/.claude/projects — ALLOWLIST. Managed by home/srvs/claude-memory.nix;
+# edits here are overwritten on the next sync. Change the nix source instead.
+#
+# This directory holds every Claude Code session transcript (*.jsonl), which is
+# large and contains whatever was on screen during that session. None of it may
+# leave the machine. So: ignore everything, then re-include ONLY the memory
+# directories. A new project, a new cache file or a stray download can never
+# widen what gets pushed — only a deliberate edit to this file can.
+*
+!*/
+!*/memory/**
+!.gitignore
+!.gitattributes
+!README.md
+
+# Per-worktree projects are ephemeral — their memories die with the worktree
+# and are worthless on the other machine.
+*--claude-worktrees-*/
