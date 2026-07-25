@@ -197,6 +197,20 @@ static std::string windowAddress(PHLWINDOW w) {
     return std::format("address:0x{:x}", (uintptr_t)w.get());
 }
 
+// Snap a window's position+size animations straight to their goal, stopping any
+// in-flight move/size animation. Used at the open-reveal hand-off: Hyprland
+// re-kicks the windowsIn open animation AFTER startOpenReveal's warp, so the
+// real window is still scaling up (a couple px short of goal) when the snapshot
+// is dropped — it then eased the last bit up over the animation's tail, which
+// read as the window "settling a hair smaller" right after it opened. Warping
+// here lands it at exactly the snapshot's geometry with no residual motion.
+static void settleGeometryToGoal(PHLWINDOW w) {
+    if (!w)
+        return;
+    w->positionAnimation()->setValueAndWarp(w->positionAnimation()->goal());
+    w->sizeAnimation()->setValueAndWarp(w->sizeAnimation()->goal());
+}
+
 CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
     m_pWindow = pWindow;
 
@@ -334,6 +348,16 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
     if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault())
         return;
 
+    // While a roll animation is running the render-stage hook (renderShadeIfRolled)
+    // owns ALL of our drawing — during the SLIDE the window is hidden so this
+    // draw() isn't called, but during the reveal-HOLD the window is un-hidden
+    // again while the hook keeps drawing, so letting draw() also fire here
+    // enqueued a SECOND renderPass. The opaque bar/snapshot/border doubled
+    // invisibly, but the 0.6-alpha drop shadow doubled to ~0.84 — a darker shadow
+    // for the tail of the roll that snapped back to normal on finish (the "flash").
+    if (m_rollAnim != ROLL_NONE)
+        return;
+
     auto data = CVtbPassElement::SVtbData{this, a};
     g_pHyprRenderer->m_renderPass.add(makeUnique<CVtbPassElement>(data));
 }
@@ -438,7 +462,66 @@ SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprCol
 
 // ---- drawing --------------------------------------------------------------
 
+// Entry point (from CVtbPassElement). At rest / mid-roll the bar draws straight
+// into the scene. But while the LONE bar is fading (open fade-in / close
+// fade-out) each layer would otherwise blend over the desktop independently —
+// the opaque black backing and the light glyphs/outlines fade at the same alpha
+// but composite differently, so the light button parts wash out against the
+// bright desktop until the backing is solid ("buttons lag the bar"). To fade the
+// bar as ONE image, render it opaque into an offscreen buffer and composite that
+// whole buffer once at the fade alpha. Confined to the fade: the direct path is
+// unchanged at rest and during the roll (which draws the live snapshot/shadow/
+// border that must blend against the real scene, not a flattened copy).
 void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
+    if (a >= 0.999f || m_rollAnim != ROLL_NONE || !pMonitor) {
+        renderBar(pMonitor, a);
+        return;
+    }
+
+    const Vector2D PX = pMonitor->m_size * pMonitor->m_scale;
+    if (PX.x < 1 || PX.y < 1) {
+        renderBar(pMonitor, a);
+        return;
+    }
+    const int FBW = (int)std::round(PX.x);
+    const int FBH = (int)std::round(PX.y);
+    if (!m_fadeFB)
+        m_fadeFB = g_pHyprRenderer->createFB("vtbFade");
+    if (m_fadeFB && ((int)m_fadeFB->m_size.x != FBW || (int)m_fadeFB->m_size.y != FBH))
+        m_fadeFB->alloc(FBW, FBH);
+    if (!m_fadeFB || !m_fadeFB->isAllocated()) {
+        renderBar(pMonitor, a); // couldn't get an offscreen buffer — fall back to direct (washes out a touch, but always draws)
+        return;
+    }
+
+    // Draw the bar opaque into the offscreen buffer. It's monitor-sized with the
+    // same projection, so renderBar's monitor-local device coords land unchanged.
+    {
+        const auto GUARD = g_pHyprRenderer->bindTempFB(m_fadeFB); // restores the prior FB on scope exit
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.f, 0.f, 0.f, 0.f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        renderBar(pMonitor, 1.f);
+    }
+
+    // Composite the whole flattened bar back into the scene at the fade alpha,
+    // clipped to the bar's footprint (the rest of the buffer is transparent, but
+    // clipping keeps the blend cheap). The texture is monitor-sized, so map it
+    // 1:1 by drawing it at the monitor's full device box.
+    CBox        full = {0.0, 0.0, (double)FBW, (double)FBH};
+    const CBox  DECOBOX = effectiveBoxGlobal();
+    CBox        footprint = {DECOBOX.x - pMonitor->m_position.x, DECOBOX.y - pMonitor->m_position.y, DECOBOX.w, DECOBOX.h};
+    footprint.translate(m_pWindow.expired() ? Vector2D() : m_pWindow.lock()->m_floatingOffset).scale(pMonitor->m_scale);
+    CHyprOpenGLImpl::STextureRenderData data;
+    data.a          = a;
+    // Expand past the bar box: the open-reveal outline (drawRollBorder) draws a few
+    // px OUTSIDE barBox, and the buffer is transparent beyond the bar anyway, so a
+    // generous clip just captures the outline without touching anything else.
+    data.clipRegion = CBox{footprint}.expand(VTB_SHADOW_SIZE).round();
+    g_pHyprOpenGL->renderTexture(m_fadeFB->getTexture(), full.round(), data);
+}
+
+void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW)
         return;
@@ -471,7 +554,13 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     // used to change tint during the early lift beat, out of sync with everything.
     float      rollSlideT = 0.f, rollDownT = 0.f;
     const bool ROLLANIM   = rollAnimSubProgress(rollSlideT, rollDownT);
-    if (ROLLANIM) {
+    if (m_bOpening) {
+        // Open reveal: the lone bar already faded in showing focused-accent labels,
+        // so the window is coming up focused — hold accent through the whole reveal.
+        // (Without this the ROLLANIM crossfade below restarts the tint at inactive
+        // the instant the roll begins, flashing the accent labels dark then back.)
+        textColor = accentColor;
+    } else if (ROLLANIM) {
         auto lerp = [](const CHyprColor& x, const CHyprColor& y, float t) {
             return CHyprColor{x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, x.a + (y.a - x.a) * t};
         };
@@ -870,7 +959,16 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     // NOT drawn on roll-UP: there the window ends hidden with no live border to
     // hand off to, so the last frame's outline had nothing to clear it and sat
     // stale until the bar was moved.
-    if (ROLLANIM && m_rollAnim == ROLL_OUT)
+    if (m_bOpening) {
+        // Open reveal: the outline is present the WHOLE reveal so it appears in step
+        // with the accent labels instead of popping in only once the roll starts.
+        // During the fade-in (ROLLANIM false) slideT is 1 → the border wraps just the
+        // lone bar; as the content rolls out it expands to wrap content+bar. Always
+        // accent (both endpoints accent → the crossfade is a no-op) since the window
+        // is coming up focused, then it hands off to the live window's accent border.
+        const float sT = ROLLANIM ? rollSlideT : 1.f;
+        drawRollBorder(barBox, SCALE, sT, accentColor, accentColor, a);
+    } else if (ROLLANIM && m_rollAnim == ROLL_OUT)
         drawRollBorder(barBox, SCALE, rollSlideT, accentColor, inactiveColor, a);
 
     // NOTE: the hover tooltip is NOT drawn here — this pass element is an
@@ -2890,6 +2988,7 @@ void CVtbDeco::beginRollReveal() {
     if (!PWINDOW)
         return;
     PWINDOW->setHidden(false);
+    settleGeometryToGoal(PWINDOW); // land at goal — kill the residual open-scale tail (see helper)
     Desktop::windowState()->raise(PWINDOW);
     Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
     // Re-register Hyprland's own decorations (border/shadow) for the freshly
@@ -2970,6 +3069,7 @@ void CVtbDeco::finishRollAnim() {
         if (PWINDOW) {
             if (!revived) {
                 PWINDOW->setHidden(false);
+                settleGeometryToGoal(PWINDOW); // land at goal — kill the residual open-scale tail (see helper)
                 Desktop::windowState()->raise(PWINDOW);
                 Desktop::focusState()->fullWindowFocus(PWINDOW, Desktop::FOCUS_REASON_CLICK);
                 PWINDOW->updateWindowDecos(); // re-add Hyprland's border/shadow (see beginRollReveal)
