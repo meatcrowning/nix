@@ -23,18 +23,20 @@ Item {
         delegate: Rectangle {
             id: row
             width: list.width
-            height: 20
+            height: Theme.fontSize + 2   // kitty-tight: one font cell + 1px each side
             color: rowMouse.containsMouse ? Theme.highlight : "transparent"
             readonly property bool isCurrent: trackId === root.currentTrackId
             readonly property color fg: !available ? Theme.inactive
                                         : (isCurrent ? Theme.accent : Theme.text)
 
+            // Text at integer y=1 in the cell-height row — packed like kitty
+            // lines, so per-title ascender ink can't read as uneven gaps.
             PixelText {
                 id: numText
                 visible: root.showNumber
                 x: 8
                 width: 30
-                anchors.verticalCenter: parent.verticalCenter
+                y: 1
                 text: track > 0 ? ((disc > 1 ? disc + "-" : "") + track) : ""
                 color: Theme.textDim
             }
@@ -43,16 +45,18 @@ Item {
                 anchors.leftMargin: root.showNumber ? 4 : 8
                 anchors.right: rightBits.left
                 anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
+                y: 1
                 text: title + (root.showArtist && artist ? "  —  " + artist : "")
-                elide: Text.ElideRight
+                clip: true
+                height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                 color: row.fg
             }
             Row {
                 id: rightBits
                 anchors.right: parent.right
                 anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
+                y: 1
+                height: 15
                 spacing: 8
 
                 PixelText {

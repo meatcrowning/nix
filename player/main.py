@@ -690,9 +690,10 @@ class Library(QObject):
     def __init__(self, tagwriter, parent=None):
         super().__init__(parent)
         self._con = open_db()
-        # One-time hygiene: purge cached lyrics that predate the embedded-tag
-        # size cap (whole scraped webpages) so they re-resolve cleanly.
-        self._con.execute("DELETE FROM lyrics WHERE length(body) > 6000")
+        # Cache hygiene at startup: purge oversized bodies (scraped-webpage
+        # tagger garbage) and ALL negative results — "no lyrics" retries
+        # online once per app session instead of sitting stale for a week.
+        self._con.execute("DELETE FROM lyrics WHERE length(body) > 6000 OR source='none'")
         self._con.commit()
         self._tagwriter = tagwriter
         self._scanner = None
@@ -1492,28 +1493,34 @@ class LyricsProvider(QObject):
             req = urllib.request.Request(url, headers=ua)
             with urllib.request.urlopen(req, timeout=10) as r:
                 return json.loads(r.read().decode("utf-8"))
+        # Multi-artist tags ("A & B", "A feat. B") rarely match LRCLIB's
+        # primary-artist entries — retry with the first artist alone.
+        primary = re.split(r"\s*(?:&|,|;|feat\.?|ft\.?|×|/)\s*", artist,
+                           maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        artists = [artist] + ([primary] if primary and primary != artist else [])
         try:
-            q = urllib.parse.urlencode({
-                "artist_name": artist, "track_name": title,
-                "album_name": row["album"] or "",
-                "duration": int(row["duration"] or 0)})
-            try:
-                d = get(base + "get?" + q)
-            except urllib.error.HTTPError as e:
-                if e.code != 404:
-                    raise
-                q = urllib.parse.urlencode({"artist_name": artist, "track_name": title})
-                results = get(base + "search?" + q)
-                dur = row["duration"] or 0
-                results = [r for r in results
-                           if not dur or abs((r.get("duration") or 0) - dur) <= 3]
-                d = results[0] if results else None
-            if not d:
-                return None, False
-            if d.get("syncedLyrics"):
-                return d["syncedLyrics"], True
-            if d.get("plainLyrics"):
-                return d["plainLyrics"], False
+            for a in artists:
+                q = urllib.parse.urlencode({
+                    "artist_name": a, "track_name": title,
+                    "album_name": row["album"] or "",
+                    "duration": int(row["duration"] or 0)})
+                try:
+                    d = get(base + "get?" + q)
+                except urllib.error.HTTPError as e:
+                    if e.code != 404:
+                        raise
+                    q = urllib.parse.urlencode({"artist_name": a, "track_name": title})
+                    results = get(base + "search?" + q)
+                    dur = row["duration"] or 0
+                    results = [r for r in results
+                               if not dur or abs((r.get("duration") or 0) - dur) <= 3]
+                    d = results[0] if results else None
+                if not d:
+                    continue
+                if d.get("syncedLyrics"):
+                    return d["syncedLyrics"], True
+                if d.get("plainLyrics"):
+                    return d["plainLyrics"], False
         except Exception:
             pass
         return None, False
