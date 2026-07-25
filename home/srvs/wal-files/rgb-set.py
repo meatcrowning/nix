@@ -13,12 +13,28 @@
 # Known controllers on `top` (informational, the loop below is generic):
 #   2x "ENE DRAM"                    — RAM sticks, 8 LEDs each (SMBus, slow-ish)
 #   "MSI PRO B650-VC WIFI (MS-7D78)" — JRGB1/2 + JRAINBOW1/2 headers
+import colorsys
 import fcntl
 import os
 import sys
 
 from openrgb import OpenRGBClient
 from openrgb.utils import RGBColor
+
+
+def vivid(hexstr):
+    """Saturate a palette colour for LED output.
+
+    The wal palette's accents are deliberate pastels (e.g. e6cc97 is ~90%
+    white) — right for text on screen, but on RGB LEDs a pastel renders as
+    a washed-out near-white "tint". Keep the hue, double the saturation
+    (capped), and push value to full so the lights show the theme's hue
+    vividly. Near-grey accents stay near-grey (2x of almost nothing).
+    """
+    r, g, b = (int(hexstr[i : i + 2], 16) / 255 for i in (0, 2, 4))
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    r, g, b = colorsys.hsv_to_rgb(h, min(1.0, s * 2.0), 1.0)
+    return RGBColor(round(r * 255), round(g * 255), round(b * 255))
 
 # ARGB (addressable) headers are write-only — OpenRGB can't detect how many
 # LEDs are chained on them and defaults the zone to 5, leaving everything
@@ -36,7 +52,7 @@ ZONE_RESIZE = {
 def main():
     if len(sys.argv) != 2:
         sys.exit("usage: rgb-set.py RRGGBB")
-    color = RGBColor.fromHEX(sys.argv[1])
+    color = vivid(sys.argv[1])
 
     # Serialise overlapping fires (rapid theme flips): same trick as
     # cursor-recolor.sh — queued runs each apply their own colour in order,
@@ -65,7 +81,7 @@ def main():
                 if want is not None and len(zone.leds) != want:
                     zone.resize(want)
             dev.set_color(color)
-            print(f"rgb-set: {dev.name} -> #{sys.argv[1]}")
+            print(f"rgb-set: {dev.name} -> #{sys.argv[1]} (vivid {color})")
         except Exception as e:
             print(f"rgb-set: {dev.name}: {e}")
 
