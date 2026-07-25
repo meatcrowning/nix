@@ -504,6 +504,14 @@ Window {
                 // queue it for the allow/block bar (win.askPermission)
                 onPermissionRequested: (permission) => win.askPermission(permission)
 
+                // alert() / confirm() / prompt() / beforeunload, and the file
+                // picker for <input type=file>. BOTH handlers are mandatory:
+                // unhandled, Chromium auto-rejects, so prompt() returns null,
+                // confirm() returns false, alert() vanishes and the picker never
+                // opens — silently, which reads as "the page is broken".
+                onJavaScriptDialogRequested: (request) => jsDialog.show(request)
+                onFileDialogRequested: (request) => filePicker.show(request)
+
                 // right-click: build a context menu from what was clicked (link,
                 // image, selection, editable field) plus the usual page actions,
                 // and show our own themed menu (win.showContextMenu) instead of
@@ -744,6 +752,17 @@ Window {
                 }
             }
         }
+    }
+
+    // page dialogs + file picker: modal overlays above the page (and above the
+    // dark-mode drawer), below the right-click menu.
+    JsDialog {
+        id: jsDialog
+        anchors.fill: parent
+    }
+    FilePicker {
+        id: filePicker
+        anchors.fill: parent
     }
 
     // reusable right-click menu — overlays the whole window, above everything.
