@@ -44,7 +44,7 @@ hyprlandPlugins.mkHyprlandPlugin {
         -e 'Desktop::viewState' -e 'Desktop::windowState' -e 'Desktop::focusState' \
         -e 'State::monitorState' -e 'Fullscreen::controller' -e 'Pointer::Cursor' \
         -e 'positionAnimation' -e 'sizeAnimation' -e 'm_layerSurfaceLayers' \
-        -e 'm_renderPass' -e 'm_renderData' \
+        -e 'm_renderPass' -e 'm_renderData' -e 'Config::mgr' -e 'g_pKeybindManager' \
         . | grep -v '^\./vtbCompat\.hpp:'; then
       echo "SEAM VIOLATION: volatile Hyprland internals belong in vtbCompat.hpp only (see PORTING.md)."
       fail=1
