@@ -15,6 +15,7 @@ Window {
     property bool searching: false
     property string sortMode: Prefs.get("sort", "orig_year")
     property string scanStatus: ""
+    property bool scanning: false
 
     readonly property bool act: win.active
 
@@ -58,6 +59,7 @@ Window {
     Connections {
         target: Library
         function onScanStatus(text) { win.scanStatus = text; }
+        function onScanRunning(on) { win.scanning = on; }
     }
 
     // ---- hyprvtb titlebar: transport ----
@@ -156,6 +158,11 @@ Window {
                 label: "sort: " + (win.sortMode === "orig_year" ? "year"
                                    : win.sortMode === "artist" ? "artist" : "album")
                 onClicked: win.cycleSort()
+            }
+            HeaderButton {
+                visible: !win.scanning
+                label: "rescan"
+                onClicked: Library.rescan()
             }
             PixelText {
                 text: win.scanStatus

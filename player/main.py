@@ -1580,6 +1580,7 @@ class Bridge(QObject):
     Library/Player and the views (which never see SQL or dicts-of-rows)."""
 
     scanStatus = Signal(str)
+    scanRunning = Signal(bool)
 
     def __init__(self, library, player, lyrics, parent=None):
         super().__init__(parent)
@@ -1606,12 +1607,17 @@ class Bridge(QObject):
         library.scanProgress.connect(
             lambda done, total: self.scanStatus.emit(f"scanning {done}/{total}"))
         library.scanSummary.connect(self._on_summary)
+        library.scanRunning.connect(self.scanRunning)
 
     def _on_summary(self, s):
         if not s.get("mounted", True):
             self.scanStatus.emit("library drive not mounted")
         else:
             self.scanStatus.emit("")
+
+    @Slot()
+    def rescan(self):
+        self._library.rescan()
 
     # ---- albums grid ----
 
@@ -1776,14 +1782,17 @@ def start_mpris(player, app):
         def seek(self, time, track_id=None): player.seek(time / 1_000_000)
         def open_uri(self, uri): pass
 
+        # mpris_server's LoopStatus getter: is_repeating = any repeat at all,
+        # is_playlist then picks Playlist over Track.
         def get_shuffle(self): return player.shuffle
         def set_shuffle(self, val): player.setShuffle(bool(val))
-        def is_repeating(self): return player.loop == Player.LOOP_TRACK
+        def is_repeating(self): return player.loop != Player.LOOP_NONE
         def is_playlist(self): return player.loop == Player.LOOP_ALL
         def set_repeating(self, val):
             player.setLoop(Player.LOOP_TRACK if val else Player.LOOP_NONE)
         def set_loop_status(self, val):
-            player.setLoop({"None": 0, "Track": 1, "Playlist": 2}.get(str(val), 0))
+            v = str(val).rsplit(".", 1)[-1].lower()
+            player.setLoop({"none": 0, "track": 1, "playlist": 2}.get(v, 0))
         def get_rate(self): return 1.0
         def set_rate(self, val): pass
         def get_volume(self): return player.volume / 100.0
