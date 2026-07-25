@@ -84,26 +84,7 @@ Window {
             case "rename": if (view.selection.length === 1) { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); } break;
             case "copy":   if (view.selection.length) view.clip = { op: "copy", paths: view.selection.slice() }; break;
             case "cut":    if (view.selection.length) view.clip = { op: "cut",  paths: view.selection.slice() }; break;
-            case "paste": {
-                if (view.clip === null) break;
-                const paths = view.clip.paths, cut = view.clip.op === "cut";
-                // Split into names that are free vs. already-taken at the target.
-                // Free ones go immediately; conflicts wait for an overwrite OK so
-                // a paste can never silently clobber an existing file.
-                const clear = [], conflicts = [];
-                for (let i = 0; i < paths.length; i++) {
-                    const src = paths[i];
-                    const dst = view.join(view.path, view.dirNameOf(src));
-                    (FileOps.pathExists(dst) ? conflicts : clear).push({ src: src, dst: dst });
-                }
-                view.runPaste(clear, cut, true);
-                if (conflicts.length) {
-                    view.pendingPaste = { items: conflicts, cut: cut };
-                    overwriteDlg.text = conflicts.length + " item(s) already exist here — overwrite?";
-                    overwriteDlg.open();
-                } else if (cut) view.clip = null;
-                break;
-            }
+            case "paste":  view.pasteInto(view.path); break;
             case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
             case "hidden": view.toggleHidden(); break;
             }
@@ -169,6 +150,27 @@ Window {
             }
         }
 
+        // Paste the clipboard into `dst`. Splits into names that are free vs.
+        // already-taken at the target: free ones go immediately; conflicts wait
+        // for an overwrite OK so a paste can never silently clobber a file.
+        // (Shared by the titlebar "p" button and the context menu.)
+        function pasteInto(dst) {
+            if (clip === null) return;
+            const paths = clip.paths, cut = clip.op === "cut";
+            const clear = [], conflicts = [];
+            for (let i = 0; i < paths.length; i++) {
+                const src = paths[i];
+                const d = join(dst, dirNameOf(src));
+                (FileOps.pathExists(d) ? conflicts : clear).push({ src: src, dst: d });
+            }
+            runPaste(clear, cut, true);
+            if (conflicts.length) {
+                pendingPaste = { items: conflicts, cut: cut };
+                overwriteDlg.text = conflicts.length + " item(s) already exist here — overwrite?";
+                overwriteDlg.open();
+            } else if (cut) clip = null;
+        }
+
         function clearSelection() { selection = []; selected = ""; anchor = ""; }
         function isSelected(p) { return selection.indexOf(p) >= 0; }
 
@@ -199,6 +201,70 @@ Window {
             if (mods & Qt.ShiftModifier) selectRange(p, isDir);
             else if (mods & Qt.ControlModifier) selectToggle(p, isDir);
             else selectSingle(p, isDir);
+        }
+        function selectAll() {
+            const ord = orderPaths();
+            selection = ord;
+            if (ord.length) { selected = ord[0]; anchor = ord[0]; }
+        }
+
+        // ---- context menu ----
+        // The entry (preview-grid image or tree row) under a view-space point,
+        // or null for empty space. Uses the views' own indexAt hit-testing, so
+        // the one right-click overlay covers tiles, rows and background alike.
+        function entryAt(x, y) {
+            if (hasImages) {
+                const g = view.mapToItem(pgrid, x, y);
+                if (g.x >= 0 && g.y >= 0 && g.x < pgrid.width && g.y < pgrid.height) {
+                    const i = pgrid.indexAt(g.x + pgrid.contentX, g.y + pgrid.contentY);
+                    return i >= 0 ? images[i] : null;
+                }
+            }
+            if (hasRows) {
+                const l = view.mapToItem(list, x, y);
+                if (l.x >= 0 && l.y >= 0 && l.x < list.width && l.y < list.height) {
+                    const i = list.indexAt(l.x + list.contentX, l.y + list.contentY);
+                    return i >= 0 ? rows[i] : null;
+                }
+            }
+            return null;
+        }
+
+        // Menu over an entry. Cut/copy/trash/delete act on the WHOLE selection
+        // (the overlay ensures the clicked entry is part of it); open/open with/
+        // paste-into target the entry itself. Rename needs exactly one selected.
+        function entryMenuItems(e) {
+            const one = selection.length === 1;
+            const n = selection.length > 1 ? " (" + selection.length + ")" : "";
+            return [
+                { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind) },
+                { label: "open with…", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
+                { separator: true },
+                { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },
+                { label: "copy" + n, trigger: () => { clip = { op: "copy", paths: selection.slice() }; } },
+                { label: e.isDir ? "paste into" : "paste", enabled: clip !== null,
+                  trigger: () => pasteInto(e.isDir ? e.path : path) },
+                { separator: true },
+                { label: "copy path", trigger: () => FileOps.copyText(selection.join("\n")) },
+                { label: "rename…", enabled: one,
+                  trigger: () => { renameDlg.value = dirNameOf(selected); renameDlg.open(); } },
+                { separator: true },
+                { label: "trash" + n, trigger: () => { FileOps.run(["gio", "trash", "--"].concat(selection), ""); clearSelection(); } },
+                { label: "delete…" + n, trigger: () => delDlg.open() },
+            ];
+        }
+
+        // Menu over empty space: dir-level actions.
+        function bgMenuItems() {
+            return [
+                { label: "new…", trigger: () => newDlg.open() },
+                { label: "paste", enabled: clip !== null, trigger: () => pasteInto(path) },
+                { separator: true },
+                { label: "select all", enabled: rows.length + images.length > 0, trigger: () => selectAll() },
+                { label: "copy path", trigger: () => FileOps.copyText(path) },
+                { separator: true },
+                { label: "open terminal here", trigger: () => FileOps.execDetached(["kitty", "--directory", path]) },
+            ];
         }
 
         // tree state: the flat list of currently-visible rows, plus the set of
@@ -615,9 +681,34 @@ Window {
             }
         }
 
+        // ---- right-click layer ----
+        // One overlay catches every right-click (RightButton ONLY — left
+        // presses, drags and wheel pass straight through to the views) and
+        // hit-tests via entryAt(): a tile/row gets the entry menu, blank space
+        // the dir menu. Right-clicking an unselected entry selects it first;
+        // right-clicking inside a multi-selection keeps it, so the menu's
+        // cut/copy/trash act on the whole set — the usual gesture. Disabled
+        // while a dialog is up (their scrims only swallow left-clicks).
+        MouseArea {
+            id: ctxArea
+            anchors.fill: parent
+            acceptedButtons: Qt.RightButton
+            enabled: !newDlg.visible && !renameDlg.visible && !openWithDlg.visible
+                     && !overwriteDlg.visible && !renameOverwriteDlg.visible && !delDlg.visible
+            onPressed: (m) => {
+                const e = view.entryAt(m.x, m.y);
+                if (e) {
+                    if (!view.isSelected(e.path)) view.selectSingle(e.path, e.isDir);
+                    else { view.selected = e.path; view.selectedIsDir = e.isDir; }
+                    ctxMenu.open(m.x, m.y, view.entryMenuItems(e));
+                } else {
+                    ctxMenu.open(m.x, m.y, view.bgMenuItems());
+                }
+            }
+        }
+        CtxMenu { id: ctxMenu; anchors.fill: parent }
+
         // ---- modal dialogs (simple centered prompts) ----
-        // (delDlg is kept for the delete action, which moves to the right-click
-        // menu — see the trash/delete split; it's wired there later.)
         BrowserPrompt {
             id: newDlg
             title: "new folder name"
@@ -666,12 +757,27 @@ Window {
             }
             onDismissed: view.pendingRename = null
         }
+        // "open with…": run the typed command with the right-clicked path
+        // appended (splitting the input on whitespace, so "mpv --loop" works).
+        BrowserPrompt {
+            id: openWithDlg
+            property string targetPath: ""
+            title: "open with (command)"
+            onAccepted: (t) => {
+                t = t.trim();
+                if (t) FileOps.execDetached(t.split(/\s+/).concat([openWithDlg.targetPath]));
+            }
+        }
+        // permanent delete (the context menu's "delete…"; trash is the safe
+        // default elsewhere). Acts on the whole selection.
         BrowserConfirm {
             id: delDlg
             danger: true
             confirmLabel: "delete"
-            text: "permanently delete?\n" + view.dirNameOf(view.selected)
-            onConfirmed: { FileOps.run(["rm", "-rf", "--", view.selected], ""); view.selected = ""; }
+            text: view.selection.length > 1
+                  ? "permanently delete " + view.selection.length + " items?"
+                  : "permanently delete?\n" + view.dirNameOf(view.selected)
+            onConfirmed: { FileOps.run(["rm", "-rf", "--"].concat(view.selection), ""); view.clearSelection(); }
         }
     }
 }

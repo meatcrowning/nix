@@ -363,6 +363,12 @@ class FileOps(QObject):
         """~ / ~user expansion for the address bar (os.path.expanduser)."""
         return os.path.expanduser(str(path))
 
+    @Slot(str)
+    def copyText(self, text):
+        """Put text on the system clipboard (the context menu's "copy path").
+        QML has no clipboard API of its own, so this bridges to Qt's."""
+        QGuiApplication.clipboard().setText(str(text))
+
     @Slot(str, result="QVariantList")
     def listDir(self, path):
         """One directory level, for the tree model. Returns a list of
