@@ -189,6 +189,7 @@ Window {
         AlbumGrid {
             anchors.fill: parent
             visible: win.view === "albums"
+            filtered: searchInput.text !== ""
             onOpened: function(albumId) { win.openAlbum(albumId); }
             onSearchArtist: function(artist) {
                 win.openSearch();
