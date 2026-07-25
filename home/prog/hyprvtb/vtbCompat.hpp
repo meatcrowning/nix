@@ -39,6 +39,7 @@
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/protocols/types/DataDevice.hpp>
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
@@ -140,6 +141,24 @@ namespace Vtb::Hl {
         return Fullscreen::controller()->isFullscreen(w);
     }
 
+    // Is the compositor running a Lua config (as opposed to the old
+    // hyprland.conf parser)? Only then are plugin Lua functions reachable.
+    //
+    // This one is here because a dry run of the next bump found it (see
+    // PORTING.md, "Does the seam actually hold?"): upstream main has already
+    // deleted CONFIG_LEGACY — CONFIG_LUA is the only member left — and the
+    // check was sitting in main.cpp, outside the seam.
+    //
+    // Phrased as "is it Lua?" rather than "is it not LEGACY?" on purpose:
+    // CONFIG_LUA is the member that survives, so this exact line compiles on
+    // 0.56 (LEGACY | LUA) and on versions that have dropped LEGACY, with no
+    // version gate. Same meaning either way. (`requires { Config::CONFIG_LEGACY; }`
+    // does NOT work for this — a missing name in a non-dependent scope is a
+    // hard error, not a failed constraint.)
+    inline bool luaConfig() {
+        return Config::mgr()->type() == Config::CONFIG_LUA;
+    }
+
     // ---- monitors ----------------------------------------------------------
 
     inline const std::vector<PHLMONITOR>& monitors() {
@@ -177,11 +196,6 @@ namespace Vtb::Hl {
     }
     inline void mouseBindMode(eMouseBindMode mode) {
         g_pKeybindManager->changeMouseBindMode(mode);
-    }
-    // Hand off to one of Hyprland's own dispatchers by name (the plugin uses
-    // "mouse" to enter a real move-drag, and "pin").
-    inline void dispatch(const std::string& name, const std::string& arg) {
-        g_pKeybindManager->m_dispatchers[name](arg);
     }
     inline void setCursorOverride(const std::string& shape) {
         Pointer::Cursor::overrideController->setOverride(shape, Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);

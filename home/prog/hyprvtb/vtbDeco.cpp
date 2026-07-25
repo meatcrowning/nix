@@ -178,10 +178,6 @@ static bool superHeld() {
 }
 
 
-static std::string windowAddress(PHLWINDOW w) {
-    return std::format("address:0x{:x}", (uintptr_t)w.get());
-}
-
 // Snap a window's position+size animations straight to their goal, stopping any
 // in-flight move/size animation. Used at the open-reveal hand-off: Hyprland
 // re-kicks the windowsIn open animation AFTER startOpenReveal's warp, so the
@@ -2350,7 +2346,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
 
     if (!VECINRECT(COORDS, 0, 0, BOX.w, BOX.h - 1)) {
         if (m_bDraggingThis)
-            Hl::dispatch("mouse", "0movewindow");
+            Config::Actions::mouse("0movewindow"); // end the move-drag (was the dispatcher map)
 
         m_bDraggingThis = false;
         m_bDragPending  = false;
@@ -2761,7 +2757,12 @@ void CVtbDeco::togglePin() {
     if (!PWINDOW || !PWINDOW->m_isFloating)
         return;
 
-    Hl::dispatch("pin", windowAddress(PWINDOW));
+    // Hyprland's own pin action, called directly. This used to go through the
+    // keybind manager's internal dispatcher map, looked up by the string
+    // "pin" and handed an address string — a map upstream has since deleted.
+    // The typed Config::Actions entry is the supported way in and takes the
+    // window itself.
+    Config::Actions::pinWindow(Config::Actions::TOGGLE_ACTION_TOGGLE, PWINDOW);
     damageEntire();
 }
 

@@ -73,6 +73,46 @@ The input is deliberately **not** `follows`-ed onto our nixpkgs: unmodified
 inputs are what make `hyprland.cachix.org` (added to `sys/base.nix`) hit, and
 overriding them would reintroduce the version skew the pin exists to remove.
 
+## Does the seam actually hold?
+
+Ask it whenever you like, without touching the pin or the running system:
+
+```
+./tools/bump-dry-run.sh            # against hyprwm/Hyprland main
+./tools/bump-dry-run.sh v0.57.0    # against a tag
+```
+
+It builds the plugin against that Hyprland and sorts the answer into three
+outcomes: builds clean (the bump is free), errors confined to `vtbCompat.hpp`
+(the seam held — port one file), or errors elsewhere (**a seam gap**: wrap
+those symbols and add them to the `checkPhase` grep *before* porting; closing
+the gap is the more valuable half of the work).
+
+The first run of this, against `main` five days ahead of the pin, found
+exactly two breakages — and it is worth knowing what they were, because they
+are the two shapes this always takes:
+
+- `CKeybindManager::m_dispatchers` **deleted**. Caught inside the seam, as
+  designed. The fix was better than a rename: the plugin was reaching into an
+  internal string-keyed map to invoke "mouse" and "pin", and both have typed,
+  supported entry points (`Config::Actions::mouse`, `Actions::pinWindow`) that
+  exist in 0.56 too. Deleting the access beat wrapping it.
+- `Config::CONFIG_LEGACY` **deleted** (Lua is the only config type now). This
+  one was in `main.cpp` — outside the seam. That is what a seam gap looks like:
+  it went into `vtbCompat.hpp` as `Hl::luaConfig()`, and `Config::mgr()` joined
+  the enforced grep.
+
+`Hl::luaConfig()` is also a small lesson in writing the seam so a version holds
+both ways: asking `type() == Config::CONFIG_LUA` compiles on 0.56 and on main,
+where `!= CONFIG_LEGACY` only compiles on one. Prefer the spelling that names
+the member which survives. (A `requires { Config::CONFIG_LEGACY; }` probe does
+NOT work — a missing name in a non-dependent scope is a hard error, not a
+failed constraint.)
+
+**As of v2.60 the plugin compiles unmodified against both the pinned v0.56.0
+and upstream `main`.** That is the whole thesis, demonstrated rather than
+asserted: the next bump is a tag edit and a smoke test, not a rewrite.
+
 ## Bump ritual
 
 1. Bump the tag in `flake.nix` **on its own** — never alongside other changes.
