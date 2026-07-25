@@ -12,6 +12,9 @@ Item {
     property bool active: true    // only fetch while the pane is on screen
     property var data: ({ source: "", synced: false, lines: [], text: "" })
     property int currentLine: -1
+    // Whether there is anything to show — the now-playing view collapses this
+    // pane entirely when a track has no lyrics.
+    readonly property bool hasContent: data.synced || data.text.length > 0
 
     onTrackIdChanged: refetch()
     onActiveChanged: if (active) refetch()

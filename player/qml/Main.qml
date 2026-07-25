@@ -163,6 +163,10 @@ Window {
             anchors.fill: parent
             visible: win.view === "albums"
             onOpened: function(albumId) { win.openAlbum(albumId); }
+            onSearchArtist: function(artist) {
+                win.openSearch();
+                searchInput.text = artist;   // filters the grid to that artist
+            }
         }
         AlbumDetail {
             anchors.fill: parent

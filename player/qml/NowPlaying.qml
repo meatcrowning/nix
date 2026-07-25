@@ -128,13 +128,13 @@ Item {
         color: Theme.border
     }
 
-    // ---- left: queue ----
+    // ---- left: queue (expands over the lyrics slot when a track has none) ----
     Item {
         id: queuePane
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        width: Math.max(260, (parent.width - side.width) * 0.45)
+        anchors.right: sep2.left
 
         PixelText {
             id: queueHead
@@ -157,19 +157,23 @@ Item {
 
     Rectangle {
         id: sep2
-        anchors.left: queuePane.right
+        anchors.right: lyricsView.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        width: 1
+        width: lyricsView.hasContent ? 1 : 0
+        visible: lyricsView.hasContent
         color: Theme.border
     }
 
-    // ---- middle: lyrics ----
+    // ---- middle: lyrics — zero width until the current track has some ----
     LyricsView {
-        anchors.left: sep2.right
-        anchors.top: parent.top
+        id: lyricsView
         anchors.right: sep1.left
+        anchors.top: parent.top
         anchors.bottom: parent.bottom
+        width: hasContent ? Math.max(300, (parent.width - side.width) * 0.5) : 0
+        visible: hasContent
+        clip: true
         trackId: root.cur.id !== undefined ? root.cur.id : -1
         active: root.visible
     }
