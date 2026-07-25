@@ -1,9 +1,5 @@
 #include "VtbPassElement.hpp"
-#include <hyprland/src/render/OpenGL.hpp>
-#include <hyprland/src/render/Renderer.hpp>
-#include "vtbDeco.hpp"
-
-using namespace Render::GL;
+#include "vtbDeco.hpp" // -> vtbCompat.hpp, the one place naming Hyprland internals
 
 CVtbPassElement::CVtbPassElement(const CVtbPassElement::SVtbData& data_) : data(data_) {
     ;
@@ -11,9 +7,9 @@ CVtbPassElement::CVtbPassElement(const CVtbPassElement::SVtbData& data_) : data(
 
 std::vector<UP<IPassElement>> CVtbPassElement::draw() {
     if (data.tooltipOnly)
-        data.deco->drawTooltipPass(g_pHyprRenderer->m_renderData.pMonitor.lock(), data.a);
+        data.deco->drawTooltipPass(Hl::renderMonitor(), data.a);
     else
-        data.deco->renderPass(g_pHyprRenderer->m_renderData.pMonitor.lock(), data.a);
+        data.deco->renderPass(Hl::renderMonitor(), data.a);
     return {};
 }
 
@@ -35,9 +31,9 @@ std::optional<CBox> CVtbPassElement::boundingBox() {
         const auto& t = data.deco->m_tooltipBox;
         if (!data.deco->m_bTooltipShown || t.w <= 0)
             return std::nullopt;
-        return CBox{t}.translate(-g_pHyprRenderer->m_renderData.pMonitor->m_position).expand(4);
+        return CBox{t}.translate(-Hl::renderMonitorPos()).expand(4);
     }
 
     CBox box = data.deco->effectiveBoxGlobal();
-    return box.translate(-g_pHyprRenderer->m_renderData.pMonitor->m_position).expand(4);
+    return box.translate(-Hl::renderMonitorPos()).expand(4);
 }
