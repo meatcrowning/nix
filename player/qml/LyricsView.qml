@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 
 // Lyrics pane. Synced (.lrc-style) lyrics scroll a ListView, the current line
 // lit in Theme.text and the rest dimmed, following Player.position; clicking
@@ -75,6 +76,7 @@ Item {
         clip: true
         model: root.data.synced ? root.data.lines : []
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: VScroll {}
 
         delegate: Item {
             width: lyricsList.width
@@ -106,6 +108,7 @@ Item {
         clip: true
         contentHeight: plainText.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: VScroll {}
 
         PixelText {
             id: plainText
