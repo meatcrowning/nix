@@ -1,8 +1,9 @@
 import QtQuick
 
-// Now playing, two ROWS. The top row is the cover art (its height is a
-// draggable, persisted fraction of the view). The bottom row is split into two
-// columns: the left carries the playing track's identity + transport controls +
+// Now playing, two ROWS. The top row is the cover art, edge to edge — it fills
+// the full width and meets the window's outline, no margins (its height is a
+// draggable, persisted fraction of the view; square covers crop, not
+// letterbox). The bottom row is split into two columns: the left carries the playing track's identity + transport controls +
 // seek bar, and under those the queue; the right column is the lyrics, which
 // collapses to zero width whenever the track has none. Lyrics are requested per
 // track change and delivered async by the LyricsProvider (embedded → .lrc →
@@ -34,19 +35,17 @@ Item {
 
         Rectangle {
             id: artBox
-            anchors.centerIn: parent
-            // Square, as large as the row allows — never zero-sized.
-            width: Math.max(1, Math.min(parent.height - 20, parent.width - 20))
-            height: width
+            // Edge to edge: the cover fills the whole top row, meeting the
+            // window's own outline — no letterbox margins around it. Square
+            // art is therefore cropped, not fitted.
+            anchors.fill: parent
             color: Theme.bgAlt
-            border.color: Theme.border
-            border.width: 1
+            clip: true
 
             Image {
                 anchors.fill: parent
-                anchors.margins: 1
                 source: root.cur.artPath ? "file://" + root.cur.artPath : ""
-                fillMode: Image.PreserveAspectFit
+                fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 sourceSize.width: 1024
                 sourceSize.height: 1024
