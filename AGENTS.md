@@ -50,17 +50,27 @@ C++ — compositor-side window titlebars + session save/restore).
 
 **Graceful session exit (logout / reboot / poweroff):** the power menu
 (`PowerMenu.qml`) runs `quickshell-files/scripts/session-exit.sh` *before* the
-power command for any `endSession` item. That script fires the hyprvtb
-dispatcher `hyprctl dispatch hyprvtbsaveclose`, which (1) snapshots the session
+power command for any `endSession` item. That script runs
+`hyprctl eval "hl.plugin.hyprvtb.save_close()"`, which (1) snapshots the session
 (`vtbSaveSession` → `~/.local/state/hyprvtb/session.tsv`) and (2) sends a
 graceful `sendClose()` to every decorated non-scratch window — i.e. "clicks the
 [x]" so each app saves its own state — then waits (bounded ~4s) for the windows
 to actually close before returning and letting the power action fire. On the
 next fresh login `vtbRestoreSession` relaunches every window at its saved
 geometry, so windows come back where they were. `sleep` is NOT an `endSession`
-item (windows stay across suspend). New plugin dispatchers are reachable via
-`hyprctl dispatch` even in the Lua-config build — only Lua-side `hl.dsp`
-classic-string *builtin* dispatch is restricted.
+item (windows stay across suspend).
+
+**Plugin actions are Lua functions, never dispatchers.** `addDispatcherV2` is
+useless under the Lua config: `hyprctl dispatch X` *evaluates X as a Lua
+expression* and then wants a dispatcher object back, so a plugin dispatcher
+name resolves to an undefined global and silently does nothing (the old
+`hyprctl dispatch hyprvtbsaveclose` in `session-exit.sh` was a no-op for its
+entire life — logout saved nothing and closed nothing gracefully; fixed in
+v2.54). Register with `HyprlandAPI::addLuaFunction`, call from keybinds as
+`hl.plugin.hyprvtb.<fn>()` and from scripts as
+`hyprctl eval "hl.plugin.hyprvtb.<fn>()"`. Compositor bumps and the pinned
+`hyprland` flake input are covered in `home/prog/hyprvtb/PORTING.md` — read it
+before touching the plugin or the pin.
 
 **Applying edits + reloading (READ THIS before editing panel/hypr config):**
 
