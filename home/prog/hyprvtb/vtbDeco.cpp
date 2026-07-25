@@ -807,7 +807,11 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
             g_pHyprOpenGL->renderRect(localBox(trkX, track.y, VTB_PLAYBAR_W, track.h), grooveC, {});
             auto fc = fillC;
             fc.a *= a;
-            g_pHyprOpenGL->renderRect(localBox(trkX, track.y, VTB_PLAYBAR_W, track.h * frac), fc, {});
+            // frac 0 (player paused at the very start of a track) makes this a
+            // zero-height box, and renderRect ABORTS the compositor on a
+            // degenerate rect — skip the fill until there is ≥1px to draw.
+            if (track.h * frac >= 1.0)
+                g_pHyprOpenGL->renderRect(localBox(trkX, track.y, VTB_PLAYBAR_W, track.h * frac), fc, {});
             // thumb: a wider notch at the fill boundary so the position reads and grabs
             const double thumbW = CELL * 0.55;
             double       thumbY = track.y + track.h * frac - VTB_PLAYBAR_THUMB_H / 2.0;
