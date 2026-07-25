@@ -18,6 +18,18 @@ import sys
 from openrgb import OpenRGBClient
 from openrgb.utils import RGBColor
 
+# ARGB (addressable) headers are write-only — OpenRGB can't detect how many
+# LEDs are chained on them and defaults the zone to 5, leaving everything
+# past LED 5 (CPU cooler, case fans, power button...) dark. Resize them to a
+# generous fixed count before colouring: LEDs beyond the physical end of the
+# chain simply ignore the data, so overshooting is harmless, while the real
+# hardware caps are 200 (JRAINBOW1) / 240 (JRAINBOW2). Resized on every run,
+# so nothing depends on the OpenRGB server persisting sizes.
+ZONE_RESIZE = {
+    "JRAINBOW1": 120,
+    "JRAINBOW2": 120,
+}
+
 
 def main():
     if len(sys.argv) != 2:
@@ -39,6 +51,10 @@ def main():
             mode = modes.get("direct") or modes.get("static")
             if mode is not None:
                 dev.set_mode(mode)
+            for zone in dev.zones:
+                want = ZONE_RESIZE.get(zone.name)
+                if want is not None and len(zone.leds) != want:
+                    zone.resize(want)
             dev.set_color(color)
             print(f"rgb-set: {dev.name} -> #{sys.argv[1]}")
         except Exception as e:
