@@ -31,10 +31,26 @@ Item {
     // model reset behind our back) lands on the exact same row again.
     onVisibleChanged: if (visible) list.requestRestore()
 
-    // Seven covers across, whatever the window width — covers scale so the
-    // rows stay flush left and right with 0px gaps.
-    readonly property int cols: 7
-    readonly property int cellW: Math.max(1, Math.floor(width / cols))
+    // N covers across, whatever the window width — covers scale so the rows
+    // stay flush left and right with 0px gaps. N comes from the settings
+    // drawer and can change live.
+    property int cols: 7
+    readonly property int safeCols: Math.max(1, cols)     // never divide by 0
+    readonly property int cellW: Math.max(1, Math.floor(width / safeCols))
+
+    // Retiling changes both the cell size and how many rows there are, so hold
+    // the album that was at the top of the viewport in place instead of
+    // letting contentY mean something completely different.
+    property int _lastCols: cols
+    onColsChanged: {
+        var oldCellW = Math.max(1, Math.floor(width / Math.max(1, _lastCols)));
+        var topAlbum = Math.floor(list.contentY / oldCellW) * _lastCols;
+        _lastCols = cols;
+        Qt.callLater(function() {
+            list.positionViewAtIndex(Math.floor(topAlbum / root.safeCols), ListView.Beginning);
+            list.rememberPos();
+        });
+    }
 
     property int revision: 0
     Connections {
@@ -57,7 +73,7 @@ Item {
                 return i;
         return -1;
     }
-    readonly property int expandedRow: expandedIndex < 0 ? -1 : Math.floor(expandedIndex / cols)
+    readonly property int expandedRow: expandedIndex < 0 ? -1 : Math.floor(expandedIndex / safeCols)
 
     // Opening from elsewhere (now playing, a context menu) may target a cover
     // that is scrolled off screen — bring its row into view, then again once
@@ -79,7 +95,7 @@ Item {
         objectName: "albumList"
         anchors.fill: parent
         clip: true
-        model: Math.ceil(AlbumsModel.count / root.cols)
+        model: Math.max(0, Math.ceil(AlbumsModel.count / root.safeCols))
         cacheBuffer: 900
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll { id: vbar }
@@ -153,12 +169,12 @@ Item {
                 height: root.cellW
 
                 Repeater {
-                    model: root.cols
+                    model: root.safeCols
 
                     delegate: Rectangle {
                         id: tile
                         required property int index
-                        readonly property int albumIndex: rowItem.index * root.cols + tile.index
+                        readonly property int albumIndex: rowItem.index * root.safeCols + tile.index
                         // Reading revision + count keeps this bound to model resets.
                         readonly property var a: (root.revision >= 0 && AlbumsModel.count >= 0)
                                                  ? root.albumAt(tile.albumIndex) : null
