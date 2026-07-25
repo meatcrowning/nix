@@ -13,6 +13,8 @@
 # Known controllers on `top` (informational, the loop below is generic):
 #   2x "ENE DRAM"                    — RAM sticks, 8 LEDs each (SMBus, slow-ish)
 #   "MSI PRO B650-VC WIFI (MS-7D78)" — JRGB1/2 + JRAINBOW1/2 headers
+import fcntl
+import os
 import sys
 
 from openrgb import OpenRGBClient
@@ -35,6 +37,13 @@ def main():
     if len(sys.argv) != 2:
         sys.exit("usage: rgb-set.py RRGGBB")
     color = RGBColor.fromHEX(sys.argv[1])
+
+    # Serialise overlapping fires (rapid theme flips): same trick as
+    # cursor-recolor.sh — queued runs each apply their own colour in order,
+    # so the devices converge on the last theme instead of getting a mix of
+    # interleaved SMBus/USB writes from two instances at once.
+    lock = open(os.path.expanduser("~/.cache/wal/rgb-set.lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
 
     try:
         client = OpenRGBClient(name="wal-set")
