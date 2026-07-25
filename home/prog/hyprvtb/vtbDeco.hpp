@@ -302,6 +302,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 handleUpEvent(Event::SCallbackInfo& info);
     void                 handleRolledDown(Event::SCallbackInfo& info); // press on a shaded window's floating bar
     void                 handleRolledUp(Event::SCallbackInfo& info);   // release: click un-shades, drag ends move
+    bool                 shadeOccludedAt(const Vector2D& mouse);       // is anything drawn ABOVE the shade bar at this point?
     int                  cellAt(const Vector2D& localCoords);
 
     bool                 tryStartEdgeResize(Event::SCallbackInfo& info, const IPointer::SButtonEvent& e);
