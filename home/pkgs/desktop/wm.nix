@@ -1,5 +1,15 @@
 { pkgs, lib, host, inputs, ... }:
 
+let
+  # The shell comes from the pinned nixpkgs, never the rolling one — see the
+  # `nixpkgs-quickshell` input in flake.nix for why. Plain `import` (no
+  # overlays, no allowUnfree) because nothing here needs either, and keeping
+  # it bare is what makes the evaluation cheap and the store path stable.
+  quickshellPinned =
+    (import inputs.nixpkgs-quickshell {
+      inherit (pkgs.stdenv.hostPlatform) system;
+    }).quickshell;
+in
 {
   home.packages = with pkgs; [
     hyprsunset
@@ -29,7 +39,7 @@
     brightnessctl
     ddcutil
     ly
-    quickshell
+    quickshellPinned
     # screenshots (Screenshot.qml overlay drives grim) + clipboard history
     wl-clipboard
     # screen recording (Screenshot.qml overlay drives wf-recorder in record
