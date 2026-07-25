@@ -17,7 +17,6 @@
 #   JRAINBOW1 — CPU cooler + case fans + power button, daisy-chained
 #   JRAINBOW2 — bottom case RGB strip
 #   JRGB1/2   — nothing visible connected
-import colorsys
 import fcntl
 import os
 import sys
@@ -26,21 +25,19 @@ from openrgb import OpenRGBClient
 from openrgb.utils import RGBColor
 
 
-def vivid(hexstr):
-    """Saturate a palette colour for LED output.
+def led_color(hexstr):
+    """Convert a screen palette colour to LED PWM values.
 
-    The wal palette's accents are deliberate pastels (e.g. e6cc97 is ~90%
-    white) — right for text on screen, but on RGB LEDs a pastel renders as
-    a washed-out near-white "tint" (tested on the box: 2x saturation was
-    still read as "basically white", warm hues especially need near-full
-    saturation to register as a colour at all). Keep the hue, push
-    saturation hard (2.8x, capped) and set value to BRIGHTNESS. Near-grey
-    accents stay near-grey (2.8x of almost nothing is still almost nothing).
+    Screens encode colours with sRGB gamma; LED PWM is linear. Sending the
+    palette hex raw made every colour wash toward white (which we first
+    mis-fixed with big saturation boosts that turned the sandy accents
+    plain yellow). Linearising each channel (^2.2) reproduces the screen
+    colour's actual light balance, then BRIGHTNESS scales the emission.
+    Calibrated on the box against a ladder of variants: gamma + no
+    saturation boost at 30% was the closest match to the on-screen accent.
     """
-    r, g, b = (int(hexstr[i : i + 2], 16) / 255 for i in (0, 2, 4))
-    h, s, v = colorsys.rgb_to_hsv(r, g, b)
-    r, g, b = colorsys.hsv_to_rgb(h, min(1.0, s * 2.8), BRIGHTNESS)
-    return RGBColor(round(r * 255), round(g * 255), round(b * 255))
+    lin = ((int(hexstr[i : i + 2], 16) / 255) ** 2.2 * BRIGHTNESS for i in (0, 2, 4))
+    return RGBColor(*(round(ch * 255) for ch in lin))
 
 # ARGB (addressable) headers are write-only — OpenRGB can't detect how many
 # LEDs are chained on them and defaults the zone to 5, leaving everything
@@ -54,16 +51,16 @@ ZONE_RESIZE = {
     "JRAINBOW2": 120,
 }
 
-# Overall LED brightness, 0..1. These modes expose no hardware brightness
-# knob (checked: brightness=None on every device), so it's applied as the
-# HSV value in vivid() — full-value output was uncomfortably bright.
+# Overall LED emission scale, 0..1 (linear light, applied after gamma in
+# led_color()). These modes expose no hardware brightness knob (checked:
+# brightness=None on every device) — full output was uncomfortably bright.
 BRIGHTNESS = 0.30
 
 
 def main():
     if len(sys.argv) != 2:
         sys.exit("usage: rgb-set.py RRGGBB")
-    color = vivid(sys.argv[1])
+    color = led_color(sys.argv[1])
 
     # Serialise overlapping fires (rapid theme flips): same trick as
     # cursor-recolor.sh — queued runs each apply their own colour in order,
@@ -92,7 +89,7 @@ def main():
                 if want is not None and len(zone.leds) != want:
                     zone.resize(want)
             dev.set_color(color)
-            print(f"rgb-set: {dev.name} -> #{sys.argv[1]} (vivid {color})")
+            print(f"rgb-set: {dev.name} -> #{sys.argv[1]} (led {color})")
         except Exception as e:
             print(f"rgb-set: {dev.name}: {e}")
 
