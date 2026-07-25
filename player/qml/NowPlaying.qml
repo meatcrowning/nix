@@ -1,9 +1,10 @@
 import QtQuick
 
-// Now playing: the play queue on the left, lyrics in the middle, art + track
-// identity + rating/favourite on the right (toward the titlebar edge). Lyrics
-// are requested per track change and delivered async by the LyricsProvider
-// (embedded → .lrc → LRCLIB).
+// Now playing, two columns: the left is split horizontally — queue on top,
+// lyrics below (the queue takes the full height when the track has none);
+// the right column is art + track identity + rating/favourite (toward the
+// titlebar edge). Lyrics are requested per track change and delivered async
+// by the LyricsProvider (embedded → .lrc → LRCLIB).
 Item {
     id: root
     signal openAlbum(int albumId)
@@ -128,13 +129,13 @@ Item {
         color: Theme.border
     }
 
-    // ---- left: queue (expands over the lyrics slot when a track has none) ----
+    // ---- left column, top: queue (full height when the track has no lyrics) ----
     Item {
         id: queuePane
         anchors.left: parent.left
         anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.right: sep2.left
+        anchors.right: sep1.left
+        anchors.bottom: sep2.top
 
         PixelText {
             id: queueHead
@@ -157,22 +158,22 @@ Item {
 
     Rectangle {
         id: sep2
-        anchors.right: lyricsView.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: lyricsView.hasContent ? 1 : 0
+        anchors.left: parent.left
+        anchors.right: sep1.left
+        anchors.bottom: lyricsView.top
+        height: lyricsView.hasContent ? 1 : 0
         visible: lyricsView.hasContent
         color: Theme.border
     }
 
-    // ---- middle: lyrics — zero width until the current track has some ----
+    // ---- left column, bottom: lyrics — zero height until the track has some ----
     LyricsView {
         id: lyricsView
         objectName: "lyricsPane"
+        anchors.left: parent.left
         anchors.right: sep1.left
-        anchors.top: parent.top
         anchors.bottom: parent.bottom
-        width: hasContent ? Math.max(300, (parent.width - side.width) * 0.5) : 0
+        height: hasContent ? parent.height * 0.5 : 0
         visible: hasContent
         clip: true
         trackId: root.cur.id !== undefined ? root.cur.id : -1
