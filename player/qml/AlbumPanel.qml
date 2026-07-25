@@ -9,16 +9,35 @@ import QtQuick
 // AlbumTracksModel) rather than trusting whoever opened it to have done so —
 // it is created on every open, including a delegate rebuilt after scrolling
 // away and back, so the track list can never come up empty/stale.
+//
+// Its layout is RESPONSIVE, because the player window is often a narrow
+// column: side by side (art | info | tracks) when there is room, otherwise
+// stacked — art + info on top, the track list full-width underneath. Geometry
+// is set explicitly rather than by anchors so nothing can be squeezed to a
+// zero-width sliver on a narrow window.
 Item {
     id: root
     property int albumId: 0
     property var info: ({})
     signal closed()
 
+    readonly property int rowH: Theme.fontSize + 2
+    readonly property int pad: 10
+
+    // Not enough width for three columns → stack the track list underneath.
+    readonly property bool stacked: width < 700
+    readonly property int artSide: stacked ? Math.max(60, Math.min(150, width - 240)) : 200
+    readonly property int metaX: pad + artSide + 12
+    readonly property int metaW: Math.max(80, stacked ? width - metaX - pad
+                                                      : Math.min(260, width - metaX - 212))
+    // The list's own height when stacked; side by side it just fills the panel.
+    readonly property int listH: Math.max(60, Math.min(stacked ? 220 : 406,
+                                                       AlbumTracksModel.count * rowH + 6))
+
     // Tall enough for the art, and for the track list up to a sane cap — a
     // 30-track album shouldn't push the whole gallery off screen.
-    readonly property int rowH: Theme.fontSize + 2
-    implicitHeight: Math.max(232, Math.min(430, 24 + AlbumTracksModel.count * rowH))
+    implicitHeight: stacked ? pad + artSide + 8 + listH + 8
+                            : Math.max(232, Math.min(430, 24 + AlbumTracksModel.count * rowH))
 
     onAlbumIdChanged: load()
     Component.onCompleted: load()
@@ -58,10 +77,9 @@ Item {
 
     Rectangle {
         id: artBox
-        anchors.left: parent.left
-        anchors.leftMargin: 12
-        anchors.verticalCenter: parent.verticalCenter
-        width: Math.max(1, Math.min(root.height - 24, 200))
+        x: root.pad
+        y: root.stacked ? root.pad : Math.max(root.pad, (root.height - root.artSide) / 2)
+        width: Math.max(1, root.artSide)
         height: width
         color: Theme.bgAlt
         border.color: Theme.border
@@ -88,17 +106,16 @@ Item {
 
     Column {
         id: meta
-        anchors.left: artBox.right
-        anchors.leftMargin: 12
-        anchors.top: artBox.top
-        width: Math.max(0, Math.min(260, root.width - artBox.width - 40))
+        x: root.metaX
+        y: artBox.y
+        width: root.metaW
         spacing: 2
 
         PixelText {
             width: parent.width
             text: root.info.album || ""
             wrapMode: Text.Wrap
-            maximumLineCount: 3
+            maximumLineCount: root.stacked ? 2 : 3
             color: Theme.text
         }
         PixelText {
@@ -132,24 +149,21 @@ Item {
         }
     }
 
-    PixelText {
-        anchors.centerIn: tracks
-        visible: AlbumTracksModel.count === 0
-        text: "no tracks"
-        color: Theme.dim
-    }
     TrackList {
         id: tracks
-        anchors.left: meta.right
-        anchors.leftMargin: 12
-        anchors.right: parent.right
-        anchors.rightMargin: 2
-        anchors.top: parent.top
-        anchors.topMargin: 8
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 8
+        x: root.stacked ? root.pad : root.metaX + root.metaW + 12
+        y: root.stacked ? artBox.y + root.artSide + 8 : 8
+        width: Math.max(1, root.width - x - (root.stacked ? root.pad : 4))
+        height: Math.max(1, root.height - y - 8)
         model: AlbumTracksModel
         showArtist: false
         onPlayed: function(index) { Player.playAlbum(root.albumId, index); }
+    }
+    PixelText {
+        x: tracks.x
+        y: tracks.y + 4
+        visible: AlbumTracksModel.count === 0
+        text: "no tracks"
+        color: Theme.dim
     }
 }
