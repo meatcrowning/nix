@@ -327,7 +327,7 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
 
     auto bar = makeUnique<CVtbDeco>(window);
     g_pGlobalState->bars.emplace_back(bar);
-    const WP<CVtbDeco> thisDeco = g_pGlobalState->bars.back();
+    const CDecoRef thisDeco = g_pGlobalState->bars.back();
     bar->m_self = bar;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
 
@@ -828,7 +828,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.54"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.55"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
