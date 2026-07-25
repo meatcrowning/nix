@@ -23,7 +23,10 @@ Window {
 
     readonly property bool act: win.active
 
-    title: "player"
+    // The OUTER titlebar shows the window title — put the playing track there
+    // ("artist — title") instead of a static app name; the inner column's
+    // footer stays unused so the playbar gets the full lower run.
+    title: footerStr !== "" ? footerStr : "player"
     width: 1080
     height: 720
     minimumWidth: 480
@@ -106,13 +109,10 @@ Window {
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
-    // Footer: track identity only — it changes per track, not per tick (a
-    // fast-changing footer would re-raster the titlebar text stack).
     readonly property string footerStr: {
         var t = Player.current;
         return (t && t.title) ? ((t.artist ? t.artist + " — " : "") + t.title) : "";
     }
-    onFooterStrChanged: Titlebar.setFooter(footerStr)
 
     function pushPlaybar() {
         // Floor the fraction: hyprvtb builds ≤2.44 abort the compositor on a
