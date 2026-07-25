@@ -135,6 +135,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_rollFinishing    = false;          // progress hit 1; finalize deferred out of the render
     Time::steady_tp      m_rollAnimAt       = Time::steadyNow(); // last frame stamp (dt clock)
     SP<Render::ITexture> m_rollSnapTex;                       // window content, held across the shade
+    SP<Render::IFramebuffer> m_fadeFB;                        // offscreen bar for the composited lone-bar fade (see renderPass)
     CBox                 m_rollWinBox;                        // client box (global logical) at shade time
     Vector2D             m_rollSnapOrigin;                    // window's top-left within the (monitor-sized) snapshot texture, device px
     bool                 m_bRollReveal   = false;             // roll-out slide landed; reveal hold ARMED (set before the deferred beginRollReveal — NOT proof it ran)
@@ -260,6 +261,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     CHyprSignalListener  m_pMouseAxisCallback;
 
     void                 renderPass(PHLMONITOR, float const& a);
+    void                 renderBar(PHLMONITOR, float a); // the actual bar drawing; renderPass wraps it (direct, or FBO-composited while fading)
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
     SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr,
                                           int* outLines = nullptr, bool ellipsis = true);
