@@ -36,6 +36,14 @@
       url = "github:hyprwm/hyprpaper";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Anthropic ships new Claude Code builds faster than they reach nixpkgs
+    # (nixos-unstable lags by days). numtide/llm-agents.nix repackages the
+    # official prebuilt binary, auto-updates daily, and has a binary cache
+    # (cache.numtide.com). Deliberately NOT `follows`-ed onto our nixpkgs: it
+    # ships a patchelf'd prebuilt, so pinning its nixpkgs would only forfeit
+    # that cache hit. Bump with `nix flake update llm-agents`.
+    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs = { nixpkgs, home-manager, plasma-manager, aerothemeplasma-nix, ... }@inputs:
