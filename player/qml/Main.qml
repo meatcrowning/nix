@@ -1,7 +1,9 @@
 import QtQuick
 import QtQuick.Window
 
-// player's window: album grid / album detail / playlists / now-playing views.
+// player's window: album gallery / playlists / now-playing views. There is no
+// separate album page — clicking a cover opens an AlbumPanel section inline,
+// under that cover's row in the gallery.
 // ALL chrome lives in the hyprvtb titlebar (the same bridge viewer uses):
 // transport (<< >/|| >> shuffle repeat), the view switcher (a/p/n), the sort
 // cycler, a search toggle whose bar slides in from the titlebar edge, and a
@@ -12,9 +14,14 @@ import QtQuick.Window
 Window {
     id: win
 
-    // "albums" | "detail" | "playlists" | "now"
-    property string view: Prefs.get("view", "albums")
-    property int detailAlbumId: 0
+    // "albums" | "playlists" | "now"  ("detail" is a pre-inline-panel leftover
+    // that may still sit in prefs — fold it back into the gallery)
+    property string view: {
+        var v = Prefs.get("view", "albums");
+        return v === "detail" ? "albums" : v;
+    }
+    // The album whose inline section is open in the gallery (0 = none).
+    property int openAlbumId: 0
     property bool searching: false          // full results overlay
     property bool searchOpen: false         // slide-out bar
     property string sortMode: Prefs.get("sort", "orig_year")
@@ -41,11 +48,11 @@ Window {
     property var histBack: []
     property var histForward: []
 
-    function _here() { return { view: view, albumId: detailAlbumId }; }
+    function _here() { return { view: view, albumId: openAlbumId }; }
     function _apply(s) {
-        detailAlbumId = s.albumId;
-        if (s.view === "detail" && s.albumId > 0)
-            Library.openAlbum(s.albumId);
+        openAlbumId = s.albumId;
+        if (s.albumId > 0)
+            Library.openAlbum(s.albumId);   // fills AlbumTracksModel for the panel
         view = s.view;
     }
     function goBack() {
@@ -65,13 +72,15 @@ Window {
         _apply(s);
     }
 
+    // Open (or, with 0, close) an album's inline section in the gallery. Always
+    // lands on the gallery, so it works from now-playing too.
     function openAlbum(albumId) {
-        _navigate({ view: "detail", albumId: albumId });
+        _navigate({ view: "albums", albumId: albumId });
     }
 
     function setView(v) {
-        _navigate({ view: v, albumId: detailAlbumId });
-        Prefs.set("view", v === "detail" ? "albums" : v);
+        _navigate({ view: v, albumId: openAlbumId });
+        Prefs.set("view", v);
     }
 
     function cycleSort() {
@@ -125,7 +134,7 @@ Window {
             { id: "loop",      label: Player.loop === 1 ? "1" : "o", state: Player.loop > 0 ? 1 : 0,
               tip: Player.loop === 1 ? "repeat track" : (Player.loop === 2 ? "repeat all" : "repeat") },
             "-",
-            { id: "albums",    label: "a", state: (view === "albums" || view === "detail") ? 1 : 0, tip: "albums" },
+            { id: "albums",    label: "a", state: view === "albums" ? 1 : 0, tip: "albums" },
             { id: "playlists", label: "p", state: view === "playlists" ? 1 : 0, tip: "playlists" },
             { id: "now",       label: "n", state: view === "now" ? 1 : 0, tip: "now playing" },
             "-",
@@ -187,20 +196,16 @@ Window {
         anchors.fill: parent
 
         AlbumGrid {
+            objectName: "albumGrid"
             anchors.fill: parent
             visible: win.view === "albums"
             filtered: searchInput.text !== ""
+            expandedAlbumId: win.openAlbumId
             onOpened: function(albumId) { win.openAlbum(albumId); }
             onSearchArtist: function(artist) {
                 win.openSearch();
                 searchInput.text = artist;   // filters the grid to that artist
             }
-        }
-        AlbumDetail {
-            anchors.fill: parent
-            visible: win.view === "detail"
-            albumId: win.detailAlbumId
-            onBack: win.setView("albums")
         }
         PlaylistsView {
             anchors.fill: parent
@@ -317,7 +322,7 @@ Window {
         enabled: !searchInput.activeFocus
         onActivated: {
             if (win.searching || win.searchOpen) win.closeSearch();
-            else if (win.view === "detail") win.setView("albums");
+            else if (win.openAlbumId > 0) win.openAlbum(0);   // close the inline section
         }
     }
 }

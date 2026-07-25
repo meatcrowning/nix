@@ -185,33 +185,10 @@ Item {
                     height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                     color: Theme.textDim
                 }
-                Item { width: 1; height: 6 }
-                Row {
-                    spacing: 12
-                    visible: root.cur.id !== undefined
-                    Stars {
-                        anchors.verticalCenter: parent.verticalCenter
-                        rating: root.cur.rating === null || root.cur.rating === undefined
-                                ? -1 : root.cur.rating
-                        onRated: function(fmps) { Library.setRating(root.cur.id, fmps); }
-                    }
-                    Item {
-                        width: 12; height: 15
-                        anchors.verticalCenter: parent.verticalCenter
-                        PixelText {
-                            anchors.centerIn: parent
-                            text: "♥"
-                            color: root.cur.favorite ? Theme.crit : Theme.dim
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
-                        }
-                    }
-                }
                 Item { width: 1; height: 8 }
 
-                // ---- transport: the same actions as the titlebar buttons ----
+                // ---- transport (same actions as the titlebar buttons), with
+                // the track's rating stars + favourite heart trailing it ----
                 Row {
                     spacing: 6
                     HeaderButton {
@@ -236,6 +213,28 @@ Item {
                         label: Player.loop === 1 ? "1" : "o"
                         lit: Player.loop > 0
                         onClicked: Player.cycleLoop()
+                    }
+                    Item { width: 6; height: 1 }
+                    Stars {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.cur.id !== undefined
+                        rating: root.cur.rating === null || root.cur.rating === undefined
+                                ? -1 : root.cur.rating
+                        onRated: function(fmps) { Library.setRating(root.cur.id, fmps); }
+                    }
+                    Item {
+                        width: 14; height: 20
+                        visible: root.cur.id !== undefined
+                        anchors.verticalCenter: parent.verticalCenter
+                        PixelText {
+                            anchors.centerIn: parent
+                            text: "♥"
+                            color: root.cur.favorite ? Theme.crit : Theme.dim
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
+                        }
                     }
                 }
                 Item { width: 1; height: 6 }

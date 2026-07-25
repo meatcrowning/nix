@@ -1,38 +1,93 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// The album grid: edge-to-edge cover tiles with ZERO gap — the cell size
+// The album gallery: edge-to-edge cover tiles with ZERO gap — the cell size
 // adapts so whole covers tile the full width exactly. Title / artist / year
 // appear only on hover, overlaid on the lower part of the cover itself.
 // Thumbs are pre-rendered 256px JPEGs in the art cache, loaded async, so
 // scrolling never decodes original artwork.
+//
+// Clicking a cover opens an AlbumPanel section INLINE, pushing the rows below
+// it down (there is no separate album page) — so the grid is a ListView of
+// cover ROWS, not a GridView: only a row delegate can grow to make room for
+// the panel. Each row reads its `cols` albums straight out of AlbumsModel via
+// get(); `revision` (bumped on every model reset) is read by those bindings so
+// a re-sort/re-filter/rescan repaints the tiles even when the count is equal.
 Item {
     id: root
-    signal opened(int albumId)
+    // The album to expand; 0 collapses. Owned by Main (so the mouse
+    // back/forward history can restore it), toggled through `opened`.
+    property int expandedAlbumId: 0
+    signal opened(int albumId)      // 0 == collapse
     signal searchArtist(string artist)
 
     // True while a search filter narrows the grid: the browse position is only
     // remembered for the UNFILTERED grid, so clearing the search puts the user
     // back where they were browsing rather than at the filtered view's top.
     property bool filtered: false
-    onFilteredChanged: if (!filtered) grid.requestRestore()
+    onFilteredChanged: if (!filtered) list.requestRestore()
 
-    // Coming back to the albums page (from a detail/now-playing/playlists trip,
-    // or a model reset behind our back) lands on the exact same row again.
-    onVisibleChanged: if (visible) grid.requestRestore()
+    // Coming back to the albums page (from a now-playing/playlists trip, or a
+    // model reset behind our back) lands on the exact same row again.
+    onVisibleChanged: if (visible) list.requestRestore()
 
-    GridView {
-        id: grid
+    // Seven covers across, whatever the window width — covers scale so the
+    // rows stay flush left and right with 0px gaps.
+    readonly property int cols: 7
+    readonly property int cellW: Math.max(1, Math.floor(width / cols))
+
+    property int revision: 0
+    Connections {
+        target: AlbumsModel
+        function onModelReset() { root.revision++; }
+    }
+
+    function albumAt(i) {
+        return (i >= 0 && i < AlbumsModel.count) ? AlbumsModel.get(i) : null;
+    }
+
+    // Where the expanded album sits now — re-scanned whenever the model is
+    // rebuilt, so a re-sort moves the open section to the cover's new row.
+    readonly property int expandedIndex: {
+        root.revision;               // dependency: re-scan after a model reset
+        if (root.expandedAlbumId <= 0)
+            return -1;
+        for (var i = 0; i < AlbumsModel.count; i++)
+            if (AlbumsModel.get(i).albumId === root.expandedAlbumId)
+                return i;
+        return -1;
+    }
+    readonly property int expandedRow: expandedIndex < 0 ? -1 : Math.floor(expandedIndex / cols)
+
+    // Opening from elsewhere (now playing, a context menu) may target a cover
+    // that is scrolled off screen — bring its row into view, then again once
+    // the row has finished growing so the whole section is on screen.
+    onExpandedIndexChanged: {
+        if (expandedIndex >= 0) {
+            Qt.callLater(list.showExpanded);
+            settleTimer.restart();
+        }
+    }
+    Timer {
+        id: settleTimer
+        interval: 140
+        onTriggered: list.showExpanded()
+    }
+
+    ListView {
+        id: list
+        objectName: "albumList"
         anchors.fill: parent
         clip: true
-        // Seven covers across, whatever the window width — covers scale so the
-        // rows stay flush left and right with 0px gaps.
-        readonly property int cols: 7
-        cellWidth: Math.floor(width / cols)
-        cellHeight: cellWidth
-        cacheBuffer: 600
-        model: AlbumsModel
+        model: Math.ceil(AlbumsModel.count / root.cols)
+        cacheBuffer: 900
+        boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll { id: vbar }
+
+        function showExpanded() {
+            if (root.expandedRow >= 0)
+                positionViewAtIndex(root.expandedRow, ListView.Contain);
+        }
 
         // ---- scroll memory ----------------------------------------------
         // The grid's spot is kept in Prefs (so it survives a restart too) and
@@ -74,100 +129,151 @@ Item {
         Timer {   // debounce the prefs write across a scroll
             id: saveTimer
             interval: 400
-            onTriggered: Prefs.set("albumScrollY", grid.savedY)
+            onTriggered: Prefs.set("albumScrollY", list.savedY)
         }
 
-        delegate: Rectangle {
-            id: tile
-            width: grid.cellWidth
-            height: grid.cellHeight
-            color: Theme.bgAlt
+        // ---- one row of covers, plus the inline section when it is open ----
+        delegate: Item {
+            id: rowItem
+            required property int index
+            readonly property bool expanded: root.expandedRow === rowItem.index
 
-            Image {
-                anchors.fill: parent
-                source: thumbPath ? "file://" + thumbPath : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                sourceSize.width: 256
-                sourceSize.height: 256
-                visible: status === Image.Ready
-            }
-            PixelText {
-                anchors.centerIn: parent
-                visible: !thumbPath
-                text: "♫"
-                font.pixelSize: 45
-                color: Theme.dim
+            width: list.width
+            height: root.cellW + panelLoader.height
+            clip: true
+            Behavior on height { NumberAnimation { duration: 110; easing.type: Easing.OutQuad } }
+
+            Row {
+                id: tiles
+                height: root.cellW
+
+                Repeater {
+                    model: root.cols
+
+                    delegate: Rectangle {
+                        id: tile
+                        required property int index
+                        readonly property int albumIndex: rowItem.index * root.cols + tile.index
+                        // Reading revision + count keeps this bound to model resets.
+                        readonly property var a: (root.revision >= 0 && AlbumsModel.count >= 0)
+                                                 ? root.albumAt(tile.albumIndex) : null
+
+                        width: root.cellW
+                        height: root.cellW
+                        visible: a !== null
+                        color: Theme.bgAlt
+
+                        Image {
+                            anchors.fill: parent
+                            source: (tile.a && tile.a.thumbPath) ? "file://" + tile.a.thumbPath : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: true
+                            sourceSize.width: 256
+                            sourceSize.height: 256
+                            visible: status === Image.Ready
+                        }
+                        PixelText {
+                            anchors.centerIn: parent
+                            visible: !(tile.a && tile.a.thumbPath)
+                            text: "♫"
+                            font.pixelSize: 45
+                            color: Theme.dim
+                        }
+
+                        // Hover: the metadata, inside the cover's lower edge.
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: labelCol.implicitHeight + 10
+                            visible: tileMouse.containsMouse
+                            color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
+
+                            Column {
+                                id: labelCol
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 6
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+
+                                PixelText {
+                                    width: parent.width
+                                    text: tile.a ? tile.a.album : ""
+                                    clip: true
+                                    height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                                    color: Theme.text
+                                }
+                                PixelText {
+                                    width: parent.width
+                                    text: tile.a ? ((tile.a.year > 0 ? tile.a.year + "  " : "") + tile.a.artist) : ""
+                                    clip: true
+                                    height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                                    color: Theme.textDim
+                                }
+                            }
+                        }
+                        // Hover / open frame, drawn over the art's edge. The
+                        // open cover stays framed so it's obvious which one
+                        // the section below belongs to.
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: tileMouse.containsMouse
+                                     || (tile.a && tile.a.albumId === root.expandedAlbumId)
+                            color: "transparent"
+                            border.color: Theme.accent
+                            border.width: 1
+                        }
+
+                        MouseArea {
+                            id: tileMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: tile.a !== null
+                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                            onClicked: function(m) {
+                                var aid = tile.a.albumId, art = tile.a.artist;
+                                if (m.button === Qt.MiddleButton) {
+                                    Player.queueAlbum(aid);
+                                } else if (m.button === Qt.RightButton) {
+                                    var p = tileMouse.mapToItem(root, m.x, m.y);
+                                    ctxMenu.open(p.x, p.y, [
+                                        { label: "play",          trigger: function() { Player.playAlbum(aid, 0); } },
+                                        { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, 0); } },
+                                        { label: "add to queue",  trigger: function() { Player.queueAlbum(aid); } },
+                                        { separator: true },
+                                        { label: aid === root.expandedAlbumId ? "close album" : "open album",
+                                          trigger: function() { root.opened(aid === root.expandedAlbumId ? 0 : aid); } },
+                                        { label: "search artist", enabled: art !== "",
+                                          trigger: function() { root.searchArtist(art); } },
+                                    ]);
+                                } else {
+                                    // A second click on the open cover closes it.
+                                    root.opened(aid === root.expandedAlbumId ? 0 : aid);
+                                }
+                            }
+                            onDoubleClicked: function(m) {
+                                if (m.button === Qt.LeftButton) Player.playAlbum(tile.a.albumId, 0);
+                            }
+                        }
+                    }
+                }
             }
 
-            // Hover: the metadata, inside the cover's lower edge.
-            Rectangle {
+            // The inline album section — only the open row instantiates one.
+            Loader {
+                id: panelLoader
+                anchors.top: tiles.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: labelCol.implicitHeight + 10
-                visible: tileMouse.containsMouse
-                color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.82)
-
-                Column {
-                    id: labelCol
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: 6
-                    anchors.right: parent.right
-                    anchors.rightMargin: 6
-
-                    PixelText {
-                        width: parent.width
-                        text: album
-                        clip: true
-                        height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                        color: Theme.text
+                active: rowItem.expanded
+                sourceComponent: Component {
+                    AlbumPanel {
+                        objectName: "albumPanel"
+                        albumId: root.expandedAlbumId
+                        onClosed: root.opened(0)
                     }
-                    PixelText {
-                        width: parent.width
-                        text: (year > 0 ? year + "  " : "") + artist
-                        clip: true
-                        height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                        color: Theme.textDim
-                    }
-                }
-            }
-            Rectangle {  // hover frame, drawn over the art's edge
-                anchors.fill: parent
-                visible: tileMouse.containsMouse
-                color: "transparent"
-                border.color: Theme.accent
-                border.width: 1
-            }
-
-            MouseArea {
-                id: tileMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-                onClicked: function(m) {
-                    if (m.button === Qt.MiddleButton) {
-                        Player.queueAlbum(albumId);
-                    } else if (m.button === Qt.RightButton) {
-                        var p = tileMouse.mapToItem(root, m.x, m.y);
-                        var aid = albumId, art = artist;
-                        ctxMenu.open(p.x, p.y, [
-                            { label: "play",          trigger: function() { Player.playAlbum(aid, 0); } },
-                            { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, 0); } },
-                            { label: "add to queue",  trigger: function() { Player.queueAlbum(aid); } },
-                            { separator: true },
-                            { label: "open album",    trigger: function() { root.opened(aid); } },
-                            { label: "search artist", enabled: art !== "",
-                              trigger: function() { root.searchArtist(art); } },
-                        ]);
-                    } else {
-                        root.opened(albumId);
-                    }
-                }
-                onDoubleClicked: function(m) {
-                    if (m.button === Qt.LeftButton) Player.playAlbum(albumId, 0);
                 }
             }
         }
@@ -175,7 +281,7 @@ Item {
 
     PixelText {
         anchors.centerIn: parent
-        visible: grid.count === 0
+        visible: AlbumsModel.count === 0
         text: "no albums — is the library drive mounted?"
         color: Theme.textDim
     }
