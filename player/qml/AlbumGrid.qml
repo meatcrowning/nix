@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 
 // The album grid: edge-to-edge cover tiles with ZERO gap — the cell size
 // adapts so whole covers tile the full width exactly. Title / artist / year
@@ -20,6 +21,7 @@ Item {
         cellHeight: cellWidth
         cacheBuffer: 600
         model: AlbumsModel
+        ScrollBar.vertical: VScroll {}
 
         delegate: Rectangle {
             id: tile

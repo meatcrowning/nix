@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 
 // A reusable track table (album detail, playlists, search, queue): one packed
 // pixel-text row per track — number, title, optional artist, rating stars,
@@ -17,6 +18,7 @@ Item {
         anchors.fill: parent
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: VScroll {}
 
         delegate: Rectangle {
             id: row
