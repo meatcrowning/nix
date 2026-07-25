@@ -13,6 +13,10 @@
 # Known controllers on `top` (informational, the loop below is generic):
 #   2x "ENE DRAM"                    — RAM sticks, 8 LEDs each (SMBus, slow-ish)
 #   "MSI PRO B650-VC WIFI (MS-7D78)" — JRGB1/2 + JRAINBOW1/2 headers
+# Physical chains (mapped by per-zone test colours, 2026-07):
+#   JRAINBOW1 — CPU cooler + case fans + power button, daisy-chained
+#   JRAINBOW2 — bottom case RGB strip
+#   JRGB1/2   — nothing visible connected
 import colorsys
 import fcntl
 import os
@@ -27,13 +31,15 @@ def vivid(hexstr):
 
     The wal palette's accents are deliberate pastels (e.g. e6cc97 is ~90%
     white) — right for text on screen, but on RGB LEDs a pastel renders as
-    a washed-out near-white "tint". Keep the hue, double the saturation
-    (capped), and push value to full so the lights show the theme's hue
-    vividly. Near-grey accents stay near-grey (2x of almost nothing).
+    a washed-out near-white "tint" (tested on the box: 2x saturation was
+    still read as "basically white", warm hues especially need near-full
+    saturation to register as a colour at all). Keep the hue, push
+    saturation hard (2.8x, capped) and value to full. Near-grey accents
+    stay near-grey (2.8x of almost nothing is still almost nothing).
     """
     r, g, b = (int(hexstr[i : i + 2], 16) / 255 for i in (0, 2, 4))
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
-    r, g, b = colorsys.hsv_to_rgb(h, min(1.0, s * 2.0), 1.0)
+    r, g, b = colorsys.hsv_to_rgb(h, min(1.0, s * 2.8), 1.0)
     return RGBColor(round(r * 255), round(g * 255), round(b * 255))
 
 # ARGB (addressable) headers are write-only — OpenRGB can't detect how many
