@@ -37,6 +37,27 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Hyprland itself, pinned to an exact upstream tag — NOT taken from
+    # nixpkgs. Two reasons, both learned the hard way (see
+    # home/prog/hyprvtb/PORTING.md):
+    #
+    #  1. hyprvtb is a compositor plugin built against Hyprland's *internal*
+    #     headers, so every compositor bump is a porting job. Off nixpkgs,
+    #     that bump rode in on any unrelated `nix flake update` (Firefox,
+    #     whatever) and ambushed a working session. Pinned, the compositor
+    #     only ever moves when this line is edited on purpose.
+    #  2. nixpkgs bumps `hyprland` and `hyprutils` on independent schedules;
+    #     that's how 0.56 + hyprutils 0.14.0 landed together as two unrelated
+    #     breakages in one evening. The hyprwm flakes `follows`-pin their own
+    #     hyprutils/aquamarine/hyprgraphics/hyprlang, so pinning here gets the
+    #     tuple upstream actually tested, as a unit.
+    #
+    # Deliberately NOT `inputs.nixpkgs.follows`-ed: unmodified inputs are what
+    # makes hyprland.cachix.org (added in sys/base.nix) hit, and overriding
+    # them would also re-introduce exactly the independent-version-skew this
+    # pin exists to remove. Bump with the ritual in PORTING.md.
+    hyprland.url = "github:hyprwm/Hyprland/v0.56.0";
+
     # Anthropic ships new Claude Code builds faster than they reach nixpkgs
     # (nixos-unstable lags by days). numtide/llm-agents.nix repackages the
     # official prebuilt binary, auto-updates daily, and has a binary cache

@@ -1,7 +1,17 @@
-{ config, pkgs, ... }:
+{ config, pkgs, inputs, ... }:
 
 {
-  programs.hyprland.enable = true;
+  # Hyprland comes from the pinned `hyprland` flake input, NOT nixpkgs — see
+  # the long comment on that input in flake.nix. Short version: hyprvtb is
+  # built against Hyprland's internal headers, so an unpinned compositor
+  # meant every unrelated `nix flake update` could break the desktop's
+  # titlebars (and with them filer/viewer/player/surfer's entire chrome).
+  # Bump deliberately, following the ritual in home/prog/hyprvtb/PORTING.md.
+  programs.hyprland = {
+    enable = true;
+    package = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+    portalPackage = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.xdg-desktop-portal-hyprland;
+  };
 
   # xdg-desktop-portal routing for the Hyprland session. programs.hyprland
   # already enables xdg.portal + the hyprland backend; without an explicit
