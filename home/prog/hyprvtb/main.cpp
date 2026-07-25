@@ -540,10 +540,16 @@ static int luaCloseActive(lua_State* L) {
     return 0;
 }
 
+// The last window rolled up through the no-arg keybind path, so a second press
+// of the same key un-shades it: a rolled window is hidden and can't be the
+// active window, so the toggle can't find it through focus — we remember it.
+static PHLWINDOWREF g_lastRolled;
+
 // lua: hyprvtb.rollup([address]) — windowshade a window (same as the titlebar
-// >> button). No arg targets the active window (bind this to a key). A shaded
-// window is hidden and thus not focusable, so pass "address:0x.." to un-shade
-// a specific one from a script.
+// >> button). No arg is the keybind toggle: roll up the active window, and on
+// the NEXT press un-shade whatever it last rolled up (a shaded window is hidden
+// and thus not focusable, so it can't be reached through the active window).
+// Pass "address:0x.." to un-shade a specific one from a script.
 static int luaRollup(lua_State* L) {
     if (!g_pGlobalState)
         return 0;
@@ -552,20 +558,37 @@ static int luaRollup(lua_State* L) {
     if (a.starts_with("address:"))
         a = a.substr(8);
 
-    CVtbDeco* deco = nullptr;
+    // Explicit address target (scripts): toggle exactly that window.
     if (a.starts_with("0x")) {
         const uintptr_t want = std::strtoull(a.c_str(), nullptr, 16);
         for (auto& b : g_pGlobalState->bars) {
             if (b && (uintptr_t)b->getOwner().get() == want) {
-                deco = b.get();
+                b->toggleRollup();
                 break;
             }
         }
-    } else
-        deco = activeDeco();
+        return 0;
+    }
 
-    if (deco)
-        deco->toggleRollup();
+    // No-arg keybind toggle. First, if we have a still-shaded window from the
+    // last press, un-shade it (and forget it) instead of rolling a new one.
+    if (const auto W = g_lastRolled.lock()) {
+        g_lastRolled.reset();
+        for (auto& b : g_pGlobalState->bars) {
+            if (b && b->getOwner() == W && b->isRolledUp()) {
+                b->toggleRollup(); // roll back out; toggleRollup refocuses it
+                return 0;
+            }
+        }
+        // fell through: it closed or was un-shaded elsewhere — roll a new one.
+    }
+
+    // Roll up the active window and remember it (it's live/focusable, so it is
+    // never itself already shaded — no need to check which way the toggle goes).
+    if (const auto d = activeDeco()) {
+        g_lastRolled = d->getOwner();
+        d->toggleRollup();
+    }
     return 0;
 }
 
@@ -818,7 +841,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.52"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.53"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
