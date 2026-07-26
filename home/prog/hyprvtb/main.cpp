@@ -782,8 +782,13 @@ static int luaKineticSet(lua_State* L) {
     if (lua_isboolean(L, 1))
         ok = g_pGlobalState->kinetic->setEnabled(lua_toboolean(L, 1) != 0);
     else {
-        const std::string KEY = luaL_optstring(L, 1, "");
-        ok                    = !KEY.empty() && g_pGlobalState->kinetic->setKnob(KEY, luaL_optnumber(L, 2, 0.0));
+        // luaL_* can longjmp out on a type error, which would skip the
+        // destructor of anything non-trivial already alive on this frame. So
+        // pull every lua value out FIRST, then build the std::string.
+        const double      VAL = luaL_optnumber(L, 2, 0.0);
+        const char*       RAW = luaL_optstring(L, 1, "");
+        const std::string KEY = RAW ? RAW : "";
+        ok                    = !KEY.empty() && g_pGlobalState->kinetic->setKnob(KEY, VAL);
     }
     lua_pushboolean(L, ok ? 1 : 0);
     return 1;
@@ -1035,7 +1040,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.kineticFriction         = makeShared<Config::Values::CFloatValue>(
         "plugin:hyprvtb:kinetic_friction", "Momentum decay rate k (1/s); coast distance is v0/k", 3.6f, Config::Values::SFloatValueOptions{.min = 0.5f, .max = 20.f});
     g_pGlobalState->config.kineticMinStartVelocity = makeShared<Config::Values::CFloatValue>(
-        "plugin:hyprvtb:kinetic_min_start_velocity", "px/s below which no fling starts", 200.f, Config::Values::SFloatValueOptions{.min = 0.f, .max = 5000.f});
+        // min 1.0, not 0: a floor of zero would let every microscopic residual
+        // twitch launch a fling, and the value is a threshold, not a switch —
+        // "no minimum" is spelled by turning the feature off.
+        "plugin:hyprvtb:kinetic_min_start_velocity", "px/s below which no fling starts", 200.f, Config::Values::SFloatValueOptions{.min = 1.f, .max = 5000.f});
     g_pGlobalState->config.kineticMinVelocity      = makeShared<Config::Values::CFloatValue>(
         "plugin:hyprvtb:kinetic_min_velocity", "px/s stop floor", 24.f, Config::Values::SFloatValueOptions{.min = 1.f, .max = 500.f});
     g_pGlobalState->config.kineticMaxVelocity      = makeShared<Config::Values::CFloatValue>(
@@ -1062,6 +1070,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         "plugin:hyprvtb:kinetic_allow_classes", "Non-empty makes this an allowlist (staged rollout)", "");
     g_pGlobalState->config.kineticDenyXwayland     = makeShared<Config::Values::CBoolValue>(
         "plugin:hyprvtb:kinetic_deny_xwayland", "No momentum for X11 windows until the Xwayland axis path is verified", true);
+    // The kill switch for the one trigger that INFERS a finger-lift rather than
+    // observing libinput's guaranteed one. If momentum is ever seen to start
+    // with fingers still on the pad, turn this off first — see
+    // CVtbKinetic::onDeviceFrame for exactly what it cannot rule out.
+    g_pGlobalState->config.kineticFrameStopFallback = makeShared<Config::Values::CBoolValue>(
+        "plugin:hyprvtb:kinetic_frame_stop_fallback", "Treat an axis-less touchpad frame as a finger-lift (fallback trigger)", true);
     g_pGlobalState->config.kineticDebug            = makeShared<Config::Values::CIntValue>(
         "plugin:hyprvtb:kinetic_debug", "1 = log fling start/end/cancel, 2 = also every refusal", 0, Config::Values::SIntValueOptions{.min = 0, .max = 2});
 
@@ -1082,6 +1096,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticDenyClasses);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticAllowClasses);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticDenyXwayland);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticFrameStopFallback);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticDebug);
 
     // ---- kinetic scrolling: the module and its feeds -----------------------
@@ -1194,7 +1209,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.79"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.80"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
