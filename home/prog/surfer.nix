@@ -1,6 +1,6 @@
 { pkgs, lib, host, ... }:
 
-# surfer — the standalone Qt/QML browser (source at ~/nix/surfer; QtWebEngine,
+# surfer — the standalone Qt/QML browser (source at ~/nix/apps/surfer; QtWebEngine,
 # i.e. open Chromium, with the browser chrome in the hyprvtb titlebar).
 # Packaging mirrors filer.nix exactly, including the air split:
 #
@@ -11,7 +11,7 @@
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the
 #     Qt env so QtWebEngine finds its resources.
 #
-# Both run the LIVE source at ~/nix/surfer/main.py — day-to-day edits need no
+# Both run the LIVE source at ~/nix/apps/surfer/main.py — day-to-day edits need no
 # rebuild on either machine. (Adding a Python dep like `adblock` below is the
 # exception: it needs one `rbhome` to land in pyEnv. On air the ad blocker
 # looks for `adblock` in the system python — `pip install --user adblock` to
@@ -39,7 +39,7 @@ let
   surfer =
     if host == "air" then
       # air additionally brackets the run with the profile handoff (see
-      # ~/nix/surfer/tools/sync.py): merge top's cookies + userscripts in
+      # ~/nix/apps/surfer/tools/sync.py): merge top's cookies + userscripts in
       # before the window opens, merge ours back out after it closes.
       #
       # Only air does this, and that is not an oversight: Fedora runs no
@@ -55,11 +55,11 @@ let
         LOG="$HOME/.cache/surfer-sync.log"
         vtbsync() {
           echo "--- $(date -Is) $1" >> "$LOG"
-          timeout 90 /usr/bin/python3 /home/lam/nix/surfer/tools/sync.py "$1" \
+          timeout 90 /usr/bin/python3 /home/lam/nix/apps/surfer/tools/sync.py "$1" \
             >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
         }
         [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync pull
-        /usr/bin/python3 /home/lam/nix/surfer/main.py "$@"
+        /usr/bin/python3 /home/lam/nix/apps/surfer/main.py "$@"
         rc=$?
         [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync push
         exit $rc
@@ -78,7 +78,7 @@ let
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/surfer \
-            --add-flags /home/lam/nix/surfer/main.py \
+            --add-flags /home/lam/nix/apps/surfer/main.py \
             --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall

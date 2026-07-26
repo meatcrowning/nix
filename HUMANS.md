@@ -12,9 +12,10 @@ pointed at people.
 the short version, if you want to run this (or steal pieces of it):
 
 - **clone to `/home/lam/nix` — the path is load-bearing.** the sudo rebuild
-  wrapper, the live-source app wrappers (filer/viewer/player/painter/surfer run
-  `main.py` straight out of this checkout), and several out-of-store symlinks
-  all hardcode it. different username = grep for `/home/lam` first.
+  wrapper, the live-source app wrappers (everything under `apps/` —
+  filer/viewer/player/painter/surfer — runs `main.py` straight out of this
+  checkout), and several out-of-store symlinks all hardcode it. different
+  username = grep for `/home/lam` first.
 - **replace `hosts/top/hardware-configuration.nix`** with your machine's own
   (`nixos-generate-config`), then first build:
   `sudo nixos-rebuild switch --flake /home/lam/nix#top`. after that the config

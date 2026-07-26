@@ -1,7 +1,7 @@
 { pkgs, lib, host, ... }:
 
 # painter — text-to-image front end for a headless ComfyUI (source at
-# ~/nix/painter), fifth sibling of surfer/filer/viewer/player. Packaging mirrors
+# ~/nix/apps/painter), fifth sibling of surfer/filer/viewer/player. Packaging mirrors
 # player.nix, including the air split.
 #
 # Two things differ from the other siblings:
@@ -21,7 +21,7 @@
 # via a symlink) and are reached through extra_model_paths.yaml. None of that is
 # in this repo.
 #
-# Runs the LIVE source at ~/nix/painter/main.py — .py/.qml edits need no
+# Runs the LIVE source at ~/nix/apps/painter/main.py — .py/.qml edits need no
 # rebuild, only dep/packaging changes do.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
@@ -32,7 +32,7 @@ let
   painter =
     if host == "air" then
       pkgs.writeShellScriptBin "painter" ''
-        exec /usr/bin/python3 /home/lam/nix/painter/main.py "$@"
+        exec /usr/bin/python3 /home/lam/nix/apps/painter/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {
@@ -53,7 +53,7 @@ let
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
-            --add-flags /home/lam/nix/painter/main.py \
+            --add-flags /home/lam/nix/apps/painter/main.py \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';

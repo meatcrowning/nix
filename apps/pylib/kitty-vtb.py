@@ -14,7 +14,7 @@ instance's active window.
 Logs to ~/.local/state/vtb/kitty-vtb.log (tiny, self-truncating) so a
 silently-missing button column is diagnosable the morning after.
 
-Runs from the live repo (~/nix/pylib), stdlib only — edits apply to the next
+Runs from the live repo (~/nix/apps/pylib), stdlib only — edits apply to the next
 kitty you open, no rebuild.
 """
 import os
