@@ -115,6 +115,9 @@ double CVtbKinetic::effGain() const {
 double CVtbKinetic::effAxisLockRatio() const {
     return std::clamp((double)Cfg::kineticAxisLockRatio(), 0.0, 1.0);
 }
+double CVtbKinetic::effMaxCoastRatio() const {
+    return std::clamp(eff("max_coast_ratio", Cfg::kineticMaxCoastRatio()), 1.0, 50.0);
+}
 int CVtbKinetic::effRateHz() const {
     return (int)std::lround(eff("rate_hz", (double)Cfg::kineticRateHz()));
 }
@@ -405,6 +408,50 @@ const char* CVtbKinetic::startGate(uint32_t tStopMs, double& outVx, double& outV
     if (speed < effMinStartVelocity())
         return "slow";
 
+    // ---- coast-ratio cap ---------------------------------------------------
+    //
+    // The bug this exists for, in the user's words: "scrolling in tiny
+    // increments actually scrolls faster than normal scrolling."
+    //
+    // Velocity is distance over TIME, so it says nothing about how far the
+    // finger went. A 6px nudge delivered in 20ms reads ~300px/s and coasts
+    // 300/3.6 = 83px — fourteen times its own travel — while a long deliberate
+    // drag decelerates before the lift and barely coasts at all. The gesture
+    // ends up proportional to its final instant rather than to itself, and the
+    // small end of the range is where that inverts most violently.
+    //
+    // So bound the coast by the distance the finger actually covered inside the
+    // velocity window. Because coast is exactly speed/k, the constraint
+    //     speed <= k * ratio * travel
+    // is precisely "coast <= ratio * travel" — the cap means what it is named,
+    // with no second constant to keep in sync with the friction.
+    //
+    // Travel is the vector magnitude of the SAME per-axis sums the velocity came
+    // from, carried through the same scroll factor so the units are the surface
+    // px the client sees. |factor| because a negative one would otherwise invert
+    // the cap into a sign flip.
+    //
+    // Deliberately AFTER the min_start_velocity gate, not before: the gate
+    // decides whether this gesture was a fling at all, and it must judge the
+    // real gesture. Capping first would turn every small nudge into a refusal
+    // ("no coast at all") rather than the short, proportional coast that is the
+    // point — an 8px nudge should glide 32px, not 0.
+    const double TRAVEL  = std::hypot(sumX, sumY) * std::abs(factor);
+    const double NATURAL = speed;
+    const double CAP     = effFriction() * effMaxCoastRatio() * TRAVEL;
+    bool         capped  = false;
+    if (CAP > 0.0 && speed > CAP) {
+        const double SCALE = CAP / speed;
+        vx *= SCALE;
+        vy *= SCALE;
+        speed  = CAP;
+        capped = true;
+        m_stats.coastCapped++;
+    }
+    m_stats.lastNaturalV0 = NATURAL;
+    m_stats.lastTravel    = TRAVEL;
+    m_stats.lastWasCapped = capped;
+
     // LAST, after every multiply: the isfinite check has to sit downstream of
     // the factor and gain, not just downstream of the division. A non-finite
     // gain (kinetic_set is a raw setter) would sail past a check placed above
@@ -473,7 +520,9 @@ void CVtbKinetic::startFling(double vx, double vy, uint32_t tStopMs, const SLatc
     m_stats.lastDistance = 0.0;
     armTick();
     debugLog(1,
-             std::format("fling start v=({:.0f},{:.0f}) px/s coast~{:.0f}px cls={} samples={} cadence={:.1f}ms{}", vx, vy, std::hypot(vx, vy) / effFriction(),
+             std::format("fling start v=({:.0f},{:.0f}) px/s coast~{:.0f}px travel={:.0f}px{} cls={} samples={} cadence={:.1f}ms{}", jnum(vx), jnum(vy),
+                         jnum(std::hypot(vx, vy) / effFriction()), jnum(m_stats.lastTravel),
+                         m_stats.lastWasCapped ? std::format(" CAPPED(natural {:.0f}px/s -> {:.0f})", jnum(m_stats.lastNaturalV0), jnum(std::hypot(vx, vy))) : std::string(),
                          latch.cls, m_stats.lastSamples, m_stats.lastCadenceMs, m_dry ? " [DRY]" : ""));
 }
 
@@ -1084,7 +1133,7 @@ bool CVtbKinetic::setKnob(const std::string& key, double val) {
         m_unsafeWet = val != 0.0;
         return true;
     }
-    static const char* KNOBS[] = {"enabled", "friction", "min_start_velocity", "min_velocity", "max_velocity", "gain", "stop_delay_ms", "rate_hz", "frame_stop_fallback"};
+    static const char* KNOBS[] = {"enabled", "friction", "min_start_velocity", "min_velocity", "max_velocity", "gain", "stop_delay_ms", "rate_hz", "frame_stop_fallback", "max_coast_ratio"};
     bool               known   = false;
     for (const char* K : KNOBS)
         known = known || key == K;
@@ -1229,7 +1278,9 @@ std::string CVtbKinetic::statsJson() {
       // This one is the wire-level analogue of the degenerate-rect assertion.
       // It must be zero; anything else means a NaN or a literal 0.0 reached the
       // seam and was refused there rather than never computed.
-      << ",\"emitRefused\":" << m_stats.emitRefused << ",\"lastEmits\":" << m_stats.lastEmits << ",\"lastV0\":" << std::format("{:.1f}", jnum(m_stats.lastV0))
+      << ",\"emitRefused\":" << m_stats.emitRefused << ",\"lastEmits\":" << m_stats.lastEmits << ",\"coastCapped\":" << m_stats.coastCapped
+      << ",\"lastV0\":" << std::format("{:.1f}", jnum(m_stats.lastV0)) << ",\"lastNaturalV0\":" << std::format("{:.1f}", jnum(m_stats.lastNaturalV0))
+      << ",\"lastTravel\":" << std::format("{:.2f}", jnum(m_stats.lastTravel)) << ",\"lastWasCapped\":" << (m_stats.lastWasCapped ? "true" : "false")
       << ",\"lastDistance\":" << std::format("{:.1f}", jnum(m_stats.lastDistance)) << ",\"lastSamples\":" << m_stats.lastSamples
       << ",\"lastCadenceMs\":" << std::format("{:.2f}", jnum(m_stats.lastCadenceMs)) << ",\"lastSumAbsDelta\":" << std::format("{:.2f}", jnum(m_stats.lastSumAbsDelta))
       << ",\"refusals\":{";
@@ -1263,7 +1314,8 @@ std::string CVtbKinetic::getJson() {
     o << "{\"enabled\":" << (effEnabled() ? "true" : "false") << ",\"configEnabled\":" << (Cfg::kinetic() ? "true" : "false")
       << ",\"friction\":" << std::format("{:.3f}", jnum(effFriction())) << ",\"min_start_velocity\":" << std::format("{:.1f}", jnum(effMinStartVelocity()))
       << ",\"min_velocity\":" << std::format("{:.1f}", jnum(effMinVelocity())) << ",\"max_velocity\":" << std::format("{:.1f}", jnum(effMaxVelocity()))
-      << ",\"gain\":" << std::format("{:.3f}", jnum(effGain())) << ",\"axis_lock_ratio\":" << std::format("{:.3f}", jnum(effAxisLockRatio())) << ",\"rate_hz\":" << effRateHz()
+      << ",\"gain\":" << std::format("{:.3f}", jnum(effGain())) << ",\"axis_lock_ratio\":" << std::format("{:.3f}", jnum(effAxisLockRatio()))
+      << ",\"max_coast_ratio\":" << std::format("{:.2f}", jnum(effMaxCoastRatio())) << ",\"rate_hz\":" << effRateHz()
       << ",\"tick_hz\":" << std::format("{:.1f}", jnum(1.0 / period())) << ",\"stop_delay_ms\":" << effStopDelayMs() << ",\"window_ms\":" << effWindowMs()
       << ",\"stale_ms\":" << effStaleMs() << ",\"max_duration_ms\":" << effMaxDurationMs()
       << ",\"frame_stop_fallback\":" << (effFrameStopFallback() ? "true" : "false") << ",\"emit_eps\":" << std::format("{:.2f}", KIN_EMIT_EPS)

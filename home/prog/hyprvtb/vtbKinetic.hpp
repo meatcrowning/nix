@@ -177,8 +177,12 @@ class CVtbKinetic {
         uint64_t                  emits       = 0; // axis events put on the wire (per axis, dry or wet)
         uint64_t                  emitRefused = 0; // MUST stay 0 — see Hl::sendAxis
         uint64_t                  lastEmits    = 0; // ...of the last flight only
+        uint64_t                  coastCapped  = 0; // flings the coast-ratio cap reined in
         double                    lastDistance = 0.0;
-        double                    lastV0       = 0.0;
+        double                    lastV0       = 0.0;  // launch speed AS USED (post-cap)
+        double                    lastNaturalV0 = 0.0; // ...and what it would have been
+        double                    lastTravel   = 0.0;  // finger travel in the window, px
+        bool                      lastWasCapped = false;
         // Last gesture's observed cadence, which is the one thing about this
         // trackpad nobody has ever measured (it sets whether window_ms holds
         // enough samples for a stable sum/dt).
@@ -220,6 +224,7 @@ class CVtbKinetic {
     double effMaxVelocity() const;
     double effGain() const;
     double effAxisLockRatio() const;
+    double effMaxCoastRatio() const;
     int    effRateHz() const;
     int    effStopDelayMs() const;
     int    effWindowMs() const;

@@ -158,6 +158,7 @@ struct SGlobalState {
         SP<Config::Values::CFloatValue>  kineticMaxVelocity;
         SP<Config::Values::CFloatValue>  kineticGain;
         SP<Config::Values::CFloatValue>  kineticAxisLockRatio;
+        SP<Config::Values::CFloatValue>  kineticMaxCoastRatio;
         SP<Config::Values::CIntValue>    kineticRateHz;
         SP<Config::Values::CIntValue>    kineticStopDelayMs;
         SP<Config::Values::CIntValue>    kineticWindowMs;
@@ -249,6 +250,9 @@ namespace Vtb::Cfg {
     }
     inline auto kineticAxisLockRatio() {
         return g_pGlobalState->config.kineticAxisLockRatio->value();
+    }
+    inline auto kineticMaxCoastRatio() {
+        return g_pGlobalState->config.kineticMaxCoastRatio->value();
     }
     inline auto kineticRateHz() {
         return g_pGlobalState->config.kineticRateHz->value();
