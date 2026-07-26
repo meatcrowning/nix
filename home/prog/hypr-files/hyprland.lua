@@ -203,6 +203,23 @@ hl.config({
             ["col.accent"]        = "rgba(d99c1fff)",
             ["col.bg_alt"]        = "rgba(120f08ff)",
             ["col.crit"]          = "rgba(fab424ff)",
+            -- macOS-style momentum scrolling: content keeps gliding after the
+            -- fingers leave the pad, decelerating exponentially. Synthesized by
+            -- the plugin at the seat, so it reaches every toolkit at once —
+            -- design and provenance in docs/kinetic-scroll.md. Off by default
+            -- in C++ (the blast radius is the compositor); this turns it on for
+            -- real, surviving reloads and relogins, which a runtime
+            -- kinetic_set(true) deliberately does not.
+            kinetic               = true,
+            -- Feel, live-tunable without a reload via
+            -- `hyprctl eval "hl.plugin.hyprvtb.kinetic_set('friction', X)"`:
+            -- 2.6 floaty, 3.6 mac-anchored, 5.2 snappy. coast = v0/friction.
+            kinetic_friction      = 3.6,
+            -- Empty: momentum everywhere it is safe. viewer used to be denied
+            -- because its wheel ZOOMS and was sign-only (12 events saturated
+            -- 1..8); that handler is delta-proportional now, so a coast there
+            -- just keeps zooming smoothly and the clamp still holds.
+            kinetic_deny_classes  = "",
         },
     },
 })
