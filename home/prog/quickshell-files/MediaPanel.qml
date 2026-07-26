@@ -37,6 +37,66 @@ SlidePopup {
     }
     readonly property bool hasPlayer: player !== null
     readonly property bool playing: hasPlayer && player.isPlaying
+
+    // ---- reload continuity (see shell.qml's `persist` block) --------------
+    // Two separate things reset on a reload and both are visible:
+    //
+    //   * the spectrum. cava is bound to `open`, so a reload kills it and the
+    //     new instance respawns it — every bar snaps to the floor and climbs
+    //     back ~200ms later. Carrying the last frame across means the bars are
+    //     simply where they were, and the live feed takes back over mid-stride.
+    //   * the track text. MPRIS re-resolves over D-Bus, which is a round trip,
+    //     so for the first frames there is no player at all: the header falls
+    //     back to "media", the title to "nothing playing", and the artist line
+    //     — which is `visible`-gated — disappears, shortening the card by a row
+    //     and walking its bottom-anchored top edge down and back. `_settling`
+    //     keeps the carried-over snapshot on screen for that window only, so a
+    //     player that genuinely went away still reads as "nothing playing" a
+    //     moment later rather than showing a ghost track forever.
+    property var snap: null       // {id,title,artist,art,pos,len,play} or null
+    property bool _settling: false
+    Timer { id: settleTimer; interval: 1500; onTriggered: root._settling = false }
+
+    // What to draw: the live player once we have one, else the carried snapshot
+    // while MPRIS is still coming up.
+    readonly property bool useSnap: !hasPlayer && _settling && snap !== null
+    readonly property string dispIdentity: hasPlayer ? (player.identity || "media")
+        : useSnap ? (snap.id || "media") : "media"
+    readonly property string dispTitle: hasPlayer ? (player.trackTitle || "—")
+        : useSnap ? (snap.title || "—") : "nothing playing"
+    readonly property string dispArtist: hasPlayer ? (player.trackArtist || "")
+        : useSnap ? (snap.artist || "") : ""
+    readonly property string dispArt: hasPlayer ? (player.trackArtUrl || "")
+        : useSnap ? (snap.art || "") : ""
+    readonly property real dispPos: hasPlayer ? player.position : useSnap ? snap.pos : 0
+    readonly property real dispLen: hasPlayer
+        ? (player.lengthSupported ? player.length : 0) : useSnap ? snap.len : 0
+
+    function stateJson() {
+        return JSON.stringify({
+            lv: spectrumLevels, pk: spectrumPeaks,
+            pv: spectrumPeakVel, ph: spectrumPeakHold,
+            np: hasPlayer ? {
+                id: player.identity, title: player.trackTitle,
+                artist: player.trackArtist, art: player.trackArtUrl,
+                pos: player.position,
+                len: player.lengthSupported ? player.length : 0,
+                play: player.isPlaying,
+            } : snap,
+        });
+    }
+    function restoreState(s) {
+        if (!s) return;
+        try {
+            const d = JSON.parse(s);
+            root.spectrumLevels   = d.lv || [];
+            root.spectrumPeaks    = d.pk || [];
+            root.spectrumPeakVel  = d.pv || [];
+            root.spectrumPeakHold = d.ph || [];
+            root.snap = d.np || null;
+            if (root.snap) { root._settling = true; settleTimer.restart(); }
+        } catch (e) {}
+    }
     property var spectrumLevels: []
     // Per-bar peak-hold state, advanced once per cava frame (see the feed's
     // SplitParser). Classic analyser behaviour: instant attack, a brief hold at
@@ -317,7 +377,7 @@ SlidePopup {
             width: 276
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
-            text: (root.hasPlayer && root.player.identity) ? root.player.identity : "media"
+            text: root.dispIdentity
             color: Theme.accent
         }
 
@@ -325,14 +385,14 @@ SlidePopup {
         PixelText {
             width: 276
             elide: Text.ElideRight
-            text: root.hasPlayer ? (root.player.trackTitle || "—") : "nothing playing"
+            text: root.dispTitle
             color: Theme.text
         }
         PixelText {
             width: 276
             elide: Text.ElideRight
-            visible: root.hasPlayer && (root.player.trackArtist || "") !== ""
-            text: root.hasPlayer ? root.player.trackArtist : ""
+            visible: root.dispArtist !== ""
+            text: root.dispArtist
             color: Theme.textDim
         }
 
@@ -354,7 +414,7 @@ SlidePopup {
                 Image {
                     id: art
                     anchors { fill: parent; margins: 1 }
-                    source: root.hasPlayer ? (root.player.trackArtUrl || "") : ""
+                    source: root.dispArt
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     cache: true
@@ -388,7 +448,7 @@ SlidePopup {
                 width: 36
                 anchors.verticalCenter: parent.verticalCenter
                 horizontalAlignment: Text.AlignLeft
-                text: root.fmtTime(root.hasPlayer ? root.player.position : 0)
+                text: root.fmtTime(root.dispPos)
                 color: Theme.textDim
             }
 
@@ -400,8 +460,11 @@ SlidePopup {
 
                 readonly property bool seekable: root.hasPlayer && root.player.canSeek
                     && root.player.lengthSupported && root.player.length > 0
-                readonly property real frac: seekable
-                    ? Math.max(0, Math.min(1, root.player.position / root.player.length)) : 0
+                // driven by the DISPLAY position/length, not the live player's,
+                // so the fill holds its place through the MPRIS reconnect
+                // instead of collapsing to zero and springing back
+                readonly property real frac: root.dispLen > 0
+                    ? Math.max(0, Math.min(1, root.dispPos / root.dispLen)) : 0
 
                 Rectangle { // track
                     anchors.verticalCenter: parent.verticalCenter
@@ -434,7 +497,7 @@ SlidePopup {
                 width: 36
                 anchors.verticalCenter: parent.verticalCenter
                 horizontalAlignment: Text.AlignRight
-                text: root.fmtTime(root.hasPlayer && root.player.lengthSupported ? root.player.length : 0)
+                text: root.fmtTime(root.dispLen)
                 color: Theme.textDim
             }
         }

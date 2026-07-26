@@ -13,8 +13,16 @@ Item {
     // hovering the VU bar activates the media widget popup (wired in StatusPanel)
     signal hovered(bool h)
 
-    property int levelL: 0 // 0-100
-    property int levelR: 0
+    // 0-100 per channel. Backed by SysInfo rather than held locally so the
+    // levels survive a config reload: the bar is instantiated per-monitor
+    // inside a Variants and has no stable id, whereas the SysInfo singleton is
+    // reachable from shell.qml's reload-continuity wiring. Without this the
+    // bars drop to the floor the instant a reload starts and spring back up
+    // when cava respawns ~200ms later — the exact re-entry this is avoiding.
+    // (read-only mirrors — the cava parser below writes SysInfo directly; an
+    // `alias` can't target a singleton's property, only an id in this file)
+    readonly property int levelL: SysInfo.vuL
+    readonly property int levelR: SysInfo.vuR
 
     readonly property int barH: 68
     // Unchanged overall width, so the panel's layout doesn't move: what used to
@@ -43,8 +51,8 @@ Item {
             onRead: data => {
                 const parts = data.split(";");
                 if (parts.length >= 2) {
-                    root.levelL = Math.min(100, parseInt(parts[0], 10) || 0);
-                    root.levelR = Math.min(100, parseInt(parts[1], 10) || 0);
+                    SysInfo.vuL = Math.min(100, parseInt(parts[0], 10) || 0);
+                    SysInfo.vuR = Math.min(100, parseInt(parts[1], 10) || 0);
                 }
             }
         }

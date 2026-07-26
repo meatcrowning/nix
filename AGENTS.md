@@ -140,6 +140,38 @@ before touching the plugin or the pin.
   only Quickshell's QML tree in-process (never touches Hyprland); a parse error
   keeps the old tree + fires a toast, so it can't crash the session.
 
+- **A reload must look like a state change IN PLACE, not a re-entry** — that's
+  the standing bar for anything on the desktop, because a wallpaper/theme change
+  rewrites `Theme.qml` and so reloads the panel. Quickshell rebuilds the *whole*
+  QML tree, so every widget otherwise comes back empty and visibly refills: the
+  disk widget maps at its one-line "reading…" height and grows twice as its
+  scripts land (dragging every in-place stackable above it up the screen), the
+  forecast collapses until curl returns, cava restarts so the VU and spectrum
+  drop to the floor, and the chart ring buffers restart from zero. Two
+  mechanisms carry state across, both wired in `shell.qml`:
+  - **the pin set** — mirrored to `$XDG_RUNTIME_DIR/qs-live-pins` and read back
+    SYNCHRONOUSLY (`FileView { blockLoading: true }`) in `Component.onCompleted`,
+    then applied with `snapPinned()`. The file's absence doubles as the
+    login-vs-reload flag ($XDG_RUNTIME_DIR is wiped at logout).
+  - **the widgets' contents** — a `PersistentProperties` block, which hands
+    properties from the outgoing tree to the incoming one in-process. Each
+    source exposes `stateJson()`/`restoreState()` plus a `stateRev` counter that
+    `shell.qml` snapshots on; the 60fps VU/spectrum feeds are sampled on a
+    250ms timer instead. **Two constraints, both found the hard way and both
+    silent when violated:** it must be a DIRECT child of the root `Scope` (one
+    level down inside a plain `Item` it never restores — a non-Reloadable parent
+    breaks the matching chain), and every carried property must be a STRING —
+    Quickshell alternates between two QML engines across reloads and a JSValue
+    (any `property var` holding an array/object) can't move between them, so a
+    `var` arrives `undefined` on every *other* reload with only a
+    `JSValue can't be reassigned to another engine` warning to show for it.
+    Restore fires after every `Component.onCompleted` but inside the same
+    synchronous reload pass, so no frame renders in between.
+    Verify with **`qs ipc call state carried`** — sizes of each carried blob
+    plus the live buffer lengths. Poll it repeatedly across a forced reload:
+    all non-zero and `cpuHist` counting up monotonically = the swap worked;
+    a reset to 0 = something regressed.
+
 - **Seed-once mutable files are NOT updated by rebuild:** `Theme.qml`,
   `hyprland.lua`, `hyprpaper.conf` are installed only if absent (they're
   rewritten in place at runtime by `wal-set.sh` / `cursor-recolor.sh` /

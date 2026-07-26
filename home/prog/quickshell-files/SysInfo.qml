@@ -64,6 +64,14 @@ Singleton {
     // once negative.
     readonly property int brightnessLevel: gamma < 100 ? gamma - 100 : brightness
 
+    // Stereo VU levels (0-100), fed by VuMeter.qml's cava instance. They live
+    // here rather than in VuMeter because the bar is instantiated per-monitor
+    // inside a Variants, so it has no stable id for shell.qml's reload-continuity
+    // wiring to reach — and "current output level" is system state like the rest
+    // of this singleton anyway.
+    property int vuL: 0
+    property int vuR: 0
+
     // throughput history for the sparkline (bytes/s totals)
     property var history: []
     readonly property int historyLen: 24
@@ -85,8 +93,69 @@ Singleton {
         return h;
     }
 
+    // ---- reload continuity (see shell.qml's `persist` block) --------------
+    // Quickshell rebuilds the whole QML tree on every reload — a QML edit, or
+    // wal-set.sh rewriting Theme.qml on a wallpaper/theme change — so all of
+    // the above would come back at its default: the charts empty, every
+    // readout "--" until the next poll two seconds later. shell.qml carries
+    // this blob across the reload and hands it back before the first frame, so
+    // a reload looks like the panel simply kept running.
+    //
+    // Bumped once per poll; shell.qml re-snapshots on the change rather than
+    // on each of the individual property signals.
+    property int stateRev: 0
+
+    function stateJson() {
+        return JSON.stringify({
+            rx: rxSpeed, tx: txSpeed, dfk: diskFreeKb, dup: diskUsePct,
+            vol: volume, mut: muted, cu: cpuUsage, ct: cpuTemp,
+            gu: gpuUsage, gt: gpuTemp, bp: batteryPct, bc: batteryCharging,
+            bri: brightness, hbl: _hasBacklight,
+            h: history, ch: cpuHist, th: tempHist,
+            gh: gpuHist, gth: gpuTempHist, rh: rxHist, tht: txHist,
+            // the running counters the next poll diffs against — without them
+            // the first sample after a reload has no baseline and the readouts
+            // sit at "--" for one interval, which is the flicker this avoids
+            prx: _prevRx, ptx: _prevTx, pat: _prevAt,
+            pct: _prevCpuTotal, pci: _prevCpuIdle,
+        });
+    }
+
+    function restoreState(s) {
+        if (!s) return;
+        let d;
+        try { d = JSON.parse(s); } catch (e) { return; }
+        rxSpeed = d.rx; txSpeed = d.tx; diskFreeKb = d.dfk; diskUsePct = d.dup;
+        volume = d.vol; muted = d.mut; cpuUsage = d.cu; cpuTemp = d.ct;
+        gpuUsage = d.gu; gpuTemp = d.gt; batteryPct = d.bp; batteryCharging = d.bc;
+        brightness = d.bri; _hasBacklight = d.hbl;
+        history = d.h || []; cpuHist = d.ch || []; tempHist = d.th || [];
+        gpuHist = d.gh || []; gpuTempHist = d.gth || [];
+        rxHist = d.rh || []; txHist = d.tht || [];
+        _prevRx = d.prx; _prevTx = d.ptx; _prevAt = d.pat || 0;
+        _prevCpuTotal = d.pct; _prevCpuIdle = d.pci;
+    }
+
+    // The VU/spectrum feeds run at 60fps, far too hot to snapshot per frame,
+    // so shell.qml samples this on a timer instead of on change.
+    function metersJson() {
+        return JSON.stringify({ l: vuL, r: vuR });
+    }
+    function restoreMeters(s) {
+        if (!s) return;
+        try { const d = JSON.parse(s); vuL = d.l; vuR = d.r; } catch (e) {}
+    }
+
     property real _prevRx: -1
     property real _prevTx: -1
+    // Wall-clock (ms) of the sample _prevRx/_prevTx came from. The throughput
+    // deltas used to be divided by intervalSec on the assumption that the timer
+    // fired exactly on schedule; measuring the real gap instead is both more
+    // honest and what makes the counters survive a reload — the poll restarts
+    // (triggeredOnStart) the moment the new tree is up, so the first sample
+    // after a reload covers a fraction of an interval, and dividing it by a
+    // whole one would draw a spurious dip into the chart.
+    property real _prevAt: 0
     property real _prevCpuTotal: -1
     property real _prevCpuIdle: -1
     readonly property real intervalSec: SettingsStore.d.monPollSec
@@ -129,9 +198,13 @@ Singleton {
         batteryPct = isNaN(bp) || bp < 0 ? -1 : bp;
         batteryCharging = f[12] === "1";
 
+        const now = Date.now();
         if (_prevRx >= 0) {
-            rxSpeed = Math.max(0, (rx - _prevRx) / intervalSec);
-            txSpeed = Math.max(0, (tx - _prevTx) / intervalSec);
+            // real elapsed time, floored so a fast double-poll can't divide by
+            // ~0 and draw a spike off the top of the chart
+            const dt = _prevAt > 0 ? Math.max(0.25, (now - _prevAt) / 1000) : intervalSec;
+            rxSpeed = Math.max(0, (rx - _prevRx) / dt);
+            txSpeed = Math.max(0, (tx - _prevTx) / dt);
             const h = history.slice();
             h.push(rxSpeed + txSpeed);
             while (h.length > historyLen) h.shift();
@@ -141,12 +214,15 @@ Singleton {
         }
         _prevRx = rx;
         _prevTx = tx;
+        _prevAt = now;
 
         // CPU/temp history for the hover charts (cpuUsage/cpuTemp are set above)
         if (cpuUsage >= 0) cpuHist = _pushHist(cpuHist, cpuUsage);
         if (cpuTemp >= 0) tempHist = _pushHist(tempHist, cpuTemp);
         if (gpuUsage >= 0) gpuHist = _pushHist(gpuHist, gpuUsage);
         if (gpuTemp >= 0) gpuTempHist = _pushHist(gpuTempHist, gpuTemp);
+
+        stateRev++;   // one snapshot per poll (see stateJson above)
     }
 
     // Human-readable bytes/s -> e.g. "1.2M", "34K", "0"
