@@ -27,6 +27,8 @@ import http.server
 import json
 import os
 import secrets
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -74,8 +76,19 @@ def _post_form(url, fields):
         return json.load(r)
 
 
-def _get_json(url, token):
-    """GET with 429/5xx backoff. Returns parsed JSON."""
+class ApiError(Exception):
+    def __init__(self, code, body, url):
+        super().__init__(f"HTTP {code} on {url}: {body}")
+        self.code, self.body, self.url = code, body, url
+
+
+def _get_json(url, token, optional=False):
+    """GET with 429/5xx backoff. Returns parsed JSON.
+
+    `optional` turns a 403/404 into None instead of an exception - some
+    playlists are simply not readable by this app (see fetch_all), and losing
+    a whole run's worth of successful requests to one of them is not
+    acceptable."""
     for attempt in range(MAX_RETRIES):
         req = urllib.request.Request(
             url, headers={"Authorization": f"Bearer {token}",
@@ -89,15 +102,22 @@ def _get_json(url, token):
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 wait = int(e.headers.get("Retry-After", "3")) + 1
-                print(f"  rate limited, sleeping {wait}s", file=sys.stderr)
+                print(f"  rate limited, sleeping {wait}s", file=sys.stderr, flush=True)
                 time.sleep(wait)
                 continue
             if 500 <= e.code < 600:
                 wait = 2 ** attempt
-                print(f"  http {e.code}, retrying in {wait}s", file=sys.stderr)
+                print(f"  http {e.code}, retrying in {wait}s", file=sys.stderr, flush=True)
                 time.sleep(wait)
                 continue
-            raise
+            body = ""
+            try:
+                body = e.read().decode(errors="replace")[:300]
+            except Exception:
+                pass
+            if optional and e.code in (403, 404):
+                return None
+            raise ApiError(e.code, body, url) from None
     raise RuntimeError(f"giving up on {url} after {MAX_RETRIES} attempts")
 
 
@@ -128,7 +148,32 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         pass  # keep the terminal clean
 
 
-def _authorize(client_id):
+def _open_url(url, browser):
+    """Open the authorize URL in a named browser, falling back to whatever
+    the desktop default is. Explicit rather than relying on xdg-settings: the
+    redirect only lands back here if it happens in a browser you can see."""
+    if browser:
+        exe = shutil.which(browser)
+        if exe:
+            try:
+                subprocess.Popen(
+                    [exe, url],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                return True
+            except Exception as e:
+                print(f"  could not launch {browser}: {e}", file=sys.stderr)
+        else:
+            print(f"  {browser} not on PATH, falling back to the default browser",
+                  file=sys.stderr)
+    try:
+        return webbrowser.open(url)
+    except Exception:
+        return False
+
+
+def _authorize(client_id, browser="vivaldi"):
     verifier = secrets.token_urlsafe(64)[:96]
     challenge = base64.urlsafe_b64encode(
         hashlib.sha256(verifier.encode()).digest()
@@ -146,13 +191,10 @@ def _authorize(client_id):
     }
     url = AUTH_URL + "?" + urllib.parse.urlencode(params)
 
-    print("Opening Spotify authorization in your browser.")
+    print(f"Opening Spotify authorization in {browser or 'your browser'}.")
     print("If nothing opens, paste this URL yourself:\n")
     print("  " + url + "\n")
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    _open_url(url, browser)
 
     srv = http.server.HTTPServer(("127.0.0.1", CALLBACK_PORT), _CallbackHandler)
     srv.timeout = 300
@@ -196,7 +238,7 @@ def _save_token(tok):
     os.replace(tmp, TOKEN_FILE)
 
 
-def get_token(client_id, reauth=False):
+def get_token(client_id, reauth=False, browser="vivaldi"):
     if not reauth and os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE) as f:
             tok = json.load(f)
@@ -209,7 +251,7 @@ def get_token(client_id, reauth=False):
             new.setdefault("refresh_token", tok["refresh_token"])
             _save_token(new)
             return new["access_token"]
-    tok = _authorize(client_id)
+    tok = _authorize(client_id, browser)
     _save_token(tok)
     return tok["access_token"]
 
@@ -218,12 +260,15 @@ def get_token(client_id, reauth=False):
 # fetching
 # --------------------------------------------------------------------------
 
-def paged(url, token, key=None, label=""):
+def paged(url, token, key=None, label="", optional=False):
     """Follow Spotify's `next` links. `key` digs into a wrapper object
-    (followed artists nest under "artists" and are cursor-paged)."""
+    (followed artists nest under "artists" and are cursor-paged).
+    Returns None if `optional` and the collection is not readable."""
     items = []
     while url:
-        data = _get_json(url, token)
+        data = _get_json(url, token, optional=optional)
+        if data is None:
+            return None
         page = data[key] if key else data
         items.extend(page.get("items", []))
         url = page.get("next")
@@ -232,7 +277,7 @@ def paged(url, token, key=None, label=""):
             print(f"\r  {label}: {len(items)}"
                   + (f"/{total}" if total else ""), end="", flush=True)
     if label:
-        print()
+        print(flush=True)
     return items
 
 
@@ -261,14 +306,14 @@ def track_row(tr, source, playlist=""):
 def fetch_all(token):
     out = {}
 
-    print("Saved tracks:")
+    print("Saved tracks:", flush=True)
     saved = paged(f"{API}/me/tracks?limit=50", token, label="tracks")
     out["saved_tracks"] = [
         dict(track_row(i["track"], "saved"), added_at=i.get("added_at", ""))
         for i in saved if track_row(i["track"], "saved")
     ]
 
-    print("Saved albums:")
+    print("Saved albums:", flush=True)
     albums = paged(f"{API}/me/albums?limit=50", token, label="albums")
     out["saved_albums"] = [{
         "name": i["album"]["name"],
@@ -279,7 +324,7 @@ def fetch_all(token):
         "added_at": i.get("added_at", ""),
     } for i in albums]
 
-    print("Followed artists:")
+    print("Followed artists:", flush=True)
     artists = paged(f"{API}/me/following?type=artist&limit=50",
                     token, key="artists", label="artists")
     out["followed_artists"] = [
@@ -287,18 +332,33 @@ def fetch_all(token):
          "genres": a.get("genres", [])} for a in artists
     ]
 
-    print("Playlists:")
+    print("Playlists:", flush=True)
     playlists = paged(f"{API}/me/playlists?limit=50", token, label="playlists")
     out["playlists"] = []
-    for pl in playlists:
+    out["unreadable_playlists"] = []
+    for n, pl in enumerate(playlists, 1):
         name = pl["name"]
-        print(f"  {name}")
-        items = paged(f"{API}/playlists/{pl['id']}/tracks?limit=100", token)
+        print(f"  [{n}/{len(playlists)}] {name}", flush=True)
+        # /playlists/{id}/tracks was REMOVED in Spotify's Feb-Mar 2026 API
+        # migration and now 403s for everyone; the replacement is
+        # /playlists/{id}/items, which also renames each entry's "track" key
+        # to "item". Both are read below so this keeps working either way.
+        items = paged(f"{API}/playlists/{pl['id']}/items?limit=100",
+                      token, optional=True)
+        if items is None:
+            # Development-mode apps only get contents for playlists the user
+            # created or collaborates on; others return metadata only.
+            print("      (contents not readable by this app - skipped)", flush=True)
+            out["unreadable_playlists"].append(
+                {"name": name, "spotify_id": pl["id"],
+                 "owner": (pl.get("owner") or {}).get("id", "")})
+            continue
         rows = []
         for i in items:
-            row = track_row(i.get("track"), "playlist", name)
+            row = track_row(i.get("item") or i.get("track"), "playlist", name)
             if row:
                 row["added_at"] = i.get("added_at", "")
+                row["is_local"] = row["is_local"] or bool(i.get("is_local"))
                 rows.append(row)
         out["playlists"].append({
             "name": name,
@@ -363,6 +423,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--client-id", help="Spotify app client id (cached after first use)")
     ap.add_argument("--reauth", action="store_true", help="discard the cached token")
+    ap.add_argument("--browser", default="vivaldi",
+                    help="browser to open the auth page in (default vivaldi)")
     ap.add_argument("--out", default=OUT_DIR, help=f"output dir (default {OUT_DIR})")
     args = ap.parse_args()
 
@@ -380,7 +442,7 @@ def main():
             "developer.spotify.com/dashboard); it is cached afterwards."
         )
 
-    token = get_token(client_id, reauth=args.reauth)
+    token = get_token(client_id, reauth=args.reauth, browser=args.browser)
     data = fetch_all(token)
     jpath, tpath, upath, n, nu = write_outputs(data, args.out)
 
@@ -388,7 +450,9 @@ def main():
     print(f"saved tracks     : {len(data['saved_tracks'])}")
     print(f"saved albums     : {len(data['saved_albums'])}")
     print(f"followed artists : {len(data['followed_artists'])}")
-    print(f"playlists        : {len(data['playlists'])}")
+    print(f"playlists        : {len(data['playlists'])}"
+          + (f"  ({len(data['unreadable_playlists'])} unreadable)"
+             if data.get("unreadable_playlists") else ""))
     print(f"track rows       : {n}  ({nu} unique)")
     print()
     print(f"  {jpath}")
