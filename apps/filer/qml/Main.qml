@@ -107,6 +107,17 @@ Window {
         }
     }
 
+    // a finished video compression: DirWatch already brings the new file into
+    // the list, this just puts the selection on it (same courtesy as a file op).
+    Connections {
+        target: VideoConv
+        function onFinished(outPath) {
+            if (!outPath) return;
+            view.refresh();
+            view.selection = [outPath]; view.selected = outPath; view.anchor = outPath;
+        }
+    }
+
     // external change in a watched dir (something added/removed by another
     // process — a finishing download, a shell mv, …): same keep-scroll refresh
     // as a file op. DirWatch debounces, so a burst of writes lands as one.
@@ -236,9 +247,16 @@ Window {
         function entryMenuItems(e) {
             const one = selection.length === 1;
             const n = selection.length > 1 ? " (" + selection.length + ")" : "";
-            return [
+            const items = [
                 { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind) },
                 { label: "open with...", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
+            ];
+            // videos get the "squeeze it under an upload limit" action. Only the
+            // clicked entry, not the selection: each conversion is its own long
+            // job with its own toast.
+            if (!e.isDir && VideoConv.isVideo(e.path))
+                items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path) });
+            return items.concat([
                 { separator: true },
                 { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },
                 { label: "copy" + n, trigger: () => { clip = { op: "copy", paths: selection.slice() }; } },
@@ -251,7 +269,19 @@ Window {
                 { separator: true },
                 { label: "trash" + n, trigger: () => { FileOps.run(["gio", "trash", "--"].concat(selection), ""); clearSelection(); } },
                 { label: "delete..." + n, trigger: () => delDlg.open() },
-            ];
+            ]);
+        }
+
+        // "compress to <10MB": VideoConv.plan() decides everything (resolution,
+        // bitrate, encoder) and estimates the encode. It only asks first when
+        // there's something worth asking about — a long encode, or a budget so
+        // tight the result will look rough; anything quick and decent just runs.
+        // Progress lives in a desktop toast either way, so nothing blocks here.
+        function compressVideo(p) {
+            const plan = VideoConv.plan(p);
+            if (!plan.ok) { VideoConv.start(p); return; }   // start() toasts the reason
+            if (plan.ask) { compressDlg.targetPath = p; compressDlg.text = plan.warning; compressDlg.open(); }
+            else VideoConv.start(p);
         }
 
         // Menu over empty space: dir-level actions.
@@ -700,6 +730,7 @@ Window {
             acceptedButtons: Qt.RightButton
             enabled: !newDlg.visible && !renameDlg.visible && !openWithDlg.visible
                      && !overwriteDlg.visible && !renameOverwriteDlg.visible && !delDlg.visible
+                     && !compressDlg.visible
             onPressed: (m) => {
                 const e = view.entryAt(m.x, m.y);
                 if (e) {
@@ -772,6 +803,15 @@ Window {
                 t = t.trim();
                 if (t) FileOps.execDetached(t.split(/\s+/).concat([openWithDlg.targetPath]));
             }
+        }
+        // slow-conversion confirm: only shown when VideoConv's estimate crosses
+        // its "quick" threshold, so a short clip never asks. Neutral, not danger
+        // — it writes a NEW file beside the source and touches nothing else.
+        BrowserConfirm {
+            id: compressDlg
+            property string targetPath: ""
+            confirmLabel: "compress"
+            onConfirmed: if (targetPath) VideoConv.start(targetPath)
         }
         // permanent delete (the context menu's "delete…"; trash is the safe
         // default elsewhere). Acts on the whole selection.
