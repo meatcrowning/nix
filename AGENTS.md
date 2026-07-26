@@ -33,7 +33,7 @@ The configuration is split into three main areas: System-wide NixOS settings, Us
 
 - `surfer/`: Vendored source of the standalone QtWebEngine **browser** (same live-source, top-level-on-purpose pattern as `filer/`; built/installed by `home/prog/surfer.nix`). Titlebar chrome via hyprvtb like the others.
 - `pylib/`: shared Python helpers for the vendored apps — most importantly `vtbclient.py`, the hyprvtb titlebar-button socket bridge used by filer/viewer/surfer/player/painter.
-- `tools/`: repo maintenance scripts that the documented workflows depend on: `preflight.sh` (THE pre-rebuild gate — untracked-file check + rootless eval + seed-drift; run it before every `sudo rebuild-top`), `seed-drift.sh` (seed-once source/live diff), `prune-worktrees.sh` (agent-worktree cleanup, aliased `wtprune`).
+- `tools/`: repo maintenance scripts that the documented workflows depend on: `preflight.sh` (THE pre-rebuild gate — untracked-file check + rootless eval + seed-drift; run it before every `sudo rebuild-top`), `seed-drift.sh` (seed-once source/live diff), `prune-worktrees.sh` (agent-worktree cleanup, aliased `wtprune`), `sandbox.sh` (an off-screen virtual monitor to test GUI changes on, so agents never open windows on the user's screen — see the desktop-shell section).
 - `sounds/`: **git submodule** → `github.com/meatcrowning/vista-sounds` (a PRIVATE repo). Holds the Windows Vista event `.wav`s, which are Microsoft's and must NOT live in this public tree — so they're pulled in privately here. `home/srvs/vista-sounds.nix` exposes the checkout at the runtime path everything expects via an out-of-store symlink (`~/.local/share/sounds/vista → /home/lam/nix/sounds`), so a plain `git pull` picks up new sounds with no rebuild. **Cloning/pulling the config on a new machine (e.g. book) must use `--recurse-submodules`** (`git clone --recurse-submodules …`, or after a plain pull: `git submodule update --init`) or the sounds dir is empty; the private submodule also needs GitHub auth on that machine.
 
 - `home/srvs/claude-memory.nix` + `claude-memory-files/`: two-way sync of Claude Code's **memory** files between `top` and `book`, via the PRIVATE repo `github.com/meatcrowning/claude-memories`. `~/.claude/projects` itself is the git checkout (in place — no copying), driven by the `claude-memory-sync.timer` user unit every 5 min; log at `~/.cache/claude-memory-sync.log`, force a run with `systemctl --user start claude-memory-sync.service`. Being under `home/`, it deploys to book automatically — that machine only needs `home-manager switch --flake ~/nix#air` plus a `gh auth login` (the git credential helper is `!gh auth git-credential`). **Two invariants worth protecting:** the `.gitignore` is an ALLOWLIST (ignore `*`, re-include only `*/memory/**`) because the same tree holds every session transcript, which must never be pushed; and `.gitattributes` sets `*.md merge=union` so a memory edited on both machines keeps both sides rather than wedging the sync on a conflict. Both are seeded from nix on every run, so edit them in `claude-memory-files/`, not in the live repo. Practical consequence: **a memory written on one machine is shared infrastructure** — a wrong one propagates, so say which host a fact is specific to.
@@ -225,6 +225,19 @@ before touching the plugin or the pin.
   - `PLUGIN_INIT` decorates hidden windows too (it used to skip them), so a
     minimized window isn't left with no titlebar at all after the swap.
 
+  **A swap must also be INVISIBLE, not merely survivable (2.71).** Restoring
+  every window on the way out is required, but it left them restored: a
+  rolled-up window snapped open on `hyprctl reload` and stayed open. So
+  `PLUGIN_EXIT` now writes the roll/minimize states to
+  `~/.local/state/hyprvtb/handoff.tsv` before undoing them, and `PLUGIN_INIT`
+  re-applies them (`toggleRollup(false)` — no animation) after it has decorated
+  the existing windows. Keyed by window ADDRESS, which is only meaningful
+  because a hot swap happens inside one compositor process; the file records
+  that process's PID and is discarded on a mismatch, and consumed (deleted) on
+  the first read either way, so nothing leaks into a fresh login. Note the fix
+  cannot show on the first reload FROM an older build — the outgoing instance
+  is the half that has to write the file.
+
   **Test a swap without gambling the session:**
   `home/prog/hyprvtb/tools/hotswap-test.sh [plugin.so]` rolls a window up in a
   nested Hyprland, swaps the plugin under it, and checks who owns the titlebar
@@ -277,6 +290,27 @@ before touching the plugin or the pin.
   `workspaces`/the Hyprland log (plugin state + crashes), `qmllint` (QML syntax),
   and headless PySide harnesses (e.g. pre-grant a permission and assert a signal
   fires) for app logic. Never run bare `qs` (it launches a second panel).
+
+- **NEVER open a test window on the user's screen — use `tools/sandbox.sh`.**
+  It creates a virtual monitor in the live session (`hyprctl output create
+  headless`) and launches windows onto it: a real monitor to the compositor —
+  workspaces, decorations, animations, every frame rendered — that no cable
+  leads to, so nothing appears in front of the user. `start` / `exec CMD` /
+  `shot [file]` (grim of that monitor) / `clients` / `stop`. `exec` restores
+  keyboard focus to the user's monitor afterwards (a new window takes focus even
+  with `silent`), and `stop` closes the sandbox's windows BEFORE removing the
+  output — Hyprland migrates a removed monitor's windows onto a real one — then
+  prunes the classes it launched from the plugin's per-class geometry memory.
+  Windows there are decorated by the LIVE plugin instance, which is the point
+  (you test what is actually running) but also means it is no protection against
+  a plugin crash: for an unswitched plugin build use the nested harness
+  (`home/prog/hyprvtb/tools/nested-smoke.sh`), which is properly isolated but
+  appears as a window. Three headless-parent designs were tried and rejected
+  first; `tools/sandbox.sh`'s header records why, so they don't get retried.
+  Two API traps it encodes: this config is Lua, so dispatchers are
+  `hl.dsp.*` objects passed to `hyprctl dispatch` (a bare dispatcher name is a
+  nil global), and `hyprctl keyword` refuses outright ("keyword can't work with
+  non-legacy parsers") — use `hyprctl eval`.
 
 - **Commit + push after making changes here.** `~/nix` is kept committed and
   pushed — after a working change, `git add` the specific files you touched
