@@ -38,6 +38,17 @@ SlidePopup {
     readonly property bool hasPlayer: player !== null
     readonly property bool playing: hasPlayer && player.isPlaying
     property var spectrumLevels: []
+    // Per-bar peak-hold state, advanced once per cava frame (see the feed's
+    // SplitParser). Classic analyser behaviour: instant attack, a brief hold at
+    // the top, then an accelerating fall — the acceleration is what makes a peak
+    // read as *falling* rather than fading, so keep the velocity term.
+    property var spectrumPeaks: []
+    property var spectrumPeakVel: []
+    property var spectrumPeakHold: []
+    // Frames, at cava's 60fps: ~0.33s of hold before the drop starts.
+    readonly property int peakHoldFrames: 20
+    // Units of the 0-100 scale added to the fall speed each frame.
+    readonly property real peakGravity: 0.055
 
     // ---- repeat / shuffle state -----------------------------------------
     // Repeat cycles None -> Track -> Playlist natively when the player exposes
@@ -123,10 +134,32 @@ SlidePopup {
             + "exec cava -p \"$cfg\""]
         stdout: SplitParser {
             onRead: data => {
+                const n = SettingsStore.d.mediaSpectrumBars;
                 const parts = data.split(";");
                 const out = [];
-                for (let i = 0; i < SettingsStore.d.mediaSpectrumBars; i++) out.push(Math.min(100, parseInt(parts[i], 10) || 0));
+                for (let i = 0; i < n; i++) out.push(Math.min(100, parseInt(parts[i], 10) || 0));
                 root.spectrumLevels = out;
+
+                // Advance the peak markers on the same clock as the bars. The
+                // arrays are re-seeded whenever the bar count changes under us
+                // (cava respawns with a new bucket count), so a length mismatch
+                // is expected, not an error.
+                const pk  = root.spectrumPeaks.length    === n ? root.spectrumPeaks.slice()    : out.slice();
+                const vel = root.spectrumPeakVel.length  === n ? root.spectrumPeakVel.slice()  : new Array(n).fill(0);
+                const hld = root.spectrumPeakHold.length === n ? root.spectrumPeakHold.slice() : new Array(n).fill(0);
+                for (let i = 0; i < n; i++) {
+                    if (out[i] >= pk[i]) {          // new peak: snap up, reset the fall
+                        pk[i] = out[i]; vel[i] = 0; hld[i] = root.peakHoldFrames;
+                    } else if (hld[i] > 0) {        // sitting at the top
+                        hld[i]--;
+                    } else {                        // falling, faster each frame
+                        vel[i] += root.peakGravity;
+                        pk[i] = Math.max(out[i], pk[i] - vel[i]);
+                    }
+                }
+                root.spectrumPeaks = pk;
+                root.spectrumPeakVel = vel;
+                root.spectrumPeakHold = hld;
             }
         }
         // A bar-count change stops cava so it respawns with the new bucket count
@@ -223,25 +256,46 @@ SlidePopup {
         id: spec
         readonly property int nbars: SettingsStore.d.mediaSpectrumBars
         readonly property real gamma: 0.55
-        Row {
-            anchors.fill: parent
-            spacing: 2
-            Repeater {
-                model: spec.nbars
-                Item {
-                    required property int index
-                    width: (spec.width - (spec.nbars - 1) * 2) / spec.nbars
-                    height: spec.height
-                    Rectangle {
-                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                        height: Math.max(1, spec.height
-                            * Math.pow(Math.max(0, root.spectrumLevels[index] || 0) / 100, spec.gamma))
-                        color: Theme.accent
-                        // cava already smooths (noise_reduction) and feeds 60fps,
-                        // so this is a second low-pass on top. Keep it just long
-                        // enough to absorb a dropped frame, not to re-add lag.
-                        Behavior on height { NumberAnimation { duration: 25 } }
-                    }
+        // Bars are gapless, so they can't be laid out by a Row with spacing 0:
+        // at 32 buckets the per-bar width is fractional, and rounding each one
+        // independently leaves subpixel seams between them. Position from the
+        // shared edge instead — bar i spans round(w*i/n)..round(w*(i+1)/n), so
+        // one bar's right edge IS the next one's left edge and the row stays
+        // exactly `width` wide however the division falls.
+        Repeater {
+            model: spec.nbars
+            Item {
+                required property int index
+                readonly property int x0: Math.round(spec.width * index / spec.nbars)
+                x: x0
+                width: Math.max(1, Math.round(spec.width * (index + 1) / spec.nbars) - x0)
+                height: spec.height
+
+                // level
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: Math.max(1, spec.height
+                        * Math.pow(Math.max(0, root.spectrumLevels[index] || 0) / 100, spec.gamma))
+                    color: Theme.accent
+                    // cava already smooths (noise_reduction) and feeds 60fps,
+                    // so this is a second low-pass on top. Keep it just long
+                    // enough to absorb a dropped frame, not to re-add lag.
+                    Behavior on height { NumberAnimation { duration: 25 } }
+                }
+
+                // peak marker — same gamma as the bar so it lines up with the
+                // bar top on a fresh hit. Deliberately NOT animated: the fall
+                // is already interpolated frame-by-frame by the gravity model,
+                // and a Behavior here would drag the marker behind the peak it
+                // is supposed to be pinning. Brighter than the bar so it stays
+                // legible where it rides just above a tall one.
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right }
+                    height: 1
+                    y: Math.min(spec.height - height, Math.max(0, spec.height - height - spec.height
+                        * Math.pow(Math.max(0, root.spectrumPeaks[index] || 0) / 100, spec.gamma)))
+                    color: Theme.text
+                    visible: (root.spectrumPeaks[index] || 0) > 0
                 }
             }
         }
