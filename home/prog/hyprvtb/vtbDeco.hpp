@@ -298,7 +298,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 renderBar(PHLMONITOR, float a); // the actual bar drawing; renderPass wraps it (direct, or FBO-composited while fading)
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
     SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr,
-                                          int* outLines = nullptr, bool ellipsis = true);
+                                          int* outLines = nullptr, bool ellipsis = true, bool flatColon = false);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
 
     // title address editor
