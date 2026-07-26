@@ -43,6 +43,8 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 
+from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
+
 # Preview classification. `kind` is the scaffold for file previews: the QML side
 # groups/renders entries by it (images get a thumbnail grid at the top of the
 # dir; everything else stays a plain row). Extend this — a new extension set and
@@ -613,6 +615,7 @@ def main():
     winctl = WinCtl()
     titlebar = Titlebar()
     dirwatch = DirWatch()
+    videoconv = VideoConv()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
     # Quick type name and would shadow the context property.
     # WalPalette first, so Theme's bindings resolve it when Theme is instantiated.
@@ -622,6 +625,7 @@ def main():
     ctx.setContextProperty("WinCtl", winctl)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)
+    ctx.setContextProperty("VideoConv", videoconv)
     ctx.setContextProperty("startDir", start_dir)
     # Last-used sort + hidden-files toggle, restored into the view on startup.
     ctx.setContextProperty("startSortField", settings.value("sortField", "name"))
