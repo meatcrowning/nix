@@ -73,6 +73,8 @@
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/KeybindManager.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/protocols/types/DataDevice.hpp>
@@ -409,6 +411,64 @@ namespace Vtb::Hl {
     }
     inline void clearCursorOverride() {
         VtbCursor::overrideController->unsetOverride(VtbCursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+    }
+
+    // ---- event loop: timers and deferred work ------------------------------
+    //
+    // g_pEventLoopManager is the compositor's wl_event_loop front end, and this
+    // plugin uses three corners of it: the 150ms main-thread heartbeat
+    // (main.cpp), the idle callbacks the roll animation finalizes itself from
+    // (vtbDeco.cpp), and the readable-waiter that drains the clipboard pipe
+    // asynchronously (pasteIntoEdit).
+    //
+    // Wrapped here for the usual Axis-A reason — one more relocatable global —
+    // and for a sharper one: every one of those callbacks' CODE lives in this
+    // .so, so the unload path has to be able to take them back, and a
+    // cancellation API is only usable if the handle-issuing call is reachable
+    // through the seam that the unload path already goes through. That is why
+    // doLater() returns its sequence here rather than swallowing it.
+    //
+    // EventLoopManager.hpp is byte-identical between the two pins, so none of
+    // these needs a version arm: addTimer/removeTimer :32-33, doLater/
+    // removeDoLater :41-42, doOnReadable :77.
+
+    // Main-thread timer registration. removeTimer is half of what makes a hot
+    // swap survivable — the timer's lambda is in this image, so PLUGIN_EXIT
+    // must deregister it before dlclose() (see main.cpp's tick).
+    inline void addTimer(SP<CEventLoopTimer> timer) {
+        g_pEventLoopManager->addTimer(timer);
+    }
+    inline void removeTimer(SP<CEventLoopTimer> timer) {
+        g_pEventLoopManager->removeTimer(timer);
+    }
+
+    // Run fn on the next wayland idle turn.
+    //
+    // [[nodiscard]] on purpose: dropping the sequence is the bug this wrapper
+    // exists to make hard. A queued idle lambda that is still in the
+    // compositor's list when `hyprctl reload` dlclose()s this image runs into
+    // unmapped memory — the same class of crash as an unremoved timer,
+    // one loop turn wide, and the three call sites in vtbDeco.cpp discarded
+    // the seq for their entire life. Hold it and removeDoLater() it on the way
+    // out (CVtbDeco::queueDoLater / cancelPendingDoLater do exactly that).
+    [[nodiscard]] inline uint64_t doLater(std::function<void()> fn) {
+        return g_pEventLoopManager->doLater(fn);
+    }
+    // Harmless on a sequence that has already fired: upstream's erase_if simply
+    // matches nothing (EventLoopManager.cpp:240-247).
+    inline void removeDoLater(uint64_t seq) {
+        g_pEventLoopManager->removeDoLater(seq);
+    }
+
+    // Run fn once fd is readable — and note it TAKES OWNERSHIP of fd, which is
+    // why the caller passes a duplicate() of an fd it still wants to read from.
+    // Two sharp edges are upstream's, not this wrapper's: fn runs SYNCHRONOUSLY
+    // if the fd is already readable, and there is no cancel handle — a waiter
+    // lives until its fd fires or the compositor dies. So use it only for a
+    // client-driven pipe with a bounded lifetime (the clipboard paste), never
+    // as a general deferral: doLater() above is the cancellable one.
+    inline void doOnReadable(Hyprutils::OS::CFileDescriptor fd, std::function<void()>&& fn) {
+        g_pEventLoopManager->doOnReadable(std::move(fd), std::move(fn));
     }
 
     // ---- rendering ---------------------------------------------------------

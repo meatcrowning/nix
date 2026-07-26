@@ -295,6 +295,27 @@ class CVtbDeco : public IHyprWindowDecoration {
     CHyprSignalListener  m_pMouseMoveCallback;
     CHyprSignalListener  m_pMouseAxisCallback;
 
+    // ---- deferred (idle) callbacks this deco has queued ----
+    //
+    // The roll animation and the close animation finalize themselves off the
+    // render loop via Hl::doLater. Those lambdas guard the OBJECT's lifetime
+    // (CDecoRef::alive(), PHLWINDOWREF::lock()) — but nothing guarded their
+    // CODE, which lives in this .so: a callback still sitting in the
+    // compositor's idle list when `hyprctl reload` dlclose()s this image runs
+    // into unmapped memory. Same family as the timer PLUGIN_EXIT already
+    // removes and the decorations it already detaches, just one event-loop turn
+    // wide instead of 150ms — which is why it had never been seen, only
+    // deduced. So every sequence goes in here and is cancelled on the way out
+    // (~CVtbDeco and restoreForUnload). Callbacks retire their own sequence as
+    // they fire, so this holds exactly the ones still in flight (0..3).
+    std::vector<uint64_t> m_pendingDoLater;
+
+    // Queue fn on the next event-loop turn, tracked in m_pendingDoLater. Use
+    // this, never a bare Hl::doLater(), for anything queued from a deco.
+    void                 queueDoLater(std::function<void()> fn);
+    void                 retireDoLater(uint64_t seq); // fn ran: stop tracking it
+    void                 cancelPendingDoLater();      // unload / destruction: drop them all
+
     void                 renderPass(PHLMONITOR, float const& a);
     void                 renderBar(PHLMONITOR, float a); // the actual bar drawing; renderPass wraps it (direct, or FBO-composited while fading)
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);

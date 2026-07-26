@@ -7,7 +7,9 @@
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
-#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+// The event loop itself is reached only through Hl:: (vtbCompat.hpp); this is
+// just the fd type pasteIntoEdit names in its own paste context.
+#include <hyprutils/os/FileDescriptor.hpp>
 
 #include <pango/pangocairo.h>
 #include <xkbcommon/xkbcommon.h>
@@ -241,10 +243,51 @@ static int countCp(const std::string& s, size_t byteLen) {
 }
 
 CVtbDeco::~CVtbDeco() {
+    // Nothing deferred may outlive this object: the callbacks' code is in this
+    // .so, and this destructor is also the path PLUGIN_EXIT's detachOurDecos()
+    // takes on a hot swap. See m_pendingDoLater.
+    cancelPendingDoLater();
     if (m_bCursorOverridden)
         Hl::clearCursorOverride();
     if (g_pGlobalState)
         std::erase(g_pGlobalState->bars, m_self);
+}
+
+// ---- deferred-callback bookkeeping ----------------------------------------
+// See m_pendingDoLater in the header for why a deco may never hand an idle
+// callback to the event loop without keeping its sequence.
+
+void CVtbDeco::queueDoLater(std::function<void()> fn) {
+    // The wrapper's only extra job is retiring the sequence once fn has
+    // actually run — and that sequence doesn't exist until doLater() returns,
+    // so pass it through a shared slot the wrapper captures (the same
+    // self-referential idiom as pasteIntoEdit's pump). doLater never runs its
+    // callback inline (it always goes through wl_event_loop_add_idle), so the
+    // slot is always filled before anything can read it.
+    auto           seqBox = makeShared<uint64_t>(0);
+    CDecoRef       self   = m_self;
+    const uint64_t SEQ    = Hl::doLater([self, seqBox, fn = std::move(fn)]() {
+        // Retire before running: fn may queue the next beat of the animation,
+        // and the sequence being retired is this one, not that one. CDecoRef:
+        // alive() + operator->, no lock() to get wrong (globals.hpp). If the
+        // deco died inside this same idle batch its list is gone with it —
+        // fn's own guards then make the call a no-op.
+        if (self.alive())
+            self->retireDoLater(*seqBox);
+        fn();
+    });
+    *seqBox = SEQ;
+    m_pendingDoLater.push_back(SEQ);
+}
+
+void CVtbDeco::retireDoLater(uint64_t seq) {
+    std::erase(m_pendingDoLater, seq);
+}
+
+void CVtbDeco::cancelPendingDoLater() {
+    for (const uint64_t SEQ : m_pendingDoLater)
+        Hl::removeDoLater(SEQ);
+    m_pendingDoLater.clear();
 }
 
 SDecorationPositioningInfo CVtbDeco::getPositioningInfo() {
@@ -1749,7 +1792,7 @@ void CVtbDeco::pasteIntoEdit() {
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                 // nothing more yet — re-arm on the same pipe (dup, since the
                 // waiter takes ownership of the fd it polls) and wait again.
-                g_pEventLoopManager->doOnReadable(ctx->fd.duplicate(), [pump]() { (*pump)(); });
+                Hl::doOnReadable(ctx->fd.duplicate(), [pump]() { (*pump)(); });
                 return;
             }
             // EOF (n == 0) or a hard error: commit whatever we got, if the deco
@@ -1762,7 +1805,7 @@ void CVtbDeco::pasteIntoEdit() {
         }
     };
     // seed the first wait with a dup so the master fd in ctx stays ours to read.
-    g_pEventLoopManager->doOnReadable(ctx->fd.duplicate(), [pump]() { (*pump)(); });
+    Hl::doOnReadable(ctx->fd.duplicate(), [pump]() { (*pump)(); });
 }
 
 // Map a bar-local Y (logical px) to a byte offset on a codepoint boundary — the
@@ -3156,7 +3199,7 @@ void CVtbDeco::stepRollAnim() {
                 m_bRollReveal  = true;
                 m_rollRevealAt = now;
                 CDecoRef self = m_self;
-                g_pEventLoopManager->doLater([self]() {
+                queueDoLater([self]() {
                     // CDecoRef: alive() + operator->, no lock() to get wrong.
                     if (self.alive())
                         self->beginRollReveal();
@@ -3173,7 +3216,7 @@ void CVtbDeco::stepRollAnim() {
         // frame(s) until it fires render the terminal look (progress==1), which
         // is visually identical to the settled state, so there's no seam.
         CDecoRef self = m_self;
-        g_pEventLoopManager->doLater([self]() {
+        queueDoLater([self]() {
             // CDecoRef: alive() + operator->, no lock() to get wrong.
             if (self.alive())
                 self->finishRollAnim();
@@ -3415,7 +3458,7 @@ void CVtbDeco::renderShadeIfRolled(PHLMONITOR pMonitor) {
             m_bCloseReady = true;
             Hl::damage(CBox{m_rollBox}.expand(VTB_SHADOW_SIZE)); // final clear of the bar
             PHLWINDOWREF w = m_pWindow;
-            g_pEventLoopManager->doLater([w]() {
+            queueDoLater([w]() {
                 if (auto win = w.lock())
                     win->sendClose();
             });
@@ -3495,6 +3538,14 @@ void CVtbDeco::restoreFromMinimize() {
 // ever get to run. Deliberately NOT the animated paths: those schedule work on
 // timers and doLater callbacks whose code is about to be unmapped.
 void CVtbDeco::restoreForUnload() {
+    // Take back every queued idle callback FIRST, and before the no-window
+    // early return — a deco whose window has already gone can still have one
+    // in flight, and this is the pass that visits every bar the plugin owns
+    // (detachOurDecos, which runs after, only reaches decos still attached to a
+    // window in the compositor's list). The two halves together leave nothing
+    // queued into an image that is about to be unmapped. See m_pendingDoLater.
+    cancelPendingDoLater();
+
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW)
         return;
