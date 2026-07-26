@@ -411,6 +411,19 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
     pango_layout_set_spacing(layout, 0);
 
+    // Pin the per-cell pitch to the font size — kitty's cell, and the same
+    // thing PixelText does in QML with lineHeightMode: FixedHeight. Pango
+    // rounds ascent and descent UP separately (at 15px: 11.25→12 + 3.75→4 =
+    // 17), so a stacked column would lead wider than a terminal row and drift
+    // further off the grid with every glyph. Negative spacing pulls each line
+    // back onto the cell; everything downstream (maxLines above, m_iEditLineH,
+    // the caret/selection rows) already assumes a pitch of exactly SIZE.
+    int natH = 0;
+    pango_layout_set_text(layout, "M", -1);
+    pango_layout_get_pixel_size(layout, nullptr, &natH);
+    if (natH > 0 && natH != SIZE)
+        pango_layout_set_spacing(layout, (SIZE - natH) * PANGO_SCALE);
+
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
 
     // Flat colons force the column to be drawn in RUNS between them (a pango
@@ -442,9 +455,10 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
         cairo_move_to(CR, 0, y);
         pango_cairo_show_layout(CR, layout);
 
-        int lw = 0, lh = 0;
-        pango_layout_get_pixel_size(layout, &lw, &lh);
-        y += lh;
+        // advance by whole cells, not by the run's ink height — the last line
+        // of a run still carries its full (rounded-up) descent, which would
+        // otherwise reintroduce the drift the pinned spacing just removed.
+        y += (double)(j - i) * SIZE;
         i = j;
     }
 

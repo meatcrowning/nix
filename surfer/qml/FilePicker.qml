@@ -266,7 +266,7 @@ Item {
                 delegate: Rectangle {
                     required property var modelData
                     width: list.width
-                    height: Theme.fontSize + 4
+                    height: Theme.fontSize   // kitty-tight: one font cell, no gap
                     color: root.isSelected(modelData.path) ? Theme.highlight
                          : rowMa.containsMouse ? Theme.bg : "transparent"
 
