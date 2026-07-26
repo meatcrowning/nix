@@ -3284,6 +3284,31 @@ void CVtbDeco::restoreFromMinimize() {
     damageEntire();
 }
 
+// Leave the window the way we found it (see the .hpp): un-park a minimized one,
+// un-hide a rolled-up one, and cancel any animation in flight — synchronously,
+// since this runs while the plugin is being unloaded and nothing deferred will
+// ever get to run. Deliberately NOT the animated paths: those schedule work on
+// timers and doLater callbacks whose code is about to be unmapped.
+void CVtbDeco::restoreForUnload() {
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return;
+
+    if (m_bMinimized)
+        restoreFromMinimize();
+
+    m_rollAnim    = ROLL_NONE;
+    m_rollSnapTex = nullptr;
+    if (m_bRolledUp || PWINDOW->isHidden()) {
+        m_bRolledUp    = false;
+        m_bRollReveal  = false;
+        m_bRollRevived = false;
+        PWINDOW->setHidden(false);
+        settleGeometryToGoal(PWINDOW);
+        PWINDOW->updateWindowDecos(); // visible again -> Hyprland re-adds its own border/shadow
+    }
+}
+
 void CVtbDeco::onFocusGained() {
     if (!m_bMinimized)
         return;

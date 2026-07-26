@@ -131,9 +131,7 @@ before touching the plugin or the pin.
   `~/.config/...` file **in place** (targeted string edit — never overwrite
   wholesale or you reset the live wal palette/border). Apply `hyprland.lua`
   changes with **`hyprctl reload`** (re-runs the live Lua, re-registers
-  `hl.bind`s, does not disturb the session) — safe for *config* edits, and
-  only because the plugin line now passes a constant path string (see the
-  hyprvtb bullet below: reload must never re-map the `.so`).
+  `hl.bind`s, does not disturb the session).
 
   **Run `tools/seed-drift.sh` whenever you touch one of these — before you
   start (to see what's already stale) and after you finish (to prove both
@@ -174,28 +172,62 @@ before touching the plugin or the pin.
   the previous generation in mind. Bump a pin **on its own commit**, never
   alongside other changes.
 
-- **`hyprvtb` plugin (C++) after a source edit — `rbsys`, then the change goes
-  live at the NEXT LOGIN. There is no hot reload. Do not try to make one.**
-  Bump the version string in `main.cpp` per change, `rbsys`, and stop there;
-  `hyprctl plugin list` will keep reporting the OLD version until the user
-  relogs, and that is correct, not a failure. If the tree is dirty, `git add`
-  the changed files first — flake eval ignores untracked ones.
+- **`hyprvtb` plugin (C++) reload after a source edit — `rbsys` then
+  `hyprctl reload`. That is the whole procedure. NO relog, and never
+  `hyprctl plugin load/unload`.** Bump the version string in `main.cpp` per
+  change, then confirm `hyprctl plugin list` shows the **new Version**,
+  **exactly one** hyprvtb, and `hyprctl configerrors` is empty. It briefly
+  re-decorates every window (the plugin does session save/restore, so this is
+  safe). If the tree is dirty, `git add` the changed files first — flake eval
+  ignores untracked ones.
 
-  Every hot-swap route has now been tried and every one takes the session down:
-  - **`hyprctl reload` swapping the `.so`** (what `hyprland.lua` did from
-    2026-07-25 until later the same day, by passing `hl.plugin.load` the
-    `readlink -f`-resolved store path so each rebuild yielded a new path
-    string): the reload itself looks perfect — new Version, exactly one
-    instance, empty `configerrors` — and then the compositor **SIGSEGVs at the
-    next window close**, jumping to a freed address under
-    `CWindow::destroyWindow`, because the unloaded `.so`'s code is still
-    reachable from Hyprland's own bookkeeping. Hyprland's watchdog restarts the
-    compositor with `--safe-mode`: no config at all, no titlebars, no keybinds,
-    no panel, and only a relog gets out of it. The config now passes the
-    **constant symlink** string, which makes `updateConfigPlugins` early-return
-    — reload can no longer touch the plugin, by construction.
-  - **Manual `hyprctl plugin load`/`unload`** — see below; corrupts the
-    `plugin:hyprvtb:col.*` keys unrecoverably.
+  This works because `hyprland.lua` passes `hl.plugin.load` the **resolved**
+  `/nix/store/...` path (via `readlink -f`), not the stable symlink. Hyprland
+  tracks config-loaded plugins by that literal path **string**, and
+  `CPluginSystem::updateConfigPlugins` early-returns unless the string list
+  *changes* between reloads. With the symlink the string was constant forever,
+  so `hyprctl reload` was a no-op and the stale `.so` stayed mapped — which is
+  what made everyone reach for manual `plugin load` and, historically, a relog.
+  With the resolved path, each `rbsys` yields a new string and Hyprland does the
+  swap itself, in the right order and with the right bookkeeping.
+
+  **What makes the swap SURVIVABLE (2.65) — do not regress this.** A hot swap
+  `dlclose()`s the old image while the compositor still holds pointers into it,
+  and Hyprland's own cleanup is not enough:
+  `HyprlandAPI::removeWindowDecoration` lands in `CWindow::removeWindowDeco`,
+  which only queues the removal and calls `updateWindowDecos()` — and that
+  early-returns on `!m_isMapped || isHidden()`. Every hidden window (this plugin
+  hides rolled-up ones and parks minimized ones off-screen) therefore kept a
+  `UP<CVtbDeco>` whose vtable was about to be unmapped, and the session
+  SIGSEGV'd at the next window close, inside `~CWindow` under
+  `CWindow::destroyWindow`. That is what took the desktop down on 2026-07-25.
+  Three things now hold it together, all in `PLUGIN_EXIT`/`PLUGIN_INIT`:
+  - `Hl::detachOurDecos()` erases this plugin's decorations from every window
+    itself, uncaching them from the positioner, while its code is still mapped.
+  - `CVtbDeco::restoreForUnload()` runs first, un-hiding rolled-up windows and
+    un-parking minimized ones — states only this instance knows how to leave,
+    which the incoming one does not inherit.
+  - `PLUGIN_INIT` decorates hidden windows too (it used to skip them), so a
+    minimized window isn't left with no titlebar at all after the swap.
+
+  **Test a swap without gambling the session:**
+  `home/prog/hyprvtb/tools/hotswap-test.sh [plugin.so]` rolls a window up in a
+  nested Hyprland, swaps the plugin under it, and checks who owns the titlebar
+  afterwards. It passes on 2.65 and fails on 2.64, so it is a real regression
+  test, not a smoke check. (Two gotchas it encodes: the swap is asynchronous —
+  Hyprland's config watcher usually performs it — and an idle nested compositor
+  won't notice until an IPC request turns its event loop.)
+
+  **And if a swap does kill the compositor**, the session no longer falls off a
+  cliff: `sys/dsk/hyprland.nix` replaces the wayland-session's `start-hyprland`
+  (whose answer to an unclean exit is `--safe-mode`, i.e. no config at all) with
+  `hypr-supervise`, which records the plugin build that was live in
+  `~/.local/state/hyprvtb/crashed-with` and restarts with the REAL config.
+  `hyprland.lua` reads that on the way up and loads the last **known-good**
+  build instead, leaving the reason in `.../quarantined`. So a bad plugin costs
+  one version and a breadcrumb, not the desktop. After 3 crashes in a row the
+  supervisor gives up and hands over to `start-hyprland` — at that point it is
+  not the plugin's fault.
 
   **Do not go back to manual `hyprctl plugin load`/`unload`.** It is the source
   of every "hot reload is unstable" report:
