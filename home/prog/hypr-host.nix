@@ -16,6 +16,11 @@
       -- shows at once instead of only after you hover something (the software
       -- cursor never re-rasterises the on-screen shape on a live theme change).
       no_hardware_cursors = ${if host == "air" then "false" else "true"},
+      -- Momentum ("kinetic") scrolling, synthesized by hyprvtb — see
+      -- docs/kinetic-scroll.md. It only has anything to act on where there is
+      -- a finger source, i.e. the laptop's touchpad, so it is enabled on
+      -- `air`/book alone; `top` (mouse wheel only) stays exactly as it was.
+      kinetic = ${if host == "air" then "true" else "false"},
     }
   '';
 }
