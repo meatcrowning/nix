@@ -27,12 +27,21 @@
 # merge, and that is left for a human (logged loudly, retried next tick).
 #
 # The CM_SYNC_* overrides exist so the script can be exercised against a
-# throwaway repo in a test.
+# throwaway repo in a test — and, since the logic here is generic
+# "keep one private repo in sync across two machines", so a SECOND caller can
+# reuse it wholesale. home/srvs/nix-docs.nix does exactly that for ~/nix/docs;
+# see the note on CM_SYNC_SEED below before adding a third.
 REPO="${CM_SYNC_REPO:-$HOME/.claude/projects}"
 REMOTE="${CM_SYNC_REMOTE:-https://github.com/tilktilk5/claude-memories.git}"
 BRANCH="${CM_SYNC_BRANCH:-main}"
 LOG="${CM_SYNC_LOG:-$HOME/.cache/claude-memory-sync.log}"
+# MUST be overridden by any other caller: this default seeds the ALLOWLIST
+# .gitignore, which ignores everything except */memory/**. Point a different
+# repo at it and every file in that repo silently stops being tracked.
 SEED="${CM_SYNC_SEED:-$HOME/.config/scripts/claude-memory-seed}"
+# Noun for commit messages, so a reused instance doesn't claim to be syncing
+# memories.
+LABEL="${CM_SYNC_LABEL:-memory file}"
 HOST="$(hostname -s 2>/dev/null || hostname)"
 
 mkdir -p "$(dirname "$LOG")"
@@ -78,7 +87,7 @@ else
   n=$(git diff --cached --name-only | wc -l | tr -d ' ')
   git -c user.name="claude-memory-sync" \
       -c user.email="claude-memory-sync@$HOST" \
-      commit -q -m "sync($HOST): $n memory file(s)" \
+      commit -q -m "sync($HOST): $n $LABEL(s)" \
     && log "committed $n file(s)"
 fi
 
@@ -94,9 +103,11 @@ if git fetch -q origin "$BRANCH" 2>/dev/null; then
     else
       git merge --abort 2>/dev/null
       log "MERGE CONFLICT — could not auto-merge origin/$BRANCH."
-      log "  Content conflicts are auto-resolved by the union driver, so this is"
-      log "  almost certainly a file deleted on one machine and edited on the"
-      log "  other. Resolve by hand in $REPO; the timer will retry meanwhile."
+      log "  Where .gitattributes marks the content merge=union (the memory"
+      log "  store does), content conflicts cannot happen, so this is a file"
+      log "  deleted on one machine and edited on the other. Elsewhere (docs)"
+      log "  it may simply be the same lines edited twice."
+      log "  Resolve by hand in $REPO; the timer will retry meanwhile."
       exit 1
     fi
   fi
