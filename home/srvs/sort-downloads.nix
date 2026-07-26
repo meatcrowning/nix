@@ -22,18 +22,28 @@
   };
 
   systemd.user.services.sort-downloads = {
-    Unit.Description = "File finished image/video downloads into ~/Pictures and ~/Videos";
+    Unit = {
+      Description = "File finished image/video downloads into ~/Pictures and ~/Videos";
+      # A burst of downloads retriggers the path unit repeatedly; the default
+      # 5-starts-in-10s limit would wedge the unit for the rest of the session.
+      StartLimitIntervalSec = 0;
+    };
     Service = {
       Type = "oneshot";
-      # Pinned so the unit doesn't depend on the ambient systemd-user PATH;
-      # lsof is the open-file check the script degrades gracefully without.
+      # Pinned so the unit doesn't depend on the ambient systemd-user PATH.
+      # lsof = open-file check, file = MIME sniff for extensionless downloads;
+      # the script degrades gracefully if either is missing.
       Environment = [
         "PATH=${lib.makeBinPath [
           pkgs.coreutils
           pkgs.lsof
+          pkgs.file
         ]}"
       ];
       ExecStart = "${pkgs.bash}/bin/bash %h/.config/scripts/sort-downloads.sh";
+      # The script polls in-flight downloads until they settle, capped at its
+      # own MAX_WAIT (600s). This is the outer guard on that.
+      TimeoutStartSec = "15min";
     };
   };
 
