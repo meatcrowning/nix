@@ -56,6 +56,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                               isMinimized() const { return m_bMinimized; } // for session snapshot
     bool                               isRolledUp() const { return m_bRolledUp; }   // for session snapshot
 
+    // The mid-roll composite's drop shadow, in pMonitor's device pixels. False
+    // when there is none to draw. vtbRenderShadowLayer calls this so the roll's
+    // shadow joins the SAME union as every resting window's — see the
+    // definition for what drawing it separately used to cost.
+    bool                               rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out);
+
     // Put this window back into a plain, visible state — no animation, no
     // deferred work. PLUGIN_EXIT calls it for every bar: the states this plugin
     // puts a window INTO (rolled up = setHidden, minimized = parked off-screen)
@@ -365,7 +371,6 @@ class CVtbDeco : public IHyprWindowDecoration {
     // bar (so the bar/snapshot occlude its centre, leaving only the L-overhang);
     // the sliding snapshot AFTER (clipped at the bar's left edge). Both take the
     // bar's device-space box (already dropped by the set-down).
-    void                 drawRollShadow(PHLMONITOR pMonitor, const CBox& barBoxDev, float scale, float slideT, float downT, float a);
     void                 drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a);
     void                 drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a);
 
