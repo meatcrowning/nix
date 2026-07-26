@@ -27,6 +27,37 @@ Scope {
         root.locked = true;
     }
 
+    // Idle auto-lock. The panel owns this rather than hypridle because the
+    // timeout is a live setting (`autoLockMin`): a binding re-arms the monitor
+    // the instant settings.json changes, where hypridle would need its config
+    // rewritten and the daemon restarted on every drag of the slider.
+    // 0 = never, so `enabled` gates the whole thing.
+    //
+    // `respectInhibitors` keeps the video-playback behaviour hypridle had: a
+    // client holding zwp_idle_inhibit_manager_v1 (Firefox/Chromium while
+    // playing) stops the idle clock, so it won't lock mid-video.
+    //
+    // Fires activate() in-process instead of shelling out to
+    // `loginctl lock-session`. That would be one more hop (logind Lock signal
+    // -> hypridle lock_cmd -> `qs ipc call lock activate`) landing back here
+    // anyway, and loginctl has a habit of failing silently from inside the
+    // panel. Display blanking stays with hypridle — see hypridle.conf.
+    IdleMonitor {
+        enabled: SettingsStore.d.autoLockMin > 0
+        timeout: SettingsStore.d.autoLockMin * 60
+        respectInhibitors: true
+        onIsIdleChanged: if (isIdle) root.activate()
+    }
+
+    // Lock before the machine suspends, honouring the `lockOnSuspend` setting.
+    // hypridle's before_sleep_cmd calls this (via `qs ipc call lock suspend`)
+    // rather than locking unconditionally, so the toggle actually does
+    // something.
+    function suspend() {
+        if (!SettingsStore.d.lockOnSuspend) return;
+        root.activate();
+    }
+
     // Shared clock, so every monitor's surface reads the same time. Only ticks
     // while locked.
     property string timeText: "12:00 AM"

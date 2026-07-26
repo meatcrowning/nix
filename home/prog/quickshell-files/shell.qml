@@ -437,9 +437,12 @@ Scope {
     }
 
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
+    // `suspend` is the before-sleep entry point (hypridle) and obeys the
+    // `lockOnSuspend` setting; `activate` is unconditional.
     IpcHandler {
         target: "lock"
         function activate(): void { lock.activate(); }
+        function suspend(): void { lock.suspend(); }
     }
 
     // Let Hyprland toggle the launcher: `qs ipc call launcher toggle`.
