@@ -41,6 +41,7 @@ hyprlandPlugins.mkHyprlandPlugin {
     if grep -rn --include=\*.cpp --include=\*.hpp \
         -e 'g_pCompositor' -e 'g_pHyprRenderer' -e 'g_pHyprOpenGL' \
         -e 'g_pInputManager' -e 'g_pSeatManager' -e 'g_pKeybindManager' \
+        -e 'g_pEventLoopManager' \
         -e 'Desktop::viewState' -e 'Desktop::windowState' -e 'Desktop::focusState' \
         -e 'State::monitorState' -e 'Fullscreen::controller' -e 'Pointer::Cursor' \
         -e 'positionAnimation' -e 'sizeAnimation' -e 'm_layerSurfaceLayers' \

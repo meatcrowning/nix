@@ -6,7 +6,6 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/supplementary/executor/Executor.hpp>
-#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 
 extern "C" {
 #include <lua.h>
@@ -819,7 +818,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                            self->updateTimeout(std::chrono::milliseconds(150));
                                                        },
                                                        nullptr);
-    g_pEventLoopManager->addTimer(g_pGlobalState->tick);
+    Hl::addTimer(g_pGlobalState->tick);
 
     // Listeners are stored in g_pGlobalState (destroyed with it in
     // PLUGIN_EXIT) and every callback re-checks the state pointer: a
@@ -999,7 +998,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.76"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.77"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -1009,7 +1008,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // The tick timer's callback code lives in this .so: deregister and drop it
     // before anything else so it can never fire into an unloaded image.
     if (g_pGlobalState && g_pGlobalState->tick) {
-        g_pEventLoopManager->removeTimer(g_pGlobalState->tick);
+        Hl::removeTimer(g_pGlobalState->tick);
         g_pGlobalState->tick.reset();
     }
 
