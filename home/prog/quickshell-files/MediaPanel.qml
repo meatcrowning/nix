@@ -276,7 +276,7 @@ SlidePopup {
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                     height: Math.max(1, spec.height
                         * Math.pow(Math.max(0, root.spectrumLevels[index] || 0) / 100, spec.gamma))
-                    color: Theme.accent
+                    color: Theme.textDim
                     // cava already smooths (noise_reduction) and feeds 60fps,
                     // so this is a second low-pass on top. Keep it just long
                     // enough to absorb a dropped frame, not to re-add lag.
@@ -289,18 +289,18 @@ SlidePopup {
                 // and a Behavior here would drag the marker behind the peak it
                 // is supposed to be pinning.
                 //
-                // Theme.textDim, matching the artist line above. It reads 3.8:1
-                // against the background — where a marker spends nearly all its
-                // time, since it sits above its own bar by definition — and
-                // 1.9:1 against accent for the moments it rides right on a bar
-                // top, which is actually better separation there than the
-                // brighter Theme.text it replaces (1.4:1).
+                // The bar/marker pair is a light-on-dark split of the same hue:
+                // the bars take Theme.textDim (the elapsed/remaining time
+                // colour) and the markers the brighter Theme.accent, so a
+                // marker reads both against the background it usually floats
+                // over and against its own bar on the frames it rides the top.
+                // 2px tall — at 1px a falling marker was too faint to track.
                 Rectangle {
                     anchors { left: parent.left; right: parent.right }
-                    height: 1
+                    height: 2
                     y: Math.min(spec.height - height, Math.max(0, spec.height - height - spec.height
                         * Math.pow(Math.max(0, root.spectrumPeaks[index] || 0) / 100, spec.gamma)))
-                    color: Theme.textDim
+                    color: Theme.accent
                     visible: (root.spectrumPeaks[index] || 0) > 0
                 }
             }

@@ -95,7 +95,10 @@ Item {
                     // pin it near the ceiling and destroy the headroom.
                     height: Math.round(parent.height * lvl / 100)
                     y: parent.height - height
-                    color: Theme.accent
+                    // Theme.textDim, matching the spectrum's bars: the dim half
+                    // of the palette is the level, the bright half (accent) is
+                    // the marker riding on top of it.
+                    color: Theme.textDim
                     // Matches the spectrum's 25ms: long enough to absorb a
                     // dropped frame, short enough not to re-add the lag that
                     // the lower noise_reduction just removed.
@@ -107,16 +110,14 @@ Item {
         // The volume level as a horizontal line across both bars — the bar's
         // always-visible volume indicator (the volume OSD is gone).
         //
-        // STATIC white, deliberately not a wal palette slot. The palette is
-        // derived from the wallpaper and is monochromatic, so every slot in it
-        // is a near-neighbour of `accent`: measured against the accent fill,
-        // Theme.text contrasts 1.40:1, crit 1.49:1, ok 1.20:1 — all invisible
-        // on top of a bar. That went unnoticed while the bars were 5px with a
-        // 4px gap, because most of the line's length crossed background
-        // (10.2:1); making them gapless put the whole line on accent. White is
-        // 2.88:1 against the fill and 21:1 against the background, so it reads
-        // in both places and on any wallpaper. Same precedent as
-        // Theme.windowBorderInactive: a state indicator that must not recolour.
+        // Theme.accent, i.e. the colour the channel fills used to be — the
+        // fills dropped to Theme.textDim so the line has the brighter half of
+        // the palette to itself. That's what the earlier static white was
+        // working around: while both were accent-adjacent the line vanished on
+        // top of a bar (Theme.text measured 1.40:1 against the accent fill),
+        // and gapless bars left it nowhere else to be. Against a dim fill the
+        // separation comes from the palette itself, so the indicator can
+        // recolour with the wallpaper again like the rest of the panel.
         // Muted keeps Theme.crit — muting silences the output, so the bars fall
         // to zero and that line lands on background, where crit reads 10.9:1.
         Rectangle {
@@ -125,7 +126,7 @@ Item {
             width: parent.width
             y: Math.max(0, Math.round(root.barH * (1 - Math.max(0, SysInfo.volume) / 100)) - 1)
             height: 2
-            color: SysInfo.muted ? Theme.crit : "#ffffff"
+            color: SysInfo.muted ? Theme.crit : Theme.accent
         }
     }
 
