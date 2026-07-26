@@ -27,6 +27,20 @@
 #
 # Usage: ./nested-smoke.sh [path/to/libhyprvtb.so]
 # Default plugin: whatever the last `nixos-rebuild switch` installed.
+#
+# Env: VTBSMOKE_EXPECT_FRAMES=0
+#   Animation COMPLETION needs this nested compositor to receive frame
+#   callbacks from its host. When its window is parked on a headless sandbox
+#   output (tools/sandbox.sh) and the host session runs debug:vfr, it gets
+#   none: the compositor never steps its animations, so a rolled-up window
+#   never comes back OUT and a close animation never reaches sendClose. That is
+#   the environment, not a regression — the roll-out step fails identically on
+#   2.76 and on current builds, and a grim/screencopy pump does not unstick it
+#   (screencopy renders the HOST output; the nested compositor still gets no
+#   frame callback). Set 0 in such a run: the two animation-completion
+#   assertions become clearly-labelled notes and every crash-class assertion
+#   (compositor alive, log clean, decoration ownership) stays fully strict.
+#   Leave unset (=1) when the nested compositor is a visible window.
 
 set -uo pipefail
 
@@ -71,8 +85,21 @@ trap cleanup EXIT
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32mok\033[0m   %s\n' "$*"; }
 bad()  { printf '   \033[31mFAIL\033[0m %s\n' "$*"; FAILED=1; }
+note() { printf '   \033[33mnote\033[0m %s\n' "$*"; }
 skip() { printf '   \033[33mSKIP\033[0m %s\n' "$*"; }
 FAILED=0
+
+# Frame-starved environments (see VTBSMOKE_EXPECT_FRAMES in the header) cannot
+# finish an animation, so the two assertions that need one finished are reported
+# rather than failed. Everything else stays strict — a crash is a crash.
+EXPECT_FRAMES="${VTBSMOKE_EXPECT_FRAMES:-1}"
+animfail() {
+  if [ "$EXPECT_FRAMES" = 1 ]; then
+    bad "$*"
+  else
+    note "$* — but VTBSMOKE_EXPECT_FRAMES=0: this nested compositor gets no host frame callbacks, so its animations never step. Not a plugin verdict."
+  fi
+}
 
 # ---- the plugin under test --------------------------------------------------
 
@@ -172,7 +199,7 @@ step "roll back out (open-reveal -> beginRollReveal doLater)"
 hc eval "hl.plugin.hyprvtb.rollup('address:$ADDR')" >/dev/null
 sleep 2
 alive && ok "compositor survived the roll-out" || bad "compositor died during roll-out"
-hidden && bad "window is still hidden — it never rolled back out" || ok "window is visible again"
+hidden && animfail "window is still hidden — it never rolled back out" || ok "window is visible again"
 
 step "kinetic momentum (2.78: a new timer + a weak ref to a surface)"
 # Axis B is exactly the class this module can hit: v2.48 compiled perfectly and
@@ -188,22 +215,93 @@ step "kinetic momentum (2.78: a new timer + a weak ref to a surface)"
 # (The 4th argument is spelled `wet` in docs/kinetic-scroll.md and `dry` in the
 # integration design. Both values are run below, so this step covers the timer
 # either way; kinetic-test.sh is the one that has to know which is which.)
-KIN_PROBE="$(hc eval "tostring(((hl.plugin or {}).hyprvtb or {}).kinetic_test)" 2>&1)$(hc eval "return tostring(((hl.plugin or {}).hyprvtb or {}).kinetic_test)" 2>&1)"
+# `hyprctl eval` never hands back a value here (a chunk that runs prints exactly
+# "ok"), so the capability question is asked by THROWING: an absent field errors
+# and hyprctl prints the message.
+KIN_PROBE="$(hc eval "if type(((hl.plugin or {}).hyprvtb or {}).kinetic_test) ~= 'function' then error('KINETIC_ABSENT') end" 2>&1)"
 case "$KIN_PROBE" in
-  *function*)
-    hc eval "hl.plugin.hyprvtb.kinetic_set(true)" >/dev/null 2>&1
-    hc eval "hl.plugin.hyprvtb.kinetic_test(40, 8, 12, true)" >/dev/null 2>&1
-    sleep 3   # coast (<= kinetic_max_duration_ms 2000) + the withheld stop (300)
-    alive && ok "compositor survived a dry injection" || bad "compositor died during the dry injection"
-    # The wet opt-in, for this nested instance only. Dry needs none.
-    hc eval "hl.plugin.hyprvtb.kinetic_set(\"unsafe_wet\", 1)" >/dev/null 2>&1
-    hc eval "hl.plugin.hyprvtb.kinetic_test(40, 8, 12, false)" >/dev/null 2>&1
-    sleep 3
-    alive && ok "compositor survived a wet injection" || bad "compositor died during the wet injection"
-    hc eval "hl.plugin.hyprvtb.kinetic_set(false)" >/dev/null 2>&1
+  *KINETIC_ABSENT*|*error*|*Error*)
+    skip "no kinetic_* lua functions on this .so — pre-kinetic build, nothing to exercise"
     ;;
   *)
-    skip "no kinetic_* lua functions on this .so — pre-2.78 build, nothing to exercise"
+    # Counters, not return values: kinetic_stats() publishes its JSON to
+    # $HOME/.local/state/hyprvtb/kinetic-stats.txt (our own $RUN/home), so
+    # "flings" tells us whether the injection actually STARTED one — the
+    # difference between a real timer test and a vacuous one.
+    KSTATS="$RUN/home/.local/state/hyprvtb/kinetic-stats.txt"
+    kflings() {
+      hc eval "hl.plugin.hyprvtb.kinetic_stats()" >/dev/null 2>&1
+      sed -n '2s/.*"flings":\([0-9][0-9]*\).*/\1/p' "$KSTATS" 2>/dev/null | head -1
+    }
+    # startGate refuses ("no-focus"/"not-window") unless the pointer is over a
+    # mapped, visible toplevel — on the DRY path too. Aim at whatever visible
+    # window there is.
+    kin_centre() { # x y of the first visible mapped window, if any
+      hc clients -j | jq -r 'first(.[]|select(.mapped and (.hidden|not)))|"\(.at[0] + (.size[0]/2|floor)) \(.at[1] + (.size[1]/2|floor))"' 2>/dev/null
+    }
+    KIN_TMPWIN=""
+    read -r KCX KCY <<EOF
+$(kin_centre)
+EOF
+    if [ -z "${KCX:-}" ]; then
+      # Nothing visible to point at: a frame-starved roll-out leaves the smoke
+      # window hidden for good, and without a target the injections below would
+      # be refused and prove nothing. Put a window there — and take it away
+      # again before the rest of the smoke test runs, so nothing downstream
+      # sees a stranger.
+      note "no visible window (starved roll-out) — opening a temporary one to aim at"
+      hc eval "hl.exec_cmd('kitty --class hyprvtb-kin')" >/dev/null
+      for _ in $(seq 1 40); do
+        sleep 0.5
+        KIN_TMPWIN=$(hc clients -j | jq -r '.[]|select(.class=="hyprvtb-kin" and .mapped)|.address' | head -1)
+        [ -n "$KIN_TMPWIN" ] && break
+      done
+      read -r KCX KCY <<EOF
+$(kin_centre)
+EOF
+    fi
+    if [ -n "${KCX:-}" ] && [ -n "${KCY:-}" ]; then
+      # The warp is a DISPATCHER object: `hyprctl dispatch` on hl.dsp.cursor.move.
+      # `hl.cursor.move` exists as a name but calling it through eval moves
+      # nothing (it builds the dispatcher, it does not run it) — verified here,
+      # the cursor stayed at 0,0. Verify with cursorpos rather than trusting it.
+      hc dispatch "hl.dsp.cursor.move({ x = $KCX, y = $KCY })" >/dev/null 2>&1
+      [ "$(hc cursorpos 2>/dev/null | tr -d ' ')" = "$KCX,$KCY" ] || hc eval "hl.cursor.move({ x = $KCX, y = $KCY })" >/dev/null 2>&1
+      note "aiming at $KCX,$KCY; nested cursor now at $(hc cursorpos 2>/dev/null | tr -d '\n')"
+    else
+      note "no visible mapped window to point at — the gate will refuse; only the crash-class checks below apply"
+    fi
+    hc eval "hl.plugin.hyprvtb.kinetic_set(true)" >/dev/null 2>&1
+    F0="$(kflings)"
+    hc eval "hl.plugin.hyprvtb.kinetic_test(40, 8, 12, false)" >/dev/null 2>&1   # DRY: 4th arg is `wet`
+    sleep 3   # coast (<= kinetic_max_duration_ms 2000) + the withheld stop (300)
+    alive && ok "compositor survived a dry injection" || bad "compositor died during the dry injection"
+    F1="$(kflings)"
+    if [ -n "$F0" ] && [ -n "$F1" ] && [ "$F1" -gt "$F0" ]; then
+      ok "a dry fling really started (flings $F0 -> $F1) — the timer path was exercised"
+    else
+      note "no fling started (flings $F0 -> $F1); the gate refused: $(sed -n 2p "$KSTATS" 2>/dev/null | sed 's/.*"refusals"://')"
+    fi
+    # The wet opt-in, for this nested instance only. Dry needs none.
+    hc eval "hl.plugin.hyprvtb.kinetic_set(\"unsafe_wet\", 1)" >/dev/null 2>&1
+    hc eval "hl.plugin.hyprvtb.kinetic_test(40, 8, 12, true)" >/dev/null 2>&1    # WET
+    sleep 3
+    alive && ok "compositor survived a wet injection" || bad "compositor died during the wet injection"
+    F2="$(kflings)"
+    if [ -n "$F1" ] && [ -n "$F2" ] && [ "$F2" -gt "$F1" ]; then
+      ok "a wet fling really started (flings $F1 -> $F2) — real axis events went to the seat"
+    else
+      note "no wet fling started (flings $F1 -> $F2): $(sed -n 2p "$KSTATS" 2>/dev/null | sed 's/.*"refusals"://')"
+    fi
+    hc eval "hl.plugin.hyprvtb.kinetic_set(false)" >/dev/null 2>&1
+    if [ -n "$KIN_TMPWIN" ]; then
+      # Kill the CLIENT, not the window: a dispatched close is animated, and
+      # animations are exactly what this environment cannot finish.
+      KIN_TMPPID=$(hc clients -j | jq -r --arg a "$KIN_TMPWIN" '.[]|select(.address==$a)|.pid')
+      [ -n "$KIN_TMPPID" ] && [ "$KIN_TMPPID" != "null" ] && kill -9 "$KIN_TMPPID" 2>/dev/null
+      sleep 1
+      alive && ok "temporary window gone, compositor still alive" || bad "compositor died closing the temporary window"
+    fi
     ;;
 esac
 
@@ -227,14 +325,17 @@ alive && ok "compositor survived the close" || bad "compositor died during the c
 if hidden; then
   ok "close animation started (window hidden)"
 else
-  bad "close_active did nothing — the window never even rolled up"
+  # Also downgraded when frames are absent: close_active works on the FOCUSED
+  # window, and a window the roll-out could not un-hide is unfocusable, so this
+  # branch reports the starvation upstream rather than a plugin fault.
+  animfail "close_active did nothing — the window never even rolled up"
 fi
 for _ in 1 2 3 4 5 6 7 8; do
   sleep 1
   hc clients -j | jq -e --arg a "$ADDR" 'any(.[]; .address==$a)' >/dev/null || break
 done
 if hc clients -j | jq -e --arg a "$ADDR" 'any(.[]; .address==$a)' >/dev/null; then
-  printf '   \033[33mnote\033[0m the client had not exited after 8s — expected when the nested\n         window is occluded (no frames -> the fade never finishes)\n'
+  printf '   \033[33mnote\033[0m the client had not exited after 8s — expected whenever this nested\n         compositor gets no frame callbacks (occluded, or on a headless\n         sandbox output): the fade never finishes, so sendClose never runs\n'
 else
   ok "window is gone (the close ran end to end)"
 fi
