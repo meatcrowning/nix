@@ -873,9 +873,13 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             // the texture's glyphs start at its top; bottom-anchor using the real
             // pango text height so the readout hugs the bar's bottom edge (above
             // the bottom-anchored group, if any) — or top-anchor for the scrub bar
+            // footerBottom flips the pair: the track takes the top of the lower
+            // area and the readout bottom-anchors under it (player), instead of
+            // the readout on top and the track below (viewer).
             const auto   TSZ  = m_pFooterTex->m_size;
-            const double fy   = reg.playbar ? (barBox.y + lowerTop * SCALE)
-                                            : (barBox.y + barBox.h - (VTB_PAD + BH) * SCALE - m_iFooterTextH);
+            const bool   FTOP = reg.playbar && !reg.footerBottom;
+            const double fy   = FTOP ? (barBox.y + lowerTop * SCALE)
+                                     : (barBox.y + barBox.h - (VTB_PAD + BH) * SCALE - m_iFooterTextH);
             CBox         fbox = {barBox.x + footerTexX() * SCALE, fy, TSZ.x, TSZ.y};
             Hl::texture(m_pFooterTex, fbox.round(), {.a = a});
         }
@@ -1449,8 +1453,12 @@ bool CVtbDeco::playbarTrackLocal(const SVtbAppReg& reg, double contentH, double 
     const double lowerTop = appBottom + VTB_PAD;
     const double lowerBot = contentH - bottomGroupH(reg.buttons) - VTB_PAD;
     const double footerH  = scale > 0 ? m_iFooterTextH / scale : 0;
-    const double trackTop = lowerTop + footerH + VTB_PAD;
-    const double trackLen = lowerBot - trackTop;
+    // Footer above the track (default) or below it (reg.footerBottom): either
+    // way the track gives up the same footerH + VTB_PAD, just off the other
+    // end. The default expression is left exactly as it was so viewer's track
+    // geometry is bit-identical to before this flag existed.
+    const double trackTop = reg.footerBottom ? lowerTop : lowerTop + footerH + VTB_PAD;
+    const double trackLen = (reg.footerBottom ? lowerBot - (footerH + VTB_PAD) : lowerBot) - trackTop;
     if (trackLen < VTB_PLAYBAR_MIN)
         return false;
     out = {(double)innerColX(), trackTop, (double)cellSize(), trackLen};

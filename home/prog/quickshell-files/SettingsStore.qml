@@ -209,6 +209,12 @@ Singleton {
             // pulled (hyprsunset gamma %, 100 = off). 20 keeps the screen just
             // readable at the bottom of the range; 5 is nearly black.
             property int    gammaFloor: 20
+            // Where in that negative region we currently sit (hyprsunset gamma
+            // %, 100 = at or above hardware zero). This is live STATE, not a
+            // preference — it lives here so the level survives a panel reload
+            // (a theme change rebuilds the QML tree), which otherwise snapped
+            // the screen back to full brightness. SysInfo owns the writes.
+            property int    gammaLevel: 100
         }
     }
 
@@ -243,6 +249,6 @@ Singleton {
         weatherLon: -134.4197, weatherPlace: "juneau", weatherUnit: "F", weatherRefreshMin: 20,
         worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
         brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
-        nightTemp: 4000, gammaFloor: 20
+        nightTemp: 4000, gammaFloor: 20, gammaLevel: 100
     })
 }

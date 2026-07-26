@@ -46,7 +46,19 @@ Singleton {
     // negative level (gamma 80 -> "-20"). SettingsApply owns the hyprsunset
     // process and pushes this value to it — including killing it (which
     // restores the normal ramp) the moment we return to 100.
-    property int gamma: 100
+    //
+    // The level is PERSISTED (SettingsStore.d.gammaLevel), so it survives a
+    // panel reload — a theme change or an agent's Theme.qml bump rebuilds the
+    // whole QML tree, and a plain `property int gamma: 100` here meant the
+    // screen jumped back to full brightness every time. Read-only on purpose:
+    // adjustGamma() writes the store, and the binding brings the new value
+    // back, so there is exactly one copy of this state. Clamped to the current
+    // floor on the way in, so raising the floor (or setting it to 100, which
+    // disables the feature) takes effect on an already-negative screen.
+    readonly property int gamma: {
+        const floor = Math.max(5, Math.min(100, SettingsStore.d.gammaFloor));
+        return Math.max(floor, Math.min(100, SettingsStore.d.gammaLevel));
+    }
     readonly property bool negativeBrightness: gamma < 100
     // Signed level for display: the hardware value normally, gamma-below-100
     // once negative.
@@ -211,7 +223,8 @@ Singleton {
     // instant (unlike the ~1.5s DDC write), so every tick lands right away.
     function adjustGamma(step) {
         const floor = Math.max(5, Math.min(100, SettingsStore.d.gammaFloor));
-        gamma = Math.max(floor, Math.min(100, gamma + step));
+        SettingsStore.d.gammaLevel = Math.max(floor, Math.min(100, gamma + step));
+        SettingsStore.save();
         Osd.trigger("brightness");
     }
 

@@ -21,11 +21,6 @@ Item {
     property real artFrac: Number(Prefs.get("npArtFrac", 0.45))
     property real lyricsW: Number(Prefs.get("npLyricsWidth", 320))
 
-    function fmt(s) {
-        s = Math.max(0, Math.round(s));
-        return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
-    }
-
     // ---- top row: cover art -------------------------------------------------
     Item {
         id: artRow
@@ -244,36 +239,11 @@ Item {
                         color: Theme.dim
                     }
                 }
-                Item { width: 1; height: 8 }
-
-                // ---- shuffle + loop only. Prev/play/next are NOT duplicated
-                // here: the titlebar transport buttons are the one place for
-                // them, and two sets of the same three controls a few hundred
-                // pixels apart was just noise. Shuffle and loop stay because
-                // they are queue MODES, and this is the queue's own pane.
-                Row {
-                    spacing: 6
-                    HeaderButton {
-                        label: "*"
-                        lit: Player.shuffle
-                        onClicked: Player.setShuffle(!Player.shuffle)
-                    }
-                    HeaderButton {
-                        label: Player.loop === 1 ? "1" : "o"
-                        lit: Player.loop > 0
-                        onClicked: Player.cycleLoop()
-                    }
-                }
-                Item { width: 1; height: 6 }
-
-                // no seek bar here: the titlebar's vertical scrub track (vtb
-                // PLAYBAR/SEEK) is the one place to scrub, so this column just
-                // reads out the position.
-                PixelText {
-                    visible: Player.duration > 0
-                    text: root.fmt(Player.position) + " / " + root.fmt(Player.duration)
-                    color: Theme.textDim
-                }
+                // Nothing else lives under the album line any more. Shuffle and
+                // loop moved out to the titlebar (they were the last duplicated
+                // controls left down here), and the position readout moved to
+                // the titlebar footer, under the scrub track it belongs to — so
+                // every transport control is now in exactly one place.
             }
 
             // ---- queue, filling the rest of the left column ----
