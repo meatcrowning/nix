@@ -21,8 +21,14 @@ let
 
   player =
     if host == "air" then
+      # air plays top's library over SMB, so launching is more than exec'ing
+      # python: probe top, mount, pull the metadata database + art cache, run,
+      # push back. That lives in the repo as live source (player/tools/
+      # air-launch.sh) like everything else here, so it can be fixed on air
+      # without a home-manager rebuild — and it degrades to a plain offline
+      # launch when top is unreachable. See docs/air-library-share.md.
       pkgs.writeShellScriptBin "player" ''
-        exec /usr/bin/python3 /home/lam/nix/player/main.py "$@"
+        exec /home/lam/nix/player/tools/air-launch.sh "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

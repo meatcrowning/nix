@@ -65,7 +65,11 @@ from mutagen.flac import FLAC, Picture  # noqa: E402
 from mutagen.id3 import ID3, TXXX  # noqa: E402
 from mutagen.mp4 import MP4, MP4FreeForm  # noqa: E402
 
-LIBRARY_ROOT = Path("/run/media/lam/SSD/aud")
+# The library root. Overridable ONLY so the share can be tested against a
+# second mount of itself without a second machine (docs/air-library-share.md,
+# A5.2) — air deliberately mounts the SMB share at this same absolute path, so
+# that every tracks.path row from top's database is valid there verbatim.
+LIBRARY_ROOT = Path(os.environ.get("PLAYER_LIBRARY_ROOT", "/run/media/lam/SSD/aud"))
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
               ".ape", ".aiff", ".aif", ".wav", ".mpc", ".tta", ".dff"}
@@ -535,6 +539,7 @@ CREATE TABLE IF NOT EXISTS tracks (
   date TEXT, year INTEGER, orig_year INTEGER,
   genre TEXT, duration REAL, codec TEXT, samplerate INTEGER, bitdepth INTEGER,
   rating REAL, favorite INTEGER DEFAULT 0, play_count INTEGER DEFAULT 0,
+  meta_mtime REAL,
   added_at REAL NOT NULL, last_played REAL,
   has_art INTEGER DEFAULT 0,
   album_id INTEGER,
@@ -562,14 +567,25 @@ CREATE INDEX IF NOT EXISTS i_t_added  ON tracks(added_at);
 # Columns added after the first release. CREATE TABLE IF NOT EXISTS silently
 # leaves an existing table alone, so new columns need an explicit ALTER against
 # the DB that is already out there.
+#
+# (table, column, decl, rescan). `rescan` says the column can only be filled by
+# re-reading the FILE — mutagen owns it — so open_db() has to clear the mtime
+# cache and let the next scan re-parse the whole library. A column the APP
+# writes must NOT set it: this used to be implicit ("any tracks column"), and
+# left that way, adding meta_mtime would have made air's very first launch
+# re-read 11k files across a 208 GB SMB share (docs/air-library-share.md, A3).
 MIGRATIONS = [
-    ("tracks", "rg_track_gain", "REAL"),
-    ("tracks", "rg_track_peak", "REAL"),
-    ("tracks", "rg_album_gain", "REAL"),
-    ("tracks", "rg_album_peak", "REAL"),
+    ("tracks", "rg_track_gain", "REAL", True),
+    ("tracks", "rg_track_peak", "REAL", True),
+    ("tracks", "rg_album_gain", "REAL", True),
+    ("tracks", "rg_album_peak", "REAL", True),
     # How many times we have asked the network about this track and come back
     # empty — drives the retry backoff in LyricsProvider.
-    ("lyrics", "attempts", "INTEGER DEFAULT 0"),
+    ("lyrics", "attempts", "INTEGER DEFAULT 0", False),
+    # When rating/favorite were last written here. play_count merges by max()
+    # and last_played by newest, but rating is a value with no natural
+    # ordering, so cross-machine merges need an explicit "who wrote last".
+    ("tracks", "meta_mtime", "REAL", False),
 ]
 
 
@@ -585,13 +601,13 @@ def open_db():
     con.executescript(SCHEMA)
     cols = {}
     added = False
-    for table, col, decl in MIGRATIONS:
+    for table, col, decl, rescan in MIGRATIONS:
         if table not in cols:
             cols[table] = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
         if col not in cols[table]:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             cols[table].add(col)
-            added = table == "tracks" or added
+            added = rescan or added
     if added:
         # The new columns are all NULL for already-scanned files; force the
         # next scan to re-read every file's tags by clearing the mtime cache
@@ -990,7 +1006,9 @@ class Library(QObject):
     def setRating(self, track_id, rating):
         """rating: FMPS 0..1 (UI passes stars/5); negative clears."""
         val = None if rating < 0 else max(0.0, min(1.0, rating))
-        self._con.execute("UPDATE tracks SET rating=? WHERE id=?", (val, track_id))
+        # meta_mtime: the tiebreaker tools/dbsync.py merges rating/favorite on.
+        self._con.execute("UPDATE tracks SET rating=?, meta_mtime=? WHERE id=?",
+                          (val, time.time(), track_id))
         self._con.commit()
         t = self._track(track_id)
         if t:
@@ -999,8 +1017,8 @@ class Library(QObject):
 
     @Slot(int, bool)
     def setFavorite(self, track_id, fav):
-        self._con.execute("UPDATE tracks SET favorite=? WHERE id=?",
-                          (1 if fav else 0, track_id))
+        self._con.execute("UPDATE tracks SET favorite=?, meta_mtime=? WHERE id=?",
+                          (1 if fav else 0, time.time(), track_id))
         self._con.commit()
         t = self._track(track_id)
         if t:
