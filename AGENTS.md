@@ -327,6 +327,56 @@ before touching the plugin or the pin.
     paths, so a stale instance can become unreachable (its store path may even be
     GC'd) — at which point a relog really is the only way out.
 
+- **Kinetic momentum scrolling (`vtbKinetic`, plugin ≥2.78) — the plugin now
+  SYNTHESIZES input.** macOS-style momentum, generated compositor-side: the
+  module watches finger-source axis events on the bus and, at the finger-lift
+  stop, keeps emitting decaying axis events **at the seat**
+  (`Hl::sendAxis` → `CSeatManager::sendPointerAxis`), which is *downstream* of
+  the `input.mouse.axis` bus — synthetic events can never re-enter the plugin's
+  own listeners, decos, or keybinds. Do NOT "fix" that by routing through
+  `CInputManager::onMouseWheel` (re-enters the bus + defers a frame the timer
+  can't supply). Full spec + provenance: `docs/kinetic-scroll.md` and
+  `docs/kinetic-scroll-research/`. Rules learned building it:
+  - A **0-value `sendPointerAxis` IS the protocol `axis_stop`** — never emit a
+    literal 0 mid-flight (the wire cousin of the degenerate-rect abort); the
+    seam wrapper refuses zeros and non-finite values.
+  - The terminal stop is **withheld ≥300 ms**, which zeroes every client-side
+    fling estimator (Chromium 200 ms, GTK/kitty 150, Firefox 100) — that one
+    rule is why there is no double momentum. Any timer added to this plugin
+    must be disarmed in `PLUGIN_EXIT` before anything else, and any OPEN axis
+    sequence closed with a 0-delta send + frame — a client left mid-sequence
+    believes scroll is in progress forever.
+  - Ships **default off**; enable at runtime with
+    `hyprctl eval "hl.plugin.hyprvtb.kinetic_set(true)"` (instant off:
+    `kinetic_set(false)`). **`hyprctl reload` clears the runtime override** —
+    so every plugin hot-swap disables momentum until re-enabled or until the
+    `plugin:hyprvtb:kinetic` config key is promoted into both `hyprland.lua`
+    copies (a deliberate trial-mode property, not a bug). Feel-tune live:
+    `kinetic_set("friction", 2.6..7.0)`, default 3.6 (mac-anchored).
+  - **`hyprctl eval` returns NO values** (any successful chunk prints "ok";
+    only `error("x")` messages carry text). Introspection therefore publishes
+    to state files: `kinetic_dump()/stats()/get()` write
+    `~/.local/state/hyprvtb/kinetic-{dump.json,stats.txt,get.txt}` atomically
+    with a `seq` freshness token — $HOME-relative, so a nested harness
+    instance (HOME=$RUN/home) is isolated for free. Any future value-returning
+    lua fn must follow this pattern.
+  - **Testing:** `kinetic_test(dy, n, ms)` injects through the real estimator,
+    DRY by default (trace-only — safe in the live session); a wet run is
+    refused without a prior `kinetic_set("unsafe_wet", 1)` and must only ever
+    happen in a nested compositor (`sendPointerAxis` targets the seat's
+    pointer focus — the sandbox monitor cannot isolate it). The battery:
+    `tools/kinetic-test.sh` (nested, dry+wet numeric acceptance),
+    `hotswap-test.sh` (mid-flight swap), `nested-smoke.sh` (crash-class);
+    run frame-starved nested (sandbox on book) with
+    `VTBSMOKE_EXPECT_FRAMES=0` — nested compositors never step render-driven
+    animations there, an environment artifact, not a regression.
+  - **book hot-swaps properly since 2026-07-26**: the live `hyprland.lua` now
+    carries the resolved-path + quarantine block (it used to load the symlink,
+    so reload had NEVER swapped there — `docs/book-hyprvtb-version-bridge.md`
+    records the correction). book still has no `hypr-supervise` (Fedora), so a
+    compositor crash is still a relog — the quarantine block only picks the
+    known-good build at the next start.
+
 - **`surfer`/`filer` (standalone PySide6 apps) run the LIVE source** at
   `~/nix/{surfer,filer}/main.py` — `.py`/`.qml` edits need NO rebuild, but there
   is NO hot-reload either: **relaunch the app** to pick up a change. Syntax-check
