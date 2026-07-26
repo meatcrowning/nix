@@ -166,6 +166,7 @@ struct SGlobalState {
         SP<Config::Values::CStringValue> kineticDenyClasses;
         SP<Config::Values::CStringValue> kineticAllowClasses;
         SP<Config::Values::CBoolValue>   kineticDenyXwayland;
+        SP<Config::Values::CBoolValue>   kineticFrameStopFallback;
         SP<Config::Values::CIntValue>    kineticDebug;
     } config;
 };
@@ -272,6 +273,9 @@ namespace Vtb::Cfg {
     }
     inline auto kineticDenyXwayland() {
         return g_pGlobalState->config.kineticDenyXwayland->value();
+    }
+    inline auto kineticFrameStopFallback() {
+        return g_pGlobalState->config.kineticFrameStopFallback->value();
     }
     inline auto kineticDebug() {
         return g_pGlobalState->config.kineticDebug->value();

@@ -87,8 +87,9 @@ class CVtbKinetic {
     // and turns the terminating zero into a fling if every gate agrees.
     void onAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& info);
     // Per-device frame: belt-and-braces finger-lift detection for the case
-    // where the guaranteed terminating zero does not show up.
-    void onDeviceFrame();
+    // where the guaranteed terminating zero does not show up. Takes the device
+    // it came from, so one touchpad's frame cannot consume another's evidence.
+    void onDeviceFrame(uintptr_t devId);
     // Per-device hold-begin: fingers back on the pad. This is the brake, and it
     // is reachable ONLY per device — the event bus has swipe and pinch but no
     // hold on either pin.
@@ -171,8 +172,9 @@ class CVtbKinetic {
         uint64_t                  stopsSent   = 0; // terminal axis_stop sends
         uint64_t                  drops       = 0; // ended owing nothing
         uint64_t                  ticks       = 0;
-        uint64_t                  emits       = 0; // axis events put on the wire
+        uint64_t                  emits       = 0; // axis events put on the wire (per axis, dry or wet)
         uint64_t                  emitRefused = 0; // MUST stay 0 — see Hl::sendAxis
+        uint64_t                  lastEmits    = 0; // ...of the last flight only
         double                    lastDistance = 0.0;
         double                    lastV0       = 0.0;
         // Last gesture's observed cadence, which is the one thing about this
@@ -218,6 +220,7 @@ class CVtbKinetic {
     int    effWindowMs() const;
     int    effStaleMs() const;
     int    effMaxDurationMs() const;
+    bool   effFrameStopFallback() const;
     int    effDebug() const;
 
     // ---- state -------------------------------------------------------------
@@ -252,7 +255,21 @@ class CVtbKinetic {
 
     std::vector<Hyprutils::Signal::CHyprSignalListener> m_devListeners;
     std::vector<uintptr_t>                             m_devFingerprint;
-    bool                                               m_sawAxisSinceFrame = false;
+
+    // "Has an axis event arrived since this device's previous frame?", one entry
+    // per touchpad. It has to be per device so that a second pointer's
+    // motion-only frame cannot consume the evidence belonging to the touchpad
+    // actually being scrolled. It can only ever be set for ALL of them at once,
+    // though: the event bus carries no device on an axis event, so there is no
+    // way to attribute one. See onDeviceFrame for what that leaves uncovered
+    // and the config kill switch that answers it.
+    std::map<uintptr_t, bool>                          m_devSawAxis;
+
+    // Deduplicates the second stop event of a two-axis (diagonal) finger lift
+    // when the FIRST one was refused: without it the same lift books two
+    // refusals, and the second is always the meaningless "no-samples".
+    uint32_t                                           m_lastStopTimeMs = 0;
+    bool                                               m_haveLastStop   = false;
 
     std::map<std::string, double>                      m_overrides;
     bool                                               m_shuttingDown = false;
@@ -261,7 +278,14 @@ class CVtbKinetic {
     // kinetic_test: dry runs record what WOULD have gone on the wire instead of
     // sending it. A wet run sprays real scroll at whatever the pointer happens
     // to be over, so it is refused unless explicitly unlocked in this process.
+    //
+    // m_dry is the load-bearing one, so its ownership is stated explicitly:
+    // ONLY injectTest may write it, and only while m_injecting is true. Any
+    // other writer is a hole — a dry invocation that ends up emitting real
+    // events at the user's pointer focus is precisely the bug this pair now
+    // makes structurally impossible (see injectTest and endFlight).
     bool                                               m_dry       = false;
+    bool                                               m_injecting = false;
     bool                                               m_unsafeWet = false;
     std::vector<std::pair<uint32_t, double>>           m_trace;
     static constexpr size_t                            KIN_TRACE_MAX = 512;

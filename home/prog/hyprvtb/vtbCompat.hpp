@@ -536,13 +536,17 @@ namespace Vtb::Hl {
     inline bool anyPointerDevice() {
         return !g_pInputManager->m_pointers.empty();
     }
-    // Modifier bits currently held down, in HL_MODIFIER_* space (IKeyboard.hpp:14-21,
-    // byte-identical on both pins; `m_modifiersState.depressed` at :106-107 is
-    // the same mask IKeyboard.cpp:357 hands to the keybind matcher). Zero when
-    // there is no keyboard — a machine with none cannot be holding Ctrl.
-    inline uint32_t modsDepressed() {
-        const auto KB = g_pSeatManager->m_keyboard.lock();
-        return KB ? KB->m_modifiersState.depressed : 0u;
+    // Modifier bits held down on ANY keyboard, in HL_MODIFIER_* space
+    // (IKeyboard.hpp:14-21, byte-identical on both pins; the same mask
+    // IKeyboard.cpp:357 hands to the keybind matcher).
+    //
+    // Deliberately NOT `g_pSeatManager->m_keyboard`, which is only the keyboard
+    // that most recently produced an event: hold Ctrl on one keyboard, type on
+    // another, and that read comes back clean while Ctrl is very much down. This
+    // is the OR across all of them, which is also what Hyprland's own keybind
+    // matching uses. InputManager.hpp:189 (air) / :192 (top), public on both.
+    inline uint32_t modsAllKeyboards() {
+        return g_pInputManager->getModsFromAllKBs();
     }
 
     // Surface -> view -> window/layer-surface. Pin-identical, so NO version arm:
@@ -551,6 +555,20 @@ namespace Vtb::Hl {
     // Desktop::viewState()->query()…runWindow()). WLSurface.hpp:79 (air) / :76
     // (top) for fromResource, :43 / :45 for view(), Window.hpp:120 and
     // LayerSurface.hpp:18 for fromView on both.
+    //
+    // NOTE what these do NOT do: resolve a subsurface or popup surface to the
+    // toplevel that owns it. Neither pin offers that, which is worth writing
+    // down because both of the calls that look like they would are in fact this
+    // same expression — air's `CCompositor::getWindowFromSurface`
+    // (Compositor.cpp:1242-1252) is `view()` plus a type check that REFUSES any
+    // non-WINDOW view, and top's `viewState()->query().type(VIEW_TYPE_WINDOW)
+    // .surface(s).runWindow()` gates its only tree walk (`layerBySurface`) on
+    // the type being LAYER_SURFACE (ViewQuery.cpp:248-260, :288-290). The owner
+    // refs that would answer it — `CSubsurface::m_windowParent`,
+    // `CPopup::m_windowOwner` — are private on both pins. So a caller that
+    // needs the OWNING window of an arbitrary focus surface must get it from
+    // the cursor hit test (windowAtCursorProps) instead; see the classification
+    // in vtbKinetic's startGate.
     inline SP<Desktop::View::IView> viewOf(SP<CWLSurfaceResource> surf) {
         if (!surf)
             return nullptr;
