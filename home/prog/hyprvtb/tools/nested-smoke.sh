@@ -71,6 +71,7 @@ trap cleanup EXIT
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32mok\033[0m   %s\n' "$*"; }
 bad()  { printf '   \033[31mFAIL\033[0m %s\n' "$*"; FAILED=1; }
+skip() { printf '   \033[33mSKIP\033[0m %s\n' "$*"; }
 FAILED=0
 
 # ---- the plugin under test --------------------------------------------------
@@ -172,6 +173,39 @@ hc eval "hl.plugin.hyprvtb.rollup('address:$ADDR')" >/dev/null
 sleep 2
 alive && ok "compositor survived the roll-out" || bad "compositor died during roll-out"
 hidden && bad "window is still hidden — it never rolled back out" || ok "window is visible again"
+
+step "kinetic momentum (2.78: a new timer + a weak ref to a surface)"
+# Axis B is exactly the class this module can hit: v2.48 compiled perfectly and
+# then aborted the compositor seconds into login, from a deferred callback. A
+# fling is a CEventLoopTimer plus a per-surface weak ref, so run one dry (the
+# estimator, the timer and the integrator, appending to a trace instead of the
+# wire) and one wet (really at the seat — refused unless this instance is first
+# told kinetic_set("unsafe_wet", 1); there is no automatic nested detection, the
+# explicit opt-in IS the safety mechanism, and it is safe only because this
+# compositor is a nested one we own).
+# Acceptance here is only "alive and log clean": the numeric acceptance
+# criteria live in kinetic-test.sh, which owns a real client to measure with.
+# (The 4th argument is spelled `wet` in docs/kinetic-scroll.md and `dry` in the
+# integration design. Both values are run below, so this step covers the timer
+# either way; kinetic-test.sh is the one that has to know which is which.)
+KIN_PROBE="$(hc eval "tostring(((hl.plugin or {}).hyprvtb or {}).kinetic_test)" 2>&1)$(hc eval "return tostring(((hl.plugin or {}).hyprvtb or {}).kinetic_test)" 2>&1)"
+case "$KIN_PROBE" in
+  *function*)
+    hc eval "hl.plugin.hyprvtb.kinetic_set(true)" >/dev/null 2>&1
+    hc eval "hl.plugin.hyprvtb.kinetic_test(40, 8, 12, true)" >/dev/null 2>&1
+    sleep 3   # coast (<= kinetic_max_duration_ms 2000) + the withheld stop (300)
+    alive && ok "compositor survived a dry injection" || bad "compositor died during the dry injection"
+    # The wet opt-in, for this nested instance only. Dry needs none.
+    hc eval "hl.plugin.hyprvtb.kinetic_set(\"unsafe_wet\", 1)" >/dev/null 2>&1
+    hc eval "hl.plugin.hyprvtb.kinetic_test(40, 8, 12, false)" >/dev/null 2>&1
+    sleep 3
+    alive && ok "compositor survived a wet injection" || bad "compositor died during the wet injection"
+    hc eval "hl.plugin.hyprvtb.kinetic_set(false)" >/dev/null 2>&1
+    ;;
+  *)
+    skip "no kinetic_* lua functions on this .so — pre-2.78 build, nothing to exercise"
+    ;;
+esac
 
 step "session save"
 hc eval "hl.plugin.hyprvtb.save_session()" >/dev/null

@@ -23,14 +23,25 @@
 # So the shape of the test is: roll a window up (hidden, holding a deco),
 # hot-swap the plugin under it, then close that window and see who is left.
 #
+# 2.78 adds a second thing that must survive the swap, and it is worse: a
+# kinetic fling in flight is a live CEventLoopTimer *plus* an OPEN
+# wl_pointer axis sequence — code owned by the outgoing .so, and a protocol
+# obligation owed to a client. So this file also starts a long fling into a
+# PySide wheel logger (tools/wheel-log.py) before the swap and afterwards
+# checks three things: the compositor is alive, the INCOMING instance is cold
+# (empty trace, idle), and the client's last event is a ScrollEnd — the stop
+# PLUGIN_EXIT owed it. Against a pre-2.78 .so the kinetic steps SKIP.
+#
 # Usage: ./hotswap-test.sh [path/to/libhyprvtb.so]
 # Default plugin: whatever the last `nixos-rebuild switch` installed. Point it
 # at a pre-2.65 build and it should FAIL — that is the bug reproducing.
 
 set -uo pipefail
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 RUN="/tmp/vtbhs$$"
 mkdir -p "$RUN"
+KIN_TSV="$RUN/wheel.tsv"
 
 if [ -z "${WAYLAND_DISPLAY:-}" ]; then
   echo "no WAYLAND_DISPLAY — run this from inside the graphical session."
@@ -42,6 +53,9 @@ case "$WAYLAND_DISPLAY" in
 esac
 
 cleanup() {
+  # The wheel logger is a client of the NESTED compositor; its argv carries the
+  # (unique) TSV path, so this can never match anything of the user's.
+  pkill -9 -f "$KIN_TSV" 2>/dev/null
   pkill -9 -f "Hyprland -c $RUN/hyprland.lua" 2>/dev/null
   [ -n "${HYPRPID:-}" ] && kill -9 "$HYPRPID" 2>/dev/null
   sleep 0.5
@@ -56,6 +70,8 @@ trap cleanup EXIT
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32mok\033[0m   %s\n' "$*"; }
 bad()  { printf '   \033[31mFAIL\033[0m %s\n' "$*"; FAILED=1; }
+note() { printf '   \033[33mnote\033[0m %s\n' "$*"; }
+skip() { printf '   \033[33mSKIP\033[0m %s\n' "$*"; }
 FAILED=0
 
 PLUGIN="${1:-$(readlink -f "$HOME/.config/hypr/plugins/libhyprvtb.so")}"
@@ -129,6 +145,89 @@ else
   exit 1
 fi
 
+step "arming a fling across the swap (kinetic, integration design 5b)"
+# Momentum must be flowing INTO A REAL CLIENT when the .so is unmapped. A dry
+# injection would exercise the timer but not the protocol obligation, which is
+# the half nothing else in this plugin has ever had.
+KINETIC=0
+KIN_WET=0
+KIN_PY=""
+KIN_LAST_PRE=""
+: > "$KIN_TSV"
+KIN_PROBE="$(hc eval "tostring(((hl.plugin or {}).hyprvtb or {}).kinetic_test)" 2>&1)$(hc eval "return tostring(((hl.plugin or {}).hyprvtb or {}).kinetic_test)" 2>&1)"
+case "$KIN_PROBE" in *function*) KINETIC=1 ;; esac
+if [ "$KINETIC" = 0 ]; then
+  skip "no kinetic_* lua functions on this .so — pre-2.78 build, the mid-flight"
+  skip "     swap case does not apply (same caveat shape as the 2.71 handoff assertion)"
+else
+  # The wheel logger needs PySide6: Fedora's /usr/bin/python3 on book, and on
+  # top whatever KINETIC_PY points at (there is no /usr/bin/python3 there).
+  for cand in "${KINETIC_PY:-}" /usr/bin/python3 "$(command -v python3)"; do
+    [ -n "$cand" ] && [ -x "$cand" ] || continue
+    "$cand" -c 'import PySide6.QtWidgets' >/dev/null 2>&1 && { KIN_PY="$cand"; break; }
+  done
+fi
+if [ "$KINETIC" = 1 ] && [ -z "$KIN_PY" ]; then
+  skip "no python3 that can import PySide6 — the client half of 5b is untestable here."
+  skip "     Set KINETIC_PY=/path/to/python3 to enable it."
+  KINETIC=0
+fi
+if [ "$KINETIC" = 1 ]; then
+  hc eval "hl.plugin.hyprvtb.kinetic_set(true)" >/dev/null 2>&1
+  # friction 0.5 => a slow, long fling, so it is still coasting when the async
+  # swap finally lands. It is a runtime override, so no config edit, no reload.
+  hc eval "hl.plugin.hyprvtb.kinetic_set(\"friction\", 0.5)" >/dev/null 2>&1
+  # A wet injection is refused without this opt-in — there is no automatic
+  # nested detection, the explicit opt-in IS the safety mechanism. Safe only
+  # because this is a nested instance we own; the live session never gets it.
+  hc eval "hl.plugin.hyprvtb.kinetic_set(\"unsafe_wet\", 1)" >/dev/null 2>&1
+  ok "kinetic enabled, friction 0.5, wet injection opted in (runtime overrides)"
+  hc eval "hl.exec_cmd('env QT_QPA_PLATFORM=wayland $KIN_PY $HERE/wheel-log.py $KIN_TSV')" >/dev/null
+  KINWIN=""
+  for _ in $(seq 1 60); do
+    sleep 0.5
+    KINWIN=$(hc clients -j | jq -r '.[]|select(.mapped and (.class=="wheel-log" or .title=="wheel-log"))|.address' | head -1)
+    [ -n "$KINWIN" ] && break
+  done
+  if [ -z "$KINWIN" ]; then
+    note "the wheel logger never mapped — skipping the client half of 5b"
+    KINETIC=0
+  else
+    ok "wheel-log window $KINWIN"
+    # Pointer focus is what momentum follows, and sendPointerAxis has no
+    # surface argument — it goes wherever the cursor is. This config is Lua, so
+    # a bare dispatcher name is a nil global: the warp is hl.cursor.move via
+    # `eval`. Verify with cursorpos rather than trusting the call.
+    read -r KCX KCY <<EOF
+$(hc clients -j | jq -r --arg a "$KINWIN" '.[]|select(.address==$a)|"\(.at[0] + (.size[0]/2|floor)) \(.at[1] + (.size[1]/2|floor))"')
+EOF
+    for form in "hl.cursor.move({ x = ${KCX:-0}, y = ${KCY:-0} })" "hl.dsp.cursor.move({ x = ${KCX:-0}, y = ${KCY:-0} })" "hl.cursor.move(${KCX:-0}, ${KCY:-0})"; do
+      hc eval "$form" >/dev/null 2>&1
+      [ "$(hc cursorpos 2>/dev/null | tr -d ' ')" = "${KCX},${KCY}" ] && break
+      hc dispatch "$form" >/dev/null 2>&1
+      [ "$(hc cursorpos 2>/dev/null | tr -d ' ')" = "${KCX},${KCY}" ] && break
+    done
+    note "cursor at $(hc cursorpos 2>/dev/null | tr -d '\n') (window centre $KCX,$KCY)"
+    # 4th arg: docs/kinetic-scroll.md calls the slot `wet` (true = emit for
+    # real), the integration design calls it `dry` (true = trace only). Try the
+    # design's spelling first and flip if no client rows appear — a dry run is
+    # harmless either way.
+    hc eval "hl.plugin.hyprvtb.kinetic_test(400, 20, 8, false)" >/dev/null 2>&1
+    for _ in $(seq 1 8); do sleep 0.25; [ -s "$KIN_TSV" ] && break; done
+    if [ ! -s "$KIN_TSV" ]; then
+      note "(...,false) reached no client — 4th arg is 'wet' in this build, retrying with true"
+      hc eval "hl.plugin.hyprvtb.kinetic_test(400, 20, 8, true)" >/dev/null 2>&1
+      for _ in $(seq 1 8); do sleep 0.25; [ -s "$KIN_TSV" ] && break; done
+    fi
+    if [ -s "$KIN_TSV" ]; then
+      KIN_WET=1
+      ok "momentum is reaching the client ($(wc -l < "$KIN_TSV" | tr -d ' ') wheel events so far)"
+    else
+      note "no wheel events reached the client — the exit-obligation half will be untested"
+    fi
+  fi
+fi
+
 step "hot-swapping the plugin under it (vtb-a.so -> vtb-b.so, hyprctl reload)"
 write_config "$RUN/vtb-b.so"
 hc reload >/dev/null 2>&1
@@ -147,6 +246,11 @@ for i in $(seq 1 60); do
   # idle/occluded nested compositor can sit on either for a long time.
   [ $((i % 5)) = 1 ] && echo "   reload: $(hc reload 2>&1 | tr -d '\n')"
   hc clients >/dev/null 2>&1   # a real request, to actually turn the loop
+  # Remember what the client had last seen a beat before the swap landed: it is
+  # the only way to know afterwards whether the fling was still in flight, and
+  # so whether the ScrollEnd asserted below came from PLUGIN_EXIT or from the
+  # fling ending on its own (kinetic_max_duration_ms caps it at ~2s).
+  [ "$KINETIC" = 1 ] && KIN_LAST_PRE="$(tail -n 1 "$KIN_TSV" 2>/dev/null | cut -f6)"
   sleep 1
   if grep -q "Loading plugin.*vtb-b.so" "$ILOG"; then SWAPPED=1; break; fi
 done
@@ -178,6 +282,67 @@ if grep -q "Unloading plugin.*vtb-a.so" "$ILOG" && grep -q "Loading plugin.*vtb-
 else
   bad "no unload/load pair in the log — nothing was swapped, the test is vacuous"
   grep -i "plugin" "$ILOG" | tail -5
+fi
+
+step "did the fling survive the swap? (kinetic, integration design 5b)"
+if [ "$KINETIC" = 0 ]; then
+  skip "kinetic steps were skipped above — nothing to assert here"
+else
+  # 1. The whole point: a timer firing into the unmapped image SIGSEGVs here.
+  if alive; then
+    ok "compositor alive after a reload with momentum in flight"
+  else
+    bad "compositor DIED on a reload with momentum in flight — the timer outlived its .so"
+    tail -40 "$RUN/hyprland.log"
+    exit 1
+  fi
+  # 2. The incoming instance must start cold: no trace, no timer, no state.
+  #    (It also starts with kinetic OFF — the enable above was a RUNTIME
+  #    override on the outgoing instance, so a state of "disabled" is fine;
+  #    only an ACTIVE-looking state or a non-empty trace is a leak.)
+  hc eval "hl.plugin.hyprvtb.kinetic_dump()" > "$RUN/kin-dump.txt" 2>&1
+  python3 - "$RUN/kin-dump.txt" <<'PY'
+import json, re, sys
+m = re.search(r"\{.*\}", open(sys.argv[1]).read(), re.S)
+if not m:
+    sys.exit(2)
+try:
+    d = json.loads(m.group(0))
+except Exception:
+    sys.exit(2)
+tr = d.get("trace") or []
+st = str(d.get("state", "")).lower()
+active = any(w in st for w in ("coast", "decay", "fling", "active", "running", "emit"))
+sys.exit(0 if (not tr and not active) else 1)
+PY
+  case $? in
+    0) ok "the new instance is cold — empty trace, no active state" ;;
+    1) bad "the new instance inherited momentum state: $(head -c 200 "$RUN/kin-dump.txt")" ;;
+    *) bad "kinetic_dump() on the new instance returned no JSON: $(head -c 200 "$RUN/kin-dump.txt")" ;;
+  esac
+  # 3. The exit obligation. A client left mid-sequence believes a scroll is
+  #    still in progress, forever — nothing else in this plugin has ever owed a
+  #    client anything at unload.
+  if [ "$KIN_WET" = 1 ]; then
+    for _ in $(seq 1 20); do
+      sleep 0.25
+      [ "$(tail -n 1 "$KIN_TSV" 2>/dev/null | cut -f6)" = "ScrollEnd" ] && break
+    done
+    KIN_LAST="$(tail -n 1 "$KIN_TSV" 2>/dev/null | cut -f6)"
+    if [ "$KIN_LAST" = "ScrollEnd" ]; then
+      ok "the client's last event is ScrollEnd — the sequence was closed"
+    else
+      bad "the client's last event is '$KIN_LAST' — no axis_stop was ever sent, the client is stranded mid-scroll"
+    fi
+    case "${KIN_LAST_PRE:-}" in
+      ScrollEnd) note "the fling had already ended before the swap landed (the async swap poll can" ;
+                 note "     outlast kinetic_max_duration_ms), so that stop is the ordinary one, not PLUGIN_EXIT's" ;;
+      "")        note "no pre-swap sample of the client's tail — cannot say whether momentum was in flight" ;;
+      *)         ok "momentum WAS in flight when the swap landed (last pre-swap phase: $KIN_LAST_PRE)" ;;
+    esac
+  else
+    note "no wheel events ever reached the client — the exit-obligation half is untested"
+  fi
 fi
 
 step "who owns the hidden window's titlebar after the swap?"
