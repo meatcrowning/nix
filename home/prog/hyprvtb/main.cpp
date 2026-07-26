@@ -891,7 +891,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             // (un-shading) or playing its open reveal — draws OVER windows from
             // the first frame, otherwise it animates behind everything and only
             // pops on top when it lands and the real window is un-hidden/raised.
-            const bool aboveWindows = b->isRollingOut() || b->isOpening();
+            // Roll-UP's slide beat is the same case in reverse: the window the
+            // user just shaded must stay on top for as long as its content is
+            // still sliding, and only sink under the others for the set-down.
+            const bool aboveWindows = b->isRollingOut() || b->isOpening() || b->isRollingUpSlide();
             if (stage == RENDER_PRE_WINDOWS) {
                 if (!aboveWindows)
                     b->renderShadeIfRolled(PMONITOR);
@@ -996,7 +999,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.74"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.75"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

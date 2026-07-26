@@ -53,6 +53,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                               isMaximized() const { return m_bMaximized; } // for the sibling shadow deco
     bool                               isRollingOut() const { return m_rollAnim == ROLL_OUT; } // slide-out draws OVER windows
     bool                               isOpening() const { return m_bOpening; }                // open reveal also draws OVER windows
+    bool                               isRollingUpSlide() const;                               // roll-up's slide beat draws OVER windows too
     bool                               isMinimized() const { return m_bMinimized; } // for session snapshot
     bool                               isRolledUp() const { return m_bRolledUp; }   // for session snapshot
 
