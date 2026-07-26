@@ -50,11 +50,22 @@ Rectangle {
     // Value only follows the model while the box is not being typed into.
     onValueChanged: if (!input.activeFocus) input.text = fmt(value)
 
+    // The wheel steps by ACCUMULATED delta, not once per event.  A trackpad
+    // sends a burst of small pixelDelta events per flick, and one step each ran
+    // denoise 40% of its range (and the seed off by dozens) on a single gesture.
+    // 120 units of angleDelta / 40 px of pixelDelta = one step, so a classic
+    // wheel detent still moves the value by exactly `step` as it always did;
+    // the fractional remainder is carried, never dropped.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
+        property real wheelAcc: 0
         onWheel: function (w) {
-            spin.commit(spin.value + (w.angleDelta.y > 0 ? spin.step : -spin.step))
+            wheelAcc += w.pixelDelta.y !== 0 ? w.pixelDelta.y / 40 : w.angleDelta.y / 120
+            while (Math.abs(wheelAcc) >= 1) {
+                if (wheelAcc > 0) { spin.commit(spin.value + spin.step); wheelAcc -= 1 }
+                else              { spin.commit(spin.value - spin.step); wheelAcc += 1 }
+            }
             w.accepted = true
         }
     }
