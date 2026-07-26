@@ -24,7 +24,7 @@
   xdg.configFile."kitty/kitty-focus-dim.py".source = ./kitty-files/kitty-focus-dim.py;
 
   # Startup session: a background launch of the hyprvtb titlebar-button client
-  # (~/nix/pylib/kitty-vtb.py, run from the live repo) plus the normal shell
+  # (~/nix/apps/pylib/kitty-vtb.py, run from the live repo) plus the normal shell
   # window. See the startup_session note in kitty.conf.
   xdg.configFile."kitty/vtb.session".source = ./kitty-files/vtb.session;
 

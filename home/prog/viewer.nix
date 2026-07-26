@@ -1,7 +1,7 @@
 { pkgs, lib, host, ... }:
 
 # viewer — the standalone Qt/QML image viewer split out of filer (source at
-# ~/nix/viewer). Packaging mirrors filer.nix exactly, including the air split:
+# ~/nix/apps/viewer). Packaging mirrors filer.nix exactly, including the air split:
 #
 #   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
 #     Honeykrisp GBM/EGL driver — same root cause as filer/hyprvtb, see
@@ -10,7 +10,7 @@
 #     env (qtimageformats/qtsvg add the webp/tiff/svg image plugins beyond
 #     qtbase's png/jpg/gif).
 #
-# Both run the LIVE source at ~/nix/viewer/main.py, so QML/Python edits need no
+# Both run the LIVE source at ~/nix/apps/viewer/main.py, so QML/Python edits need no
 # rebuild — only changing the runtime deps does. filer opens images by shelling
 # out to `viewer <path>` (see filer's openFile), so this must be on PATH.
 let
@@ -19,7 +19,7 @@ let
   viewer =
     if host == "air" then
       pkgs.writeShellScriptBin "viewer" ''
-        exec /usr/bin/python3 /home/lam/nix/viewer/main.py "$@"
+        exec /usr/bin/python3 /home/lam/nix/apps/viewer/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {
@@ -38,7 +38,7 @@ let
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/viewer \
-            --add-flags /home/lam/nix/viewer/main.py \
+            --add-flags /home/lam/nix/apps/viewer/main.py \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';

@@ -58,7 +58,7 @@ PALETTE_DEFAULTS = {
 
 class Palette(QObject):
     """Live wallpaper palette — same parser/watcher as filer's (see
-    ~/nix/filer/main.py for the full commentary)."""
+    ~/nix/apps/filer/main.py for the full commentary)."""
 
     changed = Signal()
 

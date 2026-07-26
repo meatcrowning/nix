@@ -1,6 +1,6 @@
 { pkgs, lib, host, ... }:
 
-# player — the standalone Qt/QML music player (source at ~/nix/player), fourth
+# player — the standalone Qt/QML music player (source at ~/nix/apps/player), fourth
 # sibling of surfer/filer/viewer. Packaging mirrors viewer.nix, including the
 # air split (air lacks nixpkgs GPU Qt — system python fallback; best-effort
 # there, the library SSD hangs off top anyway).
@@ -14,7 +14,7 @@
 #   * mpris-server — exports org.mpris.MediaPlayer2.player so the panel's
 #     MediaPanel widget controls this app (pulls pydbus/pygobject).
 #
-# Runs the LIVE source at ~/nix/player/main.py — .py/.qml edits need no
+# Runs the LIVE source at ~/nix/apps/player/main.py — .py/.qml edits need no
 # rebuild, only dep/packaging changes do.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.mpv ps.mutagen ps.mpris-server ]);
@@ -28,7 +28,7 @@ let
       # without a home-manager rebuild — and it degrades to a plain offline
       # launch when top is unreachable. See docs/air-library-share.md.
       pkgs.writeShellScriptBin "player" ''
-        exec /home/lam/nix/player/tools/air-launch.sh "$@"
+        exec /home/lam/nix/apps/player/tools/air-launch.sh "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {
@@ -46,7 +46,7 @@ let
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/player \
-            --add-flags /home/lam/nix/player/main.py \
+            --add-flags /home/lam/nix/apps/player/main.py \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
