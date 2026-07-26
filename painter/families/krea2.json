@@ -1,0 +1,73 @@
+{
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "prompt_transform": "none",
+  "latent_class": "EmptyLatentImage",
+  "toggles": {
+    "negpip": false,
+    "model_sampling": false
+  },
+  "model_sampling": {
+    "shift_start": 3.5,
+    "shift_end": 1.2,
+    "start_percent": 0.0,
+    "end_percent": 0.5,
+    "curve": "ease_in",
+    "outside_window": "hold",
+    "multiplier": 1.0
+  },
+  "defaults": {
+    "steps": 50,
+    "cfg": 0.5,
+    "sampler_name": "euler_cfg_pp",
+    "scheduler": "beta",
+    "denoise": 1.0,
+    "add_noise": true
+  },
+  "resolution": {
+    "megapixels": 2.7,
+    "multiple": 8,
+    "aspect": "2:3"
+  },
+  "lora": {
+    "aliases": {
+      "text_fusion": "txtfusion",
+      "transformer_blocks.": "blocks.",
+      "ff.": "mlp.",
+      "to_out.0": "wo",
+      "to_q": "wq",
+      "to_k": "wk",
+      "to_v": "wv",
+      "to_gate": "gate"
+    },
+    "loader": "LoraLoaderModelOnly"
+  },
+  "id": "krea2",
+  "label": "Flux Krea 2",
+  "detect": "krea2",
+  "text_encoder": {
+    "te_model": "QWEN3VL_4B",
+    "clip_type": "krea2",
+    "clip_type_significant": true,
+    "hidden": 2560,
+    "match": "base.txtdim == te.hidden"
+  },
+  "vae": {
+    "arch": "wan21",
+    "prefer": [
+      "qwen_image_vae.safetensors"
+    ]
+  },
+  "int8": {
+    "model_type": "krea2",
+    "enable_convrot": true,
+    "on_the_fly_quantization": false,
+    "lora_mode": "None"
+  },
+  "variants": {
+    "turbo": {
+      "steps": 8,
+      "cfg": 1.0
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "prompt_transform": "none",
+  "latent_class": "EmptyLatentImage",
+  "toggles": {
+    "negpip": false,
+    "model_sampling": false
+  },
+  "model_sampling": {
+    "shift_start": 3.5,
+    "shift_end": 1.2,
+    "start_percent": 0.0,
+    "end_percent": 0.5,
+    "curve": "ease_in",
+    "outside_window": "hold",
+    "multiplier": 1.0
+  },
+  "defaults": {
+    "steps": 26,
+    "cfg": 4.0,
+    "sampler_name": "heun",
+    "scheduler": "beta",
+    "denoise": 1.0,
+    "add_noise": true
+  },
+  "resolution": {
+    "megapixels": 1.0,
+    "multiple": 64,
+    "aspect": "1:1"
+  },
+  "lora": {
+    "aliases": {},
+    "loader": "LoraLoaderModelOnly"
+  },
+  "id": "chroma",
+  "label": "Chroma",
+  "detect": "chroma",
+  "text_encoder": {
+    "te_model": "T5_XXL",
+    "clip_type": "chroma",
+    "clip_type_significant": true,
+    "hidden": 4096
+  },
+  "vae": {
+    "arch": "flux_ae",
+    "prefer": [
+      "schnell.safetensors"
+    ]
+  },
+  "int8": {
+    "model_type": "chroma"
+  },
+  "negpip_note": "ComfyUI-ppm patches NegPip onto Flux's forward, which expects time_in; Chroma replaces that with distilled_guidance_layer, so enabling it aborts the sampler."
+}
