@@ -131,7 +131,9 @@ before touching the plugin or the pin.
   `~/.config/...` file **in place** (targeted string edit — never overwrite
   wholesale or you reset the live wal palette/border). Apply `hyprland.lua`
   changes with **`hyprctl reload`** (re-runs the live Lua, re-registers
-  `hl.bind`s, does not disturb the session).
+  `hl.bind`s, does not disturb the session) — safe for *config* edits, and
+  only because the plugin line now passes a constant path string (see the
+  hyprvtb bullet below: reload must never re-map the `.so`).
 
   **Run `tools/seed-drift.sh` whenever you touch one of these — before you
   start (to see what's already stale) and after you finish (to prove both
@@ -172,24 +174,28 @@ before touching the plugin or the pin.
   the previous generation in mind. Bump a pin **on its own commit**, never
   alongside other changes.
 
-- **`hyprvtb` plugin (C++) reload after a source edit — `rbsys` then
-  `hyprctl reload`. That is the whole procedure. NO relog, and never
-  `hyprctl plugin load/unload`.** Bump the version string in `main.cpp` per
-  change, then confirm `hyprctl plugin list` shows the **new Version**,
-  **exactly one** hyprvtb, and `hyprctl configerrors` is empty. It briefly
-  re-decorates every window (the plugin does session save/restore, so this is
-  safe). If the tree is dirty, `git add` the changed files first — flake eval
-  ignores untracked ones.
+- **`hyprvtb` plugin (C++) after a source edit — `rbsys`, then the change goes
+  live at the NEXT LOGIN. There is no hot reload. Do not try to make one.**
+  Bump the version string in `main.cpp` per change, `rbsys`, and stop there;
+  `hyprctl plugin list` will keep reporting the OLD version until the user
+  relogs, and that is correct, not a failure. If the tree is dirty, `git add`
+  the changed files first — flake eval ignores untracked ones.
 
-  This works because `hyprland.lua` passes `hl.plugin.load` the **resolved**
-  `/nix/store/...` path (via `readlink -f`), not the stable symlink. Hyprland
-  tracks config-loaded plugins by that literal path **string**, and
-  `CPluginSystem::updateConfigPlugins` early-returns unless the string list
-  *changes* between reloads. With the symlink the string was constant forever,
-  so `hyprctl reload` was a no-op and the stale `.so` stayed mapped — which is
-  what made everyone reach for manual `plugin load` and, historically, a relog.
-  With the resolved path, each `rbsys` yields a new string and Hyprland does the
-  swap itself, in the right order and with the right bookkeeping.
+  Every hot-swap route has now been tried and every one takes the session down:
+  - **`hyprctl reload` swapping the `.so`** (what `hyprland.lua` did from
+    2026-07-25 until later the same day, by passing `hl.plugin.load` the
+    `readlink -f`-resolved store path so each rebuild yielded a new path
+    string): the reload itself looks perfect — new Version, exactly one
+    instance, empty `configerrors` — and then the compositor **SIGSEGVs at the
+    next window close**, jumping to a freed address under
+    `CWindow::destroyWindow`, because the unloaded `.so`'s code is still
+    reachable from Hyprland's own bookkeeping. Hyprland's watchdog restarts the
+    compositor with `--safe-mode`: no config at all, no titlebars, no keybinds,
+    no panel, and only a relog gets out of it. The config now passes the
+    **constant symlink** string, which makes `updateConfigPlugins` early-return
+    — reload can no longer touch the plugin, by construction.
+  - **Manual `hyprctl plugin load`/`unload`** — see below; corrupts the
+    `plugin:hyprvtb:col.*` keys unrecoverably.
 
   **Do not go back to manual `hyprctl plugin load`/`unload`.** It is the source
   of every "hot reload is unstable" report:
