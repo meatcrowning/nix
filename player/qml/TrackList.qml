@@ -15,7 +15,23 @@ Item {
     // whatever is behind, so the page underneath scrolls instead.
     property bool scrollable: true
     property int currentTrackId: Player.current.id !== undefined ? Player.current.id : -1
+    // Row-index identity of the now-playing track, for owners whose model IS the
+    // play order (the queue). -1 = fall back to matching by track id, which is
+    // all an album/search listing can do — but wrong for a queue holding the
+    // same track twice.
+    property int currentRow: -1
+    // Keep the now-playing row parked in the middle of the view as playback
+    // walks down the list.
+    property bool followCurrent: false
     signal played(int index)
+
+    function centerCurrent() {
+        if (!followCurrent || currentRow < 0 || currentRow >= list.count || list.height <= 0)
+            return;
+        list.positionViewAtIndex(currentRow, ListView.Center);
+    }
+    onCurrentRowChanged: centerCurrent()
+    Component.onCompleted: centerCurrent()
 
     ListView {
         id: list
@@ -25,12 +41,30 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: VScroll { visible: root.scrollable }
 
+        // Re-centre once the view actually has a size / rows (the queue's height
+        // and model both arrive after this component is built, and a
+        // positionViewAtIndex against a 0-height or empty view does nothing).
+        onHeightChanged: root.centerCurrent()
+        onCountChanged: root.centerCurrent()
+
         delegate: Rectangle {
             id: row
             width: list.width
             height: Theme.fontSize + 2   // kitty-tight: one font cell + 1px each side
-            color: rowMouse.containsMouse ? Theme.highlight : "transparent"
-            readonly property bool isCurrent: trackId === root.currentTrackId
+            readonly property bool isCurrent: root.currentRow >= 0
+                                              ? index === root.currentRow
+                                              : trackId === root.currentTrackId
+            color: isCurrent ? Theme.highlight
+                             : (rowMouse.containsMouse ? Theme.highlight : "transparent")
+
+            // Accent gutter, so the playing row still reads as the playing row
+            // when the cursor is hovering some other one.
+            Rectangle {
+                width: 2
+                height: parent.height
+                color: Theme.accent
+                visible: row.isCurrent
+            }
             readonly property color fg: !available ? Theme.inactive
                                         : (isCurrent ? Theme.accent : Theme.text)
 

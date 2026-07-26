@@ -16,6 +16,7 @@ extern "C" {
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <unistd.h> // getpid — the hot-swap handoff's staleness guard
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -90,6 +91,123 @@ static CBox clampToMonitor(const CBox& box, PHLWINDOW w) {
 // The slide-in scratchpad terminal's window class (defined here, ahead of the
 // scratchpad section, because the session snapshot below also skips it).
 static constexpr const char* SCRATCH_CLASS = "hyprvtb-scratch";
+
+// ---- hot-swap handoff (roll/minimize state across `hyprctl reload`) --------
+//
+// PLUGIN_EXIT has to hand every window back in a plain state: a rolled-up
+// window is HIDDEN and a minimized one is parked off-screen, and both are
+// states only the running instance knows how to leave (restoreForUnload —
+// leaving them would strand a window with no titlebar, or invisible entirely).
+// But the incoming instance then sees plain windows, so every rolled-up window
+// snapped open on a hot swap and never came back.
+//
+// So write those states down on the way out and re-apply them on the way in,
+// which makes a swap invisible: the window is un-rolled and re-rolled inside
+// one PLUGIN_EXIT/PLUGIN_INIT pair, with no frame drawn in between.
+//
+// Keyed by window ADDRESS, which is stable here in a way it is nowhere else:
+// this is the same compositor process, mid-`hyprctl reload`, so the CWindow
+// objects never move. The file records the compositor's PID for exactly that
+// reason — after a restart the addresses are meaningless (and could collide
+// with unrelated windows), so a PID mismatch discards it. It is consumed and
+// deleted on the first read either way; nothing about it survives a login.
+struct SHandoffEntry {
+    uintptr_t addr     = 0;
+    bool      rolled   = false;
+    bool      minimized = false;
+};
+
+static std::string vtbHandoffPath() {
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : "") + "/.local/state/hyprvtb/handoff.tsv";
+}
+
+// Called from PLUGIN_EXIT BEFORE restoreForUnload undoes these states.
+static void vtbSaveHandoff() {
+    if (!g_pGlobalState)
+        return;
+
+    std::vector<SHandoffEntry> entries;
+    for (auto& b : g_pGlobalState->bars) {
+        if (!b.alive())
+            continue;
+        const auto w = b->getOwner();
+        if (!w || !w->m_isMapped)
+            continue;
+        if (!b->isRolledUp() && !b->isMinimized())
+            continue;
+        entries.push_back({(uintptr_t)w.get(), b->isRolledUp(), b->isMinimized()});
+    }
+
+    const auto PATH = vtbHandoffPath();
+    if (entries.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(PATH, ec); // no stale file to mis-apply later
+        return;
+    }
+
+    std::filesystem::create_directories(std::filesystem::path(PATH).parent_path());
+    std::ofstream f(PATH, std::ios::trunc);
+    f << "pid\t" << (long)getpid() << '\n';
+    for (const auto& e : entries)
+        f << e.addr << '\t' << (int)e.rolled << '\t' << (int)e.minimized << '\n';
+}
+
+// Called from PLUGIN_INIT AFTER the existing windows have been decorated (the
+// state is applied through their fresh decorations).
+static void vtbApplyHandoff() {
+    const auto      PATH = vtbHandoffPath();
+    std::ifstream   f(PATH);
+    std::error_code ec;
+    if (!f.good()) {
+        std::filesystem::remove(PATH, ec);
+        return;
+    }
+
+    std::vector<SHandoffEntry> entries;
+    bool                       pidOk = false;
+    std::string                line;
+    while (std::getline(f, line)) {
+        std::istringstream ss(line);
+        std::string        first;
+        if (!std::getline(ss, first, '\t'))
+            continue;
+        if (first == "pid") {
+            long pid = 0;
+            if (ss >> pid)
+                pidOk = (pid == (long)getpid());
+            continue;
+        }
+        SHandoffEntry e;
+        int           rolled = 0, minimized = 0;
+        e.addr = std::strtoull(first.c_str(), nullptr, 10);
+        if (!(ss >> rolled >> minimized) || !e.addr)
+            continue;
+        e.rolled    = rolled;
+        e.minimized = minimized;
+        entries.push_back(e);
+    }
+    f.close();
+    std::filesystem::remove(PATH, ec); // one-shot: never applied twice
+
+    if (!pidOk || entries.empty() || !g_pGlobalState || !Hl::compositorReady())
+        return;
+
+    for (const auto& e : entries) {
+        for (auto& b : g_pGlobalState->bars) {
+            if (!b.alive())
+                continue;
+            const auto w = b->getOwner();
+            if (!w || (uintptr_t)w.get() != e.addr)
+                continue;
+            if (e.rolled)
+                b->toggleRollup(false); // snap back, no animation
+            else if (e.minimized)
+                b->minimizeWindow();
+            break;
+        }
+    }
+}
 
 // ---- session snapshot (manual save on a keybind + restore at login) --------
 //
@@ -858,6 +976,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         }
     }
 
+    // Put back the roll/minimize states PLUGIN_EXIT had to undo, if this init is
+    // the other half of a hot swap. No-op (and self-cleaning) on a fresh login.
+    vtbApplyHandoff();
+
     // Restore a saved session, but only on a fresh login (vtbRestoreSession
     // no-ops if any user window is already open — see its guard). Must run
     // AFTER the window.open listener is registered above so the relaunched
@@ -895,6 +1017,12 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // neither state survives the swap — the incoming .so sees a plain window
     // (or, for a hidden one, used to see nothing at all). Restore first, detach
     // second.
+    //
+    // Write those states down BEFORE undoing them: vtbApplyHandoff re-applies
+    // them in the matching PLUGIN_INIT, so a rolled-up window stays rolled up
+    // across `hyprctl reload` instead of snapping open.
+    vtbSaveHandoff();
+
     if (g_pGlobalState) {
         for (auto& b : g_pGlobalState->bars) {
             if (b.alive())
