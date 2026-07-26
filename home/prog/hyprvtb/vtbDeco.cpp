@@ -463,6 +463,12 @@ SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprCol
 // border that must blend against the real scene, not a flattened copy).
 void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     if (a >= 0.999f || m_rollAnim != ROLL_NONE || !pMonitor) {
+        if (m_fadeFB) {
+            // Fade is over: drop the offscreen buffer instead of pinning a
+            // monitor-sized RGBA FB (~14M at 1440p) per window for its lifetime.
+            m_fadeFB->release();
+            m_fadeFB.reset();
+        }
         renderBar(pMonitor, a);
         return;
     }
