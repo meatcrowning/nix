@@ -98,14 +98,35 @@ Singleton {
     // Same in reverse: a dock panel dragged below exitPx shows the classic width
     // immediately, so you can see the collapse coming before you let go.
     //
-    // Only the in-dock resize tracks the pointer, and it is clamped to
-    // [minPx, maxPx] and quantized, so it lands on the same 8px grid the
-    // wallpaper is composed against.
+    // Only the in-dock resize tracks the pointer, clamped to [minPx, maxPx].
+    //
+    // It is deliberately NOT quantized here. Quantizing the LIVE width made the
+    // edge advance in 8px hops instead of following the cursor, which reads as
+    // the drag being coarse and unresponsive. The 8px grid only has to hold for
+    // the COMMITTED width — that's what the wallpaper is composed against — so
+    // quantize() belongs in commitDrag(), not on the tracked value.
     readonly property int liveWidth: {
         if (!dragging) return barWidth;
         if (!dock) return dragWidth >= enterPx ? dockPx : Theme.barWidth;
         if (dragWidth < exitPx) return Theme.barWidth;
-        return Math.max(minPx, Math.min(maxPx, quantize(dragWidth)));
+        return Math.round(Math.max(minPx, Math.min(maxPx, dragWidth)));
+    }
+
+    // Diagnostic trace of the last drag, read with `qs ipc call view trace`:
+    // one "dragWidth,surfaceWidth,liveWidth" sample per pointer event. The
+    // surface width is what the compositor actually gave us, so comparing the
+    // three columns shows directly whether the edge is tracking, lagging or
+    // oscillating — this is a gesture nobody can verify from a log line, and
+    // it has already been mis-diagnosed twice by reasoning instead of measuring.
+    //
+    // A plain JS array mutated IN PLACE, never reassigned: reassigning would
+    // emit a change signal and copy the array on every pointer event, which
+    // would itself cost more than the thing being measured.
+    property var dragTrace: []
+    function traceAdd(surfaceW) {
+        if (dragTrace.length < 500)
+            dragTrace.push(Math.round(dragWidth) + ","
+                           + Math.round(surfaceW) + "," + liveWidth);
     }
 
     // True while liveWidth is a SNAPPED value (the entry jump, or the preview of
