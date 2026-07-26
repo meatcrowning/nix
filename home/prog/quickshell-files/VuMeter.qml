@@ -106,13 +106,26 @@ Item {
 
         // The volume level as a horizontal line across both bars — the bar's
         // always-visible volume indicator (the volume OSD is gone).
+        //
+        // STATIC white, deliberately not a wal palette slot. The palette is
+        // derived from the wallpaper and is monochromatic, so every slot in it
+        // is a near-neighbour of `accent`: measured against the accent fill,
+        // Theme.text contrasts 1.40:1, crit 1.49:1, ok 1.20:1 — all invisible
+        // on top of a bar. That went unnoticed while the bars were 5px with a
+        // 4px gap, because most of the line's length crossed background
+        // (10.2:1); making them gapless put the whole line on accent. White is
+        // 2.88:1 against the fill and 21:1 against the background, so it reads
+        // in both places and on any wallpaper. Same precedent as
+        // Theme.windowBorderInactive: a state indicator that must not recolour.
+        // Muted keeps Theme.crit — muting silences the output, so the bars fall
+        // to zero and that line lands on background, where crit reads 10.9:1.
         Rectangle {
             visible: SysInfo.volume >= 0
             x: 0
             width: parent.width
             y: Math.max(0, Math.round(root.barH * (1 - Math.max(0, SysInfo.volume) / 100)) - 1)
             height: 2
-            color: SysInfo.muted ? Theme.crit : Theme.text
+            color: SysInfo.muted ? Theme.crit : "#ffffff"
         }
     }
 
