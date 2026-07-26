@@ -152,7 +152,12 @@ before touching the plugin or the pin.
   - **the pin set** — mirrored to `$XDG_RUNTIME_DIR/qs-live-pins` and read back
     SYNCHRONOUSLY (`FileView { blockLoading: true }`) in `Component.onCompleted`,
     then applied with `snapPinned()`. The file's absence doubles as the
-    login-vs-reload flag ($XDG_RUNTIME_DIR is wiped at logout).
+    login-vs-reload flag ($XDG_RUNTIME_DIR is wiped at logout). Pinning must
+    ALWAYS trigger `SlidePopup`'s deferred layer remap, even pre-map: Quickshell
+    latches the layer when it creates the window (at component completion,
+    regardless of `visible`), so a pin applied during construction comes up on
+    Overlay and every desktop widget floats ON TOP of windows. Check with
+    `hyprctl layers` — the `qs-*` widget namespaces belong in level 1 (bottom).
   - **the widgets' contents** — a `PersistentProperties` block, which hands
     properties from the outgoing tree to the incoming one in-process. Each
     source exposes `stateJson()`/`restoreState()` plus a `stateRev` counter that
