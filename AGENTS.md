@@ -56,15 +56,22 @@ C++ — compositor-side window titlebars + session save/restore).
 
 **Two VIEW MODES (`ViewMode.qml`), and the drag handle IS the switch.**
 `classic` is the 48px vertical bar this config has always had, with the desktop
-widgets pinned out on the wallpaper. `dock` turns the panel into a 25-33%-of-
-screen column: `DockHeader.qml` (runner button at the left, task icons flowing
-across and wrapping) over `DockGrid.qml` (the widget grid). There is no toggle
-button — you grab the bar's inner edge (`edgeGrip` in `shell.qml`) and pull;
-past `enterFrac` (5% of screen) past the classic width it commits to dock, and
-shoving a dock panel below `exitFrac` (20%) collapses it back. The asymmetry is
-deliberate: entering is a small tug from a 48px bar, leaving must be a decisive
-shove or width nudges keep falling out of the mode. Scripted path:
-`qs ipc call view toggle|dock|classic|mode`.
+widgets pinned out on the wallpaper. `dock` turns the panel into a wide column
+(14-33% of screen, default 15%): `DockHeader.qml` (runner button at the left,
+task icons flowing across and wrapping) over `DockGrid.qml` (the widget grid).
+There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
+`shell.qml`) and pull. Scripted path: `qs ipc call view toggle|dock|classic|mode`.
+- **Opening it has ONE destination.** The entry drag is a gesture, not a resize:
+  the bar holds at 48px until the pull passes `enterFrac` (5% of screen) past
+  its own width, then opens in one movement at `dockPx` — the same size every
+  time. Resizing only happens once you're already in dock, where the panel does
+  track the pointer, clamped to `[minFrac, maxFrac]`. Don't "improve" this into
+  a continuous stretch on entry; it was that once and the user asked for the
+  single snap.
+- **`exitFrac` (10%) must stay below `minFrac` (14%).** If the collapse
+  threshold reached into the legal width range, the narrowest dock the user is
+  allowed to pick would already sit inside the "about to collapse" zone and the
+  panel could never rest there.
 - **Both layouts are always instantiated**, crossfaded on `ViewMode.showDock`
   (which follows the drag LIVE, so the panel visibly becomes the dock as you
   cross the threshold rather than snapping at release). A faded-out layout sets
@@ -78,12 +85,29 @@ shove or width nudges keep falling out of the mode. Scripted path:
 - **Dock widths are quantized to 8px** (`ViewMode.widthStep`). Not cosmetic: the
   width IS the wallpaper's reserve, and each distinct reserve is a fresh
   ImageMagick compose + a hyprpaper re-render, which reads on screen as a FLASH.
-- **The edge-grip resize is self-correcting, not incremental.** A layer surface
-  never sees the pointer's absolute position, and the grip is anchored to the
-  edge it moves — so as the bar grows, `mouse.x` drifts back toward the grab
-  point by exactly the amount the bar changed. Feeding that residual back each
-  event tracks the pointer using only local coordinates. Don't "fix" it into an
-  absolute-position calculation; there isn't one to be had.
+- **The edge-grip resize must be ABSOLUTE, measured from the fixed screen edge**
+  (`edgeGrip.widthAt()` maps the pointer into the bar and subtracts from
+  `bar.width`). It was incremental once — add this event's pointer delta to the
+  current width — and it visibly BOUNCED: resizing a layer surface takes a
+  configure/ack roundtrip, so for several events the pointer coordinates still
+  describe the old surface while the requested width has already moved on, and
+  each event over-corrects against a width that hasn't happened yet. Measuring
+  from the anchored screen edge reads `bar.width` and the pointer from the same
+  frame, so their difference is exact even mid-roundtrip. Never reintroduce a
+  delta-accumulating version, and never feed `liveWidth` back into `dragWidth`.
+- **Never animate a width that is tracking the pointer** — the `Behavior on
+  implicitWidth` is gated on `!dragging || ViewMode.snapping`. An animation on
+  the tracked resize means the edge permanently chases the cursor from behind,
+  which reads as lag. `snapping` marks the discrete jumps (entry, collapse
+  preview) that *should* glide.
+- **Growing the panel pushes floating windows out from under it**
+  (`scripts/push-windows.py`, run from `applyReserve()` only when the reserve
+  GREW). The exclusive zone reflows tiled windows only, and this desktop is
+  almost entirely floating. It skips `hidden` windows — those are hyprvtb's
+  rolled-up/minimized ones, parked off-screen deliberately. Pixel dispatchers
+  under the Lua config are `hl.dsp.window.move({window=,x=,y=})` and
+  `hl.dsp.window.resize({window=,x=,y=})`, both ABSOLUTE, and **resize must come
+  before move** — resizing re-anchors the window, undoing a move issued first.
 - **Dock mode retires the desktop widgets** (they belong to the grid there), and
   restores the exact pre-dock pin set on the way back. `shell.qml`'s
   `Component.onCompleted` returns early in dock mode so neither the reload

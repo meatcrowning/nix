@@ -81,6 +81,13 @@ in
       source = ./quickshell-files/scripts/force-quit.sh;
       executable = true;
     };
+    # Dock view mode (ViewMode.qml): shove floating windows out from under the
+    # panel when it grows. The exclusive zone only reflows TILED windows, and
+    # this desktop is almost entirely floating.
+    "quickshell/scripts/push-windows.py" = {
+      source = ./quickshell-files/scripts/push-windows.py;
+      executable = true;
+    };
     # Power-menu graceful exit (PowerMenu.qml): snapshot the session + "click the
     # [x]" on every window (hyprvtb dispatcher) and wait for them to close, so
     # logout/reboot/poweroff let apps save and the next login restores positions.

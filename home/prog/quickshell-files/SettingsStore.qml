@@ -117,7 +117,7 @@ Singleton {
             // dockWidthFrac is clamped to ViewMode.minFrac..maxFrac on read, so
             // a hand-edited out-of-range value can't produce a broken panel.
             property string viewMode: "classic"        // classic | dock
-            property real   dockWidthFrac: 0.28
+            property real   dockWidthFrac: 0.15
             // classic-mode bar width; the dock mode's comes from dockWidthFrac
             property int    barWidth: 48
             property string barEdge: "right"           // left | right
@@ -236,7 +236,7 @@ Singleton {
         fontSize: 15, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
-        viewMode: "classic", dockWidthFrac: 0.28,
+        viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],
         monPollSec: 2, cpuWarn: 75, cpuCrit: 90, tempWarn: 65, tempCrit: 80, diskWarn: 75,
