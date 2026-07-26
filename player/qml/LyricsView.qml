@@ -21,26 +21,45 @@ Item {
     // nothing left to do about it. An unresolved miss keeps the pane so you
     // can settle it by hand, and a hand-marked one keeps it so that stays
     // undoable.
-    readonly property bool hasContent: lyricsData.synced
-                                       || lyricsData.text.length > 0
-                                       || lyricsData.source === "none"
-                                       || lyricsData.source === "instrumental-user"
+    readonly property bool resolvedContent: lyricsData.synced
+                                            || lyricsData.text.length > 0
+                                            || lyricsData.source === "none"
+                                            || lyricsData.source === "instrumental-user"
+
+    // While a lookup is in flight this HOLDS the previous track's answer.
+    // Recomputing it from the just-cleared lyricsData collapsed the pane to
+    // zero width for the handful of frames a resolve takes, and since the whole
+    // bottom row is anchored off this pane's left edge, every skip snapped the
+    // queue full-width and back — a violent flash on each track change. The
+    // column width now moves only when the new verdict is actually in.
+    property bool fetching: false
+    property bool lastContent: false
+    readonly property bool hasContent: fetching ? lastContent : resolvedContent
 
     onTrackIdChanged: refetch()
     onActiveChanged: if (active) refetch()
 
     function refetch() {
         currentLine = -1;
-        lyricsData = { source: "", synced: false, lines: [], text: "" };
-        if (active && trackId >= 0)
+        if (active && trackId >= 0) {
+            fetching = true;
+            lyricsData = { source: "", synced: false, lines: [], text: "" };
             Library.requestLyrics(trackId);
+        } else {
+            fetching = false;
+            lastContent = false;
+            lyricsData = { source: "", synced: false, lines: [], text: "" };
+        }
     }
 
     Connections {
         target: Lyrics
         function onReady(tid, result) {
-            if (tid === root.trackId)
+            if (tid === root.trackId) {
                 root.lyricsData = result;
+                root.lastContent = root.resolvedContent;
+                root.fetching = false;
+            }
         }
     }
 
@@ -132,7 +151,7 @@ Item {
             // NOT parent.width: parent is the Flickable's contentItem, whose
             // width stays 0 when only contentHeight is set — bind to the
             // Flickable itself (minus the scrollbar).
-            width: plainFlick.width - 12
+            width: Math.max(0, plainFlick.width - 12)
             text: root.lyricsData.text
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
@@ -158,7 +177,10 @@ Item {
     // never will.
     Column {
         anchors.centerIn: parent
-        width: parent.width - 16
+        // Math.max: a zero-width pane would give this a NEGATIVE width, and
+        // centre-aligned text in a negative-width item draws half a line's
+        // worth to the LEFT of the pane, outside it.
+        width: Math.max(0, parent.width - 16)
         spacing: 6
         visible: !root.lyricsData.synced && root.lyricsData.text.length === 0
                  && root.trackId >= 0
