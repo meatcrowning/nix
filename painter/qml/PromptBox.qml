@@ -33,6 +33,10 @@ Rectangle {
             font.pixelSize: Theme.fontSize
             font.hintingPreference: Font.PreferNoHinting
             renderType: Text.NativeRendering
+            // the one multi-line editor in any of these apps, so it needs the
+            // pin PixelText carries: FixedHeight at the font cell == kitty's row
+            lineHeight: Theme.fontSize
+            lineHeightMode: TextEdit.FixedHeight
             selectByMouse: true
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg

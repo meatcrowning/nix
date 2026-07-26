@@ -63,7 +63,11 @@ PopupWindow {
             text: tip.text
             textFormat: Text.PlainText
             horizontalAlignment: Text.AlignHCenter
-            lineHeight: 1.1
+            // NB: no lineHeight override here — PixelText sets lineHeightMode:
+            // FixedHeight, which makes lineHeight a PIXEL count, so the old
+            // `lineHeight: 1.1` (read as a multiplier) collapsed every line to
+            // 1.1px: a two-line tooltip measured 15px tall instead of 30 and
+            // drew its lines on top of each other.
             color: Theme.text
         }
     }
