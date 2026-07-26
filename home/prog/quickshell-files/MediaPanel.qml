@@ -101,14 +101,25 @@ SlidePopup {
         id: cavaProc
         running: root.open
         // see VuMeter.qml: prepend ~/.nix-profile/bin so the session's bare PATH
-        // can find the nix-installed cava, else the spectrum never spawns. cava
-        // has no CLI for the bar count, so patch `bars` into a runtime copy of
-        // the conf (from mediaSpectrumBars) and run cava against that.
+        // can find the nix-installed cava, else the spectrum never spawns (and
+        // /run/current-system/sw/bin for pw-dump, used below). cava has no CLI
+        // for the bar count or the input source, so both get patched into a
+        // runtime copy of the conf and cava is run against that.
+        //
+        // The source patch taps `easyeffects_sink.monitor` — the audio as apps
+        // wrote it, BEFORE the EasyEffects chain processes it (see the conf's
+        // [input] comment). Guarded on the sink actually existing: EasyEffects
+        // is started from hyprland.lua alongside the session, so a cold start
+        // can briefly race it, and pointing cava at a missing source would fail
+        // straight into the 2s onExited retry loop. Absent -> leave `auto`,
+        // i.e. fall back to the post-chain hardware monitor.
         command: ["sh", "-c",
-            "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; "
+            "export PATH=\"$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH\"; "
             + "src=\"$HOME/.config/quickshell/scripts/cava-spectrum.conf\"; "
             + "cfg=\"${XDG_RUNTIME_DIR:-/tmp}/qs-cava-spectrum.conf\"; "
             + "sed \"s/^bars *=.*/bars = " + SettingsStore.d.mediaSpectrumBars + "/\" \"$src\" > \"$cfg\" && "
+            + "{ pw-dump 2>/dev/null | grep -q '\"easyeffects_sink\"' && "
+            + "sed -i \"s/^source *=.*/source = easyeffects_sink.monitor/\" \"$cfg\"; } ; "
             + "exec cava -p \"$cfg\""]
         stdout: SplitParser {
             onRead: data => {
