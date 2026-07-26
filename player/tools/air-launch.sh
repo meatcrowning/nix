@@ -62,7 +62,26 @@ fi
 # ---- is top up? -----------------------------------------------------------
 # bash's /dev/tcp, so this needs no nc. A short timeout because the whole point
 # is to not sit here when the answer is "no".
-top_up() { timeout 2 bash -c "exec 3<>/dev/tcp/$HOST/445" 2>/dev/null; }
+#
+# But resolve the name OURSELVES first, and with Fedora's python. `top.local`
+# is mDNS, which glibc answers by dlopen()ing /usr/lib64/libnss_mdns4_minimal;
+# a NIX-built binary links nix's glibc, which looks for that module under its
+# own store path, does not find it, and fails every .local lookup with
+# "Temporary failure in name resolution". This script runs under whichever bash
+# is first on PATH and on air that is ~/.nix-profile/bin/bash — so /dev/tcp
+# could never resolve top.local, top_up() was false forever, and the player
+# launched "offline" on a LAN where top was sitting right there. Fedora's
+# /usr/bin/python3 uses Fedora's glibc and resolves it fine.
+#
+# Only the probe needs the address: ssh is Fedora's (/usr/sbin/ssh) and
+# resolves the name itself, and keeping the NAME there keeps known_hosts and
+# the authorized key matching what Part B set up.
+ADDR="$("$PY" -c 'import socket,sys
+try: print(socket.gethostbyname(sys.argv[1]))
+except OSError: print(sys.argv[1])' "$HOST" 2>/dev/null)"
+[ -n "$ADDR" ] || ADDR="$HOST"
+
+top_up() { timeout 2 bash -c "exec 3<>/dev/tcp/$ADDR/445" 2>/dev/null; }
 
 ONLINE=0
 if top_up; then
