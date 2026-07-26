@@ -1,7 +1,21 @@
 { config, pkgs, lib, ... }:
 
 {
-  xdg.configFile."kitty/kitty.conf".source = ./kitty-files/kitty.conf;
+  # kitty.conf must resolve to a real file inside its OWN store directory, not
+  # to a bare top-level store file: kitty ≥0.47's config watcher (`kitten
+  # __watch_conf__`) fully resolves the symlink chain and RECURSIVELY inotify-
+  # watches the resolved file's parent directory. With a plain
+  # `source = ./kitty-files/kitty.conf` that parent is /nix/store itself, so
+  # every kitty instance pinned ~250k watches (one per store dir, growing with
+  # each build) and exhausted fs.inotify.max_user_watches — which is what
+  # silently killed Quickshell hot-reload on book. The wrapper dir must contain
+  # a COPY, not a symlink (linkFarm would resolve straight back to the store
+  # root).
+  xdg.configFile."kitty/kitty.conf".source =
+    "${pkgs.runCommandLocal "kitty-conf" { } ''
+      mkdir -p $out
+      cp ${./kitty-files/kitty.conf} $out/kitty.conf
+    ''}/kitty.conf";
 
   # Listener that greys an unfocused kitty's foreground to match filer / the
   # hyprvtb inactive tone. kitty can't self-detect OS focus under Hyprland, so
