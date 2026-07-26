@@ -38,11 +38,14 @@ mkdir -p "$REPO/$REL"
 sleep 3
 
 # Mirror image files wall -> repo (add/update only). Re-copying an unchanged file
-# is a no-op as far as git is concerned (it compares content, not mtime).
+# is a no-op as far as git CONTENT is concerned, but git does track the exec bit —
+# `cp -p` used to carry 755 modes over from ~/Pictures/wall, flipping every
+# wallpaper to git-modified (mode-only) and keeping the tree permanently dirty.
+# install -m 644 pins the mode so an unchanged file really is a no-op.
 for f in "$WALL"/*; do
   [ -f "$f" ] || continue
   case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in
-    *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif) cp -p "$f" "$REPO/$REL/" ;;
+    *.png | *.jpg | *.jpeg | *.webp | *.bmp | *.gif) install -m 644 "$f" "$REPO/$REL/" ;;
   esac
 done
 

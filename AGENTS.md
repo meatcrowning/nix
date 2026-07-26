@@ -31,6 +31,9 @@ The configuration is split into three main areas: System-wide NixOS settings, Us
   - **Per-family prompt transforms**: Anima's prompts are flattened to a single line on the way out (`prompt_transform: single_line`) while the editor keeps your line breaks; everything else is passed through verbatim (Krea 2's `<think>…</think>` prose must not be touched). The string actually sent is what gets recorded in the PNG.
   - Adding a family = drop a `families/<id>.json`. No code, no new graph. Verify with `tools/validate-graphs.py` (every family x all four toggle combinations, checked against live `/object_info`), `registry.py --pair-all`, `registry.py --lora-matrix`, and `tools/coverage-test.py`, which actually runs **every** base model for one step — 19/19 as of 2026-07-25, including the int8-convrot loader, three GGUFs, both bundled checkpoints, and the pixel-space `zeta-chroma`, which needs the generated `vae/pixel_space_vae_stub.safetensors` (a 220-byte file whose only tensor is named `pixel_space_vae`; `comfy/sd.py` matches on that key alone). `tools/consolidate.py` did the model move and writes an inverse-`mv` rollback script before touching anything.
 
+- `surfer/`: Vendored source of the standalone QtWebEngine **browser** (same live-source, top-level-on-purpose pattern as `filer/`; built/installed by `home/prog/surfer.nix`). Titlebar chrome via hyprvtb like the others.
+- `pylib/`: shared Python helpers for the vendored apps — most importantly `vtbclient.py`, the hyprvtb titlebar-button socket bridge used by filer/viewer/surfer/player/painter.
+- `tools/`: repo maintenance scripts that the documented workflows depend on: `preflight.sh` (THE pre-rebuild gate — untracked-file check + rootless eval + seed-drift; run it before every `sudo rebuild-top`), `seed-drift.sh` (seed-once source/live diff), `prune-worktrees.sh` (agent-worktree cleanup, aliased `wtprune`).
 - `sounds/`: **git submodule** → `github.com/tilktilk5/vista-sounds` (a PRIVATE repo). Holds the Windows Vista event `.wav`s, which are Microsoft's and must NOT live in this public tree — so they're pulled in privately here. `home/srvs/vista-sounds.nix` exposes the checkout at the runtime path everything expects via an out-of-store symlink (`~/.local/share/sounds/vista → /home/lam/nix/sounds`), so a plain `git pull` picks up new sounds with no rebuild. **Cloning/pulling the config on a new machine (e.g. book) must use `--recurse-submodules`** (`git clone --recurse-submodules …`, or after a plain pull: `git submodule update --init`) or the sounds dir is empty; the private submodule also needs GitHub auth on that machine.
 
 - `home/srvs/claude-memory.nix` + `claude-memory-files/`: two-way sync of Claude Code's **memory** files between `top` and `book`, via the PRIVATE repo `github.com/tilktilk5/claude-memories`. `~/.claude/projects` itself is the git checkout (in place — no copying), driven by the `claude-memory-sync.timer` user unit every 5 min; log at `~/.cache/claude-memory-sync.log`, force a run with `systemctl --user start claude-memory-sync.service`. Being under `home/`, it deploys to book automatically — that machine only needs `home-manager switch --flake ~/nix#air` plus a `gh auth login` (the git credential helper is `!gh auth git-credential`). **Two invariants worth protecting:** the `.gitignore` is an ALLOWLIST (ignore `*`, re-include only `*/memory/**`) because the same tree holds every session transcript, which must never be pushed; and `.gitattributes` sets `*.md merge=union` so a memory edited on both machines keeps both sides rather than wedging the sync on a conflict. Both are seeded from nix on every run, so edit them in `claude-memory-files/`, not in the live repo. Practical consequence: **a memory written on one machine is shared infrastructure** — a wrong one propagates, so say which host a fact is specific to.
@@ -113,9 +116,11 @@ before touching the plugin or the pin.
   (or `sudo rebuild-top --upgrade`) non-interactively — no tty, no prompt. Note
   the NOPASSWD now covers **only the `rebuild-top` wrapper**, not bare
   `nixos-rebuild`, so use the wrapper — `sudo nixos-rebuild switch --flake …`
-  will hang/fail on the missing tty. (Optional: pre-build with
-  `nixos-rebuild build --flake …`, which needs no sudo at all, to validate +
-  warm the store first.) For any
+  will hang/fail on the missing tty. **Run `tools/preflight.sh` first** — it
+  mechanizes the pre-rebuild ritual (untracked-`.nix`/`.qml` check, rootless
+  eval of the top system, seed-drift) in ~10s with no sudo. (Optional: also
+  pre-build with `nixos-rebuild build --flake …`, which needs no sudo at all,
+  to warm the store first.) For any
   OTHER sudo command (one NOT covered by a NOPASSWD rule), use **`sudo -A`**:
   `SUDO_ASKPASS` is wired to a ksshaskpass dialog (`home/prog/askpass.nix`), so
   `sudo -A <cmd>` pops a password prompt to the user instead of failing on the
@@ -155,12 +160,11 @@ before touching the plugin or the pin.
   the live file — the running system keeps the old behaviour indefinitely, and
   the reverse (live-only edit) is silently lost on the next fresh install.
   Editing only one side is the single most common way a change here appears to
-  do nothing. This has bitten us repeatedly: a stale `focus workspace 50` line
+  do nothing. This has bitten us repeatedly (a stale `focus workspace 50` line
   lived on in the live file long after it was removed from source, scattering
-  windows across two workspaces; and as of 2026-07-25 both `hyprland.lua` (the
-  whole per-host `host.lua` mechanism) and `Theme.qml` (the entire
-  `SettingsStore` binding — the live file still hardcodes `fontSize: 15`,
-  `barWidth: 48`) are stale on `top`, so those features are not actually live.
+  windows across two workspaces; a later drift episode shipped a dead
+  `SettingsStore` binding). Never trust a written claim about current drift
+  state — run `tools/seed-drift.sh` for the live answer.
 
 - **`hyprvtb` plugin (C++) — where to edit.** Hyprland comes from a *pinned*
   flake input (`hyprland.url = github:hyprwm/Hyprland/vX.Y.Z`), and the plugin

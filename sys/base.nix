@@ -5,6 +5,11 @@
     settings = {
       experimental-features = [ "nix-command" "flakes" "pipe-operators" ];
       auto-optimise-store = true;
+      # Defaults were max-jobs=auto(16) x cores=0(all 16): up to 16 parallel
+      # derivations each spawning -j16 thrashes the 16-thread CPU and 30G RAM
+      # on big uncached updates. Cap the product near the thread count.
+      max-jobs = 4;
+      cores = 8;
       # These must be in `substituters` (the active query list), NOT only
       # `trusted-substituters` — the latter merely *permits* opting in and is
       # never consulted, so the CUDA deps of the git-CUDA ollama overlay were
