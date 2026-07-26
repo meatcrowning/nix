@@ -3052,6 +3052,17 @@ bool CVtbDeco::rollAnimSubProgress(float& slideT, float& downT) {
     return true;
 }
 
+// True while a roll-UP is still in its first beat, the drawer slide. The window
+// being shaded is the one the user just acted on, so its composite must keep
+// drawing OVER its neighbours until the content has fully tucked behind the bar;
+// only for the set-down beat does it drop to the under-windows layer, where a
+// rolled-up bar belongs. Without this it fell behind everything on the very
+// first frame — hideRolledWindow hands focus away immediately, which raises
+// another window over the one still visibly sliding.
+bool CVtbDeco::isRollingUpSlide() const {
+    return m_rollAnim == ROLL_UP && m_rollProgress < VTB_ROLL_SLIDE_FRAC;
+}
+
 // Current set-down fraction: the live animation value, else 1 for a window that
 // rests fully rolled up and 0 for one that isn't (drives the bar's dropped
 // resting position in effectiveBoxGlobal).
