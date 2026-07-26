@@ -9,6 +9,10 @@ Item {
     id: root
     property alias model: list.model
     property bool showArtist: true
+    // Artist name to LEAVE OFF a row (the queue passes the now-playing track's
+    // artist): in a queue that is mostly one artist, repeating their name on
+    // every row says nothing — the rows that differ are the ones worth naming.
+    property string hideArtist: ""
     property bool showNumber: true
     // false where the owner sizes itself to hold every row (the gallery's
     // inline album section): no scrollbar, and wheel notches pass through to
@@ -104,7 +108,8 @@ Item {
                 // offsets 8-16 instead of 3-11) — out the bottom of the row
                 // rect, which is what made the current-row highlight and the
                 // hover band look offset from their own text.
-                text: title + (root.showArtist && artist ? "  -  " + artist : "")
+                text: title + (root.showArtist && artist && artist !== root.hideArtist
+                               ? "  -  " + artist : "")
                 clip: true
                 height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                 color: row.fg
@@ -117,12 +122,6 @@ Item {
                 height: 15
                 spacing: 8
 
-                PixelText {
-                    visible: playCount > 0
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: playCount + "x"
-                    color: Theme.dim
-                }
                 Stars {
                     anchors.verticalCenter: parent.verticalCenter
                     opacity: row.showRatings ? 1 : 0
@@ -145,6 +144,15 @@ Item {
                         enabled: row.showRatings
                         onClicked: Library.setFavorite(trackId, !favorite)
                     }
+                }
+                // Play count sits immediately left of the duration — both are
+                // numbers about the track itself, so they read as one column
+                // pair rather than splitting the title from its time.
+                PixelText {
+                    visible: playCount > 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: playCount + "x"
+                    color: Theme.dim
                 }
                 PixelText {
                     anchors.verticalCenter: parent.verticalCenter
