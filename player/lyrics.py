@@ -25,13 +25,23 @@ week is pure waste.
 """
 import json
 import re
+import sys
 import time
-import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
-import mutagen
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pylib"))
+from trackmatch import (  # noqa: E402
+    artist_variants,
+    title_variants,
+    fold as _fold,
+    title_matches as _title_matches,
+    artist_matches as _artist_matches,
+)
+
+import mutagen  # noqa: E402
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, USLT
 from mutagen.mp4 import MP4
@@ -150,88 +160,9 @@ def write_embedded(path, text):
 
 
 # ---------------------------------------------------------------------------
-# Query normalisation
-# ---------------------------------------------------------------------------
-
-# Parenthetical/bracketed decorations that are not part of the song's name.
-_DECO = re.compile(
-    r"\s*[\(\[][^)\]]*\b(?:mix|remix|edit|version|ver|instrumental|inst|feat|ft|"
-    r"with|prod|bonus|demo|live|remaster(?:ed)?|reprise|interlude|acoustic|"
-    r"extended|radio|album|single|original|deluxe|cover|vip|bootleg|rework|"
-    r"flip|dub|mono|stereo)\b[^)\]]*[\)\]]", re.IGNORECASE)
-_TRAILING_PAREN = re.compile(r"\s*[\(\[][^)\]]{0,40}[\)\]]\s*$")
-_DASH_FEAT = re.compile(r"\s*[-–—]\s*(?:feat\.?|ft\.?|with|prod\.?(?:\sby)?)\s.*$",
-                        re.IGNORECASE)
-_ARTIST_SPLIT = re.compile(r"\s*(?:&|,|;|\+|/|×|x|feat\.?|ft\.?|vs\.?|with)\s+",
-                           re.IGNORECASE)
-_ARTIST_PROD = re.compile(r",?\s*(?:prod\.?(?:\sby)?)\s.*$", re.IGNORECASE)
-
-
-def title_variants(title):
-    """Progressively less decorated forms of a track title, most specific
-    first. '(Monopoly mix)' / '(ft. X)' suffixes are the single biggest reason
-    a real LRCLIB entry is missed for this library."""
-    out = []
-
-    def add(s):
-        s = (s or "").strip(" -–—·").strip()
-        if s and s not in out:
-            out.append(s)
-    add(title)
-    add(_DASH_FEAT.sub("", title))
-    add(_DECO.sub("", title))
-    add(_DECO.sub("", _DASH_FEAT.sub("", title)))
-    add(_TRAILING_PAREN.sub("", _DASH_FEAT.sub("", title)))
-    return out
-
-
-def artist_variants(artist):
-    """Full tag first, then the primary artist alone: LRCLIB indexes on a
-    primary-artist name, so 'A & B' / 'A feat. B' rarely matches as written."""
-    out = []
-
-    def add(s):
-        s = (s or "").strip(" -–—,&").strip()
-        if s and s not in out:
-            out.append(s)
-    add(artist)
-    add(_ARTIST_PROD.sub("", artist or ""))
-    add(_ARTIST_SPLIT.split(_ARTIST_PROD.sub("", artist or ""), maxsplit=1)[0])
-    return out
-
-
-def _fold(s):
-    """Aggressive comparison key: caseless, unaccented, punctuation-free."""
-    s = unicodedata.normalize("NFKD", str(s or ""))
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    s = s.casefold()
-    s = re.sub(r"[^\w\s]", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def _title_matches(want, got):
-    a, b = _fold(want), _fold(got)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    # A decorated tag title may legitimately contain the canonical one
-    # ("Melt! (Monopoly mix)" vs "Melt!") — but only that direction, and only
-    # when the canonical side is substantial enough not to match by accident.
-    return (a.startswith(b) or b.startswith(a)) and min(len(a), len(b)) >= 4
-
-
-def _artist_matches(want, got):
-    a, b = _fold(want), _fold(got)
-    if not a or not b:
-        return False
-    if a == b or a.startswith(b) or b.startswith(a):
-        return True
-    # "A & B" vs "A": accept when one side's primary token set is contained.
-    at, bt = set(a.split()), set(b.split())
-    return bool(at) and bool(bt) and (at <= bt or bt <= at)
-
-
+# Query normalisation lives in pylib/trackmatch.py (imported at the top of this
+# file under its historical private names) so that tools which must not pull in
+# mutagen can share exactly this logic rather than keep a copy that drifts.
 # ---------------------------------------------------------------------------
 # LRCLIB
 # ---------------------------------------------------------------------------
