@@ -287,14 +287,20 @@ SlidePopup {
                 // bar top on a fresh hit. Deliberately NOT animated: the fall
                 // is already interpolated frame-by-frame by the gravity model,
                 // and a Behavior here would drag the marker behind the peak it
-                // is supposed to be pinning. Brighter than the bar so it stays
-                // legible where it rides just above a tall one.
+                // is supposed to be pinning.
+                //
+                // Theme.textDim, matching the artist line above. It reads 3.8:1
+                // against the background — where a marker spends nearly all its
+                // time, since it sits above its own bar by definition — and
+                // 1.9:1 against accent for the moments it rides right on a bar
+                // top, which is actually better separation there than the
+                // brighter Theme.text it replaces (1.4:1).
                 Rectangle {
                     anchors { left: parent.left; right: parent.right }
                     height: 1
                     y: Math.min(spec.height - height, Math.max(0, spec.height - height - spec.height
                         * Math.pow(Math.max(0, root.spectrumPeaks[index] || 0) / 100, spec.gamma)))
-                    color: Theme.text
+                    color: Theme.textDim
                     visible: (root.spectrumPeaks[index] || 0) > 0
                 }
             }
