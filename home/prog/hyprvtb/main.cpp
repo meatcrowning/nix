@@ -27,6 +27,7 @@ extern "C" {
 #include "vtbDeco.hpp"
 #include "VtbPassElement.hpp"
 #include "vtbIpc.hpp"
+#include "vtbKinetic.hpp"
 #include "globals.hpp"
 
 // Do NOT change this function.
@@ -763,18 +764,94 @@ static int luaCloseAll(lua_State* L) {
 // lua: hyprvtb.save_session() — snapshot the current windows (position +
 // min/roll/max state + relaunch command) so the next fresh login restores
 // them. Bind to a key (Meta+Ctrl+S); pops a confirmation notification.
+// ---- kinetic scrolling (vtbKinetic.hpp) ------------------------------------
+//
+// All of these are no-ops with the module absent, so a caller never has to know
+// whether it exists. Feel tuning goes through kinetic_set, which writes a
+// RUNTIME override rather than the config — so a `hyprctl reload` is also the
+// rollback, which is the whole reason the recommended way to switch momentum on
+// is kinetic_set(true) and not the config key.
+
+// lua: hyprvtb.kinetic_set(true) | hyprvtb.kinetic_set("friction", 3.2)
+static int luaKineticSet(lua_State* L) {
+    if (!g_pGlobalState || !g_pGlobalState->kinetic) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    bool ok = false;
+    if (lua_isboolean(L, 1))
+        ok = g_pGlobalState->kinetic->setEnabled(lua_toboolean(L, 1) != 0);
+    else {
+        const std::string KEY = luaL_optstring(L, 1, "");
+        ok                    = !KEY.empty() && g_pGlobalState->kinetic->setKnob(KEY, luaL_optnumber(L, 2, 0.0));
+    }
+    lua_pushboolean(L, ok ? 1 : 0);
+    return 1;
+}
+
+// lua: hyprvtb.kinetic_test(dy, n, ms [, wet]) -> 1 if a fling started.
+// DRY unless wet, and wet needs a prior kinetic_set("unsafe_wet", 1) — see
+// CVtbKinetic::injectTest for why that is not an env check.
+static int luaKineticTest(lua_State* L) {
+    if (!g_pGlobalState || !g_pGlobalState->kinetic) {
+        lua_pushnumber(L, 0);
+        return 1;
+    }
+    const double DY  = luaL_optnumber(L, 1, 12.0);
+    const int    N   = (int)luaL_optinteger(L, 2, 8);
+    const int    MS  = (int)luaL_optinteger(L, 3, 8);
+    const bool   WET = lua_toboolean(L, 4) != 0;
+    lua_pushnumber(L, g_pGlobalState->kinetic->injectTest(DY, N, MS, WET));
+    return 1;
+}
+
+static int luaKineticDump(lua_State* L) {
+    if (!g_pGlobalState || !g_pGlobalState->kinetic)
+        return 0;
+    const auto S = g_pGlobalState->kinetic->dumpJson();
+    lua_pushstring(L, S.c_str());
+    return 1;
+}
+
+static int luaKineticStats(lua_State* L) {
+    if (!g_pGlobalState || !g_pGlobalState->kinetic)
+        return 0;
+    const auto S = g_pGlobalState->kinetic->statsJson();
+    lua_pushstring(L, S.c_str());
+    return 1;
+}
+
+static int luaKineticGet(lua_State* L) {
+    if (!g_pGlobalState || !g_pGlobalState->kinetic)
+        return 0;
+    const auto S = g_pGlobalState->kinetic->getJson();
+    lua_pushstring(L, S.c_str());
+    return 1;
+}
+
+static int luaKineticCancel(lua_State* L) {
+    if (g_pGlobalState && g_pGlobalState->kinetic)
+        g_pGlobalState->kinetic->cancelNow();
+    return 0;
+}
+
 static int luaSaveSession(lua_State* L) {
     if (g_pGlobalState)
         vtbSaveSession();
     return 0;
 }
 
-static void onConfigReloaded() {
+static void onConfigReloadedInner() {
     for (auto& b : g_pGlobalState->bars) {
         if (!b)
             continue;
         b->onConfigReloaded();
     }
+    // Drops the kinetic runtime overrides — so a reload is the documented way
+    // back to the configured feel, and to OFF if momentum was switched on for
+    // the session with kinetic_set(true).
+    if (g_pGlobalState->kinetic)
+        g_pGlobalState->kinetic->onConfigReloaded();
 }
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
@@ -815,6 +892,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                                if (b)
                                                                    b->mainThreadTick(SERIAL);
                                                            }
+                                                           // The pointer device list has no add/remove event on
+                                                           // either pin, so kinetic's per-touchpad listeners are
+                                                           // re-derived from here (cheap: a fingerprint compare).
+                                                           if (g_pGlobalState->kinetic)
+                                                               g_pGlobalState->kinetic->heartbeat();
                                                            self->updateTimeout(std::chrono::milliseconds(150));
                                                        },
                                                        nullptr);
@@ -837,8 +919,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }));
     // After any mouse release: re-pin the scratchpad (a border-drag may have
     // moved edges other than the right one) and persist its dragged width.
+    // Also the kinetic brake: ANY button, press or release, kills momentum —
+    // macOS does the same, and it is the one cancel every user reaches for
+    // instinctively.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent e, Event::SCallbackInfo& info) {
-        if (!g_pGlobalState || e.state != WL_POINTER_BUTTON_STATE_RELEASED || !g_pGlobalState->scratchVisible)
+        if (!g_pGlobalState)
+            return;
+        if (g_pGlobalState->kinetic)
+            g_pGlobalState->kinetic->onPointerButton();
+        if (e.state != WL_POINTER_BUTTON_STATE_RELEASED || !g_pGlobalState->scratchVisible)
             return;
         const auto W = scratchWindow();
         if (!W)
@@ -933,8 +1022,109 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.textColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.buttonBorderColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.accentColor);
+    // Kinetic scrolling. Flat underscore names (matching bar_width/font_size),
+    // and every default is HERE rather than in hyprland.lua: that file is
+    // seed-once on both machines, so a default expressed there would silently
+    // not apply to whichever copy has drifted. Ranges are declared so hyprlang
+    // rejects a bad value rather than the module having to survive one.
+    //
+    // Ships FALSE. The blast radius of this feature is the compositor's input
+    // path, so it is opt-in per session via kinetic_set(true) — which a reload
+    // undoes — long before it is ever a config key anyone writes down.
+    g_pGlobalState->config.kinetic                 = makeShared<Config::Values::CBoolValue>("plugin:hyprvtb:kinetic", "macOS-style momentum scrolling", false);
+    g_pGlobalState->config.kineticFriction         = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_friction", "Momentum decay rate k (1/s); coast distance is v0/k", 3.6f, Config::Values::SFloatValueOptions{.min = 0.5f, .max = 20.f});
+    g_pGlobalState->config.kineticMinStartVelocity = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_min_start_velocity", "px/s below which no fling starts", 200.f, Config::Values::SFloatValueOptions{.min = 0.f, .max = 5000.f});
+    g_pGlobalState->config.kineticMinVelocity      = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_min_velocity", "px/s stop floor", 24.f, Config::Values::SFloatValueOptions{.min = 1.f, .max = 500.f});
+    g_pGlobalState->config.kineticMaxVelocity      = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_max_velocity", "px/s clamp, direction preserving", 6000.f, Config::Values::SFloatValueOptions{.min = 100.f, .max = 40000.f});
+    g_pGlobalState->config.kineticGain             = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_gain", "Extra multiplier on top of scroll_factor", 1.f, Config::Values::SFloatValueOptions{.min = 0.1f, .max = 5.f});
+    g_pGlobalState->config.kineticAxisLockRatio    = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_axis_lock_ratio", "Zero the minor axis below this ratio of the major", 0.25f, Config::Values::SFloatValueOptions{.min = 0.f, .max = 1.f});
+    g_pGlobalState->config.kineticRateHz           = makeShared<Config::Values::CIntValue>(
+        "plugin:hyprvtb:kinetic_rate_hz", "Tick rate; 0 follows the latched monitor's refresh", 0, Config::Values::SIntValueOptions{.min = 0, .max = 240});
+    g_pGlobalState->config.kineticStopDelayMs      = makeShared<Config::Values::CIntValue>(
+        "plugin:hyprvtb:kinetic_stop_delay_ms", "Delay before the terminal axis_stop; 0 lets clients stack their own fling", 300,
+        Config::Values::SIntValueOptions{.min = 0, .max = 1000});
+    g_pGlobalState->config.kineticWindowMs         = makeShared<Config::Values::CIntValue>(
+        "plugin:hyprvtb:kinetic_window_ms", "Velocity sample window", 100, Config::Values::SIntValueOptions{.min = 20, .max = 300});
+    g_pGlobalState->config.kineticStaleMs          = makeShared<Config::Values::CIntValue>(
+        "plugin:hyprvtb:kinetic_stale_ms", "Pause before lift that means 'stop', not 'fling'", 100, Config::Values::SIntValueOptions{.min = 20, .max = 500});
+    g_pGlobalState->config.kineticMaxDurationMs    = makeShared<Config::Values::CIntValue>(
+        "plugin:hyprvtb:kinetic_max_duration_ms", "Hard safety cut on one fling", 2000, Config::Values::SIntValueOptions{.min = 100, .max = 10000});
+    // viewer's wheel handler zooms by a fixed x1.2 per event regardless of
+    // magnitude, so twelve momentum ticks saturate its whole 1..8 range.
+    g_pGlobalState->config.kineticDenyClasses      = makeShared<Config::Values::CStringValue>("plugin:hyprvtb:kinetic_deny_classes", "Comma-separated classes with no momentum", "viewer");
+    g_pGlobalState->config.kineticAllowClasses     = makeShared<Config::Values::CStringValue>(
+        "plugin:hyprvtb:kinetic_allow_classes", "Non-empty makes this an allowlist (staged rollout)", "");
+    g_pGlobalState->config.kineticDenyXwayland     = makeShared<Config::Values::CBoolValue>(
+        "plugin:hyprvtb:kinetic_deny_xwayland", "No momentum for X11 windows until the Xwayland axis path is verified", true);
+    g_pGlobalState->config.kineticDebug            = makeShared<Config::Values::CIntValue>(
+        "plugin:hyprvtb:kinetic_debug", "1 = log fling start/end/cancel, 2 = also every refusal", 0, Config::Values::SIntValueOptions{.min = 0, .max = 2});
+
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.critColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.inactiveColor);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kinetic);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticFriction);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMinStartVelocity);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMinVelocity);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMaxVelocity);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticGain);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticAxisLockRatio);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticRateHz);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticStopDelayMs);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticWindowMs);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticStaleMs);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMaxDurationMs);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticDenyClasses);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticAllowClasses);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticDenyXwayland);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticDebug);
+
+    // ---- kinetic scrolling: the module and its feeds -----------------------
+    //
+    // Built AFTER the config holders above, because everything it does — down
+    // to deciding whether to log — reads one of them through a Cfg:: accessor,
+    // and those deliberately do not null-guard (globals.hpp: a silent default
+    // would hide the bug instead of crashing on it).
+    //
+    // Still BEFORE the decorate-existing sweep further down, which is what puts
+    // this axis listener ahead of every decoration's own. hyprutils calls
+    // listeners in registration order, and that ordering is exactly why the
+    // module runs its own deco predicate rather than reading info.cancelled:
+    // at this point in the chain nobody else has had a chance to set it.
+    //
+    // Construction itself registers nothing and reads nothing: the timer is
+    // built on first use, so a session that never flings never has one.
+    g_pGlobalState->kinetic = makeUnique<CVtbKinetic>();
+
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.input.mouse.axis.listen([](IPointer::SAxisEvent e, Event::SCallbackInfo& info) {
+        if (g_pGlobalState && g_pGlobalState->kinetic)
+            g_pGlobalState->kinetic->onAxis(e, info);
+    }));
+    // Momentum dies when pointer focus moves — DROP, not stop: the old surface
+    // already had wl_pointer.leave, which ends the sequence by protocol.
+    g_pGlobalState->listeners.push_back(Hl::listenPointerFocusChange([] {
+        if (g_pGlobalState && g_pGlobalState->kinetic)
+            g_pGlobalState->kinetic->onPointerFocusChange();
+    }));
+    // Only a MODIFIER change cancels — see CVtbKinetic::onKeyboardKey.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent e, Event::SCallbackInfo& info) {
+        if (g_pGlobalState && g_pGlobalState->kinetic)
+            g_pGlobalState->kinetic->onKeyboardKey();
+    }));
+    // A three-finger gesture right after a two-finger flick.
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.gesture.swipe.begin.listen([](IPointer::SSwipeBeginEvent e, Event::SCallbackInfo& info) {
+        if (g_pGlobalState && g_pGlobalState->kinetic)
+            g_pGlobalState->kinetic->onGestureBegin();
+    }));
+    g_pGlobalState->listeners.push_back(Event::bus()->m_events.gesture.pinch.begin.listen([](IPointer::SPinchBeginEvent e, Event::SCallbackInfo& info) {
+        if (g_pGlobalState && g_pGlobalState->kinetic)
+            g_pGlobalState->kinetic->onGestureBegin();
+    }));
 
     // Every plugin action is exposed as a Lua function and nothing else.
     // `addDispatcherV2` is deliberately NOT used: under the Lua config,
@@ -954,11 +1144,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_all", ::luaCloseAll);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_set", ::luaKineticSet);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_test", ::luaKineticTest);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_dump", ::luaKineticDump);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_stats", ::luaKineticStats);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_get", ::luaKineticGet);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_cancel", ::luaKineticCancel);
     }
 
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.config.reloaded.listen([] {
         if (g_pGlobalState)
-            onConfigReloaded();
+            onConfigReloadedInner();
     }));
 
     // decorate windows that already exist (none when loaded at config-parse
@@ -998,12 +1194,21 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.77"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.78"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
     // Join the IPC thread FIRST — it must be gone before this .so unloads.
     VtbIpc::stop();
+
+    // Momentum first: it owns a second timer AND a client obligation. Its own
+    // shutdown() stops deciding, drops the timer and the per-device listeners,
+    // and only then flushes the terminal axis_stop the client is owed — a
+    // sequence abandoned mid-flight leaves Qt with scrollingPhase stuck true
+    // and GTK with scroll->active, forever. That obligation is new for this
+    // plugin; nothing else here owed a client anything at unload.
+    if (g_pGlobalState && g_pGlobalState->kinetic)
+        g_pGlobalState->kinetic->shutdown();
 
     // The tick timer's callback code lives in this .so: deregister and drop it
     // before anything else so it can never fire into an unloaded image.

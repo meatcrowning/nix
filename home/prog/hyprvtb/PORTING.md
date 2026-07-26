@@ -38,6 +38,53 @@ parameter, so there is no better call to make. One did: the `#define private
 public` InputManager hack is gone, because `hasHeldButtons()` is public and is
 literally `return !m_currentlyHeldButtons.empty()`.
 
+**The input/seat half of the seam (added 2.77/2.78 for kinetic scrolling).**
+The momentum module (`vtbKinetic.{hpp,cpp}`) is the first part of this plugin
+that *writes* to the input path rather than only reading it, and its whole
+surface went through `vtbCompat.hpp` before a line of it was written. Worth
+knowing when porting:
+
+- **All of it is pin-identical — not one `#if`.** `EventLoopManager.hpp`,
+  `EventLoopTimer.hpp`, `IPointer.hpp` and `IKeyboard.hpp` are *byte-identical*
+  between 0.55.4 and 0.56.0; `SeatManager.hpp` differs only at `nextSerial` and
+  below. That is not luck, it is a choice at two points: surface→window
+  classification goes through the **view** indirection
+  (`CWLSurface::fromResource` → `view()` → `CWindow::fromView`), which sidesteps
+  the one genuinely divergent call (`g_pCompositor->getWindowFromSurface` vs
+  `Desktop::viewState()->query()…runWindow()`); and the monitor refresh rate is
+  reached as `PHLMONITOR->m_refreshRate`, which absorbs both the header move
+  (`helpers/Monitor.hpp` → `output/Monitor.hpp`) and `CMonitor` gaining a
+  namespace.
+- **Never touch `CSeatManager::nextSerial`.** It is the one axis-adjacent
+  signature that actually differs — `nextSerial(SP<CWLSeatResource>)` on air vs
+  `nextSerial(SP<CWLSeatResource>, bool enter = false)` on top, plus three
+  pointer-serial methods and two members that exist on the top pin alone. An
+  axis event carries no serial, so there is no reason to go near it. If a future
+  bump makes something here *want* a serial, that is the moment to add a
+  `#if VTB_HL_056` arm, and it should be the only one in the block.
+- **`HyprlandAPI::addEvent` is top-pin only.** Plugin-defined custom bus events
+  do not exist on 0.55.4. Nothing uses it; if anything ever does, it needs a
+  guard.
+- **Hold gestures are per-device, not on the bus.** `Event::bus()`'s gesture
+  group has `swipe.*` and `pinch.*` on both pins and no `hold` on either, so
+  "fingers back on the pad" is reachable only through
+  `IPointer::m_pointerEvents.holdBegin` on each touchpad. There is also no
+  device add/remove event, which is why those listeners are re-derived from a
+  fingerprint on the 150ms heartbeat rather than attached once.
+- **Two things that look reachable and are not.** `PROTO::seat->m_currentCaps`
+  (the seat-capability gate every `sendAxis*` silently bails on) is private
+  *and* no `PROTO::` symbol is exported by either compositor binary — naming it
+  binds to this `.so`'s own null `UP` and dereferences it. `Hl::anyPointerDevice()`
+  is the observable proxy that replaced it. By contrast `Log::logger` **is**
+  exported, as `STB_GNU_UNIQUE` along with its guard variable, which is the only
+  reason `Hl::log()` merges with the compositor's logger instead of quietly
+  constructing a second, uninitialised one.
+- **The wire has its own degenerate-value class**, and it is the exact analogue
+  of the zero-area rect that aborts the renderer: a `value == 0.0` send *is*
+  `wl_pointer.axis_stop`, and NaN/inf reach `wl_fixed_from_double` completely
+  unguarded. Both are refused inside `Hl::sendAxis`, at the seam, never at the
+  call sites — same doctrine as the two rendering GUARDs.
+
 **A note on dispatchers (Axis C).** Under this Hyprland's Lua config,
 `hyprctl dispatch X` evaluates `X` as a Lua expression, so a plugin dispatcher
 name registered with `addDispatcherV2` resolves to an undefined global and does

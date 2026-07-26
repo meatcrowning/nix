@@ -4,6 +4,7 @@
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 
@@ -17,6 +18,7 @@
 inline HANDLE PHANDLE = nullptr;
 
 class CVtbDeco;
+class CVtbKinetic;
 
 // Weak reference to a decoration — deliberately NOT a bare WP<CVtbDeco>.
 //
@@ -123,6 +125,12 @@ struct SGlobalState {
     // before the state dies.
     SP<CEventLoopTimer> tick;
 
+    // macOS-style momentum scrolling (vtbKinetic.hpp). Owned here so
+    // g_pGlobalState.reset() in PLUGIN_EXIT destroys it deterministically, with
+    // the bus listeners that feed it. Null until PLUGIN_INIT builds it; the
+    // whole module is inert unless plugin:hyprvtb:kinetic is on.
+    UP<CVtbKinetic>     kinetic;
+
     struct {
         SP<Config::Values::CBoolValue>   enabled;
         SP<Config::Values::CIntValue>    barWidth;
@@ -136,6 +144,29 @@ struct SGlobalState {
         SP<Config::Values::CColorValue>  accentColor;
         SP<Config::Values::CColorValue>  critColor;
         SP<Config::Values::CColorValue>  inactiveColor;
+
+        // ---- kinetic scrolling (see vtbKinetic.hpp) ----
+        // Flat underscore names, matching bar_width / font_size. The dotted
+        // `col.*` group exists only because wal-set.sh writes those keys.
+        // EVERY default lives here in C++ and nowhere else: hyprland.lua is a
+        // seed-once file on both machines, so a default expressed there would
+        // silently not apply to whichever copy is stale.
+        SP<Config::Values::CBoolValue>   kinetic;
+        SP<Config::Values::CFloatValue>  kineticFriction;
+        SP<Config::Values::CFloatValue>  kineticMinStartVelocity;
+        SP<Config::Values::CFloatValue>  kineticMinVelocity;
+        SP<Config::Values::CFloatValue>  kineticMaxVelocity;
+        SP<Config::Values::CFloatValue>  kineticGain;
+        SP<Config::Values::CFloatValue>  kineticAxisLockRatio;
+        SP<Config::Values::CIntValue>    kineticRateHz;
+        SP<Config::Values::CIntValue>    kineticStopDelayMs;
+        SP<Config::Values::CIntValue>    kineticWindowMs;
+        SP<Config::Values::CIntValue>    kineticStaleMs;
+        SP<Config::Values::CIntValue>    kineticMaxDurationMs;
+        SP<Config::Values::CStringValue> kineticDenyClasses;
+        SP<Config::Values::CStringValue> kineticAllowClasses;
+        SP<Config::Values::CBoolValue>   kineticDenyXwayland;
+        SP<Config::Values::CIntValue>    kineticDebug;
     } config;
 };
 
@@ -190,8 +221,75 @@ namespace Vtb::Cfg {
     inline auto inactiveColor() {
         return g_pGlobalState->config.inactiveColor->value();
     }
+
+    // ---- kinetic scrolling ----
+    // These are the CONFIGURED values. vtbKinetic reads them through its own
+    // eff*() helpers, which let a runtime kinetic_set() override shadow them
+    // without a `hyprctl reload` — feel-tuning has to be interactive to be
+    // possible at all, and an override that survives a reload would be a
+    // trapdoor rather than a knob.
+    inline auto kinetic() {
+        return g_pGlobalState->config.kinetic->value();
+    }
+    inline auto kineticFriction() {
+        return g_pGlobalState->config.kineticFriction->value();
+    }
+    inline auto kineticMinStartVelocity() {
+        return g_pGlobalState->config.kineticMinStartVelocity->value();
+    }
+    inline auto kineticMinVelocity() {
+        return g_pGlobalState->config.kineticMinVelocity->value();
+    }
+    inline auto kineticMaxVelocity() {
+        return g_pGlobalState->config.kineticMaxVelocity->value();
+    }
+    inline auto kineticGain() {
+        return g_pGlobalState->config.kineticGain->value();
+    }
+    inline auto kineticAxisLockRatio() {
+        return g_pGlobalState->config.kineticAxisLockRatio->value();
+    }
+    inline auto kineticRateHz() {
+        return g_pGlobalState->config.kineticRateHz->value();
+    }
+    inline auto kineticStopDelayMs() {
+        return g_pGlobalState->config.kineticStopDelayMs->value();
+    }
+    inline auto kineticWindowMs() {
+        return g_pGlobalState->config.kineticWindowMs->value();
+    }
+    inline auto kineticStaleMs() {
+        return g_pGlobalState->config.kineticStaleMs->value();
+    }
+    inline auto kineticMaxDurationMs() {
+        return g_pGlobalState->config.kineticMaxDurationMs->value();
+    }
+    inline auto kineticDenyClasses() {
+        return g_pGlobalState->config.kineticDenyClasses->value();
+    }
+    inline auto kineticAllowClasses() {
+        return g_pGlobalState->config.kineticAllowClasses->value();
+    }
+    inline auto kineticDenyXwayland() {
+        return g_pGlobalState->config.kineticDenyXwayland->value();
+    }
+    inline auto kineticDebug() {
+        return g_pGlobalState->config.kineticDebug->value();
+    }
 }
 namespace Cfg = Vtb::Cfg;
+
+// Does any titlebar consume a vertical wheel event at this cursor position (the
+// PLAYBAR scrub track, or an open address editor)? Defined in vtbDeco.cpp.
+//
+// It is declared HERE, next to the free functions, rather than in vtbDeco.hpp
+// so that vtbKinetic.cpp can ask the question without naming a decoration type
+// — the module is otherwise entirely free of CVtbDeco and could be lifted into
+// a sibling plugin by moving two files. It exists because `info.cancelled` is
+// useless as a "did someone else eat this?" test: hyprutils calls every
+// listener unconditionally and the kinetic listener is registered FIRST, so it
+// would always observe `false` no matter what a deco does afterwards.
+bool        vtbAxisConsumerAtCursor(const Vector2D& mouse);
 
 std::string vtbStatePath();
 void        vtbLoadGeometry();
