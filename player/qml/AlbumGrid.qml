@@ -326,7 +326,7 @@ Item {
     PixelText {
         anchors.centerIn: parent
         visible: AlbumsModel.count === 0
-        text: "no albums — is the library drive mounted?"
+        text: "no albums - is the library drive mounted?"  // ASCII: the font has no em dash
         color: Theme.textDim
     }
 
