@@ -511,9 +511,10 @@ void CVtbDeco::renderPass(PHLMONITOR pMonitor, const float& a) {
     if (a >= 0.999f || m_rollAnim != ROLL_NONE || !pMonitor) {
         if (m_fadeFB) {
             // Fade is over: drop the offscreen buffer instead of pinning a
-            // monitor-sized RGBA FB (~14M at 1440p) per window for its lifetime.
-            m_fadeFB->release();
-            m_fadeFB.reset();
+            // monitor-sized RGBA FB (~14M at 1440p) per window for its
+            // lifetime. Through the seam: we are INSIDE a pass element here,
+            // and releasing mid-frame needs a rebind on 0.55 (Hl::releaseFB).
+            Hl::releaseFB(m_fadeFB);
         }
         renderBar(pMonitor, a);
         return;
@@ -2535,7 +2536,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
             // another window is stacked over ours at this point, the edge is
             // occluded and can't be grabbed — offering the resize cursor there
             // was misleading (the press is already rejected by inputIsValid's
-            // same window-at-cursor test). vectorToWindowUnified honours z-order;
+            // same window-at-cursor test). The compositor hit test honours z-order;
             // a null result is empty space, where a halo edge-grab is still valid.
             const auto WINDOWATCURSOR = Hl::windowAtCursorProps(MOUSE);
             const bool occluded = WINDOWATCURSOR && WINDOWATCURSOR != m_pWindow;
@@ -2877,14 +2878,14 @@ void CVtbDeco::startBarFade() {
 // Begin the open animation for a freshly-mapped floating window: snapshot +
 // hide it (so only the bar shows), then fade the bar in. renderShadeIfRolled
 // starts the roll-out reveal once the fade-in completes. Runs from window.open
-// (dispatch path), so makeSnapshot is safe here (not mid render-stage).
+// (dispatch path), so Hl::snapshotFB is safe here (not mid render-stage).
 void CVtbDeco::startOpenReveal() {
     const auto PWINDOW = m_pWindow.lock();
     if (!PWINDOW || !PWINDOW->m_isFloating || m_bRolledUp || m_rollAnim != ROLL_NONE)
         return;
 
     // A freshly-mapped window is still mid open-animation (value() != goal()), so
-    // warp it straight to its settled geometry first — otherwise makeSnapshot
+    // warp it straight to its settled geometry first — otherwise the snapshot
     // captures the half-animated frame and m_rollSnapOrigin (computed off goal())
     // wouldn't line up with where the pixels actually landed in the FB.
     Hl::warpToGoal(PWINDOW);
@@ -3102,7 +3103,7 @@ void CVtbDeco::startRollAnim(eRollAnim dir) {
             const auto SNAPFB = Hl::snapshotFB(PWINDOW);
             if (SNAPFB && SNAPFB->isAllocated())
                 m_rollSnapTex = SNAPFB->getTexture();
-            // makeSnapshot renders into a MONITOR-sized framebuffer, so the window
+            // The snapshot is a MONITOR-sized framebuffer, so the window
             // is only a sub-rect of the texture; remember its device-px top-left
             // there so drawRollSnapshot can sample just the window, not the whole
             // screen scaled down into the bar.
@@ -3681,7 +3682,7 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
             continue;
 
         // Frame-sized rect offset down and left; only the sharp L-overhang ends
-        // up visible once the frames are subtracted. m_realSize is the client
+        // up visible once the frames are subtracted. The size animvar is the client
         // surface only — the titlebar is a reserved deco on the RIGHT edge, so
         // the visible frame is that much wider; widen the shadow to match or the
         // whole bar column casts nothing.

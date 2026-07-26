@@ -24,9 +24,19 @@ let
   # override wouldn't be needed) — it crashes on startup, nixpkgs' Mesa
   # lacks working Apple Silicon GBM driver support that Fedora Asahi's
   # patched Mesa has. Reverted; back to this override.
+  #
+  # AND air needs a different VERSION entirely (the bridge — see flake.nix's
+  # `hyprland-air` input and docs/book-hyprvtb-version-bridge.md): Fedora's
+  # rpm is 0.55.4 while top's pin is 0.56.0, and a plugin only loads into the
+  # exact compositor version it was built against. So air's plugin builds
+  # against the hyprland-air pin (matching Fedora, GIT_* forced to "unknown"
+  # to match its stripped rpm) and top's against the main pin. vtbCompat.hpp
+  # branches on VTB_HL_056 to compile against both. TEMPORARY: when Fedora
+  # ships 0.56, drop hyprland-air and this branch collapses back to one line.
   hyprlandPinned = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+  hyprlandAir = inputs.hyprland-air.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
 
-  hyprlandForVtb = if host == "air" then hyprlandPinned.overrideAttrs (old: {
+  hyprlandForVtb = if host == "air" then hyprlandAir.overrideAttrs (old: {
     env = (old.env or { }) // {
       GIT_BRANCH = "unknown";
       GIT_COMMIT_DATE = "unknown";

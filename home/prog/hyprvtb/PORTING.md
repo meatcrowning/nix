@@ -73,6 +73,24 @@ The input is deliberately **not** `follows`-ed onto our nixpkgs: unmodified
 inputs are what make `hyprland.cachix.org` (added to `sys/base.nix`) hit, and
 overriding them would reintroduce the version skew the pin exists to remove.
 
+### The second pin: `hyprland-air` (TEMPORARY — the book bridge)
+
+Since 2026-07-26 there is a **second** pin, `hyprland-air`
+(`github:hyprwm/Hyprland/v0.55.4`), used ONLY to build `air`/book's plugin.
+book's compositor is Fedora Asahi's rpm (nix hyprland crashes there — no
+Apple-Silicon GBM in nixpkgs Mesa), Fedora is on 0.55.4 while `top` moved to
+0.56.0, and a plugin loads only into the exact version it was built against.
+`vtbCompat.hpp` therefore carries `#if VTB_HL_056` branches (version detected
+from pkg-config via `CMakeLists.txt`'s `VTB_HL_VERSION`, with `__has_include`
+probes as fallback) and must keep compiling against BOTH pins — check both
+before landing seam changes. Full runbook, port mapping and runtime caveats:
+`docs/book-hyprvtb-version-bridge.md` (private nix-docs repo).
+
+**Bumping either pin now has a second question: does the seam still build
+against the *other* one?** And when Fedora Asahi ships 0.56, delete the whole
+bridge: the `hyprland-air` input, `hyprvtb.nix`'s `hyprlandAir` branch, and
+(optionally, on the next natural port) the `#else` arms in `vtbCompat.hpp`.
+
 ## Does the seam actually hold?
 
 Ask it whenever you like, without touching the pin or the running system:

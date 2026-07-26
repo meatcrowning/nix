@@ -45,6 +45,9 @@ hyprlandPlugins.mkHyprlandPlugin {
         -e 'State::monitorState' -e 'Fullscreen::controller' -e 'Pointer::Cursor' \
         -e 'positionAnimation' -e 'sizeAnimation' -e 'm_layerSurfaceLayers' \
         -e 'm_renderPass' -e 'm_renderData' -e 'Config::mgr' -e 'g_pKeybindManager' \
+        -e 'm_realPosition' -e 'm_realSize' -e 'm_snapshotFB' -e 'makeSnapshot' \
+        -e 'changeWindowZOrder' -e 'vectorToWindow' -e 'vectorToLayerSurface' \
+        -e 'getMonitorFromVector' -e 'Cursor::overrideController' \
         . | grep -v '^\./vtbCompat\.hpp:'; then
       echo "SEAM VIOLATION: volatile Hyprland internals belong in vtbCompat.hpp only (see PORTING.md)."
       fail=1

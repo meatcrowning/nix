@@ -233,7 +233,12 @@ before touching the plugin or the pin.
   NVIDIA driver, the kernel, Qt/PySide6, kitty, Plasma — still rolls, and
   still can break things, so `nixos-rebuild build` before `switch` and keep
   the previous generation in mind. Bump a pin **on its own commit**, never
-  alongside other changes.
+  alongside other changes. There is also a TEMPORARY third pin,
+  `hyprland-air` (v0.55.4): book runs Fedora Asahi's rpm compositor (nix
+  hyprland crashes on Asahi — no GBM), and its hyprvtb must be built against
+  that exact version, so `vtbCompat.hpp` is dual-version (`#if VTB_HL_056`)
+  and seam changes must compile against BOTH pins. Delete the bridge when
+  Fedora ships 0.56 — runbook: `docs/book-hyprvtb-version-bridge.md`.
 
 - **`hyprvtb` plugin (C++) reload after a source edit — `rbsys` then
   `hyprctl reload`. That is the whole procedure. NO relog, and never

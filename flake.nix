@@ -58,6 +58,20 @@
     # pin exists to remove. Bump with the ritual in PORTING.md.
     hyprland.url = "github:hyprwm/Hyprland/v0.56.0";
 
+    # THE VERSION BRIDGE for `air`/book — TEMPORARY, delete when Fedora Asahi
+    # ships Hyprland 0.56 (check: `dnf list --installed hyprland` on book vs
+    # the pin above). book cannot run the nix hyprland (nixpkgs Mesa has no
+    # Apple-Silicon GBM; it crashes on Asahi), so its compositor is Fedora's
+    # rpm — currently 0.55.4 — and a plugin only loads into the exact version
+    # it was built against. This second pin exists ONLY so hyprvtb.nix can
+    # build book's plugin against the compositor book actually runs, while
+    # `top` stays on the pin above. vtbCompat.hpp carries the matching
+    # #if VTB_HL_056 branches. Full runbook: docs/book-hyprvtb-version-bridge.md.
+    # Same no-follows rationale as `hyprland` above: keep the tuple upstream
+    # actually shipped (hyprutils 0.13.1 etc. — mixing generations is silent
+    # ABI corruption, see the tripwire static_asserts in vtbCompat.hpp).
+    hyprland-air.url = "github:hyprwm/Hyprland/v0.55.4";
+
     # Quickshell, frozen the same way and for the same reason as Hyprland
     # above — it is the other half of this desktop (the panel, the lock
     # screen, the power menu, the screenshot overlay, the OSDs), and the QML
