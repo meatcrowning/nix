@@ -31,6 +31,18 @@ in
   # root-owned (correct), cld's top dir is chowned to lam once so it's
   # usable as a data drive.
   fileSystems = {
+    # The music library SSD. udisks mounted this only while a desktop session
+    # was up; sys/net/share.nix serves it over SMB to `air`, which needs it
+    # present from boot. Options match what udisks was already using, so the
+    # mount path — and therefore every tracks.path in the player's database —
+    # is unchanged. Escape hatch: delete this entry and udisks resumes its old
+    # session-scoped behaviour.
+    "/run/media/lam/SSD" = {
+      device = "/dev/disk/by-uuid/0068-1FA0";
+      fsType = "exfat";
+      options = [ "nofail" "x-systemd.device-timeout=5s"
+                  "uid=1000" "gid=100" "fmask=0022" "dmask=0022" "iocharset=utf8" ];
+    };
     "/home/lam/drives/cld" = {
       device = "/dev/disk/by-uuid/7f022945-5aba-4d0e-8a42-fa5be19292f4";
       fsType = "btrfs";
