@@ -111,21 +111,89 @@ end)
 -- (locked), which no layer-shell client could do; this replaced the old
 -- quickshell titlebars and the in-compositor geometry event stream that
 -- fed them.
--- Load the STABLE SYMLINK path, never the resolved /nix/store one.
+-- Load the RESOLVED /nix/store path, not the symlink — this is what makes
+-- `hyprctl reload` hot-swap a rebuilt plugin instead of needing a relog.
 -- Hyprland tracks config-loaded plugins by the literal path STRING passed
 -- here, and `CPluginSystem::updateConfigPlugins` early-returns unless that
--- list CHANGES between reloads. The symlink string is constant forever, so
--- `hyprctl reload` leaves the mapped .so alone — which is exactly what we
--- want. This used to `readlink -f` the symlink so each rebuild yielded a new
--- string and reload would hot-swap the plugin (no relog); that swap is NOT
--- safe. It unloads the old .so while Hyprland still holds callbacks into it,
--- and the session dies at the next window close — SIGSEGV jumping to a
--- freed address, under CWindow::destroyWindow (2026-07-25). Hyprland's
--- watchdog then restarts the compositor with --safe-mode, i.e. with NO
--- config at all: no titlebars, no keybinds, no panel, and a relog to get out.
--- A rebuilt plugin now simply takes effect at the next login.
-local VTB_SO = "/home/lam/.config/hypr/plugins/libhyprvtb.so"
-hl.plugin.load(VTB_SO)
+-- list CHANGES between reloads. Pass the symlink and the string is constant
+-- forever, so reload is a no-op and the stale .so stays mapped. Pass the
+-- resolved store path and every rebuild yields a new string, so reload does
+-- the swap itself: unload-old -> load-new -> re-parse (correct order, no
+-- orphaned instance, no `plugin:hyprvtb:col.*` key collision).
+--
+-- ...and the block below is the seatbelt for that, because a hot swap runs
+-- brand-new compositor code in-process: if the plugin build that was live when
+-- the session died is the same one we are about to load, load the last
+-- KNOWN-GOOD build instead. hypr-supervise (sys/dsk/hyprland.nix) is what
+-- names the culprit: on an unclean exit it copies `loaded` to `crashed-with`
+-- and restarts the compositor with this config, rather than letting Hyprland's
+-- own watchdog come back in --safe-mode with no config at all. So a bad plugin
+-- costs you the previous version and a breadcrumb in
+-- ~/.local/state/hyprvtb/quarantined — not your desktop.
+local VTB_SO    = "/home/lam/.config/hypr/plugins/libhyprvtb.so"
+local VTB_STATE = os.getenv("HOME") .. "/.local/state/hyprvtb"
+
+local function vtb_read(name)
+    local f = io.open(VTB_STATE .. "/" .. name)
+    if not f then return nil end
+    local s = f:read("l")
+    f:close()
+    if not s or s == "" then return nil end
+    return s
+end
+
+local function vtb_write(name, text)
+    os.execute("mkdir -p " .. VTB_STATE)
+    local f = io.open(VTB_STATE .. "/" .. name, "w")
+    if not f then return end
+    f:write(text .. "\n")
+    f:close()
+end
+
+local function vtb_exists(path)
+    local f = io.open(path, "r")
+    if not f then return false end
+    f:close()
+    return true
+end
+
+local vtb_p = io.popen("readlink -f " .. VTB_SO)
+local vtb_cur
+if vtb_p then
+    vtb_cur = vtb_p:read("l")
+    vtb_p:close()
+end
+if not vtb_cur or vtb_cur == "" then vtb_cur = VTB_SO end
+
+local vtb_crashed = vtb_read("crashed-with")
+local vtb_prev    = vtb_read("loaded")
+local vtb_good    = vtb_read("known-good")
+
+-- The previous session ended cleanly (no crash breadcrumb), so whatever it was
+-- running has earned the title.
+if not vtb_crashed and vtb_prev and vtb_exists(vtb_prev) then
+    vtb_good = vtb_prev
+    vtb_write("known-good", vtb_prev)
+end
+
+local vtb_use = vtb_cur
+if vtb_crashed == vtb_cur then
+    if vtb_good and vtb_good ~= vtb_cur and vtb_exists(vtb_good) then
+        vtb_use = vtb_good
+        vtb_write("quarantined", vtb_cur)
+    else
+        vtb_use = nil -- nothing to fall back to: no titlebars, but a live session to debug in
+        vtb_write("quarantined", vtb_cur .. " (no known-good build to fall back to)")
+    end
+end
+os.remove(VTB_STATE .. "/crashed-with")
+
+if vtb_use then
+    vtb_write("loaded", vtb_use)
+    hl.plugin.load(vtb_use)
+else
+    vtb_write("loaded", "")
+end
 hl.config({
     plugin = {
         hyprvtb = {

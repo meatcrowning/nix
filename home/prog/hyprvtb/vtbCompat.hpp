@@ -35,6 +35,7 @@
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
@@ -101,6 +102,41 @@ namespace Vtb::Hl {
     }
     inline const std::vector<PHLWINDOW>& windows() {
         return Desktop::viewState()->windows();
+    }
+
+    // Rip THIS plugin's decorations off every window, right now, destroying
+    // them here rather than leaving that to the window.
+    //
+    // The obvious call — HyprlandAPI::removeWindowDecoration, which the plugin
+    // system itself runs for every registered deco on unload — is not enough:
+    // it lands in CWindow::removeWindowDeco, which only QUEUES the deco in
+    // m_decosToRemove and then calls updateWindowDecos(), and that early-returns
+    // on `!m_isMapped || isHidden()`. A window that is hidden (this plugin hides
+    // every rolled-up / minimized one) or not yet mapped therefore keeps holding
+    // a UP<> to a decoration whose vtable and destructor live in a .so that
+    // dlclose() is about to unmap. The window dies later, ~CWindow destroys that
+    // pointer, and the compositor SIGSEGVs into freed memory under
+    // CWindow::destroyWindow — the "hot swap worked, then the session died at
+    // the next window close" crash (2026-07-25).
+    //
+    // So do the erase ourselves, unconditionally, uncaching from the positioner
+    // exactly like updateWindowDecos would. Hyprland's own removeWindowDecoration
+    // pass afterwards finds nothing to match and returns false, which is fine —
+    // it compares raw pointers and never dereferences them.
+    inline void detachOurDecos() {
+        for (const auto& w : windows()) {
+            if (!w)
+                continue;
+            std::erase_if(w->m_windowDecorations, [](const UP<IHyprWindowDecoration>& d) {
+                if (!d)
+                    return false;
+                const auto NAME = d->getDisplayName();
+                if (NAME != "Hyprvtb" && NAME != "HyprvtbShadow")
+                    return false;
+                g_pDecorationPositioner->uncacheDecoration(d.get());
+                return true;
+            });
+        }
     }
     inline void raise(PHLWINDOW w) {
         Desktop::windowState()->raise(w);

@@ -830,9 +830,19 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // decorate windows that already exist (none when loaded at config-parse
     // time during compositor startup — the window.open listener covers those)
+    //
+    // HIDDEN windows count. This used to skip them, which was invisible while
+    // an unloaded plugin's decorations stayed attached to their windows: a
+    // minimized or rolled-up window kept its old titlebar (drawn by dead code)
+    // across a `hyprctl reload` swap. Now that PLUGIN_EXIT really tears those
+    // off (Hl::detachOurDecos), skipping here would leave every minimized
+    // window with NO titlebar — no close button, no roll-out — for the rest of
+    // the session. Unmapped ones are still skipped: addWindowDecoration
+    // refuses them anyway, and the window.open listener decorates them when
+    // they map.
     if (Hl::compositorReady()) {
         for (auto& w : Hl::windows()) {
-            if (w->isHidden() || !w->m_isMapped)
+            if (!w->m_isMapped)
                 continue;
             onNewWindow(w, false); // already open — decorate only, don't move it
         }
@@ -851,7 +861,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.64"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.65"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -869,6 +879,26 @@ APICALL EXPORT void PLUGIN_EXIT() {
         m->m_scheduledRecalc = true;
 
     Hl::removePassesOfType("CVtbPassElement");
+
+    // Hand every window back in a state the NEXT instance can work with: a
+    // rolled-up window is hidden and a minimized one is parked off-screen, and
+    // neither state survives the swap — the incoming .so sees a plain window
+    // (or, for a hidden one, used to see nothing at all). Restore first, detach
+    // second.
+    if (g_pGlobalState) {
+        for (auto& b : g_pGlobalState->bars) {
+            if (b.alive())
+                b->restoreForUnload();
+        }
+    }
+
+    // Destroy every decoration we added, HERE, while our code is still mapped.
+    // Hyprland's own unload pass cannot be trusted to do it: its removal is a
+    // no-op for hidden or unmapped windows, and each one it misses leaves a
+    // UP<CVtbDeco> owned by a window whose destructor will call into this .so
+    // long after dlclose(). See Hl::detachOurDecos for the full autopsy — this
+    // one line is what makes `hyprctl reload`'s hot swap survivable.
+    Hl::detachOurDecos();
 
     // Destroys the event listeners with the state, so nothing can call back
     // into this image after unload.

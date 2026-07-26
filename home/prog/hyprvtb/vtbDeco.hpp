@@ -56,6 +56,15 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                               isMinimized() const { return m_bMinimized; } // for session snapshot
     bool                               isRolledUp() const { return m_bRolledUp; }   // for session snapshot
 
+    // Put this window back into a plain, visible state — no animation, no
+    // deferred work. PLUGIN_EXIT calls it for every bar: the states this plugin
+    // puts a window INTO (rolled up = setHidden, minimized = parked off-screen)
+    // are states only this plugin knows how to leave, and the instance that
+    // replaces us on a `hyprctl reload` hot swap does not inherit them. Without
+    // it a swap strands every rolled/minimized window — invisible or
+    // off-screen, with nothing left that could bring it back.
+    void                               restoreForUnload();
+
     // Called from main.cpp's render-stage hook (RENDER_POST_WINDOWS): a shaded
     // window is hidden, so Hyprland won't render it or call our draw() — this
     // enqueues the bar's pass element for the shade to stay visible in place.
