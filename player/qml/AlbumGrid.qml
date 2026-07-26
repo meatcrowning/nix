@@ -44,7 +44,10 @@ Item {
     property int _lastCols: cols
     onColsChanged: {
         var oldCellW = Math.max(1, Math.floor(width / Math.max(1, _lastCols)));
-        var topAlbum = Math.floor(list.contentY / oldCellW) * _lastCols;
+        // contentY is measured from originY, which is not 0 once the cells
+        // have been resized before (see WheelScroll.qml's clamp note) — the
+        // row under the viewport top is the offset INTO the content.
+        var topAlbum = Math.floor((list.contentY - list.originY) / oldCellW) * _lastCols;
         _lastCols = cols;
         Qt.callLater(function() {
             list.positionViewAtIndex(Math.floor(topAlbum / root.safeCols), ListView.Beginning);
@@ -119,7 +122,10 @@ Item {
         function restorePos() {
             if (root.filtered || count === 0 || height <= 0 || contentHeight <= 0)
                 return;
-            contentY = Math.max(0, Math.min(savedY, contentHeight - height));
+            // originY, not 0 — see the clamp note in WheelScroll.qml: this
+            // ListView's cells resize (cols / window width) and Qt moves the
+            // content origin with them.
+            contentY = Math.max(originY, Math.min(savedY, originY + contentHeight - height));
             restored = true;
             pending = false;
         }
