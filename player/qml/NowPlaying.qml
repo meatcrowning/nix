@@ -3,8 +3,9 @@ import QtQuick
 // Now playing, two ROWS. The top row is the cover art, edge to edge — it fills
 // the full width and meets the window's outline, no margins (its height is a
 // draggable, persisted fraction of the view; square covers crop, not
-// letterbox). The bottom row is split into two columns: the left carries the playing track's identity + transport controls +
-// seek bar, and under those the queue; the right column is the lyrics, which
+// letterbox). The bottom row is split into two columns: the left carries the
+// playing track's identity + transport controls + position readout (scrubbing
+// lives on the titlebar's vertical track), and under those the queue; the right column is the lyrics, which
 // collapses to zero width whenever the track has none. Lyrics are requested per
 // track change and delivered async by the LyricsProvider (embedded → .lrc →
 // LRCLIB).
@@ -238,47 +239,9 @@ Item {
                 }
                 Item { width: 1; height: 6 }
 
-                // ---- seek bar: click or drag anywhere along it ----
-                Item {
-                    id: seek
-                    width: parent.width
-                    height: 14
-                    readonly property real frac: Player.duration > 0
-                                                 ? Math.max(0, Math.min(1, Player.position / Player.duration))
-                                                 : 0
-
-                    Rectangle {
-                        id: seekTrack
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width
-                        height: 5
-                        color: Theme.bgAlt
-                        border.color: Theme.border
-                        border.width: 1
-
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            anchors.margins: 1
-                            width: Math.max(0, (parent.width - 2) * seek.frac)
-                            visible: width > 0
-                            color: seekMouse.containsMouse || seekMouse.pressed
-                                   ? Theme.accent : Theme.textDim
-                        }
-                    }
-                    MouseArea {
-                        id: seekMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: Player.duration > 0
-                        function scrub(x) {
-                            if (width > 0) Player.seekFrac(x / width);
-                        }
-                        onPressed: function(mouse) { scrub(mouse.x); }
-                        onPositionChanged: function(mouse) { if (pressed) scrub(mouse.x); }
-                    }
-                }
+                // no seek bar here: the titlebar's vertical scrub track (vtb
+                // PLAYBAR/SEEK) is the one place to scrub, so this column just
+                // reads out the position.
                 PixelText {
                     visible: Player.duration > 0
                     text: root.fmt(Player.position) + " / " + root.fmt(Player.duration)
