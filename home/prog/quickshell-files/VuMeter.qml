@@ -16,10 +16,15 @@ Item {
     property int levelL: 0 // 0-100
     property int levelR: 0
 
-    readonly property int barW: 5
     readonly property int barH: 68
-    readonly property int gapPx: 4
-    readonly property int meterW: barW * 2 + gapPx   // the visual meter's width
+    // Unchanged overall width, so the panel's layout doesn't move: what used to
+    // be 5px + 4px gap + 5px is now one 14px track box holding two gapless
+    // fills. Deliberately still ONE bucket per channel — cava's stereo mode is
+    // mirrored, so asking it for 4 bars yields [L-low, L-high, R-high, R-low]
+    // and the two inner (high-frequency) bars measured medians of 17/22 against
+    // the outer pair's 61/69: permanent stubs, and a frequency split rather
+    // than the channel level meter this is meant to be.
+    readonly property int meterW: 14
 
     // Full bar width so the click/drag/scroll band covers the whole module
     // section, not just the narrow pair of bars — same treatment as the
@@ -52,38 +57,51 @@ Item {
         onTriggered: cavaProc.running = true
     }
 
-    component Channel: Item {
-        property int level: 0
-        width: root.barW
-        height: root.barH
-
-        Rectangle { // track
-            anchors.fill: parent
-            color: "transparent"
-            border.width: 1
-            border.color: Theme.border
-        }
-        Rectangle { // fill, from the bottom
-            anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-            anchors.margins: 1
-            height: Math.round((parent.height - 2) * parent.level / 100)
-            color: Theme.accent
-            Behavior on height { NumberAnimation { duration: 30 } }
-        }
-    }
-
-    // Centred visual meter: the two channel bars plus the volume-level line.
+    // Centred visual meter: the two channel fills plus the volume-level line.
     Item {
         id: meter
         anchors.centerIn: parent
         width: root.meterW
         height: root.barH
 
-        Row {
-            anchors.centerIn: parent
-            spacing: root.gapPx
-            Channel { level: root.levelL }
-            Channel { level: root.levelR }
+        // ONE track box around both channels. Per-channel borders would put two
+        // 1px lines back to back down the middle — a 2px seam, i.e. the gap this
+        // was meant to close. With a shared box the fills genuinely touch.
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            border.width: 1
+            border.color: Theme.border
+        }
+
+        // Fill area inside the border. Split on the shared edge (same trick as
+        // MediaPanel's spectrum) so the two halves meet exactly and always add
+        // up to the full inner width, whatever the rounding.
+        Item {
+            anchors.fill: parent
+            anchors.margins: 1
+
+            Repeater {
+                model: 2
+                Rectangle {
+                    required property int index
+                    readonly property int x0: Math.round(parent.width * index / 2)
+                    readonly property int lvl: index === 0 ? root.levelL : root.levelR
+                    x: x0
+                    width: Math.round(parent.width * (index + 1) / 2) - x0
+                    // No gamma curve here, unlike the spectrum: one bucket per
+                    // channel spans the whole range, so this already sits at a
+                    // measured median of 55 and p90 93. Curving it would just
+                    // pin it near the ceiling and destroy the headroom.
+                    height: Math.round(parent.height * lvl / 100)
+                    y: parent.height - height
+                    color: Theme.accent
+                    // Matches the spectrum's 25ms: long enough to absorb a
+                    // dropped frame, short enough not to re-add the lag that
+                    // the lower noise_reduction just removed.
+                    Behavior on height { NumberAnimation { duration: 25 } }
+                }
+            }
         }
 
         // The volume level as a horizontal line across both bars — the bar's
