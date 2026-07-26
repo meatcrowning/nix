@@ -563,6 +563,9 @@ MIGRATIONS = [
     ("tracks", "rg_track_peak", "REAL"),
     ("tracks", "rg_album_gain", "REAL"),
     ("tracks", "rg_album_peak", "REAL"),
+    # How many times we have asked the network about this track and come back
+    # empty — drives the retry backoff in LyricsProvider.
+    ("lyrics", "attempts", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -571,12 +574,15 @@ def open_db():
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
-    have = {r["name"] for r in con.execute("PRAGMA table_info(tracks)")}
+    cols = {}
     added = False
     for table, col, decl in MIGRATIONS:
-        if col not in have:
+        if table not in cols:
+            cols[table] = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+        if col not in cols[table]:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
-            added = True
+            cols[table].add(col)
+            added = table == "tracks" or added
     if added:
         # The new columns are all NULL for already-scanned files; force the
         # next scan to re-read every file's tags by clearing the mtime cache
@@ -920,6 +926,25 @@ class Library(QObject):
         words = text.split()
         ids = [tid for hay, tid in self._search_rows if all(w in hay for w in words)]
         return self.tracks_by_ids(ids[:400])
+
+    @Slot(int, bool)
+    def setInstrumental(self, track_id, yes):
+        """Mark/unmark a track as having no words at all.
+
+        The escape hatch for everything the network cannot settle: LRCLIB only
+        flags instrumentals it knows about, and a large slice of this library
+        it has never seen. Marking one is permanent (no retry, no lookup);
+        unmarking clears the row so the next play resolves it afresh."""
+        if yes:
+            self._con.execute(
+                "INSERT OR REPLACE INTO lyrics"
+                " (track_id, source, synced, body, fetched_at, attempts)"
+                " VALUES (?,?,?,?,?,?)",
+                (track_id, "instrumental-user", 0, "", time.time(), 0))
+        else:
+            self._con.execute("DELETE FROM lyrics WHERE track_id=?", (track_id,))
+        self._con.commit()
+        self.trackChanged.emit(track_id)
 
     def median_rg_gain(self):
         """The library's median ReplayGain track gain, as the fallback for the
@@ -1657,7 +1682,34 @@ class LyricsProvider(QObject):
 
     ready = Signal(int, "QVariantMap")  # trackId, {source, synced, lines, text}
 
+    # Three distinct verdicts, because "we found nothing" and "this track has
+    # no words" are NOT the same claim and only one of them is knowable:
+    #
+    #   instrumental       LRCLIB says the track is instrumental. Authoritative,
+    #                      permanent, never re-asked.
+    #   instrumental-user  You said so (a track can only be marked by hand from
+    #                      the pane). Also permanent — for a library this niche
+    #                      you are a better oracle than any online database.
+    #   none               Nobody knows. Genuinely undetermined: the miss pile
+    #                      holds both wordless ambient AND vocal tracks too
+    #                      obscure to be indexed (Coaltar of the Deepers,
+    #                      Astrid Sonne), and nothing in the tags can separate
+    #                      them. Retried, but with a widening backoff.
+    #
+    # Nothing infers "instrumental" from titles or genre: an audit of this
+    # library found only 163 titles with any marker at all, catching 11 of the
+    # first 769 misses, and "Intro"/"Interlude"/"skit" turned out to have real
+    # lyrics often enough to make guessing worse than admitting ignorance.
+    INSTRUMENTAL = ("instrumental", "instrumental-user")
+
     RETRY_NONE_AFTER = 7 * 86400
+    RETRY_MAX = 180 * 86400
+
+    @classmethod
+    def _retry_after(cls, attempts):
+        """7d, 14d, 28d … capped. A track LRCLIB has never heard of is unlikely
+        to appear next week, and this library has thousands of them."""
+        return min(cls.RETRY_MAX, cls.RETRY_NONE_AFTER * (2 ** max(0, attempts - 1)))
 
     def __init__(self, prefs=None, parent=None):
         super().__init__(parent)
@@ -1699,17 +1751,20 @@ class LyricsProvider(QObject):
             self._emit(tid, "none", False, "")
             return
         cached = con.execute("SELECT * FROM lyrics WHERE track_id=?", (tid,)).fetchone()
+        attempts = 0
         if cached is not None:
             src = cached["source"]
-            if src == "instrumental":
-                self._emit(tid, "instrumental", False, "")
+            if src in self.INSTRUMENTAL:
+                self._emit(tid, src, False, "")      # settled — never re-asked
                 return
             # A cached PLAIN result is not final: the network may since have
             # gained a synced version, and that is the whole point of the pane.
-            if src not in ("none",) and cached["synced"]:
+            if src != "none" and cached["synced"]:
                 self._emit(tid, src, True, cached["body"])
                 return
-            if time.time() - (cached["fetched_at"] or 0) < self.RETRY_NONE_AFTER:
+            attempts = (cached["attempts"] or 0) if "attempts" in cached.keys() else 0
+            wait = self._retry_after(attempts) if src == "none" else self.RETRY_NONE_AFTER
+            if time.time() - (cached["fetched_at"] or 0) < wait:
                 if src == "none":
                     self._emit(tid, "none", False, "")
                     return
@@ -1769,9 +1824,11 @@ class LyricsProvider(QObject):
         if not text:
             source = "none"
 
-        con.execute("INSERT OR REPLACE INTO lyrics (track_id, source, synced, body, fetched_at)"
-                    " VALUES (?,?,?,?,?)",
-                    (tid, source, 1 if synced else 0, text or "", time.time()))
+        con.execute("INSERT OR REPLACE INTO lyrics"
+                    " (track_id, source, synced, body, fetched_at, attempts)"
+                    " VALUES (?,?,?,?,?,?)",
+                    (tid, source, 1 if synced else 0, text or "", time.time(),
+                     attempts + 1 if source == "none" else 0))
         con.commit()
         self._emit(tid, source, synced, text)
 

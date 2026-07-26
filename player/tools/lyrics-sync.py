@@ -47,6 +47,11 @@ def open_db():
     con.execute("""CREATE TABLE IF NOT EXISTS lyrics (
                      track_id INTEGER PRIMARY KEY,
                      source TEXT, synced INTEGER, body TEXT, fetched_at REAL)""")
+    # Same migration main.py applies — the tool may well run before the app
+    # next starts.
+    if "attempts" not in {r["name"] for r in con.execute("PRAGMA table_info(lyrics)")}:
+        con.execute("ALTER TABLE lyrics ADD COLUMN attempts INTEGER DEFAULT 0")
+        con.commit()
     return con
 
 
@@ -84,7 +89,14 @@ def report(con):
         kind = "synced" if r["synced"] else "plain "
         print(f"    {r['source']:<12} {kind}  {r['c']:>6}")
     n_sync = con.execute("SELECT COUNT(*) c FROM lyrics WHERE synced=1").fetchone()["c"]
-    print(f"  timestamped: {n_sync} ({100.0 * n_sync / max(1, total):.1f}% of library)")
+    n_inst = con.execute("SELECT COUNT(*) c FROM lyrics WHERE source IN"
+                         " ('instrumental','instrumental-user')").fetchone()["c"]
+    n_none = con.execute("SELECT COUNT(*) c FROM lyrics WHERE source='none'").fetchone()["c"]
+    pct = lambda n: 100.0 * n / max(1, total)  # noqa: E731
+    print(f"  timestamped:  {n_sync} ({pct(n_sync):.1f}% of library)")
+    print(f"  no words:     {n_inst} ({pct(n_inst):.1f}%)  — settled, never re-asked")
+    print(f"  undetermined: {n_none} ({pct(n_none):.1f}%)  — nobody has them indexed;"
+          " retried with a widening backoff, or mark one by hand in the player")
 
 
 def embed_cached(con, args):
@@ -205,7 +217,9 @@ def main():
             if src and syn:                      # already have synced lyrics
                 skipped_cached += 1
                 continue
-            if src == "instrumental":            # a real, permanent answer
+            # "no words in this track" is a real, permanent answer — whether
+            # LRCLIB said so or you did. Never re-asked.
+            if src in ("instrumental", "instrumental-user"):
                 skipped_cached += 1
                 continue
             if src == "none" and not args.retry_missing:
@@ -315,12 +329,19 @@ def main():
                 else:
                     stats["plain"] += 1
 
-                # Cache the verdict (including honest negatives).
+                # Cache the verdict (including honest negatives). A miss bumps
+                # the attempt counter, which widens the player's retry backoff
+                # — thousands of tracks here are simply not indexed anywhere,
+                # and asking again every week forever is pure waste.
                 with lock:
+                    prev = con.execute("SELECT attempts FROM lyrics WHERE track_id=?",
+                                       (r["id"],)).fetchone()
+                    tries = (prev["attempts"] or 0) if prev else 0
                     con.execute("INSERT OR REPLACE INTO lyrics"
-                                " (track_id, source, synced, body, fetched_at)"
-                                " VALUES (?,?,?,?,?)",
-                                (r["id"], src, 1 if syn else 0, text or "", time.time()))
+                                " (track_id, source, synced, body, fetched_at, attempts)"
+                                " VALUES (?,?,?,?,?,?)",
+                                (r["id"], src, 1 if syn else 0, text or "", time.time(),
+                                 tries + 1 if src == "none" else 0))
 
                 # Embed, if this is a fetched result worth putting in the file.
                 worth = src == "lrclib" and text and (syn or args.plain)
