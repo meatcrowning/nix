@@ -246,48 +246,83 @@ Scope {
         ? [cpuPanel, ethPanel, analogClock, weatherPanel, mediaPanel]
         : [diskPanel, mediaPanel, analogClock, weatherPanel, calendar, gpuPanel, cpuPanel, ethPanel]
 
-    // text is two lines: "<space-separated keys>\n<login|reload>".
+    // Login restore: fan the saved (or default) set out. text is the first line
+    // of the saved-widgets file — space-separated persistKeys.
     function applyWidgetState(text) {
-        const lines = (text || "").split("\n");
-        const saved = (lines[0] || "").trim().split(/\s+/).filter(s => s.length);
-        const login = (lines[1] || "").trim() !== "reload";
+        const saved = (text || "").split("\n")[0].trim().split(/\s+/).filter(s => s.length);
         // saved set wins; otherwise the baked-in default (first boot).
         const want = saved.length ? saved : _defaultWidgets;
         if (!want.length) return;
         if (want.length === _allWidgets.length) allRevealed = true;
 
-        if (login) {
-            // Fan the wanted widgets OUT (staged cascade) at a genuine login,
-            // reusing the exact stage grouping/order the reveal button uses so
-            // tiling and stacking land right — filtered to the wanted set (empty
-            // stages fall through). Mirrors "how they are now": they fan in.
-            const stages = _fanOut.map(grp => grp.filter(w => want.indexOf(w.persistKey) >= 0));
-            _runFan(stages, true);
-        } else {
-            // A hot reload (e.g. wal-set.sh rewriting Theme.qml) recreates this
-            // whole tree — snap the pins back instantly instead of replaying the
-            // ~1.2s fan on every wallpaper change.
-            for (const w of _pinOrder)
-                if (want.indexOf(w.persistKey) >= 0) w.pinnedOpen = true;
-        }
+        // Fan the wanted widgets OUT (staged cascade), reusing the exact stage
+        // grouping/order the reveal button uses so tiling and stacking land
+        // right — filtered to the wanted set (empty stages fall through).
+        const stages = _fanOut.map(grp => grp.filter(w => want.indexOf(w.persistKey) >= 0));
+        _runFan(stages, true);
     }
 
-    // Read the saved pin set once at startup, plus a login-vs-reload flag: a
-    // marker in $XDG_RUNTIME_DIR (wiped on logout) exists on reloads but not on
-    // the session's first load, so only a real login gets the fan cascade. A
-    // Process (not FileView) keeps it simple and the async read doubles as a
-    // small settle delay before pins map.
+    // Read the explicitly saved (Meta+Ctrl+S) pin set. Only ever started on a
+    // genuine login — a hot reload restores from the live pin file below instead.
     Process {
         id: widgetStateProc
         command: ["sh", "-c",
-            "printf '%s\\n' \"$(cat \"$HOME/.local/state/quickshell/widgets\" 2>/dev/null | head -1)\"; " +
-            "m=\"${XDG_RUNTIME_DIR:-/tmp}/qs-fanned\"; " +
-            "[ -e \"$m\" ] && echo reload || { touch \"$m\"; echo login; }"]
+            "cat \"$HOME/.local/state/quickshell/widgets\" 2>/dev/null | head -1"]
         stdout: StdioCollector {
             onStreamFinished: shell.applyWidgetState(this.text)
         }
     }
-    Component.onCompleted: widgetStateProc.running = true
+
+    // ---- hot-reload continuity ------------------------------------------
+    // Quickshell rebuilds this entire object tree on every reload (a QML edit,
+    // or wal-set.sh rewriting Theme.qml on a wallpaper change), so the desktop
+    // widgets are recreated unpinned and would otherwise blink out and replay
+    // their entry animation. To make a reload a straight swap instead:
+    //
+    //   * the LIVE pin set is mirrored to a file in $XDG_RUNTIME_DIR on every
+    //     change (not the Meta+Ctrl+S file — that one is the deliberate login
+    //     set and must not be overwritten by casual pinning), and
+    //   * it is read back SYNCHRONOUSLY here in Component.onCompleted, i.e.
+    //     while the tree is still being constructed and before any surface has
+    //     mapped, and applied with snapPinned() — no slide, no layer remap.
+    //     (The old async Process read landed after the windows were already up,
+    //     which is exactly what produced the disappear/reappear.)
+    //
+    // $XDG_RUNTIME_DIR is wiped at logout, so the file's absence IS the
+    // login-vs-reload flag — no separate marker needed.
+    readonly property string livePinsPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/qs-live-pins"
+    readonly property string livePins: _allWidgets.filter(w => w.pinnedOpen).map(w => w.persistKey).join(" ")
+
+    FileView {
+        id: livePinsFile
+        path: shell.livePinsPath
+        blockLoading: true    // synchronous read — see Component.onCompleted
+        printErrors: false    // absent on the session's first load; not an error
+    }
+
+    // Debounced so the staged fan (one stage every _fanStepMs) writes once at
+    // the end rather than four times. The "v1" prefix keeps the file non-empty
+    // when nothing is pinned, so "exists" stays distinguishable from "absent".
+    onLivePinsChanged: livePinsWriteTimer.restart()
+    Timer {
+        id: livePinsWriteTimer
+        interval: 400
+        onTriggered: Quickshell.execDetached(["sh", "-c",
+            "printf 'v1 %s\\n' \"$2\" > \"$1\"", "_", shell.livePinsPath, shell.livePins])
+    }
+
+    Component.onCompleted: {
+        const live = livePinsFile.text();
+        if (live.indexOf("v1") === 0) {
+            // hot reload — put the widgets back exactly as they were, instantly
+            const want = live.slice(2).trim().split(/\s+/).filter(s => s.length);
+            if (want.length === _allWidgets.length) allRevealed = true;
+            for (const w of _pinOrder)
+                if (want.indexOf(w.persistKey) >= 0) w.snapPinned();
+        } else {
+            widgetStateProc.running = true;   // genuine login — fan them in
+        }
+    }
 
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
     IpcHandler {
