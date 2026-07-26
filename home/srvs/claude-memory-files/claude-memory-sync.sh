@@ -60,7 +60,23 @@ fi
 
 log() { echo "$(date -Is) $*"; }
 
-[ -d "$REPO" ] || { log "no $REPO — nothing to sync"; exit 0; }
+# A missing REPO on a machine that has never synced is the NORMAL first state
+# for a caller whose directory is not created by something else. ~/.claude/
+# projects always exists (Claude Code makes it), but ~/nix/docs does not — it
+# is only ever created by a clone, so bailing here meant the docs timer logged
+# "nothing to sync" forever on `book` and the runbook that exists to be read on
+# the second machine was the one file that never got there. Clone it instead.
+# Only when the PARENT exists: that keeps this from conjuring a tree in a
+# half-configured HOME, and it is the same condition under which a human would
+# have run the clone by hand.
+if [ ! -d "$REPO" ]; then
+  if [ -d "$(dirname "$REPO")" ] && git clone -q "$REMOTE" "$REPO" 2>/dev/null; then
+    log "=== cloned $REMOTE into $REPO ==="
+  else
+    log "no $REPO — nothing to sync"
+    exit 0
+  fi
+fi
 cd "$REPO" || exit 0
 
 # ---- one-time bootstrap -----------------------------------------------------
