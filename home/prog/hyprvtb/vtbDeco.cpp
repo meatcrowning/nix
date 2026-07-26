@@ -51,6 +51,15 @@ static constexpr double VTB_PLAYBAR_W       = 4;
 static constexpr double VTB_PLAYBAR_THUMB_H = 3;
 static constexpr double VTB_PLAYBAR_RESERVE = 90;
 static constexpr double VTB_PLAYBAR_MIN     = 14; // don't draw/hit a track shorter than this
+// One wheel notch on the track, as a fraction of the whole. 3% was a hair too
+// timid to skim with (~7s on a 4-minute song); 5% lands a notch on something
+// you can hear the difference in without overshooting a verse.
+static constexpr double VTB_PLAYBAR_SCROLL  = 0.05;
+// How long the bar keeps showing a seek we requested but the client hasn't
+// echoed, and how close an echo has to be to count as agreement (a track
+// pixel's worth on a normal bar). See m_playbarPendingFrac.
+static constexpr long   VTB_PLAYBAR_ECHO_MS  = 1500;
+static constexpr double VTB_PLAYBAR_ECHO_EPS = 0.004;
 
 // How long a clicked cell stays inverted as activation feedback.
 static constexpr float VTB_FLASH_MS = 220.f;
@@ -870,7 +879,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         // (handled in the mouse hooks); while dragging the fill follows the cursor.
         CBox track;
         if (playbarTrackLocal(reg, CONTENTH, SCALE, track)) {
-            const double frac  = std::clamp(m_bPlaybarDragging ? m_playbarDragFrac : (double)reg.playPos, 0.0, 1.0);
+            const double frac  = playbarFrac(reg);
             const double cx    = innerColX() + CELL / 2.0;
             const double trkX  = cx - VTB_PLAYBAR_W / 2.0;
             const auto   fillC = FOCUSED ? accentColor : inactiveColor;
@@ -1352,6 +1361,38 @@ bool CVtbDeco::playbarTrackLocal(const SVtbAppReg& reg, double contentH, double 
     return true;
 }
 
+// What the scrub bar shows, and what a scroll steps from. Priority: the live
+// drag, then a seek we asked for but haven't seen echoed, then the client's own
+// reported position. The pending value retires as soon as the echo lands within
+// a track-pixel or so of it — or after VTB_PLAYBAR_ECHO_MS, so a client that
+// ignores SEEK entirely (or seeks somewhere else, e.g. clamped to a chapter)
+// can't leave a lie on screen.
+double CVtbDeco::playbarFrac(const SVtbAppReg& reg) {
+    const double POS = std::clamp((double)reg.playPos, 0.0, 1.0);
+
+    if (m_bPlaybarDragging)
+        return std::clamp(m_playbarDragFrac, 0.0, 1.0);
+
+    if (m_playbarPendingFrac >= 0.0) {
+        const long MS = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - m_playbarPendingAt).count();
+        if (std::abs(POS - m_playbarPendingFrac) <= VTB_PLAYBAR_ECHO_EPS || MS > VTB_PLAYBAR_ECHO_MS)
+            m_playbarPendingFrac = -1.0; // the client caught up (or never will)
+        else
+            return m_playbarPendingFrac;
+    }
+
+    return POS;
+}
+
+// Ask the client to seek, and remember what we asked for so the bar can show it
+// until the answer arrives.
+void CVtbDeco::playbarSeekTo(double frac) {
+    frac                 = std::clamp(frac, 0.0, 1.0);
+    m_playbarPendingFrac = frac;
+    m_playbarPendingAt   = Time::steadyNow();
+    VtbIpc::sendSeek(appPid(), (float)frac);
+}
+
 // Render this window's app-button glyph textures into the cache NOW, from the
 // main-thread timer — a GPU submission separate from (and before) the frame
 // that samples them. Fixes a flash-blank on Apple-Silicon/Asahi: when several
@@ -1638,10 +1679,9 @@ void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEven
               : Hl::windowAtCursorProps(MOUSE) != PW;
         if (PW && !occluded && VtbIpc::get(appPid(), reg) && reg.playbar &&
             playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) && track.containsPoint(LOCAL)) {
-            info.cancelled    = true; // scrub, don't hand the wheel to the app
-            const double step = 0.03;
-            const double f    = std::clamp((double)reg.playPos + (e.delta > 0 ? step : -step), 0.0, 1.0);
-            VtbIpc::sendSeek(appPid(), (float)f);
+            info.cancelled = true; // scrub, don't hand the wheel to the app
+            playbarSeekTo(playbarFrac(reg) + (e.delta > 0 ? VTB_PLAYBAR_SCROLL : -VTB_PLAYBAR_SCROLL));
+            damageEntire(); // the fill moves now, not when the client answers
             return;
         }
     }
@@ -2200,7 +2240,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
             const double f = std::clamp((LOCAL.y - track.y) / track.h, 0.0, 1.0);
             if (f != m_playbarDragFrac) {
                 m_playbarDragFrac = f;
-                VtbIpc::sendSeek(appPid(), (float)f);
+                playbarSeekTo(f);
                 damageEntire();
             }
         }
@@ -2460,7 +2500,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         if (VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, BOX.h, scl, track) && track.containsPoint(COORDS)) {
             m_bPlaybarDragging = true;
             m_playbarDragFrac  = std::clamp((COORDS.y - track.y) / track.h, 0.0, 1.0);
-            VtbIpc::sendSeek(appPid(), (float)m_playbarDragFrac);
+            playbarSeekTo(m_playbarDragFrac);
             damageEntire();
             return;
         }

@@ -980,6 +980,10 @@ class Player(QObject):
         self._index = -1
         self._mpv_base = 0      # queue index of mpv playlist position 0
         self._position = 0.0
+        # An explicit seek's target, until mpv's clock agrees with it (see
+        # _on_pos): mpv keeps reporting the PRE-seek time for a tick or two.
+        self._seek_target = None
+        self._seek_at = 0.0
         self._duration = 0.0
         self._playing = False
         self._shuffle = False
@@ -1032,6 +1036,16 @@ class Player(QObject):
     # ---- mpv event handlers (GUI thread) ----
 
     def _on_pos(self, pos):
+        # Drop the stale samples that trail an explicit seek. mpv answers a seek
+        # asynchronously and keeps reporting the old clock meanwhile, so taking
+        # those would walk the position BACK to where the track was, then
+        # forward again once the seek lands — once per stale sample. That is
+        # what made the titlebar scrub bar bounce a few times after a click.
+        if self._seek_target is not None:
+            if abs(pos - self._seek_target) <= 1.0 or (time.monotonic() - self._seek_at) > 1.5:
+                self._seek_target = None   # caught up (or mpv seeked elsewhere)
+            else:
+                return
         delta = pos - self._position
         if 0 < delta < 2.0:
             self._listened += delta
@@ -1238,6 +1252,8 @@ class Player(QObject):
     def seek(self, secs):
         try:
             self._mpv.command("seek", secs, "absolute")
+            self._seek_target = secs
+            self._seek_at = time.monotonic()
             self._position = secs
             self.positionChanged.emit()
             self.seeked.emit(secs)
