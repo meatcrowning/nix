@@ -200,9 +200,18 @@ SlidePopup {
     }
 
     // ---- spectrum: mediaSpectrumBars vertical bars, driven by spectrumLevels --
+    // cava's 0-100 is roughly linear in amplitude, and real music spends almost
+    // all its time in the bottom third of that (measured medians 15, p90 49), so
+    // a straight height mapping draws stubs that twitch by a pixel and reads as
+    // "unresponsive". Curve it: gamma 0.55 pulls that same data up to med ~35 /
+    // p90 ~68 without touching the top end (100 still maps to 100), so the bars
+    // use the widget's full height and the same transient moves visibly further.
+    // Do this here rather than raising cava's sensitivity — autosens owns that,
+    // and fighting it is what forces per-track fiddling.
     component Spectrum: Item {
         id: spec
         readonly property int nbars: SettingsStore.d.mediaSpectrumBars
+        readonly property real gamma: 0.55
         Row {
             anchors.fill: parent
             spacing: 2
@@ -214,9 +223,13 @@ SlidePopup {
                     height: spec.height
                     Rectangle {
                         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                        height: Math.max(1, spec.height * (root.spectrumLevels[index] || 0) / 100)
+                        height: Math.max(1, spec.height
+                            * Math.pow(Math.max(0, root.spectrumLevels[index] || 0) / 100, spec.gamma))
                         color: Theme.accent
-                        Behavior on height { NumberAnimation { duration: 60 } }
+                        // cava already smooths (noise_reduction) and feeds 60fps,
+                        // so this is a second low-pass on top. Keep it just long
+                        // enough to absorb a dropped frame, not to re-add lag.
+                        Behavior on height { NumberAnimation { duration: 25 } }
                     }
                 }
             }
