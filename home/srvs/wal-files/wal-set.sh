@@ -126,6 +126,20 @@ fi
 # ~0.5s. The set is what actually needs to land, and it returns 0 once the image
 # is loaded, so on a truly-fresh image the retry re-attempts preload+set until
 # the set sticks.
+#
+# SKIPPED ENTIRELY when hyprpaper has already been told exactly this, by this
+# same hyprpaper process. That is not just an optimisation — re-setting an
+# already-current wallpaper makes hyprpaper re-render its background layer
+# surface, which reads on screen as the wallpaper FLASHING. It fired on every
+# picker commit: the preview (--wallpaper-only) sets the image, then closing the
+# picker runs the full apply, which set the identical image a second time — so
+# the wallpaper changed, and then a moment later flashed for no reason. The
+# marker records both what was sent and which hyprpaper process it was sent to,
+# so a restarted (state-less) hyprpaper still gets a real apply.
+APPLIED="$CACHE/hyprpaper-applied"
+hyprpaper_current() {
+    printf 'pid=%s\n%s%s' "$(pgrep -x hyprpaper | head -n1)" "$PRELOADS" "$WALLLINES"
+}
 hyprpaper_apply() {
     printf '%s' "$PRELOADS" | while read -r p; do
         [ -n "$p" ] && hyprctl hyprpaper preload "$p" >/dev/null 2>&1
@@ -139,11 +153,24 @@ hyprpaper_apply() {
             sleep 0.1
         done
     done
+    hyprpaper_current > "$APPLIED"
+}
+
+# true when hyprpaper is already showing exactly this, so a re-set would only
+# cost a flash
+hyprpaper_is_current() {
+    pgrep -x hyprpaper >/dev/null 2>&1 || return 1
+    [ -f "$APPLIED" ] || return 1
+    [ "$(hyprpaper_current)" = "$(cat "$APPLIED")" ]
 }
 
 if [ "$WALLPAPER_ONLY" = 1 ]; then
     # Preview: setting the wallpaper IS the whole job, so do it synchronously.
-    hyprpaper_apply
+    if hyprpaper_is_current; then
+        echo "wal-set: wallpaper already current, no hyprpaper set"
+    else
+        hyprpaper_apply
+    fi
     echo "wal-set: wallpaper-only, skipping theme apply"
     exit 0
 fi
@@ -160,7 +187,11 @@ fi
 # that only happens on a picker commit — where the preview already set it — so
 # the final wallpaper is still correct; standalone/startup runs aren't torn down
 # and complete it normally.
-hyprpaper_apply &
+if hyprpaper_is_current; then
+    echo "wal-set: wallpaper already current, no hyprpaper set"
+else
+    hyprpaper_apply &
+fi
 
 # ---- 3. load the palette (already extracted by wal-prepare.sh above) ---------
 eval "$(cat "$THEMES/$KEY.env")"

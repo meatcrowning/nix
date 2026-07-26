@@ -311,6 +311,81 @@ Scope {
             "printf 'v1 %s\\n' \"$2\" > \"$1\"", "_", shell.livePinsPath, shell.livePins])
     }
 
+    // ---- reload continuity, part 2: the widgets' CONTENTS -----------------
+    // Restoring the pins (above) puts the desktop widgets back in place, but
+    // each one still came back with empty data — no drives, no forecast, no
+    // spectrum, empty chart ring buffers, every readout "--" — and then filled
+    // in over the following seconds. Since most of these widgets are sized to
+    // their content and bottom-anchored, "filling in" means visibly growing,
+    // and the in-place stackables above the disk chase it up the screen. That
+    // is the meander: the widgets were in the right place immediately, but the
+    // layout underneath them was still arriving.
+    //
+    // PersistentProperties hands an object's properties from the outgoing tree
+    // to the incoming one in-process. Two hard-won constraints:
+    //
+    //   * It must be a DIRECT child of this root Scope. Nested one level down
+    //     inside a plain Item it silently never restores (verified: the value
+    //     comes back empty on every reload) — a non-Reloadable parent breaks
+    //     the chain Quickshell walks to match old objects to new ones.
+    //   * Every carried property is a STRING. Quickshell alternates between two
+    //     QML engines across reloads, and a JSValue — i.e. any `property var`
+    //     holding an array or object — cannot move between them: every OTHER
+    //     reload logs "JSValue can't be reassigned to another engine" and the
+    //     property arrives `undefined`. That intermittency is worse than no
+    //     persistence at all, so everything is JSON round-tripped.
+    //
+    // Timing: onLoaded fires after every Component.onCompleted in the new tree
+    // but still inside the same synchronous reload pass, so no frame can be
+    // rendered in between — the widgets are laid out from restored data before
+    // anything is drawn. That's what makes the swap invisible rather than fast.
+    PersistentProperties {
+        id: persist
+        reloadableId: "qsPanelState"
+
+        property string sysinfo: ""
+        property string weather: ""
+        property string disk: ""
+        property string media: ""
+        property string meters: ""
+
+        onLoaded: {
+            SysInfo.restoreState(sysinfo);
+            SysInfo.restoreMeters(meters);
+            Weather.restoreState(weather);
+            diskPanel.restoreState(disk);
+            mediaPanel.restoreState(media);
+        }
+    }
+
+    // Mirror each source into the carrier. Plain assignments, never bindings:
+    // the restore above writes these properties directly, which would break a
+    // binding permanently on the first reload.
+    Connections {
+        target: SysInfo
+        function onStateRevChanged() { persist.sysinfo = SysInfo.stateJson(); }
+    }
+    Connections {
+        target: Weather
+        function onStateRevChanged() { persist.weather = Weather.stateJson(); }
+    }
+    Connections {
+        target: diskPanel
+        function onStateRevChanged() { persist.disk = diskPanel.stateJson(); }
+    }
+    // The VU and spectrum feeds run at cava's 60fps — far too hot to stringify
+    // per frame, and a snapshot a quarter-second old is indistinguishable from
+    // a live one at the moment a reload lands. So these two are sampled.
+    Timer {
+        interval: 250
+        running: true
+        repeat: true
+        onTriggered: {
+            persist.meters = SysInfo.metersJson();
+            persist.media = mediaPanel.stateJson();
+        }
+    }
+
     Component.onCompleted: {
         const live = livePinsFile.text();
         if (live.indexOf("v1") === 0) {
@@ -321,6 +396,26 @@ Scope {
                 if (want.indexOf(w.persistKey) >= 0) w.snapPinned();
         } else {
             widgetStateProc.running = true;   // genuine login — fan them in
+        }
+    }
+
+    // Reload-continuity probe: `qs ipc call state carried`. Reports how much of
+    // each carried blob survived the last reload, so the swap can be verified
+    // without looking at the screen — all five must be non-zero after a reload
+    // and are all zero on a genuine login. (Sizes, not contents: this is a
+    // health check, not a data dump.)
+    IpcHandler {
+        target: "state"
+        function carried(): string {
+            return "sysinfo=" + persist.sysinfo.length
+                + " meters=" + persist.meters.length
+                + " weather=" + persist.weather.length
+                + " disk=" + persist.disk.length
+                + " media=" + persist.media.length
+                + " cpuHist=" + SysInfo.cpuHist.length
+                + " drives=" + diskPanel.drives.length
+                + " days=" + Weather.days.length
+                + " spectrum=" + mediaPanel.spectrumLevels.length;
         }
     }
 

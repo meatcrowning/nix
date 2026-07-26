@@ -41,6 +41,29 @@ SlidePopup {
     property var smart: ({}) // "/dev/sdX" -> {health,temp,wear,poh}
     property string renaming: "" // src currently being relabeled inline
 
+    // ---- reload continuity (see shell.qml's `persist` block) --------------
+    // This widget is the loudest thing on the screen during a reload if left
+    // alone. It comes back with no drives, i.e. the one-line "reading…" height;
+    // then disk-usage.sh lands and it grows several rows; then smartctl lands
+    // and it grows again. It's bottom-anchored, so each growth walks its top
+    // edge up the screen — and every in-place stackable above it (gpu/cpu/eth)
+    // chases it via Popups.stackObstacleTop. Carrying drives+smart across the
+    // reload means it is laid out at its true height before the first frame,
+    // and the stack above it never moves. The scripts still re-run underneath;
+    // they just now confirm what's already drawn instead of building it.
+    property int stateRev: 0
+    function stateJson() {
+        return JSON.stringify({ d: drives, s: smart });
+    }
+    function restoreState(str) {
+        if (!str) return;
+        try {
+            const o = JSON.parse(str);
+            root.drives = o.d || [];
+            root.smart = o.s || ({});
+        } catch (e) {}
+    }
+
     // relabel a filesystem via the root helper, then refresh
     Process {
         id: labelProc
@@ -81,6 +104,7 @@ SlidePopup {
                                rota: f[5] === "1", model: f[6], fstype: f[7] || "" });
                 }
                 root.drives = out;
+                root.stateRev++;
             }
         }
     }
@@ -97,6 +121,7 @@ SlidePopup {
                     m[f[0]] = { health: f[1], temp: f[2], wear: f[3], poh: f[4] };
                 }
                 root.smart = m;
+                root.stateRev++;
             }
         }
     }

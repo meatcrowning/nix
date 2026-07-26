@@ -26,6 +26,23 @@ Singleton {
 
     function refetch() { fetchProc.running = false; fetchProc.running = true; }
 
+    // ---- reload continuity (see shell.qml's `persist` block) --------------
+    // The forecast is a 20-minute-cadence network fetch, so without this a
+    // reload collapses WeatherPanel to its header for however long curl takes
+    // — and the panel is bottom-anchored, so its whole card visibly grows back
+    // up the screen. Carried across the reload, it's simply already there.
+    property int stateRev: 0
+    function stateJson() {
+        return JSON.stringify({ t: tempF, c: cond, d: days });
+    }
+    function restoreState(s) {
+        if (!s) return;
+        try {
+            const d = JSON.parse(s);
+            root.tempF = d.t; root.cond = d.c; root.days = d.d || [];
+        } catch (e) {}
+    }
+
     // Re-fetch immediately when the location or unit changes in Settings,
     // instead of waiting for the next refresh tick (url is a live binding, but
     // the curl Process must be re-run for the new url to take effect).
@@ -73,6 +90,7 @@ Singleton {
                         });
                     }
                     root.days = out;
+                    root.stateRev++;
                 } catch (e) {
                     // keep the last good values; "--" only before first fetch
                 }
