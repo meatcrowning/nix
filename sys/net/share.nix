@@ -33,7 +33,9 @@ in
         "server string" = "top";
         "server role" = "standalone server";
         "map to guest" = "never";
-        "hosts allow" = "${lanCidr} 127.0.0.1";
+        # 100.64.0.0/10 is the tailnet (sys/net/tailscale.nix) — authenticated
+        # peers only, so the share works when book is off the home LAN.
+        "hosts allow" = "${lanCidr} 100.64.0.0/10 127.0.0.1";
         "hosts deny" = "0.0.0.0/0";
         # SMB3 only, and sign nothing on a wired LAN we control — signing
         # costs real throughput on a 208 GB library and buys nothing here.

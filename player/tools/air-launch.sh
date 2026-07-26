@@ -18,7 +18,14 @@
 # Only ever invoked on air (home/prog/player.nix picks it for host == "air").
 set -uo pipefail
 
-HOST="${PLAYER_SYNC_HOST:-top.local}"
+# Names for top, tried in order: the mDNS name answers only on the home LAN;
+# `top` is the tailscale MagicDNS name and works from any network the tailnet
+# reaches (sys/net/tailscale.nix). PLAYER_SYNC_HOST pins the list to one name.
+if [ -n "${PLAYER_SYNC_HOST:-}" ]; then
+    CANDIDATES=("$PLAYER_SYNC_HOST")
+else
+    CANDIDATES=(top.local top)
+fi
 MOUNT="/run/media/lam/SSD/aud"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAIN="$HERE/../main.py"
@@ -76,19 +83,25 @@ fi
 # Only the probe needs the address: ssh is Fedora's (/usr/sbin/ssh) and
 # resolves the name itself, and keeping the NAME there keeps known_hosts and
 # the authorized key matching what Part B set up.
-ADDR="$("$PY" -c 'import socket,sys
+resolve() { "$PY" -c 'import socket,sys
 try: print(socket.gethostbyname(sys.argv[1]))
-except OSError: print(sys.argv[1])' "$HOST" 2>/dev/null)"
-[ -n "$ADDR" ] || ADDR="$HOST"
+except OSError: print(sys.argv[1])' "$1" 2>/dev/null; }
 
-top_up() { timeout 2 bash -c "exec 3<>/dev/tcp/$ADDR/445" 2>/dev/null; }
+top_up() { timeout 2 bash -c "exec 3<>/dev/tcp/$1/445" 2>/dev/null; }
 
 ONLINE=0
-if top_up; then
-    ONLINE=1
-else
-    say "$HOST unreachable — starting offline against the local database"
-fi
+HOST="${CANDIDATES[0]}"
+ADDR="$HOST"
+for cand in "${CANDIDATES[@]}"; do
+    addr="$(resolve "$cand")"
+    [ -n "$addr" ] || addr="$cand"
+    if top_up "$addr"; then
+        HOST="$cand"; ADDR="$addr"; ONLINE=1
+        [ "$cand" = "${CANDIDATES[0]}" ] || say "reaching top as '$cand'"
+        break
+    fi
+done
+[ "$ONLINE" = 1 ] || say "top unreachable (tried: ${CANDIDATES[*]}) — starting offline against the local database"
 
 if [ "$ONLINE" = 1 ]; then
     # Touch the path to fire the systemd automount (fstab: noauto,
@@ -108,11 +121,14 @@ if [ "$ONLINE" = 1 ]; then
     # Art: thumbs (~21 MB) block launch because the album grid is the first
     # thing you see; the full-size covers (~192 MB) trickle in behind it, since
     # only the now-playing view wants them.
+    # Same first-contact rule as dbsync's SSH: a new name (top vs top.local)
+    # must not wedge on the host-key prompt, a changed key must still fail.
+    RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
     mkdir -p "$ART_LOCAL"
-    rsync -a --timeout=20 --include='*-t.jpg' --exclude='*' \
+    rsync -a -e "$RSH" --timeout=20 --include='*-t.jpg' --exclude='*' \
         "$HOST:.cache/player/art/" "$ART_LOCAL/" 2>/dev/null \
         || say "thumb sync failed (covers may be blank)"
-    ( rsync -a --timeout=60 --include='*-f.jpg' --exclude='*' \
+    ( rsync -a -e "$RSH" --timeout=60 --include='*-f.jpg' --exclude='*' \
         "$HOST:.cache/player/art/" "$ART_LOCAL/" >/dev/null 2>&1 ) &
 fi
 
@@ -141,7 +157,7 @@ EOF
 rc=$?
 
 # ---- push what this session changed ---------------------------------------
-if [ "$ONLINE" = 1 ] && top_up; then
+if [ "$ONLINE" = 1 ] && top_up "$ADDR"; then
     "$PY" "$DBSYNC" --host "$HOST" push || say "db push failed — ratings stay local until the next sync"
 fi
 exit $rc

@@ -244,7 +244,11 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
 # transport
 # ---------------------------------------------------------------------------
 
-SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+# accept-new: BatchMode can never answer the first-contact host-key prompt, so
+# a name we haven't spoken to before (top.local vs the tailscale `top`) would
+# fail forever. Trust on first use, still fail hard on a CHANGED key.
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+       "-o", "StrictHostKeyChecking=accept-new"]
 REMOTE_TMP = "/tmp/player-dbsync-{}.db"
 
 
