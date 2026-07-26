@@ -1,0 +1,67 @@
+{
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "prompt_transform": "none",
+  "latent_class": "EmptyLatentImage",
+  "toggles": {
+    "negpip": false,
+    "model_sampling": true
+  },
+  "model_sampling": {
+    "shift_start": 3.0,
+    "shift_end": 3.0,
+    "start_percent": 0.0,
+    "end_percent": 1.0,
+    "curve": "ease_in",
+    "outside_window": "hold",
+    "multiplier": 1.0
+  },
+  "defaults": {
+    "steps": 30,
+    "cfg": 3.5,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "denoise": 1.0,
+    "add_noise": true
+  },
+  "resolution": {
+    "megapixels": 1.0,
+    "multiple": 64,
+    "aspect": "1:1"
+  },
+  "lora": {
+    "aliases": {
+      "to_out.0": "out",
+      "to_q": "qkv",
+      "to_k": "qkv",
+      "to_v": "qkv"
+    },
+    "loader": "LoraLoaderModelOnly"
+  },
+  "id": "z_image",
+  "label": "Z-Image",
+  "detect": "z_image",
+  "text_encoder": {
+    "te_model": "QWEN3_4B",
+    "clip_type": "lumina2",
+    "clip_type_significant": true,
+    "hidden": 2560,
+    "match": "base.cap_feat_dim == te.hidden"
+  },
+  "vae": {
+    "arch": "flux_ae",
+    "prefer": [
+      "z.safetensors",
+      "zbase.safetensors"
+    ]
+  },
+  "int8": {
+    "model_type": "z-image"
+  },
+  "variants": {
+    "turbo": {
+      "steps": 8,
+      "cfg": 1.0
+    }
+  }
+}

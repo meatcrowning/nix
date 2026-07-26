@@ -1,0 +1,55 @@
+{
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "prompt_transform": "single_line",
+  "latent_class": "EmptyLatentImage",
+  "toggles": {
+    "negpip": true,
+    "model_sampling": true
+  },
+  "model_sampling": {
+    "shift_start": 3.5,
+    "shift_end": 1.2,
+    "start_percent": 0.0,
+    "end_percent": 0.5,
+    "curve": "ease_in",
+    "outside_window": "hold",
+    "multiplier": 1.0
+  },
+  "defaults": {
+    "steps": 50,
+    "cfg": 0.7,
+    "sampler_name": "euler_cfg_pp",
+    "scheduler": "beta",
+    "denoise": 1.0,
+    "add_noise": true
+  },
+  "resolution": {
+    "megapixels": 2.0,
+    "multiple": 64,
+    "aspect": "2:3"
+  },
+  "lora": {
+    "aliases": {},
+    "loader": "LoraLoaderModelOnly"
+  },
+  "id": "anima",
+  "label": "Anima",
+  "detect": "anima",
+  "text_encoder": {
+    "te_model": "QWEN3_06B",
+    "clip_type": "qwen_image",
+    "clip_type_significant": false,
+    "hidden": 1024,
+    "match": "base.llm_dim == te.hidden"
+  },
+  "vae": {
+    "arch": "wan21",
+    "prefer": [
+      "qwen_image_vae.safetensors"
+    ]
+  },
+  "int8": {
+    "model_type": "anima"
+  }
+}

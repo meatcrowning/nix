@@ -1,0 +1,54 @@
+{
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "prompt_transform": "none",
+  "latent_class": "EmptyLatentImage",
+  "toggles": {
+    "negpip": false,
+    "model_sampling": true
+  },
+  "model_sampling": {
+    "shift_start": 3.1,
+    "shift_end": 3.1,
+    "start_percent": 0.0,
+    "end_percent": 1.0,
+    "curve": "ease_in",
+    "outside_window": "hold",
+    "multiplier": 1.0
+  },
+  "defaults": {
+    "steps": 20,
+    "cfg": 2.5,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "denoise": 1.0,
+    "add_noise": true
+  },
+  "resolution": {
+    "megapixels": 1.0,
+    "multiple": 16,
+    "aspect": "1:1"
+  },
+  "lora": {
+    "aliases": {},
+    "loader": "LoraLoaderModelOnly"
+  },
+  "id": "qwen_image",
+  "label": "Qwen-Image",
+  "detect": "qwen_image",
+  "text_encoder": {
+    "te_model": "QWEN25_7B",
+    "clip_type": "qwen_image",
+    "clip_type_significant": true,
+    "hidden": 3584
+  },
+  "vae": {
+    "arch": "wan21",
+    "prefer": [
+      "qwen_image_vae.safetensors"
+    ]
+  },
+  "int8": {
+    "model_type": "qwen"
+  }
+}

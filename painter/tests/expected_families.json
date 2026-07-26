@@ -1,0 +1,817 @@
+[
+ {
+  "dims": {
+   "tensors": 2516
+  },
+  "family": "sdxl_ckpt",
+  "loader": "CheckpointLoaderSimple",
+  "name": "miruku_v3.safetensors",
+  "quant": "fp16",
+  "role": "checkpoint"
+ },
+ {
+  "dims": {
+   "cap_feat_dim": 2304,
+   "dim": 2304,
+   "layers": 26
+  },
+  "family": "lumina2_ckpt",
+  "loader": "CheckpointLoaderSimple",
+  "name": "netayumeLuminaNetaLumina_v35Pretrained.safetensors",
+  "quant": "bf16",
+  "role": "checkpoint"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "llm_dim": 1024,
+   "model_channels": 2048
+  },
+  "family": "anima",
+  "loader": "UNETLoader",
+  "name": "anima-base-v1.0.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "llm_dim": 1024,
+   "model_channels": 2048
+  },
+  "family": "anima",
+  "loader": "UNETLoader",
+  "name": "anima-preview.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "llm_dim": 1024,
+   "model_channels": 2048
+  },
+  "family": "anima",
+  "loader": "UNETLoader",
+  "name": "anima-preview2.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "llm_dim": 1024,
+   "model_channels": 2048
+  },
+  "family": "anima",
+  "loader": "UNETLoader",
+  "name": "anima-preview3-base.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "double_blocks": 19,
+   "single_blocks": 38
+  },
+  "family": "chroma",
+  "loader": "UNETLoader",
+  "name": "chroma-unlocked-v50-flash-heun.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "context_in": 12288,
+   "double_blocks": 8,
+   "hidden": 4096,
+   "single_blocks": 24
+  },
+  "family": "flux2",
+  "loader": "UNETLoader",
+  "name": "flux-2-klein-9b-fp8.safetensors",
+  "quant": "float8_e4m3fn",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "OTUNetLoaderW8A8",
+  "name": "krea-2-raw-int8-convrot.safetensors",
+  "quant": "comfy_quant",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "UnetLoaderGGUF",
+  "name": "krea2_raw-Q6_K.gguf",
+  "quant": "gguf:18",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "UnetLoaderGGUF",
+  "name": "krea2_raw-Q8_0.gguf",
+  "quant": "gguf:7",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "UNETLoader",
+  "name": "krea2_raw_fp8_scaled.safetensors",
+  "quant": "float8_e4m3fn",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "UnetLoaderGGUF",
+  "name": "krea2_turbo-Q8_0.gguf",
+  "quant": "gguf:7",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "UNETLoader",
+  "name": "krea2_turbo_fp8_scaled.safetensors",
+  "quant": "float8_e4m3fn",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 28,
+   "features": 6144,
+   "txtdim": 2560,
+   "txtlayers": 12
+  },
+  "family": "krea2",
+  "loader": "UNETLoader",
+  "name": "krea2_turbo_nvfp4.safetensors",
+  "quant": "nvfp4",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "blocks": 60,
+   "in_ch": 64
+  },
+  "family": "qwen_image",
+  "loader": "UnetLoaderGGUF",
+  "name": "qwen-image-2512-Q4_K_M.gguf",
+  "quant": "gguf:15",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "cap_feat_dim": 2560,
+   "dim": 3840,
+   "layers": 30
+  },
+  "family": "z_image",
+  "loader": "UNETLoader",
+  "name": "z_image_bf16.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "cap_feat_dim": 2560,
+   "dim": 3840,
+   "layers": 30
+  },
+  "family": "z_image",
+  "loader": "UNETLoader",
+  "name": "z_image_turbo_bf16.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "cap_feat_dim": 2560,
+   "dim": 3840,
+   "layers": 30,
+   "x0": true
+  },
+  "family": "zimage_pixel",
+  "loader": "UNETLoader",
+  "name": "zeta-chroma-base-x0-pixel-dino-distance.safetensors",
+  "quant": "bf16",
+  "role": "diffusion"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "Sei5oSuzuki_2-5k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "Sei5oSuzuki_2k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "layers.0.adaLN_modulation.0",
+    "layers.0.attention.to_k",
+    "layers.0.attention.to_out.0",
+    "layers.0.attention.to_q"
+   ],
+   "targets": 240
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "Soyjak for z base.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": "anima-preview/lora",
+   "kohya": true,
+   "patches_clip": false,
+   "rank": null,
+   "sample_targets": [
+    "blocks_0_cross_attn_k_proj",
+    "blocks_0_cross_attn_output_proj",
+    "blocks_0_cross_attn_q_proj",
+    "blocks_0_cross_attn_v_proj"
+   ],
+   "targets": 280
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "apple_style_anima.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": true,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks_0_cross_attn_k_proj",
+    "blocks_0_cross_attn_output_proj",
+    "blocks_0_cross_attn_q_proj",
+    "blocks_0_cross_attn_v_proj"
+   ],
+   "targets": 280
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "chris chan anima 3.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": "Z-Image/lora",
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 16,
+   "sample_targets": [
+    "layers.0.attention.to_k",
+    "layers.0.attention.to_out.0",
+    "layers.0.attention.to_q",
+    "layers.0.attention.to_v"
+   ],
+   "targets": 210
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "garmash2025-12-16_22-01-55-save-1573-42-19.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "ham zhazha 2-5k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "ham zhazha 2k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": "Z-Image/lora",
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 16,
+   "sample_targets": [
+    "layers.0.attention.to_k",
+    "layers.0.attention.to_out.0",
+    "layers.0.attention.to_q",
+    "layers.0.attention.to_v"
+   ],
+   "targets": 210
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "ham_zhazha2025-12-16_18-23-39-save-1537-17-58.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "text_fusion.layerwise_blocks.0.attn.to_gate",
+    "text_fusion.layerwise_blocks.0.attn.to_k",
+    "text_fusion.layerwise_blocks.0.attn.to_out.0",
+    "text_fusion.layerwise_blocks.0.attn.to_q"
+   ],
+   "targets": 256
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "jennifer%20connelly%20krea%202.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": null,
+   "sample_targets": [
+    "txtfusion.projector"
+   ],
+   "targets": 1
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "krea2filterbypass3.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": "anima-preview/lora",
+   "kohya": true,
+   "patches_clip": false,
+   "rank": 16,
+   "sample_targets": [
+    "blocks_0_cross_attn_k_proj",
+    "blocks_0_cross_attn_output_proj",
+    "blocks_0_cross_attn_q_proj",
+    "blocks_0_cross_attn_v_proj"
+   ],
+   "targets": 280
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "n64 anima.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "shejtano_e35.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "shejtano_e36.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "shejtano_e37.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": true,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks_0_cross_attn_k_proj",
+    "blocks_0_cross_attn_output_proj",
+    "blocks_0_cross_attn_q_proj",
+    "blocks_0_cross_attn_v_proj"
+   ],
+   "targets": 280
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "soyjak for anima3.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "stonetoss_anima3_020.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "wasurenaide_2.5k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "wasurenaide_2k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "wasurenaide_3.5k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "wasurenaide_3k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "declared": null,
+   "kohya": false,
+   "patches_clip": false,
+   "rank": 32,
+   "sample_targets": [
+    "blocks.0.adaln_modulation_cross_attn.1",
+    "blocks.0.adaln_modulation_cross_attn.2",
+    "blocks.0.adaln_modulation_mlp.1",
+    "blocks.0.adaln_modulation_mlp.2"
+   ],
+   "targets": 448
+  },
+  "family": "lora",
+  "loader": null,
+  "name": "wasurenaide_4k.safetensors",
+  "quant": null,
+  "role": "lora"
+ },
+ {
+  "dims": {
+   "hidden": 2560,
+   "layers": 36
+  },
+  "family": "QWEN3VL_4B",
+  "loader": null,
+  "name": "qwen3vl_4b_fp8_scaled.safetensors",
+  "quant": null,
+  "role": "text_encoder"
+ },
+ {
+  "dims": {
+   "hidden": 3584,
+   "layers": 28
+  },
+  "family": "QWEN25_7B",
+  "loader": null,
+  "name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+  "quant": null,
+  "role": "text_encoder"
+ },
+ {
+  "dims": {
+   "hidden": 1024,
+   "layers": 28
+  },
+  "family": "QWEN3_06B",
+  "loader": null,
+  "name": "qwen_3_06b_base.safetensors",
+  "quant": null,
+  "role": "text_encoder"
+ },
+ {
+  "dims": {
+   "hidden": 2560,
+   "layers": 36
+  },
+  "family": "QWEN3_4B",
+  "loader": null,
+  "name": "qwen_3_4b.safetensors",
+  "quant": null,
+  "role": "text_encoder"
+ },
+ {
+  "dims": {
+   "hidden": 4096,
+   "layers": 36
+  },
+  "family": "QWEN3_8B",
+  "loader": null,
+  "name": "qwen_3_8b_fp8mixed.safetensors",
+  "quant": null,
+  "role": "text_encoder"
+ },
+ {
+  "dims": {
+   "hidden": 4096
+  },
+  "family": "T5_XXL",
+  "loader": null,
+  "name": "t5xxl_fp16.safetensors",
+  "quant": null,
+  "role": "text_encoder"
+ },
+ {
+  "dims": {
+   "latent_channels": 128,
+   "tensors": 251
+  },
+  "family": "flux2",
+  "loader": null,
+  "name": "flux2-vae.safetensors",
+  "quant": null,
+  "role": "vae"
+ },
+ {
+  "dims": {
+   "downscale": 1,
+   "latent_channels": 3
+  },
+  "family": "pixel_space",
+  "loader": null,
+  "name": "pixel_space_vae_stub.safetensors",
+  "quant": null,
+  "role": "vae"
+ },
+ {
+  "dims": {
+   "latent_channels": 16,
+   "tensors": 194
+  },
+  "family": "wan21",
+  "loader": null,
+  "name": "qwen_image_vae.safetensors",
+  "quant": null,
+  "role": "vae"
+ },
+ {
+  "dims": {
+   "latent_channels": 16,
+   "mid_attn": false,
+   "tensors": 244
+  },
+  "family": "flux_ae",
+  "loader": null,
+  "name": "schnell.safetensors",
+  "quant": null,
+  "role": "vae"
+ },
+ {
+  "dims": {
+   "latent_channels": 16,
+   "tensors": 194
+  },
+  "family": "wan21",
+  "loader": null,
+  "name": "wan21-vae.safetensors",
+  "quant": null,
+  "role": "vae"
+ },
+ {
+  "dims": {
+   "latent_channels": 16,
+   "mid_attn": true,
+   "tensors": 244
+  },
+  "family": "flux_ae",
+  "loader": null,
+  "name": "z.safetensors",
+  "quant": null,
+  "role": "vae"
+ },
+ {
+  "dims": {
+   "latent_channels": 16,
+   "mid_attn": true,
+   "tensors": 244
+  },
+  "family": "flux_ae",
+  "loader": null,
+  "name": "zbase.safetensors",
+  "quant": null,
+  "role": "vae"
+ }
+]
