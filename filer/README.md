@@ -61,5 +61,5 @@ Change the wallpaper and filer recolours in lock-step with the bar.
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md). Next up (Phase 1): keyboard navigation,
+See [docs/filer-roadmap.md](../docs/filer-roadmap.md). Next up (Phase 1): keyboard navigation,
 right-click context menu, hidden-files toggle, sort options.
