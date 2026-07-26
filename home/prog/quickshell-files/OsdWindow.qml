@@ -53,7 +53,8 @@ PanelWindow {
         border.color: Theme.accent
         border.width: 2
 
-        readonly property color tint: Osd.kind === "brightness" ? Theme.warn
+        readonly property color tint: Osd.kind === "brightness"
+                                    ? (Osd.negative ? Theme.crit : Theme.warn)
                                     : Osd.muted ? Theme.crit : Theme.info
         // 0..1 fill fraction; a muted sink reads as empty.
         readonly property real level: (Osd.kind === "volume" && Osd.muted)
@@ -65,7 +66,7 @@ PanelWindow {
             anchors.top: parent.top
             anchors.topMargin: 6
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Osd.kind === "brightness" ? "bri" : "vol"
+            text: Osd.kind === "brightness" ? (Osd.negative ? "gma" : "bri") : "vol"
             color: card.tint
         }
 
@@ -75,7 +76,7 @@ PanelWindow {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 6
             anchors.horizontalCenter: parent.horizontalCenter
-            text: (Osd.kind === "volume" && Osd.muted) ? "x" : Osd.value
+            text: (Osd.kind === "volume" && Osd.muted) ? "x" : Osd.shown
             color: Theme.text
         }
 
@@ -93,10 +94,14 @@ PanelWindow {
             border.color: Theme.border
             border.width: 1
 
+            // Normally stands up from the bottom. In negative brightness it
+            // HANGS DOWN FROM THE TOP instead, so the range below hardware
+            // zero reads as depth rather than as a level.
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.bottom: parent.bottom
+                anchors.top: Osd.negative ? parent.top : undefined
+                anchors.bottom: Osd.negative ? undefined : parent.bottom
                 anchors.margins: 2
                 height: Math.max(0, (track.height - 4) * card.level)
                 radius: 0

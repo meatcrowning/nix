@@ -208,8 +208,9 @@ Column {
     // ---------- Brightness ----------
     Stat {
         label: "bri"
-        value: SysInfo.brightness < 0 ? "--" : SysInfo.brightness + ""
-        valueColor: Theme.text
+        // Reads negative ("-20") once scrolling past 0 pulls gamma instead.
+        value: SysInfo.brightness < 0 ? "--" : SysInfo.brightnessLevel + ""
+        valueColor: SysInfo.negativeBrightness ? Theme.crit : Theme.text
         onWheelUp: () => SysInfo.adjustBrightness(SettingsStore.d.brightnessStep)
         onWheelDown: () => SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep)
     }

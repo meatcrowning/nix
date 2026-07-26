@@ -38,6 +38,20 @@ Singleton {
         return be === "backlight" ? true : be === "ddc" ? false : _hasBacklight;
     }
 
+    // "Negative brightness". Once the hardware is at 0 and the user keeps
+    // lowering, the extra steps come out of the compositor's gamma ramp
+    // instead (hyprsunset), so the screen can go darker than the monitor
+    // alone allows. 100 = no gamma reduction = the feature is off; anything
+    // below means we're in the negative region and the panel/OSD read out a
+    // negative level (gamma 80 -> "-20"). SettingsApply owns the hyprsunset
+    // process and pushes this value to it — including killing it (which
+    // restores the normal ramp) the moment we return to 100.
+    property int gamma: 100
+    readonly property bool negativeBrightness: gamma < 100
+    // Signed level for display: the hardware value normally, gamma-below-100
+    // once negative.
+    readonly property int brightnessLevel: gamma < 100 ? gamma - 100 : brightness
+
     // throughput history for the sparkline (bytes/s totals)
     property var history: []
     readonly property int historyLen: 24
@@ -171,6 +185,12 @@ Singleton {
 
     function adjustBrightness(step) {
         if (brightness < 0) brightness = 50;
+        // Below hardware zero, and back up again: lowering at 0 eats gamma,
+        // and raising gives all of the gamma back BEFORE the hardware level
+        // starts climbing again, so the two halves of the range are one
+        // continuous line.
+        if (step < 0 && brightness === 0) { adjustGamma(step); return; }
+        if (step > 0 && gamma < 100)      { adjustGamma(step); return; }
         brightness = Math.max(0, Math.min(100, brightness + step));
         Osd.trigger("brightness");
         // Leading-edge fire: a single tick after being idle writes
@@ -185,6 +205,14 @@ Singleton {
         } else {
             fireBrightnessWrite();
         }
+    }
+
+    // Gamma side of the range. No debounce needed — hyprsunset's IPC is
+    // instant (unlike the ~1.5s DDC write), so every tick lands right away.
+    function adjustGamma(step) {
+        const floor = Math.max(5, Math.min(100, SettingsStore.d.gammaFloor));
+        gamma = Math.max(floor, Math.min(100, gamma + step));
+        Osd.trigger("brightness");
     }
 
     function fireBrightnessWrite() {

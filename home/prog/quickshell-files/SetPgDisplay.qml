@@ -21,6 +21,15 @@ Column {
             }
         }
         SetRow {
+            label: "floor"
+            desc: "how dark negative brightness (gamma below hardware 0) may go"
+            SetSlider {
+                from: 5; to: 100; step: 5; unit: "%"
+                value: page.d.gammaFloor
+                onMoved: (v) => { page.d.gammaFloor = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "backend"
             desc: "auto = backlight if present, else DDC/CI to an external monitor"
             SetSelect {
