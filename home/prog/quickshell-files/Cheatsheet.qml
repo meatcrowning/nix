@@ -181,7 +181,10 @@ PanelWindow {
         // screen.width (minus the bar's exclusive zone) is known from the start,
         // so the endpoints are right on frame one and it always slides in from
         // the right. Falls back to parent.width only if screen isn't assigned yet.
-        readonly property real avail: root.screen ? root.screen.width - Theme.barWidth
+        // ViewMode.barWidth, not Theme.barWidth: the bar is only 48px wide in
+        // classic mode, and in dock mode it takes a third of the screen — so
+        // sizing off the fixed setting would run the card under the panel.
+        readonly property real avail: root.screen ? root.screen.width - ViewMode.barWidth
                                                   : parent.width
         width: Math.round(avail * 2 / 3)
 
