@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import sqlite3
 import sys
 import threading
@@ -2312,6 +2313,11 @@ def main():
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
+    # air (the MacBook, OS hostname "book") has a much smaller screen than
+    # top: the QML lowers the window minimums and caps the now-playing cover
+    # there. Keyed on hostname, not the launcher, so a bare `python3 main.py`
+    # on air behaves the same as going through air-launch.sh.
+    ctx.setContextProperty("OnAir", socket.gethostname().split(".")[0] == "book")
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Prefs", prefs)

@@ -40,7 +40,12 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: Math.max(60, Math.min(root.height * 0.8, root.height * root.artFrac))
+        // On air the window runs narrow: never let the row grow taller than
+        // it is wide, or a square cover crops away most of its width. On top
+        // the window is wide enough that the fraction alone is the right cap.
+        readonly property real hCap: OnAir ? Math.min(root.height * 0.8, root.width)
+                                           : root.height * 0.8
+        height: Math.max(60, Math.min(hCap, root.height * root.artFrac))
 
         Rectangle {
             id: artBox
