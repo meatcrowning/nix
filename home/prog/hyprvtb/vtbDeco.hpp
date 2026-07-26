@@ -253,6 +253,18 @@ class CVtbDeco : public IHyprWindowDecoration {
     double                                m_playbarPendingFrac = -1.0; // <0 = none pending
     std::chrono::steady_clock::time_point m_playbarPendingAt{};
 
+    // Sub-detent scroll remainder, carried between axis events.
+    //
+    // The pending value above is the right BASE to accumulate from and always
+    // was; what was missing is the other half — the per-event MAGNITUDE. A
+    // trackpad delivers a detent's worth of motion as a burst of small deltas,
+    // so each event's fraction of a VTB_PLAYBAR_SCROLL step lands here and is
+    // committed once it adds up to something the bar can actually show. Kept as
+    // a sibling of the pending value rather than folded into it: that one is a
+    // POSITION the bar renders and the client's echo retires, this is an
+    // uncommitted DELTA nothing else may see. See playbarScrollBy.
+    double                                m_playbarScrollAcc = 0.0;
+
     // Click-activation flash: the clicked cell briefly inverts (fills with its
     // highlight colour, label drawn in the bar background) so a press reads as
     // "activated". Same cell-id space as m_iHoverCell.
@@ -355,6 +367,10 @@ class CVtbDeco : public IHyprWindowDecoration {
     // else the client's own position. Retires the pending value once the echo
     // agrees (or gives up on it) — see m_playbarPendingFrac.
     double               playbarFrac(const SVtbAppReg& reg);
+    // A wheel/trackpad event over the track, delta-proportional: one detent's
+    // worth of motion = one VTB_PLAYBAR_SCROLL step, sub-detent remainder
+    // carried in m_playbarScrollAcc.
+    void                 playbarScrollBy(const SVtbAppReg& reg, const IPointer::SAxisEvent& e);
     void                 playbarSeekTo(double frac);
     int                  appDropSlot(const Vector2D& localCoords, const SVtbAppReg& reg); // nearest draggable slot to cursor Y
     void                 prewarmGlyphs(); // upload app-button glyph textures ahead of the render (Asahi tiler race)
