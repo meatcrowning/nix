@@ -57,6 +57,27 @@ static constexpr double VTB_PLAYBAR_MIN     = 14; // don't draw/hit a track shor
 // timid to skim with (~7s on a 4-minute song); 5% lands a notch on something
 // you can hear the difference in without overshooting a verse.
 static constexpr double VTB_PLAYBAR_SCROLL  = 0.05;
+// ...and what "one notch" means in the two units an SAxisEvent can carry. These
+// are facts about libinput, not taste, and all three sources agree:
+//
+//  * e.delta for a WHEEL is the angle the wheel turned, in DEGREES, and "the
+//    default is 15 degrees per wheel click" (/usr/include/libinput.h:1607-1609
+//    — the header the live compositor links).
+//  * e.deltaDiscrete is libinput's v120 value, "normalized to the 0-±120 range"
+//    (:1727-1749), the Microsoft WHEEL_DELTA convention. aquamarine fills it
+//    from libinput_event_pointer_get_scroll_value_v120() and ONLY for WHEEL
+//    (Session.cpp, byte-identical in both pinned aquamarines), which is why a
+//    finger event always arrives with deltaDiscrete == 0 and takes the degree
+//    path.
+//  * Hyprland states the equivalence itself: the top pin backfills a missing
+//    discrete with std::round(e.delta * 8.0) (InputManager.cpp:972) — and
+//    15 x 8 = 120.
+//
+// So one detent = 15.0 delta = 120 deltaDiscrete = one VTB_PLAYBAR_SCROLL step,
+// and the two paths below cannot drift apart. If the trackpad turns out to want
+// a coarser feel, this is the one number to change.
+static constexpr double VTB_PLAYBAR_DETENT    = 15.0;  // e.delta units per detent
+static constexpr double VTB_PLAYBAR_DETENT120 = 120.0; // e.deltaDiscrete units per detent
 // How long the bar keeps showing a seek we requested but the client hasn't
 // echoed, and how close an echo has to be to count as agreement (a track
 // pixel's worth on a normal bar). See m_playbarPendingFrac.
@@ -1581,6 +1602,49 @@ double CVtbDeco::playbarFrac(const SVtbAppReg& reg) {
     return POS;
 }
 
+// Scroll over the scrub track. DELTA-PROPORTIONAL: one wheel detent moves the
+// seek by VTB_PLAYBAR_SCROLL, and a trackpad's stream of small deltas moves it
+// by the same amount per detent's worth of motion.
+//
+// This used to key on the SIGN of e.delta alone and step a full 5% PER EVENT.
+// A mouse wheel emits one event per detent, so that read correctly for years on
+// `top`; a trackpad emits a burst of a hundred a second, and on book the
+// trackpad is the only pointer there is — so one two-finger flick across the
+// track threw the song forward by minutes. Same shape of bug as viewer's
+// sign-only zoom and painter's per-event Spin: a handler that was written when
+// every axis event meant one detent.
+//
+// The sub-detent remainder is CARRIED rather than rounded away, for the same
+// reason the kinetic engine carries its fractional pixels: a trackpad's
+// individual deltas are small, and dropping each one's remainder would make
+// slow, careful scrubbing do nothing at all.
+void CVtbDeco::playbarScrollBy(const SVtbAppReg& reg, const IPointer::SAxisEvent& e) {
+    const double DETENTS = e.deltaDiscrete != 0 ? (double)e.deltaDiscrete / VTB_PLAYBAR_DETENT120 : e.delta / VTB_PLAYBAR_DETENT;
+    m_playbarScrollAcc += DETENTS * VTB_PLAYBAR_SCROLL;
+
+    // Accumulate against what the bar is actually SHOWING, which while a seek is
+    // in flight is the pending value rather than the client's echoed position
+    // (playbarFrac's whole job). That is what lets a burst add up instead of
+    // every event re-deriving its step from a position two IPC ticks stale —
+    // the second half of the same bug.
+    const double BASE   = playbarFrac(reg);
+    const double TARGET = std::clamp(BASE + m_playbarScrollAcc, 0.0, 1.0);
+
+    // Whatever the rails swallowed is dropped, never banked: otherwise scrolling
+    // back off the end of a track would first have to burn through everything
+    // the clamp ate on the way there.
+    m_playbarScrollAcc = TARGET - BASE;
+
+    // Under one track pixel there is nothing to show and nothing worth putting
+    // on the socket — keep carrying it.
+    if (std::abs(m_playbarScrollAcc) < VTB_PLAYBAR_ECHO_EPS)
+        return;
+
+    m_playbarScrollAcc = 0.0;
+    playbarSeekTo(TARGET);
+    damageEntire(); // the fill moves now, not when the client answers
+}
+
 // Ask the client to seek, and remember what we asked for so the bar can show it
 // until the answer arrives.
 void CVtbDeco::playbarSeekTo(double frac) {
@@ -1927,9 +1991,11 @@ void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEven
         SVtbAppReg reg;
         if (!VtbIpc::get(appPid(), reg))
             return;
+        // Cancelled unconditionally, even when the accumulated remainder is too
+        // small to move anything yet: the track owns this wheel either way, and
+        // letting a sub-pixel leftover through would scroll the app underneath.
         info.cancelled = true; // scrub, don't hand the wheel to the app
-        playbarSeekTo(playbarFrac(reg) + (e.delta > 0 ? VTB_PLAYBAR_SCROLL : -VTB_PLAYBAR_SCROLL));
-        damageEntire(); // the fill moves now, not when the client answers
+        playbarScrollBy(reg, e);
         return;
     }
 
@@ -2739,6 +2805,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         const double scl = MON ? MON->m_scale : 1.0;
         if (VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, BOX.h, scl, track) && track.containsPoint(COORDS)) {
             m_bPlaybarDragging = true;
+            m_playbarScrollAcc = 0.0; // a grab supersedes any carried scroll remainder
             m_playbarDragFrac  = std::clamp((COORDS.y - track.y) / track.h, 0.0, 1.0);
             playbarSeekTo(m_playbarDragFrac);
             damageEntire();
