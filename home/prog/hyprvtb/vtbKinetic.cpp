@@ -16,7 +16,9 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <sstream>
 
 // ---------------------------------------------------------------------------
@@ -97,7 +99,9 @@ double CVtbKinetic::effFriction() const {
     return std::clamp(eff("friction", Cfg::kineticFriction()), 0.5, 20.0);
 }
 double CVtbKinetic::effMinStartVelocity() const {
-    return std::clamp(eff("min_start_velocity", Cfg::kineticMinStartVelocity()), 0.0, 5000.0);
+    // Lower bound 1.0, matching the hyprlang min on the config key: a runtime
+    // override must not be a back door to the floor of zero that key forbids.
+    return std::clamp(eff("min_start_velocity", Cfg::kineticMinStartVelocity()), 1.0, 5000.0);
 }
 double CVtbKinetic::effMinVelocity() const {
     return std::clamp(eff("min_velocity", Cfg::kineticMinVelocity()), 1.0, 500.0);
@@ -136,6 +140,45 @@ int CVtbKinetic::effDebug() const {
 void CVtbKinetic::debugLog(int level, const std::string& msg) {
     if (effDebug() >= level)
         Hl::log("[hyprvtb kinetic] " + msg);
+}
+
+// ---------------------------------------------------------------------------
+// the readback channel
+// ---------------------------------------------------------------------------
+//
+// `hyprctl eval` NEVER returns a value on this Hyprland. A chunk that succeeds
+// prints exactly "ok", whatever it evaluates to; the only text that comes back
+// out is an error message (`hyprctl eval 'error("x")'` -> "error: … x"). So a
+// lua function's return value is unreadable from a script, and every one of
+// this module's introspection calls would otherwise be write-only.
+//
+// Hence a file channel. Each call drops its blob into the plugin's state
+// directory — the same one geometry.tsv and the hot-swap handoff use, which is
+// $HOME-based, so a NESTED test compositor (started with HOME=$RUN/home) writes
+// into the harness's own scratch tree and can neither read nor clobber the live
+// session's files. That isolation is free and needs no instance signature.
+//
+// Atomic via write-then-rename into the same directory, so a poller reading
+// concurrently sees either the previous complete blob or the new one, never a
+// half-written file. Failures are silent on purpose: this is a diagnostic, and a
+// full disk must not take a code path that the compositor depends on.
+void CVtbKinetic::publish(const char* filename, const std::string& body) {
+    std::error_code   ec;
+    const auto        DIR = std::filesystem::path(vtbStateDir());
+    std::filesystem::create_directories(DIR, ec); // may already exist; ec swallows that
+    const auto FINAL = DIR / filename;
+    const auto TMP   = DIR / (std::string(filename) + ".tmp");
+    {
+        std::ofstream f(TMP, std::ios::trunc);
+        if (!f.good())
+            return;
+        f << body;
+        if (!f.good())
+            return;
+    } // closed — and therefore flushed — before the rename
+    std::filesystem::rename(TMP, FINAL, ec);
+    if (ec)
+        std::filesystem::remove(TMP, ec); // don't leave a .tmp behind on failure
 }
 
 // Tick period. rate_hz 0 (the default) follows the latched window's monitor,
@@ -1159,10 +1202,13 @@ void CVtbKinetic::cancelNow() {
     }
 }
 
+// NB written unconditionally, including when the trace is empty: "this fling
+// emitted nothing" is a meaningful answer, and skipping the write would leave a
+// stale file that reads as if it were the answer.
 std::string CVtbKinetic::dumpJson() {
     static const char* NAMES[] = {"idle", "tracking", "flying", "grace"};
     std::ostringstream o;
-    o << "{\"state\":\"" << NAMES[(int)m_phase] << "\",\"friction\":" << std::format("{:.3f}", jnum(effFriction())) << ",\"vx\":" << std::format("{:.2f}", jnum(m_vx))
+    o << "{\"seq\":" << ++m_introspectSeq << ",\"state\":\"" << NAMES[(int)m_phase] << "\",\"friction\":" << std::format("{:.3f}", jnum(effFriction())) << ",\"vx\":" << std::format("{:.2f}", jnum(m_vx))
       << ",\"vy\":" << std::format("{:.2f}", jnum(m_vy)) << ",\"dry\":" << (m_dry ? "true" : "false") << ",\"owed\":[" << (m_owedX ? "true" : "false") << ","
       << (m_owedY ? "true" : "false") << "],\"trace\":[";
     for (size_t i = 0; i < m_trace.size(); i++) {
@@ -1171,7 +1217,9 @@ std::string CVtbKinetic::dumpJson() {
         o << '[' << m_trace[i].first << ',' << std::format("{:.4f}", jnum(m_trace[i].second)) << ']';
     }
     o << "]}";
-    return o.str();
+    const auto BODY = o.str();
+    publish("kinetic-dump.json", BODY + "\n");
+    return BODY;
 }
 
 std::string CVtbKinetic::statsJson() {
@@ -1201,7 +1249,13 @@ std::string CVtbKinetic::statsJson() {
         o << '"' << jsonEscape(K) << "\":" << V;
     }
     o << "}}";
-    return o.str();
+    const auto BODY = o.str();
+    // "seq N" on its own first line, JSON on the second: these two are .txt, not
+    // .json, precisely so a poller can read the freshness token with `head -1`
+    // without parsing anything. kinetic-dump.json stays pure JSON (its seq is a
+    // field) so `jq` can be pointed straight at it.
+    publish("kinetic-stats.txt", std::format("seq {}\n{}\n", ++m_introspectSeq, BODY));
+    return BODY;
 }
 
 std::string CVtbKinetic::getJson() {
@@ -1224,5 +1278,7 @@ std::string CVtbKinetic::getJson() {
         o << '"' << jsonEscape(K) << "\":" << std::format("{:.4f}", jnum(V));
     }
     o << "}}";
-    return o.str();
+    const auto BODY = o.str();
+    publish("kinetic-get.txt", std::format("seq {}\n{}\n", ++m_introspectSeq, BODY));
+    return BODY;
 }

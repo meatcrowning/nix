@@ -37,9 +37,14 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 // ---- per-class geometry memory --------------------------------------------
 
-std::string vtbStatePath() {
+// See the comment on the declaration in globals.hpp for why this is $HOME-based.
+std::string vtbStateDir() {
     const char* home = std::getenv("HOME");
-    return std::string(home ? home : "") + "/.local/state/hyprvtb/geometry.tsv";
+    return std::string(home ? home : "") + "/.local/state/hyprvtb";
+}
+
+std::string vtbStatePath() {
+    return vtbStateDir() + "/geometry.tsv";
 }
 
 void vtbLoadGeometry() {
@@ -118,8 +123,7 @@ struct SHandoffEntry {
 };
 
 static std::string vtbHandoffPath() {
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : "") + "/.local/state/hyprvtb/handoff.tsv";
+    return vtbStateDir() + "/handoff.tsv";
 }
 
 // Called from PLUGIN_EXIT BEFORE restoreForUnload undoes these states.
@@ -219,8 +223,7 @@ static void vtbApplyHandoff() {
 // at PLUGIN_INIT and only when the session is genuinely empty.
 
 std::string vtbSessionPath() {
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : "") + "/.local/state/hyprvtb/session.tsv";
+    return vtbStateDir() + "/session.tsv";
 }
 
 // Single-quote for /bin/sh, escaping embedded quotes, so argv tokens with
@@ -1209,7 +1212,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.80"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.81"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
