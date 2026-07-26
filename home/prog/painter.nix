@@ -105,5 +105,6 @@ in
     Icon=applications-graphics
     Terminal=false
     Categories=Graphics;2DGraphics;
+    Keywords=bespoke;
   '';
 }

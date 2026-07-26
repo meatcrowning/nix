@@ -60,6 +60,7 @@ in
     Icon=image-x-generic
     Terminal=false
     Categories=Graphics;Viewer;AudioVideo;
+    Keywords=bespoke;
     MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;image/avif;image/tiff;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;
   '';
 }
