@@ -66,6 +66,8 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/View.hpp>
+#include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
@@ -77,7 +79,12 @@
 #include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
+#include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/protocols/types/DataDevice.hpp>
+#include <hyprland/src/debug/log/Logger.hpp>
+
+#include <algorithm>
+#include <cmath>
 
 #if VTB_HL_056
 // 0.56 pulled the window/monitor collections out of CCompositor into free
@@ -411,6 +418,170 @@ namespace Vtb::Hl {
     }
     inline void clearCursorOverride() {
         VtbCursor::overrideController->unsetOverride(VtbCursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+    }
+
+    // ---- input / seat: momentum synthesis (kinetic scroll, added 2.78) ------
+    //
+    // vtbKinetic keeps emitting decaying axis events after the finger leaves the
+    // trackpad. Everything it needs from the compositor passes through here.
+    //
+    // The whole block is pin-identical — `SeatManager.hpp` differs between the
+    // pins ONLY at `nextSerial` and below (:77 gained a `bool enter = false`
+    // parameter, plus three pointer-serial methods that exist on the top pin
+    // alone), and nothing here goes near any of them. An axis event carries no
+    // serial, so there is no reason to.
+    //
+    // NOTE the delivery model, because it shapes the whole module:
+    // sendPointerAxis takes NO surface argument — it always sends to whatever
+    // `m_state.pointerFocus` currently is. A fling therefore cannot be latched
+    // to its original target; it can only be validated against it and dropped
+    // when focus moves.
+
+    // A synthetic axis value that must never reach the wire, and the reason the
+    // module counts every refusal instead of shrugging at it.
+    //
+    // This is the degenerate-rect lesson transposed to the protocol. Two values
+    // are load-bearing rather than merely odd:
+    //   * 0.0  — `SeatManager.cpp` (:367-368 air / :439-440 top) turns a
+    //            zero-value send on a non-WHEEL source into `wl_pointer.axis_stop`.
+    //            So a rounding artefact mid-tail does not drop a frame, it ENDS
+    //            the client's scroll sequence — which is precisely the signal
+    //            every client-side fling estimator waits for. The one legal zero
+    //            goes through sendAxisStop() below, and nowhere else.
+    //   * NaN/inf — nothing upstream guards them: `Seat.cpp:242-250` checks only
+    //            the surface and the caps, then calls `wl_fixed_from_double`,
+    //            a union bit-trick that yields an arbitrary int32.
+    // The magnitude clamp is the third: `wl_fixed_t` is 24.8 signed, so |value|
+    // above 8388607 wraps and the content jumps BACKWARDS. 4000 px in one tick
+    // is already far past anything the physics can produce (a 6000 px/s cap at
+    // 60 Hz is 100 px), so the clamp only ever catches a bug.
+    inline constexpr double AXIS_VALUE_MAX = 4000.0;
+
+    // Emit one synthetic axis event. Returns false if the value was REFUSED —
+    // callers count that; it must stay at zero (the wire-level equivalent of
+    // "we never handed Hyprland a zero-area box").
+    //
+    // discrete/value120 are passed through for signature fidelity with
+    // CInputManager::onMouseWheel's own call, but the module always passes 0/0:
+    // `sendPointerAxis` skips that whole branch for a non-WHEEL source anyway,
+    // and wayland.xml says value120 "must not be zero" — sending detents is what
+    // would knock a client out of smooth/pixel mode. SeatManager.hpp:64-65,
+    // character-identical on both pins.
+    [[nodiscard]] inline bool sendAxis(uint32_t timeMs, wl_pointer_axis axis, double value, int32_t discrete, int32_t value120, wl_pointer_axis_source source,
+                                       wl_pointer_axis_relative_direction relative) {
+        if (!std::isfinite(value) || value == 0.0) // GUARD (see above)
+            return false;
+        g_pSeatManager->sendPointerAxis(timeMs, axis, std::clamp(value, -AXIS_VALUE_MAX, AXIS_VALUE_MAX), discrete, value120, source, relative);
+        return true;
+    }
+
+    // The terminal `wl_pointer.axis_stop`, and the ONLY sanctioned zero send.
+    // Named separately from sendAxis because it is a protocol OBLIGATION, not an
+    // optimisation: a client left without it believes the scroll sequence is
+    // still open forever (Qt keeps `scrollingPhase` true, GTK keeps `scroll->active`).
+    inline void sendAxisStop(uint32_t timeMs, wl_pointer_axis axis, wl_pointer_axis_source source, wl_pointer_axis_relative_direction relative) {
+        g_pSeatManager->sendPointerAxis(timeMs, axis, 0.0, 0, 0, source, relative);
+    }
+
+    // MANDATORY once per tick, and the reason the module cannot use
+    // CInputManager::onMouseWheel: for FINGER/CONTINUOUS that function sets
+    // `m_pointerAxisFramePending` and defers the frame to a real device frame
+    // event, which a timer does not have — the client would buffer the axis
+    // forever, and the flag is private. SeatManager.hpp:62 both pins.
+    inline void sendPointerFrame() {
+        g_pSeatManager->sendPointerFrame();
+    }
+
+    // Who the seat is currently sending pointer events to. SeatManager.hpp:89
+    // (air) / :92 (top) — same member, line numbers only.
+    inline SP<CWLSurfaceResource> pointerFocusSurface() {
+        return g_pSeatManager->m_state.pointerFocus.lock();
+    }
+    // Momentum must die when focus moves — see the delivery-model note above.
+    // SeatManager.hpp:105 (air) / :108 (top), CSignalT<> on both.
+    inline Hyprutils::Signal::CHyprSignalListener listenPointerFocusChange(std::function<void()> fn) {
+        return g_pSeatManager->m_events.pointerFocusChange.listen(std::move(fn));
+    }
+
+    // The pointer is over a layer surface (panel / lock screen / launcher).
+    // A blanket "no momentum there" is what keeps the Quickshell bar's volume
+    // and brightness sliders precise — they act per EVENT, so a coast would fire
+    // dozens of wpctl spawns. InputManager.hpp:199 (air) / :202 (top), public.
+    inline bool pointerOnLayerSurface() {
+        return g_pInputManager->m_lastFocusOnLS;
+    }
+    // A game has grabbed/locked the pointer. InputManager.hpp:117 / :119.
+    inline bool pointerConstrained() {
+        return g_pInputManager->isConstrained();
+    }
+    // Every pointer device. The module needs the list for two things the event
+    // bus cannot give it: hold-gesture signals (the bus has swipe and pinch but
+    // NO hold on either pin) and the per-device scroll factor (the axis signal
+    // carries no device). InputManager.hpp:162 (air) / :165 (top), public —
+    // `private:` starts at :216 / :219.
+    inline const std::vector<SP<IPointer>>& pointers() {
+        return g_pInputManager->m_pointers;
+    }
+    // Proxy for "the seat still advertises a pointer capability".
+    //
+    // The real read — `PROTO::seat->m_currentCaps & HID_INPUT_CAPABILITY_POINTER`,
+    // the gate every CWLPointerResource::sendAxis* silently bails on
+    // (Seat.cpp:246-247 …) — is UNREACHABLE from a plugin, twice over:
+    // `m_currentCaps` is private with a fixed friend list (Seat.hpp:196), and no
+    // `PROTO::` symbol is exported by the compositor binary at all (`nm -D`
+    // on both pins: zero matches), so naming `PROTO::seat` would bind to this
+    // .so's own null UP and dereference it. This is the observable half of the
+    // same condition — the caps are derived from the device list — and it costs
+    // one comparison.
+    inline bool anyPointerDevice() {
+        return !g_pInputManager->m_pointers.empty();
+    }
+    // Modifier bits currently held down, in HL_MODIFIER_* space (IKeyboard.hpp:14-21,
+    // byte-identical on both pins; `m_modifiersState.depressed` at :106-107 is
+    // the same mask IKeyboard.cpp:357 hands to the keybind matcher). Zero when
+    // there is no keyboard — a machine with none cannot be holding Ctrl.
+    inline uint32_t modsDepressed() {
+        const auto KB = g_pSeatManager->m_keyboard.lock();
+        return KB ? KB->m_modifiersState.depressed : 0u;
+    }
+
+    // Surface -> view -> window/layer-surface. Pin-identical, so NO version arm:
+    // going through the view indirection sidesteps the one place the two trees
+    // really differ (0.55's g_pCompositor->getWindowFromSurface vs 0.56's
+    // Desktop::viewState()->query()…runWindow()). WLSurface.hpp:79 (air) / :76
+    // (top) for fromResource, :43 / :45 for view(), Window.hpp:120 and
+    // LayerSurface.hpp:18 for fromView on both.
+    inline SP<Desktop::View::IView> viewOf(SP<CWLSurfaceResource> surf) {
+        if (!surf)
+            return nullptr;
+        const auto WLS = Desktop::View::CWLSurface::fromResource(surf);
+        return WLS ? WLS->view() : nullptr;
+    }
+    inline PHLWINDOW windowFromSurface(SP<CWLSurfaceResource> surf) {
+        return Desktop::View::CWindow::fromView(viewOf(surf));
+    }
+    inline PHLLS layerFromSurface(SP<CWLSurfaceResource> surf) {
+        return Desktop::View::CLayerSurface::fromView(viewOf(surf));
+    }
+
+    // A monitor's refresh rate, for pacing the momentum timer. Same expression
+    // on both pins even though the header moved (helpers/Monitor.hpp:134 air ->
+    // output/Monitor.hpp:92 top) and the class gained a namespace — PHLMONITOR
+    // absorbs both.
+    inline float refreshHz(PHLMONITOR m) {
+        return m ? m->m_refreshRate : 0.f;
+    }
+
+    // The compositor's own log. `Log::logger` is an inline UP<> in a header, so
+    // this only works because both compositor binaries export it AND its guard
+    // variable as STB_GNU_UNIQUE (`nm -D` shows `u _ZN3Log6loggerE` /
+    // `u _ZGVN3Log6loggerE`) — the plugin's copy therefore merges with the
+    // compositor's instead of running its own initializer over it. The
+    // string_view overload is used deliberately: it is a directly exported
+    // symbol on both pins, whereas the variadic template's BODY differs between
+    // them (0.55 caches a `static bool TRACE`, 0.56 reads a member).
+    inline void log(const std::string& msg) {
+        Log::logger->log(Log::DEBUG, msg);
     }
 
     // ---- event loop: timers and deferred work ------------------------------

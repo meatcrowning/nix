@@ -1852,44 +1852,87 @@ void CVtbDeco::ensureEditCaretVisible() {
         m_pEditTex = nullptr; // scrolled -> rebuild the (substring) texture
 }
 
-// Wheel while the address editor is open scrolls the stacked URL instead of the
-// page (we own the keyboard grab; owning the wheel too keeps a long URL
-// navigable). Only the focused/editing window's deco consumes it.
-void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEvent& e) {
-    // scroll over the media scrub bar seeks it (viewer video). Only the deco
+// Would this titlebar eat a vertical wheel event at this cursor position?
+//
+// Factored out of onMouseAxis so vtbKinetic can ask the same question BEFORE
+// starting a fling (and again on every tick of one) — a momentum tail poured
+// into the PLAYBAR would scrub a song by minutes, and into an open address
+// editor would scroll the URL instead of the page. It has to be a separate
+// predicate rather than a reading of `info.cancelled`, because hyprutils calls
+// every listener on a signal unconditionally and the kinetic listener is
+// registered first: it would always see `false` no matter what a deco does
+// afterwards.
+//
+// The two branches below are the ORIGINAL gates, moved verbatim; the handler
+// now calls this and then does exactly what it did before. Not const: it runs
+// through appPid()/assignedBoxGlobal()/playbarTrackLocal()/shadeOccludedAt(),
+// which cache and would each have to be const-qualified in turn.
+bool CVtbDeco::consumesAxisAt(const Vector2D& mouse) {
+    // Scroll over the media scrub bar seeks it (viewer video). Only the deco
     // whose track actually sits under the cursor acts; everyone else passes the
     // wheel through untouched.
-    if (!m_bEditing && e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL && e.delta != 0.0) {
-        const auto   PW  = m_pWindow.lock();
-        const auto   MON = PW ? PW->m_monitor.lock() : nullptr;
+    if (!m_bEditing) {
+        // Same predicates as before, in a cheaper ORDER: a momentum fling asks
+        // this of every bar on every tick, so the map lookup that rules out
+        // every window without a scrub bar (i.e. all but viewer/player) has to
+        // come before the hit test, not after it. All of these are
+        // side-effect-free — appPid() only fills its own cache — so reordering
+        // cannot change the answer.
+        const auto PW = m_pWindow.lock();
+        if (!PW)
+            return false;
+        SVtbAppReg reg;
+        if (!VtbIpc::get(appPid(), reg) || !reg.playbar)
+            return false;
+        const auto   MON = PW->m_monitor.lock();
         const double scl = MON ? MON->m_scale : 1.0;
-        SVtbAppReg   reg;
         CBox         track;
-        const auto   MOUSE = Hl::mouse();
-        const auto   LOCAL = MOUSE - assignedBoxGlobal().pos();
+        if (!playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) || !track.containsPoint(mouse - assignedBoxGlobal().pos()))
+            return false;
         // ...and only when the track is the topmost thing at the cursor: a
         // shaded bar draws under every window, and an unshaded bar can have
         // another window stacked over it — either way the wheel belongs to
         // what's on top, not the track underneath.
-        const bool   occluded = m_bRolledUp
-              ? shadeOccludedAt(MOUSE)
-              : Hl::windowAtCursorProps(MOUSE) != PW;
-        if (PW && !occluded && VtbIpc::get(appPid(), reg) && reg.playbar &&
-            playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) && track.containsPoint(LOCAL)) {
-            info.cancelled = true; // scrub, don't hand the wheel to the app
-            playbarSeekTo(playbarFrac(reg) + (e.delta > 0 ? VTB_PLAYBAR_SCROLL : -VTB_PLAYBAR_SCROLL));
-            damageEntire(); // the fill moves now, not when the client answers
-            return;
-        }
+        return !(m_bRolledUp ? shadeOccludedAt(mouse) : Hl::windowAtCursorProps(mouse) != PW);
     }
 
-    if (!m_bEditing)
-        return;
+    // Editing: this deco owns the wheel, but only while it is also the focused
+    // window (focus can slip away before renderPass cancels the edit).
     const auto PWINDOW = m_pWindow.lock();
-    if (!PWINDOW || PWINDOW != Hl::focusedWindow())
-        return;
+    return PWINDOW && PWINDOW == Hl::focusedWindow();
+}
+
+// Does ANY titlebar consume a vertical wheel at this point? Declared in
+// globals.hpp so vtbKinetic.cpp can call it without naming a decoration type.
+bool vtbAxisConsumerAtCursor(const Vector2D& mouse) {
+    if (!g_pGlobalState)
+        return false;
+    for (auto& b : g_pGlobalState->bars) {
+        if (b && b->consumesAxisAt(mouse))
+            return true;
+    }
+    return false;
+}
+
+// Wheel while the address editor is open scrolls the stacked URL instead of the
+// page (we own the keyboard grab; owning the wheel too keeps a long URL
+// navigable). Only the focused/editing window's deco consumes it.
+void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEvent& e) {
     if (e.axis != WL_POINTER_AXIS_VERTICAL_SCROLL || e.delta == 0.0)
         return;
+    if (!consumesAxisAt(Hl::mouse()))
+        return;
+
+    if (!m_bEditing) {
+        SVtbAppReg reg;
+        if (!VtbIpc::get(appPid(), reg))
+            return;
+        info.cancelled = true; // scrub, don't hand the wheel to the app
+        playbarSeekTo(playbarFrac(reg) + (e.delta > 0 ? VTB_PLAYBAR_SCROLL : -VTB_PLAYBAR_SCROLL));
+        damageEntire(); // the fill moves now, not when the client answers
+        return;
+    }
+
     info.cancelled = true; // scroll the editor, not the page
     const int totalCp   = countCp(m_editBuf, m_editBuf.size());
     const int rows      = editVisibleRows();

@@ -104,6 +104,13 @@ class CVtbDeco : public IHyprWindowDecoration {
     // position if it's currently minimized, its live goal otherwise).
     CBox                               memorableGeometry();
 
+    // Would this titlebar eat a vertical wheel event at this cursor position
+    // (PLAYBAR scrub track / open address editor)? Public because vtbKinetic
+    // has to ask before starting a momentum fling and on every tick of one —
+    // reached through the free vtbAxisConsumerAtCursor() in globals.hpp, so the
+    // kinetic module never names a decoration type.
+    bool                               consumesAxisAt(const Vector2D& mouse);
+
     CDecoRef                           m_self;
 
   private:
