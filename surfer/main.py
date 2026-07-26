@@ -29,8 +29,8 @@ import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
-                            QBuffer, QIODevice, QEvent, Qt)
-from PySide6.QtGui import QGuiApplication, QColor
+                            QBuffer, QIODevice, QEvent, Qt, QPoint, QCoreApplication)
+from PySide6.QtGui import QGuiApplication, QColor, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
 from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
@@ -1131,22 +1131,50 @@ class DarkMode(QObject):
         )
 
 
+# QtWebEngine ignores pixelDelta() entirely and scrolls by
+# angleDelta/120 * wheelScrollLines(3) * 20 px (web_event_factory.cpp), while
+# QtWayland synthesizes angleDelta = pixelDelta * 12 for touchpads — so one
+# finger-pixel of trackpad scroll moves a page ~6 px where the QML apps
+# (player/filer, pixelDelta 1:1) move 1. This factor cancels that: 1/6 puts a
+# web page at parity with the rest of the desktop, drag phase and kinetic
+# coast alike (scaling at the event source keeps the coast consistent with
+# the drag — deliberately NOT special-cased in the compositor's momentum
+# engine). Raise it if pages should feel a bit brisker than lists.
+WHEEL_GAIN = 1 / 6
+
+
 class ZoomFilter(QObject):
-    """Ctrl+wheel and Ctrl +/-/0 -> shared zoom, installed on the top-level
-    WINDOW (not the QApplication — an app-wide event filter segfaults this
-    PySide6/Py3.14 build wrapping transient QObjects during focus events; a
-    window-scoped filter only ever sees `obj == the window`, which is stable).
-    The QQuickWindow receives input from the platform BEFORE it is delivered
-    down to the WebEngineView item, so consuming it here (return True) both
-    drives our zoom AND suppresses Chromium's own Ctrl+wheel / Ctrl+/- zoom —
-    leaving zoomFactor to change only when we set it. Plain input falls through
-    untouched."""
+    """Ctrl+wheel and Ctrl +/-/0 -> shared zoom, plus trackpad wheel-gain
+    correction, installed on the top-level WINDOW (not the QApplication — an
+    app-wide event filter segfaults this PySide6/Py3.14 build wrapping
+    transient QObjects during focus events; a window-scoped filter only ever
+    sees `obj == the window`, which is stable). The QQuickWindow receives
+    input from the platform BEFORE it is delivered down to the WebEngineView
+    item, so consuming it here (return True) both drives our zoom AND
+    suppresses Chromium's own Ctrl+wheel / Ctrl+/- zoom — leaving zoomFactor
+    to change only when we set it.
+
+    Plain (unmodified) wheel events are consumed and re-sent scaled by
+    WHEEL_GAIN, with fractional remainders carried so the sub-pixel tail of a
+    kinetic glide is not rounded to death, and zero-delta phase markers
+    (ScrollBegin/ScrollEnd) passed through untouched so scroll sequences stay
+    coherent. NB this is window-wide: wheel over the file picker / drawers is
+    scaled too — acceptable, those are small keyboard-first surfaces."""
 
     _ZOOM_IN_KEYS = (Qt.Key.Key_Plus, Qt.Key.Key_Equal)  # Ctrl++ and Ctrl+=
 
     def __init__(self, zoom, parent=None):
         super().__init__(parent)
         self._zoom = zoom
+        self._rescaling = False  # re-sent events must not be scaled again
+        self._carry_px = [0.0, 0.0]  # fractional pixelDelta remainder (x, y)
+        self._carry_ang = [0.0, 0.0]  # fractional angleDelta remainder (x, y)
+
+    def _scaled(self, carry, i, v):
+        carry[i] += v * WHEEL_GAIN
+        out = int(carry[i])
+        carry[i] -= out
+        return out
 
     def eventFilter(self, obj, event):
         t = event.type()
@@ -1156,6 +1184,27 @@ class ZoomFilter(QObject):
                 if dy != 0:
                     self._zoom.bump(1 if dy > 0 else -1)
                     return True
+            elif not self._rescaling:
+                px, ang = event.pixelDelta(), event.angleDelta()
+                if px.isNull() and ang.isNull():
+                    return False  # phase marker (Begin/End): pass untouched
+                spx = QPoint(self._scaled(self._carry_px, 0, px.x()),
+                             self._scaled(self._carry_px, 1, px.y()))
+                sang = QPoint(self._scaled(self._carry_ang, 0, ang.x()),
+                              self._scaled(self._carry_ang, 1, ang.y()))
+                if spx.isNull() and sang.isNull():
+                    return True  # everything carried; a zero event would read
+                    # as a fake phase marker downstream, so emit nothing
+                ev = QWheelEvent(event.position(), event.globalPosition(),
+                                 spx, sang, event.buttons(),
+                                 event.modifiers(), event.phase(),
+                                 event.inverted())
+                self._rescaling = True
+                try:
+                    QCoreApplication.sendEvent(obj, ev)
+                finally:
+                    self._rescaling = False
+                return True
         elif t == QEvent.Type.KeyPress:
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 k = event.key()
