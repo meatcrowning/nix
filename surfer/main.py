@@ -1140,7 +1140,28 @@ class DarkMode(QObject):
 # coast alike (scaling at the event source keeps the coast consistent with
 # the drag — deliberately NOT special-cased in the compositor's momentum
 # engine). Raise it if pages should feel a bit brisker than lists.
+#
+# IT APPLIES TO TOUCHPADS ONLY. The correction above is entirely about
+# QtWayland's angleDelta = 12 x finger-pixels synthesis; a real mouse wheel
+# has no such inflation — one detent is 120, which QtWebEngine turns into the
+# same 3 lines x 20 px every other Chromium on the planet scrolls. Applying
+# the gain there made top's wheel scroll web pages at 1/6 speed, which is the
+# bug this note exists to prevent a third time.
+#
+# Telling them apart is exact, not a heuristic (qtbase 6.11
+# qwaylandinputdevice.cpp): FrameData::hasPixelDelta() returns false for
+# axis_source_wheel unconditionally, so a wheel NEVER carries a pixelDelta and
+# always reports angleDelta = -delta120, i.e. +-120 per detent; a touchpad
+# reports either a non-null pixelDelta or, when the finger moved under a
+# pixel, a bare angleDelta below 120. Same discriminator the QML apps use in
+# WheelScroll.qml — keep the two in step.
 WHEEL_GAIN = 1 / 6
+
+
+def _is_wheel_detent(px, ang):
+    """True for a real mouse wheel notch (leave it alone), False for a
+    touchpad's high-resolution stream (scale it)."""
+    return px.isNull() and max(abs(ang.x()), abs(ang.y())) >= 120
 
 
 class ZoomFilter(QObject):
@@ -1154,9 +1175,10 @@ class ZoomFilter(QObject):
     suppresses Chromium's own Ctrl+wheel / Ctrl+/- zoom — leaving zoomFactor
     to change only when we set it.
 
-    Plain (unmodified) wheel events are consumed and re-sent scaled by
-    WHEEL_GAIN, with fractional remainders carried so the sub-pixel tail of a
-    kinetic glide is not rounded to death, and zero-delta phase markers
+    Plain (unmodified) TOUCHPAD wheel events are consumed and re-sent scaled
+    by WHEEL_GAIN, with fractional remainders carried so the sub-pixel tail of
+    a kinetic glide is not rounded to death; real mouse-wheel detents
+    (_is_wheel_detent) and zero-delta phase markers
     (ScrollBegin/ScrollEnd) passed through untouched so scroll sequences stay
     coherent. NB this is window-wide: wheel over the file picker / drawers is
     scaled too — acceptable, those are small keyboard-first surfaces."""
@@ -1188,6 +1210,8 @@ class ZoomFilter(QObject):
                 px, ang = event.pixelDelta(), event.angleDelta()
                 if px.isNull() and ang.isNull():
                     return False  # phase marker (Begin/End): pass untouched
+                if _is_wheel_detent(px, ang):
+                    return False  # real wheel: Chromium's own step, untouched
                 spx = QPoint(self._scaled(self._carry_px, 0, px.x()),
                              self._scaled(self._carry_px, 1, px.y()))
                 sang = QPoint(self._scaled(self._carry_ang, 0, ang.x()),
