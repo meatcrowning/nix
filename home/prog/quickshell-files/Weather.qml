@@ -26,6 +26,28 @@ Singleton {
 
     function refetch() { fetchProc.running = false; fetchProc.running = true; }
 
+    // ---- retry on failure ------------------------------------------------
+    // The refresh cadence is 20 minutes, so a SINGLE failed fetch used to
+    // blank the widget for the next 20 — and the fetch that fails is almost
+    // always the one at startup: the panel is (re)started by a rebuild, whose
+    // activation restarts NetworkManager/avahi underneath it, so curl runs
+    // with no DNS and exits non-zero. Same story for a login before the link
+    // is up, or a wifi blip. So a failure schedules its own retry on a short
+    // backoff (15s, doubling to 4min) instead of waiting for the next tick.
+    property int retryMs: 15000
+    function failed() {
+        retryTimer.interval = root.retryMs;
+        retryTimer.restart();
+        root.retryMs = Math.min(root.retryMs * 2, 240000);
+    }
+    function succeeded() { retryTimer.stop(); root.retryMs = 15000; }
+
+    Timer {
+        id: retryTimer
+        repeat: false
+        onTriggered: root.refetch()
+    }
+
     // ---- reload continuity (see shell.qml's `persist` block) --------------
     // The forecast is a 20-minute-cadence network fetch, so without this a
     // reload collapses WeatherPanel to its header for however long curl takes
@@ -70,6 +92,10 @@ Singleton {
     Process {
         id: fetchProc
         command: ["curl", "-sf", "--max-time", "15", root.url]
+        // curl exits non-zero on a DNS/connect/HTTP error and prints nothing
+        // (-sf), so this is where a dead network is seen. onStreamFinished has
+        // already run by then, so a successful parse has cleared the backoff.
+        onExited: (code, status) => { if (code !== 0) root.failed(); }
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
@@ -91,8 +117,10 @@ Singleton {
                     }
                     root.days = out;
                     root.stateRev++;
+                    root.succeeded();
                 } catch (e) {
                     // keep the last good values; "--" only before first fetch
+                    root.failed();
                 }
             }
         }
