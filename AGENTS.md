@@ -108,6 +108,14 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   the tracked resize means the edge permanently chases the cursor from behind,
   which reads as lag. `snapping` marks the discrete jumps (entry, collapse
   preview) that *should* glide.
+- **Never quantize or animate the LIVE drag width, and don't touch
+  `exclusiveZone` during a drag.** Quantizing it to the 8px grid made the edge
+  advance in hops instead of following the cursor; the grid only has to hold for
+  the COMMITTED width (that's what the wallpaper is composed against), so
+  `quantize()` belongs in `commitDrag()`. And re-writing the exclusive zone per
+  pointer event makes Hyprland recompute the reserved area and re-run the layout
+  in the same frame the resize is trying to land in — it's frozen at the
+  committed width mid-drag and applied once on release.
 - **Growing the panel pushes floating windows out from under it**
   (`scripts/push-windows.py`, run from `applyReserve()` only when the reserve
   GREW). The exclusive zone reflows tiled windows only, and this desktop is
@@ -116,6 +124,19 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   under the Lua config are `hl.dsp.window.move({window=,x=,y=})` and
   `hl.dsp.window.resize({window=,x=,y=})`, both ABSOLUTE, and **resize must come
   before move** — resizing re-anchors the window, undoing a move issued first.
+  - **Push the FRAME, not the client rect.** `at`/`size` from `hyprctl clients`
+    exclude the chrome, and `hyprctl` reports decoration extents nowhere. The
+    hyprvtb titlebar is VERTICAL on the window's RIGHT edge
+    (`DECORATION_EDGE_RIGHT`, `desiredExtents` right = `bar_width * 2` = 64px),
+    which is the same side the panel is on — so client-rect math leaves exactly
+    the titlebar covered, the bug reported on 2026-07-26. Reconstruct the frame
+    from `plugin:hyprvtb:{enabled,bar_width}` + `general:border_size` via
+    `hyprctl getoption -j` (`enabled` is a global bool, not per-window).
+- **Verify the drag by MEASURING it:** `qs ipc call view geom` (widths +
+  thresholds) and `qs ipc call view trace` (one
+  `dragWidth,surfaceWidth,liveWidth` sample per pointer event of the last drag).
+  This gesture cannot be judged from a log line and has been mis-diagnosed twice
+  by reasoning about it instead; read the trace.
 - **Dock mode retires the desktop widgets** (they belong to the grid there), and
   restores the exact pre-dock pin set on the way back. `shell.qml`'s
   `Component.onCompleted` returns early in dock mode so neither the reload

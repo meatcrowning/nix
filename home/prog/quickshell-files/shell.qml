@@ -460,6 +460,25 @@ Scope {
         function dock(): void { ViewMode.setMode("dock"); ViewMode.applyReserve(); }
         function classic(): void { ViewMode.setMode("classic"); ViewMode.applyReserve(); }
         function mode(): string { return SettingsStore.d.viewMode; }
+
+        // Geometry + the last drag's trace, for verifying the edge gesture
+        // without watching it: `qs ipc call view geom` / `... view trace`.
+        // Each trace sample is dragWidth,surfaceWidth,liveWidth for one pointer
+        // event — if the middle column chases the first instead of matching it,
+        // the surface is lagging; if either oscillates around a value the
+        // pointer is holding still at, the tracking maths is wrong.
+        function geom(): string {
+            return "mode=" + SettingsStore.d.viewMode
+                + " barWidth=" + ViewMode.barWidth
+                + " liveWidth=" + ViewMode.liveWidth
+                + " dockPx=" + ViewMode.dockPx
+                + " range=" + ViewMode.minPx + "-" + ViewMode.maxPx
+                + " enterPx=" + Math.round(ViewMode.enterPx)
+                + " exitPx=" + Math.round(ViewMode.exitPx)
+                + " dragging=" + ViewMode.dragging
+                + " samples=" + ViewMode.dragTrace.length;
+        }
+        function trace(): string { return ViewMode.dragTrace.join(" "); }
     }
 
     // Reload-continuity probe: `qs ipc call state carried`. Reports how much of
@@ -649,7 +668,15 @@ Scope {
             // maximized windows. This mirrors the left screen edge, where the
             // EdgeAccent and a window's left border already share the same
             // pixels. Keep in sync with the window border (hypr border_size).
-            exclusiveZone: ViewMode.liveWidth - Theme.windowBorderWidth
+            // Frozen at the COMMITTED width during a drag. Changing the
+            // exclusive zone makes Hyprland recompute the monitor's reserved
+            // area and re-run the layout, and doing that on every pointer event
+            // fights the same frame the resize is trying to land in. Nothing is
+            // lost by deferring it: windows are pushed clear once, on release
+            // (applyReserve), which is also when the wallpaper recomposes.
+            exclusiveZone: (ViewMode.dragging ? ViewMode.barWidth
+                                              : ViewMode.liveWidth)
+                           - Theme.windowBorderWidth
             color: Theme.bg
 
             WlrLayershell.namespace: "qs-bar"
@@ -911,12 +938,14 @@ Scope {
                     grabOffset = 0;
                     grabOffset = bar.width - widthAt(mouse.x);
                     ViewMode.dragWidth = bar.width;
+                    ViewMode.dragTrace.length = 0;
                     ViewMode.dragging = true;
                 }
 
                 onPositionChanged: (mouse) => {
                     if (!ViewMode.dragging) return;
                     ViewMode.dragWidth = widthAt(mouse.x);
+                    ViewMode.traceAdd(bar.width);
                 }
 
                 onReleased: ViewMode.commitDrag(ViewMode.dragWidth)

@@ -34,6 +34,39 @@ def hypr(*args):
     return json.loads(out) if out.strip() else []
 
 
+def option(key, field):
+    """One value out of `hyprctl getoption`. None if absent/unparseable."""
+    out = subprocess.run(["hyprctl", "getoption", key, "-j"],
+                         capture_output=True, text=True).stdout
+    try:
+        return json.loads(out).get(field)
+    except (ValueError, AttributeError):
+        return None
+
+
+def frame_extents():
+    """How far the visible frame extends beyond a window's client area.
+
+    `at`/`size` from `hyprctl clients` are the CLIENT rectangle — they do not
+    include the chrome, and pushing by those alone leaves the chrome behind
+    under the panel, which is the bug this exists to fix.
+
+    hyprvtb's titlebar is VERTICAL and sits on the window's RIGHT edge
+    (getPositioningInfo: DECORATION_EDGE_RIGHT, desiredExtents right =
+    totalBarW() = bar_width * 2) — the same side the panel is normally on, so
+    it is exactly the part that stays covered. `enabled` is a global config
+    bool, not per-window, so every decorated window carries it. Hyprland's own
+    border then wraps window + bar as a single frame (the deco's priority is
+    above the border's), adding border_size on every side.
+
+    Returns (extra_right, border).
+    """
+    border = option("general:border_size", "int") or 0
+    if not option("plugin:hyprvtb:enabled", "bool"):
+        return 0, border
+    return (option("plugin:hyprvtb:bar_width", "int") or 0) * 2, border
+
+
 def main():
     edge = sys.argv[1] if len(sys.argv) > 1 else "right"
     try:
@@ -47,6 +80,7 @@ def main():
     if not monitors:
         return
 
+    extra_right, border = frame_extents()
     cmds = []
     for c in hypr("clients"):
         # Tiled windows are already handled by the exclusive zone. `hidden`
@@ -79,16 +113,26 @@ def main():
         w, h = c["size"]
         addr = c["address"]
 
-        # A window too wide for what's left has to shrink, or no placement can
-        # keep it clear of the panel.
-        new_w = min(w, avail_w)
+        # Work in FRAME coordinates — client rect grown by the chrome — so the
+        # titlebar is pushed clear too, then convert back to the client `at`/
+        # `size` the dispatchers speak.
+        frame_l = x - border
+        frame_w = w + extra_right + 2 * border
+
+        # A frame too wide for what's left has to shrink, or no placement can
+        # keep it clear of the panel. The chrome is fixed-size, so all of the
+        # shrink comes off the client area.
+        new_frame_w = min(frame_w, avail_w)
+        new_w = max(1, new_frame_w - extra_right - 2 * border)
+
         # Then slide it back inside: off the right first, then clamp to the left
-        # (order matters for a window that is exactly avail_w wide).
-        new_x = x
-        if new_x + new_w > avail_r:
-            new_x = avail_r - new_w
-        if new_x < avail_l:
-            new_x = avail_l
+        # (order matters for a frame exactly as wide as the space).
+        new_frame_l = frame_l
+        if new_frame_l + new_frame_w > avail_r:
+            new_frame_l = avail_r - new_frame_w
+        if new_frame_l < avail_l:
+            new_frame_l = avail_l
+        new_x = new_frame_l + border
 
         if new_w != w:
             cmds.append(f'hl.dsp.window.resize({{ window = "address:{addr}", '
