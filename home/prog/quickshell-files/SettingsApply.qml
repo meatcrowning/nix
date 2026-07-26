@@ -13,8 +13,8 @@ import Quickshell.Io
 // GLOBAL input.sensitivity; a per-device override in hyprland.lua (e.g. the
 // trackball) still wins for that device.
 //
-// Night light runs `hyprsunset -t <kelvin>` while enabled and is killed when
-// disabled (hyprsunset restores the normal gamma on exit).
+// It also owns the one hyprsunset daemon, shared by night light (temperature)
+// and negative brightness (gamma) — see the block at the bottom.
 Item {
     id: root
 
@@ -33,7 +33,7 @@ Item {
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
-    Component.onCompleted: applyInput()
+    Component.onCompleted: { applyInput(); syncSunset(); }
 
     Connections {
         target: SettingsStore.d
@@ -44,20 +44,58 @@ Item {
         function onTapToClickChanged() { root.applyInput(); }
     }
 
-    // ---- night light (hyprsunset) ----
-    Process {
-        id: sunset
-        running: SettingsStore.d.nightLight
-        command: ["hyprsunset", "-t", String(SettingsStore.d.nightTemp)]
-    }
-    // hyprsunset takes its temperature as a launch arg and doesn't re-read it, so
-    // when the temperature changes while it's on, cycle it (kill + relaunch a
-    // tick later so the old instance has released before the new one starts).
-    Timer { id: sunsetRestart; interval: 60; onTriggered: sunset.running = true }
-    Connections {
-        target: SettingsStore.d
-        function onNightTempChanged() {
-            if (SettingsStore.d.nightLight) { sunset.running = false; sunsetRestart.restart(); }
+    // ---- hyprsunset: night light + negative brightness ----
+    // ONE daemon serves both (only one client can hold wlr-gamma-control), so
+    // this is the single place that starts, feeds and stops it:
+    //   * night light -> temperature (kelvin)
+    //   * negative brightness (SysInfo.gamma < 100) -> gamma
+    // It runs while either wants it and is killed as soon as neither does —
+    // hyprsunset restores the normal ramp on exit, which is exactly how
+    // negative brightness "turns itself off" on the way back to 0.
+    //
+    // Launch args set the initial state; after that changes go over
+    // hyprsunset's IPC (`hyprctl hyprsunset temperature|gamma`), which is
+    // instant and flicker-free — the old code could only re-apply the
+    // temperature by killing and relaunching. The `pkill -x` in the launch
+    // line takes over any instance started outside the panel (e.g. by hand),
+    // rather than starting a second one that can't grab the gamma control.
+    property bool sunsetWanted: SettingsStore.d.nightLight || SysInfo.gamma < 100
+    readonly property int sunsetTemp: SettingsStore.d.nightLight ? SettingsStore.d.nightTemp : 6000
+    readonly property int sunsetGamma: SysInfo.gamma
+
+    function syncSunset() {
+        if (!root.sunsetWanted) {
+            sunset.running = false;
+            sunsetSettle.stop();
+            return;
         }
+        if (!sunset.running) {
+            sunset.command = ["sh", "-c",
+                "pkill -x hyprsunset; sleep 0.3; exec hyprsunset -t "
+                + root.sunsetTemp + " -g " + root.sunsetGamma];
+            sunset.running = true;
+        } else {
+            pushSunset();
+        }
+        // The daemon isn't listening during that 0.3s handover, and repeated
+        // brightness keys fire far faster than that, so re-assert the final
+        // values once the dust settles.
+        sunsetSettle.restart();
     }
+
+    function pushSunset() {
+        Quickshell.execDetached(["hyprctl", "hyprsunset", "temperature", String(root.sunsetTemp)]);
+        Quickshell.execDetached(["hyprctl", "hyprsunset", "gamma", String(root.sunsetGamma)]);
+    }
+
+    Process { id: sunset }
+    Timer {
+        id: sunsetSettle
+        interval: 450
+        onTriggered: if (root.sunsetWanted && sunset.running) root.pushSunset()
+    }
+
+    onSunsetWantedChanged: syncSunset()
+    onSunsetTempChanged: if (sunsetWanted) syncSunset()
+    onSunsetGammaChanged: if (sunsetWanted) syncSunset()
 }

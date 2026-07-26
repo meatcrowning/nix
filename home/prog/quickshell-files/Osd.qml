@@ -11,7 +11,12 @@ Singleton {
 
     property bool   active: false
     property string kind: "volume"     // "volume" | "brightness"
-    property int    value: 0           // 0-100
+    property int    value: 0           // 0-100, drives the bar fill
+    // What the readout prints. Same as `value` except in negative brightness,
+    // where the bar keeps falling with the gamma while the number goes below
+    // zero ("-20").
+    property int    shown: 0
+    property bool   negative: false    // brightness pushed below hardware 0
     property bool   muted: false
 
     readonly property int holdMs: 1600
@@ -30,9 +35,16 @@ Singleton {
             // as its debounced write was about to fire, so the wrong value
             // got written to the monitor). Just read the value SysInfo is
             // already maintaining instead of re-querying hardware.
-            value = SysInfo.brightness < 0 ? 0 : SysInfo.brightness;
+            negative = SysInfo.negativeBrightness;
+            // In the negative region `value` is the DEPTH below zero (gamma 80
+            // -> 20), which OsdWindow draws hanging down from the top of the
+            // track instead of standing up from the bottom.
+            value = negative ? 100 - SysInfo.gamma
+                             : (SysInfo.brightness < 0 ? 0 : SysInfo.brightness);
+            shown = SysInfo.brightness < 0 ? 0 : SysInfo.brightnessLevel;
             muted = false;
         } else {
+            negative = false;
             readProc.command = ["sh", "-c", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null"];
             readProc.running = false;
             readProc.running = true;
@@ -47,6 +59,7 @@ Singleton {
                 root.muted = /MUTED/.test(t);
                 const m = t.match(/([0-9]*\.?[0-9]+)/);
                 if (m) root.value = Math.round(parseFloat(m[1]) * 100);
+                root.shown = root.value;
                 SysInfo.volume = root.value;
                 SysInfo.muted = root.muted;
             }

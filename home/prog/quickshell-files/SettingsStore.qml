@@ -205,6 +205,10 @@ Singleton {
             property string brightnessBackend: "auto"  // auto | backlight | ddc
             property bool   nightLight: false
             property int    nightTemp: 4000            // kelvin
+            // "Negative brightness": how far below hardware 0 the gamma may be
+            // pulled (hyprsunset gamma %, 100 = off). 20 keeps the screen just
+            // readable at the bottom of the range; 5 is nearly black.
+            property int    gammaFloor: 20
         }
     }
 
@@ -239,6 +243,6 @@ Singleton {
         weatherLon: -134.4197, weatherPlace: "juneau", weatherUnit: "F", weatherRefreshMin: 20,
         worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
         brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
-        nightTemp: 4000
+        nightTemp: 4000, gammaFloor: 20
     })
 }
