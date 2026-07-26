@@ -1637,8 +1637,7 @@ void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEven
               ? shadeOccludedAt(MOUSE)
               : Hl::windowAtCursorProps(MOUSE) != PW;
         if (PW && !occluded && VtbIpc::get(appPid(), reg) && reg.playbar &&
-            playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) &&
-            VECINRECT(LOCAL, track.x, track.y, track.w, track.h)) {
+            playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track) && track.containsPoint(LOCAL)) {
             info.cancelled    = true; // scrub, don't hand the wheel to the app
             const double step = 0.03;
             const double f    = std::clamp((double)reg.playPos + (e.delta > 0 ? step : -step), 0.0, 1.0);
@@ -2458,8 +2457,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         CBox         track;
         const auto   MON = PWINDOW->m_monitor.lock();
         const double scl = MON ? MON->m_scale : 1.0;
-        if (VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, BOX.h, scl, track) &&
-            VECINRECT(COORDS, track.x, track.y, track.w, track.h)) {
+        if (VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, BOX.h, scl, track) && track.containsPoint(COORDS)) {
             m_bPlaybarDragging = true;
             m_playbarDragFrac  = std::clamp((COORDS.y - track.y) / track.h, 0.0, 1.0);
             VtbIpc::sendSeek(appPid(), (float)m_playbarDragFrac);

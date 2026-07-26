@@ -207,6 +207,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     // SEEK with the fraction under the cursor); scrolling nudges. While dragging
     // the fill follows the cursor immediately (m_playbarDragFrac) instead of
     // waiting for the client's echoed PLAYBAR.
+    // Hit-test the track with CBox::containsPoint, NOT VECINRECT: that macro
+    // takes (x1, y1, x2, y2) corners, and feeding it the box's (x, y, w, h)
+    // silently clipped the live target to the top slice of the drawn groove —
+    // the taller the bar, the deader it got (player's 420px track responded
+    // only in its first ~90px, which read as "the scrub bar does nothing").
     bool                 m_bPlaybarDragging = false;
     double               m_playbarDragFrac  = 0.0;
 
