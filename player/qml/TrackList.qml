@@ -85,7 +85,13 @@ Item {
                 anchors.right: rightBits.left
                 anchors.rightMargin: 8
                 y: 1
-                text: title + (root.showArtist && artist ? "  —  " + artist : "")
+                // ASCII hyphen, NOT an em dash: More Perfect DOS VGA has no
+                // U+2014, and the fallback font that supplies it carries a
+                // taller ascent that drops the whole line 5px (ink at row
+                // offsets 8-16 instead of 3-11) — out the bottom of the row
+                // rect, which is what made the current-row highlight and the
+                // hover band look offset from their own text.
+                text: title + (root.showArtist && artist ? "  -  " + artist : "")
                 clip: true
                 height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                 color: row.fg

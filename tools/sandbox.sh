@@ -1,248 +1,221 @@
 #!/usr/bin/env bash
-# An off-screen desktop for testing. Nothing it does appears on the user's
-# monitor.
+# A monitor the user cannot see, for agents to test on.
 #
 # WHY THIS EXISTS
 #
-# Verifying a change used to mean opening a window on the live session — which
-# steals focus, rearranges the user's stack, and (for this repo's plugin) drags
-# the real desktop into whatever is being debugged. The existing nested harness
-# (home/prog/hyprvtb/tools/nested-smoke.sh) already runs a separate Hyprland,
-# but as a WINDOW in the live session, so it is still disruptive.
+# Testing a desktop change used to mean opening a window on the live session:
+# it steals focus, shoves the user's stack around, and drags whatever they were
+# doing into the experiment. This gives that work somewhere else to happen.
 #
-# So: a full desktop nobody can see. `cage` with WLR_BACKENDS=headless is a
-# Wayland compositor rendering to no output at all; a nested Hyprland runs as
-# its single client, with this repo's hyprvtb plugin loaded. Windows opened
-# inside are real windows on a real compositor — decorated, focusable,
-# animating, screenshottable — on a monitor that does not physically exist.
+# Hyprland can add a virtual output at runtime (`hyprctl output create
+# headless`). It is a real monitor in every way the compositor cares about — it
+# has workspaces, it renders every frame, and windows on it are decorated,
+# animated and screenshottable — except that no cable leads anywhere. Windows
+# launched onto it are invisible to the user, and `grim -o` reads its pixels
+# back.
 #
-# Frame callbacks are the reason it is a headless PARENT rather than a hidden
-# window: a nested compositor whose surface is not visible stops being sent
-# frames and quietly freezes mid-animation. A headless wlroots output ticks off
-# a timer instead, so the sandbox keeps rendering at a steady fake refresh rate
-# whether or not anyone is looking.
+# The alternative (a nested Hyprland, as home/prog/hyprvtb/tools/nested-smoke.sh
+# runs) is more isolated but appears as a WINDOW in the live session, so it is
+# just as disruptive. Three headless-parent designs were tried and abandoned
+# before this one: nixpkgs' cage is wlroots 0.17 and offers xdg_wm_base v5,
+# which Hyprland's client side (v6) refuses; sway creates the headless output
+# but has the same v5 ceiling; labwc has the right xdg-shell but on this NVIDIA
+# box either advertises no usable DRM device (endless "Failed to allocate a GBM
+# buffer: bo null") or hands the nested compositor no output at all. This
+# approach needs no extra package and no nesting at all.
+#
+# THE TRADE-OFF, STATED PLAINLY: windows here are in the user's real session,
+# decorated by the LIVE hyprvtb instance. Good for fidelity — you are testing
+# the plugin that is actually running — but a plugin crash still takes the
+# session down, and these are real clients of the real compositor. To test a
+# plugin build that has NOT been switched to yet, use the nested harness.
 #
 # USAGE
 #
-#   tools/sandbox.sh start [WxH]     boot the sandbox (default 1920x1080)
-#   tools/sandbox.sh exec CMD...     run a GUI program inside it (backgrounded)
-#   tools/sandbox.sh run CMD...      run a command with the sandbox env set
-#   tools/sandbox.sh hyprctl ARGS... drive the sandbox compositor
-#   tools/sandbox.sh shot [FILE]     screenshot it (default $DIR/shot.png)
-#   tools/sandbox.sh log             tail the sandbox Hyprland log
-#   tools/sandbox.sh status          is it up, and what is in it
-#   tools/sandbox.sh stop            tear it down
+#   tools/sandbox.sh start            create the virtual monitor
+#   tools/sandbox.sh exec CMD...      launch a GUI program onto it (off-screen)
+#   tools/sandbox.sh shot [FILE]      screenshot it (default /tmp/vtb-sandbox/shot.png)
+#   tools/sandbox.sh clients          what is on it, with geometry
+#   tools/sandbox.sh hyprctl ARGS...  plain hyprctl, for convenience
+#   tools/sandbox.sh status           monitor + workspace + window count
+#   tools/sandbox.sh stop             close its windows and remove the monitor
 #
-# Everything lives under /tmp/vtb-sandbox (override with VTB_SANDBOX_DIR).
+# NOTES
 #
-# ISOLATION NOTES (all learned the hard way, do not undo)
-#
-#  * HOME is redirected into the sandbox dir. The plugin keeps per-class
-#    geometry AND the session snapshot under $HOME/.local/state/hyprvtb, so a
-#    shared HOME would restore the real session into the sandbox and then
-#    overwrite the real session.tsv with the sandbox's window set.
-#  * XDG_RUNTIME_DIR stays the real one (the parent Wayland socket lives
-#    there), but WAYLAND_DISPLAY is per-sandbox.
-#  * The socket path must stay SHORT. Hyprland rejects its IPC socket with
-#    "Socket2 path is too long" well before most people would call a path long.
-#  * Teardown kills by config path, never by $!: the Hyprland launcher hands
-#    off to a child, so killing the pid we spawned leaves the compositor alive.
+#  * `exec` restores keyboard focus to the monitor that had it. A new window
+#    takes focus even with `silent` (silent only stops the VIEW switching), and
+#    focus left sitting on an invisible monitor means the user's next keystroke
+#    goes somewhere they cannot see. That is the one thing here that would
+#    genuinely disturb them, so it is handled on every launch.
+#  * `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
+#    migrates the windows of a removed monitor onto a real one, which is
+#    exactly what this exists to prevent. It then prunes the classes it
+#    launched from the plugin's per-class geometry memory, so a test window's
+#    size never becomes where the real app opens next time.
+#  * Dispatchers go through `hl.dsp.*` Lua objects. NOT `hyprctl dispatch
+#    <name>` (this config is Lua, so the argument is evaluated as Lua and a
+#    bare dispatcher name is a nil global) and NOT `hyprctl keyword` (it
+#    refuses outright: "keyword can't work with non-legacy parsers").
 
 set -uo pipefail
 
 DIR="${VTB_SANDBOX_DIR:-/tmp/vtb-sandbox}"
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CONF="$DIR/hyprland.lua"
-ENVF="$DIR/env"
-LOG="$DIR/hyprland.log"
+STATE="$DIR/state"
+CLASSES="$DIR/classes"
 
 die() {
   echo "sandbox: $*" >&2
   exit 1
 }
 
-# The plugin the live system last installed. Override with VTB_PLUGIN to test a
-# build that has not been switched to yet.
-plugin_path() {
-  if [ -n "${VTB_PLUGIN:-}" ]; then
-    echo "$VTB_PLUGIN"
-    return
-  fi
-  local p="$HOME/.config/hypr/plugins/libhyprvtb.so"
-  [ -e "$p" ] || p="$(readlink -f /run/current-system/sw/lib/libhyprvtb.so 2>/dev/null)"
-  if [ ! -e "${p:-}" ]; then
-    p="$(find /nix/store -maxdepth 4 -name libhyprvtb.so -newer /nix/var/nix/profiles/system 2>/dev/null | head -1)"
-  fi
-  [ -e "${p:-}" ] || p="$(ls -dt /nix/store/*hyprvtb*/lib/libhyprvtb.so 2>/dev/null | head -1)"
-  echo "${p:-}"
+have_hypr() {
+  hyprctl version >/dev/null 2>&1 || die "no live Hyprland session"
 }
 
-write_config() {
-  local size="$1" plugin="$2"
-  cat > "$CONF" <<LUA
--- Generated by tools/sandbox.sh. Deliberately minimal: this is a test rig, not
--- a copy of the user's desktop. No autostart, no panel, no wallpaper -- just a
--- compositor with hyprvtb loaded so windows get its titlebars.
-monitor = { "HEADLESS-1,${size}@60,0x0,1" }
-
-general = {
-    border_size = 2,
-    gaps_in     = 4,
-    gaps_out    = 8,
-    layout      = "dwindle",
+find_headless() {
+  hyprctl monitors -j | python3 -c '
+import json, sys
+for m in json.load(sys.stdin):
+    if m["name"].startswith("HEADLESS-"):
+        print(m["name"]); break'
 }
 
-decoration = {
-    rounding = 0,
-    -- native shadow off: hyprvtb draws its own (mirrors the live config, and
-    -- shadow tests depend on it)
-    shadow = { enabled = false },
-    blur   = { enabled = false },
+mon_ws() {
+  hyprctl monitors -j | python3 -c '
+import json, sys
+for m in json.load(sys.stdin):
+    if m["name"] == sys.argv[1]:
+        print(m["activeWorkspace"]["id"]); break' "$1"
 }
 
-animations = { enabled = true }
-
-misc = {
-    disable_hyprland_logo    = true,
-    disable_splash_rendering = true,
-    force_default_wallpaper  = 0,
+focused_mon() {
+  hyprctl monitors -j | python3 -c '
+import json, sys
+for m in json.load(sys.stdin):
+    if m["focused"]:
+        print(m["name"]); break'
 }
 
--- Float everything: hyprvtb's titlebar, roll-up and shadow all target floating
--- windows, so a tiled sandbox would test the wrong path.
-windowrule = { "float, class:.*" }
-
-hl.plugin.load("${plugin}")
-LUA
+ws_windows() { # addresses of everything on the sandbox workspace
+  hyprctl clients -j | python3 -c '
+import json, sys
+for c in json.load(sys.stdin):
+    if c["workspace"]["id"] == int(sys.argv[1]):
+        print(c["address"])' "$1"
 }
 
-start() {
-  local size="${1:-1920x1080}"
-  if [ -S "$DIR/wayland-vtb.lock" ] || { [ -f "$ENVF" ] && pgrep -f "Hyprland -c $CONF" >/dev/null 2>&1; }; then
-    echo "sandbox: already running (tools/sandbox.sh stop to tear it down)"
-    return 0
-  fi
-
-  command -v cage >/dev/null || die "cage not installed — it is in home/pkgs/dev.nix; run a rebuild first"
-  [ -n "${XDG_RUNTIME_DIR:-}" ] || die "no XDG_RUNTIME_DIR"
-
-  local plugin
-  plugin="$(plugin_path)"
-  [ -e "$plugin" ] || die "no libhyprvtb.so found — set VTB_PLUGIN=/path/to/libhyprvtb.so"
-
-  rm -rf "$DIR"
-  mkdir -p "$DIR/home"
-  write_config "$size" "$plugin"
-
-  # A unique display name per sandbox, so a stray one can never collide with
-  # the live session or another run.
-  local wl="wl-vtb$$"
-
-  # cage renders to nowhere (headless wlroots backend) and runs exactly one
-  # client: our nested Hyprland. WLR_LIBINPUT_NO_DEVICES stops it demanding
-  # input devices it will never get.
-  (
-    export WLR_BACKENDS=headless
-    export WLR_LIBINPUT_NO_DEVICES=1
-    export WLR_HEADLESS_OUTPUTS=1
-    export HOME="$DIR/home"
-    export XDG_CACHE_HOME="$DIR/home/.cache"
-    export XDG_CONFIG_HOME="$DIR/home/.config"
-    export XDG_DATA_HOME="$DIR/home/.local/share"
-    export XDG_STATE_HOME="$DIR/home/.local/state"
-    export HYPRLAND_LOG_WLR=1
-    exec cage -- Hyprland -c "$CONF" --socket "$wl"
-  ) >"$LOG" 2>&1 &
-
-  # Wait for the nested compositor's IPC to come up. Its instance signature is
-  # whatever it wrote into the sandbox HOME's runtime dir; simplest reliable
-  # handle is the socket name we forced.
-  local sig="" i
-  for i in $(seq 1 100); do
-    sig="$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -20 | while read -r s; do
-      [ -S "$XDG_RUNTIME_DIR/hypr/$s/.socket.sock" ] || continue
-      if HYPRLAND_INSTANCE_SIGNATURE="$s" hyprctl monitors -j 2>/dev/null | grep -q '"name": *"HEADLESS-1"'; then
-        echo "$s"; break
-      fi
-    done)"
-    [ -n "$sig" ] && break
-    sleep 0.2
-  done
-  [ -n "$sig" ] || { echo "sandbox: compositor did not come up; log tail:"; tail -20 "$LOG"; return 1; }
-
-  cat > "$ENVF" <<ENV
-export HYPRLAND_INSTANCE_SIGNATURE="$sig"
-export WAYLAND_DISPLAY="$wl"
-export HOME="$DIR/home"
-export XDG_CACHE_HOME="$DIR/home/.cache"
-export XDG_CONFIG_HOME="$DIR/home/.config"
-export XDG_DATA_HOME="$DIR/home/.local/share"
-export XDG_STATE_HOME="$DIR/home/.local/state"
-ENV
-  echo "sandbox: up ($size, off-screen). plugin: $plugin"
-}
-
-need_running() {
-  [ -f "$ENVF" ] || die "not running — tools/sandbox.sh start"
+load_state() {
+  [ -f "$STATE" ] || die "not started — tools/sandbox.sh start"
   # shellcheck disable=SC1090
-  . "$ENVF"
+  . "$STATE"
+  [ -n "${MON:-}" ] && [ -n "${WS:-}" ] || die "state file is incomplete"
 }
 
 case "${1:-}" in
   start)
-    shift
-    start "${1:-1920x1080}"
+    have_hypr
+    mkdir -p "$DIR"
+    mon="$(find_headless)"
+    if [ -n "$mon" ]; then
+      echo "sandbox: reusing existing $mon"
+    else
+      hyprctl output create headless >/dev/null || die "could not create the virtual output"
+      sleep 0.5
+      mon="$(find_headless)"
+      [ -n "$mon" ] || die "virtual output did not appear"
+    fi
+    ws="$(mon_ws "$mon")"
+    [ -n "$ws" ] || die "virtual monitor has no workspace"
+    printf 'MON=%s\nWS=%s\n' "$mon" "$ws" > "$STATE"
+    : > "$CLASSES"
+    echo "sandbox: $mon up, workspace $ws (off-screen)"
     ;;
+
   exec)
     shift
     [ $# -gt 0 ] || die "exec needs a command"
-    need_running
-    setsid "$@" >>"$DIR/client.log" 2>&1 &
-    sleep 1.5
-    echo "sandbox: launched: $*"
+    have_hypr
+    load_state
+    prev="$(focused_mon)"
+    # [workspace N silent] is the exec dispatcher's own rule syntax: put the
+    # window there without dragging the user's view along.
+    hyprctl dispatch "hl.dsp.exec_cmd(\"[workspace $WS silent] $*\")" >/dev/null \
+      || die "exec dispatch failed"
+    basename "$1" >> "$CLASSES" # for the geometry-memory prune in stop
+    sleep 2
+    if [ -n "$prev" ] && [ "$(focused_mon)" != "$prev" ]; then
+      hyprctl dispatch "hl.dsp.focus({ monitor = \"$prev\" })" >/dev/null
+    fi
+    echo "sandbox: launched on $MON (ws $WS): $*"
     ;;
-  run)
-    shift
-    [ $# -gt 0 ] || die "run needs a command"
-    need_running
-    "$@"
-    ;;
-  hyprctl)
-    shift
-    need_running
-    hyprctl "$@"
-    ;;
+
   shot)
     shift
-    need_running
-    out="${1:-$DIR/shot.png}"
+    have_hypr
+    load_state
     command -v grim >/dev/null || die "grim not installed"
-    grim "$out" && echo "$out"
+    out="${1:-$DIR/shot.png}"
+    mkdir -p "$(dirname "$out")"
+    grim -o "$MON" "$out" && echo "$out"
     ;;
-  log)
-    tail -n "${2:-40}" "$LOG"
+
+  clients)
+    have_hypr
+    load_state
+    hyprctl clients -j | python3 -c '
+import json, sys
+rows = [c for c in json.load(sys.stdin) if c["workspace"]["id"] == int(sys.argv[1])]
+if not rows:
+    print("(no windows)")
+for c in rows:
+    print(c["address"], f"{c['"'"'class'"'"']:<16}", "at", c["at"], "size", c["size"], repr(c["title"][:40]))' "$WS"
     ;;
+
+  hyprctl)
+    shift
+    have_hypr
+    hyprctl "$@"
+    ;;
+
   status)
-    if [ -f "$ENVF" ] && pgrep -f "Hyprland -c $CONF" >/dev/null 2>&1; then
-      need_running
-      echo "sandbox: running"
-      hyprctl clients -j | python3 -c 'import json,sys
-for c in json.load(sys.stdin): print(" ", c["address"], c["at"], c["size"], repr(c["title"])[:40])' 2>/dev/null
-      hyprctl plugin list | head -3
-    else
-      echo "sandbox: not running"
+    have_hypr
+    if [ ! -f "$STATE" ]; then
+      echo "sandbox: not started"
+      exit 0
     fi
+    load_state
+    echo "sandbox: $MON, workspace $WS, $(ws_windows "$WS" | wc -l) window(s)"
     ;;
+
   stop)
-    # By config path, never by pid — see the header.
-    pkill -f "Hyprland -c $CONF" 2>/dev/null
-    sleep 0.4
-    pkill -9 -f "Hyprland -c $CONF" 2>/dev/null
-    pkill -f "cage -- Hyprland -c $CONF" 2>/dev/null
-    rm -f "$ENVF"
+    have_hypr
+    if [ ! -f "$STATE" ]; then
+      echo "sandbox: not started"
+      exit 0
+    fi
+    load_state
+    # Close the windows BEFORE the monitor goes away — see the notes.
+    for addr in $(ws_windows "$WS"); do
+      hyprctl dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" >/dev/null 2>&1
+    done
+    sleep 1.5
+    for addr in $(ws_windows "$WS"); do # anything that ignored the close
+      hyprctl dispatch "hl.dsp.window.kill({ window = \"address:$addr\" })" >/dev/null 2>&1
+    done
+    hyprctl output remove "$MON" >/dev/null 2>&1
+
+    G="$HOME/.local/state/hyprvtb/geometry.tsv"
+    if [ -f "$G" ] && [ -s "$CLASSES" ]; then
+      while read -r cls; do
+        [ -n "$cls" ] || continue
+        grep -v "^${cls}	" "$G" > "$G.tmp" 2>/dev/null && mv "$G.tmp" "$G"
+      done < "$CLASSES"
+    fi
+    rm -f "$STATE" "$CLASSES"
     echo "sandbox: stopped"
     ;;
+
   *)
-    sed -n '/^# USAGE/,/^# ISOLATION/p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '/^# USAGE/,/^# NOTES/p' "$0" | sed 's/^# \{0,1\}//'
     ;;
 esac
