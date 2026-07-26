@@ -95,6 +95,14 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   from the anchored screen edge reads `bar.width` and the pointer from the same
   frame, so their difference is exact even mid-roundtrip. Never reintroduce a
   delta-accumulating version, and never feed `liveWidth` back into `dragWidth`.
+  - **A `PanelWindow` is NOT a `QQuickItem`** (it's a `WaylandPanelInterface`),
+    so `mapToItem(bar, ...)` throws `TypeError: Passing incompatible arguments
+    to C++ functions` — and thrown from inside `onPressed` that means the drag
+    silently never starts, with nothing on screen to explain it. `qmllint` does
+    NOT catch it; it only shows up in `qs log`. `mapToItem(null, ...)` (map to
+    the scene root) is fine and is what `Tooltip`/`StatusPanel`/`TaskMenu` use.
+    Inside a panel, prefer plain arithmetic on a child's own `x` + the panel's
+    `width`, both of which are ordinary property reads.
 - **Never animate a width that is tracking the pointer** — the `Behavior on
   implicitWidth` is gated on `!dragging || ViewMode.snapping`. An animation on
   the tracked resize means the edge permanently chases the cursor from behind,

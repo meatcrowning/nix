@@ -890,13 +890,21 @@ Scope {
                 // the cursor.
                 //
                 // Measuring from the fixed screen edge removes the feedback loop
-                // entirely: bar.width and the mapped pointer position are always
-                // read from the SAME frame, so their difference is exact whether
-                // or not the surface has caught up. Late frames are then merely
+                // entirely: bar.width and the pointer position are always read
+                // from the SAME frame, so their difference is exact whether or
+                // not the surface has caught up. Late frames are then merely
                 // late, never wrong.
+                //
+                // The pointer is put into the panel's frame by hand rather than
+                // with mapToItem(bar, ...): a PanelWindow is NOT a QQuickItem
+                // (it's a WaylandPanelInterface), so that call throws a
+                // conversion TypeError — silently, from inside onPressed, which
+                // means the drag simply never starts. qmllint can't see it. The
+                // grip is anchored flush to one edge of the panel's content
+                // item, so `edgeGrip.x + mx` is that same coordinate directly.
                 function widthAt(mx) {
-                    const bx = mapToItem(bar, mx, 0).x;
-                    return (bar.barLeft ? bx : bar.width - bx) + grabOffset;
+                    const px = edgeGrip.x + mx;
+                    return (bar.barLeft ? px : bar.width - px) + grabOffset;
                 }
 
                 onPressed: (mouse) => {
