@@ -365,7 +365,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     // bar (so the bar/snapshot occlude its centre, leaving only the L-overhang);
     // the sliding snapshot AFTER (clipped at the bar's left edge). Both take the
     // bar's device-space box (already dropped by the set-down).
-    void                 drawRollShadow(const CBox& barBoxDev, float scale, float slideT, float downT, float a);
+    void                 drawRollShadow(PHLMONITOR pMonitor, const CBox& barBoxDev, float scale, float slideT, float downT, float a);
     void                 drawRollSnapshot(const CBox& barBoxDev, float scale, float slideT, float a);
     void                 drawRollBorder(const CBox& barBoxDev, float scale, float slideT, const CHyprColor& focused, const CHyprColor& unfocused, float a);
 
