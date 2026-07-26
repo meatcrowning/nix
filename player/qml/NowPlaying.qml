@@ -13,6 +13,18 @@ import QtQuick
 Item {
     id: root
     signal openAlbum(int albumId)
+    // "show me this artist": the window lands on the gallery with the search
+    // bar carrying that name, exactly as if it had been typed.
+    signal browseArtist(string artist)
+
+    // Which name the cover's menu acts on: the ALBUM artist, since that's the
+    // tag the gallery filter matches — except on a compilation, where it names
+    // no one and the playing track's own artist is the useful answer.
+    readonly property string coverArtist: {
+        var aa = root.cur.albumArtist || "";
+        return (aa === "" || aa.toLowerCase() === "various artists" || aa.toLowerCase() === "va")
+               ? (root.cur.artist || "") : aa;
+    }
 
     readonly property var cur: Player.current
     readonly property bool hasLyrics: lyricsView.hasContent
@@ -56,9 +68,34 @@ Item {
                 color: Theme.dim
             }
             MouseArea {
+                id: artMouse
                 anchors.fill: parent
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
                 enabled: (root.cur.albumId || 0) > 0
-                onDoubleClicked: root.openAlbum(root.cur.albumId)
+                onDoubleClicked: function(m) {
+                    if (m.button === Qt.LeftButton) root.openAlbum(root.cur.albumId);
+                }
+                onClicked: function(m) {
+                    if (m.button !== Qt.RightButton) return;
+                    var aid = root.cur.albumId, art = root.coverArtist;
+                    var p = artMouse.mapToItem(root, m.x, m.y);
+                    coverMenu.open(p.x, p.y, [
+                        { label: "play album",
+                          trigger: function() {
+                              Player.playAlbum(aid, 0);
+                              root.browseArtist(art);
+                          } },
+                        { label: "shuffle artist",
+                          enabled: art !== "",
+                          trigger: function() {
+                              Player.playArtistShuffled(art);
+                              root.browseArtist(art);
+                          } },
+                        { separator: true },
+                        { label: "open album",
+                          trigger: function() { root.openAlbum(aid); } },
+                    ]);
+                }
             }
         }
     }
@@ -276,5 +313,11 @@ Item {
                 onPlayed: function(index) { Player.jumpTo(index); }
             }
         }
+    }
+
+    CtxMenu {
+        id: coverMenu
+        objectName: "coverMenu"   // handle for headless harnesses
+        anchors.fill: parent
     }
 }

@@ -60,6 +60,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
+import trackmatch  # noqa: E402  (pylib; the one artist/title normaliser)
 import mutagen  # noqa: E402
 from mutagen.flac import FLAC, Picture  # noqa: E402
 from mutagen.id3 import ID3, TXXX  # noqa: E402
@@ -918,6 +919,30 @@ class Library(QObject):
             "SELECT * FROM tracks WHERE album_id=? ORDER BY disc, track, title",
             (album_id,))
 
+    def artist_tracks(self, artist):
+        """Everything by an artist, matched on EITHER tag — an album of theirs
+        carries the name in album_artist, a one-off on a compilation only in
+        artist.
+
+        Matching is folded equality against `trackmatch.artist_variants` (the
+        full tag and the PRIMARY name), so "Oneohtrix Point Never" also picks up
+        "…feat. Iggy Pop" and "…& Alex G" — but asking for the guest returns
+        nothing, since they are not primary anywhere. That's the deliberate
+        trade: `artist_matches`' token-subset test would catch them and would
+        also call "Air" a match for "Air France"."""
+        want = {trackmatch.fold(v) for v in trackmatch.artist_variants(artist)}
+        want.discard("")
+        if not want:
+            return []
+
+        def hit(s):
+            return any(trackmatch.fold(v) in want
+                       for v in trackmatch.artist_variants(s or ""))
+
+        return [r for r in self._rows(
+                    "SELECT * FROM tracks ORDER BY album_id, disc, track, title")
+                if hit(r["artist"]) or hit(r["album_artist"])]
+
     def smart_names(self):
         return [name for name, _, _ in SMART_PLAYLISTS]
 
@@ -1471,8 +1496,10 @@ class Player(QObject):
             return {}
         art = ""
         year = 0
+        album_artist = ""
         if t.get("album_id"):
             a = self._library.album(t["album_id"])
+            album_artist = a.get("album_artist") or ""
             if a.get("full_art"):
                 art = str(ART / a["full_art"])
             # ORIGINAL release year, falling back to this pressing's — same
@@ -1482,7 +1509,10 @@ class Player(QObject):
         return {"id": t["id"], "title": t.get("title") or "", "artist": t.get("artist") or "",
                 "album": t.get("album") or "", "rating": t.get("rating"),
                 "favorite": t.get("favorite", 0), "duration": t.get("duration") or 0.0,
-                "artPath": art, "albumId": t.get("album_id") or 0, "year": year}
+                "artPath": art, "albumId": t.get("album_id") or 0, "year": year,
+                # the gallery's filter matches album_artist, so the cover's
+                # context menu needs THAT name, not the per-track one.
+                "albumArtist": album_artist}
 
     @Property(int, notify=indexChanged)
     def index(self): return self._index
@@ -1550,6 +1580,18 @@ class Player(QObject):
         for r in fresh:
             self._mpv.command("loadfile", r["path"], "append")
         self.queueChanged.emit()
+
+    @Slot(str)
+    def playArtistShuffled(self, artist):
+        """Replace the queue with everything by an artist, in random order.
+
+        The shuffle is baked into the queue rather than done by flipping
+        `shuffle` on, so the order survives the mode being turned off and the
+        user's own shuffle setting is left exactly as they had it."""
+        rows = self._library.artist_tracks(artist)
+        if not rows:
+            return
+        self.playTracks([r["id"] for r in self._shuffled(rows)], 0)
 
     @Slot(str)
     def playSmart(self, name):

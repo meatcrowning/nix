@@ -92,6 +92,18 @@ Window {
         _navigate({ view: "albums", albumId: albumId });
     }
 
+    // "show me this artist": land on the gallery with the search bar open and
+    // carrying their name — the same state typing it would produce, so the
+    // grid is filtered to that artist's albums and Escape clears it as usual.
+    function browseArtist(artist) {
+        if (view !== "albums")
+            setView("albums");
+        searching = false;          // results overlay off: this filters the grid
+        openSearch();
+        searchInput.text = artist;
+        Library.setAlbumFilter(artist);   // explicit: an unchanged text won't fire
+    }
+
     function setView(v) {
         _navigate({ view: v, albumId: openAlbumId });
         Prefs.set("view", v);
@@ -242,10 +254,7 @@ Window {
             expandedAlbumId: win.openAlbumId
             cols: win.albumCols
             onOpened: function(albumId) { win.openAlbum(albumId); }
-            onSearchArtist: function(artist) {
-                win.openSearch();
-                searchInput.text = artist;   // filters the grid to that artist
-            }
+            onSearchArtist: function(artist) { win.browseArtist(artist); }
         }
         PlaylistsView {
             anchors.fill: parent
@@ -255,6 +264,7 @@ Window {
             anchors.fill: parent
             visible: win.view === "now"
             onOpenAlbum: function(albumId) { win.openAlbum(albumId); }
+            onBrowseArtist: function(artist) { win.browseArtist(artist); }
         }
     }
 
