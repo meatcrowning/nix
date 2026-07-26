@@ -14,6 +14,11 @@ class CVtbPassElement : public IPassElement {
         // which lives in reserved space to the right, but the tooltip pops out
         // LEFT into the window's area and would be painted over there.
         bool tooltipOnly = false;
+        // The flat drop-shadow layer for the whole monitor (deco is null):
+        // enqueued once at RENDER_PRE_WINDOWS, ahead of every bar element, so
+        // all shadows are painted as one union before anything else. See
+        // vtbRenderShadowLayer.
+        bool shadowLayer = false;
     };
 
     CVtbPassElement(const SVtbData& data_);
