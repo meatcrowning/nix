@@ -2126,13 +2126,41 @@ void CVtbDeco::onMouseButton(Event::SCallbackInfo& info, IPointer::SButtonEvent 
             return;
         }
         if (m_bRolledUp) {
-            if (m_rollAnim == ROLL_NONE)
+            if (m_rollAnim == ROLL_NONE) {
                 handleRolledUp(info);
+                return;
+            }
+            // Mid-animation the click handlers are inert — but the press state
+            // still has to be RETIRED here, because clicking [<<] rolls up
+            // synchronously from the press (startRollAnim sets m_bRolledUp +
+            // m_rollAnim before we ever see the release). This branch used to
+            // just `return`, stranding m_bCancelledDown set for good, and one
+            // leaked flag caused both halves of the "sticky mouse after a
+            // roll" bug: the next press we DON'T cancel reaches the client
+            // while its release is eaten by the stale flag, so (a) the client
+            // sees press-with-no-release and acts click-and-held (errant
+            // text highlighting), and (b) Hyprland bails out of onMouseButton
+            // before erasing the button from m_currentlyHeldButtons, so its
+            // "holding a button -> don't refocus" guard pins pointer focus to
+            // the old surface — focus visibly moves, input doesn't follow,
+            // until a click back on the old window balances the books.
+            const bool CANCELLED = m_bCancelledDown;
+            m_bCancelledDown     = false;
+            m_bRollDragPending   = false;
+            m_bRollDragging      = false;
+            m_iRollPressCell     = -1;
+            if (CANCELLED)
+                info.cancelled = true; // we ate its press; don't hand the client a lone release
             return;
         }
         handleUpEvent(info);
         return;
     }
+
+    // One flag, one press: a new press supersedes whatever the last one left
+    // behind, so the release path can never consume a release whose press we
+    // let through. Every site that cancels a press below re-sets this.
+    m_bCancelledDown = false;
 
     // clicks are inert while a roll animation plays (the bar is in motion)
     if (m_rollAnim != ROLL_NONE)
