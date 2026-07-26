@@ -301,14 +301,25 @@ Scope {
     }
 
     // Debounced so the staged fan (one stage every _fanStepMs) writes once at
-    // the end rather than four times. The "v1" prefix keeps the file non-empty
+    // the end rather than four times. The "v2" prefix keeps the file non-empty
     // when nothing is pinned, so "exists" stays distinguishable from "absent".
+    //
+    // The PID after it is what makes a reload distinguishable from a fresh
+    // Quickshell start in the same session. On a RELOAD, Quickshell hands the
+    // live layer surface from the outgoing window to the incoming one, so a
+    // restored widget is already mapped at the layer it had — remapping it
+    // would tear that surface down and build a new one, i.e. exactly the
+    // blink this whole mechanism exists to avoid. On a fresh start (a crash,
+    // or `systemctl --user restart quickshell`) the pin file outlives the
+    // process, the windows are genuinely new, and they DO need the remap or
+    // they come up on Overlay. Same PID = same process = surfaces reused.
     onLivePinsChanged: livePinsWriteTimer.restart()
     Timer {
         id: livePinsWriteTimer
         interval: 400
         onTriggered: Quickshell.execDetached(["sh", "-c",
-            "printf 'v1 %s\\n' \"$2\" > \"$1\"", "_", shell.livePinsPath, shell.livePins])
+            "printf 'v2 %s %s\\n' \"$2\" \"$3\" > \"$1\"", "_", shell.livePinsPath,
+            String(Quickshell.processId), shell.livePins])
     }
 
     // ---- reload continuity, part 2: the widgets' CONTENTS -----------------
@@ -387,13 +398,19 @@ Scope {
     }
 
     Component.onCompleted: {
-        const live = livePinsFile.text();
-        if (live.indexOf("v1") === 0) {
-            // hot reload — put the widgets back exactly as they were, instantly
-            const want = live.slice(2).trim().split(/\s+/).filter(s => s.length);
+        const live = livePinsFile.text().trim();
+        const tok = live.split(/\s+/).filter(s => s.length);
+        if (tok.length && (tok[0] === "v2" || tok[0] === "v1")) {
+            // hot reload — put the widgets back exactly as they were, instantly.
+            // v2 carries the writing process's PID; ours means this is a reload
+            // of the SAME process, so every restored surface is one Quickshell
+            // handed over still mapped and must NOT be remapped (see snapPinned).
+            // A v1 file, or another PID, means new windows: let them remap.
+            const reused = tok[0] === "v2" && Number(tok[1]) === Quickshell.processId;
+            const want = tok.slice(tok[0] === "v2" ? 2 : 1);
             if (want.length === _allWidgets.length) allRevealed = true;
             for (const w of _pinOrder)
-                if (want.indexOf(w.persistKey) >= 0) w.snapPinned();
+                if (want.indexOf(w.persistKey) >= 0) w.snapPinned(reused);
         } else {
             widgetStateProc.running = true;   // genuine login — fan them in
         }
