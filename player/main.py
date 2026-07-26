@@ -1427,14 +1427,19 @@ class Player(QObject):
         if not t:
             return {}
         art = ""
+        year = 0
         if t.get("album_id"):
             a = self._library.album(t["album_id"])
             if a.get("full_art"):
                 art = str(ART / a["full_art"])
+            # ORIGINAL release year, falling back to this pressing's — same
+            # preference album_row() uses, so the now-playing readout and the
+            # gallery never disagree about an album's date.
+            year = a.get("orig_year") or a.get("year") or 0
         return {"id": t["id"], "title": t.get("title") or "", "artist": t.get("artist") or "",
                 "album": t.get("album") or "", "rating": t.get("rating"),
                 "favorite": t.get("favorite", 0), "duration": t.get("duration") or 0.0,
-                "artPath": art, "albumId": t.get("album_id") or 0}
+                "artPath": art, "albumId": t.get("album_id") or 0, "year": year}
 
     @Property(int, notify=indexChanged)
     def index(self): return self._index

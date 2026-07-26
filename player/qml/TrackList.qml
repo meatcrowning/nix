@@ -23,6 +23,12 @@ Item {
     // Keep the now-playing row parked in the middle of the view as playback
     // walks down the list.
     property bool followCurrent: false
+    // Hide each row's stars + heart until the cursor is over that row (the
+    // queue): 146 rows of always-on rating glyphs read as noise next to the
+    // one persistent setter on the now-playing title. They keep their SPACE
+    // when hidden (opacity, not visible) so nothing in the row reflows as the
+    // cursor moves down the list, and they are click-dead while invisible.
+    property bool ratingsOnHover: false
     signal played(int index)
 
     function centerCurrent() {
@@ -54,8 +60,15 @@ Item {
             readonly property bool isCurrent: root.currentRow >= 0
                                               ? index === root.currentRow
                                               : trackId === root.currentTrackId
-            color: isCurrent ? Theme.highlight
-                             : (rowMouse.containsMouse ? Theme.highlight : "transparent")
+            color: isCurrent || rowHover.hovered ? Theme.highlight : "transparent"
+            readonly property bool showRatings: !root.ratingsOnHover || rowHover.hovered
+
+            // Hover state comes from a HoverHandler, not from rowMouse: that
+            // MouseArea deliberately stops 130px short of the right edge to
+            // leave the stars/heart clickable, so its containsMouse goes FALSE
+            // exactly where the hover-revealed rating glyphs live. A handler
+            // covers the whole row and steals no clicks from them.
+            HoverHandler { id: rowHover }
 
             // Accent gutter, so the playing row still reads as the playing row
             // when the cursor is hovering some other one.
@@ -112,6 +125,8 @@ Item {
                 }
                 Stars {
                     anchors.verticalCenter: parent.verticalCenter
+                    opacity: row.showRatings ? 1 : 0
+                    interactive: row.showRatings
                     rating: model.rating !== undefined ? model.rating : -1
                     onRated: function(fmps) { Library.setRating(trackId, fmps); }
                 }
@@ -119,6 +134,7 @@ Item {
                     width: 12
                     height: 15
                     anchors.verticalCenter: parent.verticalCenter
+                    opacity: row.showRatings ? 1 : 0
                     PixelText {
                         anchors.centerIn: parent
                         text: "♥"
@@ -126,6 +142,7 @@ Item {
                     }
                     MouseArea {
                         anchors.fill: parent
+                        enabled: row.showRatings
                         onClicked: Library.setFavorite(trackId, !favorite)
                     }
                 }

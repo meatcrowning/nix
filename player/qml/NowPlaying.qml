@@ -164,12 +164,53 @@ Item {
                 anchors.rightMargin: 8
                 spacing: 2
 
-                PixelText {
+                // Title, with the rating stars + favourite heart pinned to its
+                // far right — this is the one ALWAYS-visible rating setter (the
+                // queue's per-row ones are hover-only), so it sits on the line
+                // that names what it rates.
+                Item {
                     width: parent.width
-                    text: root.cur.title || "nothing playing"
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
-                    color: root.cur.title ? Theme.text : Theme.textDim
+                    height: Math.max(titleText.height, rateBits.height)
+
+                    PixelText {
+                        id: titleText
+                        anchors.left: parent.left
+                        anchors.right: rateBits.left
+                        anchors.rightMargin: 8
+                        text: root.cur.title || "nothing playing"
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 2
+                        color: root.cur.title ? Theme.text : Theme.textDim
+                    }
+                    Row {
+                        id: rateBits
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 15   // matches TrackList's right-hand column box
+                        spacing: 0
+                        visible: root.cur.id !== undefined
+
+                        Stars {
+                            anchors.verticalCenter: parent.verticalCenter
+                            rating: root.cur.rating === null || root.cur.rating === undefined
+                                    ? -1 : root.cur.rating
+                            onRated: function(fmps) { Library.setRating(root.cur.id, fmps); }
+                        }
+                        Item {
+                            width: 14
+                            height: 15
+                            anchors.verticalCenter: parent.verticalCenter
+                            PixelText {
+                                anchors.centerIn: parent
+                                text: "♥"
+                                color: root.cur.favorite ? Theme.crit : Theme.dim
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
+                            }
+                        }
+                    }
                 }
                 PixelText {
                     width: parent.width
@@ -178,32 +219,40 @@ Item {
                     height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
                     color: Theme.textDim
                 }
-                PixelText {
+                // Album, with its original release year trailing the name. The
+                // name yields width to the year rather than the other way round,
+                // so a long album title clips and the date stays readable.
+                Row {
                     width: parent.width
-                    text: root.cur.album || ""
-                    clip: true
-                    height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                    color: Theme.textDim
+                    height: Theme.fontSize + 2
+                    spacing: 6
+
+                    PixelText {
+                        text: root.cur.album || ""
+                        clip: true
+                        width: Math.max(0, Math.min(implicitWidth,
+                                        parent.width - (albumYear.visible
+                                                        ? albumYear.width + parent.spacing : 0)))
+                        height: Theme.fontSize + 2  // descender room, as above
+                        color: Theme.textDim
+                    }
+                    PixelText {
+                        id: albumYear
+                        visible: (root.cur.year || 0) > 0 && (root.cur.album || "") !== ""
+                        text: root.cur.year
+                        height: Theme.fontSize + 2
+                        color: Theme.dim
+                    }
                 }
                 Item { width: 1; height: 8 }
 
-                // ---- transport (same actions as the titlebar buttons), with
-                // the track's rating stars + favourite heart trailing it ----
+                // ---- shuffle + loop only. Prev/play/next are NOT duplicated
+                // here: the titlebar transport buttons are the one place for
+                // them, and two sets of the same three controls a few hundred
+                // pixels apart was just noise. Shuffle and loop stay because
+                // they are queue MODES, and this is the queue's own pane.
                 Row {
                     spacing: 6
-                    HeaderButton {
-                        label: "<<"
-                        onClicked: Player.previous()
-                    }
-                    HeaderButton {
-                        label: Player.playing ? "||" : ">"
-                        onClicked: Player.toggle()
-                    }
-                    HeaderButton {
-                        label: ">>"
-                        onClicked: Player.next()
-                    }
-                    Item { width: 6; height: 1 }
                     HeaderButton {
                         label: "*"
                         lit: Player.shuffle
@@ -213,28 +262,6 @@ Item {
                         label: Player.loop === 1 ? "1" : "o"
                         lit: Player.loop > 0
                         onClicked: Player.cycleLoop()
-                    }
-                    Item { width: 6; height: 1 }
-                    Stars {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: root.cur.id !== undefined
-                        rating: root.cur.rating === null || root.cur.rating === undefined
-                                ? -1 : root.cur.rating
-                        onRated: function(fmps) { Library.setRating(root.cur.id, fmps); }
-                    }
-                    Item {
-                        width: 14; height: 20
-                        visible: root.cur.id !== undefined
-                        anchors.verticalCenter: parent.verticalCenter
-                        PixelText {
-                            anchors.centerIn: parent
-                            text: "♥"
-                            color: root.cur.favorite ? Theme.crit : Theme.dim
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
-                        }
                     }
                 }
                 Item { width: 1; height: 6 }
@@ -259,6 +286,7 @@ Item {
                 color: Theme.textDim
             }
             TrackList {
+                objectName: "queueList"   // handle for headless layout harnesses
                 anchors.top: queueHead.bottom
                 anchors.topMargin: 4
                 anchors.left: parent.left
@@ -271,6 +299,7 @@ Item {
                 // to the middle as playback advances.
                 currentRow: Player.index
                 followCurrent: true
+                ratingsOnHover: true
                 onPlayed: function(index) { Player.jumpTo(index); }
             }
         }
