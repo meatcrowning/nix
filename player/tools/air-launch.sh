@@ -99,7 +99,11 @@ if [ "$ONLINE" = 1 ]; then
 
     # Metadata first and synchronously: it is ~17 MB, rsync-delta, and the app
     # reads it at startup.
-    "$PY" "$DBSYNC" pull --host "$HOST" || say "db pull failed (continuing)"
+    # NB `--host` is a GLOBAL option on dbsync's parser, so it goes BEFORE the
+    # subcommand. After it argparse rejects the whole invocation with
+    # "unrecognized arguments" — which this script then reported as the far
+    # more innocent-sounding "db pull failed (continuing)".
+    "$PY" "$DBSYNC" --host "$HOST" pull || say "db pull failed (continuing)"
 
     # Art: thumbs (~21 MB) block launch because the album grid is the first
     # thing you see; the full-size covers (~192 MB) trickle in behind it, since
@@ -138,6 +142,6 @@ rc=$?
 
 # ---- push what this session changed ---------------------------------------
 if [ "$ONLINE" = 1 ] && top_up; then
-    "$PY" "$DBSYNC" push --host "$HOST" || say "db push failed — ratings stay local until the next sync"
+    "$PY" "$DBSYNC" --host "$HOST" push || say "db push failed — ratings stay local until the next sync"
 fi
 exit $rc
