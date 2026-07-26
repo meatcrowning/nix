@@ -33,9 +33,14 @@ MouseArea {
     // high-resolution signal to divide by; contentY is a real, so fractional
     // pixels accumulate on their own with nothing to carry by hand.
     // A real mouse wheel is told apart by its detent: |angleDelta| >= 120.
+    // Clamp against originY, not 0 — a Flickable's content need not start at
+    // contentY 0, and a ListView recomputes originY whenever delegate sizes
+    // change under it. Same fix and rationale as player/qml/WheelScroll.qml
+    // (which has the long version of this comment); keep the two in step.
     onWheel: function(wheel) {
-        var max = view ? Math.max(0, view.contentHeight - view.height) : 0;
-        if (!view || max <= 0) {
+        var minY = view ? view.originY : 0;
+        var span = view ? Math.max(0, view.contentHeight - view.height) : 0;
+        if (!view || span <= 0) {
             wheel.accepted = false;   // nothing to scroll — let it bubble out
             return;
         }
@@ -43,7 +48,7 @@ MouseArea {
         var dy = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y
                : Math.abs(ad) >= 120      ? (ad / 120) * root.lines * root.step
                :                            ad / 12;
-        view.contentY = Math.max(0, Math.min(max, view.contentY - dy));
+        view.contentY = Math.max(minY, Math.min(minY + span, view.contentY - dy));
         wheel.accepted = true;
         root.scrolled();
     }

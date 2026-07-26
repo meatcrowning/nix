@@ -419,7 +419,12 @@ Window {
         function rebuildKeepScroll() {
             const y = list.contentY;
             rebuild();
-            list.contentY = Math.max(0, Math.min(y, list.contentHeight - list.height));
+            // Clamp against originY: a ListView's content does not have to
+            // start at contentY 0 once delegate sizes have changed under it
+            // (expand/collapse does exactly that). Same fix as the players'
+            // WheelScroll.qml, which carries the full explanation.
+            list.contentY = Math.max(list.originY,
+                                     Math.min(y, list.originY + list.contentHeight - list.height));
         }
 
         function toggleExpand(p) {
