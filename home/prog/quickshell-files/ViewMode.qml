@@ -7,18 +7,24 @@ import Quickshell
 // Two modes:
 //   "classic" — the 48px vertical bar this config has always had, with the
 //               desktop widgets living on the wallpaper as pinned popups.
-//   "dock"    — the bar becomes a 25-33%-of-screen panel holding the widgets
-//               themselves in a grid, with the runner + task icons laid out
-//               horizontally across its top.
+//   "dock"    — the bar becomes a wide panel (14-33% of the screen) holding the
+//               widgets themselves in a grid, with the runner + task icons laid
+//               out horizontally across its top.
 //
 // THE SWITCH IS THE DRAG HANDLE. There is no separate toggle to hunt for: you
-// grab the bar's inner edge and pull. Pull the classic bar out past its own
-// width + `enterFrac` of the screen and it commits to dock; push the dock panel
-// in below `exitFrac` and it collapses back to classic. Everything between just
-// resizes within the clamp. `enterFrac` (5%) is deliberately much smaller than
-// `exitFrac` (20%): the gesture that ENTERS dock is a small deliberate tug from
-// a 48px bar, while the one that LEAVES it has to be a decisive shove, or a
-// user nudging the panel's width would keep falling out of the mode.
+// grab the bar's inner edge and pull.
+//
+// OPENING IT HAS ONE DESTINATION. The entry drag is a gesture, not a resize:
+// the bar stays at its 48px until the pull passes `enterFrac` past its own
+// width, then opens in one movement at `dockPx` — the same size every time.
+// Resizing is something you do once you are already in the mode, where the
+// panel does track the pointer, clamped to [minFrac, maxFrac]. Dragging a dock
+// panel below `exitFrac` collapses it back to classic.
+//
+// `exitFrac` (10%) sits well below `minFrac` (14%) on purpose: if the collapse
+// threshold reached into the legal width range, the narrowest dock the user is
+// allowed to choose would already be inside the "about to collapse" zone and
+// the panel could never rest there.
 //
 // Width lives in two properties on purpose:
 //   barWidth  — the COMMITTED width, what the desktop settles at.
@@ -30,14 +36,14 @@ Singleton {
     id: root
 
     // ---- clamps + thresholds (fractions of the screen width) -------------
-    readonly property real minFrac: 0.25
+    readonly property real minFrac: 0.14
     readonly property real maxFrac: 0.33
     // how far past the classic bar's own width you must pull to enter dock
     readonly property real enterFrac: 0.05
-    // pushing a dock panel narrower than this collapses back to classic
-    readonly property real exitFrac: 0.20
-    // hard floor while dragging, so the bar can never be dragged to nothing
-    readonly property int dragFloor: 24
+    // pushing a dock panel narrower than this collapses back to classic. Must
+    // stay clear of minFrac, or the narrowest legal dock width would already be
+    // inside the collapse zone and the panel could never rest there.
+    readonly property real exitFrac: 0.10
 
     // The screen the width fractions are measured against. Multi-monitor setups
     // size the dock off the FIRST screen rather than per-monitor: the panel is
@@ -66,27 +72,55 @@ Singleton {
     readonly property int widthStep: 8
     function quantize(px) { return Math.round(px / widthStep) * widthStep; }
 
+    // The dock's legal width range and the two thresholds, in pixels.
+    readonly property int minPx: quantize(screenWidth * minFrac)
+    readonly property int maxPx: quantize(screenWidth * maxFrac)
+    readonly property real enterPx: Theme.barWidth + screenWidth * enterFrac
+    readonly property real exitPx: screenWidth * exitFrac
+
+    // The one width the dock opens at — the stored fraction, quantized.
+    readonly property int dockPx: quantize(screenWidth * clampFrac(SettingsStore.d.dockWidthFrac))
+
     // committed width — classic reads the user's bar setting (Settings > Panel),
-    // dock computes from the clamped fraction. Quantizing HERE rather than at
-    // commit time keeps one definition, so a hand-edited or defaulted fraction
-    // lands on the same grid a dragged one does.
-    readonly property int barWidth: dock
-        ? quantize(screenWidth * clampFrac(SettingsStore.d.dockWidthFrac))
-        : Theme.barWidth
+    // dock uses the stored fraction. Quantizing in dockPx rather than at commit
+    // time keeps one definition, so a hand-edited or defaulted fraction lands on
+    // the same grid a dragged one does.
+    readonly property int barWidth: dock ? dockPx : Theme.barWidth
 
     // ---- live drag state -------------------------------------------------
     property bool dragging: false
     property real dragWidth: 0
-    readonly property int liveWidth: dragging
-        ? Math.round(Math.max(dragFloor, Math.min(screenWidth * 0.45, dragWidth)))
-        : barWidth
 
-    // Would a release at width `w` leave us in dock mode? Drives the live
-    // layout crossfade, so the panel visibly BECOMES the dock as you cross the
-    // threshold rather than snapping into it only once you let go.
+    // THE ENTRY GESTURE HAS EXACTLY ONE TARGET WIDTH. Pulling the classic bar
+    // out does not stretch it continuously — the panel stays at 48px until the
+    // pull passes enterPx and then opens, in one movement, at dockPx. Resizing
+    // is a thing you do once you are IN the mode, not part of getting there.
+    // Same in reverse: a dock panel dragged below exitPx shows the classic width
+    // immediately, so you can see the collapse coming before you let go.
+    //
+    // Only the in-dock resize tracks the pointer, and it is clamped to
+    // [minPx, maxPx] and quantized, so it lands on the same 8px grid the
+    // wallpaper is composed against.
+    readonly property int liveWidth: {
+        if (!dragging) return barWidth;
+        if (!dock) return dragWidth >= enterPx ? dockPx : Theme.barWidth;
+        if (dragWidth < exitPx) return Theme.barWidth;
+        return Math.max(minPx, Math.min(maxPx, quantize(dragWidth)));
+    }
+
+    // True while liveWidth is a SNAPPED value (the entry jump, or the preview of
+    // a collapse) rather than one tracking the pointer. shell.qml animates those
+    // transitions and leaves the tracked resize un-animated, because animating a
+    // width that is already following the cursor is exactly what makes a drag
+    // feel like it is lagging and bouncing.
+    readonly property bool snapping:
+        dragging && (!dock || dragWidth < exitPx)
+
+    // Would a release at width `w` leave us in dock mode? Drives the live layout
+    // crossfade, so the panel visibly BECOMES the dock as the threshold is
+    // crossed rather than only once the button comes up.
     function wouldDock(w) {
-        return dock ? w >= screenWidth * exitFrac
-                    : w >= Theme.barWidth + screenWidth * enterFrac;
+        return dock ? w >= exitPx : w >= enterPx;
     }
     readonly property bool showDock: dragging ? wouldDock(dragWidth) : dock
 
@@ -100,23 +134,34 @@ Singleton {
     // Called on drag release. Decides mode from the released width, stores the
     // resulting fraction, and re-centres the wallpaper if the reserved strip
     // actually changed.
+    //
+    // ENTERING dock deliberately does NOT take its width from the drag — it
+    // keeps whatever dockPx already was. The entry gesture is a single "open it"
+    // motion with one destination; letting the release width set the size would
+    // reintroduce the continuous stretch it exists to avoid, and would make the
+    // panel a slightly different size every time it was opened.
     function commitDrag(w) {
         const wasDock = dock;
         const nowDock = wouldDock(w);
-        if (nowDock) {
-            const f = clampFrac(w / screenWidth);
-            if (SettingsStore.d.dockWidthFrac !== f) SettingsStore.d.dockWidthFrac = f;
-            if (!wasDock) SettingsStore.d.viewMode = "dock";
+        if (nowDock && wasDock) {
+            const px = Math.max(minPx, Math.min(maxPx, quantize(w)));
+            const f = px / screenWidth;
+            if (SettingsStore.d.dockWidthFrac !== f) {
+                SettingsStore.d.dockWidthFrac = f;
+                SettingsStore.save();
+            }
+        } else if (nowDock) {
+            SettingsStore.d.viewMode = "dock";
             SettingsStore.save();
         } else if (wasDock) {
             SettingsStore.d.viewMode = "classic";
             SettingsStore.save();
         }
         dragging = false;
-        syncWallpaper();
+        applyReserve();
     }
 
-    function toggle() { setMode(dock ? "classic" : "dock"); syncWallpaper(); }
+    function toggle() { setMode(dock ? "classic" : "dock"); applyReserve(); }
 
     // ---- wallpaper recentering -------------------------------------------
     // The panel covers a strip of the screen, so the wallpaper underneath must
@@ -132,18 +177,38 @@ Singleton {
     //
     // Called only on a committed change (drag release / mode toggle), never
     // per drag frame: each call is an ImageMagick compose + a hyprpaper set.
+    //
+    // Pushing the windows rides along here because it is the same event — the
+    // reserved strip changed — and it must run when the panel GROWS. Hyprland's
+    // exclusive zone only reflows TILED windows, and this desktop is almost
+    // entirely floating (hyprvtb draws the chrome and remembers geometry per
+    // class), so without this, widening the panel simply covers whatever was on
+    // that side. Shrinking needs no equivalent: it uncovers windows, and moving
+    // them "back" would fight hyprvtb's own geometry memory.
     property string _lastReserve: ""
-    function syncWallpaper() {
+    property int _lastReservePx: 0
+    function applyReserve() {
         const edge = SettingsStore.d.barEdge === "left" ? "left" : "right";
         const px = dock ? barWidth : 0;
         const key = edge + " " + px;
         if (key === _lastReserve) return;
+        const grew = px > _lastReservePx;
         _lastReserve = key;
+        _lastReservePx = px;
+
         Quickshell.execDetached(["sh", "-c",
             "mkdir -p \"$HOME/.cache/wal\"; " +
             "printf '%s %s\\n' \"$1\" \"$2\" > \"$HOME/.cache/wal/reserve\"; " +
             "exec \"$HOME/.config/scripts/wal-set.sh\" --wallpaper-only",
             "_", edge, String(px)]);
+
+        // Match the exclusive zone rather than the full panel width, so a pushed
+        // window sits exactly where a maximized one's edge lands — one window
+        // border tucked under the bar's accent strip (see shell.qml).
+        if (grew)
+            Quickshell.execDetached([
+                Quickshell.shellDir + "/scripts/push-windows.py",
+                edge, String(px - Theme.windowBorderWidth)]);
     }
 
     // Keep the reserve file honest across a login or a hot reload: the panel can
@@ -157,5 +222,5 @@ Singleton {
     // guard skips the hyprpaper set entirely when nothing changed — which
     // matters, because re-setting an already-current wallpaper makes hyprpaper
     // re-render its background layer and that reads on screen as a FLASH.
-    Component.onCompleted: syncWallpaper()
+    Component.onCompleted: applyReserve()
 }

@@ -457,8 +457,8 @@ Scope {
     IpcHandler {
         target: "view"
         function toggle(): void { ViewMode.toggle(); }
-        function dock(): void { ViewMode.setMode("dock"); ViewMode.syncWallpaper(); }
-        function classic(): void { ViewMode.setMode("classic"); ViewMode.syncWallpaper(); }
+        function dock(): void { ViewMode.setMode("dock"); ViewMode.applyReserve(); }
+        function classic(): void { ViewMode.setMode("classic"); ViewMode.applyReserve(); }
         function mode(): string { return SettingsStore.d.viewMode; }
     }
 
@@ -625,13 +625,18 @@ Scope {
             // The bar's width is owned by ViewMode, not Theme, because it is no
             // longer a constant: it is Theme.barWidth in classic mode, a
             // fraction of the screen in dock mode, and the live pointer position
-            // while the inner edge is being dragged between the two. The drag
-            // frames are deliberately NOT animated — the panel must track the
-            // pointer exactly — so the Behavior is disabled for the duration and
-            // only animates the snap that follows the release.
+            // while the inner edge is being dragged between the two.
+            //
+            // A width that is TRACKING THE POINTER must never be animated — an
+            // animation there means the edge is always chasing the cursor from
+            // behind, which is precisely what reads as lag and bounce. So the
+            // Behavior runs for everything EXCEPT the tracked in-dock resize:
+            // the release snap, and ViewMode.snapping — the entry jump from 48px
+            // to the dock width, and the collapse preview — all of which are
+            // discrete jumps that should glide rather than teleport.
             implicitWidth: ViewMode.liveWidth
             Behavior on implicitWidth {
-                enabled: !ViewMode.dragging
+                enabled: !ViewMode.dragging || ViewMode.snapping
                 NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
             }
             // Reserve one window-border less than the bar's real width. The bar
@@ -866,28 +871,44 @@ Scope {
                 hoverEnabled: true
                 cursorShape: Qt.SizeHorCursor
 
-                property real grabX: 0
+                // Offset of the grab point within the grip, so the edge doesn't
+                // jump to the cursor on press.
+                property real grabOffset: 0
+
+                // Width implied by a pointer position, measured from the SCREEN
+                // EDGE the bar is anchored to — the one part of this geometry
+                // that never moves.
+                //
+                // This is ABSOLUTE, and it has to be. The first version computed
+                // the width incrementally (add this event's pointer delta to the
+                // current width) and it visibly bounced: resizing a layer surface
+                // is not synchronous — it takes a configure/ack roundtrip with
+                // the compositor — so for several events the pointer coordinates
+                // still describe the OLD surface while the requested width had
+                // already moved on. Every event then over-corrected against a
+                // width that hadn't happened yet, and the edge oscillated around
+                // the cursor.
+                //
+                // Measuring from the fixed screen edge removes the feedback loop
+                // entirely: bar.width and the mapped pointer position are always
+                // read from the SAME frame, so their difference is exact whether
+                // or not the surface has caught up. Late frames are then merely
+                // late, never wrong.
+                function widthAt(mx) {
+                    const bx = mapToItem(bar, mx, 0).x;
+                    return (bar.barLeft ? bx : bar.width - bx) + grabOffset;
+                }
 
                 onPressed: (mouse) => {
-                    grabX = mouse.x;
+                    grabOffset = 0;
+                    grabOffset = bar.width - widthAt(mouse.x);
                     ViewMode.dragWidth = bar.width;
                     ViewMode.dragging = true;
                 }
 
-                // Self-correcting incremental resize. A layer surface never sees
-                // the pointer's absolute position, and this grip is anchored to
-                // the edge it is moving — so as the bar grows, the grip travels
-                // with it and mouse.x drifts back toward grabX by exactly the
-                // amount the bar just changed. Feeding that residual in each
-                // event therefore tracks the pointer's real screen position
-                // using only local coordinates, and self-corrects instead of
-                // accumulating error. Reading liveWidth (not dragWidth) back
-                // applies ViewMode's clamp cumulatively, so the bar can't be
-                // flung past its limits and then have to unwind.
                 onPositionChanged: (mouse) => {
                     if (!ViewMode.dragging) return;
-                    const delta = bar.barLeft ? (mouse.x - grabX) : (grabX - mouse.x);
-                    ViewMode.dragWidth = ViewMode.liveWidth + delta;
+                    ViewMode.dragWidth = widthAt(mouse.x);
                 }
 
                 onReleased: ViewMode.commitDrag(ViewMode.dragWidth)
