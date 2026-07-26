@@ -13,8 +13,18 @@ Item {
     property var lyricsData: ({ source: "", synced: false, lines: [], text: "" })
     property int currentLine: -1
     // Whether there is anything to show — the now-playing view collapses this
-    // pane entirely when a track has no lyrics.
-    readonly property bool hasContent: lyricsData.synced || lyricsData.text.length > 0
+    // pane entirely otherwise.
+    //
+    // Words, an OPEN QUESTION, or a verdict of yours that you might want to
+    // take back. A track LRCLIB has confirmed instrumental is the one case
+    // that collapses silently: it is settled by an authority and there is
+    // nothing left to do about it. An unresolved miss keeps the pane so you
+    // can settle it by hand, and a hand-marked one keeps it so that stays
+    // undoable.
+    readonly property bool hasContent: lyricsData.synced
+                                       || lyricsData.text.length > 0
+                                       || lyricsData.source === "none"
+                                       || lyricsData.source === "instrumental-user"
 
     onTrackIdChanged: refetch()
     onActiveChanged: if (active) refetch()
@@ -139,15 +149,54 @@ Item {
         view: plainFlick.visible ? plainFlick : null
     }
 
-    PixelText {
+    // ---- nothing to show: say WHICH kind of nothing ----
+    //
+    // "instrumental" (the track has no words) and "not found" (nobody has them
+    // indexed) are different claims, and only the first is ever certain. The
+    // pane states whichever one is true and, when it is only a miss, offers to
+    // settle it by hand — for a library this niche you often know and LRCLIB
+    // never will.
+    Column {
         anchors.centerIn: parent
+        width: parent.width - 16
+        spacing: 6
         visible: !root.lyricsData.synced && root.lyricsData.text.length === 0
-        // "instrumental" is an answer, not a failure — LRCLIB knows this track
-        // has no words, so say so rather than implying the lookup fell short.
-        text: root.trackId < 0 ? ""
-              : root.lyricsData.source === "instrumental" ? "instrumental"
-              : root.lyricsData.source === "none" ? "no lyrics found"
-              : "..."
-        color: Theme.dim
+                 && root.trackId >= 0
+
+        readonly property bool isInst: root.lyricsData.source === "instrumental"
+                                       || root.lyricsData.source === "instrumental-user"
+        readonly property bool isMiss: root.lyricsData.source === "none"
+
+        PixelText {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            text: parent.isInst
+                  ? (root.lyricsData.source === "instrumental-user"
+                     ? "instrumental" : "instrumental - no lyrics exist")
+                  : parent.isMiss ? "no lyrics found" : "..."
+            color: Theme.dim
+        }
+
+        // Undo for a hand-marked track; the LRCLIB verdict is not editable.
+        HeaderButton {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: root.lyricsData.source === "instrumental-user"
+            label: "search anyway"
+            onClicked: {
+                Library.setInstrumental(root.trackId, false);
+                root.refetch();
+            }
+        }
+
+        HeaderButton {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: parent.isMiss
+            label: "mark instrumental"
+            onClicked: {
+                Library.setInstrumental(root.trackId, true);
+                root.refetch();
+            }
+        }
     }
 }
