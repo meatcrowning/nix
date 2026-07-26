@@ -210,7 +210,11 @@ hl.config({
             -- in C++ (the blast radius is the compositor); this turns it on for
             -- real, surviving reloads and relogins, which a runtime
             -- kinetic_set(true) deliberately does not.
-            kinetic               = true,
+            --
+            -- Per-host (hypr-host.nix -> host.lua): ON for air/book, whose
+            -- touchpad is the only finger source either machine has; OFF on
+            -- top, which drives a wheel mouse and wants the plain behaviour.
+            kinetic               = host.kinetic or false,
             -- Feel, live-tunable without a reload via
             -- `hyprctl eval "hl.plugin.hyprvtb.kinetic_set('friction', X)"`:
             -- 2.6 floaty, 3.6 mac-anchored, 5.2 snappy. coast = v0/friction.
