@@ -27,13 +27,46 @@
 // vtb socket a zero-height playbar), so the guard belongs at the seam where
 // every computed rect passes through, not at each of the 36 call sites.
 
+// ---------------------------------------------------------------------------
+// Which Hyprland are we building against? (`top` runs the pinned 0.56.0;
+// `air`/book runs Fedora Asahi's 0.55.4 rpm, and its plugin must be built
+// against that — see docs/book-hyprvtb-version-bridge.md. DELETE the whole
+// dual-version arrangement when Fedora ships 0.56.)
+//
+// There is NO Hyprland version macro to test: <hyprland/src/version.h> holds
+// only GIT_* (all "unknown" in a tarball/nix/Fedora build) and *dependency*
+// versions, and PluginAPI.hpp's HYPRLAND_API_VERSION has been "0.1" forever.
+// The only exact signal is pkg-config's `Version:` field, which lives in the
+// build system — hence two tiers:
+//
+//   Tier 1: VTB_HL_VERSION, injected by CMakeLists.txt from the pkg-config
+//           version as MAJOR*10000 + MINOR*100 + PATCH (0.56.0 -> 5600).
+//   Tier 2 (fallback, keeps this header self-sufficient for hand builds):
+//           __has_include probes, biased NEW — the legacy branch is chosen
+//           only on POSITIVE evidence of the pre-0.56 layout
+//           (helpers/Monitor.hpp moved to output/ in 0.56 and is not coming
+//           back), so an unrecognised future tree takes the 0.56 branch and
+//           fails LOUDLY in this file instead of silently compiling 0.55 code.
+// ---------------------------------------------------------------------------
+#ifndef VTB_HL_056
+  #if defined(VTB_HL_VERSION)
+    #if VTB_HL_VERSION >= 5600
+      #define VTB_HL_056 1
+    #else
+      #define VTB_HL_056 0
+    #endif
+  #elif __has_include(<hyprland/src/desktop/state/ViewState.hpp>)
+    #define VTB_HL_056 1
+  #elif __has_include(<hyprland/src/helpers/Monitor.hpp>)
+    #define VTB_HL_056 0
+  #else
+    #define VTB_HL_056 1 // unrecognised tree: assume >= 0.56 and break loudly
+  #endif
+#endif
+
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
-#include <hyprland/src/desktop/state/ViewState.hpp>
-#include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
-#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
-#include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -43,7 +76,24 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/protocols/types/DataDevice.hpp>
-#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
+
+#if VTB_HL_056
+// 0.56 pulled the window/monitor collections out of CCompositor into free
+// state singletons, moved fullscreen into a controller, and moved the
+// cursor-override controller under pointer/.
+#include <hyprland/src/desktop/state/ViewState.hpp>   // Desktop::viewState()
+#include <hyprland/src/desktop/state/WindowState.hpp> // Desktop::windowState()
+#include <hyprland/src/state/MonitorState.hpp>        // State::monitorState()
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp> // Fullscreen::controller()
+#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp> // Pointer::Cursor::overrideController
+#else
+// 0.55.4: windows/monitors/z-order/hit-test all still hang off g_pCompositor
+// (Compositor.hpp, above) and fullscreen is a CWindow member (Window.hpp,
+// above). Only the cursor override controller needs a DIFFERENT include —
+// same class, namespace Cursor rather than Pointer::Cursor. The two paths are
+// mutually exclusive: 0.56 has no src/managers/cursor/, 0.55 no src/pointer/.
+#include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
+#endif
 
 // Plain include: the plugin no longer needs the `#define private public`
 // trick hyprbars uses. It was there for m_currentlyHeldButtons, which has a
@@ -53,6 +103,36 @@
 // the most fragile access there is — an unrelated header that included
 // InputManager.hpp first silently broke it — so it is worth not needing.
 #include <hyprland/src/managers/input/InputManager.hpp>
+
+// ---------------------------------------------------------------------------
+// Dependency-tuple tripwire — NOT a version branch. Every hyprutils symbol the
+// plugin touches is source-compatible across 0.13.1/0.14.0; what this guards
+// is the ONE failure this dual-version build can produce that neither the
+// compiler nor the linker will: compiling against a hyprutils GENERATION that
+// does not match the Hyprland being targeted. hyprutils 0.14.0 added a
+// `void* m_data` member to CUniquePointer (and get() reads it), so UP<T> is
+// one pointer on 0.13.x and two on 0.14.x — and detachOurDecos() below walks
+// Hyprland's std::vector<UP<IHyprWindowDecoration>> directly. A mismatched
+// tuple is silent memory corruption over the compositor's own decoration
+// vector. Fail the build instead. (misc/HyprAssert.hpp exists only in
+// 0.14.0+ — it is what lock()'s terminate() uses — making it a reliable
+// generation probe with no version macro to parse.)
+// ---------------------------------------------------------------------------
+#if __has_include(<hyprutils/misc/HyprAssert.hpp>)
+  #define VTB_HYPRUTILS_014 1
+#else
+  #define VTB_HYPRUTILS_014 0
+#endif
+#if VTB_HL_056
+static_assert(VTB_HYPRUTILS_014,
+              "Hyprland 0.56 needs hyprutils >= 0.14.0 headers; 0.13.x's CUniquePointer has no m_data member and is ABI-incompatible");
+#else
+static_assert(!VTB_HYPRUTILS_014,
+              "Hyprland 0.55.4 needs hyprutils 0.13.x headers; 0.14.0's CUniquePointer grew an m_data member and is ABI-incompatible");
+#endif
+static_assert(sizeof(UP<int>) == (VTB_HYPRUTILS_014 ? 2 * sizeof(void*) : sizeof(void*)),
+              "hyprutils CUniquePointer layout does not match the detected generation — "
+              "the pkg-config search path is resolving a different hyprutils than the Hyprland it targets");
 
 // Call sites say Hl::something() — see the alias at the bottom of this file.
 namespace Vtb::Hl {
@@ -64,17 +144,40 @@ namespace Vtb::Hl {
     // settled); the plugin reads goal for anything it persists or measures
     // against, and value for anything it draws next to.
 
+    // 0.56 moved the two PHLANIMVAR<Vector2D>s off CWindow into the protected
+    // section of CGeometricMovableAnimated and exposed them via
+    // positionAnimation()/sizeAnimation() — plain identity getters. On 0.55.4
+    // they are still public members m_realPosition/m_realSize on CWindow, and
+    // the pointee (hyprutils CGenericAnimatedVariable) is identical, so the
+    // whole difference is the spelling of the accessor. Returned by reference:
+    // the member is a UP<>, which cannot be copied.
+#if VTB_HL_056
+    inline PHLANIMVAR<Vector2D>& posAnim(PHLWINDOW w) {
+        return w->positionAnimation();
+    }
+    inline PHLANIMVAR<Vector2D>& sizeAnim(PHLWINDOW w) {
+        return w->sizeAnimation();
+    }
+#else
+    inline PHLANIMVAR<Vector2D>& posAnim(PHLWINDOW w) {
+        return w->m_realPosition;
+    }
+    inline PHLANIMVAR<Vector2D>& sizeAnim(PHLWINDOW w) {
+        return w->m_realSize;
+    }
+#endif
+
     inline Vector2D posValue(PHLWINDOW w) {
-        return w->positionAnimation()->value();
+        return posAnim(w)->value();
     }
     inline Vector2D sizeValue(PHLWINDOW w) {
-        return w->sizeAnimation()->value();
+        return sizeAnim(w)->value();
     }
     inline Vector2D posGoal(PHLWINDOW w) {
-        return w->positionAnimation()->goal();
+        return posAnim(w)->goal();
     }
     inline Vector2D sizeGoal(PHLWINDOW w) {
-        return w->sizeAnimation()->goal();
+        return sizeAnim(w)->goal();
     }
     inline CBox boxValue(PHLWINDOW w) {
         return {posValue(w), sizeValue(w)};
@@ -85,12 +188,12 @@ namespace Vtb::Hl {
 
     // Jump straight to a position/size with no animation.
     inline void warpPos(PHLWINDOW w, const Vector2D& p) {
-        w->positionAnimation()->setValueAndWarp(p);
+        posAnim(w)->setValueAndWarp(p);
     }
     // Land the window on its goal immediately — kills a residual animation tail.
     inline void warpToGoal(PHLWINDOW w) {
-        w->positionAnimation()->setValueAndWarp(w->positionAnimation()->goal());
-        w->sizeAnimation()->setValueAndWarp(w->sizeAnimation()->goal());
+        posAnim(w)->setValueAndWarp(posAnim(w)->goal());
+        sizeAnim(w)->setValueAndWarp(sizeAnim(w)->goal());
     }
 
     // ---- window set / z-order / hit testing / focus ------------------------
@@ -101,7 +204,18 @@ namespace Vtb::Hl {
         return (bool)g_pCompositor;
     }
     inline const std::vector<PHLWINDOW>& windows() {
+#if VTB_HL_056
         return Desktop::viewState()->windows();
+#else
+        // 0.55.4: the same z-ordered vector, straight off the compositor.
+        // 0.56's viewState() is a function-local static and can never be null;
+        // g_pCompositor can (config-parse time), so keep this wrapper as total
+        // as the 0.56 one. NB on 0.55 a fading-out (closing) window stays in
+        // this vector until removed; the m_isMapped guards at the call sites
+        // already cover that.
+        static const std::vector<PHLWINDOW> EMPTY;
+        return g_pCompositor ? g_pCompositor->m_windows : EMPTY;
+#endif
     }
 
     // Rip THIS plugin's decorations off every window, right now, destroying
@@ -138,14 +252,33 @@ namespace Vtb::Hl {
             });
         }
     }
+    // 0.56's raise/lower (CWindowState::moveToZ) is the line-for-line
+    // descendant of 0.55's changeWindowZOrder — same validMapped bail, same
+    // fullscreen-input update, same X11 transient-stack walk. One rename
+    // inside: 0.55 sets m_createdOverFullscreen (default false) where 0.56
+    // sets m_allowedOverFullscreen (default true) — Hyprland policy, nothing
+    // in this plugin reads either.
     inline void raise(PHLWINDOW w) {
+#if VTB_HL_056
         Desktop::windowState()->raise(w);
+#else
+        g_pCompositor->changeWindowZOrder(w, true);
+#endif
     }
     inline void lower(PHLWINDOW w) {
+#if VTB_HL_056
         Desktop::windowState()->lower(w);
+#else
+        g_pCompositor->changeWindowZOrder(w, false);
+#endif
     }
     inline PHLWINDOW windowAt(const Vector2D& pos, uint16_t properties) {
+#if VTB_HL_056
         return Desktop::viewState()->hitTest().windowAt(pos, properties);
+#else
+        // Same parameter list incl. the defaulted ignoreWindow.
+        return g_pCompositor->vectorToWindowUnified(pos, properties);
+#endif
     }
     // The property set every hit test in this plugin uses: a window's reserved
     // + input extents, floating windows included.
@@ -153,7 +286,13 @@ namespace Vtb::Hl {
         return windowAt(pos, Desktop::View::RESERVED_EXTENTS | Desktop::View::INPUT_EXTENTS | Desktop::View::ALLOW_FLOATING);
     }
     inline SP<CWLSurfaceResource> layerSurfaceAt(const Vector2D& pos, std::vector<PHLLSREF>* layers, Vector2D* surfaceCoords, PHLLS* layerFound) {
+#if VTB_HL_056
         return Desktop::viewState()->hitTest().layerSurfaceAt(pos, layers, surfaceCoords, layerFound);
+#else
+        // Byte-for-byte the same body upstream, same trailing
+        // `aboveLockscreen = false` default.
+        return g_pCompositor->vectorToLayerSurface(pos, layers, surfaceCoords, layerFound);
+#endif
     }
     // A monitor's layer-surface array for one zwlr layer — a raw read of a
     // monitor member, kept here with the hit test it always feeds.
@@ -174,7 +313,16 @@ namespace Vtb::Hl {
         Desktop::focusState()->resetWindowFocus();
     }
     inline bool isFullscreen(PHLWINDOW w) {
+#if VTB_HL_056
         return Fullscreen::controller()->isFullscreen(w);
+#else
+        // 0.55.4: no controller — the flag lives on the window, and
+        // CWindow::isFullscreen() is the exact predicate 0.56's handler
+        // evaluates for a mode-less query (internal != FSMODE_NONE). The null
+        // guard reproduces the 0.56 controller's own early return, which the
+        // call sites rely on — do not "simplify" it away.
+        return w && w->isFullscreen();
+#endif
     }
 
     // Is the compositor running a Lua config (as opposed to the old
@@ -198,10 +346,24 @@ namespace Vtb::Hl {
     // ---- monitors ----------------------------------------------------------
 
     inline const std::vector<PHLMONITOR>& monitors() {
+#if VTB_HL_056
         return State::monitorState()->monitors();
+#else
+        // Enabled monitors (0.56's monitors() vs allMonitors() split matches
+        // 0.55's m_monitors vs m_realMonitors). Same null-guard rationale as
+        // windows().
+        static const std::vector<PHLMONITOR> EMPTY;
+        return g_pCompositor ? g_pCompositor->m_monitors : EMPTY;
+#endif
     }
     inline PHLMONITOR monitorAt(const Vector2D& v) {
+#if VTB_HL_056
         return State::monitorState()->query().vec(v).run();
+#else
+        // A vec-only query short-circuits to closestTo(v) upstream, which is
+        // the same contains-point-then-nearest algorithm as this.
+        return g_pCompositor->getMonitorFromVector(v);
+#endif
     }
 
     // ---- input / seat ------------------------------------------------------
@@ -233,11 +395,20 @@ namespace Vtb::Hl {
     inline void mouseBindMode(eMouseBindMode mode) {
         g_pKeybindManager->changeMouseBindMode(mode);
     }
+    // The override controller is the identical class on both versions (the
+    // headers differ only in the namespace-opening line); 0.56 nested Cursor
+    // inside a new Pointer namespace. Alias it once inside OUR namespace —
+    // never inject into theirs — and keep single wrapper bodies.
+#if VTB_HL_056
+    namespace VtbCursor = ::Pointer::Cursor;
+#else
+    namespace VtbCursor = ::Cursor;
+#endif
     inline void setCursorOverride(const std::string& shape) {
-        Pointer::Cursor::overrideController->setOverride(shape, Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+        VtbCursor::overrideController->setOverride(shape, VtbCursor::CURSOR_OVERRIDE_WINDOW_EDGE);
     }
     inline void clearCursorOverride() {
-        Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_WINDOW_EDGE);
+        VtbCursor::overrideController->unsetOverride(VtbCursor::CURSOR_OVERRIDE_WINDOW_EDGE);
     }
 
     // ---- rendering ---------------------------------------------------------
@@ -305,8 +476,52 @@ namespace Vtb::Hl {
 
     // Snapshot a window into a framebuffer — used to keep drawing a window
     // that has been hidden (roll-up / close animations).
+    //
+    // 0.56 hands back a FRESH, caller-owned FB per call. 0.55.4 has no such
+    // call: makeSnapshot() is void and renders into a FB the WINDOW owns and
+    // caches (CWindow::m_snapshotFB) — and the compositor is a second writer
+    // to that same FB (CWindow::onUnmap re-snapshots into it). Reproduce
+    // 0.56's contract by DETACHING: clear the slot first (so makeSnapshot
+    // must allocate a new FB + texture rather than re-render into one we may
+    // still be drawing — alloc() early-returns on same size and would reuse
+    // the texture), snapshot, take sole ownership, clear the slot again so
+    // the compositor's own unmap snapshot can never touch our copy.
+    //
+    // The isHidden() guard: inside makeSnapshot, renderWindow bails on a
+    // hidden window AFTER the FB was cleared, which would hand back a fully
+    // transparent snapshot. Returning nullptr instead keeps the callers'
+    // last-good texture (they already handle a failed snapshot).
     inline SP<Render::IFramebuffer> snapshotFB(PHLWINDOW w) {
+#if VTB_HL_056
         return g_pHyprRenderer->makeSnapshotFB(w);
+#else
+        if (!w || w->isHidden())
+            return nullptr;
+        w->m_snapshotFB.reset();
+        g_pHyprRenderer->makeSnapshot(w);
+        auto fb = w->m_snapshotFB;
+        w->m_snapshotFB.reset();
+        return (fb && fb->isAllocated() && fb->getTexture()) ? fb : nullptr;
+#endif
+    }
+
+    // Release an offscreen framebuffer safely MID-FRAME, then drop the ref.
+    // 0.56's CGLFramebuffer::release() rebinds the renderer's previously
+    // bound FB afterwards — added upstream precisely for a plugin releasing
+    // from inside a pass element. 0.55's binds FB 0 and walks away, and the
+    // pass loop never rebinds between elements, so every later draw in that
+    // frame would land in the default framebuffer (one corrupt frame at the
+    // end of every open/close fade). On 0.55, put the pass's target back
+    // ourselves.
+    inline void releaseFB(SP<Render::IFramebuffer>& fb) {
+        if (!fb)
+            return;
+        fb->release();
+#if !VTB_HL_056
+        if (g_pHyprRenderer->m_renderData.currentFB)
+            g_pHyprRenderer->m_renderData.currentFB->bind();
+#endif
+        fb.reset();
     }
 
 }
