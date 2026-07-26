@@ -70,6 +70,7 @@ in
     Icon=system-file-manager
     Terminal=false
     Categories=Utility;System;FileTools;
+    Keywords=bespoke;
     MimeType=inode/directory;
   '';
 

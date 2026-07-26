@@ -38,6 +38,14 @@ PanelWindow {
     property var results: []
     property int selected: 0
 
+    // 0 for our own programs, 1 for everything else — the primary sort key.
+    function rank(entry) {
+        const kw = entry.keywords || [];
+        for (let i = 0; i < kw.length; i++)
+            if (String(kw[i]).toLowerCase() === "bespoke") return 0;
+        return 1;
+    }
+
     function rebuild() {
         const q = input.text.trim().toLowerCase();
         let list = [];
@@ -51,7 +59,13 @@ PanelWindow {
                 if (q === "" || name.includes(q))
                     list.push(a);
             }
-            list.sort((x, y) => (x.name || "").localeCompare(y.name || ""));
+            // The desktop's own programs (filer, player, painter, surfer,
+            // viewer, settings — everything tagged `Keywords=bespoke;` in its
+            // .desktop file) sort ahead of the distro's, alphabetical within
+            // each group. They're what this runner is mostly for, and it also
+            // means the result cap below never drops them.
+            list.sort((x, y) => rank(x) - rank(y)
+                             || (x.name || "").localeCompare(y.name || ""));
         }
         // Cap the result count (0 = unlimited).
         const cap = SettingsStore.d.launcherMaxResults;

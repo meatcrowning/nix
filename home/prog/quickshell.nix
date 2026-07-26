@@ -119,6 +119,7 @@ in
     Icon=preferences-desktop
     Terminal=false
     Categories=Settings;DesktopSettings;
+    Keywords=bespoke;
   '';
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''

@@ -78,6 +78,7 @@ in
     Icon=web-browser
     Terminal=false
     Categories=Network;WebBrowser;
+    Keywords=bespoke;
     MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
   '';
 }

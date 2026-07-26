@@ -61,6 +61,7 @@ in
     Icon=audio-x-generic
     Terminal=false
     Categories=AudioVideo;Audio;Player;
+    Keywords=bespoke;
     MimeType=audio/flac;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/opus;audio/x-dsf;audio/x-wavpack;audio/x-ape;
   '';
 }
