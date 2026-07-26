@@ -146,11 +146,20 @@ Rectangle {
             }
         }
 
+        // Zoom by the DISTANCE scrolled, not once per event: the factor is
+        // exp(k·d) with k = ln(1.2)/120, so one classic wheel detent
+        // (angleDelta 120) is still exactly ×1.2 — but a trackpad, which fires
+        // a burst of small pixelDelta events per flick, no longer multiplies by
+        // 1.2 per event and slams the 1..8 range shut in a dozen of them.
         WheelHandler {
             target: null
             enabled: !viewer.isVideo   // the wheel scrubs the titlebar bar for video
             acceptedModifiers: Qt.NoModifier
-            onWheel: (e) => viewer.zoomAround(e.angleDelta.y > 0 ? 1.2 : 1 / 1.2, e.x, e.y)
+            onWheel: (e) => {
+                // pixelDelta ×3: ~40px of finger travel ≈ one detent's worth
+                const d = e.pixelDelta.y !== 0 ? e.pixelDelta.y * 3 : e.angleDelta.y;
+                viewer.zoomAround(Math.exp(Math.log(1.2) / 120 * d), e.x, e.y);
+            }
         }
     }
 

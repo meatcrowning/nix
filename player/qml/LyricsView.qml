@@ -36,6 +36,12 @@ Item {
     property bool lastContent: false
     readonly property bool hasContent: fetching ? lastContent : resolvedContent
 
+    // A scroll of your own outranks the follow below for a few seconds. The
+    // follow teleports the view to the current line at every lyric boundary,
+    // which lands mid-gesture if you are reading ahead — so it stands down for
+    // 3s after the last wheel notch (or scrollbar grab) and then resumes.
+    property real lastUserScrollMs: 0
+
     onTrackIdChanged: refetch()
     onActiveChanged: if (active) refetch()
 
@@ -80,7 +86,7 @@ Item {
             }
             if (ans !== root.currentLine) {
                 root.currentLine = ans;
-                if (ans >= 0)
+                if (ans >= 0 && Date.now() - root.lastUserScrollMs > 3000)
                     lyricsList.positionViewAtIndex(ans, ListView.Center);
             }
         }
@@ -109,7 +115,13 @@ Item {
         model: root.lyricsData.synced ? root.lyricsData.lines : []
         interactive: false     // scrollbar + wheel only — no drag-flicking
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: VScroll {}
+        // interactive:false means no flick/drag signal ever fires here, so the
+        // handle is the only user motion besides the wheel; grabbing it stands
+        // the follow down the same way. Press only — the scrollbar's `position`
+        // also moves when the FOLLOW scrolls, which would self-suppress forever.
+        ScrollBar.vertical: VScroll {
+            onPressedChanged: if (pressed) root.lastUserScrollMs = Date.now()
+        }
 
         delegate: Item {
             width: lyricsList.width
@@ -162,10 +174,12 @@ Item {
     WheelScroll {
         anchors.fill: lyricsList
         view: lyricsList.visible ? lyricsList : null
+        onScrolled: root.lastUserScrollMs = Date.now()   // you are driving now
     }
     WheelScroll {
         anchors.fill: plainFlick
         view: plainFlick.visible ? plainFlick : null
+        onScrolled: root.lastUserScrollMs = Date.now()
     }
 
     // ---- nothing to show: say WHICH kind of nothing ----
