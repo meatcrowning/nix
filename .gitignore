@@ -2,6 +2,6 @@
 .webui_secret_key
 __pycache__/
 
-# docs/ is its own PRIVATE repo (tilktilk5/nix-docs), synced top<->book by
+# docs/ is its own PRIVATE repo (meatcrowning/nix-docs), synced top<->book by
 # home/srvs/nix-docs.nix. Never track it here — this repo is public.
 /docs/

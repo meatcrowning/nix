@@ -2,7 +2,7 @@
 
 {
   # The Vista .wav files (Microsoft's — this repo is public) live in a SEPARATE
-  # PRIVATE repo, github.com/tilktilk5/vista-sounds, pulled in here as the
+  # PRIVATE repo, github.com/meatcrowning/vista-sounds, pulled in here as the
   # `sounds/` git submodule. This out-of-store symlink exposes that checkout at
   # the runtime path every consumer expects (~/.local/share/sounds/vista), so
   # the sounds ride along with `git pull --recurse-submodules` on every machine

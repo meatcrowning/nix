@@ -3,7 +3,7 @@ import Quickshell
 import QtQuick
 
 // Windows Vista system sounds. The wavs are Microsoft's, so they live in a
-// private submodule (github.com/tilktilk5/vista-sounds → sounds/), symlinked
+// private submodule (github.com/meatcrowning/vista-sounds → sounds/), symlinked
 // to ~/.local/share/sounds/vista by home/srvs/vista-sounds.nix.
 // Central playback so every component names a file, not a pipeline. Event
 // map (who calls what):

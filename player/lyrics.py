@@ -43,7 +43,7 @@ LRC_LINE = re.compile(r"\[(\d+):(\d{1,2}(?:[.:]\d{1,3})?)\]")
 # into the lyrics tag. Real lyrics are a few KB at most.
 MAX_LYRICS = 6000
 
-USER_AGENT = "player/1.0 (https://github.com/tilktilk5; personal desktop player)"
+USER_AGENT = "player/1.0 (https://github.com/meatcrowning; personal desktop player)"
 LRCLIB = "https://lrclib.net/api/"
 
 

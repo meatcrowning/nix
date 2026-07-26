@@ -2,7 +2,7 @@
 
 # Cross-machine sync for ~/nix/docs.
 #
-# `tilktilk5/nix` is PUBLIC. The working notes under docs/ — plans, roadmaps,
+# `meatcrowning/nix` is PUBLIC. The working notes under docs/ — plans, roadmaps,
 # impact analyses, the air/top library-share runbook — are not for publication,
 # but they still need to be on both machines: the whole point of the runbook is
 # that `book` pulls it and finishes a job `top` started.
@@ -51,7 +51,7 @@
           pkgs.inetutils
         ]}"
         "CM_SYNC_REPO=%h/nix/docs"
-        "CM_SYNC_REMOTE=https://github.com/tilktilk5/nix-docs.git"
+        "CM_SYNC_REMOTE=https://github.com/meatcrowning/nix-docs.git"
         "CM_SYNC_LOG=%h/.cache/nix-docs-sync.log"
         "CM_SYNC_SEED=%h/.config/scripts/nix-docs-seed"
         "CM_SYNC_LABEL=doc"

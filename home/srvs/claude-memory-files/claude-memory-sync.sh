@@ -32,7 +32,7 @@
 # reuse it wholesale. home/srvs/nix-docs.nix does exactly that for ~/nix/docs;
 # see the note on CM_SYNC_SEED below before adding a third.
 REPO="${CM_SYNC_REPO:-$HOME/.claude/projects}"
-REMOTE="${CM_SYNC_REMOTE:-https://github.com/tilktilk5/claude-memories.git}"
+REMOTE="${CM_SYNC_REMOTE:-https://github.com/meatcrowning/claude-memories.git}"
 BRANCH="${CM_SYNC_BRANCH:-main}"
 LOG="${CM_SYNC_LOG:-$HOME/.cache/claude-memory-sync.log}"
 # MUST be overridden by any other caller: this default seeds the ALLOWLIST
