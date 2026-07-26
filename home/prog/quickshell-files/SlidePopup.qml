@@ -56,6 +56,12 @@ PanelWindow {
     // Set for the duration of a snapPinned() — suppresses the card's entry
     // slide so a hot-reload restore lands in place instead of re-animating.
     property bool _snapPin: false
+    // Set alongside it when that restore is a same-process RELOAD, whose layer
+    // surface Quickshell hands over already mapped at the layer it had: then
+    // the layer remap below must be skipped, or the handover is undone (the
+    // surface is destroyed and a new one opened, which Hyprland fades out and
+    // back in — the reload blink this restore path exists to remove).
+    property bool _snapReused: false
     Behavior on _fanY { enabled: root._fanYAnim; NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
 
     // Scene-Y of our top edge while pinned in-place, recomputed LIVE (not
@@ -166,15 +172,23 @@ PanelWindow {
         if (stackFloor) Popups.tiledFloorWidth = pinnedOpen ? implicitWidth : 0;
         // Recreate the surface AFTER the layer binding settles (a synchronous
         // map reads the old layer). The deferred remap re-files it at the new
-        // one — ALWAYS, including when the surface has never mapped yet.
-        // Quickshell latches the layer when it creates the window, which it
-        // does at component completion regardless of `visible`, so a pin
-        // applied during construction (snapPinned() on the hot-reload restore,
-        // or the login fan) still comes up on Overlay — i.e. every desktop
-        // widget sitting ON TOP of windows. Unmapping first costs nothing here:
-        // nothing has been drawn yet, so the widget simply maps 32ms later, at
-        // Bottom, where it belongs.
-        if (open) { _mapped = false; remapTimer.restart(); }
+        // one, including when the surface has never mapped yet: Quickshell
+        // latches the layer when it CREATES the window, at component completion
+        // regardless of `visible`, so a pin applied during construction (the
+        // login fan) would otherwise come up on Overlay — every desktop widget
+        // sitting ON TOP of windows (measured: all six in level 3). Unmapping a
+        // never-drawn surface costs nothing; it maps 32ms later, at Bottom.
+        //
+        // The ONE exception is a same-process reload restore (_snapReused).
+        // There the window is not new: Quickshell hands the outgoing window's
+        // layer surface to the incoming object, still mapped and still on
+        // Bottom — nothing to fix, and everything to lose. A remap closes that
+        // surface and opens a fresh one, which Hyprland fades out and back in
+        // (layersOut/layersIn), i.e. the desktop widgets blink on every theme
+        // or wallpaper change. Measured on Hyprland's event socket: with the
+        // remap a reload emits closelayer+openlayer for all six widgets; with
+        // this exception, neither, and they stay in level 1 throughout.
+        if (open && !_snapReused) { _mapped = false; remapTimer.restart(); }
         // No remap needed, but a pending fan reveal still has to be released —
         // it's remapTimer that animates _fanY back to 0 (see below).
         else if (_fanRevealPending) remapTimer.restart();
@@ -211,11 +225,14 @@ PanelWindow {
     // desktop widgets vanish and fly back in on every wallpaper change or QML
     // edit. Called during construction, before the surface has mapped, so the
     // card's x binding is only ever evaluated at its final value.
-    function snapPinned() {
+    // `reused` = this is a reload of the SAME Quickshell process, so our layer
+    // surface was handed over rather than created (see onPinnedOpenChanged).
+    function snapPinned(reused) {
         if (pinnedOpen) return;
         _snapPin = true;
+        _snapReused = !!reused;
         pinnedOpen = true;
-        Qt.callLater(function() { root._snapPin = false; });
+        Qt.callLater(function() { root._snapPin = false; root._snapReused = false; });
     }
 
     // Reverse: sink the card back down into the widget below, then unpin.

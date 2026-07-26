@@ -155,12 +155,20 @@ before touching the plugin or the pin.
   - **the pin set** — mirrored to `$XDG_RUNTIME_DIR/qs-live-pins` and read back
     SYNCHRONOUSLY (`FileView { blockLoading: true }`) in `Component.onCompleted`,
     then applied with `snapPinned()`. The file's absence doubles as the
-    login-vs-reload flag ($XDG_RUNTIME_DIR is wiped at logout). Pinning must
-    ALWAYS trigger `SlidePopup`'s deferred layer remap, even pre-map: Quickshell
-    latches the layer when it creates the window (at component completion,
-    regardless of `visible`), so a pin applied during construction comes up on
-    Overlay and every desktop widget floats ON TOP of windows. Check with
-    `hyprctl layers` — the `qs-*` widget namespaces belong in level 1 (bottom).
+    login-vs-reload flag ($XDG_RUNTIME_DIR is wiped at logout); the PID written
+    alongside (`v2 <pid> …`) separates a RELOAD of that process from a fresh
+    `quickshell` start, which is the whole trick — **on a reload Quickshell
+    hands the outgoing window's layer surface to the incoming object, still
+    mapped**, so `SlidePopup` must NOT run its layer remap there (a remap
+    destroys that surface and opens a new one, which Hyprland fades out/in —
+    the widgets blink on every wallpaper or theme change). Everywhere else the
+    remap is mandatory, INCLUDING pre-map: Quickshell latches the layer when it
+    creates the window (at component completion, regardless of `visible`), so
+    the login fan would otherwise come up on Overlay with every desktop widget
+    floating ON TOP of windows. Both halves are checkable without looking at
+    the screen: `hyprctl layers` — the `qs-*` widget namespaces belong in level
+    1 (bottom) — and Hyprland's event socket, which must emit NO
+    `closelayer`/`openlayer` for them across a reload.
   - **the widgets' contents** — a `PersistentProperties` block, which hands
     properties from the outgoing tree to the incoming one in-process. Each
     source exposes `stateJson()`/`restoreState()` plus a `stateRev` counter that
