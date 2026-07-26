@@ -197,15 +197,27 @@ else
   bad "$DECOS hyprvtb decorations on the hidden window (want 2)"
   hc decorations "address:$ADDR" | sed 's/^/         /'
 fi
-# ...and this is what proves WHICH instance they belong to: rollup() walks the
-# live plugin's own bar list, so it can only move a window the CURRENT .so
-# decorates. A stale titlebar just sits there.
-# The incoming instance does not inherit the roll STATE, only the window: its
-# fresh deco believes the window is un-rolled (PLUGIN_EXIT un-hid it on the way
-# out), so one call rolls it up again and the second brings it back. What
-# matters is that the calls MOVE it at all.
-hc eval "hl.plugin.hyprvtb.rollup('address:$ADDR')" >/dev/null
-sleep 2
+step "did the window STAY rolled up across the swap? (2.71)"
+# PLUGIN_EXIT must un-roll every window on the way out — a hidden window whose
+# decoration is about to be unmapped is the crash this whole file is about. But
+# an un-rolled window is not where the user left it: before 2.71 every rolled-up
+# window snapped open on a `hyprctl reload` and stayed open. The outgoing
+# instance now writes its roll/minimize states to handoff.tsv and the incoming
+# one re-applies them, so the round trip is invisible.
+#
+# NB this asserts nothing on the FIRST swap from a pre-2.71 build: the outgoing
+# instance is the one that has to write the file. Both halves here are the same
+# build, so it applies.
+if [ "$(hc clients -j | jq -r --arg a "$ADDR" '.[]|select(.address==$a)|.hidden')" = "true" ]; then
+  ok "still rolled up after the swap — the handoff carried the state"
+else
+  bad "the window snapped open across the swap — handoff.tsv was not written or not applied"
+fi
+
+step "does the NEW instance own the titlebar?"
+# rollup() walks the live plugin's own bar list, so it can only move a window
+# the CURRENT .so decorates — a stale titlebar just sits there. The window is
+# rolled up (asserted above), so ONE call must bring it back out.
 hc eval "hl.plugin.hyprvtb.rollup('address:$ADDR')" >/dev/null
 sleep 2
 if ! alive; then
