@@ -4,8 +4,9 @@ import QtQuick
 // the full width and meets the window's outline, no margins (its height is a
 // draggable, persisted fraction of the view; square covers crop, not
 // letterbox). The bottom row is split into two columns: the left carries the
-// playing track's identity + transport controls + position readout (scrubbing
-// lives on the titlebar's vertical track), and under those the queue; the right column is the lyrics, which
+// playing track's identity (title + rating + artist + album) and under it the
+// queue — no transport controls and no position readout, both of which live in
+// the titlebar now; the right column is the lyrics, which
 // collapses to zero width whenever the track has none. Lyrics are requested per
 // track change and delivered async by the LyricsProvider (embedded → .lrc →
 // LRCLIB).
