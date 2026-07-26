@@ -436,6 +436,16 @@ hl.config({
 	disable_splash_rendering = true, 
         force_default_wallpaper = 0,    -- Set to 0 or 1 to disable the anime mascot wallpapers
         disable_hyprland_logo   = true, -- If true disables the random hyprland logo / anime girl background. :(
+
+        -- "Hyprland was started without start-hyprland. This is strongly
+        -- discouraged unless you are in a debugging environment."
+        -- That is deliberate here: the session's Exec is `hypr-supervise`
+        -- (sys/dsk/hyprland.nix), which replaces start-hyprland's watchdog
+        -- precisely because its answer to an unclean exit is --safe-mode.
+        -- Ours restarts with the REAL config and quarantines the plugin build
+        -- that died. We don't speak start-hyprland's --watchdog-fd protocol,
+        -- so the compositor can't tell us apart from a raw `Hyprland` launch.
+        disable_watchdog_warning = true,
     },
 })
 
