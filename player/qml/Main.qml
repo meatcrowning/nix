@@ -52,8 +52,11 @@ Window {
     title: footerStr !== "" ? footerStr : "player"
     width: 1080
     height: 720
-    minimumWidth: 480
-    minimumHeight: 320
+    // air's screen is a fraction of top's — let the window shrink well past
+    // top's floor there (the layouts already flow; the now-playing cover has
+    // its own air-side cap so it stays proportionate).
+    minimumWidth: OnAir ? 320 : 480
+    minimumHeight: OnAir ? 240 : 320
     visible: true
     color: Theme.bg
 
