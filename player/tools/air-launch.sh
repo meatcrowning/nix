@@ -32,10 +32,16 @@ say() { printf 'player: %s\n' "$*" >&2; }
 # ---- dependency preflight -------------------------------------------------
 # air runs Fedora's system python, so the deps are dnf/pip's problem, not nix's.
 # Name what is missing instead of dying on an import traceback.
+#
+# Fedora 44 has NO python3-mpv package — the binding is pip-only, and it is a
+# pure-ctypes wrapper, so it also needs the library itself (dnf mpv-libs) or it
+# fails at import, not at play. mpris_server is likewise pip-only.
 check_deps() {
     local missing=() mod pkg
-    for pair in "PySide6:python3-pyside6" "mpv:python3-mpv" \
-                "mutagen:python3-mutagen" "mpris_server:pip install mpris-server"; do
+    for pair in "PySide6:dnf install python3-pyside6" \
+                "mpv:dnf install mpv-libs && pip install --user python-mpv" \
+                "mutagen:dnf install python3-mutagen" \
+                "mpris_server:pip install --user mpris-server"; do
         mod="${pair%%:*}"; pkg="${pair#*:}"
         "$PY" -c "import $mod" 2>/dev/null || missing+=("$mod  ($pkg)")
     done
