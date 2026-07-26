@@ -123,10 +123,11 @@ namespace {
         // re-registrations (viewer re-registers its button set on every
         // image<->video switch, and again would clobber the live PLAYBAR)
         if (auto it = g_regs.find(pid); it != g_regs.end()) {
-            reg.footer    = it->second.footer;
-            reg.titleEdit = it->second.titleEdit;
-            reg.playbar   = it->second.playbar;
-            reg.playPos   = it->second.playPos;
+            reg.footer       = it->second.footer;
+            reg.titleEdit    = it->second.titleEdit;
+            reg.playbar      = it->second.playbar;
+            reg.playPos      = it->second.playPos;
+            reg.footerBottom = it->second.footerBottom;
         }
         c.pid          = pid;
         g_regs[pid]    = std::move(reg);
@@ -144,6 +145,20 @@ namespace {
         if (it->second.footer == text)
             return;
         it->second.footer = text;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void handleFooterPos(SClient& c, const std::string& arg) {
+        if (c.pid <= 0)
+            return;
+        std::lock_guard lk(g_lk);
+        const auto      it = g_regs.find(c.pid);
+        if (it == g_regs.end() || g_regFd[c.pid] != c.fd)
+            return;
+        const bool BOTTOM = (arg == "1");
+        if (it->second.footerBottom == BOTTOM)
+            return;
+        it->second.footerBottom = BOTTOM;
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -203,6 +218,8 @@ namespace {
     void handleLine(SClient& c, const std::string& line) {
         if (line.starts_with("REGISTER "))
             handleRegister(c, line.substr(9));
+        else if (line.starts_with("FOOTERPOS "))
+            handleFooterPos(c, line.substr(10));
         else if (line.starts_with("FOOTER "))
             handleFooter(c, line.substr(7));
         else if (line == "FOOTER")

@@ -7,6 +7,7 @@ the server side):
 
     -> REGISTER <pid> <id>:<label>:<state>:<tip>:<drag>|...  our whole button set
     -> FOOTER <text>                             stacked text at column bottom
+    -> FOOTERPOS <0|1>                           footer below the scrub bar (player)
     -> TITLEEDIT <0|1>                           title region is an address bar
     -> LOADING <0|1>                             page loading (draws a spinner)
     -> PLAYBAR <0|1> <pos>                       media scrub bar + playback fraction
@@ -56,6 +57,7 @@ class VtbClient:
         self._sock = None          # guarded by _lock
         self._buttons = []         # last set, guarded by _lock (resent on reconnect)
         self._footer = ""
+        self._footer_bottom = False
         self._title_edit = False
         self._loading = False
         self._playbar = None       # (shown, pos) or None if never set
@@ -76,6 +78,16 @@ class VtbClient:
         with self._lock:
             self._footer = str(text)
             self._send_footer_locked()
+
+    def set_footer_bottom(self, on):
+        """Put the footer BELOW the scrub bar instead of above it (player's
+        position readout, which belongs against its own track). Default off
+        keeps viewer's order: readout under the buttons, track beneath it."""
+        with self._lock:
+            if bool(on) == self._footer_bottom:
+                return
+            self._footer_bottom = bool(on)
+            self._send_footer_pos_locked()
 
     def set_title_edit(self, on):
         """Mark the title region an editable address bar (surfer)."""
@@ -155,6 +167,9 @@ class VtbClient:
     def _send_footer_locked(self):
         self._send_locked("FOOTER " + self._footer)
 
+    def _send_footer_pos_locked(self):
+        self._send_locked("FOOTERPOS " + ("1" if self._footer_bottom else "0"))
+
     def _send_title_edit_locked(self):
         self._send_locked("TITLEEDIT " + ("1" if self._title_edit else "0"))
 
@@ -189,6 +204,8 @@ class VtbClient:
                 with self._lock:
                     self._sock = sock
                     self._send_register_locked()
+                    if self._footer_bottom:
+                        self._send_footer_pos_locked()
                     if self._footer:
                         self._send_footer_locked()
                     if self._title_edit:

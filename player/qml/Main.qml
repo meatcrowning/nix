@@ -47,8 +47,8 @@ Window {
     readonly property bool act: win.active
 
     // The OUTER titlebar shows the window title — put the playing track there
-    // ("artist — title") instead of a static app name; the inner column's
-    // footer stays unused so the playbar gets the full lower run.
+    // ("artist — title") instead of a static app name. The inner column's
+    // footer carries the position readout (see tbTime), below the scrub track.
     title: footerStr !== "" ? footerStr : "player"
     width: 1080
     height: 720
@@ -126,7 +126,13 @@ Window {
             closeSearch();
     }
 
-    Component.onCompleted: Library.setSort(sortMode)
+    Component.onCompleted: {
+        Library.setSort(sortMode);
+        // opt in to the footer sitting below the scrub track (hyprvtb >= 2.72);
+        // older plugin builds just ignore the FOOTERPOS line.
+        Titlebar.setFooterBottom(true);
+        Titlebar.setFooter(win.tbTime);
+    }
 
     Connections {
         target: Library
@@ -164,6 +170,22 @@ Window {
         return (t && t.title) ? ((t.artist ? t.artist + " — " : "") + t.title) : "";
     }
 
+    // ---- titlebar footer: the position readout, under the scrub track -------
+    // Stacked one character per line by the plugin, so length is the whole cost
+    // — "3:45/5:12" is 9 cells. Minutes are left unbounded rather than growing
+    // an hours field, so an 80-minute mix reads "80:14" instead of "1:20:14"
+    // and the column never gains two more rows. No spaces around the slash for
+    // the same reason: a space still costs a full (blank) cell.
+    function fmtTime(s) {
+        s = Math.max(0, Math.round(s));
+        return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+    }
+    readonly property string tbTime: (Player.duration > 0 && Player.index >= 0)
+        ? (fmtTime(Player.position) + "/" + fmtTime(Player.duration)) : ""
+    // position fires far faster than the string changes; a QML property only
+    // notifies on an actual change, so this pushes once per displayed second.
+    onTbTimeChanged: Titlebar.setFooter(tbTime)
+
     function pushPlaybar() {
         // Floor the fraction: hyprvtb builds ≤2.44 abort the compositor on a
         // zero-height fill rect (paused at 0:00), and a 0.2% fill is invisible.
@@ -182,7 +204,10 @@ Window {
         function onCurrentChanged() { win.pushPlaybar(); }
         function onDurationChanged() { win.pushPlaybar(); }
     }
-    Component.onDestruction: Titlebar.setPlaybar(false, 0)
+    Component.onDestruction: {
+        Titlebar.setPlaybar(false, 0);
+        Titlebar.setFooter("");
+    }
 
     Connections {
         target: Titlebar

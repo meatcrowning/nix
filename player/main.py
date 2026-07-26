@@ -188,6 +188,10 @@ class Titlebar(QObject):
     def setFooter(self, text):
         self._client.set_footer(text)
 
+    @Slot(bool)
+    def setFooterBottom(self, on):
+        self._client.set_footer_bottom(on)
+
     @Slot(bool, float)
     def setPlaybar(self, shown, pos):
         self._client.set_playbar(shown, pos)
@@ -1419,6 +1423,27 @@ class Player(QObject):
             return self._queue[self._index]
         return None
 
+    def apply_track_update(self, track_id, row):
+        """Patch the cached queue dicts after a DB write, then re-notify.
+
+        `current` reads straight out of `self._queue`, which is a snapshot taken
+        by `tracks_by_ids()` when the queue was built and never refreshed. So a
+        rating/favourite write used to update the DB and every ListModel, emit
+        currentChanged, and then have QML re-read the SAME stale dict — the
+        now-playing stars and heart never moved, which looked like the click
+        doing nothing at all. Patch the cache first, and only then notify.
+
+        `_orig_queue` (the pre-shuffle order) is a shallow copy, so it holds the
+        very same dict objects and comes along for free.
+        """
+        touched = False
+        for t in self._queue:
+            if t.get("id") == track_id:
+                t.update(row)
+                touched = True
+        if touched:
+            self.currentChanged.emit()
+
     # ---- properties for QML ----
 
     @Property("QVariant", notify=currentChanged)
@@ -2087,7 +2112,9 @@ class Bridge(QObject):
             for i in range(model.count):
                 if model.get(i).get("trackId") == track_id:
                     model.update_row(i, {**model.get(i), **new})
-        self._player.currentChanged.emit()  # now-playing rating stars
+        # now-playing stars/heart: patch the player's own cached queue dict, not
+        # just the models — a bare currentChanged re-reads the pre-write copy.
+        self._player.apply_track_update(track_id, rows[0])
 
     @Slot(int)
     def requestLyrics(self, track_id):

@@ -17,6 +17,7 @@
 //         footer) — surfer's settings button. Fields are percent-encoded by the
 //         client (%3A ':', %7C '|', %0A newline) and decoded here, so a label
 //         may be any glyph incl. "|" or ":". An entry with id "-" is a separator.
+//     FOOTERPOS <0|1>  footer below the scrub bar instead of above it (player)
 //     FOOTER <text>
 //         Short text drawn as stacked upright characters at the bottom of the
 //         inner column (filer's dir-size readout). Empty text clears it.
@@ -77,6 +78,13 @@ struct SVtbAppReg {
     bool                       loading   = false; // page loading (spinner above the address bar)
     bool                       playbar   = false; // media scrub bar shown (viewer video)
     float                      playPos   = 0.f;   // playback fraction 0..1 (fill length)
+    // Where the footer sits when a scrub bar is shown. Default false keeps the
+    // original order (footer under the top button group, track below it), which
+    // is what viewer wants: its readout names the file the track belongs to.
+    // True swaps them — track first, footer beneath it, just above the
+    // bottom-anchored buttons — so the player's position readout ends up
+    // against its own scrub bar rather than at the far end of the column.
+    bool                       footerBottom = false;
 };
 
 namespace VtbIpc {

@@ -33,7 +33,7 @@ Item {
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
-    Component.onCompleted: { applyInput(); syncSunset(); }
+    Component.onCompleted: { applyInput(); sunsetProbe.running = true; }
 
     Connections {
         target: SettingsStore.d
@@ -59,21 +59,52 @@ Item {
     // temperature by killing and relaunching. The `pkill -x` in the launch
     // line takes over any instance started outside the panel (e.g. by hand),
     // rather than starting a second one that can't grab the gamma control.
+    //
+    // The daemon is launched DETACHED and tracked by a pgrep probe rather than
+    // being a child Process, so it OUTLIVES a panel reload: a theme change
+    // rebuilds this whole tree, and a child would have been killed with it —
+    // restoring the ramp and throwing the screen back to full brightness for
+    // the half-second until we relaunched. Now a reload just finds the daemon
+    // already up and pushes the (persisted) values at it, so nothing flickers.
     property bool sunsetWanted: SettingsStore.d.nightLight || SysInfo.gamma < 100
     readonly property int sunsetTemp: SettingsStore.d.nightLight ? SettingsStore.d.nightTemp : 6000
     readonly property int sunsetGamma: SysInfo.gamma
 
+    // Is a hyprsunset believed to be running, and is it one we drive? We only
+    // ever kill a daemon we launched or adopted — an instance someone started
+    // by hand while the panel wanted nothing from it is left alone.
+    property bool _sunsetUp: false
+    property bool _sunsetOurs: false
+    property bool _sunsetProbed: false
+
+    Process {
+        id: sunsetProbe
+        command: ["pgrep", "-x", "hyprsunset"]
+        onExited: (code) => {
+            root._sunsetUp = (code === 0);
+            root._sunsetProbed = true;
+            root.syncSunset();
+        }
+    }
+
     function syncSunset() {
+        // Until the probe has answered we don't know what's out there; it
+        // calls back into here the moment it does.
+        if (!root._sunsetProbed) return;
         if (!root.sunsetWanted) {
-            sunset.running = false;
+            if (root._sunsetUp && root._sunsetOurs)
+                Quickshell.execDetached(["pkill", "-x", "hyprsunset"]);
+            root._sunsetUp = false;
+            root._sunsetOurs = false;
             sunsetSettle.stop();
             return;
         }
-        if (!sunset.running) {
-            sunset.command = ["sh", "-c",
+        root._sunsetOurs = true;
+        if (!root._sunsetUp) {
+            Quickshell.execDetached(["sh", "-c",
                 "pkill -x hyprsunset; sleep 0.3; exec hyprsunset -t "
-                + root.sunsetTemp + " -g " + root.sunsetGamma];
-            sunset.running = true;
+                + root.sunsetTemp + " -g " + root.sunsetGamma]);
+            root._sunsetUp = true;
         } else {
             pushSunset();
         }
@@ -88,11 +119,10 @@ Item {
         Quickshell.execDetached(["hyprctl", "hyprsunset", "gamma", String(root.sunsetGamma)]);
     }
 
-    Process { id: sunset }
     Timer {
         id: sunsetSettle
         interval: 450
-        onTriggered: if (root.sunsetWanted && sunset.running) root.pushSunset()
+        onTriggered: if (root.sunsetWanted && root._sunsetUp) root.pushSunset()
     }
 
     onSunsetWantedChanged: syncSunset()
