@@ -38,8 +38,31 @@ let
 
   surfer =
     if host == "air" then
+      # air additionally brackets the run with the profile handoff (see
+      # ~/nix/surfer/tools/sync.py): merge top's cookies + userscripts in
+      # before the window opens, merge ours back out after it closes.
+      #
+      # Only air does this, and that is not an oversight: Fedora runs no
+      # sshd, so top cannot reach book — book is the only machine that can
+      # initiate. It still converges both ways, because book pulls top's
+      # latest at ITS launch and pushes its own at ITS exit.
+      #
+      # Never allowed to get between the user and the browser: the sync is
+      # timeout-bounded and `|| true`, so top being asleep, off the network
+      # or mid-session just logs and launches anyway. Chatter goes to
+      # ~/.cache/surfer-sync.log, not the terminal.
       pkgs.writeShellScriptBin "surfer" ''
-        exec /usr/bin/python3 /home/lam/nix/surfer/main.py "$@"
+        LOG="$HOME/.cache/surfer-sync.log"
+        vtbsync() {
+          echo "--- $(date -Is) $1" >> "$LOG"
+          timeout 90 /usr/bin/python3 /home/lam/nix/surfer/tools/sync.py "$1" \
+            >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
+        }
+        [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync pull
+        /usr/bin/python3 /home/lam/nix/surfer/main.py "$@"
+        rc=$?
+        [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync push
+        exit $rc
       ''
     else
       pkgs.stdenv.mkDerivation {
