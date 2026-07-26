@@ -312,9 +312,20 @@ Window {
     function grantPermission() { if (permCurrent) permCurrent.grant(); nextPermission(); }
     function denyPermission()  { if (permCurrent) permCurrent.deny();  nextPermission(); }
 
+    // How many dialogs/pickers a tab is sitting on. A deferred request keeps the
+    // page blocked with nothing on screen, so the tab's tooltip has to say so —
+    // it's the only clue that the tab is waiting on YOU. Guarded because
+    // tbButtons evaluates once before the overlays below have been created.
+    readonly property int dlgRev: (jsDialog ? jsDialog.rev : 0) + (filePicker ? filePicker.rev : 0)
+    function waitingFor(view) {
+        if (!view || !jsDialog || !filePicker) return 0;
+        return jsDialog.countFor(view) + filePicker.countFor(view);
+    }
+
     // ---- hyprvtb titlebar buttons (the browser's real chrome) ----
     readonly property var tbButtons: {
         void tabRev;                    // structural-change dependency
+        void dlgRev;                    // …and on a tab gaining/losing a dialog
         var arr = [
             { id: "back",    label: "<",  state: current && current.canGoBack ? 0 : 2,    tip: "back" },
             { id: "fwd",     label: ">",  state: current && current.canGoForward ? 0 : 2, tip: "forward" },
@@ -331,9 +342,10 @@ Window {
         for (var i = 0; i < tabs.count; i++) {
             var v = viewRep.count > i ? viewRep.itemAt(i) : null;
             var ttl = v && v.title ? v.title : "tab";
+            var asks = waitingFor(v) > 0 ? "asks · " : "";
             arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v),
                        state: i === currentTab ? 1 : 0,
-                       tip: i === currentTab ? "close · " + ttl : ttl, drag: true });
+                       tip: asks + (i === currentTab ? "close · " + ttl : ttl), drag: true });
         }
         arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab" });
         // settings pins to the bottom of the inner column (hyprvtb bottom-anchor)
@@ -469,6 +481,13 @@ Window {
                 // isolated worlds; see UserScripts in main.py
                 userScripts.collection: UserScripts.scriptObjects
                 Component.onCompleted: { zoomFactor = Zoom.level; url = seed; }
+                // closing this tab kills any dialog/picker it was holding — the
+                // requests die with the view, so the queues must let go of them
+                // here, while the view is still a valid key.
+                Component.onDestruction: {
+                    if (jsDialog) jsDialog.dropView(webview);
+                    if (filePicker) filePicker.dropView(webview);
+                }
 
                 // userscripts are injected by the profile (document-start, GM
                 // shim — see UserScripts in main.py); this just themes the
@@ -509,8 +528,11 @@ Window {
                 // unhandled, Chromium auto-rejects, so prompt() returns null,
                 // confirm() returns false, alert() vanishes and the picker never
                 // opens — silently, which reads as "the page is broken".
-                onJavaScriptDialogRequested: (request) => jsDialog.show(request)
-                onFileDialogRequested: (request) => filePicker.show(request)
+                // Both are queued PER VIEW (the view is passed in): only the
+                // current tab's front request is shown, so a background tab
+                // can't throw a modal over the page you're reading.
+                onJavaScriptDialogRequested: (request) => jsDialog.show(webview, request)
+                onFileDialogRequested: (request) => filePicker.show(webview, request)
 
                 // right-click: build a context menu from what was clicked (link,
                 // image, selection, editable field) plus the usual page actions,
@@ -756,13 +778,17 @@ Window {
 
     // page dialogs + file picker: modal overlays above the page (and above the
     // dark-mode drawer), below the right-click menu.
+    // currentView is what makes the queues per-tab: each panel shows only the
+    // current view's front request, and re-syncs when the current tab changes.
     JsDialog {
         id: jsDialog
         anchors.fill: parent
+        currentView: win.current
     }
     FilePicker {
         id: filePicker
         anchors.fill: parent
+        currentView: win.current
     }
 
     // reusable right-click menu — overlays the whole window, above everything.

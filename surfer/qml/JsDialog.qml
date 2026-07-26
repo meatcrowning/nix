@@ -14,15 +14,30 @@ import QtWebEngine
 // The request object is held across the event loop while the dialog is up —
 // the documented pattern for custom dialogs, and what makes it modal: the
 // page's JS stays blocked inside the prompt() call until dialogAccept/Reject.
-// Because of that block a view can only ever have one dialog outstanding, but
-// two TABS can, so requests queue rather than clobber each other.
+//
+// Queues are PER VIEW, and only the current tab's front request is ever shown:
+// a dialog belongs to the page that raised it, so a background tab must not
+// throw a modal over whatever you're reading. Switching tabs swaps the panel to
+// that tab's dialog (or hides it); switching back brings the deferred one up
+// untouched. Chromium proper auto-dismisses background-tab dialogs instead —
+// deferring is friendlier here, since the page stays blocked either way and the
+// tab's titlebar tooltip advertises that it's waiting (see win.waitingFor).
 Item {
     id: root
     visible: false
     z: 2800
 
-    property var pending: null      // the JavaScriptDialogRequest being shown
-    property var queue: []
+    // the view whose dialogs may be shown — bound to win.current by Main.qml
+    property var currentView: null
+
+    property var pending: null      // the JavaScriptDialogRequest on screen
+    property var pendingView: null  // and the view it came from
+    // [{ view, items: [request, …] }] — the shown request stays at its bucket's
+    // head until it's answered, so hiding it on a tab switch is just forgetting
+    // that it's on screen.
+    property var buckets: []
+    property int rev: 0             // bumped on every queue change (tab tooltips)
+
     property int dtype: JavaScriptDialogRequest.DialogTypeAlert
     property string message: ""
     property string origin: ""
@@ -30,18 +45,63 @@ Item {
     readonly property bool isPrompt: dtype === JavaScriptDialogRequest.DialogTypePrompt
     readonly property bool isAlert:  dtype === JavaScriptDialogRequest.DialogTypeAlert
 
-    function show(request) {
-        request.accepted = true;    // "we'll handle it" — suppresses the auto-reject
-        if (pending) { queue.push(request); return; }
-        present(request);
+    onCurrentViewChanged: sync()
+
+    function bucketFor(view, make) {
+        for (var i = 0; i < buckets.length; i++)
+            if (buckets[i].view === view) return buckets[i];
+        if (!make) return null;
+        var b = { view: view, items: [] };
+        buckets.push(b);
+        return b;
+    }
+    function countFor(view) {
+        var b = bucketFor(view, false);
+        return b ? b.items.length : 0;
     }
 
-    function present(request) {
-        pending  = request;
-        dtype    = request.type;
-        message  = request.message;
-        origin   = ("" + request.securityOrigin).replace(/^[a-z]+:\/\//, "").replace(/\/$/, "");
-        field.text = request.defaultText;
+    function show(view, request) {
+        request.accepted = true;    // "we'll handle it" — suppresses the auto-reject
+        bucketFor(view, true).items.push(request);
+        rev += 1;
+        sync();
+    }
+
+    // A tab is closing: its held requests die with the view, so drop them
+    // unanswered (reaching into a request whose page is being torn down is not
+    // safe). Driven from the view's Component.onDestruction — the only reliable
+    // signal, since a JS reference to an already-destroyed QObject stays truthy
+    // here, so liveness can't be tested after the fact.
+    function dropView(view) {
+        var live = [];
+        for (var i = 0; i < buckets.length; i++)
+            if (buckets[i].view !== view) live.push(buckets[i]);
+        buckets = live;
+        if (pendingView === view) { pending = null; pendingView = null; root.visible = false; }
+        rev += 1;
+        sync();
+    }
+
+    // Make the panel agree with the current tab: hide a dialog that isn't the
+    // current view's, then show that view's front one if there is one.
+    function sync() {
+        if (pending && pendingView !== currentView) {
+            pending = null;              // stays at its bucket's head, deferred
+            pendingView = null;
+            root.visible = false;
+        }
+        if (pending) return;
+        var b = bucketFor(currentView, false);
+        if (b && b.items.length > 0) present(b.items[0], currentView);
+    }
+
+    function present(request, view) {
+        pending     = request;
+        pendingView = view;
+        dtype       = request.type;
+        message     = request.message;
+        origin      = ("" + request.securityOrigin).replace(/^[a-z]+:\/\//, "").replace(/\/$/, "");
+        field.text  = request.defaultText;
         root.visible = true;
         // steal the keyboard from the WebEngineView: the prompt's field must
         // take typing (a focus scope wouldn't hand it over on its own).
@@ -49,10 +109,15 @@ Item {
         else keySink.forceActiveFocus();
     }
 
+    // answered: drop it from its bucket and move on to whatever's behind it
     function finish() {
+        var b = bucketFor(pendingView, false);
+        if (b) b.items.shift();
         pending = null;
+        pendingView = null;
         root.visible = false;
-        if (queue.length > 0) present(queue.shift());
+        rev += 1;
+        sync();
     }
 
     // Both answers go through try/finish: the tab that raised the dialog can be
