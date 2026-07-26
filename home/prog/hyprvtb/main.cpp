@@ -1055,6 +1055,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         "plugin:hyprvtb:kinetic_gain", "Extra multiplier on top of scroll_factor", 1.f, Config::Values::SFloatValueOptions{.min = 0.1f, .max = 5.f});
     g_pGlobalState->config.kineticAxisLockRatio    = makeShared<Config::Values::CFloatValue>(
         "plugin:hyprvtb:kinetic_axis_lock_ratio", "Zero the minor axis below this ratio of the major", 0.25f, Config::Values::SFloatValueOptions{.min = 0.f, .max = 1.f});
+    // The fix for "small nudges scroll FURTHER than deliberate scrolling".
+    // Velocity is distance over time, so a 6px flick in 20ms reads ~300px/s and
+    // coasts ~83px — fourteen times the finger travel — while a long, careful
+    // drag ends slow and barely coasts at all. Bounding coast as a multiple of
+    // how far the finger actually moved is what makes the gesture feel
+    // proportional to itself instead of to its final instant.
+    g_pGlobalState->config.kineticMaxCoastRatio    = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:kinetic_max_coast_ratio", "Coast distance may not exceed this multiple of the finger travel inside the velocity window", 4.f,
+        Config::Values::SFloatValueOptions{.min = 1.f, .max = 50.f});
     g_pGlobalState->config.kineticRateHz           = makeShared<Config::Values::CIntValue>(
         "plugin:hyprvtb:kinetic_rate_hz", "Tick rate; 0 follows the latched monitor's refresh", 0, Config::Values::SIntValueOptions{.min = 0, .max = 240});
     g_pGlobalState->config.kineticStopDelayMs      = makeShared<Config::Values::CIntValue>(
@@ -1091,6 +1100,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMaxVelocity);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticGain);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticAxisLockRatio);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMaxCoastRatio);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticRateHz);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticStopDelayMs);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticWindowMs);
@@ -1212,7 +1222,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.81"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.82"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
