@@ -224,6 +224,21 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                 m_bPlaybarDragging = false;
     double               m_playbarDragFrac  = 0.0;
 
+    // Where we last ASKED the client to seek to, held until its echo agrees.
+    //
+    // Releasing a scrub used to hand the fill straight back to reg.playPos, and
+    // a media client cannot answer that fast: the player pushes PLAYBAR off a
+    // 250ms timer reading mpv's clock, and mpv reports the PRE-seek position
+    // for a tick or two after the seek. So the fill snapped back to where the
+    // track was, jumped forward when the seek landed, and did it again for each
+    // stale tick already in flight — the "bounces a few times before settling".
+    // Rendering this pending value instead makes the bar answer the click
+    // immediately and only defer to the client once it has caught up. It also
+    // gives repeated scrolls a stable base to accumulate from, instead of each
+    // notch re-deriving its step from a position two ticks out of date.
+    double                                m_playbarPendingFrac = -1.0; // <0 = none pending
+    std::chrono::steady_clock::time_point m_playbarPendingAt{};
+
     // Click-activation flash: the clicked cell briefly inverts (fills with its
     // highlight colour, label drawn in the bar background) so a press reads as
     // "activated". Same cell-id space as m_iHoverCell.
@@ -300,6 +315,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     // the full inner-column width used as the click/scroll hit region, h = track
     // length). False when no scrub bar is shown or the window is too short.
     bool                 playbarTrackLocal(const SVtbAppReg& reg, double contentH, double scale, CBox& out);
+    // The fraction the scrub bar should DRAW, and the one a scroll should step
+    // from: the live drag, else a pending seek the client hasn't echoed yet,
+    // else the client's own position. Retires the pending value once the echo
+    // agrees (or gives up on it) — see m_playbarPendingFrac.
+    double               playbarFrac(const SVtbAppReg& reg);
+    void                 playbarSeekTo(double frac);
     int                  appDropSlot(const Vector2D& localCoords, const SVtbAppReg& reg); // nearest draggable slot to cursor Y
     void                 prewarmGlyphs(); // upload app-button glyph textures ahead of the render (Asahi tiler race)
     std::string          tooltipForCell(int cell); // "" = none
