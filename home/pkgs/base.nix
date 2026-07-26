@@ -11,23 +11,6 @@
     home-manager
     cava
     killall
-    # open-webui hardcodes KEY_FILE = cwd/.webui_secret_key, so launching it
-    # from $HOME litters ~/.webui_secret_key. Setting WEBUI_SECRET_KEY makes
-    # upstream skip that file entirely; this wrapper keeps the secret in a
-    # stable spot under ~/.local/share/open-webui instead.
-    (writeShellScriptBin "open-webui" ''
-      set -eu
-      keydir="''${XDG_DATA_HOME:-$HOME/.local/share}/open-webui"
-      keyfile="$keydir/.webui_secret_key"
-      if [ -z "''${WEBUI_SECRET_KEY:-}" ]; then
-        if [ ! -f "$keyfile" ]; then
-          mkdir -p "$keydir"
-          head -c 24 /dev/urandom | base64 > "$keyfile"
-        fi
-        export WEBUI_SECRET_KEY="$(cat "$keyfile")"
-      fi
-      exec ${open-webui}/bin/open-webui "$@"
-    '')
     # claude-code, off numtide/llm-agents.nix instead of nixpkgs so it tracks
     # Anthropic's releases (nixpkgs' copy lags days behind). system is derived
     # from pkgs so this resolves on both `top` (x86_64) and `air` (aarch64).
@@ -67,5 +50,24 @@
     btrfs-progs
     ranger
     grim
-  ];
+  ]
+  # open-webui is a heavy python+node build with no aarch64 binary cache, and it
+  # fails to build under Asahi — gate it to x86_64 (like google-chrome) so it
+  # doesn't block `air`'s whole home-manager generation. `top` still gets it.
+  # The wrapper exists because open-webui hardcodes KEY_FILE = cwd/.webui_secret_key,
+  # so launching it from $HOME litters ~/.webui_secret_key. Setting WEBUI_SECRET_KEY
+  # makes upstream skip that file; this keeps the secret under ~/.local/share/open-webui.
+  ++ lib.optional pkgs.stdenv.hostPlatform.isx86_64 (writeShellScriptBin "open-webui" ''
+    set -eu
+    keydir="''${XDG_DATA_HOME:-$HOME/.local/share}/open-webui"
+    keyfile="$keydir/.webui_secret_key"
+    if [ -z "''${WEBUI_SECRET_KEY:-}" ]; then
+      if [ ! -f "$keyfile" ]; then
+        mkdir -p "$keydir"
+        head -c 24 /dev/urandom | base64 > "$keyfile"
+      fi
+      export WEBUI_SECRET_KEY="$(cat "$keyfile")"
+    fi
+    exec ${pkgs.open-webui}/bin/open-webui "$@"
+  '');
 }
