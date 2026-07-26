@@ -1658,14 +1658,28 @@ class Cosmetic(QObject):
 
 def main():
     # air (Fedora/Asahi) has no working VA-API or Vulkan (the GPU logs show
-    # vaInitialize failing + Vulkan disabled), and Chromium's GPU compositing of
-    # video frames corrupts them there — every video "glitches out". Composite in
-    # software on air ONLY (detected by the system-python launcher path; top's
-    # GPU is fine and keeps full acceleration); page raster stays GPU-accelerated.
-    # Must be set before QtWebEngine initializes.
+    # vaInitialize failing + Vulkan disabled), and Chromium's handling of video
+    # frames corrupts them there — every video "glitches out". Fixed on air ONLY
+    # (detected by the system-python launcher path; top's GPU is fine and keeps
+    # full acceleration). Must be set before QtWebEngine initializes.
+    #
+    # This used to be `--disable-gpu-compositing`, whose comment claimed "page
+    # raster stays GPU-accelerated". It does not: that flag turns off the GPU
+    # compositor for the WHOLE page, so every scroll frame of a heavy site
+    # (github, with its sticky headers and deep layer tree) is composited on the
+    # CPU — which is precisely the "scrolling looks like a much lower framerate"
+    # report, and it got more visible once momentum made scrolls last longer.
+    # The narrow flag disables only the zero-copy GPU-memory-buffer path that
+    # video frames travel through, which is the part Asahi actually breaks, and
+    # leaves page compositing on the GPU where scrolling needs it.
+    #
+    # If video ever glitches again, `SURFER_GPU=safe surfer` restores the old
+    # blunt behaviour without an edit.
     if os.path.realpath(sys.executable).startswith("/usr/"):
         _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " --disable-gpu-compositing").strip()
+        _gpu = ("--disable-gpu-compositing" if os.environ.get("SURFER_GPU") == "safe"
+                else "--disable-gpu-memory-buffer-video-frames")
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " " + _gpu).strip()
 
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
     # userscripts' GM_xmlhttpRequest goes through it — see GmXhrHandler). Must be
