@@ -603,7 +603,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // the sliding snapshot, drawn at the end) occlude its centre — only the
     // bottom-left L-overhang shows, collapsing to nothing as the bar sets down.
     if (ROLLANIM)
-        drawRollShadow(barBox, SCALE, rollSlideT, rollDownT, a);
+        drawRollShadow(pMonitor, barBox, SCALE, rollSlideT, rollDownT, a);
 
     // background
     Hl::rect(barBox, bgColor, {});
@@ -973,11 +973,62 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // enqueueTooltip / drawTooltipPass.
 }
 
+// A window's box in this monitor's device pixels, carrying the same
+// workspace-slide + floating-drag offsets the titlebar uses so anything drawn
+// off it tracks the window through animations.
+static CBox vtbWindowLocalBox(PHLMONITOR pMonitor, PHLWINDOW w) {
+    CBox       g   = Hl::boxValue(w);
+    const auto WS  = w->m_workspace;
+    const auto OFF = (WS && !w->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
+    g.translate(OFF);
+    CBox b = {g.x - pMonitor->m_position.x, g.y - pMonitor->m_position.y, g.w, g.h};
+    return b.translate(w->m_floatingOffset).scale(pMonitor->m_scale).round();
+}
+
+// The visible frames of every window on this monitor — client box plus its
+// reserved titlebar strip — in monitor-local device pixels. This is what
+// occludes shadows: subtracting it is the "a shadow only ever falls on the
+// desktop" rule, and BOTH shadow paths (the flat layer and the roll
+// animation's own collapsing shadow) have to obey it.
+static CRegion vtbWindowFrames(PHLMONITOR pMonitor) {
+    CRegion frames;
+    if (!pMonitor)
+        return frames;
+
+    const double BARW = totalBarW() * pMonitor->m_scale;
+
+    for (const auto& w : Hl::windows()) {
+        if (!w || !w->m_isMapped || w->isHidden())
+            continue;
+        if (w->m_monitor.lock() != pMonitor)
+            continue;
+        if (!w->m_pinned && (!w->m_workspace || !w->m_workspace->isVisible()))
+            continue;
+
+        const CBox L = vtbWindowLocalBox(pMonitor, w);
+        if (L.w < 1 || L.h < 1)
+            continue;
+
+        const bool DECORATED = w->m_ruleApplicator->decorate().valueOrDefault();
+        frames.add(CBox{L.x, L.y, L.w + (DECORATED ? BARW : 0.0), L.h}.round());
+    }
+
+    return frames;
+}
+
 // The collapsing drop shadow of the visible composite (remaining client + bar),
 // offset down+left by the current float height; at downT 1 the offset is 0, so
 // the bar/snapshot sit flush over it and it vanishes ("set down"). Drawn before
 // the bar so only the L-overhang survives the occlusion.
-void CVtbDeco::drawRollShadow(const CBox& barBoxDev, float scale, float slideT, float downT, float a) {
+//
+// It is clipped against every other window's frame for the same reason the flat
+// layer is: on a roll-OUT (and the open reveal, which ends in one) the whole
+// composite is enqueued at RENDER_POST_WINDOWS so it animates OVER the windows
+// it's rising in front of — which put this shadow on top of them for the length
+// of the slide. The strip only vanished when the animation landed and the window
+// joined vtbRenderShadowLayer, which does subtract the frames. Now the rule
+// holds from the animation's first frame.
+void CVtbDeco::drawRollShadow(PHLMONITOR pMonitor, const CBox& barBoxDev, float scale, float slideT, float downT, float a) {
     const double shadowOff = VTB_SHADOW_SIZE * (1.f - downT) * scale;
     if (shadowOff <= 0.5)
         return;
@@ -986,8 +1037,25 @@ void CVtbDeco::drawRollShadow(const CBox& barBoxDev, float scale, float slideT, 
     // left edge of the still-visible content as it tucks right into the bar
     const double visLeft   = barBoxDev.x - clientW * (1.f - slideT);
     CBox         shadowBox = {visLeft - shadowOff, barBoxDev.y + shadowOff, barRight - visLeft, barBoxDev.h};
-    CHyprColor   sc        = {0.0, 0.0, 0.0, 0.6 * a};
-    Hl::rect(shadowBox.round(), sc, {});
+    if (shadowBox.w < 1 || shadowBox.h < 1) // never hand renderRect a degenerate box
+        return;
+
+    CHyprColor sc = {0.0, 0.0, 0.0, 0.6 * a};
+
+    // Our own window is hidden for the whole animation, so it contributes no
+    // frame here — only the windows underneath do, which is exactly what should
+    // clip us.
+    CRegion    shadow = CBox{shadowBox}.round();
+    shadow.subtract(vtbWindowFrames(pMonitor));
+    if (shadow.empty())
+        return;
+
+    for (const auto& r : shadow.getRects()) {
+        CBox b = {(double)r.x1, (double)r.y1, (double)(r.x2 - r.x1), (double)(r.y2 - r.y1)};
+        if (b.w < 1 || b.h < 1)
+            continue;
+        Hl::rect(b, sc, {});
+    }
 }
 
 // The window snapshot sliding right into the bar (or back out), clipped at the
@@ -3487,19 +3555,9 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
     const double N     = VTB_SHADOW_SIZE * SCALE;
     const double BARW  = totalBarW() * SCALE;
 
-    // The window's box in this monitor's device pixels, carrying the same
-    // workspace-slide + floating-drag offsets the titlebar uses so the shadow
-    // tracks the window through animations.
-    const auto localBox = [&](PHLWINDOW w) -> CBox {
-        CBox       g   = Hl::boxValue(w);
-        const auto WS  = w->m_workspace;
-        const auto OFF = (WS && !w->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
-        g.translate(OFF);
-        CBox b = {g.x - pMonitor->m_position.x, g.y - pMonitor->m_position.y, g.w, g.h};
-        return b.translate(w->m_floatingOffset).scale(SCALE).round();
-    };
-
-    CRegion shadow, frames;
+    // What occludes the shadows (see vtbWindowFrames — shared with the roll
+    // animation's own shadow, which has to obey the same rule).
+    CRegion shadow, frames = vtbWindowFrames(pMonitor);
 
     for (const auto& w : Hl::windows()) {
         if (!w || !w->m_isMapped || w->isHidden())
@@ -3509,15 +3567,11 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
         if (!w->m_pinned && (!w->m_workspace || !w->m_workspace->isVisible()))
             continue;
 
-        const CBox L = localBox(w);
+        const CBox L = vtbWindowLocalBox(pMonitor, w);
         if (L.w < 1 || L.h < 1)
             continue;
 
         const bool DECORATED = w->m_ruleApplicator->decorate().valueOrDefault();
-
-        // The visible frame: client box plus the reserved titlebar strip on the
-        // right. This is what occludes shadows — every window's, including its own.
-        frames.add(CBox{L.x, L.y, L.w + (DECORATED ? BARW : 0.0), L.h}.round());
 
         if (!DECORATED || Hl::isFullscreen(w))
             continue;
