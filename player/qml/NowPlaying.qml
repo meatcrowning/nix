@@ -79,19 +79,18 @@ Item {
                     if (m.button !== Qt.RightButton) return;
                     var aid = root.cur.albumId, art = root.coverArtist;
                     var p = artMouse.mapToItem(root, m.x, m.y);
+                    // The queue actions stay put — you keep watching what you
+                    // just started. Leaving for the gallery is its own row.
                     coverMenu.open(p.x, p.y, [
                         { label: "play album",
-                          trigger: function() {
-                              Player.playAlbum(aid, 0);
-                              root.browseArtist(art);
-                          } },
+                          trigger: function() { Player.playAlbum(aid, 0); } },
                         { label: "shuffle artist",
                           enabled: art !== "",
-                          trigger: function() {
-                              Player.playArtistShuffled(art);
-                              root.browseArtist(art);
-                          } },
+                          trigger: function() { Player.playArtistShuffled(art); } },
                         { separator: true },
+                        { label: "search for artist",
+                          enabled: art !== "",
+                          trigger: function() { root.browseArtist(art); } },
                         { label: "open album",
                           trigger: function() { root.openAlbum(aid); } },
                     ]);
