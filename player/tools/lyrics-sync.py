@@ -41,8 +41,13 @@ JOURNAL = STATE / "tagwrites.log"
 
 
 def open_db():
-    con = sqlite3.connect(DB_PATH, timeout=30)
+    # Generous, because the thing most likely to be writing is the player's own
+    # library scan, which holds back-to-back write transactions for MINUTES
+    # (a schema migration forces a full re-read of 11k files). 30s was not
+    # enough and cost a run at 96%.
+    con = sqlite3.connect(DB_PATH, timeout=120)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout=120000")
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("""CREATE TABLE IF NOT EXISTS lyrics (
                      track_id INTEGER PRIMARY KEY,
@@ -53,6 +58,26 @@ def open_db():
         con.execute("ALTER TABLE lyrics ADD COLUMN attempts INTEGER DEFAULT 0")
         con.commit()
     return con
+
+
+def db_retry(fn, what="db write", tries=5):
+    """Run a DB operation, surviving a busy database.
+
+    Even a 120s busy timeout can expire against a full library re-scan, and
+    losing one track's verdict is nothing — losing the whole sweep at 96%,
+    which is exactly what happened once, is not. Failed results simply aren't
+    cached, so the next run re-checks them."""
+    for i in range(tries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e):
+                raise
+            if i == tries - 1:
+                print(f"  !! {what} gave up: {e}", flush=True)
+                return None
+            time.sleep(2 * (i + 1))
+    return None
 
 
 def journal(entry, status):
@@ -249,6 +274,12 @@ def main():
     lock = threading.Lock()
     stop = threading.Event()
 
+    def _commit():
+        # `with` so an OperationalError still releases — a bare
+        # acquire/commit/release would strand the lock and deadlock the retry.
+        with lock:
+            con.commit()
+
     def worker():
         cl = L.Lrclib(min_interval=0.12 * args.jobs)
         while not stop.is_set():
@@ -333,15 +364,17 @@ def main():
                 # the attempt counter, which widens the player's retry backoff
                 # — thousands of tracks here are simply not indexed anywhere,
                 # and asking again every week forever is pure waste.
-                with lock:
-                    prev = con.execute("SELECT attempts FROM lyrics WHERE track_id=?",
-                                       (r["id"],)).fetchone()
-                    tries = (prev["attempts"] or 0) if prev else 0
-                    con.execute("INSERT OR REPLACE INTO lyrics"
-                                " (track_id, source, synced, body, fetched_at, attempts)"
-                                " VALUES (?,?,?,?,?,?)",
-                                (r["id"], src, 1 if syn else 0, text or "", time.time(),
-                                 tries + 1 if src == "none" else 0))
+                def _store(r=r, src=src, syn=syn, text=text):
+                    with lock:
+                        prev = con.execute("SELECT attempts FROM lyrics WHERE track_id=?",
+                                           (r["id"],)).fetchone()
+                        tries = (prev["attempts"] or 0) if prev else 0
+                        con.execute("INSERT OR REPLACE INTO lyrics"
+                                    " (track_id, source, synced, body, fetched_at, attempts)"
+                                    " VALUES (?,?,?,?,?,?)",
+                                    (r["id"], src, 1 if syn else 0, text or "", time.time(),
+                                     tries + 1 if src == "none" else 0))
+                db_retry(_store, f"cache {r['artist']} — {r['title']}")
 
                 # Embed, if this is a fetched result worth putting in the file.
                 worth = src == "lrclib" and text and (syn or args.plain)
@@ -365,8 +398,7 @@ def main():
                           f"{r['artist']} — {r['title']}", flush=True)
 
             if stats["done"] % 50 == 0:
-                with lock:
-                    con.commit()
+                db_retry(_commit, "periodic commit")
                 rate = stats["done"] / max(0.001, time.time() - t0)
                 eta = (len(todo) - stats["done"]) / max(0.001, rate)
                 print(f"  … {stats['done']}/{len(todo)}  synced={stats['synced']} "
@@ -377,8 +409,7 @@ def main():
         print("\ninterrupted — committing what is done (safe to re-run)")
         stop.set()
     finally:
-        with lock:
-            con.commit()
+        db_retry(_commit, "final commit")
 
     secs = time.time() - t0
     print(f"\nchecked {stats['done']} tracks in {secs / 60:.1f}m")
