@@ -6,7 +6,9 @@ CVtbPassElement::CVtbPassElement(const CVtbPassElement::SVtbData& data_) : data(
 }
 
 std::vector<UP<IPassElement>> CVtbPassElement::draw() {
-    if (data.tooltipOnly)
+    if (data.shadowLayer)
+        vtbRenderShadowLayer(Hl::renderMonitor());
+    else if (data.tooltipOnly)
         data.deco->drawTooltipPass(Hl::renderMonitor(), data.a);
     else
         data.deco->renderPass(Hl::renderMonitor(), data.a);
@@ -22,6 +24,12 @@ bool CVtbPassElement::needsPrecomputeBlur() {
 }
 
 std::optional<CBox> CVtbPassElement::boundingBox() {
+    // The shadow layer spans the whole monitor (it draws every window's shadow);
+    // nullopt = "unknown", which keeps it out of the pass's occlusion
+    // simplification instead of claiming a box it would then be culled against.
+    if (data.shadowLayer)
+        return std::nullopt;
+
     // Tooltip-only element (RENDER_POST_WINDOWS): just the label box, which
     // mainThreadTick pre-sizes generously the moment the tooltip is shown so
     // this box already covers the strip on the very first frame (before

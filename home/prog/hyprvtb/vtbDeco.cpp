@@ -3419,7 +3419,11 @@ void CVtbShadowDeco::onPositioningReply(const SDecorationPositioningReply& reply
     m_bAssignedBox = reply.assignedGeometry; // empty for ABSOLUTE; we position off the window
 }
 
-void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
+// The deco no longer PAINTS anything — vtbRenderShadowLayer below draws every
+// window's shadow in one flat pass before any window. What's left here is the
+// half that has to be per-window: declaring the shadow's reach (getPositioningInfo)
+// so Hyprland's damage box covers it, and self-damaging the footprint as it moves.
+void CVtbShadowDeco::draw(PHLMONITOR, const float&) {
     if (!validMapped(m_pWindow) || !g_pGlobalState || !Cfg::enabled())
         return;
 
@@ -3427,66 +3431,120 @@ void CVtbShadowDeco::draw(PHLMONITOR pMonitor, const float& a) {
     if (!PWINDOW->m_ruleApplicator->decorate().valueOrDefault() || Hl::isFullscreen(PWINDOW))
         return;
 
-    // no shadow on our custom-maximized windows, nor on a rolled-up one (the
-    // sibling titlebar knows). A rolled-up window is hidden and its lone bar
-    // casts no shadow at rest — but this bottom-layer deco still gets drawn for
-    // the hidden window, so without this guard dragging the bar drags a stale
-    // hard shadow that trails and flashes. isRolledUp() stays true across the
-    // whole roll-up/roll-out animation too, where drawRollShadow owns the shadow.
-    for (auto& b : g_pGlobalState->bars) {
-        if (b && b->getOwner() == PWINDOW) {
-            if (b->isMaximized() || b->isRolledUp())
-                return;
-            break;
-        }
-    }
-
-    const auto SCALE = pMonitor->m_scale;
-
-    // Global window box with the same workspace-slide + floating-drag offsets
-    // the titlebar uses, so the shadow tracks the window through animations.
     CBox       g   = Hl::boxValue(PWINDOW);
     const auto WS  = PWINDOW->m_workspace;
     const auto OFF = (WS && !PWINDOW->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
     g.translate(OFF);
 
-    CBox local = {g.x - pMonitor->m_position.x, g.y - pMonitor->m_position.y, g.w, g.h};
-    local.translate(PWINDOW->m_floatingOffset).scale(SCALE).round();
-    if (local.w < 1 || local.h < 1)
-        return;
-
-    // Frame-sized rect offset down and left; NON_SOLID + BOTTOM layer means the
-    // window (and its titlebar) covers the centre and only the sharp L-overhang
-    // shows. m_realSize is the client surface only — the titlebar is a reserved
-    // deco on the RIGHT edge, so the visible frame is that much wider; widen the
-    // shadow to match or the whole bar column casts nothing.
-    const double N    = VTB_SHADOW_SIZE * SCALE;
-    const double BARW = totalBarW() * SCALE;
-    CBox         shadowBox = {local.x - N, local.y + N, local.w + BARW, local.h};
-    shadowBox.round();
-
     // Self-damage on motion. Hyprland's per-frame drag/animation damage covers
-    // the window + border but NOT this custom bottom-layer deco's left+bottom
-    // overhang (the now-disabled native drop shadow used to incidentally cover
-    // it), so a moving window trailed the hard shadow's left edge. Whenever the
-    // footprint moves, damage its old ∪ new (global-logical, incl. the drag's
+    // the window + border but NOT the shadow's left+bottom overhang (the
+    // now-disabled native drop shadow used to incidentally cover it), so a
+    // moving window trailed the hard shadow's left edge. Whenever the footprint
+    // moves, damage its old ∪ new (global-logical, incl. the drag's
     // floatingOffset) so the trailing edge repaints. Stable when the window is.
-    const auto&  FO     = PWINDOW->m_floatingOffset;
-    CBox         coverG = {g.x + FO.x - VTB_SHADOW_SIZE, g.y + FO.y, g.w + VTB_SHADOW_SIZE + totalBarW(), g.h + VTB_SHADOW_SIZE};
+    const auto& FO     = PWINDOW->m_floatingOffset;
+    CBox        coverG = {g.x + FO.x - VTB_SHADOW_SIZE, g.y + FO.y, g.w + VTB_SHADOW_SIZE + totalBarW(), g.h + VTB_SHADOW_SIZE};
     if (coverG.x != m_lastCoverBox.x || coverG.y != m_lastCoverBox.y || coverG.w != m_lastCoverBox.w || coverG.h != m_lastCoverBox.h) {
         if (m_lastCoverBox.w > 0)
             Hl::damage(CBox{m_lastCoverBox}.expand(2));
         Hl::damage(CBox{coverG}.expand(2));
         m_lastCoverBox = coverG;
     }
+}
 
-    CHyprColor color = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
-    color.a *= a;
+// ---- the flat shadow layer ------------------------------------------------
+//
+// Every window's hard drop shadow, painted ONCE per monitor at
+// RENDER_PRE_WINDOWS, instead of each shadow deco enqueueing its own rect
+// alongside its window. Two properties fall out of that which per-window rects
+// could not give:
+//
+//  * overlapping shadows stay ONE shadow. Two 0.6-alpha black rects blended
+//    over each other come out at ~0.84, so wherever two windows' shadows met
+//    there was a visibly darker patch. Here the boxes are unioned into a
+//    CRegion first, and pixman hands back DISJOINT rects — every shadowed pixel
+//    is painted exactly once, at exactly 0.6, however many windows cast there.
+//  * a shadow never lands on another window. Drawing before all windows already
+//    puts opaque windows over it, but a translucent one would still have been
+//    tinted by the shadow of the window beneath it, and a rolled-up bar (drawn
+//    in this same stage) would have been too. So every visible window's frame —
+//    client box plus its titlebar strip — is subtracted from the region as well:
+//    the shadow only ever falls on the desktop.
+//
+// Called from main.cpp's render-stage hook BEFORE the shade bars, which must
+// draw over it.
+void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
+    if (!pMonitor || !g_pGlobalState || !Cfg::enabled())
+        return;
 
-    CRectPassElement::SRectData data;
-    data.box   = shadowBox;
-    data.color = color;
-    Hl::addPass(makeUnique<CRectPassElement>(data));
+    const double SCALE = pMonitor->m_scale;
+    const double N     = VTB_SHADOW_SIZE * SCALE;
+    const double BARW  = totalBarW() * SCALE;
+
+    // The window's box in this monitor's device pixels, carrying the same
+    // workspace-slide + floating-drag offsets the titlebar uses so the shadow
+    // tracks the window through animations.
+    const auto localBox = [&](PHLWINDOW w) -> CBox {
+        CBox       g   = Hl::boxValue(w);
+        const auto WS  = w->m_workspace;
+        const auto OFF = (WS && !w->m_pinned) ? WS->m_renderOffset->value() : Vector2D();
+        g.translate(OFF);
+        CBox b = {g.x - pMonitor->m_position.x, g.y - pMonitor->m_position.y, g.w, g.h};
+        return b.translate(w->m_floatingOffset).scale(SCALE).round();
+    };
+
+    CRegion shadow, frames;
+
+    for (const auto& w : Hl::windows()) {
+        if (!w || !w->m_isMapped || w->isHidden())
+            continue;
+        if (w->m_monitor.lock() != pMonitor)
+            continue;
+        if (!w->m_pinned && (!w->m_workspace || !w->m_workspace->isVisible()))
+            continue;
+
+        const CBox L = localBox(w);
+        if (L.w < 1 || L.h < 1)
+            continue;
+
+        const bool DECORATED = w->m_ruleApplicator->decorate().valueOrDefault();
+
+        // The visible frame: client box plus the reserved titlebar strip on the
+        // right. This is what occludes shadows — every window's, including its own.
+        frames.add(CBox{L.x, L.y, L.w + (DECORATED ? BARW : 0.0), L.h}.round());
+
+        if (!DECORATED || Hl::isFullscreen(w))
+            continue;
+
+        // No shadow on our custom-maximized windows, nor on a rolled-up one
+        // (the sibling titlebar knows). isRolledUp() stays true across the whole
+        // roll-up/roll-out animation too, where drawRollShadow owns the shadow.
+        bool skip = false;
+        for (auto& b : g_pGlobalState->bars) {
+            if (b && b->getOwner() == w) {
+                skip = b->isMaximized() || b->isRolledUp();
+                break;
+            }
+        }
+        if (skip)
+            continue;
+
+        // Frame-sized rect offset down and left; only the sharp L-overhang ends
+        // up visible once the frames are subtracted. m_realSize is the client
+        // surface only — the titlebar is a reserved deco on the RIGHT edge, so
+        // the visible frame is that much wider; widen the shadow to match or the
+        // whole bar column casts nothing.
+        shadow.add(CBox{L.x - N, L.y + N, L.w + BARW, L.h}.round());
+    }
+
+    if (shadow.empty())
+        return;
+
+    shadow.subtract(frames);
+
+    const CHyprColor COLOR = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
+    for (const auto& r : shadow.getRects())
+        Hl::rect(CBox{(double)r.x1, (double)r.y1, (double)(r.x2 - r.x1), (double)(r.y2 - r.y1)}, COLOR);
 }
 
 void CVtbShadowDeco::damageEntire() {

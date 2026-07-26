@@ -25,6 +25,7 @@ extern "C" {
 #include <hyprland/src/SharedDefs.hpp> // eRenderStage
 
 #include "vtbDeco.hpp"
+#include "VtbPassElement.hpp"
 #include "vtbIpc.hpp"
 #include "globals.hpp"
 
@@ -741,9 +742,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Two render-stage jobs, both per-monitor:
     //  * RENDER_PRE_WINDOWS (after background/bottom layers, before windows):
-    //    draw each shaded (rolled-up) window's bar. A shaded window is hidden,
-    //    so Hyprland never renders it or calls its draw() — the shade bar sits
-    //    OVER the desktop widgets (bottom-layer quickshell) yet UNDER windows.
+    //    first the flat drop-shadow layer — EVERY window's shadow, unioned into
+    //    one region so overlapping shadows don't blend into a darker patch and
+    //    no shadow lands on a window (vtbRenderShadowLayer). Then each shaded
+    //    (rolled-up) window's bar: a shaded window is hidden, so Hyprland never
+    //    renders it or calls its draw() — the shade bar sits OVER the desktop
+    //    widgets (bottom-layer quickshell) yet UNDER windows, and over the
+    //    shadows, which is why it is enqueued second.
     //  * RENDER_POST_WINDOWS (after windows, before top/overlay layers): draw
     //    the hover tooltip so it lands OVER the window it labels (the bar's own
     //    UNDER-layer pass draws before the window; the tooltip overhangs left
@@ -755,6 +760,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         const auto PMONITOR = Hl::renderMonitor();
         if (!PMONITOR)
             return;
+        if (stage == RENDER_PRE_WINDOWS) {
+            auto shadows        = CVtbPassElement::SVtbData{};
+            shadows.shadowLayer = true;
+            Hl::addPass(makeUnique<CVtbPassElement>(shadows));
+        }
         for (auto& b : g_pGlobalState->bars) {
             if (!b)
                 continue;
@@ -861,7 +871,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.66"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore", "lam", "2.67"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

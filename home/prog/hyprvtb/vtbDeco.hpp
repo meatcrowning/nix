@@ -376,13 +376,20 @@ class CVtbDeco : public IHyprWindowDecoration {
     friend class CVtbPassElement;
 };
 
-// The bottom-left hard drop shadow, as its OWN decoration rather than something
-// the titlebar draws. The titlebar is a STICKY-right deco, so it can only ever
-// declare a right-edge extent — Hyprland would never damage a bottom-left
-// region as the window moves, which is what made the shadow trail. This is an
-// ABSOLUTE, non-reserved, NON_SOLID deco that declares LEFT+BOTTOM extents (so
-// the shadow area is part of the window's damage box) and renders a plain rect
-// pass element (region-accurate occlusion behind the window — no flashing).
+// Paint every window's hard drop shadow on this monitor, as one flat layer of
+// disjoint rects under all windows — see the definition in vtbDeco.cpp for why
+// the shadows are not drawn per-window any more. Called from main.cpp's
+// RENDER_PRE_WINDOWS hook, before the shade bars.
+void vtbRenderShadowLayer(PHLMONITOR pMonitor);
+
+// The bottom-left hard drop shadow's per-window half: it declares the shadow's
+// reach and damages it as the window moves, but the pixels are drawn by
+// vtbRenderShadowLayer. It exists as its OWN decoration because the titlebar is
+// a STICKY-right deco, so it can only ever declare a right-edge extent —
+// Hyprland would never damage a bottom-left region as the window moves, which
+// is what made the shadow trail. This is an ABSOLUTE, non-reserved, NON_SOLID
+// deco that declares LEFT+BOTTOM extents, putting the shadow area inside the
+// window's damage box.
 class CVtbShadowDeco : public IHyprWindowDecoration {
   public:
     CVtbShadowDeco(PHLWINDOW);
