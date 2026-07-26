@@ -143,12 +143,6 @@ PanelWindow {
     WlrLayershell.namespace: popupNamespace
 
     onPinnedOpenChanged: {
-        // Whether our surface is actually on screen RIGHT NOW, sampled before
-        // this handler flips _visSurface. Only a surface that is already mapped
-        // needs the layer remap below; one that has never been shown (the
-        // hot-reload restore, which pins during construction) maps at the right
-        // layer to begin with, and remapping it would blink it in and out.
-        const wasMapped = visible;
         if (pinnedOpen) {
             if (pinInPlace) Popups.registerStack(root, true);
             else Popups.pin(root);
@@ -172,9 +166,15 @@ PanelWindow {
         if (stackFloor) Popups.tiledFloorWidth = pinnedOpen ? implicitWidth : 0;
         // Recreate the surface AFTER the layer binding settles (a synchronous
         // map reads the old layer). The deferred remap re-files it at the new
-        // one. Only when it's already on-screen — a plain close, or a pin that
-        // happens before the surface has ever mapped, needs no remap.
-        if (open && wasMapped) { _mapped = false; remapTimer.restart(); }
+        // one — ALWAYS, including when the surface has never mapped yet.
+        // Quickshell latches the layer when it creates the window, which it
+        // does at component completion regardless of `visible`, so a pin
+        // applied during construction (snapPinned() on the hot-reload restore,
+        // or the login fan) still comes up on Overlay — i.e. every desktop
+        // widget sitting ON TOP of windows. Unmapping first costs nothing here:
+        // nothing has been drawn yet, so the widget simply maps 32ms later, at
+        // Bottom, where it belongs.
+        if (open) { _mapped = false; remapTimer.restart(); }
         // No remap needed, but a pending fan reveal still has to be released —
         // it's remapTimer that animates _fanY back to 0 (see below).
         else if (_fanRevealPending) remapTimer.restart();
