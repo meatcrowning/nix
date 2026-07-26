@@ -29,9 +29,9 @@ Item {
     property bool followCurrent: false
     // Hide each row's stars + heart until the cursor is over that row (the
     // queue): 146 rows of always-on rating glyphs read as noise next to the
-    // one persistent setter on the now-playing title. They keep their SPACE
-    // when hidden (opacity, not visible) so nothing in the row reflows as the
-    // cursor moves down the list, and they are click-dead while invisible.
+    // one persistent setter on the now-playing title. A hidden row releases
+    // their width to the title, which is the whole point — a long "title -
+    // artist" would otherwise clip against blank space.
     property bool ratingsOnHover: false
     signal played(int index)
 
@@ -122,27 +122,33 @@ Item {
                 height: 15
                 spacing: 8
 
-                Stars {
-                    anchors.verticalCenter: parent.verticalCenter
-                    opacity: row.showRatings ? 1 : 0
-                    interactive: row.showRatings
-                    rating: model.rating !== undefined ? model.rating : -1
-                    onRated: function(fmps) { Library.setRating(trackId, fmps); }
-                }
-                Item {
-                    width: 12
+                // The rating glyphs give their SPACE back when hidden (visible,
+                // not opacity — a Row skips an invisible child's width AND its
+                // spacing), so an unhovered row spends that width on its title
+                // instead of clipping a name in front of empty pixels.
+                Row {
                     height: 15
-                    anchors.verticalCenter: parent.verticalCenter
-                    opacity: row.showRatings ? 1 : 0
-                    PixelText {
-                        anchors.centerIn: parent
-                        text: "♥"
-                        color: favorite ? Theme.crit : Theme.dim
+                    spacing: 8
+                    visible: row.showRatings
+
+                    Stars {
+                        anchors.verticalCenter: parent.verticalCenter
+                        rating: model.rating !== undefined ? model.rating : -1
+                        onRated: function(fmps) { Library.setRating(trackId, fmps); }
                     }
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: row.showRatings
-                        onClicked: Library.setFavorite(trackId, !favorite)
+                    Item {
+                        width: 12
+                        height: 15
+                        anchors.verticalCenter: parent.verticalCenter
+                        PixelText {
+                            anchors.centerIn: parent
+                            text: "♥"
+                            color: favorite ? Theme.crit : Theme.dim
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: Library.setFavorite(trackId, !favorite)
+                        }
                     }
                 }
                 // Play count sits immediately left of the duration — both are
@@ -166,7 +172,11 @@ Item {
             MouseArea {
                 id: rowMouse
                 anchors.fill: parent
-                anchors.rightMargin: 130   // keep stars/heart clickable
+                // Stop short of the right-hand column so its stars/heart stay
+                // clickable (this MouseArea is declared last, so it would sit
+                // on top of them). Measured, not a magic 130: the column's
+                // width now varies with the hover-revealed glyphs.
+                anchors.rightMargin: rightBits.width + 8
                 hoverEnabled: true
                 onDoubleClicked: root.played(index)
             }
