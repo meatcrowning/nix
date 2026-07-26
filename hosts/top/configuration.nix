@@ -28,6 +28,14 @@
       enable = true;
       alsa = { enable = true; support32Bit = true; };
       pulse.enable = true;
+      # Stop WirePlumber suspending idle audio nodes: the DAC powering back
+      # up on wake produces an audible click at the start of playback.
+      wireplumber.extraConfig."51-disable-suspend" = {
+        "monitor.alsa.rules" = [{
+          matches = [{ "node.name" = "~alsa_(output|input).*"; }];
+          actions.update-props."session.suspend-timeout-seconds" = 0;
+        }];
+      };
     };
     hardware.openrgb.enable = true;
   };
