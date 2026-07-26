@@ -266,6 +266,11 @@ Item {
                 anchors.bottom: parent.bottom
                 model: QueueModel
                 showNumber: false
+                // the queue model IS the play order, so identify the playing row
+                // by index (a queue can hold the same track twice) and scroll it
+                // to the middle as playback advances.
+                currentRow: Player.index
+                followCurrent: true
                 onPlayed: function(index) { Player.jumpTo(index); }
             }
         }
