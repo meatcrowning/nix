@@ -142,7 +142,12 @@ Item {
     PixelText {
         anchors.centerIn: parent
         visible: !root.lyricsData.synced && root.lyricsData.text.length === 0
-        text: root.trackId < 0 ? "" : (root.lyricsData.source === "none" ? "no lyrics found" : "…")
+        // "instrumental" is an answer, not a failure — LRCLIB knows this track
+        // has no words, so say so rather than implying the lookup fell short.
+        text: root.trackId < 0 ? ""
+              : root.lyricsData.source === "instrumental" ? "instrumental"
+              : root.lyricsData.source === "none" ? "no lyrics found"
+              : "..."
         color: Theme.dim
     }
 }

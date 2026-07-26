@@ -302,6 +302,8 @@ Window {
         onCloseRequested: win.settingsOpen = false
         onColumnsRequested: function(n) { win.setAlbumCols(n); }
         onRescanRequested: Library.rescan()
+        onReplayGainRequested: function(mode) { Player.setReplayGain(mode); }
+        onRgPreampRequested: function(db) { Player.setRgPreamp(db); }
     }
 
     // Mouse back/forward buttons navigate the view history. Only these two

@@ -20,6 +20,8 @@ Item {
     signal closeRequested()
     signal columnsRequested(int n)
     signal rescanRequested()
+    signal replayGainRequested(string mode)
+    signal rgPreampRequested(real db)
 
     // Nothing to hit-test while it is fully retracted.
     visible: drawer.slide > 0.001
@@ -113,6 +115,71 @@ Item {
                     step: 1
                     value: root.columns
                     onMoved: function(v) { root.columnsRequested(v); }
+                }
+            }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.border }
+
+            // ---- replay gain: library-wide volume levelling ----
+            // The mode button cycles; "auto" is album gain within an album and
+            // track gain for anything mixed, which is what you actually want
+            // without having to think about it.
+            Column {
+                width: parent.width
+                spacing: 4
+
+                Item {
+                    width: parent.width
+                    height: 20
+                    PixelText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "volume levelling"
+                        color: Theme.text
+                    }
+                    HeaderButton {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        label: Player.replayGain
+                        lit: Player.replayGain !== "off"
+                        onClicked: {
+                            var modes = ["auto", "track", "album", "off"];
+                            var i = modes.indexOf(Player.replayGain);
+                            root.replayGainRequested(modes[(i + 1) % modes.length]);
+                        }
+                    }
+                }
+
+                PixelText {
+                    width: parent.width
+                    text: Player.rgStatus
+                    wrapMode: Text.Wrap
+                    color: Theme.textDim
+                }
+
+                Item {
+                    width: parent.width
+                    height: 20
+                    visible: Player.replayGain !== "off"
+                    PixelText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "preamp"
+                        color: Theme.text
+                    }
+                    PixelText {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (Player.rgPreamp >= 0 ? "+" : "") + Player.rgPreamp.toFixed(1) + " dB"
+                        color: Theme.textDim
+                    }
+                }
+                Slider {
+                    width: parent.width
+                    visible: Player.replayGain !== "off"
+                    from: -15
+                    to: 15
+                    step: 0.5
+                    value: Player.rgPreamp
+                    onMoved: function(v) { root.rgPreampRequested(v); }
                 }
             }
 

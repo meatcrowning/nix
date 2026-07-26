@@ -24,8 +24,18 @@ gapless-audio=weak joins compatible streams. The app owns the queue and mirrors
 it into mpv's playlist so the next track is prefetched. MPRIS is exported so
 the panel's MediaPanel widget controls this player like any other.
 
-Lyrics: embedded tags → sidecar .lrc → LRCLIB (lrclib.net), cached in the DB
-(including negative results); synced [mm:ss.xx] lyrics scroll in the UI.
+Lyrics: TIMESTAMPED embedded tags → sidecar .lrc → LRCLIB (lrclib.net), cached
+in the DB (including negative results); synced [mm:ss.xx] lyrics scroll in the
+UI. Plain unsynced lyrics never end the search — a synced version is a strict
+upgrade — and anything fetched is written back into the file's own lyrics frame
+so it outlives this DB. The matching rules live in lyrics.py, shared with
+tools/lyrics-sync.py, which sweeps the whole library in one go.
+
+ReplayGain: the scan mirrors each file's REPLAYGAIN_* / R128_* tags into the DB
+and mpv applies the gain itself while decoding, so volume is levelled library
+wide without touching the volume slider. Mode is off/track/album/auto (auto =
+album gain inside an album, track gain for anything mixed); the ~4% of files
+with no tags fall back to the library's own median gain.
 """
 import hashlib
 import json
@@ -35,8 +45,6 @@ import sqlite3
 import sys
 import threading
 import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Qt, QThread, QTimer, QUrl, Signal, Slot,
@@ -51,9 +59,10 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 
+import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 import mutagen  # noqa: E402
 from mutagen.flac import FLAC, Picture  # noqa: E402
-from mutagen.id3 import ID3, TXXX, USLT  # noqa: E402
+from mutagen.id3 import ID3, TXXX  # noqa: E402
 from mutagen.mp4 import MP4, MP4FreeForm  # noqa: E402
 
 LIBRARY_ROOT = Path("/run/media/lam/SSD/aud")
@@ -266,6 +275,96 @@ def _vorbis_get(tags, *keys):
     return None
 
 
+def _gain_db(s):
+    """'-7.53 dB' / '-7.53' → -7.53. ReplayGain gains are always in dB."""
+    if s is None:
+        return None
+    m = re.search(r"[-+]?\d+(?:[.,]\d+)?", str(s))
+    if not m:
+        return None
+    try:
+        v = float(m.group(0).replace(",", "."))
+    except ValueError:
+        return None
+    # Junk guard: real album/track gains live within roughly ±30 dB.
+    return v if -60.0 <= v <= 60.0 else None
+
+
+def _peak(s):
+    """Sample peak, normally 0..~1.5 linear. Some taggers write it in dB."""
+    v = _float_of(s)
+    if v is None or v <= 0:
+        return None
+    return v if v <= 4.0 else None
+
+
+def read_replaygain(audio):
+    """ReplayGain from any of the three tag families → dict of 4 floats (or
+    Nones). ~96% of this library is already tagged (fooyin/Strawberry and the
+    original rips wrote them), which is why the player can normalise volume
+    without analysing anything itself.
+
+    Opus/Ogg carry R128_*_GAIN instead: a Q7.8 fixed-point integer referenced
+    to -23 LUFS, where ReplayGain 2.0 is referenced to -18 LUFS — hence the
+    +5 dB shift when converting."""
+    out = {"rg_track_gain": None, "rg_track_peak": None,
+           "rg_album_gain": None, "rg_album_peak": None}
+    tags = audio.tags
+    if tags is None:
+        return out
+
+    def take(kind, gain, peak, r128=None):
+        if out["rg_%s_gain" % kind] is None:
+            if gain is not None:
+                out["rg_%s_gain" % kind] = _gain_db(gain)
+            elif r128 is not None:
+                q = _int_of(r128)
+                if q is not None:
+                    out["rg_%s_gain" % kind] = round(q / 256.0 + 5.0, 2)
+        if out["rg_%s_peak" % kind] is None and peak is not None:
+            out["rg_%s_peak" % kind] = _peak(peak)
+
+    try:
+        if isinstance(tags, ID3):
+            gx = lambda d: _first(tags.get("TXXX:" + d))  # noqa: E731
+            # TXXX descriptions are case-sensitive and taggers disagree.
+            byname = {}
+            for k in tags.keys():
+                if str(k).upper().startswith("TXXX:"):
+                    byname[str(k)[5:].lower()] = _first(tags.get(k))
+            take("track", byname.get("replaygain_track_gain") or gx("REPLAYGAIN_TRACK_GAIN"),
+                 byname.get("replaygain_track_peak"))
+            take("album", byname.get("replaygain_album_gain") or gx("REPLAYGAIN_ALBUM_GAIN"),
+                 byname.get("replaygain_album_peak"))
+        elif isinstance(audio, MP4):
+            # Freeform atom names are case-sensitive keys but taggers disagree
+            # on both halves ("com.apple.iTunes" vs "com.apple.itunes"), so
+            # match on the trailing name, folded.
+            byname = {}
+            for k in audio.keys():
+                ks = str(k)
+                if ks.startswith("----:"):
+                    v = audio.get(k)
+                    if v:
+                        try:
+                            byname[ks.rsplit(":", 1)[-1].lower()] = \
+                                bytes(v[0]).decode("utf-8", "replace").strip() or None
+                        except Exception:
+                            pass
+            gff = byname.get
+            take("track", gff("replaygain_track_gain"), gff("replaygain_track_peak"))
+            take("album", gff("replaygain_album_gain"), gff("replaygain_album_peak"))
+        else:  # Vorbis comments / APEv2
+            v = lambda *k: _vorbis_get(tags, *k)  # noqa: E731
+            take("track", v("replaygain_track_gain"), v("replaygain_track_peak"),
+                 v("r128_track_gain"))
+            take("album", v("replaygain_album_gain"), v("replaygain_album_peak"),
+                 v("r128_album_gain"))
+    except Exception:
+        pass
+    return out
+
+
 def read_tags(path):
     """Parse one file with mutagen → dict of the columns the DB stores, plus
     has_art (bool, embedded art present — recorded so the album-art pass can
@@ -287,6 +386,8 @@ def read_tags(path):
         "track": None, "disc": None, "date": None, "year": None,
         "orig_year": None, "genre": None, "rating": None, "favorite": 0,
         "play_count": 0, "has_art": False,
+        "rg_track_gain": None, "rg_track_peak": None,
+        "rg_album_gain": None, "rg_album_peak": None,
     }
     tags = audio.tags
 
@@ -351,6 +452,7 @@ def read_tags(path):
         else:
             t["has_art"] = bool(v("metadata_block_picture"))
 
+    t.update(read_replaygain(audio))
     t["year"] = _year_of(t["date"])
     t["date"] = _first(t["date"])
     if not t["title"]:
@@ -431,7 +533,9 @@ CREATE TABLE IF NOT EXISTS tracks (
   rating REAL, favorite INTEGER DEFAULT 0, play_count INTEGER DEFAULT 0,
   added_at REAL NOT NULL, last_played REAL,
   has_art INTEGER DEFAULT 0,
-  album_id INTEGER
+  album_id INTEGER,
+  rg_track_gain REAL, rg_track_peak REAL,
+  rg_album_gain REAL, rg_album_peak REAL
 );
 CREATE TABLE IF NOT EXISTS albums (
   id INTEGER PRIMARY KEY,
@@ -451,11 +555,34 @@ CREATE INDEX IF NOT EXISTS i_t_added  ON tracks(added_at);
 """
 
 
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS silently
+# leaves an existing table alone, so new columns need an explicit ALTER against
+# the DB that is already out there.
+MIGRATIONS = [
+    ("tracks", "rg_track_gain", "REAL"),
+    ("tracks", "rg_track_peak", "REAL"),
+    ("tracks", "rg_album_gain", "REAL"),
+    ("tracks", "rg_album_peak", "REAL"),
+]
+
+
 def open_db():
     DATA.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    have = {r["name"] for r in con.execute("PRAGMA table_info(tracks)")}
+    added = False
+    for table, col, decl in MIGRATIONS:
+        if col not in have:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            added = True
+    if added:
+        # The new columns are all NULL for already-scanned files; force the
+        # next scan to re-read every file's tags by clearing the mtime cache
+        # it compares against.
+        con.execute("UPDATE tracks SET mtime = 0")
+        con.commit()
     return con
 
 
@@ -577,17 +704,21 @@ class Scanner(QThread):
                 INSERT INTO tracks (path, mtime, size, title, artist, album, album_artist,
                                     track, disc, date, year, orig_year, genre, duration,
                                     codec, samplerate, bitdepth, rating, favorite,
-                                    play_count, added_at, has_art)
+                                    play_count, added_at, has_art,
+                                    rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak)
                 VALUES (:path,:mtime,:size,:title,:artist,:album,:album_artist,
                         :track,:disc,:date,:year,:orig_year,:genre,:duration,
-                        :codec,:samplerate,:bitdepth,:rating,:favorite,:play_count,:added_at,:has_art)
+                        :codec,:samplerate,:bitdepth,:rating,:favorite,:play_count,:added_at,:has_art,
+                        :rg_track_gain,:rg_track_peak,:rg_album_gain,:rg_album_peak)
                 ON CONFLICT(path) DO UPDATE SET
                     mtime=:mtime, size=:size, title=:title, artist=:artist, album=:album,
                     album_artist=:album_artist, track=:track, disc=:disc, date=:date,
                     year=:year, orig_year=:orig_year, genre=:genre, duration=:duration,
                     codec=:codec, samplerate=:samplerate, bitdepth=:bitdepth,
                     rating=:rating, favorite=:favorite, play_count=:play_count,
-                    has_art=:has_art
+                    has_art=:has_art,
+                    rg_track_gain=:rg_track_gain, rg_track_peak=:rg_track_peak,
+                    rg_album_gain=:rg_album_gain, rg_album_peak=:rg_album_peak
             """, {**t, "path": p, "mtime": mtime, "size": size, "added_at": now})
             if (i + 1) % 200 == 0:
                 con.commit()
@@ -610,9 +741,10 @@ class Scanner(QThread):
         total = con.execute("SELECT COUNT(*) c FROM tracks").fetchone()["c"]
         loose = con.execute("SELECT COUNT(*) c FROM tracks WHERE album_id IS NULL").fetchone()["c"]
         rated = con.execute("SELECT COUNT(*) c FROM tracks WHERE rating IS NOT NULL").fetchone()["c"]
+        gained = con.execute("SELECT COUNT(rg_track_gain) c FROM tracks").fetchone()["c"]
         self.summary.emit({"mounted": True, "tracks": total, "albums": albums,
                            "albumless": loose, "rated": rated, "parsed": len(todo),
-                           "unreadable": bad, "pruned": len(gone),
+                           "unreadable": bad, "pruned": len(gone), "replaygain": gained,
                            "secs": round(time.time() - t0, 1)})
         self.done.emit()
 
@@ -691,9 +823,16 @@ class Library(QObject):
         super().__init__(parent)
         self._con = open_db()
         # Cache hygiene at startup: purge oversized bodies (scraped-webpage
-        # tagger garbage) and ALL negative results — "no lyrics" retries
-        # online once per app session instead of sitting stale for a week.
-        self._con.execute("DELETE FROM lyrics WHERE length(body) > 6000 OR source='none'")
+        # tagger garbage) and STALE negative results, so "no lyrics found"
+        # gets another go online eventually. The age check matters: a full
+        # tools/lyrics-sync.py sweep records thousands of honest misses, and
+        # dropping them on every launch would make the next sweep re-ask the
+        # network for all of them. 'instrumental' is never purged — that is a
+        # real answer about the track, not a failed lookup.
+        self._con.execute(
+            "DELETE FROM lyrics WHERE length(body) > 6000"
+            "    OR (source='none' AND COALESCE(fetched_at, 0) < ?)",
+            (time.time() - LyricsProvider.RETRY_NONE_AFTER,))
         self._con.commit()
         self._tagwriter = tagwriter
         self._scanner = None
@@ -781,6 +920,31 @@ class Library(QObject):
         words = text.split()
         ids = [tid for hay, tid in self._search_rows if all(w in hay for w in words)]
         return self.tracks_by_ids(ids[:400])
+
+    def median_rg_gain(self):
+        """The library's median ReplayGain track gain, as the fallback for the
+        minority of files that carry no tags. Derived rather than guessed: a
+        constant would put untagged files at a different loudness from the
+        collection they sit in, which is exactly what normalising is meant to
+        stop. Falls back to a flat 0 (no change) if nothing is tagged yet."""
+        try:
+            row = self._con.execute(
+                "SELECT rg_track_gain g FROM tracks WHERE rg_track_gain IS NOT NULL"
+                " ORDER BY g LIMIT 1"
+                " OFFSET (SELECT COUNT(*)/2 FROM tracks WHERE rg_track_gain IS NOT NULL)"
+            ).fetchone()
+        except sqlite3.Error:
+            return 0.0
+        return round(float(row["g"]), 2) if row and row["g"] is not None else 0.0
+
+    def rg_coverage(self):
+        """(tagged, total) — how much of the library can actually be levelled."""
+        try:
+            r = self._con.execute(
+                "SELECT COUNT(*) t, COUNT(rg_track_gain) g FROM tracks").fetchone()
+            return int(r["g"]), int(r["t"])
+        except sqlite3.Error:
+            return 0, 0
 
     # ---- writes (DB + tag queue) ----
 
@@ -961,6 +1125,7 @@ class Player(QObject):
     shuffleChanged = Signal()
     loopChanged = Signal()
     volumeChanged = Signal()
+    replayGainChanged = Signal()
     seeked = Signal(float)  # explicit seeks only (not per-tick) — MPRIS Seeked
 
     _sigPos = Signal(float)
@@ -1001,6 +1166,16 @@ class Player(QObject):
             self._mpv.volume = float(vol)
         except Exception:
             pass
+
+        self._rg_mode = self._prefs.get("replayGain", "auto")
+        if self._rg_mode not in self.RG_MODES:
+            self._rg_mode = "auto"
+        self._rg_preamp = float(self._prefs.get("rgPreamp", 0.0) or 0.0)
+        self._rg_fallback = self._library.median_rg_gain()
+        self._apply_rg("track")
+        # The first scan after the schema migration is what fills the gain
+        # columns in — recompute the fallback once it lands.
+        self._library.scanSummary.connect(self._on_scan_for_rg)
 
         self._sigPos.connect(self._on_pos)
         self._sigDur.connect(self._on_dur)
@@ -1107,6 +1282,89 @@ class Player(QObject):
         self.currentChanged.emit()
         self.positionChanged.emit()
 
+    # ---- ReplayGain ----
+    #
+    # mpv applies the gain itself, from the file's own tags, in the decode
+    # chain — independent of the `volume` property, so the volume slider keeps
+    # meaning what it always did. We only choose the MODE and the preamp.
+    #
+    # ~96% of this library carries ReplayGain tags already, so nothing has to
+    # be analysed; the ~4% that don't get `replaygain-fallback`, set to the
+    # library's own median track gain (see Library.median_rg_gain) rather than
+    # a made-up constant, so untagged files sit at the same loudness as the
+    # rest instead of jumping out.
+
+    RG_MODES = ("off", "track", "album", "auto")
+
+    def _on_scan_for_rg(self, _summary):
+        fb = self._library.median_rg_gain()
+        if abs(fb - self._rg_fallback) > 0.01:
+            self._rg_fallback = fb
+            self._apply_rg(self._rg_effective(max(0, self._index)))
+        self.replayGainChanged.emit()
+
+    def _apply_rg(self, effective):
+        """Push one of track/album/no to mpv. Takes effect per file as it is
+        loaded, so changing it mid-track only shows on the next one."""
+        try:
+            self._mpv.replaygain = "no" if self._rg_mode == "off" else effective
+            self._mpv.replaygain_preamp = float(self._rg_preamp)
+            self._mpv.replaygain_fallback = float(self._rg_fallback)
+            # Back the gain off rather than clip when the peak says it would.
+            self._mpv.replaygain_clip = True
+        except Exception as e:
+            print("replaygain:", e, flush=True)
+
+    def _rg_effective(self, start_idx=0):
+        """'auto' = album gain when the upcoming queue is one album (keeps an
+        album's intended quiet/loud contrast), track gain otherwise (levels a
+        shuffled library, which is the point of normalising at all)."""
+        if self._rg_mode != "auto":
+            return self._rg_mode if self._rg_mode != "off" else "no"
+        if self._shuffle:
+            return "track"
+        ids = {t.get("album_id") for t in self._queue[start_idx:]}
+        ids.discard(None)
+        ids.discard(0)
+        one_album = len(ids) == 1 and len(self._queue) - start_idx > 1
+        return "album" if one_album else "track"
+
+    @Property(str, notify=replayGainChanged)
+    def replayGain(self):
+        return self._rg_mode
+
+    @Property(float, notify=replayGainChanged)
+    def rgPreamp(self):
+        return self._rg_preamp
+
+    @Property(str, notify=replayGainChanged)
+    def rgStatus(self):
+        """One line for the settings drawer: what is actually being applied."""
+        if self._rg_mode == "off":
+            return "off — files play at their tagged loudness"
+        eff = self._rg_effective(max(0, self._index))
+        pre = f", preamp {self._rg_preamp:+.1f} dB" if self._rg_preamp else ""
+        return f"{eff} gain{pre} (untagged: {self._rg_fallback:+.1f} dB)"
+
+    @Slot(str)
+    def setReplayGain(self, mode):
+        if mode not in self.RG_MODES or mode == self._rg_mode:
+            return
+        self._rg_mode = mode
+        self._prefs.set("replayGain", mode)
+        self._apply_rg(self._rg_effective(max(0, self._index)))
+        self.replayGainChanged.emit()
+
+    @Slot(float)
+    def setRgPreamp(self, db):
+        db = max(-15.0, min(15.0, float(db)))
+        if abs(db - self._rg_preamp) < 0.01:
+            return
+        self._rg_preamp = db
+        self._prefs.set("rgPreamp", db)
+        self._apply_rg(self._rg_effective(max(0, self._index)))
+        self.replayGainChanged.emit()
+
     def _sync_mpv(self, start_idx, paused=False):
         """Point mpv at queue[start_idx:] — replace starts playback, appends
         prefetch the rest for gapless auto-advance. _set_index runs first so a
@@ -1117,6 +1375,10 @@ class Player(QObject):
             return
         self._mpv_base = start_idx
         self._set_index(start_idx)
+        # Decide album-vs-track BEFORE the load: mpv reads the option when it
+        # starts decoding each file.
+        self._apply_rg(self._rg_effective(start_idx))
+        self.replayGainChanged.emit()
         self._mpv.command("loadfile", paths[0], "replace")
         for p in paths[1:]:
             self._mpv.command("loadfile", p, "append")
@@ -1370,66 +1632,37 @@ class Player(QObject):
 # Lyrics
 # ---------------------------------------------------------------------------
 
-LRC_LINE = re.compile(r"\[(\d+):(\d{1,2}(?:\.\d{1,3})?)\]")
-
-
-def parse_lrc(text):
-    """LRC → sorted [{t, line}]; a line may carry several timestamps."""
-    out = []
-    for raw in text.splitlines():
-        stamps = LRC_LINE.findall(raw)
-        if not stamps:
-            continue
-        line = LRC_LINE.sub("", raw).strip()
-        for mins, secs in stamps:
-            out.append({"t": int(mins) * 60 + float(secs), "line": line})
-    out.sort(key=lambda e: e["t"])
-    return out
-
-
-def embedded_lyrics(path):
-    """(text, synced?) from the file's own tags, or (None, False)."""
-    try:
-        audio = mutagen.File(path)
-        if audio is None:
-            return None, False
-        text = None
-        tags = audio.tags
-        if isinstance(tags, ID3):
-            uslt = tags.getall("USLT")
-            if uslt:
-                text = str(uslt[0].text)
-        elif isinstance(audio, MP4):
-            v = audio.get("\xa9lyr")
-            text = _first(v)
-        elif tags is not None:
-            text = _vorbis_get(tags, "lyrics", "unsyncedlyrics", "unsynced lyrics")
-        if not text or not text.strip():
-            return None, False
-        # Sanity cap: some taggers stuff entire scraped lyrics-site WEBPAGES
-        # (menus, ads, inline JS) into the lyrics tag. Real lyrics are a few
-        # KB at most — treat anything huge as garbage and fall through to
-        # .lrc / LRCLIB.
-        if len(text) > 6000:
-            return None, False
-        return text, bool(LRC_LINE.search(text))
-    except Exception:
-        return None, False
+# Parsing/normalising/embedding all live in lyrics.py so tools/lyrics-sync.py
+# can sweep the library with exactly the matching rules the app uses.
+parse_lrc = lyricslib.parse_lrc
+embedded_lyrics = lyricslib.read_embedded
 
 
 class LyricsProvider(QObject):
     """Resolves lyrics for a track: DB cache → embedded tags → sidecar .lrc →
-    LRCLIB. Runs on a worker thread (tag parse + network); results land back on
-    the GUI thread via the ready signal. Negative results are cached too, with
-    a 7-day retry window, so a library full of instrumentals doesn't hammer
-    lrclib.net."""
+    LRCLIB, and EMBEDS what it finds back into the file. Runs on a worker
+    thread (tag parse + network + tag write); results land back on the GUI
+    thread via the ready signal. Negative results are cached too, with a 7-day
+    retry window, so a library full of instrumentals doesn't hammer lrclib.net.
+
+    Timestamped lyrics outrank everything. A plain-text lyrics tag is NOT
+    allowed to end the search — roughly a fifth of this library has unsynced
+    words sitting in its tags, and treating those as the answer is what kept
+    the scrolling pane empty for them. Plain text is only used if the network
+    has nothing synced either.
+
+    Writeback is gated on the `lyricsEmbed` pref (default on). It goes through
+    the same journal as the rating writer, and only ever touches the lyrics
+    frame."""
 
     ready = Signal(int, "QVariantMap")  # trackId, {source, synced, lines, text}
 
     RETRY_NONE_AFTER = 7 * 86400
 
-    def __init__(self, parent=None):
+    def __init__(self, prefs=None, parent=None):
         super().__init__(parent)
+        self._prefs = prefs
+        self._lrclib = lyricslib.Lrclib()
         self._jobs = []
         self._cv = threading.Condition()
         threading.Thread(target=self._loop, daemon=True).start()
@@ -1467,26 +1700,72 @@ class LyricsProvider(QObject):
             return
         cached = con.execute("SELECT * FROM lyrics WHERE track_id=?", (tid,)).fetchone()
         if cached is not None:
-            if cached["source"] != "none":
-                self._emit(tid, cached["source"], cached["synced"], cached["body"])
+            src = cached["source"]
+            if src == "instrumental":
+                self._emit(tid, "instrumental", False, "")
+                return
+            # A cached PLAIN result is not final: the network may since have
+            # gained a synced version, and that is the whole point of the pane.
+            if src not in ("none",) and cached["synced"]:
+                self._emit(tid, src, True, cached["body"])
                 return
             if time.time() - (cached["fetched_at"] or 0) < self.RETRY_NONE_AFTER:
-                self._emit(tid, "none", False, "")
+                if src == "none":
+                    self._emit(tid, "none", False, "")
+                    return
+                self._emit(tid, src, False, cached["body"])
                 return
 
         path = row["path"]
-        text, synced = embedded_lyrics(path) if os.path.exists(path) else (None, False)
-        source = "embedded"
-        if not text and os.path.exists(path):
-            lrc = Path(path).with_suffix(".lrc")
-            if lrc.exists():
+        exists = os.path.exists(path)
+        text = synced = None
+        source = "none"
+
+        # 1. Timestamped lyrics already in the file win outright.
+        emb_text, emb_synced = embedded_lyrics(path) if exists else (None, False)
+        if emb_synced:
+            text, synced, source = emb_text, True, "embedded"
+
+        # 2. A sidecar .lrc beside the file (only trusted if actually stamped).
+        if not text and exists:
+            side = Path(path).with_suffix(".lrc")
+            if side.exists():
                 try:
-                    text, synced, source = lrc.read_text(encoding="utf-8", errors="replace"), True, "lrc"
+                    body = side.read_text(encoding="utf-8", errors="replace")
+                    if lyricslib.is_synced(body):
+                        text, synced, source = body, True, "lrc"
                 except OSError:
                     pass
+
+        # 3. Ask LRCLIB — even when the file already holds PLAIN lyrics, since
+        #    a synced version is a strict upgrade over them.
         if not text:
-            text, synced = self._fetch_lrclib(row)
-            source = "lrclib"
+            got = self._fetch_lrclib(row)
+            if got is None:                      # network failed: no verdict
+                if emb_text:
+                    self._emit(tid, "embedded", False, emb_text)
+                else:
+                    self._emit(tid, "none", False, "")
+                return                           # nothing cached — retry later
+            if got["instrumental"]:
+                con.execute("INSERT OR REPLACE INTO lyrics"
+                            " (track_id, source, synced, body, fetched_at)"
+                            " VALUES (?,?,?,?,?)",
+                            (tid, "instrumental", 0, "", time.time()))
+                con.commit()
+                self._emit(tid, "instrumental", False, "")
+                return
+            if got["text"] and got["synced"]:
+                text, synced, source = got["text"], True, "lrclib"
+                self._embed(row, text)           # put it in the file for good
+            elif emb_text:                       # fall back on the file's plain text
+                text, synced, source = emb_text, False, "embedded"
+            elif got["text"]:
+                text, synced, source = got["text"], False, "lrclib"
+
+        # 4. Nothing anywhere, but the file had plain words after all.
+        if not text and emb_text:
+            text, synced, source = emb_text, False, "embedded"
         if not text:
             source = "none"
 
@@ -1496,50 +1775,45 @@ class LyricsProvider(QObject):
         con.commit()
         self._emit(tid, source, synced, text)
 
-    @staticmethod
-    def _fetch_lrclib(row):
-        """LRCLIB: exact /api/get first, fuzzy /api/search fallback."""
-        artist, title = row["artist"], row["title"]
-        if not artist or not title:
-            return None, False
-        base = "https://lrclib.net/api/"
-        ua = {"User-Agent": "player/1.0 (github.com/tilktilk5; personal desktop player)"}
+    def _fetch_lrclib(self, row):
+        """One LRCLIB resolution, or None if the NETWORK failed.
 
-        def get(url):
-            req = urllib.request.Request(url, headers=ua)
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return json.loads(r.read().decode("utf-8"))
-        # Multi-artist tags ("A & B", "A feat. B") rarely match LRCLIB's
-        # primary-artist entries — retry with the first artist alone.
-        primary = re.split(r"\s*(?:&|,|;|feat\.?|ft\.?|×|/)\s*", artist,
-                           maxsplit=1, flags=re.IGNORECASE)[0].strip()
-        artists = [artist] + ([primary] if primary and primary != artist else [])
+        The None is the point: a timeout must not be recorded as "this track
+        has no lyrics", or a spell offline would poison the cache for a week."""
         try:
-            for a in artists:
-                q = urllib.parse.urlencode({
-                    "artist_name": a, "track_name": title,
-                    "album_name": row["album"] or "",
-                    "duration": int(row["duration"] or 0)})
-                try:
-                    d = get(base + "get?" + q)
-                except urllib.error.HTTPError as e:
-                    if e.code != 404:
-                        raise
-                    q = urllib.parse.urlencode({"artist_name": a, "track_name": title})
-                    results = get(base + "search?" + q)
-                    dur = row["duration"] or 0
-                    results = [r for r in results
-                               if not dur or abs((r.get("duration") or 0) - dur) <= 3]
-                    d = results[0] if results else None
-                if not d:
-                    continue
-                if d.get("syncedLyrics"):
-                    return d["syncedLyrics"], True
-                if d.get("plainLyrics"):
-                    return d["plainLyrics"], False
-        except Exception:
-            pass
-        return None, False
+            return self._lrclib.lookup(row["artist"], row["title"],
+                                       row["album"], row["duration"])
+        except lyricslib.LookupError_ as e:
+            print("lyrics: lrclib unreachable:", e, flush=True)
+            return None
+
+    def _embed(self, row, text):
+        """Write freshly-fetched synced lyrics into the file itself, so they
+        survive this DB and are visible to every other tool that reads tags.
+
+        Journalled exactly like the rating writer, and skipped when the file
+        is on an unmounted SSD or the pref is off."""
+        if not self._prefs or not self._prefs.get("lyricsEmbed", True):
+            return
+        path = row["path"]
+        if not os.path.exists(path):
+            return
+        entry = {"path": path, "lyrics": "synced", "chars": len(text),
+                 "ts": time.time()}
+        try:
+            STATE.mkdir(parents=True, exist_ok=True)
+            with open(STATE / "tagwrites.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps({**entry, "status": "writing"}) + "\n")
+            lyricslib.write_embedded(path, text)
+            with open(STATE / "tagwrites.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps({**entry, "status": "written"}) + "\n")
+        except Exception as e:
+            print("lyrics: embed failed:", path, e, flush=True)
+            try:
+                with open(STATE / "tagwrites.log", "a", encoding="utf-8") as f:
+                    f.write(json.dumps({**entry, "status": f"error: {e}"}) + "\n")
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -1877,7 +2151,7 @@ def main():
     tagwriter = TagWriter(prefs)
     library = Library(tagwriter)
     player = Player(library, prefs)
-    lyrics = LyricsProvider()
+    lyrics = LyricsProvider(prefs)
     bridge = Bridge(library, player, lyrics)
     titlebar = Titlebar()
     palette = Palette(PANEL_THEME)
