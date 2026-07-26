@@ -571,7 +571,12 @@ MIGRATIONS = [
 
 def open_db():
     DATA.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
+    # WAL lets readers and a writer coexist, but only ONE writer at a time, and
+    # sqlite's default is to give up after 5s with "database is locked". The
+    # scan and tools/lyrics-sync.py both write in bulk, so a long-running sweep
+    # could take the app down at startup. Wait for the other writer instead.
+    con = sqlite3.connect(DB_PATH, timeout=60)
+    con.execute("PRAGMA busy_timeout=60000")
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
     cols = {}
