@@ -13,12 +13,26 @@ import QtWebEngine
 // Handles all four modes Chromium asks for: one file, many files, a folder
 // (webkitdirectory), and save-as. The request is held while the picker is up
 // and answered with dialogAccept(paths) / dialogReject().
+//
+// Queued PER VIEW like JsDialog, and only the current tab's front request is
+// shown, so a background tab can't throw a picker over the page you're on.
+// Unlike a JS dialog a file request does NOT block the page's JS, so a page can
+// have several outstanding; they queue in request order. Browsing state (folder,
+// selection) is kept while the panel is only hidden by a tab switch — switching
+// back returns you to the folder you were in, not to the top.
 Item {
     id: root
     visible: false
     z: 2700
 
-    property var pending: null
+    // the view whose picker may be shown — bound to win.current by Main.qml
+    property var currentView: null
+
+    property var pending: null         // the FileDialogRequest on screen
+    property var pendingView: null     // and the view it came from
+    property var buckets: []           // [{ view, items: [request, …] }]
+    property int rev: 0                // bumped on every queue change (tab tooltips)
+
     property string dir: ""
     property var entries: []
     property var selected: []          // absolute paths, in click order
@@ -29,16 +43,65 @@ Item {
     readonly property bool folder: mode === FileDialogRequest.FileModeUploadFolder
     readonly property bool saving: mode === FileDialogRequest.FileModeSave
 
-    function show(request) {
+    onCurrentViewChanged: sync()
+
+    function bucketFor(view, make) {
+        for (var i = 0; i < buckets.length; i++)
+            if (buckets[i].view === view) return buckets[i];
+        if (!make) return null;
+        var b = { view: view, items: [] };
+        buckets.push(b);
+        return b;
+    }
+    function countFor(view) {
+        var b = bucketFor(view, false);
+        return b ? b.items.length : 0;
+    }
+
+    function show(view, request) {
         request.accepted = true;       // "we'll handle it" — suppresses the auto-reject
-        // Only one picker at a time: a page can't open a second while the first
-        // blocks, and a second tab's request would fight over this one panel.
-        if (pending) { request.dialogReject(); return; }
-        pending = request;
-        mode = request.mode;
-        selected = [];
-        nameField.text = (request.defaultFileName && !folder) ? request.defaultFileName : "";
-        cd(Files.startDir());
+        bucketFor(view, true).items.push(request);
+        rev += 1;
+        sync();
+    }
+
+    // tab closing — see JsDialog.dropView for why this can't be a liveness check
+    function dropView(view) {
+        var live = [];
+        for (var i = 0; i < buckets.length; i++)
+            if (buckets[i].view !== view) live.push(buckets[i]);
+        buckets = live;
+        if (pendingView === view) {
+            pending = null; pendingView = null; shown = null; root.visible = false;
+        }
+        rev += 1;
+        sync();
+    }
+
+    function sync() {
+        if (pending && pendingView !== currentView) {
+            pending = null;            // stays at its bucket's head, deferred
+            pendingView = null;
+            root.visible = false;
+        }
+        if (pending) return;
+        var b = bucketFor(currentView, false);
+        if (b && b.items.length > 0) present(b.items[0], currentView);
+    }
+
+    // `shown` is the last request the panel was actually set up for: re-showing
+    // it after a tab switch must NOT reset the folder you'd browsed to.
+    property var shown: null
+    function present(request, view) {
+        pending     = request;
+        pendingView = view;
+        if (shown !== request) {
+            shown = request;
+            mode = request.mode;
+            selected = [];
+            nameField.text = (request.defaultFileName && !folder) ? request.defaultFileName : "";
+            cd(Files.startDir());
+        }
         root.visible = true;
         keySink.forceActiveFocus();
     }
@@ -93,21 +156,33 @@ Item {
         return selected;
     }
 
+    // answered: drop it from its bucket and move on to whatever's behind it
+    function finish() {
+        var b = bucketFor(pendingView, false);
+        if (b) b.items.shift();
+        shown = null;
+        pending = null;
+        pendingView = null;
+        root.visible = false;
+        rev += 1;
+        sync();
+    }
+
     // try/catch for the same reason as JsDialog: the tab can be closed from the
     // titlebar while the picker is up, invalidating the held request — the
     // panel must still come down.
     function accept() {
+        if (!pending) return;
         var paths = result();
         if (paths.length === 0) return;
         Files.rememberDir(dir);
         try { pending.dialogAccept(paths); } catch (e) {}
-        pending = null;
-        root.visible = false;
+        finish();
     }
     function cancel() {
-        if (pending) { try { pending.dialogReject(); } catch (e) {} }
-        pending = null;
-        root.visible = false;
+        if (!pending) return;
+        try { pending.dialogReject(); } catch (e) {}
+        finish();
     }
 
     MouseArea { anchors.fill: parent; onClicked: root.cancel() }
