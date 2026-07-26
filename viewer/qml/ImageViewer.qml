@@ -156,8 +156,14 @@ Rectangle {
             enabled: !viewer.isVideo   // the wheel scrubs the titlebar bar for video
             acceptedModifiers: Qt.NoModifier
             onWheel: (e) => {
-                // pixelDelta ×3: ~40px of finger travel ≈ one detent's worth
-                const d = e.pixelDelta.y !== 0 ? e.pixelDelta.y * 3 : e.angleDelta.y;
+                // pixelDelta ×3: ~40px of finger travel ≈ one detent's worth.
+                // A sub-pixel event (pixelDelta rounds to 0) carries the same
+                // motion in angleDelta at 12x scale, so it needs /4 — feeding
+                // it the raw value would zoom 4x faster when moving slowly.
+                const ad = e.angleDelta.y;
+                const d = e.pixelDelta.y !== 0 ? e.pixelDelta.y * 3
+                        : Math.abs(ad) >= 120  ? ad          // real wheel detent
+                        :                        ad / 4;     // touchpad sub-pixel
                 viewer.zoomAround(Math.exp(Math.log(1.2) / 120 * d), e.x, e.y);
             }
         }

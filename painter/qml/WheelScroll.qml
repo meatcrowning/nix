@@ -22,15 +22,27 @@ MouseArea {
     acceptedButtons: Qt.NoButton
     propagateComposedEvents: true
 
+    // THE SUB-PIXEL TRAP. `pixelDelta` is an INTEGER, so a touchpad moving
+    // slower than one pixel per report (which at 125Hz is most of a slow
+    // scroll — measured: 226 of 413 events in one gesture) arrives as
+    // pixelDelta 0 with a small angleDelta. Sending that down the wheel-notch
+    // branch below scrolled it 3 lines' worth of a 120-unit detent — ~45px
+    // where the finger had moved 0.25px — so scrolling SLOWLY outran scrolling
+    // normally by ~4.5x, which is exactly backwards. QtWayland sets
+    // angleDelta = 12 x the true surface-pixel delta, so that is the
+    // high-resolution signal to divide by; contentY is a real, so fractional
+    // pixels accumulate on their own with nothing to carry by hand.
+    // A real mouse wheel is told apart by its detent: |angleDelta| >= 120.
     onWheel: function(wheel) {
         var max = view ? Math.max(0, view.contentHeight - view.height) : 0;
         if (!view || max <= 0) {
             wheel.accepted = false;   // nothing to scroll — let it bubble out
             return;
         }
-        var dy = wheel.pixelDelta.y !== 0
-                 ? wheel.pixelDelta.y
-                 : (wheel.angleDelta.y / 120) * root.lines * root.step;
+        var ad = wheel.angleDelta.y;
+        var dy = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y
+               : Math.abs(ad) >= 120      ? (ad / 120) * root.lines * root.step
+               :                            ad / 12;
         view.contentY = Math.max(0, Math.min(max, view.contentY - dy));
         wheel.accepted = true;
         root.scrolled();

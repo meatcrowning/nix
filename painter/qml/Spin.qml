@@ -61,7 +61,14 @@ Rectangle {
         acceptedButtons: Qt.NoButton
         property real wheelAcc: 0
         onWheel: function (w) {
-            wheelAcc += w.pixelDelta.y !== 0 ? w.pixelDelta.y / 40 : w.angleDelta.y / 120
+            // angleDelta is 12x the true pixel delta, so a sub-pixel touchpad
+            // event (pixelDelta rounds to 0) must divide by 12*40, not 120 —
+            // otherwise slow scrolling steps 4x faster than normal scrolling.
+            // >= 120 means a real wheel detent: one step, as it always was.
+            var ad = w.angleDelta.y
+            wheelAcc += w.pixelDelta.y !== 0 ? w.pixelDelta.y / 40
+                      : Math.abs(ad) >= 120  ? ad / 120
+                      :                        ad / 480
             while (Math.abs(wheelAcc) >= 1) {
                 if (wheelAcc > 0) { spin.commit(spin.value + spin.step); wheelAcc -= 1 }
                 else              { spin.commit(spin.value - spin.step); wheelAcc += 1 }
