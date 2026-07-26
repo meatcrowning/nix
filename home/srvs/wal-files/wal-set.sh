@@ -65,9 +65,95 @@ MONS="$(hyprctl monitors -j 2>/dev/null \
     2>/dev/null)"
 [ -z "$MONS" ] && MONS="eDP-1 2560 1600"   # fallback if IPC not up yet
 
+# ---- 2b. panel reserve (dock desktop mode) -----------------------------------
+# Normally the Quickshell panel is a 48px strip and the wallpaper is just the
+# image, centered by hyprpaper on the whole monitor. In "dock" mode the panel
+# grows to a quarter/third of the screen width — at which point centering on the
+# whole monitor puts the subject of the art behind the panel. So the desktop
+# publishes the strip it covers (the RESERVE) and we recompose the wallpaper so
+# the art is centered in the VISIBLE region instead, with a flat background strip
+# under the panel.
+#
+# Source of truth is $CACHE/reserve, one line "<edge> <px>" (e.g. "right 480"),
+# written by the panel — this script only ever READS it. Absent, unreadable or
+# malformed means no reserve, and RESERVE_PX=0 must stay byte-for-byte the
+# classic behaviour: nothing below branches until it is > 0. WAL_RESERVE /
+# WAL_RESERVE_EDGE override the file (for testing).
+RESERVE_FILE="$CACHE/reserve"
+RESERVE_PX=0
+RESERVE_EDGE="right"
+RESERVE_BG="000000"
+if [ -r "$RESERVE_FILE" ]; then
+    read -r RESERVE_EDGE RESERVE_PX _rest < "$RESERVE_FILE" || true
+fi
+[ -n "${WAL_RESERVE_EDGE:-}" ] && RESERVE_EDGE="${WAL_RESERVE_EDGE}"
+[ -n "${WAL_RESERVE:-}" ] && RESERVE_PX="${WAL_RESERVE}"
+# Anything that isn't a plain integer / a known edge disables the reserve rather
+# than guessing — a bad state file must degrade to the classic wallpaper, never
+# to a mis-composed one.
+case "${RESERVE_PX:-}" in ''|*[!0-9]*) RESERVE_PX=0 ;; esac
+case "${RESERVE_EDGE:-}" in left|right) ;; *) RESERVE_EDGE="right"; RESERVE_PX=0 ;; esac
+
+if [ "$RESERVE_PX" -gt 0 ]; then
+    # The strip under the panel is painted in the palette's own background, so it
+    # reads as part of the desktop rather than as a letterbox. wal-prepare.sh has
+    # already written the palette (wal-extract.py's KEY.env, "BG=rrggbb"); it is
+    # sourced properly in step 3, but that is after the hyprpaper apply, so pick
+    # the one key out here without disturbing the environment. Black if the
+    # palette can't be read — the same colour every wallpaper's BG resolves to
+    # today anyway.
+    RESERVE_BG="$(sed -n 's/^BG=\([0-9a-fA-F]\{6\}\)$/\1/p' "$THEMES/$KEY.env" 2>/dev/null | head -n1)"
+    [ -z "$RESERVE_BG" ] && RESERVE_BG="000000"
+fi
+
+# Compose the single image hyprpaper shows on one monitor in dock mode: the art
+# filling only the visible region (cover-scaled + center-cropped, or tiled),
+# padded out to the full monitor with the flat reserve strip on the panel's edge.
+# `-gravity West/East` + `-extent WxH` does the padding in the same pass — art
+# West (flush left) leaves the pad on the right, and vice versa.
+#
+# This lives on the APPLY path, NOT in wal-prepare.sh, on purpose: the composed
+# image depends on the reserve, which is a property of the live desktop rather
+# than of the image. wal-prepare-all.sh runs wal-prepare.sh over every file in
+# ~/Pictures/wall, so composing there would mean an ImageMagick pass per image
+# per monitor size — and a full re-run of all of them every time the dock width
+# changes — for images that will mostly never be applied.
+wal_compose_reserved() {
+    local w="$1" h="$2" out="$3" vw art_gravity
+    vw=$((w - RESERVE_PX))
+    [ "$vw" -lt 1 ] && vw=1
+    # Panel on the left => art pushed East, and vice versa.
+    if [ "$RESERVE_EDGE" = "left" ]; then art_gravity="East"; else art_gravity="West"; fi
+    if [ "$MODE" = "tile" ]; then
+        magick -size "${vw}x${h}" tile:"$WALL" \
+            -background "#$RESERVE_BG" -gravity "$art_gravity" -extent "${w}x${h}" "$out"
+    else
+        magick "$WALL" -resize "${vw}x${h}^" -gravity center -extent "${vw}x${h}" \
+            -background "#$RESERVE_BG" -gravity "$art_gravity" -extent "${w}x${h}" "$out"
+    fi
+}
+
 PRELOADS=""   # unique images to preload
 WALLLINES=""  # "monitor,image" pairs
-if [ "$MODE" = "tile" ]; then
+if [ "$RESERVE_PX" -gt 0 ]; then
+    # Dock mode: one composed PNG per (image, monitor size, edge, px). Cached
+    # like the tiled PNGs — regenerated only when it's missing or older than the
+    # source, plus older than the palette (the reserve strip is painted from it,
+    # so a re-extracted palette has to re-tint the strip).
+    while read -r name w h; do
+        [ -z "$name" ] && continue
+        out="$CACHE/composed-${KEY}-${w}x${h}-${RESERVE_EDGE}${RESERVE_PX}.png"
+        if [ ! -f "$out" ] || [ "$WALL" -nt "$out" ] || [ "$THEMES/$KEY.env" -nt "$out" ]; then
+            wal_compose_reserved "$w" "$h" "$out"
+        fi
+        case "$PRELOADS" in *"$out"*) ;; *) PRELOADS="$PRELOADS$out
+";; esac
+        WALLLINES="$WALLLINES$name,$out
+"
+    done <<EOF
+$MONS
+EOF
+elif [ "$MODE" = "tile" ]; then
     # wal-prepare.sh already generated the tiled PNG per monitor resolution.
     while read -r name w h; do
         [ -z "$name" ] && continue

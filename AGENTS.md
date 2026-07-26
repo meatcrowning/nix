@@ -54,6 +54,51 @@ The live desktop is Hyprland driving a Quickshell panel. Source lives in
 (`hyprland.lua`), plus the `hyprvtb` Hyprland plugin (`home/prog/hyprvtb/`,
 C++ — compositor-side window titlebars + session save/restore).
 
+**Two VIEW MODES (`ViewMode.qml`), and the drag handle IS the switch.**
+`classic` is the 48px vertical bar this config has always had, with the desktop
+widgets pinned out on the wallpaper. `dock` turns the panel into a 25-33%-of-
+screen column: `DockHeader.qml` (runner button at the left, task icons flowing
+across and wrapping) over `DockGrid.qml` (the widget grid). There is no toggle
+button — you grab the bar's inner edge (`edgeGrip` in `shell.qml`) and pull;
+past `enterFrac` (5% of screen) past the classic width it commits to dock, and
+shoving a dock panel below `exitFrac` (20%) collapses it back. The asymmetry is
+deliberate: entering is a small tug from a 48px bar, leaving must be a decisive
+shove or width nudges keep falling out of the mode. Scripted path:
+`qs ipc call view toggle|dock|classic|mode`.
+- **Both layouts are always instantiated**, crossfaded on `ViewMode.showDock`
+  (which follows the drag LIVE, so the panel visibly becomes the dock as you
+  cross the threshold rather than snapping at release). A faded-out layout sets
+  `visible: false` — otherwise the classic hover zones keep firing popups from
+  under the dock panel.
+- **`ViewMode.liveWidth` vs `barWidth`:** `liveWidth` is what the bar renders at
+  this frame (pointer-tracking mid-drag); `barWidth` is the committed value, and
+  only it feeds the persisted setting and the wallpaper. Read `ViewMode.barWidth`
+  and NOT `Theme.barWidth` for "how much screen does the panel take" —
+  `Theme.barWidth` is now only the *classic* width.
+- **Dock widths are quantized to 8px** (`ViewMode.widthStep`). Not cosmetic: the
+  width IS the wallpaper's reserve, and each distinct reserve is a fresh
+  ImageMagick compose + a hyprpaper re-render, which reads on screen as a FLASH.
+- **The edge-grip resize is self-correcting, not incremental.** A layer surface
+  never sees the pointer's absolute position, and the grip is anchored to the
+  edge it moves — so as the bar grows, `mouse.x` drifts back toward the grab
+  point by exactly the amount the bar changed. Feeding that residual back each
+  event tracks the pointer using only local coordinates. Don't "fix" it into an
+  absolute-position calculation; there isn't one to be had.
+- **Dock mode retires the desktop widgets** (they belong to the grid there), and
+  restores the exact pre-dock pin set on the way back. `shell.qml`'s
+  `Component.onCompleted` returns early in dock mode so neither the reload
+  restore nor the login fan re-pins anything.
+- **Wallpaper recentring:** the panel publishes the strip it covers to
+  `~/.cache/wal/reserve` (`"<edge> <px>"`) and runs `wal-set.sh
+  --wallpaper-only`; that script composes a full-screen image with the art
+  cover-scaled/tiled into the VISIBLE region and a flat palette-BG strip under
+  the panel, cached as `composed-<key>-<WxH>-<edge><px>.png`. **Reserve 0 is the
+  classic path, byte-for-byte unchanged** — keep it that way. `--wallpaper-only`
+  is REQUIRED: a full `wal-set.sh` run rewrites `Theme.qml`, which Quickshell
+  watches, so a plain apply would reload the whole panel on every width change.
+  The compose lives on the APPLY path, never in `wal-prepare.sh` — that one is
+  fanned out over every image in `~/Pictures/wall` by `wal-prepare-all.sh`.
+
 **Graceful session exit (logout / reboot / poweroff):** the power menu
 (`PowerMenu.qml`) runs `quickshell-files/scripts/session-exit.sh` *before* the
 power command for any `endSession` item. That script runs

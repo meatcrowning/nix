@@ -15,6 +15,15 @@
 # that by the time you flip to one in WallpaperPicker.qml the slow part
 # (ImageMagick, PIL) has already happened and applying it is just hyprpaper/
 # theme file writes.
+#
+# NOT here on purpose: the dock-mode "reserve" composition (art re-centered into
+# the region the panel doesn't cover, see wal-set.sh step 2b). Everything this
+# script caches is a property of the IMAGE, so it's worth warming for the whole
+# directory; the composed image is a property of the LIVE DESKTOP (which edge the
+# panel is on and how wide it currently is), so warming it in bulk would mean an
+# ImageMagick pass per image per monitor size, redone for every dock-width
+# change, almost all of it for images that never get applied. It therefore stays
+# on wal-set.sh's apply path, where exactly one image is composed.
 set -u
 
 CONFIG="$HOME/.config"
