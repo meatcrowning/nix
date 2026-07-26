@@ -357,8 +357,16 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 // top-down): every UTF-8 codepoint on its own pango line, centered, with
 // antialiasing off so the pixel font stays crisp. One column wide (colW) —
 // used for the title (outer column) and the app footer (inner column).
+//
+// flatColon rotates ':' a quarter turn — two pips side by side instead of
+// stacked — and gives it a short row of its own. In a column of upright
+// letters an upright colon is two dots reading top-down, which is exactly the
+// axis the text already runs in, so it reads as two more characters rather
+// than a separator; laid flat it reads as one. It also costs a third of a cell
+// instead of a whole one, which is why the player's "3:45/5:12" readout asks
+// for it: two colons, two cells of the scrub column handed back.
 SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outTextH, int* outLines,
-                                                bool ellipsis) {
+                                                bool ellipsis, bool flatColon) {
     const auto FONT  = Cfg::font();
     const int  SIZE  = std::round(Cfg::fontSize() * scale);
     const int  BARW  = std::round(colW() * scale);
@@ -378,18 +386,13 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
         cps.push_back(text.substr(i, len));
         i += len;
     }
-    std::string stacked;
-    const bool  truncated = ellipsis && (int)cps.size() > maxLines;
-    const int   shown     = truncated ? std::max(0, maxLines - 1) : (int)cps.size();
-    for (int i = 0; i < shown; i++) {
-        if (i)
-            stacked += "\n";
-        stacked += cps[i]; // spaces get their own (blank) cell
-    }
+    const bool               truncated = ellipsis && (int)cps.size() > maxLines;
+    const int                shown     = truncated ? std::max(0, maxLines - 1) : (int)cps.size();
+    std::vector<std::string> lines(cps.begin(), cps.begin() + shown); // spaces get their own (blank) cell
     if (truncated)
-        stacked += "\n…";
+        lines.push_back("…");
     if (outLines)
-        *outLines = shown + (truncated ? 1 : 0);
+        *outLines = lines.size();
 
     auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
     auto CR   = cairo_create(SURF);
@@ -404,20 +407,49 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     pango_font_description_set_family(fd, FONT.c_str());
     pango_font_description_set_absolute_size(fd, SIZE * PANGO_SCALE);
     pango_layout_set_font_description(layout, fd);
-    pango_layout_set_text(layout, stacked.c_str(), -1);
     pango_layout_set_width(layout, BARW * PANGO_SCALE);
     pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
     pango_layout_set_spacing(layout, 0);
 
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
-    cairo_move_to(CR, 0, 0);
-    pango_cairo_show_layout(CR, layout);
 
-    if (outTextH) {
+    // Flat colons force the column to be drawn in RUNS between them (a pango
+    // layout has one line height for every line in it), so the cells above and
+    // below a colon keep the exact typography of the single-layout path.
+    const int DOT    = std::max(1, (int)std::round(SIZE / 7.0));
+    const int PAD    = std::max(1, (int)std::round(SIZE / 8.0));
+    const int COLONH = DOT + 2 * PAD;
+
+    double    y = 0;
+    for (size_t i = 0; i < lines.size();) {
+        if (flatColon && lines[i] == ":") {
+            const double cx = BARW / 2.0;
+            cairo_rectangle(CR, std::round(cx - DOT - PAD / 2.0), std::round(y + PAD), DOT, DOT);
+            cairo_rectangle(CR, std::round(cx + PAD / 2.0), std::round(y + PAD), DOT, DOT);
+            cairo_fill(CR);
+            y += COLONH;
+            i++;
+            continue;
+        }
+        std::string run;
+        size_t      j = i;
+        for (; j < lines.size() && !(flatColon && lines[j] == ":"); j++) {
+            if (j > i)
+                run += "\n";
+            run += lines[j];
+        }
+        pango_layout_set_text(layout, run.c_str(), -1);
+        cairo_move_to(CR, 0, y);
+        pango_cairo_show_layout(CR, layout);
+
         int lw = 0, lh = 0;
         pango_layout_get_pixel_size(layout, &lw, &lh);
-        *outTextH = lh;
+        y += lh;
+        i = j;
     }
+
+    if (outTextH)
+        *outTextH = (int)std::round(y);
 
     pango_font_description_free(fd);
     g_object_unref(layout);
@@ -867,7 +899,10 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             m_szLastFooter   = reg.footer;
             m_iLastFooterRun = FRUNLEN;
             m_iFooterTextH   = 0;
-            m_pFooterTex     = renderStackedTex(reg.footer, FRUNLEN, SCALE, textColor, &m_iFooterTextH);
+            // flatColon: the footer is where clock-style readouts live
+            // ("3:45/5:12"), and a laid-flat colon both reads as a separator
+            // and gives the scrub track back the cells it was eating.
+            m_pFooterTex     = renderStackedTex(reg.footer, FRUNLEN, SCALE, textColor, &m_iFooterTextH, nullptr, /*ellipsis=*/true, /*flatColon=*/true);
         }
         if (m_pFooterTex && m_pFooterTex->m_texID != 0) {
             // the texture's glyphs start at its top; bottom-anchor using the real
