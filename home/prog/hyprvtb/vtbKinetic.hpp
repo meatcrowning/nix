@@ -118,6 +118,8 @@ class CVtbKinetic {
     bool        setKnob(const std::string& key, double val);
     int         injectTest(double dy, int n, int ms, bool wet);
     void        cancelNow();
+    // These three still RETURN their text (harmless, and free), but the return
+    // value is not how anything reads them — see publish().
     std::string dumpJson();
     std::string statsJson();
     std::string getJson();
@@ -203,6 +205,9 @@ class CVtbKinetic {
     bool        classAllowed(const std::string& cls) const;
     void        rescanDevices();
     void        debugLog(int level, const std::string& msg);
+    // Drop one introspection blob into the state dir, atomically. THE readback
+    // channel for this module — `hyprctl eval` cannot carry a value back.
+    void        publish(const char* filename, const std::string& body);
     uint32_t    wireTime() const;
     double      period() const; // seconds per tick
 
@@ -289,6 +294,11 @@ class CVtbKinetic {
     bool                                               m_unsafeWet = false;
     std::vector<std::pair<uint32_t, double>>           m_trace;
     static constexpr size_t                            KIN_TRACE_MAX = 512;
+
+    // Bumped on every published blob, so a poller can tell a fresh write from a
+    // file left over from a previous run (or from the previous poll). Process
+    // lifetime only — it is a freshness token, not a persistent counter.
+    uint64_t                                           m_introspectSeq = 0;
 
     SStats                                             m_stats;
 };

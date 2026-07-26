@@ -295,6 +295,17 @@ namespace Cfg = Vtb::Cfg;
 // would always observe `false` no matter what a deco does afterwards.
 bool        vtbAxisConsumerAtCursor(const Vector2D& mouse);
 
+// The plugin's state directory, "$HOME/.local/state/hyprvtb". Everything this
+// plugin persists lives here: geometry.tsv, the hot-swap handoff, session
+// snapshots, and the kinetic module's introspection files.
+//
+// $HOME rather than an absolute path is load-bearing for testing, not just
+// convention: the nested test harness starts its compositor with
+// HOME=$RUN/home, so a nested instance writes into the harness's own scratch
+// directory automatically and cannot touch — or be confused with — the live
+// session's real state. No instance-signature plumbing needed.
+std::string vtbStateDir();
+
 std::string vtbStatePath();
 void        vtbLoadGeometry();
 void        vtbSaveGeometry();
