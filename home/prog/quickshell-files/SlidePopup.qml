@@ -53,6 +53,9 @@ PanelWindow {
     property bool _fanYAnim: false
     property bool _fanRevealPending: false
     property real _fanY: 0
+    // Set for the duration of a snapPinned() — suppresses the card's entry
+    // slide so a hot-reload restore lands in place instead of re-animating.
+    property bool _snapPin: false
     Behavior on _fanY { enabled: root._fanYAnim; NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
 
     // Scene-Y of our top edge while pinned in-place, recomputed LIVE (not
@@ -140,6 +143,12 @@ PanelWindow {
     WlrLayershell.namespace: popupNamespace
 
     onPinnedOpenChanged: {
+        // Whether our surface is actually on screen RIGHT NOW, sampled before
+        // this handler flips _visSurface. Only a surface that is already mapped
+        // needs the layer remap below; one that has never been shown (the
+        // hot-reload restore, which pins during construction) maps at the right
+        // layer to begin with, and remapping it would blink it in and out.
+        const wasMapped = visible;
         if (pinnedOpen) {
             if (pinInPlace) Popups.registerStack(root, true);
             else Popups.pin(root);
@@ -163,8 +172,12 @@ PanelWindow {
         if (stackFloor) Popups.tiledFloorWidth = pinnedOpen ? implicitWidth : 0;
         // Recreate the surface AFTER the layer binding settles (a synchronous
         // map reads the old layer). The deferred remap re-files it at the new
-        // one. Only when it should be on-screen — a plain close needs no remap.
-        if (open) { _mapped = false; remapTimer.restart(); }
+        // one. Only when it's already on-screen — a plain close, or a pin that
+        // happens before the surface has ever mapped, needs no remap.
+        if (open && wasMapped) { _mapped = false; remapTimer.restart(); }
+        // No remap needed, but a pending fan reveal still has to be released —
+        // it's remapTimer that animates _fanY back to 0 (see below).
+        else if (_fanRevealPending) remapTimer.restart();
     }
 
     Timer {
@@ -192,6 +205,19 @@ PanelWindow {
         _fanRevealPending = true;           // remapTimer animates _fanY -> 0
         pinnedOpen = true;
     }
+    // Pin with NO entry animation at all — the widget is simply already there.
+    // Used by the hot-reload restore path (shell.qml): Quickshell recreates this
+    // whole tree on every reload, and replaying the slide-in would make the
+    // desktop widgets vanish and fly back in on every wallpaper change or QML
+    // edit. Called during construction, before the surface has mapped, so the
+    // card's x binding is only ever evaluated at its final value.
+    function snapPinned() {
+        if (pinnedOpen) return;
+        _snapPin = true;
+        pinnedOpen = true;
+        Qt.callLater(function() { root._snapPin = false; });
+    }
+
     // Reverse: sink the card back down into the widget below, then unpin.
     function fanHideStacked() {
         if (!pinnedOpen) return;
@@ -277,8 +303,9 @@ PanelWindow {
         readonly property real hidden: root.implicitWidth + Theme.gap
         x: root.open ? shown : hidden
         // horizontal slide for hover/tiled popups; suppressed during a fan
-        // reveal, where the card rises vertically (transform below) instead
-        Behavior on x { enabled: !root._fanActive; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        // reveal, where the card rises vertically (transform below) instead,
+        // and during a snapPinned() reload restore, which must not animate
+        Behavior on x { enabled: !root._fanActive && !root._snapPin; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
         // vertical fan emerge/collapse (0 = in place; +height = tucked below)
         transform: Translate { y: root._fanY }
