@@ -28,12 +28,15 @@ Item {
     // edge during a resize drag, and animating anything that tracks the pointer
     // is the one thing this panel does not do (see the LAW in AGENTS.md). The
     // drag gate covers the case where a mode switch changes both at once.
+    // ViewMode.settling covers the reload: the grid is laid out before the panel
+    // knows its real width, so without it every tile glides into place from
+    // wherever the default-classic geometry put it, on every theme change.
     Behavior on y {
-        enabled: !ViewMode.dragging
+        enabled: !ViewMode.dragging && !ViewMode.settling
         NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
     }
     Behavior on height {
-        enabled: !ViewMode.dragging
+        enabled: !ViewMode.dragging && !ViewMode.settling
         NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
     }
 

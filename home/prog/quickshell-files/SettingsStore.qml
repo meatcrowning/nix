@@ -49,6 +49,21 @@ Singleton {
         onTriggered: file.writeAdapter()
     }
 
+    // Read the file once more the instant this singleton is complete, so the
+    // real values are on the bindings by the end of the load pass rather than a
+    // turn of the event loop later. blockLoading makes it synchronous and the
+    // file is tiny.
+    //
+    // It cannot be pulled any earlier than this. `d` is read during binding
+    // evaluation, which happens BEFORE any Component.onCompleted in the tree,
+    // and neither the FileView's own initial load nor a reload() forced from a
+    // binding's side effect delivers the adapter's values in time — both were
+    // measured, and in both the panel's first evaluation still saw viewMode
+    // "classic". Every consumer of a persisted geometry value is therefore
+    // built from the shipped defaults and corrected a moment later, which is
+    // what ViewMode.settling exists to keep silent.
+    Component.onCompleted: file.reload()
+
     // Cross-process live updates. watchChanges alone does NOT reliably deliver
     // external edits here: the Settings window writes atomically (temp file +
     // rename), which swaps settings.json's inode out from under the inotify
