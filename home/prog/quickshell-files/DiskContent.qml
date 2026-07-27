@@ -71,8 +71,13 @@ Item {
                             visible: Disks.renaming !== modelData.src
                             width: parent.width
                             elide: Text.ElideRight
-                            text: (modelData.label && modelData.label.length ? modelData.label : Disks.baseName(modelData.mount))
-                                  + (modelData.rota ? "" : " •")  // dot marks SSD
+                            // Glyphs.px HERE, not at the Disks ingest: the inline
+                            // editor below prefills from `modelData.label` and
+                            // hands it to `Disks.relabel()`, which writes the
+                            // filesystem label for real.
+                            text: Glyphs.px(modelData.label && modelData.label.length
+                                  ? modelData.label : Disks.baseName(modelData.mount))
+                                  + (modelData.rota ? "" : " *")  // star marks SSD
                             color: Theme.text
                             MouseArea {
                                 anchors.fill: parent
