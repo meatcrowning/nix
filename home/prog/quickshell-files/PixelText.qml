@@ -20,6 +20,17 @@ Text {
     renderType: Text.NativeRendering
     antialiasing: false
 
+    // Text defaults to AutoText, which SNIFFS for HTML and renders it as rich
+    // text. Nearly everything the panel draws is a string from somewhere else —
+    // window titles, process names, filenames, notification bodies — so that
+    // default hands any app on the notification bus a markup renderer: an
+    // <img src="http://…"> in a notification body becomes a real fetch, i.e. a
+    // read beacon. Notifications.plain() strips tags but then UNESCAPES
+    // entities, so &lt;img&gt; survives the strip and is reborn as markup here.
+    // Pin plain text at the one type every widget uses; individual PlainText
+    // pins in Tooltip.qml and TaskMenu.qml predate this and are now redundant.
+    textFormat: Text.PlainText
+
     // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
     // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per
     // line), so multi-line/wrapped text leads ~1px wider than kitty's 15px cell
