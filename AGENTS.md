@@ -82,19 +82,26 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   only it feeds the persisted setting and the wallpaper. Read `ViewMode.barWidth`
   and NOT `Theme.barWidth` for "how much screen does the panel take" —
   `Theme.barWidth` is now only the *classic* width.
-- **Dock widths are quantized to 8px** (`ViewMode.widthStep`). Not cosmetic: the
-  width IS the wallpaper's reserve, and each distinct reserve is a fresh
-  ImageMagick compose + a hyprpaper re-render, which reads on screen as a FLASH.
-- **The edge-grip resize must be ABSOLUTE, measured from the fixed screen edge**
-  (`edgeGrip.widthAt()` maps the pointer into the bar and subtracts from
-  `bar.width`). It was incremental once — add this event's pointer delta to the
-  current width — and it visibly BOUNCED: resizing a layer surface takes a
-  configure/ack roundtrip, so for several events the pointer coordinates still
-  describe the old surface while the requested width has already moved on, and
-  each event over-corrects against a width that hasn't happened yet. Measuring
-  from the anchored screen edge reads `bar.width` and the pointer from the same
-  frame, so their difference is exact even mid-roundtrip. Never reintroduce a
-  delta-accumulating version, and never feed `liveWidth` back into `dragWidth`.
+- **The resize handle is its OWN full-screen surface** (`EdgeGrip.qml`), not an
+  item in the panel, and that is load-bearing. Wayland delivers pointer
+  coordinates in SURFACE coordinates and a layer-surface resize is a
+  configure/ack roundtrip, so mid-drag the item tree has already advanced to the
+  requested width while the surface has not — every event is wrong by whatever
+  the surface still owes. Measured with `view trace`: the computed width moved
+  1:1 with the SURFACE width while the pointer was nearly still. **No arithmetic
+  inside a resizing surface can escape this**; the reference frame is itself
+  moving. A screen-sized surface that never resizes makes a pointer x a screen
+  x. Two traps it encodes:
+  - **`exclusionMode: ExclusionMode.Ignore` is mandatory**, and you must NOT set
+    `exclusiveZone` beside it (assigning it selects "Normal" and undoes it). A
+    surface anchored to all four edges is otherwise shrunk by everyone else's
+    exclusive zones — it came up 1618px wide against the panel's own 302px zone,
+    which both misplaces the grab strip and makes the grip resize with the panel,
+    reintroducing the very problem it exists to avoid. Check with
+    `hyprctl layers`: `qs-edge-grip` must be the monitor's full width.
+  - The MouseArea fills the whole window and the grab area is carved out with
+    `mask: Region {...}`. Putting the MouseArea *at* the moving edge would
+    reintroduce the same bug one level down.
   - **A `PanelWindow` is NOT a `QQuickItem`** (it's a `WaylandPanelInterface`),
     so `mapToItem(bar, ...)` throws `TypeError: Passing incompatible arguments
     to C++ functions` — and thrown from inside `onPressed` that means the drag
@@ -141,16 +148,32 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   restores the exact pre-dock pin set on the way back. `shell.qml`'s
   `Component.onCompleted` returns early in dock mode so neither the reload
   restore nor the login fan re-pins anything.
-- **Wallpaper recentring:** the panel publishes the strip it covers to
-  `~/.cache/wal/reserve` (`"<edge> <px>"`) and runs `wal-set.sh
-  --wallpaper-only`; that script composes a full-screen image with the art
-  cover-scaled/tiled into the VISIBLE region and a flat palette-BG strip under
-  the panel, cached as `composed-<key>-<WxH>-<edge><px>.png`. **Reserve 0 is the
-  classic path, byte-for-byte unchanged** — keep it that way. `--wallpaper-only`
-  is REQUIRED: a full `wal-set.sh` run rewrites `Theme.qml`, which Quickshell
-  watches, so a plain apply would reload the whole panel on every width change.
-  The compose lives on the APPLY path, never in `wal-prepare.sh` — that one is
-  fanned out over every image in `~/Pictures/wall` by `wal-prepare-all.sh`.
+- **THE PANEL DRAWS THE WALLPAPER — hyprpaper is gone** (removed 2026-07-26).
+  `Wall.qml` (which image + tile/scale) + `WallpaperLayer.qml` (a Background
+  layer surface per monitor) + `WallpaperImage.qml` (one cross-fade frame).
+  Two reasons it had to change: hyprpaper re-rendered its whole background layer
+  on every set, which reads on screen as the wallpaper FLASHING (`wal-set.sh`
+  already skipped redundant sets purely to dodge it), and it had no notion of an
+  OFFSET — so centring the art in the non-panel region meant compositing a fresh
+  full-screen PNG with ImageMagick for *every* panel width, then setting it,
+  then flashing. Drawn here, the recentre is a property binding on
+  `ViewMode.liveWidth`, so it follows the drag at frame rate, and a wallpaper
+  change is a cross-fade.
+  - `wal-set.sh` still DECIDES the wallpaper and owns the palette/kitty/cursor/
+    OpenRGB work; it now just publishes to `~/.cache/wal/current` (path) and
+    `~/.cache/wal/current.mode` (`tile`|`scale`), written IN PLACE (an inotify
+    watch follows the inode, so a temp+rename would silently detach it).
+  - `--wallpaper-only` is now just those two writes — 14ms, which is what the
+    picker's arrow-key preview rides on. It still must NOT do the full apply:
+    that rewrites `Theme.qml`, which Quickshell watches, reloading the panel.
+  - **`sourceSize` must never be bound to the item's width** — the width changes
+    every frame of a drag and would re-decode a multi-megapixel image per frame.
+    It's the monitor resolution for `scale`, and 0 (natural size) for `tile`,
+    since a tile scaled to the screen no longer tiles.
+  - Verify without looking: **`qs ipc call wallpaper status`** reports the path,
+    mode, and whether the visible frame actually DECODED (`front=ready`). That
+    is the check that made switching hyprpaper off safe rather than a gamble on
+    a blank desktop.
 
 **Graceful session exit (logout / reboot / poweroff):** the power menu
 (`PowerMenu.qml`) runs `quickshell-files/scripts/session-exit.sh` *before* the
@@ -273,10 +296,10 @@ before touching the plugin or the pin.
     all non-zero and `cpuHist` counting up monotonically = the swap worked;
     a reset to 0 = something regressed.
 
-- **Seed-once mutable files are NOT updated by rebuild:** `Theme.qml`,
-  `hyprland.lua`, `hyprpaper.conf` are installed only if absent (they're
-  rewritten in place at runtime by `wal-set.sh` / `cursor-recolor.sh` /
-  hyprpaper). To change one, edit BOTH the nix source AND the live
+- **Seed-once mutable files are NOT updated by rebuild:** `Theme.qml` and
+  `hyprland.lua` are installed only if absent (they're rewritten in place at
+  runtime by `wal-set.sh` / `cursor-recolor.sh`). To change one, edit BOTH the
+  nix source AND the live
   `~/.config/...` file **in place** (targeted string edit — never overwrite
   wholesale or you reset the live wal palette/border). Apply `hyprland.lua`
   changes with **`hyprctl reload`** (re-runs the live Lua, re-registers

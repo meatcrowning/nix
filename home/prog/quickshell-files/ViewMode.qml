@@ -30,8 +30,9 @@ import Quickshell
 //   barWidth  — the COMMITTED width, what the desktop settles at.
 //   liveWidth — what the bar is actually rendering at THIS frame; equals
 //               barWidth except mid-drag, when it follows the pointer.
-// Only barWidth feeds the persisted setting and the wallpaper recompose, so a
-// drag doesn't hammer settings.json or spawn an ImageMagick run per frame.
+// Only barWidth feeds the persisted setting, so a drag doesn't hammer
+// settings.json. The wallpaper follows liveWidth directly (WallpaperLayer.qml)
+// and re-centres every frame, including mid-drag.
 Singleton {
     id: root
 
@@ -60,31 +61,26 @@ Singleton {
         return Math.max(minFrac, Math.min(maxFrac, v));
     }
 
-    // Dock widths are QUANTIZED to this many pixels. Not cosmetic: the panel's
-    // width is the wallpaper's reserve, and every distinct reserve is a separate
-    // ImageMagick compose plus a hyprpaper re-render — and re-rendering
-    // hyprpaper's background layer reads on screen as a flash. Without a step,
-    // releasing the drag a few pixels off a previous width would recompose a
-    // multi-megapixel image and flash the desktop for no visible gain, and the
-    // wal cache would grow a file per pixel ever landed on. Snapping to 8px
-    // makes nearby releases reuse the composed image and hit wal-set.sh's
-    // already-current early-out instead.
-    readonly property int widthStep: 8
-    function quantize(px) { return Math.round(px / widthStep) * widthStep; }
+    // NOTE: dock widths used to be quantized to an 8px grid. That existed
+    // ONLY because each distinct width meant a fresh ImageMagick compose and a
+    // hyprpaper set, and a set re-rendered the background layer as a visible
+    // flash — so it was worth snapping nearby widths together to avoid one.
+    // The panel draws the wallpaper itself now (Wall.qml), a width change costs
+    // a property binding, and the grid's only remaining effect would be to jump
+    // the panel up to 4px away from where the drag was released. It is gone; do
+    // not reintroduce it without a reason that isn't the compose cost.
 
     // The dock's legal width range and the two thresholds, in pixels.
-    readonly property int minPx: quantize(screenWidth * minFrac)
-    readonly property int maxPx: quantize(screenWidth * maxFrac)
+    readonly property int minPx: Math.round(screenWidth * minFrac)
+    readonly property int maxPx: Math.round(screenWidth * maxFrac)
     readonly property real enterPx: Theme.barWidth + screenWidth * enterFrac
     readonly property real exitPx: screenWidth * exitFrac
 
-    // The one width the dock opens at — the stored fraction, quantized.
-    readonly property int dockPx: quantize(screenWidth * clampFrac(SettingsStore.d.dockWidthFrac))
+    // The one width the dock opens at.
+    readonly property int dockPx: Math.round(screenWidth * clampFrac(SettingsStore.d.dockWidthFrac))
 
     // committed width — classic reads the user's bar setting (Settings > Panel),
-    // dock uses the stored fraction. Quantizing in dockPx rather than at commit
-    // time keeps one definition, so a hand-edited or defaulted fraction lands on
-    // the same grid a dragged one does.
+    // dock uses the stored fraction.
     readonly property int barWidth: dock ? dockPx : Theme.barWidth
 
     // ---- live drag state -------------------------------------------------
@@ -98,13 +94,9 @@ Singleton {
     // Same in reverse: a dock panel dragged below exitPx shows the classic width
     // immediately, so you can see the collapse coming before you let go.
     //
-    // Only the in-dock resize tracks the pointer, clamped to [minPx, maxPx].
-    //
-    // It is deliberately NOT quantized here. Quantizing the LIVE width made the
-    // edge advance in 8px hops instead of following the cursor, which reads as
-    // the drag being coarse and unresponsive. The 8px grid only has to hold for
-    // the COMMITTED width — that's what the wallpaper is composed against — so
-    // quantize() belongs in commitDrag(), not on the tracked value.
+    // Only the in-dock resize tracks the pointer, clamped to [minPx, maxPx],
+    // and it follows it pixel for pixel — see the note above about the 8px grid
+    // that used to be here.
     readonly property int liveWidth: {
         if (!dragging) return barWidth;
         if (!dock) return dragWidth >= enterPx ? dockPx : Theme.barWidth;
@@ -157,8 +149,7 @@ Singleton {
     }
 
     // Called on drag release. Decides mode from the released width, stores the
-    // resulting fraction, and re-centres the wallpaper if the reserved strip
-    // actually changed.
+    // resulting fraction, and pushes windows clear if the panel grew.
     //
     // ENTERING dock deliberately does NOT take its width from the drag — it
     // keeps whatever dockPx already was. The entry gesture is a single "open it"
@@ -169,7 +160,7 @@ Singleton {
         const wasDock = dock;
         const nowDock = wouldDock(w);
         if (nowDock && wasDock) {
-            const px = Math.max(minPx, Math.min(maxPx, quantize(w)));
+            const px = Math.round(Math.max(minPx, Math.min(maxPx, w)));
             const f = px / screenWidth;
             if (SettingsStore.d.dockWidthFrac !== f) {
                 SettingsStore.d.dockWidthFrac = f;
@@ -188,44 +179,25 @@ Singleton {
 
     function toggle() { setMode(dock ? "classic" : "dock"); applyReserve(); }
 
-    // ---- wallpaper recentering -------------------------------------------
-    // The panel covers a strip of the screen, so the wallpaper underneath must
-    // be composed with the ART CENTRED IN WHAT'S LEFT rather than on the whole
-    // monitor. hyprpaper has no notion of an offset, so the recentre happens
-    // upstream: wal-set.sh reads ~/.cache/wal/reserve ("<edge> <px>") and
-    // composes a full-screen image with the picture fitted into the visible
-    // region. Reserve 0 is the classic path, byte-for-byte unchanged.
+    // ---- committing a width change --------------------------------------
+    // The wallpaper needs nothing done to it here: WallpaperLayer.qml binds its
+    // geometry to ViewMode.liveWidth, so the art re-centres in the remaining
+    // desktop on its own, every frame, including mid-drag. That used to be an
+    // ImageMagick compose plus a hyprpaper set on every committed width, which
+    // is what made the background flash.
     //
-    // --wallpaper-only is REQUIRED here: a full wal-set.sh run rewrites
-    // Theme.qml's palette block, and Quickshell watches that file — so a plain
-    // apply would reload the entire panel every time the width changed.
-    //
-    // Called only on a committed change (drag release / mode toggle), never
-    // per drag frame: each call is an ImageMagick compose + a hyprpaper set.
-    //
-    // Pushing the windows rides along here because it is the same event — the
-    // reserved strip changed — and it must run when the panel GROWS. Hyprland's
-    // exclusive zone only reflows TILED windows, and this desktop is almost
-    // entirely floating (hyprvtb draws the chrome and remembers geometry per
-    // class), so without this, widening the panel simply covers whatever was on
-    // that side. Shrinking needs no equivalent: it uncovers windows, and moving
-    // them "back" would fight hyprvtb's own geometry memory.
-    property string _lastReserve: ""
-    property int _lastReservePx: 0
+    // What DOES need doing is pushing the windows, and only when the panel GREW.
+    // Hyprland's exclusive zone reflows TILED windows only, and this desktop is
+    // almost entirely floating (hyprvtb draws the chrome and remembers geometry
+    // per class), so widening the panel would otherwise simply cover whatever
+    // was on that side. Shrinking needs no equivalent: it uncovers windows, and
+    // moving them "back" would fight hyprvtb's own geometry memory.
+    property int _lastReservePx: -1
     function applyReserve() {
         const edge = SettingsStore.d.barEdge === "left" ? "left" : "right";
         const px = dock ? barWidth : 0;
-        const key = edge + " " + px;
-        if (key === _lastReserve) return;
-        const grew = px > _lastReservePx;
-        _lastReserve = key;
+        const grew = px > _lastReservePx && _lastReservePx >= 0;
         _lastReservePx = px;
-
-        Quickshell.execDetached(["sh", "-c",
-            "mkdir -p \"$HOME/.cache/wal\"; " +
-            "printf '%s %s\\n' \"$1\" \"$2\" > \"$HOME/.cache/wal/reserve\"; " +
-            "exec \"$HOME/.config/scripts/wal-set.sh\" --wallpaper-only",
-            "_", edge, String(px)]);
 
         // Match the exclusive zone rather than the full panel width, so a pushed
         // window sits exactly where a maximized one's edge lands — one window
@@ -236,16 +208,9 @@ Singleton {
                 edge, String(px - Theme.windowBorderWidth)]);
     }
 
-    // Keep the reserve file honest across a login or a hot reload: the panel can
-    // come up already in dock mode (the setting is persisted) while the wallpaper
-    // on screen was composed for whatever the reserve file last said — e.g. the
-    // width was changed from the Settings program with the panel down.
-    //
-    // _lastReserve starts empty, so this DOES spawn wal-set.sh on every reload.
-    // That's deliberate and cheap: the composed image is cached by
-    // (wallpaper, resolution, reserve), and wal-set.sh's hyprpaper_is_current
-    // guard skips the hyprpaper set entirely when nothing changed — which
-    // matters, because re-setting an already-current wallpaper makes hyprpaper
-    // re-render its background layer and that reads on screen as a FLASH.
+    // Seed _lastReservePx without pushing anything: at startup (and on every hot
+    // reload) the windows are already wherever the user left them, and a reload
+    // is not a width change. The -1 sentinel above is what distinguishes "first
+    // observation" from "the panel grew".
     Component.onCompleted: applyReserve()
 }

@@ -39,7 +39,7 @@ local menu        = "hyprlauncher"
 -- hl.on("hyprland.start", function ()
 --   hl.exec_cmd(terminal)
 --   hl.exec_cmd("nm-applet")
---   hl.exec_cmd("waybar & hyprpaper & firefox")
+--   hl.exec_cmd("waybar & firefox")
 -- end)
 
 -- Quickshell vertical panel (bar + launcher + workspaces + tray + clock)
@@ -57,7 +57,7 @@ hl.on("hyprland.start", function()
     -- actions, udisks mounts, etc.) hangs forever waiting on an
     -- authorization prompt nothing is running to show.
     hl.exec_cmd("polkit-kde-agent-1")
-    -- Tile the current wallpaper via hyprpaper and recolour the panel,
+    -- Resolve the current wallpaper (the panel draws it) and recolour the panel,
     -- kitty and this border from it. See ~/.config/scripts/wal-set.sh.
     hl.exec_cmd("$HOME/.config/scripts/wal-set.sh")
     -- Give the systemd user manager this session's env so wal-set.service

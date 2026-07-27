@@ -2,7 +2,7 @@
 # wal-prepare.sh /path/to/image
 #
 # Pre-computes and caches everything wal-set.sh needs to APPLY an image, but
-# never touches hyprpaper/Theme.qml/kitty/Hyprland itself:
+# never touches Theme.qml/kitty/Hyprland itself:
 #   - the tile-vs-scale mode decision + source dimensions
 #   - the tiled PNG per current monitor resolution (tile mode only)
 #   - the extracted colour palette (wal-extract.py)
@@ -13,17 +13,16 @@
 # and wal-prepare-all.sh calls it in bulk for every image under
 # ~/Pictures/wall whenever that directory changes (see wal-prepare.path), so
 # that by the time you flip to one in WallpaperPicker.qml the slow part
-# (ImageMagick, PIL) has already happened and applying it is just hyprpaper/
-# theme file writes.
+# (ImageMagick, PIL) has already happened and applying it is just a handful of
+# small file writes.
 #
-# NOT here on purpose: the dock-mode "reserve" composition (art re-centered into
-# the region the panel doesn't cover, see wal-set.sh step 2b). Everything this
-# script caches is a property of the IMAGE, so it's worth warming for the whole
-# directory; the composed image is a property of the LIVE DESKTOP (which edge the
-# panel is on and how wide it currently is), so warming it in bulk would mean an
-# ImageMagick pass per image per monitor size, redone for every dock-width
-# change, almost all of it for images that never get applied. It therefore stays
-# on wal-set.sh's apply path, where exactly one image is composed.
+# Everything this script caches is a property of the IMAGE, which is what makes
+# it worth warming over the whole directory. Anything that depends on the LIVE
+# DESKTOP instead (monitor geometry, how much of the screen the panel currently
+# covers) deliberately does NOT belong here — it would mean redoing the work for
+# every image on every desktop change, almost all of it for images that never
+# get applied. The Quickshell panel handles that side itself now, per frame,
+# when it draws the wallpaper.
 set -u
 
 CONFIG="$HOME/.config"
@@ -62,22 +61,13 @@ fi
 # shellcheck disable=SC1090
 . "$MODEFILE"
 
-# ---- tiled PNG per current monitor resolution (tile mode only) ----------
-if [ "$MODE" = "tile" ]; then
-    MONS="$(hyprctl monitors -j 2>/dev/null \
-        | python3 -c 'import sys,json;[print(m["name"],m["width"],m["height"]) for m in json.load(sys.stdin)]' \
-        2>/dev/null)"
-    [ -z "$MONS" ] && MONS="eDP-1 2560 1600"
-    while read -r name w h; do
-        [ -z "$name" ] && continue
-        out="$CACHE/tiled-${KEY}-${w}x${h}.png"
-        if [ ! -f "$out" ] || [ "$WALL" -nt "$out" ]; then
-            magick -size "${w}x${h}" tile:"$WALL" "$out"
-        fi
-    done <<EOF
-$MONS
-EOF
-fi
+# ---- NOTE: no pre-tiled PNG any more --------------------------------------
+# This used to render a full-screen pre-tiled PNG per monitor resolution, purely
+# because hyprpaper could only display one image and had no tiling of its own.
+# The panel draws the wallpaper now (quickshell-files/Wall.qml) and tiles the
+# SOURCE directly with Image.Tile at its natural size, which is the same picture
+# with no intermediate file — so the whole step is gone, along with an
+# ImageMagick pass per wallpaper per monitor size.
 
 # ---- colour palette -------------------------------------------------------
 # Regenerate when the cache is missing, the wallpaper changed, OR the extractor

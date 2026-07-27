@@ -540,6 +540,12 @@ Scope {
         function toggle(): void { wallpaperPicker.open = !wallpaperPicker.open; }
         function show(): void { wallpaperPicker.open = true; }
         function hide(): void { wallpaperPicker.open = false; }
+        // What the panel is actually drawing as the wallpaper, and whether it
+        // decoded: `qs ipc call wallpaper status`.
+        function status(): string {
+            return "path=" + Wall.path + " mode=" + Wall.mode
+                + " front=" + Wall.frontStatus + " url=" + Wall.frontUrl;
+        }
     }
 
     // Let Hyprland toggle the screenshot overlay: `qs ipc call screenshot toggle`.
@@ -590,6 +596,14 @@ Scope {
         target: "brightness"
         function up(): void { SysInfo.adjustBrightness(SettingsStore.d.brightnessStep); }
         function down(): void { SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep); }
+    }
+
+    // The wallpaper, one Background-layer surface per monitor. Drawn here rather
+    // than by hyprpaper so it can be centred in the non-panel desktop and follow
+    // the panel edge live — see Wall.qml.
+    Variants {
+        model: Quickshell.screens
+        WallpaperLayer {}
     }
 
     // The volume/brightness OSD popup, one per monitor.
