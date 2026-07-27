@@ -111,6 +111,26 @@ def main():
     check("broken: exit 3", p.returncode == 3, f"rc={p.returncode}")
     check("broken: stdout empty", p.stdout == b"", f"stdout={p.stdout!r}")
 
+    # --- sanitize(): the untrusted-text defence, tested directly ---
+    spec = importlib.util.spec_from_file_location("askpass_main", APP)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    s = mod.sanitize
+
+    # NUL/BEL/ESC are dropped outright (only \n \r \t become spaces), so the ANSI
+    # colour escape survives as inert literal text "[31m" — shown, never obeyed.
+    check("sanitize: strips control chars", s("a\x00\x07b\x1b[31m") == "ab[31m",
+          repr(s("a\x00\x07b\x1b[31m")))
+    check("sanitize: collapses newlines/tabs", s("one\ntwo\t\tthree") == "one two three",
+          repr(s("one\ntwo\t\tthree")))
+    check("sanitize: strips C1 block", s("a\x85\x9fb") == "ab", repr(s("a\x85\x9fb")))
+    long = s("x" * 500)
+    check("sanitize: clamps length", len(long) <= 240 and long.endswith("..."), f"len={len(long)}")
+    check("sanitize: ASCII ellipsis only", "…" not in long)
+    check("sanitize: empty stays empty", s("") == "" and s(None) == "")
+    check("sanitize: markup is NOT stripped (QML renders PlainText)",
+          s("<b>hi</b>") == "<b>hi</b>", repr(s("<b>hi</b>")))
+
     print("\n" + ("ALL PASS" if not fails else f"FAILED: {', '.join(fails)}"))
     sys.exit(1 if fails else 0)
 

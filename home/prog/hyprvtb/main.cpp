@@ -37,6 +37,29 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 // ---- per-class geometry memory --------------------------------------------
 
+// Classes whose position is NEVER remembered, in either direction: nothing is
+// restored onto them when they open, closing one does not record where it was,
+// and a pre-existing entry is dropped as the file is read. They are modals that
+// must appear where their window rule puts them (`center`), every time, on the
+// monitor that has focus.
+//
+// This exists because the geometry memory made the sudo password prompt behave
+// like a window with a memory when it should have none. An agent tested
+// `vista-askpass` on the off-screen sandbox monitor, where the centred position
+// is x=1675; closing it wrote that to geometry.tsv, and every later prompt was
+// then positioned from that entry instead of being centred on the real screen.
+// (clampToMonitor below drags such a position back onto the target monitor, so
+// it was never going to be genuinely off-screen — but "wherever the clamp puts
+// it" is not "centred", and a newly mapped window takes the keyboard.)
+//
+// Remembering a modal's position was never wanted. The general fix is the
+// exclusion, not a better clamp.
+//
+// Declared HERE, above vtbLoadGeometry, because that is its first use.
+static bool vtbNeverRemembersGeometry(const std::string& cls) {
+    return cls == "vista-askpass";
+}
+
 // See the comment on the declaration in globals.hpp for why this is $HOME-based.
 std::string vtbStateDir() {
     const char* home = std::getenv("HOME");
@@ -60,6 +83,14 @@ void vtbLoadGeometry() {
         if (!std::getline(ss, cls, '\t'))
             continue;
         if (!(ss >> x >> y >> w >> h))
+            continue;
+        // Drop never-remembered classes on the way IN, not just on the way out.
+        // vtbSaveGeometry rewrites the entire map, so an entry that predates the
+        // exclusion (or was left behind by a sandbox run) would otherwise be
+        // re-written to disk every time any OTHER window closed, and outlive
+        // every attempt to delete the line by hand. Filtering here makes the
+        // file self-clean on the next plugin load.
+        if (vtbNeverRemembersGeometry(cls))
             continue;
         g_pGlobalState->savedGeometry[cls] = CBox{x, y, w, h};
     }
@@ -501,10 +532,14 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
             return;
         }
 
-        const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
-        if (IT != g_pGlobalState->savedGeometry.end()) {
-            Config::Actions::resize(IT->second.size(), false, window);
-            Config::Actions::move(clampToMonitor(IT->second, window).pos(), false, window);
+        // A never-remembered class keeps whatever the window rule gave it
+        // (`center`), which is the whole point — see vtbNeverRemembersGeometry.
+        if (!vtbNeverRemembersGeometry(window->m_class)) {
+            const auto IT = g_pGlobalState->savedGeometry.find(window->m_class);
+            if (IT != g_pGlobalState->savedGeometry.end()) {
+                Config::Actions::resize(IT->second.size(), false, window);
+                Config::Actions::move(clampToMonitor(IT->second, window).pos(), false, window);
+            }
         }
 
         // Play the open reveal: only titlebar fades in, then the window rolls out
@@ -523,6 +558,11 @@ static void onCloseWindow(PHLWINDOW window) {
         g_pGlobalState->scratchVisible = false;
         return; // width is persisted on resize, not here
     }
+
+    // The exclusion has to hold on the way out too, or the class walks straight
+    // back into geometry.tsv the first time the modal is dismissed.
+    if (vtbNeverRemembersGeometry(window->m_class))
+        return;
 
     for (auto& b : g_pGlobalState->bars) {
         if (b && b->getOwner() == window) {
@@ -1293,7 +1333,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.86"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.88"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

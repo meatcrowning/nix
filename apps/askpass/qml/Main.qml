@@ -95,12 +95,56 @@ Window {
             wrapMode: Text.WordWrap
         }
 
-        // sudo's own prompt line, verbatim. Shown, never echoed anywhere.
+        // sudo's own prompt line. Shown, never echoed anywhere.
         PixelText {
             width: parent.width
             text: startPrompt
             color: Theme.textDim
             wrapMode: Text.WordWrap
+        }
+
+        // ---- why root is being asked for ----
+        //
+        // Caller-supplied ($SUDO_ASKPASS_REASON), therefore UNTRUSTED, therefore
+        // walled off in its own inset box with a caption that says whose words
+        // these are. That framing is the point: the reason must never be able to
+        // read as the dialog's own voice, so it cannot be used to talk the user
+        // into approving something. main.py sanitizes it and PixelText renders
+        // PlainText, so the worst a hostile caller manages is clamped, inert
+        // prose inside this rectangle.
+        Rectangle {
+            width: parent.width
+            height: reasonCol.implicitHeight + 16
+            color: Theme.highlight
+            border.width: 2
+            border.color: Theme.border
+
+            Column {
+                id: reasonCol
+                anchors {
+                    left: parent.left; right: parent.right
+                    verticalCenter: parent.verticalCenter
+                    leftMargin: 10; rightMargin: 10
+                }
+                spacing: 4
+
+                PixelText {
+                    width: parent.width
+                    text: startReason ? "REASON GIVEN BY THE CALLER"
+                                      : "NO REASON GIVEN"
+                    color: Theme.textDim
+                }
+
+                PixelText {
+                    width: parent.width
+                    visible: startReason !== ""
+                    text: startReason
+                    color: Theme.text
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 4
+                    elide: Text.ElideRight
+                }
+            }
         }
 
         // ---- password field ----

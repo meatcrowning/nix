@@ -70,5 +70,24 @@ in
   # Lets non-TTY contexts (Claude Code sessions, scripts) run root commands
   # via `sudo -A <cmd>`.
   home.packages = [ sudo-askpass askpass-dialog pkgs.kdePackages.ksshaskpass ];
-  home.sessionVariables.SUDO_ASKPASS = "${sudo-askpass}/bin/sudo-askpass";
+
+  # SUDO_ASKPASS points at a STABLE path, not at the wrapper's /nix/store path.
+  #
+  # This is not cosmetic. `SUDO_ASKPASS` used to be the store path, which is a
+  # different string in every generation — and a process only reads its
+  # environment once. Long-lived shells (this repo's agents run `sudo -A`
+  # constantly, and their shells outlive many rebuilds) therefore kept exec'ing
+  # the wrapper from whichever generation they were born in, forever. When the
+  # dialog was replaced, 31 live processes still held the previous store path
+  # and kept popping the OLD ksshaskpass dialog; the user reported "it still
+  # looks like the light theme" and they were exactly right. A stable path makes
+  # every future shell follow the symlink to the current wrapper instead.
+  #
+  # It cannot rescue a process that ALREADY holds a store path — nothing can,
+  # /nix/store is immutable — so the changeover still costs one new shell. It
+  # means there is never a second changeover. It also closes the hazard that a
+  # `nix-collect-garbage` deletes the old wrapper out from under those shells
+  # and breaks `sudo -A` outright.
+  home.file.".local/bin/sudo-askpass".source = "${sudo-askpass}/bin/sudo-askpass";
+  home.sessionVariables.SUDO_ASKPASS = "/home/lam/.local/bin/sudo-askpass";
 }
