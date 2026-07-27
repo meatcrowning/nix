@@ -1,0 +1,313 @@
+# AGENTS.md — the Quickshell panel
+
+The desktop shell's QML tree: a vertical bar, the desktop widgets, the
+wallpaper, and the popups. Runs under Hyprland, whose side of the desktop —
+`hyprland.lua`, the `hyprvtb` plugin, the sandbox — is `../AGENTS.md`. Repo-wide
+rules are `~/nix/AGENTS.md`.
+
+**Read `../AGENTS.md` too if your change touches window management, titlebars,
+logout, or anything the compositor owns.**
+
+---
+
+## Getting an edit live
+
+Most files here are installed as **Nix-store symlinks**. A rebuild swaps the
+symlink, but Quickshell watches the *resolved* store path — so the swap does
+**not** trigger its hot reload and the panel keeps running the old tree. Force
+one by modifying the single real file it watches, `~/.config/quickshell/
+Theme.qml`, **in place (same inode)**:
+
+```bash
+sudo rebuild-top
+cp ~/.config/quickshell/Theme.qml /tmp/Theme.bak
+printf '\n// x\n' >> ~/.config/quickshell/Theme.qml   # append…
+cat /tmp/Theme.bak > ~/.config/quickshell/Theme.qml   # …then restore, in place
+```
+
+- **Do NOT use `sed -i` or `mv`** — a rename is a new inode, so no reload.
+- It **dedupes by content**, so an identical rewrite is a no-op.
+- A reload rebuilds only Quickshell's QML tree in-process; it never touches
+  Hyprland. A parse error keeps the old tree and fires a toast, so it cannot
+  crash the session.
+- A **new** `.qml` file must be `git add -N`-ed before the rebuild — the tree is
+  dirty and flake eval ignores untracked files, so a brand-new `Foo.qml` is
+  silently missing from the build otherwise.
+
+**`Theme.qml` is seed-once.** It is installed only if absent, because
+`wal-set.sh` rewrites it in place at runtime. To change it, edit **both** the
+nix source here and the live `~/.config/quickshell/Theme.qml` — with a targeted
+string edit, never a wholesale overwrite, or you reset the live wal palette.
+Check with `~/nix/tools/seed-drift.sh` before you start and after you finish.
+
+---
+
+## A reload must look like a state change IN PLACE, not a re-entry
+
+That is the standing bar for anything on this desktop, because a wallpaper or
+theme change rewrites `Theme.qml` and therefore reloads the panel. Quickshell
+rebuilds the *whole* QML tree, so without help every widget comes back empty and
+visibly refills: the disk widget maps at its one-line "reading…" height and
+grows twice as its scripts land (dragging every in-place stackable above it up
+the screen), the forecast collapses until curl returns, cava restarts so the VU
+and spectrum drop to the floor, and the chart ring buffers restart from zero.
+
+Two mechanisms carry state across, both wired in `shell.qml`:
+
+**The pin set** — mirrored to `$XDG_RUNTIME_DIR/qs-live-pins` and read back
+SYNCHRONOUSLY (`FileView { blockLoading: true }`) in `Component.onCompleted`,
+then applied with `snapPinned()`. The file's absence doubles as the
+login-vs-reload flag (`$XDG_RUNTIME_DIR` is wiped at logout), and the PID written
+alongside (`v2 <pid> …`) separates a RELOAD of that process from a fresh
+`quickshell` start. That distinction is the whole trick:
+
+- **On a reload Quickshell hands the outgoing window's layer surface to the
+  incoming object, still mapped** — so `SlidePopup` must NOT run its layer remap
+  there. A remap destroys that surface and opens a new one, which Hyprland fades
+  out and in: the widgets blink on every wallpaper or theme change.
+- **Everywhere else the remap is mandatory, including pre-map.** Quickshell
+  latches the layer when it *creates* the window (at component completion,
+  regardless of `visible`), so the login fan would otherwise come up on Overlay
+  with every desktop widget floating on top of windows.
+- Both halves are checkable without looking: `hyprctl layers` — the `qs-*`
+  widget namespaces belong in level 1 (bottom) — and Hyprland's event socket,
+  which must emit **no** `closelayer`/`openlayer` for them across a reload.
+
+**The widgets' contents** — a `PersistentProperties` block, which hands
+properties from the outgoing tree to the incoming one in-process. Each source
+exposes `stateJson()`/`restoreState()` plus a `stateRev` counter that
+`shell.qml` snapshots on; the 60fps VU/spectrum feeds are sampled on a 250 ms
+timer instead. Restore fires after every `Component.onCompleted` but inside the
+same synchronous reload pass, so no frame renders in between. **Two
+constraints, both found the hard way and both silent when violated:**
+
+- It must be a **direct child of the root `Scope`**. One level down inside a
+  plain `Item` it never restores — a non-Reloadable parent breaks the matching
+  chain.
+- **Every carried property must be a STRING.** Quickshell alternates between two
+  QML engines across reloads and a JSValue (any `property var` holding an array
+  or object) cannot move between them, so a `var` arrives `undefined` on every
+  *other* reload, with only a `JSValue can't be reassigned to another engine`
+  warning to show for it.
+
+```bash
+qs ipc call state carried   # sizes of each carried blob + live buffer lengths
+```
+
+Poll that repeatedly across a forced reload: all non-zero and `cpuHist` counting
+up monotonically means the swap worked; a reset to 0 means something regressed.
+
+---
+
+## Two view modes, and the drag handle IS the switch
+
+`ViewMode.qml`. `classic` is the 48px vertical bar this config has always had,
+with the desktop widgets pinned out on the wallpaper. `dock` turns the panel
+into a wide column (14–33% of screen, default 15%): `DockHeader.qml` (runner
+button at the left, task icons flowing across and wrapping) over `DockGrid.qml`
+(the widget grid). There is no toggle button — you grab the bar's inner edge
+(`edgeGrip` in `shell.qml`) and pull.
+
+```bash
+qs ipc call view toggle|dock|classic|mode
+```
+
+- **Opening it has ONE destination.** The entry drag is a gesture, not a resize:
+  the bar holds at 48px until the pull passes `enterFrac` (5% of screen) past
+  its own width, then opens in one movement at `dockPx` — the same size every
+  time. Resizing only happens once you are already in dock, where the panel does
+  track the pointer, clamped to `[minFrac, maxFrac]`. **Don't "improve" this
+  into a continuous stretch on entry**; it was that once and the user asked for
+  the single snap.
+- **`exitFrac` (10%) must stay below `minFrac` (14%).** If the collapse
+  threshold reached into the legal width range, the narrowest dock the user is
+  allowed to pick would already sit inside the "about to collapse" zone, and the
+  panel could never rest there.
+- **Both layouts are always instantiated**, crossfaded on `ViewMode.showDock`
+  (which follows the drag LIVE, so the panel visibly *becomes* the dock as you
+  cross the threshold rather than snapping at release). A faded-out layout must
+  set `visible: false` — otherwise the classic hover zones keep firing popups
+  from under the dock panel.
+- **`liveWidth` vs `barWidth`:** `liveWidth` is what the bar renders at this
+  frame (pointer-tracking mid-drag); `barWidth` is the committed value, and only
+  it feeds the persisted setting and the wallpaper. Read `ViewMode.barWidth`,
+  **not** `Theme.barWidth`, for "how much screen does the panel take" —
+  `Theme.barWidth` is now only the *classic* width.
+- **Dock mode retires the desktop widgets** (they belong to the grid there) and
+  restores the exact pre-dock pin set on the way back. `shell.qml`'s
+  `Component.onCompleted` returns early in dock mode, so neither the reload
+  restore nor the login fan re-pins anything.
+
+### Verify the drag by MEASURING it
+
+```bash
+qs ipc call view geom    # widths + thresholds
+qs ipc call view trace   # one dragWidth,surfaceWidth,liveWidth sample per pointer event of the last drag
+```
+
+This gesture cannot be judged from a log line, and has been mis-diagnosed twice
+by reasoning about it instead. Read the trace.
+
+---
+
+## The law: NOTHING that must track the pointer may be a layer-surface SIZE
+
+A layer-surface resize is a configure/ack roundtrip, so any surface whose width
+follows the cursor is a frame or more behind it. Everything pinned to the panel
+edge is computed from `ViewMode.liveWidth` and lands exactly, so a
+surface-sized edge visibly disagrees with all of it for the whole drag. Three
+places this bit, all fixed the same way — **put the moving edge in an ITEM
+binding inside a surface that does not resize:**
+
+- **The panel** (`shell.qml`). The visible bar is `barBody`, an Item anchored to
+  the screen edge with `width: ViewMode.liveWidth`. The surface is a CONSTANT
+  `ViewMode.maxPx`, transparent, input-masked to the bar, painting its
+  background from a Rectangle inside `barBody`. It must stay constant: sizing it
+  to the bar except while dragging put a resize on the press and another on the
+  release, and each made the panel visibly JUMP (right on click, left on
+  release) — resizing a surface anchored to the right edge moves it too, and the
+  compositor can apply the new geometry a frame before the matching buffer
+  arrives. Same cause as the old flick-away-and-back when the committed width
+  landed.
+- **The accent stripes** (`EdgeAccent.qml`). The horizontal ones are FULL-WIDTH
+  surfaces (`exclusionMode: Ignore`) that never resize, with the visible stripe
+  an inner Rectangle of `parent.width - ViewMode.liveWidth`. Two earlier
+  versions were wrong: anchored to both sides and shortened by the exclusive
+  zone (which stops updating once the zone is frozen during a drag, so they only
+  resized on release — invisible while the panel GREW because the stripe was
+  covered, an obvious gap the other way), then with the *window's*
+  `implicitWidth` bound to `liveWidth`, which is a surface resize and so lagged
+  the cursor.
+- **The grip** (`EdgeGrip.qml`) — below.
+- **The wallpaper is the deliberate exception**: `WallpaperLayer.qml` tracks the
+  COMMITTED `barWidth` and glides to it, because re-cropping a full-screen
+  texture per pointer event costs real work for an image nobody is watching
+  mid-drag. The panel edge is what the eye follows.
+
+### The resize handle is its OWN full-screen surface
+
+`EdgeGrip.qml`, not an item in the panel — and that is load-bearing. Wayland
+delivers pointer coordinates in SURFACE coordinates, so mid-drag the item tree
+has already advanced to the requested width while the surface has not: every
+event is wrong by whatever the surface still owes. Measured with `view trace`,
+the computed width moved 1:1 with the SURFACE width while the pointer was nearly
+still. **No arithmetic inside a resizing surface can escape this** — the
+reference frame is itself moving. A screen-sized surface that never resizes
+makes a pointer x a screen x. Three traps it encodes:
+
+- **`exclusionMode: ExclusionMode.Ignore` is mandatory**, and you must NOT set
+  `exclusiveZone` beside it (assigning it selects "Normal" and undoes it). A
+  surface anchored to all four edges is otherwise shrunk by everyone else's
+  exclusive zones — it came up 1618px wide against the panel's own 302px zone,
+  which both misplaces the grab strip and makes the grip resize with the panel,
+  reintroducing the very problem it exists to avoid. Check with
+  `hyprctl layers`: `qs-edge-grip` must be the monitor's full width.
+- The MouseArea fills the whole window and the grab area is carved out with
+  `mask: Region {...}`. Putting the MouseArea *at* the moving edge would
+  reintroduce the same bug one level down.
+- **A `PanelWindow` is NOT a `QQuickItem`** (it is a `WaylandPanelInterface`),
+  so `mapToItem(bar, ...)` throws `TypeError: Passing incompatible arguments to
+  C++ functions` — and thrown from inside `onPressed`, that means the drag
+  silently never starts, with nothing on screen to explain it. **`qmllint` does
+  not catch it**; it only shows up in `qs log`. `mapToItem(null, ...)` (map to
+  the scene root) is fine and is what `Tooltip`/`StatusPanel`/`TaskMenu` use.
+  Inside a panel, prefer plain arithmetic on a child's own `x` plus the panel's
+  `width`, both ordinary property reads.
+
+### Never animate, quantize, or re-zone a live drag
+
+- **Never animate a width that is tracking the pointer.** The `Behavior on
+  implicitWidth` is gated on `!dragging || ViewMode.snapping`; an animation on
+  the tracked resize means the edge permanently chases the cursor from behind,
+  which reads as lag. `snapping` marks the discrete jumps (entry, collapse
+  preview) that *should* glide.
+- **Never quantize the LIVE drag width.** Quantizing to the 8px grid made the
+  edge advance in hops instead of following the cursor. The grid only has to
+  hold for the COMMITTED width (that is what the wallpaper is composed
+  against), so `quantize()` belongs in `commitDrag()`.
+- **Never touch `exclusiveZone` during a drag.** Re-writing it per pointer event
+  makes Hyprland recompute the reserved area and re-run the layout in the same
+  frame the resize is trying to land in. It is frozen at the committed width
+  mid-drag and applied once on release.
+
+### Growing the panel pushes floating windows out from under it
+
+`scripts/push-windows.py`, run from `applyReserve()` only when the reserve GREW.
+The exclusive zone reflows tiled windows only, and this desktop is almost
+entirely floating. It skips `hidden` windows — those are hyprvtb's rolled-up and
+minimized ones, parked off-screen deliberately.
+
+- Pixel dispatchers under the Lua config are `hl.dsp.window.move({window=,x=,y=})`
+  and `hl.dsp.window.resize({window=,x=,y=})`, both ABSOLUTE, and **resize must
+  come before move** — resizing re-anchors the window, undoing a move issued
+  first.
+- **Push the FRAME, not the client rect.** `at`/`size` from `hyprctl clients`
+  exclude the chrome, and `hyprctl` reports decoration extents nowhere. The
+  hyprvtb titlebar is VERTICAL on the window's RIGHT edge
+  (`DECORATION_EDGE_RIGHT`, `desiredExtents` right = `bar_width * 2` = 64px) —
+  the same side the panel is on — so client-rect math leaves exactly the
+  titlebar covered, the bug reported on 2026-07-26. Reconstruct the frame from
+  `plugin:hyprvtb:{enabled,bar_width}` + `general:border_size` via
+  `hyprctl getoption -j` (`enabled` is a global bool, not per-window).
+
+---
+
+## The panel draws the wallpaper — hyprpaper is gone
+
+Removed 2026-07-26. `Wall.qml` (which image + tile/scale), `WallpaperLayer.qml`
+(a Background layer surface per monitor), `WallpaperImage.qml` (one cross-fade
+frame). Two reasons it had to change: hyprpaper re-rendered its whole background
+layer on every set, which reads on screen as the wallpaper FLASHING (`wal-set.sh`
+already skipped redundant sets purely to dodge it), and it had no notion of an
+OFFSET — so centring the art in the non-panel region meant compositing a fresh
+full-screen PNG with ImageMagick for *every* panel width, then setting it, then
+flashing. Drawn here, the recentre is a property binding on
+`ViewMode.liveWidth`, so it follows the drag at frame rate, and a wallpaper
+change is a cross-fade.
+
+- `wal-set.sh` still DECIDES the wallpaper and owns the palette, kitty, cursor
+  and OpenRGB work. It now just publishes to `~/.cache/wal/current` (path) and
+  `~/.cache/wal/current.mode` (`tile`|`scale`), written **in place** — an inotify
+  watch follows the inode, so a temp+rename would silently detach it.
+- `--wallpaper-only` is now just those two writes — 14 ms, which is what the
+  picker's arrow-key preview rides on. It still must NOT do the full apply: that
+  rewrites `Theme.qml`, which reloads the panel.
+- **`sourceSize` must never be bound to the item's width** — the width changes
+  every frame of a drag and would re-decode a multi-megapixel image per frame.
+  It is the monitor resolution for `scale`, and 0 (natural size) for `tile`,
+  since a tile scaled to the screen no longer tiles.
+- **The blurred backdrop** behind everything is the same image decoded at ~96px
+  and stretched over the monitor — the bilinear upscale IS the blur. There is no
+  blur effect and no live filter, so it costs one tiny texture per wallpaper and
+  nothing per frame. It exists to fill the strip that opens up between the panel
+  edge and the sharp wallpaper while the panel is being narrowed (the sharp copy
+  only glides to the new width on release). **Keep it static** — it is on screen
+  exactly when the compositor is busiest.
+
+```bash
+qs ipc call wallpaper status   # path, mode, and whether the visible frame actually DECODED (front=ready)
+```
+
+That is the check that made switching hyprpaper off safe rather than a gamble on
+a blank desktop.
+
+---
+
+## Verifying
+
+The user does **all** visual, animation and interaction checks — screenshots,
+drags, hover, spinner animation, tooltip look. Never screenshot or drive the GUI
+yourself unless explicitly asked. Verify by other means:
+
+```bash
+qs log | tail            # parse/binding errors — CUMULATIVE across reloads:
+                         # snapshot the line count first, then read only the new tail
+qs ipc show              # what the panel exposes
+qs ipc call <t> <fn>     # view geom|trace, state carried, wallpaper status, …
+hyprctl layers           # namespaces, levels and surface sizes
+qmllint -I <import paths> Foo.qml
+```
+
+- **Never run bare `qs`** — it launches a second panel.
+- **Never open a test window on the user's screen** — `~/nix/tools/sandbox.sh`
+  puts it on an off-screen virtual monitor. See `../AGENTS.md`.
