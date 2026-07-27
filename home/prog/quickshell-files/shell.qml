@@ -359,6 +359,7 @@ Scope {
         property string disk: ""
         property string media: ""
         property string meters: ""
+        property string procs: ""
 
         onLoaded: {
             SysInfo.restoreState(sysinfo);
@@ -366,6 +367,7 @@ Scope {
             Weather.restoreState(weather);
             Disks.restoreState(disk);
             Media.restoreState(media);
+            Procs.restoreState(procs);
         }
     }
 
@@ -383,6 +385,10 @@ Scope {
     Connections {
         target: Disks
         function onStateRevChanged() { persist.disk = Disks.stateJson(); }
+    }
+    Connections {
+        target: Procs
+        function onStateRevChanged() { persist.procs = Procs.stateJson(); }
     }
     // The VU and spectrum feeds run at cava's 60fps — far too hot to stringify
     // per frame, and a snapshot a quarter-second old is indistinguishable from
@@ -504,10 +510,28 @@ Scope {
                 + " weather=" + persist.weather.length
                 + " disk=" + persist.disk.length
                 + " media=" + persist.media.length
+                + " procs=" + persist.procs.length
                 + " cpuHist=" + SysInfo.cpuHist.length
                 + " drives=" + Disks.drives.length
                 + " days=" + Weather.days.length
-                + " spectrum=" + Media.spectrumLevels.length;
+                + " spectrum=" + Media.spectrumLevels.length
+                + " tasks=" + Procs.rows.length;
+        }
+    }
+
+    // Which data singletons are actually polling: `qs ipc call state live`.
+    // The two-copies invariant is otherwise invisible — every widget exists twice
+    // (a popup and a dock tile) and only the one on screen may drive its scripts.
+    // A `true` here for something you are not looking at is the bug.
+    IpcHandler {
+        target: "live"
+        function all(): string {
+            return "mode=" + SettingsStore.d.viewMode
+                + " disks=" + Disks.live
+                + " media=" + Media.live
+                + " procs=" + Procs.live
+                + " watchers=" + (Disks._watchers.length + Media._watchers.length
+                                  + Procs._watchers.length);
         }
     }
 

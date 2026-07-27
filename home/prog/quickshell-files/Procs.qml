@@ -1,0 +1,97 @@
+pragma Singleton
+import QtQuick
+import Quickshell
+import Quickshell.Io
+
+// The running-process table behind the task manager: scripts/proc-list.py
+// sampled every 2s while something is watching.
+//
+// CPU% is instantaneous (two /proc samples 0.4s apart), NOT ps's lifetime
+// average — see the script's header for why that distinction is the whole point
+// of a task manager. The cost of that is a 0.4s round trip per refresh, which is
+// exactly why this is `watch`-gated like Disks and Media: nothing samples /proc
+// when nobody is looking at the list.
+Singleton {
+    id: root
+
+    // [{pid, name, cpu, mem, rss}] as produced, i.e. already busiest-first.
+    property var rows: []
+    property string sortKey: "cpu"    // cpu | mem | name
+    readonly property int count: rows.length
+
+    property var _watchers: []
+    readonly property bool live: _watchers.length > 0
+    function watch(obj, on) {
+        const i = _watchers.indexOf(obj);
+        if (on === (i >= 0)) return;
+        let w = _watchers.slice();
+        if (on) w.push(obj); else w.splice(i, 1);
+        _watchers = w;
+        if (on) refresh();
+    }
+
+    readonly property var sorted: {
+        const r = rows.slice();
+        if (sortKey === "mem") r.sort((a, b) => b.mem - a.mem);
+        else if (sortKey === "name") r.sort((a, b) => a.name.localeCompare(b.name));
+        else r.sort((a, b) => b.cpu - a.cpu);
+        return r;
+    }
+
+    function refresh() { listProc.running = true; }
+
+    // ---- reload continuity (see shell.qml's `persist` block) --------------
+    // A reload would otherwise empty the table and refill it 0.4s later, which
+    // in a fixed-height tile reads as the whole list blinking out.
+    property int stateRev: 0
+    function stateJson() { return JSON.stringify(rows); }
+    function restoreState(str) {
+        if (!str) return;
+        try { root.rows = JSON.parse(str) || []; } catch (e) {}
+    }
+
+    Process {
+        id: listProc
+        command: [Quickshell.shellDir + "/scripts/proc-list.py", "60"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let out = [];
+                for (const ln of this.text.trim().split("\n")) {
+                    if (!ln) continue;
+                    const f = ln.split("|");
+                    if (f.length < 5) continue;
+                    out.push({ pid: f[0], name: f[1],
+                               cpu: parseFloat(f[2]) || 0,
+                               mem: parseFloat(f[3]) || 0,
+                               rss: parseInt(f[4], 10) || 0 });
+                }
+                root.rows = out;
+                root.stateRev++;
+            }
+        }
+    }
+    // 2s, against a sampler that itself takes 0.4s — fast enough to watch a
+    // spike, slow enough that the list is readable while it updates.
+    Timer {
+        interval: 2000
+        running: root.live
+        repeat: true
+        onTriggered: root.refresh()
+    }
+
+    // SIGTERM by default: "click the [x]", not "shoot it". force=true is SIGKILL
+    // and is the right-click, so it can't be reached by a mis-click on a row
+    // whose position just shifted under the cursor.
+    function kill(pid, force) {
+        Quickshell.execDetached(["kill", force ? "-KILL" : "-TERM", String(pid)]);
+        // reflect it immediately rather than at the next poll
+        refreshSoon.restart();
+    }
+    Timer { id: refreshSoon; interval: 300; onTriggered: root.refresh() }
+
+    function fmtMem(kb) {
+        if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(1) + "G";
+        if (kb >= 1024) return Math.round(kb / 1024) + "M";
+        return kb + "K";
+    }
+}

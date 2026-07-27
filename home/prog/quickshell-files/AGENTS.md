@@ -147,18 +147,22 @@ and **both copies exist in the QML tree at once.**
 
 | Layer | Files | Owns |
 |---|---|---|
-| data | `SysInfo`, `Weather`, `Disks`, `Media` | polling, scripts, carried state |
-| view | `CpuContent`, `GpuContent`, `EthContent` (all on `MetricChart`), `WeatherContent`, `CalendarContent`, `ClockContent`, `DiskContent`, `MediaContent` | drawing, and nothing else |
+| data | `SysInfo`, `Weather`, `Disks`, `Media`, `Procs` | polling, scripts, carried state |
+| view | `CpuContent`, `GpuContent`, `EthContent` (all on `MetricChart` → `ChartCanvas`), `WeatherContent`, `CalendarContent`, `ClockContent`, `DiskContent`, `MediaContent`, `TaskManagerContent` | drawing, and nothing else |
 | host | `<Name>Panel.qml` (a `SlidePopup`), `DockTile` in `DockGrid` | where it sits |
 
 Three rules, all of which exist because there are two live copies:
 
-- **`active` is the contract.** Every content component takes it, and everything
-  that costs something — a Canvas repaint, a `Process`, a `Timer` — hangs off it.
-  The popup passes `root.open` (**not** `visible`: a pin flips the layer, which
-  unmaps the surface for 32ms, and cava would stop and respawn every time); the
-  grid passes `dockLayout.visible`. Get this wrong and you get two cavas, two
-  `smartctl` timers, and two different answers from `state carried`.
+- **`active` is the contract, and it defaults to FALSE.** Every content component
+  takes it, and everything that costs something — a Canvas repaint, a `Process`,
+  a `Timer` — hangs off it. The popup passes `root.open` (**not** `visible`: a pin
+  flips the layer, which unmaps the surface for 32ms, and cava would stop and
+  respawn every time); the grid passes `dockLayout.visible`. Get this wrong and
+  you get two cavas, two `smartctl` timers, and two different answers from
+  `state carried`. It defaults to false because `DockTile` applies it through a
+  `Binding` on an asynchronous `Loader`: a `true` default meant every grid tile
+  ran one full `/proc` scan and one drive scan at construction, before that
+  binding landed, for a widget nobody was looking at.
 - **Consumers register with `watch(obj, on)`, which is a SET, not a counter.**
   Re-registering is a no-op, so a re-evaluated binding or a reload restore cannot
   leak a reference and leave the scripts running against nobody.
@@ -174,12 +178,57 @@ so `onSeriesChanged` is the only repaint trigger any of them needs — don't add
 `Connections` back. Note it exposes `axisMax`, not `scale`: `scale` is a
 `QQuickItem` property (the transform), and shadowing it breaks rendering.
 
-`DockGrid.qml`'s `placements` is plain data — `{key, src, col, row, cs, rs}` —
-loaded by file name through `DockTile`'s `Loader`. That is deliberate: phase 3
-makes that array the thing the user drags and the thing that gets persisted, and
+```bash
+qs ipc call live all     # mode + which data singletons are actually polling
+```
+
+That is the check for it. A `true` for something not on screen is the bug; two
+copies of a widget both live is the bug this whole split exists to prevent.
+
+### The dock grid is ONE PAGE, and must stay one
+
+`DockGrid.qml` is `columns` x `rows` (4 x 26) filling the panel exactly: the row
+height is DERIVED from the panel's height, not a fixed pixel value, so every
+widget is on screen at once at any panel height. **No scrolling.** A first version
+used 44px rows and a `Flickable`, which made the default layout ~1900px tall on a
+1080px screen; the user's requirement is that nothing is below the fold.
+
+The consequence is a real constraint: a new widget takes rows away from the
+others, and if none can spare them, it doesn't fit. Neither count is derived from
+the panel WIDTH — the panel ranges over 14-33% of the screen, and changing the
+geometry inside that range would invalidate every saved placement each time the
+edge was dragged. Widening the panel widens the columns instead.
+
+`placements` is plain data — `{key, src, col, row, cs, rs}` — loaded by file name
+through `DockTile`'s `Loader`. That is deliberate: phase 3 makes that array the
+thing the user drags and the thing that gets persisted, and
 `cellX/cellY/cellW/cellH` stay the single place grid coordinates become pixels.
-The grid is a `Flickable` because the default layout is ~1900px tall against a
-1080px screen.
+
+Reading bottom-up, the layout is clock+calendar side by side on the bottom row,
+weather above them, media above that, and the task manager taking the rest.
+**The disk widget currently has no dock tile** — it is classic-mode only.
+
+### The task manager
+
+`TaskManagerContent.qml` + the `Procs` singleton + `scripts/proc-list.py`.
+
+- **CPU% is instantaneous**, from two `/proc` samples 0.4s apart — NOT `ps`'s
+  `%cpu`, which is the average over a process's whole lifetime and so reports an
+  idle daemon as busy forever and a process that just started spinning as idle. A
+  task manager whose numbers converge after an hour isn't one. That 0.4s per
+  refresh is why `Procs` is `watch`-gated like the others.
+- **Don't trust `comm` for the name.** The kernel caps it at 15 characters and on
+  NixOS everything runs through a wrapper, so it reads `.quickshell-wra` /
+  `.claude-wrapped`. The script prefers `argv[0]`'s basename — except for
+  Chromium/QtWebEngine helpers, which rewrite their entire command line into
+  `argv[0]`, so a "name" containing spaces or over 24 characters falls back.
+- **Kill is SIGTERM on left click, SIGKILL on RIGHT.** The rows re-sort under the
+  cursor every 2s; an unrecoverable action must not be one mis-timed left click
+  away.
+- The three history charts appear here as sparkline STRIPS, not as the cpu/gpu/eth
+  cards: at dock width three of those side by side would each be ~85px, narrower
+  than their own legend line. They share `ChartCanvas.qml` with the popups, so
+  there is still one implementation of the drawing.
 
 > Adding several new `.qml` files in one rebuild produces a burst of **failed**
 > reloads in `qs log` ("`X is not a type`") as home-manager writes them one at a
