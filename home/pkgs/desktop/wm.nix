@@ -29,9 +29,6 @@ in
   # hyprvtb build below.
   ] ++ lib.optionals (host != "air") [
     hyprlauncher
-    # hyprpaper from the hyprwm flake, not nixpkgs' crash-prone 0.8.4 — see
-    # the `hyprpaper` input in flake.nix.
-    inputs.hyprpaper.packages.${pkgs.stdenv.hostPlatform.system}.hyprpaper
     hyprlang
     hypridle
     kitty

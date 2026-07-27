@@ -14,7 +14,7 @@
 #      only, never fatal: staging is legitimate, leaving it staged is the risk.
 #   2. Rootless eval of the top system — catches syntax/option errors before the
 #      passwordless switch (~10s, no sudo needed).
-#   3. seed-drift.sh — seed-once files (Theme.qml, hyprland.lua, hyprpaper.conf)
+#   3. seed-drift.sh — seed-once files (Theme.qml, hyprland.lua)
 #      must have source and live copies in step.
 # Exit nonzero on any failure; safe to run repeatedly.
 set -u

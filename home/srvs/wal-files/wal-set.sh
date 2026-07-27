@@ -9,10 +9,31 @@
 #      palette — all cached, so this is a fast no-op once an image has been
 #      prepared (see wal-prepare-all.sh / wal-prepare.path, which pre-warm
 #      every image under ~/Pictures/wall as soon as it's added)
-#   2. sets it via hyprpaper (live if running, else started)
+#   2. PUBLISHES the wallpaper for the Quickshell panel to draw, by writing two
+#      tiny state files — $CACHE/current (absolute path) and $CACHE/current.mode
+#      (the single word `tile` or `scale`). Nothing else here paints anything.
 #   3. regenerates the Quickshell palette (panel hot-reloads)
 #   4. regenerates the kitty colours (reloaded via SIGUSR1)
 #   5. sets Hyprland's focused-window border (live + persisted)
+#
+# WHY NO hyprpaper ANY MORE (removed 2026-07-26): Quickshell draws the wallpaper
+# itself now, on a Background-layer window, and this script's whole job on the
+# wallpaper side shrank to "write two state files". Two things forced the move:
+#
+#   * hyprpaper re-renders its background layer surface on every set, and that
+#     re-render reads on screen as a wallpaper FLASH. A large slice of this file
+#     used to exist purely to dodge it — an "already applied" marker keyed to the
+#     hyprpaper PID, a retry loop around an IPC that answers "invalid request"
+#     under a burst, and a rule never to re-set an image that was already up. The
+#     panel can simply CROSS-FADE between two images instead, so the flash (and
+#     all of that machinery) is gone rather than worked around.
+#   * hyprpaper has no notion of an OFFSET: it centres the image on the whole
+#     monitor, so in dock mode (the panel grown to a third of the screen) the
+#     subject of the art sat behind the panel. The workaround was an ImageMagick
+#     compose per (image, monitor size, panel edge, width) — a fresh full-screen
+#     PNG on every dock-width step, each one another hyprpaper set, i.e. another
+#     flash. The panel knows the region it doesn't cover and can just offset the
+#     art into it, per frame, for free. That compose pipeline is gone too.
 #
 # --wallpaper-only stops after step 2 — no Theme.qml write, so no Quickshell
 # reload. Rewriting Theme.qml is exactly what makes Quickshell hot-reload its
@@ -58,225 +79,33 @@ KEY="$(printf '%s' "$WALL" | md5sum | cut -d' ' -f1)"
 # shellcheck disable=SC1090
 . "$THEMES/$KEY.mode"   # sets MODE, IW, IH
 
-# `hyprctl monitors` gives "name width height"; we need per-monitor pixels to
-# map each one to the right image below (tiled PNG or the source itself).
-MONS="$(hyprctl monitors -j 2>/dev/null \
-    | python3 -c 'import sys,json;[print(m["name"],m["width"],m["height"]) for m in json.load(sys.stdin)]' \
-    2>/dev/null)"
-[ -z "$MONS" ] && MONS="eDP-1 2560 1600"   # fallback if IPC not up yet
-
-# ---- 2b. panel reserve (dock desktop mode) -----------------------------------
-# Normally the Quickshell panel is a 48px strip and the wallpaper is just the
-# image, centered by hyprpaper on the whole monitor. In "dock" mode the panel
-# grows to a quarter/third of the screen width — at which point centering on the
-# whole monitor puts the subject of the art behind the panel. So the desktop
-# publishes the strip it covers (the RESERVE) and we recompose the wallpaper so
-# the art is centered in the VISIBLE region instead, with a flat background strip
-# under the panel.
+# ---- 2b. publish it for the panel to draw ------------------------------------
+# These two files ARE the wallpaper apply. The panel watches them and does the
+# painting: $CACHE/current (written in step 1) is the absolute path of the image,
+# $CACHE/current.mode is the single word `tile` or `scale` — the decision
+# wal-prepare.sh already made from the image's dimensions, which the panel has no
+# way to re-derive cheaply and must not second-guess (both sides disagreeing on
+# tile-vs-scale is exactly how a wallpaper ends up drawn twice differently).
 #
-# Source of truth is $CACHE/reserve, one line "<edge> <px>" (e.g. "right 480"),
-# written by the panel — this script only ever READS it. Absent, unreadable or
-# malformed means no reserve, and RESERVE_PX=0 must stay byte-for-byte the
-# classic behaviour: nothing below branches until it is > 0. WAL_RESERVE /
-# WAL_RESERVE_EDGE override the file (for testing).
-RESERVE_FILE="$CACHE/reserve"
-RESERVE_PX=0
-RESERVE_EDGE="right"
-RESERVE_BG="000000"
-if [ -r "$RESERVE_FILE" ]; then
-    read -r RESERVE_EDGE RESERVE_PX _rest < "$RESERVE_FILE" || true
-fi
-[ -n "${WAL_RESERVE_EDGE:-}" ] && RESERVE_EDGE="${WAL_RESERVE_EDGE}"
-[ -n "${WAL_RESERVE:-}" ] && RESERVE_PX="${WAL_RESERVE}"
-# Anything that isn't a plain integer / a known edge disables the reserve rather
-# than guessing — a bad state file must degrade to the classic wallpaper, never
-# to a mis-composed one.
-case "${RESERVE_PX:-}" in ''|*[!0-9]*) RESERVE_PX=0 ;; esac
-case "${RESERVE_EDGE:-}" in left|right) ;; *) RESERVE_EDGE="right"; RESERVE_PX=0 ;; esac
-
-if [ "$RESERVE_PX" -gt 0 ]; then
-    # The strip under the panel is painted in the palette's own background, so it
-    # reads as part of the desktop rather than as a letterbox. wal-prepare.sh has
-    # already written the palette (wal-extract.py's KEY.env, "BG=rrggbb"); it is
-    # sourced properly in step 3, but that is after the hyprpaper apply, so pick
-    # the one key out here without disturbing the environment. Black if the
-    # palette can't be read — the same colour every wallpaper's BG resolves to
-    # today anyway.
-    RESERVE_BG="$(sed -n 's/^BG=\([0-9a-fA-F]\{6\}\)$/\1/p' "$THEMES/$KEY.env" 2>/dev/null | head -n1)"
-    [ -z "$RESERVE_BG" ] && RESERVE_BG="000000"
-fi
-
-# Compose the single image hyprpaper shows on one monitor in dock mode: the art
-# filling only the visible region (cover-scaled + center-cropped, or tiled),
-# padded out to the full monitor with the flat reserve strip on the panel's edge.
-# `-gravity West/East` + `-extent WxH` does the padding in the same pass — art
-# West (flush left) leaves the pad on the right, and vice versa.
+# Written UNCONDITIONALLY on every run, including when the value is unchanged: a
+# no-op rewrite costs nothing now that nobody re-renders a layer surface for it,
+# and it means the pair can never be left stale by an early exit somewhere.
 #
-# This lives on the APPLY path, NOT in wal-prepare.sh, on purpose: the composed
-# image depends on the reserve, which is a property of the live desktop rather
-# than of the image. wal-prepare-all.sh runs wal-prepare.sh over every file in
-# ~/Pictures/wall, so composing there would mean an ImageMagick pass per image
-# per monitor size — and a full re-run of all of them every time the dock width
-# changes — for images that will mostly never be applied.
-wal_compose_reserved() {
-    local w="$1" h="$2" out="$3" vw art_gravity
-    vw=$((w - RESERVE_PX))
-    [ "$vw" -lt 1 ] && vw=1
-    # Panel on the left => art pushed East, and vice versa.
-    if [ "$RESERVE_EDGE" = "left" ]; then art_gravity="East"; else art_gravity="West"; fi
-    if [ "$MODE" = "tile" ]; then
-        magick -size "${vw}x${h}" tile:"$WALL" \
-            -background "#$RESERVE_BG" -gravity "$art_gravity" -extent "${w}x${h}" "$out"
-    else
-        magick "$WALL" -resize "${vw}x${h}^" -gravity center -extent "${vw}x${h}" \
-            -background "#$RESERVE_BG" -gravity "$art_gravity" -extent "${w}x${h}" "$out"
-    fi
-}
-
-PRELOADS=""   # unique images to preload
-WALLLINES=""  # "monitor,image" pairs
-if [ "$RESERVE_PX" -gt 0 ]; then
-    # Dock mode: one composed PNG per (image, monitor size, edge, px). Cached
-    # like the tiled PNGs — regenerated only when it's missing or older than the
-    # source, plus older than the palette (the reserve strip is painted from it,
-    # so a re-extracted palette has to re-tint the strip).
-    while read -r name w h; do
-        [ -z "$name" ] && continue
-        out="$CACHE/composed-${KEY}-${w}x${h}-${RESERVE_EDGE}${RESERVE_PX}.png"
-        if [ ! -f "$out" ] || [ "$WALL" -nt "$out" ] || [ "$THEMES/$KEY.env" -nt "$out" ]; then
-            wal_compose_reserved "$w" "$h" "$out"
-        fi
-        case "$PRELOADS" in *"$out"*) ;; *) PRELOADS="$PRELOADS$out
-";; esac
-        WALLLINES="$WALLLINES$name,$out
-"
-    done <<EOF
-$MONS
-EOF
-elif [ "$MODE" = "tile" ]; then
-    # wal-prepare.sh already generated the tiled PNG per monitor resolution.
-    while read -r name w h; do
-        [ -z "$name" ] && continue
-        out="$CACHE/tiled-${KEY}-${w}x${h}.png"
-        case "$PRELOADS" in *"$out"*) ;; *) PRELOADS="$PRELOADS$out
-";; esac
-        WALLLINES="$WALLLINES$name,$out
-"
-    done <<EOF
-$MONS
-EOF
-else
-    # Scale mode: preload the source once, let hyprpaper cover each monitor.
-    PRELOADS="$WALL
-"
-    while read -r name w h; do
-        [ -z "$name" ] && continue
-        WALLLINES="$WALLLINES$name,$WALL
-"
-    done <<EOF
-$MONS
-EOF
-fi
-
-# persist for next login
-{
-    echo "splash = false"
-    echo "ipc = on"
-    printf '%s' "$PRELOADS" | while read -r p; do [ -n "$p" ] && echo "preload = $p"; done
-    printf '%s' "$WALLLINES" | while read -r l; do [ -n "$l" ] && echo "wallpaper = $l"; done
-} > "$CONFIG/hypr/hyprpaper.conf"
-
-# start hyprpaper if needed, then give it a moment to come up
-if ! pgrep -x hyprpaper >/dev/null 2>&1; then
-    hyprpaper >/dev/null 2>&1 &
-    for _ in 1 2 3 4 5; do
-        pgrep -x hyprpaper >/dev/null 2>&1 && break
-        sleep 0.3
-    done
-    sleep 0.5   # let the IPC socket settle before the first request
-fi
-
-# apply live. hyprpaper's IPC occasionally answers "invalid request" under a
-# burst, so we don't gate on a probe — we issue the real commands and gate on
-# the `wallpaper` set's exit code (a successful set prints nothing). NOTE:
-# `hyprpaper unload`/`listloaded` return "invalid hyprpaper request"
-# unconditionally on this hyprpaper build (0.8.4) regardless of syntax (tested:
-# "all", a specific path, comma-separated) — so they're deliberately not called
-# here; retrying them would just burn the attempt budget for nothing.
-#
-# IMPORTANT: `preload` of an ALREADY-loaded image ALSO returns "invalid request"
-# (exit 1) on this build. Preloading is best-effort (one shot, failure ignored)
-# and only the `wallpaper` set is retried — otherwise every re-visit of an
-# already-loaded image (i.e. almost every picker preview) would sleep the full
-# 5×0.1s preload budget for nothing, which is exactly what made previews lag
-# ~0.5s. The set is what actually needs to land, and it returns 0 once the image
-# is loaded, so on a truly-fresh image the retry re-attempts preload+set until
-# the set sticks.
-#
-# SKIPPED ENTIRELY when hyprpaper has already been told exactly this, by this
-# same hyprpaper process. That is not just an optimisation — re-setting an
-# already-current wallpaper makes hyprpaper re-render its background layer
-# surface, which reads on screen as the wallpaper FLASHING. It fired on every
-# picker commit: the preview (--wallpaper-only) sets the image, then closing the
-# picker runs the full apply, which set the identical image a second time — so
-# the wallpaper changed, and then a moment later flashed for no reason. The
-# marker records both what was sent and which hyprpaper process it was sent to,
-# so a restarted (state-less) hyprpaper still gets a real apply.
-APPLIED="$CACHE/hyprpaper-applied"
-hyprpaper_current() {
-    printf 'pid=%s\n%s%s' "$(pgrep -x hyprpaper | head -n1)" "$PRELOADS" "$WALLLINES"
-}
-hyprpaper_apply() {
-    printf '%s' "$PRELOADS" | while read -r p; do
-        [ -n "$p" ] && hyprctl hyprpaper preload "$p" >/dev/null 2>&1
-    done
-    printf '%s' "$WALLLINES" | while read -r l; do
-        [ -z "$l" ] && continue
-        p="${l#*,}"
-        for _ in 1 2 3 4 5; do
-            hyprctl hyprpaper wallpaper "$l" >/dev/null 2>&1 && break
-            hyprctl hyprpaper preload "$p" >/dev/null 2>&1   # fresh image: get it loaded, then retry the set
-            sleep 0.1
-        done
-    done
-    hyprpaper_current > "$APPLIED"
-}
-
-# true when hyprpaper is already showing exactly this, so a re-set would only
-# cost a flash
-hyprpaper_is_current() {
-    pgrep -x hyprpaper >/dev/null 2>&1 || return 1
-    [ -f "$APPLIED" ] || return 1
-    [ "$(hyprpaper_current)" = "$(cat "$APPLIED")" ]
-}
+# Written IN PLACE (truncate + write, same inode), never tmp+mv: Quickshell
+# watches a file by inode, so an atomic rename hands it a new inode while it
+# keeps watching the old, now-unlinked one — the same trap documented for
+# Theme.qml in step 7. One tiny write, so the truncated window is not observable
+# in practice. No trailing newline, matching $STATE's own convention.
+printf '%s' "$MODE" > "$STATE.mode"
 
 if [ "$WALLPAPER_ONLY" = 1 ]; then
-    # Preview: setting the wallpaper IS the whole job, so do it synchronously.
-    if hyprpaper_is_current; then
-        echo "wal-set: wallpaper already current, no hyprpaper set"
-    else
-        hyprpaper_apply
-    fi
-    echo "wal-set: wallpaper-only, skipping theme apply"
+    # Preview path (the picker, arrow-keying through images): writing $STATE and
+    # $STATE.mode above IS the whole wallpaper apply now, so there is nothing
+    # left to do but get out before the theme/palette work — which is the slow
+    # part AND the part that rewrites Theme.qml and would hot-reload the panel,
+    # closing the picker out from under the user mid-flip.
+    echo "wal-set: wallpaper-only ($MODE), skipping theme apply"
     exit 0
-fi
-
-# Full apply: set the wallpaper image in the BACKGROUND so it overlaps the theme
-# steps below instead of gating them. Those steps (kitty/borders/KDE/cursor/
-# panel) are what the user reads as "windows and programs changed", and the
-# retry loop above can occasionally spend up to ~0.5s when hyprpaper is mid-burst
-# — running it first made the whole desktop recolour wait on it intermittently
-# ("usually instant, sometimes not"). Nothing below depends on the wallpaper
-# being live (from the picker it's already up from the preview), so background
-# it and move on. If the step-7 reload tears this script down before the set
-# finishes,
-# that only happens on a picker commit — where the preview already set it — so
-# the final wallpaper is still correct; standalone/startup runs aren't torn down
-# and complete it normally.
-if hyprpaper_is_current; then
-    echo "wal-set: wallpaper already current, no hyprpaper set"
-else
-    hyprpaper_apply &
 fi
 
 # ---- 3. load the palette (already extracted by wal-prepare.sh above) ---------
