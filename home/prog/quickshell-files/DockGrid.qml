@@ -1,67 +1,58 @@
 import QtQuick
 
-// The dock panel's widget grid: `columns` fixed-width columns, `rowHeight`-tall
-// rows, Theme.gap between them. A widget occupies a (col, row, colSpan, rowSpan)
-// rectangle in those coordinates, which is what lets it "take up as much space as
-// possible" — the full width, half of it, or a single cell.
+// The dock panel's widget grid: `columns` columns by `rows` rows, Theme.gap
+// between them, filling the panel exactly. A widget occupies a
+// (col, row, colSpan, rowSpan) rectangle in those coordinates, which is what
+// lets it "take up as much space as possible" — the full width, half of it, or a
+// single cell.
 //
-// Column count is FIXED rather than derived from the panel width: the panel only
-// ranges over 14-33% of the screen, and letting the count change inside that
-// range would silently invalidate every saved placement each time the edge was
-// dragged. Widening the panel makes each column wider instead.
+// IT IS ONE PAGE, AND IT MUST STAY ONE PAGE. The row height is derived from the
+// panel's own height (`rows` divides it) rather than being a fixed pixel value,
+// so every widget is on screen at once with no scrolling, at any panel height.
+// That is a deliberate constraint on what can be added: a new widget takes rows
+// away from the others, and if nothing can spare them it doesn't fit. The
+// alternative — a taller-than-the-screen grid that scrolls — was tried first and
+// is exactly what the user didn't want.
 //
-// PLACEMENTS is plain data on purpose. Phase 2 ships it as a constant default;
-// phase 3 makes it the thing the user drags around and the thing that gets
-// persisted, and nothing else in here has to change for that — cellX/cellY/cellW/
-// cellH stay the single place grid coordinates become pixels, and the drag will
-// read back through them.
-Flickable {
+// Neither count is derived from the panel WIDTH. The panel only ranges over
+// 14-33% of the screen, and letting the geometry change inside that range would
+// silently invalidate every saved placement each time the edge was dragged.
+// Widening the panel makes each column wider instead.
+//
+// `placements` is plain data on purpose. It ships as a constant default; phase 3
+// makes it the thing the user drags around and the thing that gets persisted,
+// and nothing else in here has to change for that — cellX/cellY/cellW/cellH stay
+// the single place grid coordinates become pixels, and the drag reads back
+// through them.
+Item {
     id: root
 
     property bool active: true
 
     readonly property int columns: 4
-    readonly property int rowHeight: 44
+    readonly property int rows: 26
     readonly property int spacing: Theme.gap
 
-    // Usable width per column, gaps removed. Bound to the live panel width, so it
-    // tracks a drag frame by frame.
     readonly property real cellWidth: (width - spacing * (columns - 1)) / columns
+    readonly property real cellHeight: (height - spacing * (rows - 1)) / rows
 
     function cellX(col) { return col * (cellWidth + spacing); }
-    function cellY(row) { return row * (rowHeight + spacing); }
+    function cellY(row) { return row * (cellHeight + spacing); }
     function cellW(colSpan) { return colSpan * cellWidth + (colSpan - 1) * spacing; }
-    function cellH(rowSpan) { return rowSpan * rowHeight + (rowSpan - 1) * spacing; }
+    function cellH(rowSpan) { return rowSpan * cellHeight + (rowSpan - 1) * spacing; }
 
-    // Default layout. Row spans are sized to each widget's natural height at a
-    // four-column width, so nothing is clipped at the default panel width; the
-    // two charts pair up side by side because they are the only two that read
-    // fine at half width.
+    // Reading bottom-up, which is how it was asked for: clock and calendar side
+    // by side on the bottom row, the forecast above them, the player above that,
+    // and the task manager taking everything that's left — it is the one widget
+    // whose usefulness scales with the space it gets, since every extra row is
+    // another process you can see.
     readonly property var placements: [
-        { key: "media",    src: "MediaContent.qml",    col: 0, row: 0,  cs: 4, rs: 5 },
-        { key: "disk",     src: "DiskContent.qml",     col: 0, row: 5,  cs: 4, rs: 9 },
-        { key: "cpu",      src: "CpuContent.qml",      col: 0, row: 14, cs: 2, rs: 4 },
-        { key: "gpu",      src: "GpuContent.qml",      col: 2, row: 14, cs: 2, rs: 4 },
-        { key: "eth",      src: "EthContent.qml",      col: 0, row: 18, cs: 4, rs: 4 },
-        { key: "weather",  src: "WeatherContent.qml",  col: 0, row: 22, cs: 4, rs: 5 },
-        { key: "clock",    src: "ClockContent.qml",    col: 0, row: 27, cs: 4, rs: 6 },
-        { key: "calendar", src: "CalendarContent.qml", col: 0, row: 33, cs: 4, rs: 5 },
+        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,  cs: 4, rs: 8 },
+        { key: "media",    src: "MediaContent.qml",       col: 0, row: 8,  cs: 4, rs: 6 },
+        { key: "weather",  src: "WeatherContent.qml",     col: 0, row: 14, cs: 4, rs: 6 },
+        { key: "clock",    src: "ClockContent.qml",       col: 0, row: 20, cs: 2, rs: 6 },
+        { key: "calendar", src: "CalendarContent.qml",    col: 2, row: 20, cs: 2, rs: 6 },
     ]
-
-    // Rows the placements actually occupy — the grid is taller than the panel, so
-    // it scrolls rather than shrinking the widgets to fit.
-    readonly property int usedRows: {
-        let m = 0;
-        for (const p of placements) m = Math.max(m, p.row + p.rs);
-        return m;
-    }
-
-    contentWidth: width
-    contentHeight: cellY(usedRows) - spacing
-    clip: true
-    boundsBehavior: Flickable.StopAtBounds
-    // A panel-sized grid that happens to fit needs no scrollbar and no drag.
-    interactive: contentHeight > height
 
     Repeater {
         model: root.placements

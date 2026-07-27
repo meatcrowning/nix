@@ -88,6 +88,13 @@ in
       source = ./quickshell-files/scripts/push-windows.py;
       executable = true;
     };
+    # Task manager (TaskManagerContent.qml / Procs.qml): instantaneous per-process
+    # CPU from two /proc samples, which is what ps's lifetime-average %cpu can't
+    # give.
+    "quickshell/scripts/proc-list.py" = {
+      source = ./quickshell-files/scripts/proc-list.py;
+      executable = true;
+    };
     # Power-menu graceful exit (PowerMenu.qml): snapshot the session + "click the
     # [x]" on every window (hyprvtb dispatcher) and wait for them to close, so
     # logout/reboot/poweroff let apps save and the next login restores positions.

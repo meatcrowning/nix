@@ -9,7 +9,12 @@ import Quickshell
 Item {
     id: root
 
-    property bool active: true
+    // Defaults to FALSE, and every host sets it: the popup passes its `open`,
+    // DockTile binds it to the dock's visibility. A `true` default would mean a
+    // grid tile polls once at construction, before that Binding has applied —
+    // measured as a full /proc scan and a drive scan on every reload, for a
+    // widget nobody was looking at.
+    property bool active: false
     property int pad: 10
     readonly property real inner: Math.max(180, width - 24)
 
