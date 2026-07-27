@@ -19,7 +19,7 @@ Item {
     readonly property real inner: Math.max(180, width - 24)
 
     onActiveChanged: Media.watch(root, active)
-    Component.onCompleted: Media.watch(root, active)
+    Component.onCompleted: { Media.watch(root, active); drawerOut = Media.queueOpen; }
     Component.onDestruction: Media.watch(root, false)
 
     // ---- a transport button: pixel-font glyph, themed frame -------------
@@ -384,19 +384,63 @@ Item {
     // usable in the popup copy, which has no extra rows to give.
     readonly property real naturalRest:
         pad * 2 + top.height + 6 + naturalArt + 6 + bottom.height + handle.height
-    readonly property real queueH: Media.queueOpen
-        ? Math.max(60, root.height - naturalRest) : 0
+    // EXACTLY the height past the widget's natural size, with NO floor and NO
+    // animation of its own. Both were wrong, and together they are why the cover
+    // art visibly ballooned before the queue arrived.
+    //
+    // The artwork row (`mid`) is whatever is left over — root.height minus this
+    // drawer and the fixed blocks — so `queueH == height - naturalRest` is the
+    // one identity that keeps it at `naturalArt` for EVERY frame of the slide.
+    // The tile's own height is already gliding (DockTile's Behavior); a second
+    // Behavior here was an animation chasing an animating target, so it retargets
+    // every frame and permanently trails. Measured on the open: the tile went
+    // 217->270px while queueBox was still stuck at 25px, and the artwork row
+    // absorbed the whole difference — 111px, 126, 139, 148, 154, 159, 162, 164 —
+    // before snapping back to 60 once the lagging drawer finally landed.
+    // The 60px floor did the same thing in the other direction at the start of
+    // the motion. It is not needed: the popup copy's implicitHeight already adds
+    // a constant 90 for the open state, so there is always something to show.
+    // …and it tracks `drawerOut`, not `Media.queueOpen`, which is the same flag
+    // held true for one animation on the way DOWN. The flag flips in one frame
+    // while the tile takes 200ms to shed its rows, so keying the drawer straight
+    // off it collapsed the drawer instantly and handed the artwork the whole
+    // 124px the tile had not given back yet — measured 60 -> 162px, then
+    // shrinking. Holding it lets the drawer ride the tile down, and all that is
+    // left at the end is the tile's resting slack (`qs ipc call live tiles`,
+    // 7px here), which the artwork picks up in one imperceptible step.
+    //
+    // A `Behavior on height` gated `enabled: !Media.queueOpen` was tried first
+    // and is NOT reliable: both bindings depend on the same flag, and for the
+    // dock copy the height was written before `enabled` had been re-evaluated,
+    // so the animation was skipped. Measured, not assumed — the popup copy of
+    // the same component animated and the tile did not.
+    // A CONSTANT initialiser, seeded in Component.onCompleted. Written as
+    // `property bool drawerOut: Media.queueOpen` it is a binding, and a binding
+    // that has never been overwritten yet wins the first close outright — so a
+    // panel reloaded with the drawer already out would balloon the artwork
+    // exactly once, on the next close, and behave from then on.
+    property bool drawerOut: false
+    readonly property real queueH: drawerOut
+        ? Math.max(0, root.height - naturalRest) : 0
+
+    Timer {
+        id: closeHold
+        interval: ViewMode.ms(220)
+        onTriggered: root.drawerOut = false
+    }
+    Connections {
+        target: Media
+        function onQueueOpenChanged() {
+            if (Media.queueOpen) { closeHold.stop(); root.drawerOut = true; }
+            else closeHold.restart();
+        }
+    }
 
     Item {
         id: queueBox
         anchors { bottom: handle.top; left: parent.left; right: parent.right }
         height: root.queueH
         clip: true
-        // The slide itself. The tile's own height is gliding at the same time
-        // (DockTile), so the two have to agree — same duration, same curve.
-        Behavior on height {
-            NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
-        }
 
         ListView {
             id: queueList

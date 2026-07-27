@@ -66,7 +66,26 @@ Item {
     // rows leaves the forecast two, which is its header plus its legend line.
     readonly property int queueRows: 4
     readonly property bool queueOpen: SettingsStore.d.mediaQueueOpen
-    readonly property int q: queueOpen ? queueRows : 0
+
+    // …but only as many of them as the forecast can actually spare. Four rows
+    // is four rows of a grid whose row height is DERIVED from the panel height,
+    // so on a short panel (or a tall dock header, which eats the grid) the two
+    // rows the forecast keeps can be shorter than the single line its condensed
+    // form exists to show — and a widget squeezed below its own minimum draws
+    // nothing at all. This is the only queue-side number that may depend on the
+    // panel's geometry; it is NOT in `placements` (see below), so capping it
+    // costs nothing.
+    //
+    // The floor mirrors WeatherContent's `minCondensed` (its pad plus one line
+    // of text). It is duplicated rather than read off the loaded item because
+    // the tile's Loader is asynchronous: a binding through `loader.item` would
+    // be undefined for the first frames and the grid would re-lay itself out
+    // when it resolved.
+    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 6
+    readonly property int minWeatherRows: cellHeight > 0
+        ? Math.max(1, Math.ceil((minWeatherPx + spacing) / (cellHeight + spacing))) : 2
+    // 6 is the forecast's own `rs` below; it may not be reduced past its minimum.
+    readonly property int q: queueOpen ? Math.max(0, Math.min(queueRows, 6 - minWeatherRows)) : 0
 
     // PLACEMENTS MUST NOT DEPEND ON ANYTHING THAT CHANGES AT RUNTIME. It is the
     // Repeater's model, and a JS array model is replaced wholesale when the
