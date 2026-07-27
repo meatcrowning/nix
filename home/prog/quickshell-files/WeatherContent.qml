@@ -24,6 +24,14 @@ Item {
     implicitHeight: pad * 2 + head.height + 2 + legend.height + 4
                     + 110 + 2 + dayLabels.height
 
+    // A tile too short for the graph (the player's queue drawer takes four of
+    // the forecast's six rows) drops to CURRENT CONDITIONS ONLY: header line,
+    // nothing else. Clipping the graph instead would leave a half-drawn axis and
+    // a row of day names cut through the middle, which reads as broken rather
+    // than as compact. The threshold is the header plus the legend plus the
+    // smallest graph worth drawing.
+    readonly property bool condensed: height < pad * 2 + 16 + 14 + 40
+
     // Which sample the pointer is over, or -1. Drives both the readout that
     // replaces the legend and the cursor drawn on the graph.
     property int hoverIdx: -1
@@ -31,7 +39,14 @@ Item {
     // ---- header: where, and what it is doing right now -------------------
     Item {
         id: head
-        anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
+        // Condensed, this line IS the widget, so it sits in the middle of the
+        // tile rather than pinned to the top with the space the graph left.
+        anchors {
+            top: root.condensed ? undefined : parent.top
+            topMargin: root.pad
+            verticalCenter: root.condensed ? parent.verticalCenter : undefined
+            horizontalCenter: parent.horizontalCenter
+        }
         width: root.inner
         height: place.implicitHeight
 
@@ -75,6 +90,7 @@ Item {
         anchors { top: head.bottom; topMargin: 2; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 14
+        visible: !root.condensed
 
         readonly property var hov: (root.hoverIdx >= 0 && root.hoverIdx < root.slots.length)
             ? root.slots[root.hoverIdx] : null
@@ -164,6 +180,7 @@ Item {
 
     Canvas {
         id: graph
+        visible: !root.condensed
         anchors {
             top: legend.bottom; topMargin: 4
             bottom: dayLabels.top; bottomMargin: 2
@@ -301,6 +318,7 @@ Item {
     // ---- day names, one per pair of samples ------------------------------
     Row {
         id: dayLabels
+        visible: !root.condensed
         anchors {
             bottom: parent.bottom; bottomMargin: root.pad
             left: parent.left; right: parent.right
@@ -324,7 +342,7 @@ Item {
 
     PixelText {
         anchors.centerIn: parent
-        visible: root.slots.length === 0
+        visible: root.slots.length === 0 && !root.condensed
         text: "no data yet"
         color: Theme.textDim
     }

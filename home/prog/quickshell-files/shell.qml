@@ -773,15 +773,23 @@ Scope {
 
             WlrLayershell.namespace: "qs-bar"
 
-            // The bar takes the keyboard ONLY while the task manager's filter
-            // box has focus, and only in dock mode. Exclusive rather than
-            // OnDemand because OnDemand is granted on CLICK: the click that
-            // focuses the box would have to be followed by a second one before
-            // a keystroke arrived. The dock-mode term is the safety net — if
-            // anything ever left `filterFocus` set, closing the panel still
-            // gives the keyboard back.
-            WlrLayershell.keyboardFocus: (Procs.filterFocus && ViewMode.showDock)
-                ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+            // The bar is focusable ONLY around the task manager's filter box,
+            // and only in dock mode: while the pointer is over it (so the click
+            // that follows can be granted focus — on-demand focus is granted ON
+            // a click, so arming it in the click handler would need a second
+            // click) and while it holds focus.
+            //
+            // OnDemand, NOT Exclusive. Exclusive means the compositor keeps
+            // sending us the keyboard even after the user clicks into a window,
+            // so their next keystroke goes to the filter box instead of what
+            // they just clicked on. OnDemand hands it back as part of that
+            // click, which is the behaviour asked for.
+            //
+            // The dock-mode term is the safety net: if anything ever left
+            // `filterFocus` set, closing the panel still gives the keyboard back.
+            WlrLayershell.keyboardFocus: ((Procs.filterFocus || Procs.filterHover)
+                                          && ViewMode.showDock)
+                ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
             // THE VISIBLE BAR. Its width is the only thing that moves when the
             // panel is resized — a plain binding, applied in the frame it
@@ -1009,6 +1017,26 @@ Scope {
                             left: parent.left; right: parent.right
                             top: dockDivider.bottom; topMargin: Theme.gap
                             bottom: parent.bottom
+                        }
+                    }
+
+                    // Clicking anything else in the dock takes the keyboard back
+                    // off the filter box. Clicks into a WINDOW are handled by
+                    // the compositor (that is what on-demand focus is), but a
+                    // click that stays inside this surface never reaches it, so
+                    // the box would keep the keyboard while the user was plainly
+                    // done with it. Disabled — and so fully transparent to
+                    // events — whenever the box does not have focus, and it
+                    // declines the press it saw so the widget underneath still
+                    // gets its click.
+                    MouseArea {
+                        anchors.fill: parent
+                        z: 9999
+                        enabled: Procs.filterFocus
+                        acceptedButtons: Qt.AllButtons
+                        onPressed: (mouse) => {
+                            Procs.blurFilter();
+                            mouse.accepted = false;
                         }
                     }
                 }

@@ -20,6 +20,29 @@ because plugin builds ≤2.44 abort the compositor on a zero-height fill rect
 (fixed plugin-side in v2.45 — guard every computed rect when adding hyprvtb
 drawing).
 
+## The queue socket (`start_queue_server`)
+
+The desktop panel's media widget draws a queue drawer, and MPRIS cannot carry
+it — the TrackList interface is optional and the panel's Quickshell has no
+client for it. So the app serves its own queue on
+`$XDG_RUNTIME_DIR/player-queue.sock`, one line at a time:
+
+```
+server -> client   {"index": n, "tracks":[{"title","artist","dur"}, ...]}
+                   on connect, and on queueChanged / indexChanged / currentChanged
+client -> server   GOTO <index>        -> player.jumpTo(index)
+```
+
+- **Push, not poll**: the panel is animating this, and a file it had to re-read
+  on a timer would be both later and more work.
+- Only the three fields the drawer draws are sent. The panel has no library and
+  no art cache; anything else would be bytes per queue change for nothing.
+- A stale socket from a crash is removed before `listen()` — two players never
+  run at once (the second dies on the library lock long before this).
+- **Every failure is caught and printed.** A queue drawer is a convenience and
+  must never be able to take the music player down; the same rule `start_mpris`
+  already follows.
+
 ## Lyrics + ReplayGain (2026-07-25)
 
 `lyrics.py` is a Qt-free module shared by the app and `tools/lyrics-sync.py`:

@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import Quickshell.Services.Mpris
 
 // The media widget's data: which MPRIS player is "the" player, what it is
@@ -78,8 +79,85 @@ Singleton {
     readonly property real dispLen: hasPlayer
         ? (player.lengthSupported ? player.length : 0) : useSnap ? snap.len : 0
 
+    // ---- the play queue, straight from the player -------------------------
+    // MPRIS says what is playing and nothing about what is NEXT (its TrackList
+    // interface is optional, and Quickshell implements no client for it), so
+    // the player app serves its queue over a unix socket instead — one JSON
+    // line pushed on connect and on every queue or index change, and `GOTO n`
+    // back the other way. See apps/player/main.py's start_queue_server.
+    //
+    // The parsed array is derived from the raw LINE, which is what gets carried
+    // across a reload: PersistentProperties can only move strings between the
+    // two QML engines a reload alternates between, and a `var` holding an array
+    // arrives undefined on every other one.
+    property string queueJson: ""
+    readonly property var queue: {
+        if (queueJson === "") return [];
+        try { return JSON.parse(queueJson).tracks || []; } catch (e) { return []; }
+    }
+    readonly property int queueIndex: {
+        if (queueJson === "") return -1;
+        try { const i = JSON.parse(queueJson).index; return i === undefined ? -1 : i; }
+        catch (e) { return -1; }
+    }
+    readonly property bool queueAvailable: queueSock.connected && queue.length > 0
+
+    // Whether the drawer is open. In SettingsStore, not a local property: the
+    // dock grid reads it to decide how many rows the player and the forecast
+    // get, and a drawer the user opened should still be open after the reload a
+    // wallpaper change causes.
+    readonly property bool queueOpen: SettingsStore.d.mediaQueueOpen
+    function setQueueOpen(v) {
+        SettingsStore.d.mediaQueueOpen = !!v;
+        SettingsStore.save();
+    }
+    function playIndex(i) {
+        if (i < 0 || i >= queue.length) return;
+        queueSock.write("GOTO " + i + "\n");
+        queueSock.flush();
+    }
+
+    Socket {
+        id: queueSock
+        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/player-queue.sock"
+        parser: SplitParser {
+            onRead: line => { if (line.trim() !== "") root.queueJson = line; }
+        }
+    }
+
+    // Only attempt while the player actually has a window open. Quickshell logs
+    // a warning on every failed connect, and `qs log` is cumulative — a blind
+    // retry timer fills it with ServerNotFoundError all day on a machine where
+    // nobody is playing music. The window list is the cheapest true answer
+    // available here: it needs no poll of its own, and unlike "is there an MPRIS
+    // player" it is still right on a host where mpris_server is missing.
+    readonly property bool playerUp: {
+        const t = ToplevelManager.toplevels;
+        const v = t ? t.values : null;
+        if (!v) return false;
+        for (let i = 0; i < v.length; i++)
+            if ((v[i].appId || "") === "player") return true;
+        return false;
+    }
+    // Re-asserting `connected` is a no-op while the socket is up, so this is the
+    // whole reconnect story — no state machine, nothing to get stuck in. It
+    // fires straight away when the player appears, and every 5s after that in
+    // case the window mapped before the server finished binding.
+    Timer {
+        interval: 5000
+        repeat: true
+        running: root.playerUp
+        triggeredOnStart: true
+        onTriggered: {
+            if (!queueSock.connected)
+                queueSock.connected = true;
+        }
+    }
+    onPlayerUpChanged: if (!playerUp) { queueSock.connected = false; root.queueJson = ""; }
+
     function stateJson() {
         return JSON.stringify({
+            qj: queueJson,
             lv: spectrumLevels, pk: spectrumPeaks,
             pv: spectrumPeakVel, ph: spectrumPeakHold,
             np: hasPlayer ? {
@@ -95,6 +173,7 @@ Singleton {
         if (!s) return;
         try {
             const d = JSON.parse(s);
+            root.queueJson        = d.qj || "";
             root.spectrumLevels   = d.lv || [];
             root.spectrumPeaks    = d.pk || [];
             root.spectrumPeakVel  = d.pv || [];

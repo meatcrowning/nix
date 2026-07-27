@@ -23,6 +23,20 @@ Item {
 
     // Publish allotted-vs-wanted for `qs ipc call live tiles`. "No blank space"
     // is a number, not an opinion, and this is where it can be read.
+    // A tile that changes ROW — the player's queue drawer taking rows off the
+    // forecast — glides there. Only y and height: x and width follow the panel
+    // edge during a resize drag, and animating anything that tracks the pointer
+    // is the one thing this panel does not do (see the LAW in AGENTS.md). The
+    // drag gate covers the case where a mode switch changes both at once.
+    Behavior on y {
+        enabled: !ViewMode.dragging
+        NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
+    }
+    Behavior on height {
+        enabled: !ViewMode.dragging
+        NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
+    }
+
     readonly property real contentHeight: loader.item ? loader.item.implicitHeight : -1
     onContentHeightChanged: ViewMode.reportTile(tileKey, height, contentHeight)
     onHeightChanged: ViewMode.reportTile(tileKey, height, contentHeight)

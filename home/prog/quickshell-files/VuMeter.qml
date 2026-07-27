@@ -40,30 +40,12 @@ Item {
     width: parent.width
     height: barH
 
-    Process {
-        id: cavaProc
-        running: true
-        // quickshell is launched from the Fedora session with a bare PATH that
-        // omits ~/.nix-profile/bin, where cava (a nix pkg) lives — so prepend it
-        // or every spawn dies with "cava: not found" and the bars go dead.
-        command: ["sh", "-c", "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; exec cava -p \"$HOME/.config/quickshell/scripts/cava-vu.conf\""]
-        stdout: SplitParser {
-            onRead: data => {
-                const parts = data.split(";");
-                if (parts.length >= 2) {
-                    SysInfo.vuL = Math.min(100, parseInt(parts[0], 10) || 0);
-                    SysInfo.vuR = Math.min(100, parseInt(parts[1], 10) || 0);
-                }
-            }
-        }
-        // cava dying (e.g. pipewire restart) shouldn't leave dead bars
-        onExited: restartTimer.restart()
-    }
-    Timer {
-        id: restartTimer
-        interval: 2000
-        onTriggered: cavaProc.running = true
-    }
+    // The cava process itself lives in SysInfo, NOT here. This item is
+    // instantiated per MONITOR (StatusPanel is inside a Variants), so a Process
+    // in this file is one cava per screen: a second display silently doubled the
+    // feed, and a stale sandbox monitor was enough to do it. The levels were
+    // already in the singleton for reload continuity; the reader belongs there
+    // with them.
 
     // Centred visual meter: the two channel fills plus the volume-level line.
     Item {

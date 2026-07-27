@@ -137,7 +137,11 @@ Item {
     readonly property int naturalArt: 60
 
     implicitWidth: 300
+    // The open drawer's 90 is a CONSTANT, not `queueH`: queueH is derived from
+    // the item's height, and feeding it back into implicitHeight — which is what
+    // the popup takes its height FROM — is a binding loop.
     implicitHeight: pad * 2 + top.height + 6 + naturalArt + 6 + bottom.height
+                    + handle.height + (Media.queueOpen ? 90 : 0)
 
     // ONE line: track on the left, artist on the right. It keeps its height when
     // both are empty, so nothing below it moves when playback stops — which is
@@ -273,7 +277,7 @@ Item {
     // ~300px of inner width rather than squeezing the seekbar to nothing.
     Row {
         id: bottom
-        anchors { bottom: parent.bottom; bottomMargin: root.pad; horizontalCenter: parent.horizontalCenter }
+        anchors { bottom: queueBox.top; bottomMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 22
         spacing: 6
@@ -363,6 +367,160 @@ Item {
                 ? Media.fmtTime(Media.dispPos) + "/" + Media.fmtTime(Media.dispLen)
                 : Media.fmtTime(Media.dispPos)
             color: Theme.textDim
+        }
+    }
+
+    // ---- the play queue drawer -------------------------------------------
+    // The player app serves its own queue over a socket (Media.queue); this is
+    // the part of it you can see and click. It slides DOWN out of the bottom of
+    // the widget, and the rows it needs come off the forecast tile below, which
+    // condenses to its current-conditions line — see DockGrid's `queueRows` and
+    // WeatherContent's `condensed`.
+    //
+    // The drawer takes the height the grid handed over (everything past the
+    // widget's natural size) rather than a fixed pixel count, so it is exactly
+    // as tall as the rows it was given and the artwork above it goes back to its
+    // natural size instead of being squeezed by a guess. A floor of 60 keeps it
+    // usable in the popup copy, which has no extra rows to give.
+    readonly property real naturalRest:
+        pad * 2 + top.height + 6 + naturalArt + 6 + bottom.height + handle.height
+    readonly property real queueH: Media.queueOpen
+        ? Math.max(60, root.height - naturalRest) : 0
+
+    Item {
+        id: queueBox
+        anchors { bottom: handle.top; left: parent.left; right: parent.right }
+        height: root.queueH
+        clip: true
+        // The slide itself. The tile's own height is gliding at the same time
+        // (DockTile), so the two have to agree — same duration, same curve.
+        Behavior on height {
+            NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
+        }
+
+        ListView {
+            id: queueList
+            anchors { fill: parent; leftMargin: root.pad; rightMargin: root.pad }
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            model: Media.queue
+            // Keep the playing track in view as it advances — the drawer is
+            // most useful for "what is next", which is the row under it.
+            currentIndex: Media.queueIndex
+            highlightFollowsCurrentItem: true
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+
+            delegate: Item {
+                id: qrow
+                required property var modelData
+                required property int index
+                width: queueList.width
+                height: 16
+
+                readonly property bool isCurrent: index === Media.queueIndex
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: qrow.isCurrent ? Theme.highlight
+                         : (qma.containsMouse ? Theme.bgAlt : "transparent")
+                }
+                PixelText {
+                    id: qnum
+                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                    width: 22
+                    // The playing row is marked, not numbered: its number is the
+                    // one thing about it you already know.
+                    text: qrow.isCurrent ? ">" : (qrow.index + 1)
+                    color: qrow.isCurrent ? Theme.accent : Theme.textDim
+                }
+                PixelText {
+                    id: qdur
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                    text: Media.fmtTime(qrow.modelData.dur || 0)
+                    color: Theme.textDim
+                }
+                PixelText {
+                    id: qartist
+                    anchors { right: qdur.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    width: Math.min(implicitWidth, parent.width / 3)
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    text: qrow.modelData.artist || ""
+                    color: Theme.textDim
+                }
+                PixelText {
+                    anchors {
+                        left: qnum.right; right: qartist.left; rightMargin: 8
+                        verticalCenter: parent.verticalCenter
+                    }
+                    elide: Text.ElideRight
+                    text: qrow.modelData.title || ""
+                    color: qrow.isCurrent ? Theme.accent : Theme.text
+                }
+                MouseArea {
+                    id: qma
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    // Click a row to play it. GOTO goes back down the same
+                    // socket the queue arrived on; the player answers with a new
+                    // snapshot, so the highlight moves because the PLAYER moved,
+                    // never because the panel assumed it would.
+                    onClicked: Media.playIndex(qrow.index)
+                }
+            }
+        }
+
+        PixelText {
+            anchors.centerIn: parent
+            visible: Media.queue.length === 0
+            text: Media.queueAvailable ? "queue is empty" : "player not running"
+            color: Theme.textDim
+        }
+    }
+
+    // ---- the handle: the widget's bottom edge -----------------------------
+    // A strip across the very bottom that lights up under the pointer and says
+    // which way it will go. It is the affordance AND the close button: with the
+    // drawer open it is the bottom edge of the drawer, which is where the user
+    // reaches for it.
+    Item {
+        id: handle
+        anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+        height: 11
+
+        Rectangle {
+            anchors.fill: parent
+            color: hma.containsMouse ? Theme.bgAlt : "transparent"
+            // A hairline that only appears on hover: the widget already has a
+            // tile border, and a second permanent line across the bottom would
+            // read as a division rather than a control.
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; top: parent.top }
+                height: 1
+                color: Theme.border
+                visible: hma.containsMouse || Media.queueOpen
+            }
+        }
+        PixelText {
+            anchors.centerIn: parent
+            // "v" opens (it comes down), "^" closes. Dim until hovered, so the
+            // strip is a hint rather than a permanent chevron.
+            text: Media.queueOpen ? "^" : "v"
+            color: hma.containsMouse ? Theme.accent : Theme.textDim
+            opacity: hma.containsMouse || Media.queueOpen ? 1 : 0.55
+        }
+        MouseArea {
+            id: hma
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Media.setQueueOpen(!Media.queueOpen)
+        }
+        Tooltip {
+            target: handle
+            show: hma.containsMouse
+            text: Media.queueOpen ? "hide the queue" : "show the play queue"
         }
     }
 }
