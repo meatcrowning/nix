@@ -54,6 +54,29 @@ Four things to know before touching any of it:
   as "cancelled", and a picker that cannot even be spawned falls through to the
   delegate. `FILER_PORTAL_OPEN=delegate` turns the whole service into a
   pass-through, which is the way to bisect a problem without editing config.
+- **On `book`, `filer-portal-switch on` currently changes nothing, and that is
+  not the switch's fault.** `xdg-desktop-portal.service` carries
+  `Requisite=graphical-session.target`, and that target has *never* been active
+  on book (`ActiveEnterTimestamp` is empty; Hyprland starts outside a systemd
+  graphical session — `hyprland.lua`'s exec-once block already works around the
+  same gap by hand-starting easyeffects and udiskie). So the frontend
+  `org.freedesktop.portal.Desktop` cannot D-Bus-activate at all:
+
+  ```
+  gdbus call --session --dest org.freedesktop.portal.Desktop \
+    --object-path /org/freedesktop/portal/desktop \
+    --method org.freedesktop.DBus.Properties.Get \
+    org.freedesktop.portal.FileChooser version
+  → Could not activate remote peer: startup job failed
+  ```
+
+  Every portal file dialog on book is already dead this way, long before any of
+  this landed — GTK and Qt apps just fall back to their own dialogs and nobody
+  noticed. `xdg-desktop-portal-gtk.service` runs only because it has plain
+  `After=`, not `Requisite=`. Unblocking it is a session-startup change, which
+  is ask-first territory; the narrow version is a user drop-in clearing the
+  `Requisite=` for that one unit. `top` is unaffected — it reaches
+  `graphical-session.target` normally via SDDM.
 - **The picker is a SUBPROCESS** (`filer --pick <spec.json>`), not QML hosted in
   the backend, so a crash or a wedge costs one dialog instead of every future
   one — and `Close()` has something to kill. The two halves talk only through
