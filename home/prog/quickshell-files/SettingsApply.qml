@@ -27,8 +27,17 @@ Item {
             + "repeat_rate = " + Math.round(d.keyRepeatRate) + ", "
             + "sensitivity = " + d.pointerSpeed + ", "
             + "natural_scroll = " + _b(d.naturalScroll) + ", "
+            // tap_to_click, NOT ["tap-to-click"]. The ini/`hyprctl getoption`
+            // name is `input:touchpad:tap-to-click`, but the LUA config manager
+            // takes the underscored alias and only that: the hyphenated form
+            // was rejected with `unknown config key 'input.touchpad.tap-to-click'`
+            // in `hyprctl configerrors` — so this whole setting was a no-op for
+            // its entire life and the touchpad just ran on Hyprland's default.
+            // (`getoption` normalises - and _, which is why it looked fine
+            // there. Both pins carry the alias: verified live on 0.55.4 and in
+            // the 0.56 binary's string table.)
             + "touchpad = { natural_scroll = " + _b(d.naturalScroll)
-            + ", [\"tap-to-click\"] = " + _b(d.tapToClick) + " } "
+            + ", tap_to_click = " + _b(d.tapToClick) + " } "
             + "}})";
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
