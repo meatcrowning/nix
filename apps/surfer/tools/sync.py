@@ -71,7 +71,25 @@ DEFAULT_HOST = os.environ.get("SURFER_SYNC_HOST", "top")
 # NB `top`, not `top.local`: nix-built binaries on book cannot resolve mDNS
 # (.local) at all, while plain DNS gives top.lan -> 192.168.40.202.
 
-SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+# ControlMaster: a `pull` is three separate ssh invocations (is-running, schema,
+# dump) and a `push` is five, each otherwise paying its own TCP + key-exchange +
+# auth handshake — ~0.17s warm, ~0.28s cold, which is most of the 0.72s the
+# browser used to sit behind before its window could open. Multiplexing makes
+# the first connection a master and the rest channels on it (~0.05s each).
+# `auto` re-masters silently over a stale socket, so this can never become the
+# reason a sync doesn't happen; %C hashes (host, port, user) so `top` and
+# `top.local` cannot share a socket.
+def _control_path():
+    p = os.environ.get("SURFER_SSH_CONTROL")
+    if p:
+        return p
+    run = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return os.path.join(run, "surfer-sync-ssh-%C")
+
+
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+       "-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+       "-o", "ControlPath=" + _control_path()]
 
 # Chromium's unique index on `cookies` — the merge key.
 KEY_COLS = (
@@ -315,8 +333,12 @@ def sync_userscripts(host, dry_run=False):
         (f"{host}:.config/surfer/userscripts/", local + "/", "pull"),
         (local + "/", f"{host}:.config/surfer/userscripts/", "push"),
     ):
+        # -e: rsync would otherwise spawn a bare `ssh` with none of the options
+        # above — no BatchMode (so it can hang on a prompt) and, now, no share
+        # of the connection the guards already opened.
         p = subprocess.run(
-            ["rsync", *flags, src, dst], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            ["rsync", *flags, "-e", " ".join(SSH), src, dst],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         if p.returncode != 0:
             sys.stderr.write(p.stderr.decode("utf-8", "replace"))

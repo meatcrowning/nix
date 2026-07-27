@@ -6,6 +6,9 @@
     dbsync.py sync [--host top.local]     pull, then push
     dbsync.py status [--host top.local]   what each side holds, no writes
 
+`pull` is a no-op when top's database is exactly where it was at the last pull
+(see `stamp` below) — add --force to transfer anyway.
+
 Why this exists: air plays top's library over SMB (docs/air-library-share.md)
 and the two machines each keep their own copy of the database. The audio and
 the tags are shared; the *metadata the app writes* — play counts, ratings,
@@ -247,8 +250,30 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
 # accept-new: BatchMode can never answer the first-contact host-key prompt, so
 # a name we haven't spoken to before (top.local vs the tailscale `top`) would
 # fail forever. Trust on first use, still fail hard on a CHANGED key.
+#
+# ControlMaster: every ssh here pays a full TCP + key-exchange + auth handshake,
+# measured at ~0.17s on this LAN, and a single `pull` opens three of them
+# (stamp, snapshot, rsync) before the player has even started. Multiplexing
+# collapses them onto ONE connection — the first ssh becomes the master and the
+# rest are just new channels on it. `auto` means a stale socket (master killed,
+# machine slept) silently re-masters instead of failing, so this can never be
+# the reason a sync doesn't happen.
+#
+# The path is overridable so air-launch.sh can name the same socket for its own
+# rsync calls and share this connection; %C is a hash of (host, port, user), so
+# top.local and top correctly get separate masters.
+def _control_path():
+    p = os.environ.get("PLAYER_SSH_CONTROL")
+    if p:
+        return p
+    run = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return os.path.join(run, "player-dbsync-ssh-%C")
+
+
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-       "-o", "StrictHostKeyChecking=accept-new"]
+       "-o", "StrictHostKeyChecking=accept-new",
+       "-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+       "-o", "ControlPath=" + _control_path()]
 REMOTE_TMP = "/tmp/player-dbsync-{}.db"
 
 
@@ -268,6 +293,25 @@ def _rsync(src, dst):
                    check=True)
 
 
+def basis_path():
+    """Where the last remote snapshot is kept, so the next one is a DELTA.
+
+    `--inplace` has been on this rsync since it was written, but it was pointed
+    at a fresh temporary directory every run — and rsync can only compute a
+    delta against a file that already exists, so the destination being absent
+    silently turned every pull into a full 17 MB transfer. Keeping the previous
+    snapshot means rsync sends only the sqlite pages that actually changed,
+    which for a play-count bump is a few kilobytes.
+
+    It lives in the CACHE because that is exactly what it is: losing it costs
+    one slow pull and nothing else. It is never read as a database — it is only
+    ever rsync's basis and then the merge source, both of which verify it
+    (rsync by checksum against the remote, sqlite by refusing to open garbage).
+    """
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return cache / "player" / "dbsync-remote.db"
+
+
 def _seedable(db):
     """True if the local database is absent or has no tracks table yet."""
     if not Path(db).exists() or Path(db).stat().st_size == 0:
@@ -281,26 +325,97 @@ def _seedable(db):
         con.close()
 
 
+# --- pull short-circuit ----------------------------------------------------
+# A pull costs ~0.9s (remote sqlite backup of 17 MB + rsync), and air pays it on
+# EVERY launch — including the common case where nobody has touched top's
+# library since the last sync. `stamp` is the cheap question that makes that
+# case free: one multiplexed round trip (~30ms) for the remote file's size and
+# mtime, compared against what we recorded at the last successful pull.
+#
+# Size+mtime is a sound "nothing happened" test here because the only writer is
+# the player on top, and sqlite cannot update a page without touching the file.
+# It is deliberately conservative in the safe direction: a false "changed" costs
+# a pull we didn't need, a false "unchanged" would need the mtime to go
+# backwards to a previously-seen value at an identical size.
+
+
+def stamp_cache():
+    state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return state / "player" / "dbsync-remote.stamp"
+
+
+def _local_stamp(db):
+    try:
+        st = Path(db).stat()
+        return f"{st.st_mtime_ns} {st.st_size}"
+    except OSError:
+        return ""
+
+
+def _read_stamp():
+    try:
+        return stamp_cache().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _write_stamp(host, value):
+    """Record `value` as the remote state we have already merged.
+
+    Keyed by host: pulling from top.local and then from the tailscale `top` is
+    the same database, but there is no way to prove that from here, so a host
+    change simply forces one honest pull.
+    """
+    try:
+        p = stamp_cache()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"{host} {value}\n", encoding="utf-8")
+    except OSError:
+        pass  # a stamp we can't cache just means the next pull is a real one
+
+
 def cmd_pull(args):
     remote_tmp = REMOTE_TMP.format("pull")
-    _remote(args.host, ["snapshot", remote_tmp])
-    with tempfile.TemporaryDirectory() as td:
-        local = str(Path(td) / "remote.db")
-        _rsync(f"{args.host}:{remote_tmp}", local)
-        # First pull on a fresh machine SEEDS rather than merges. air must
-        # never build its own database from scratch: the saved queue in
-        # prefs.json is a list of track ids — insertion-ordered rowids — so a
-        # locally-scanned database renumbers everything and the restored queue
-        # silently points at different songs.
-        if _seedable(args.db):
-            if args.dry_run:
-                print("dry-run: would seed local database from remote")
-                return
-            Path(args.db).parent.mkdir(parents=True, exist_ok=True)
-            snapshot(local, str(args.db))
-            print(f"seeded {args.db} from {args.host}", flush=True)
+
+    # Skip the whole transfer when top's database is byte-for-byte where it was
+    # at our last pull. Never skip a SEED (no local database yet) — there is
+    # nothing to be up to date with — and never on --force.
+    want = ""
+    if not args.force and not _seedable(args.db):
+        want = _remote(args.host, ["stamp"]).stdout.decode().strip()
+        if want and _read_stamp() == f"{args.host} {want}":
+            print(f"up to date with {args.host} (no pull needed)", flush=True)
             return
-        merge(local, str(args.db), dry_run=args.dry_run)
+
+    _remote(args.host, ["snapshot", remote_tmp])
+    local = basis_path()
+    local.parent.mkdir(parents=True, exist_ok=True)
+    # Drop the WAL sidecars our own read-only open leaves behind before the file
+    # underneath them is replaced. rsync rewrites only `local`, so a -wal left
+    # from the PREVIOUS snapshot would sit next to a newer database and sqlite
+    # would happily replay it — the file-plus-sidecar trap this tool warns about
+    # for `cp`, arriving by a different door. They are pure derived state.
+    for side in ("-wal", "-shm"):
+        Path(str(local) + side).unlink(missing_ok=True)
+    _rsync(f"{args.host}:{remote_tmp}", str(local))
+    # First pull on a fresh machine SEEDS rather than merges. air must
+    # never build its own database from scratch: the saved queue in
+    # prefs.json is a list of track ids — insertion-ordered rowids — so a
+    # locally-scanned database renumbers everything and the restored queue
+    # silently points at different songs.
+    if _seedable(args.db):
+        if args.dry_run:
+            print("dry-run: would seed local database from remote")
+            return
+        Path(args.db).parent.mkdir(parents=True, exist_ok=True)
+        snapshot(str(local), str(args.db))
+        print(f"seeded {args.db} from {args.host}", flush=True)
+    else:
+        merge(str(local), str(args.db), dry_run=args.dry_run)
+    # Only now — a stamp written before the merge would make a failed pull look
+    # done, and a --dry-run never merged anything at all.
+    if want and not args.dry_run:
+        _write_stamp(args.host, want)
 
 
 def cmd_push(args):
@@ -353,8 +468,10 @@ def main():
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--db", type=Path, default=None, help="local database (default: XDG)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="pull even when the remote database looks unchanged")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("pull", "push", "sync", "status", "counts"):
+    for name in ("pull", "push", "sync", "status", "counts", "stamp"):
         sub.add_parser(name)
     p = sub.add_parser("snapshot")
     p.add_argument("out")
@@ -366,6 +483,11 @@ def main():
     if args.db is None:
         args.db = db_path()
 
+    if args.cmd == "stamp":
+        # runs on the FAR end (and locally for debugging): size+mtime of the
+        # database, the cheap "has anything happened here?" answer.
+        print(_local_stamp(args.db))
+        return
     if args.cmd == "snapshot":
         snapshot(str(args.db), args.out)
         return
