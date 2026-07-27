@@ -3187,6 +3187,84 @@ void CVtbDeco::hideRolledWindow(PHLWINDOW PWINDOW) {
         Hl::resetFocus();
 }
 
+// Shove a SHADED window's floating bar back inside a horizontal band on its own
+// monitor, and return true if it actually moved.
+//
+// Why this has to live in the plugin at all. Everything else on screen can be
+// pushed out from under a grown panel with a plain `hl.dsp.window.move` — but a
+// rolled-up window can't, for three compounding reasons:
+//   1. while shaded the bar is drawn at m_rollBox, a SNAPSHOT taken at roll-up
+//      time (startRollAnim / startOpenReveal). Nothing recomputes it afterwards.
+//   2. the window itself is setHidden(true), so the decoration positioner skips
+//      it entirely — `updateWindowDecos()` early-returns on a hidden window, so
+//      even a positioner run wouldn't refresh m_bAssignedBox, let alone m_rollBox.
+//   3. therefore moving the underlying window from outside moves *nothing
+//      visible*: the pixels keep being painted at the frozen m_rollBox, and the
+//      only thing that changes is where the window will pop back out on unroll.
+// So the mover has to be the one thing that owns m_rollBox — us.
+//
+// The body deliberately mirrors the rolled-bar DRAG path in onMouseMove
+// (damage-old / shift m_rollBox.x / warpPos the hidden window / damage-new),
+// because that path is the known-correct way to relocate a shaded bar: it is
+// exercised every time the user drags one, and each of its four steps exists for
+// a reason discovered there (in particular damaging effectiveBoxGlobal() and not
+// raw m_rollBox — see the comment at the drag). Like the drag, this does NOT
+// touch m_rollWinBox: that box is the roll-up snapshot's source rect, used to
+// sample the frozen texture, and shifting it would slide the picture inside the
+// bar. Staying consistent with the drag is the point.
+bool CVtbDeco::pushRolledIntoBand(double reserve, bool edgeRight) {
+    // Never touch one mid-animation: m_rollBox is being interpolated against by
+    // the roll beats, and the window's position is mid-warp.
+    if (!m_bRolledUp || m_rollAnim != ROLL_NONE)
+        return false;
+    if (!(reserve > 0.0)) // also rejects NaN
+        return false;
+    if (!validMapped(m_pWindow))
+        return false;
+
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW)
+        return false;
+    const auto PMONITOR = PWINDOW->m_monitor.lock();
+    if (!PMONITOR)
+        return false;
+
+    // The band is the part of THIS window's monitor the panel doesn't cover.
+    const double MONL  = PMONITOR->m_position.x;
+    const double MONR  = MONL + PMONITOR->m_size.x;
+    const double BANDL = edgeRight ? MONL : MONL + reserve;
+    const double BANDR = edgeRight ? MONR - reserve : MONR;
+    if (!(BANDR > BANDL)) // reserve swallowed the monitor — nowhere to push to
+        return false;
+
+    // Single dx: pull left until the bar ends flush with the band, then (if it
+    // is wider than the band, or was already left of it) clamp at the left edge.
+    // Doing it as one delta keeps this to exactly one damage/warp pair.
+    const double BARL = m_rollBox.x;
+    const double BARR = m_rollBox.x + m_rollBox.w;
+    double       dx   = 0.0;
+    if (BARR > BANDR)
+        dx = BANDR - BARR;
+    if (BARL + dx < BANDL)
+        dx = BANDL - BARL;
+    if (dx == 0.0)
+        return false; // already inside — no damage, no warp, no work
+
+    // Clear the bar's old spot at the box it is actually DRAWN in (see the drag:
+    // effectiveBoxGlobal() is m_rollBox dropped by the set-down offset, and
+    // damaging raw m_rollBox leaves the bottom shadow strip smeared behind).
+    Hl::damage(CBox{effectiveBoxGlobal()}.expand(2));
+    m_rollBox.x += dx;
+    m_iHoverCell = -1; // the bar moved out from under the cursor
+    // Move the hidden window too, so it reappears under its bar on unroll.
+    // warpPos is setValueAndWarp, so the logical goal tracks as well and a later
+    // real drag doesn't snap back to the pre-push spot — same semantics (and the
+    // same posGoal-relative arithmetic) the drag uses via m_rollDragWinStart.
+    Hl::warpPos(PWINDOW, Hl::posGoal(PWINDOW) + Vector2D{dx, 0.0});
+    Hl::damage(CBox{effectiveBoxGlobal()}.expand(2)); // new spot, same cushion
+    return true;
+}
+
 // Eased sub-progress for the two beats. slideT: 0 = content fully out/visible,
 // 1 = tucked entirely behind the bar. downT: 0 = raised with full shadow, 1 =
 // set down with no shadow. Roll-out runs the beats in the reverse order (lift

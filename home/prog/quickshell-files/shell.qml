@@ -677,15 +677,29 @@ Scope {
             //
             // The surface is transparent and input-masked to barBody, so the
             // part of it hanging over the desktop neither paints nor takes
-            // clicks. It is only oversized WHILE DRAGGING — the rest of the time
-            // it is exactly the bar, so the mask covers the whole surface and a
-            // permanent screen-wide overlay never exists. barBody is anchored to
-            // the screen edge rather than positioned by `x`, so the surface
-            // growing at drag start and shrinking at drag end cannot move it
-            // even if those resizes land a frame late.
-            implicitWidth: ViewMode.dragging ? ViewMode.maxPx : ViewMode.liveWidth
+            // clicks.
+            //
+            // It is a CONSTANT — the widest the panel may ever be — and must
+            // stay one. Sizing it to the bar except while dragging seemed
+            // tidier, but that put a surface resize on the press and another on
+            // the release, and each one made the panel visibly jump (right on
+            // click, left on release): resizing a surface anchored to the right
+            // edge changes its position too, and the compositor can apply the
+            // new geometry a frame before the matching buffer arrives. The
+            // surface must simply never change.
+            implicitWidth: ViewMode.maxPx
             color: "transparent"
-            mask: Region { item: barBody }
+            // Explicit coordinates rather than `Region { item: barBody }`. Both
+            // should work, but this is the identical form EdgeGrip.qml uses, and
+            // that one is proven every second the desktop is usable: it is a
+            // full-screen surface on the OVERLAY layer, so if masks did not
+            // confine input, nothing on screen would be clickable at all.
+            mask: Region {
+                x: bar.barLeft ? 0 : bar.width - ViewMode.liveWidth
+                y: 0
+                width: ViewMode.liveWidth
+                height: bar.height
+            }
 
             // Publish the VISIBLE bar width for the drag trace (`qs ipc call
             // view trace`). Diagnostic only, and single-monitor by nature — the
