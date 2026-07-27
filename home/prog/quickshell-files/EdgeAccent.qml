@@ -29,16 +29,40 @@ PanelWindow {
     // visible there and matches the left/right stripe.
     property int thickness: 2
 
+    // The horizontal stripes span the desktop the panel does NOT cover, and they
+    // must follow the panel edge EXACTLY while it is being dragged.
+    //
+    // They used to get that for free by being anchored to both side edges and
+    // letting the exclusive zone shorten them. That broke the moment the zone
+    // stopped being rewritten per drag frame (it makes Hyprland re-run the whole
+    // layout, which fights the resize): the stripes then only updated on
+    // release, so widening the desktop left a gap at the end of each one — the
+    // shortfall was invisible while the panel GREW, because the stripe was
+    // simply covered, and obvious the other way.
+    //
+    // So they are sized explicitly off ViewMode.liveWidth instead, anchored to
+    // one side only, and ignore exclusive zones entirely (with the zone still in
+    // play the panel's reservation would shorten them a second time on top of
+    // this). Same reason EdgeGrip.qml needs Ignore, and the same rule applies:
+    // do not set exclusiveZone alongside it.
+    readonly property bool horizontal: edge === "top" || edge === "bottom"
+    readonly property bool barLeft: SettingsStore.d.barEdge === "left"
+
     anchors {
-        left: edge !== "right"
-        right: edge !== "left"
+        left: horizontal ? true : edge !== "right"
+        right: horizontal ? false : edge !== "left"
         top: edge !== "bottom"
         bottom: edge !== "top"
     }
-    implicitWidth: thickness
+    exclusionMode: ExclusionMode.Ignore
+
+    implicitWidth: horizontal
+        ? Math.max(1, (screen ? screen.width : 1920) - ViewMode.liveWidth)
+        : thickness
     implicitHeight: thickness
+    // With the bar on the left the stripes start past it rather than at 0.
+    margins.left: (horizontal && barLeft) ? ViewMode.liveWidth : 0
     color: Theme.accent
-    exclusiveZone: 0
 
     WlrLayershell.layer: WlrLayer.Bottom
     WlrLayershell.namespace: "qs-edge-accent"

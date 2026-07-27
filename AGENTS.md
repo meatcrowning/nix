@@ -82,6 +82,28 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   only it feeds the persisted setting and the wallpaper. Read `ViewMode.barWidth`
   and NOT `Theme.barWidth` for "how much screen does the panel take" —
   `Theme.barWidth` is now only the *classic* width.
+- **NOTHING that must track the pointer may be a layer-surface SIZE.** A layer
+  surface resize is a configure/ack roundtrip, so any surface whose width
+  follows the cursor is a frame or more behind it. Everything pinned to the
+  panel edge is computed from `ViewMode.liveWidth` and lands exactly, so a
+  surface-sized edge visibly disagrees with all of it for the whole drag. Three
+  places this bit, all fixed the same way — put the moving edge in an ITEM
+  binding inside a surface that does not resize:
+  - **The panel** (`shell.qml`): the visible bar is `barBody`, an Item anchored
+    to the screen edge with `width: ViewMode.liveWidth`. The surface only grows
+    (to `maxPx`) *while dragging*, is `color: "transparent"` with
+    `mask: Region { item: barBody }`, and paints its background from a Rectangle
+    inside barBody. barBody is ANCHORED, never positioned by `x`, so the
+    surface's grow/shrink at drag start and end cannot shift it even a frame.
+    This also removed the flick-away-and-back on release, which was the surface
+    resizing once more as the committed width landed.
+  - **The accent stripes** (`EdgeAccent.qml`): the horizontal ones span
+    `screen.width - ViewMode.liveWidth` explicitly and use
+    `exclusionMode: Ignore`. They used to be anchored to both sides and shortened
+    by the exclusive zone — which stopped updating per frame once the zone was
+    frozen during drags, so they only resized on release. Invisible while the
+    panel GREW (the stripe was simply covered) and an obvious gap the other way.
+  - **The grip** (`EdgeGrip.qml`), below.
 - **The resize handle is its OWN full-screen surface** (`EdgeGrip.qml`), not an
   item in the panel, and that is load-bearing. Wayland delivers pointer
   coordinates in SURFACE coordinates and a layer-surface resize is a
