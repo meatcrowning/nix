@@ -728,6 +728,48 @@ static int luaRollup(lua_State* L) {
     return 0;
 }
 
+// lua: hyprvtb.push_rolled(reserve_px, "left"|"right") — shove every ROLLED-UP
+// window's floating bar out from under a panel that just grew into a dock,
+// per monitor. Returns the number of bars that actually moved.
+//
+// This exists because a rolled-up window is the one thing a helper script
+// CANNOT push. The panel's own script relocates ordinary floating windows with
+// hl.dsp.window.move and that works — but a shaded window is setHidden(true)
+// and its bar is painted at m_rollBox, a snapshot captured at roll-up time.
+// The decoration positioner never refreshes a hidden window (updateWindowDecos
+// early-returns on it), so nothing recomputes that box: moving the window from
+// outside moves only where it will pop back out later, while the visible bar
+// stays exactly where it was, still under the panel. m_rollBox has one owner —
+// the decoration — so the push has to come from in here.
+//
+// Per-bar work (band arithmetic, damage, warp) is CVtbDeco::pushRolledIntoBand,
+// which mirrors the rolled-bar drag path step for step; this is just the sweep,
+// and it skips anything not rolled / mid-animation there rather than here so
+// there is a single place that decides what is safe to move.
+static int luaPushRolled(lua_State* L) {
+    if (!g_pGlobalState)
+        return 0;
+
+    // Pull every lua value out before anything non-trivial exists on this frame
+    // (luaL_* can longjmp on a type error) — same discipline as luaKineticSet.
+    const double RESERVE = luaL_optnumber(L, 1, 0.0);
+    const char*       RAWEDGE = luaL_optstring(L, 2, "right");
+    const std::string EDGE    = RAWEDGE ? RAWEDGE : "";
+    const bool        RIGHT   = EDGE != "left"; // anything but "left" means right
+
+    int moved = 0;
+    if (RESERVE > 0.0) { // 0 = nothing to do; don't even walk the list
+        for (auto& b : g_pGlobalState->bars) {
+            if (!b)
+                continue;
+            if (b->pushRolledIntoBand(RESERVE, RIGHT))
+                moved++;
+        }
+    }
+    lua_pushnumber(L, moved);
+    return 1;
+}
+
 // lua: hyprvtb.toggle_scratch() — the Meta+S slide-in terminal.
 static int luaToggleScratch(lua_State* L) {
     if (g_pGlobalState)
@@ -1172,6 +1214,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_all", ::luaCloseAll);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "push_rolled", ::luaPushRolled);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_set", ::luaKineticSet);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_test", ::luaKineticTest);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_dump", ::luaKineticDump);
@@ -1222,7 +1265,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.82"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.83"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

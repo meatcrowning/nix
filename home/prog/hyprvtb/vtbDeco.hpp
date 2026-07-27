@@ -57,6 +57,14 @@ class CVtbDeco : public IHyprWindowDecoration {
     bool                               isMinimized() const { return m_bMinimized; } // for session snapshot
     bool                               isRolledUp() const { return m_bRolledUp; }   // for session snapshot
 
+    // Shove this window's SHADED bar back inside the un-covered horizontal band
+    // of its own monitor (`reserve` px taken off the right edge, or off the left
+    // when edgeRight is false), returning true if it moved. Public because only
+    // the plugin can do this at all: a rolled-up bar is drawn at the frozen
+    // m_rollBox of a hidden window, so an outside `window.move` moves nothing
+    // visible. Driven by hyprvtb.push_rolled() when the panel grows into a dock.
+    bool                               pushRolledIntoBand(double reserve, bool edgeRight);
+
     // The mid-roll composite's drop shadow, in pMonitor's device pixels. False
     // when there is none to draw. vtbRenderShadowLayer calls this so the roll's
     // shadow joins the SAME union as every resting window's — see the

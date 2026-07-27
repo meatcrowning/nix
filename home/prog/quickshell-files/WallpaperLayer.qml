@@ -31,13 +31,23 @@ PanelWindow {
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
     // The desktop the user can actually see. Everything is centred in HERE.
+    //
+    // Tracks the COMMITTED width (barWidth), not the live drag. Re-centring the
+    // art on every pointer event means re-cropping a full-screen texture at
+    // pointer rate for an image nobody is looking at yet — the panel edge is
+    // what the eye follows during a drag. So it waits for the release and then
+    // glides to the new centre, which costs one animation instead of a whole
+    // drag's worth of frames.
     Item {
         id: visibleArea
         y: 0
         height: parent.height
-        x: root.barLeft ? ViewMode.liveWidth : 0
-        width: Math.max(1, parent.width - ViewMode.liveWidth)
+        x: root.barLeft ? ViewMode.barWidth : 0
+        width: Math.max(1, parent.width - ViewMode.barWidth)
         clip: true
+
+        Behavior on x { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
 
         // The two frames of the cross-fade. Only one is showing at a time; a new
         // wallpaper is loaded into whichever is hidden and revealed once it has

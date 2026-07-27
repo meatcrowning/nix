@@ -18,6 +18,7 @@ import Quickshell.Wayland
 // invisible under it the moment hyprpaper next churns. Bottom always paints
 // above Background regardless of mapping order.
 PanelWindow {
+    id: root
     required property var modelData
     screen: modelData
 
@@ -29,40 +30,52 @@ PanelWindow {
     // visible there and matches the left/right stripe.
     property int thickness: 2
 
-    // The horizontal stripes span the desktop the panel does NOT cover, and they
-    // must follow the panel edge EXACTLY while it is being dragged.
+    // The horizontal stripes span the desktop the panel does NOT cover, so they
+    // have to follow the panel edge exactly while it is dragged.
     //
-    // They used to get that for free by being anchored to both side edges and
-    // letting the exclusive zone shorten them. That broke the moment the zone
-    // stopped being rewritten per drag frame (it makes Hyprland re-run the whole
-    // layout, which fights the resize): the stripes then only updated on
-    // release, so widening the desktop left a gap at the end of each one — the
-    // shortfall was invisible while the panel GREW, because the stripe was
-    // simply covered, and obvious the other way.
+    // TWO wrong ways to do that, both already tried:
+    //   1. Anchor them to both side edges and let the panel's EXCLUSIVE ZONE
+    //      shorten them. That stopped working the moment the zone stopped being
+    //      rewritten per drag frame (rewriting it makes Hyprland re-run the whole
+    //      layout, which fights the resize) — the stripes then only updated on
+    //      release, leaving a gap when the desktop widened. Invisible while the
+    //      panel GREW, because the stripe was simply covered.
+    //   2. Bind the WINDOW's implicitWidth to ViewMode.liveWidth. That is a
+    //      layer-surface resize, i.e. a configure/ack roundtrip, so the stripes
+    //      visibly lagged the cursor — the same mistake this file's own comment
+    //      warns about elsewhere.
     //
-    // So they are sized explicitly off ViewMode.liveWidth instead, anchored to
-    // one side only, and ignore exclusive zones entirely (with the zone still in
-    // play the panel's reservation would shorten them a second time on top of
-    // this). Same reason EdgeGrip.qml needs Ignore, and the same rule applies:
-    // do not set exclusiveZone alongside it.
+    // So: the SURFACE is a fixed full-width strip that never resizes, and the
+    // stripe inside it is a plain Rectangle whose width is the binding. An item
+    // geometry change lands in the frame it is made. Ignore is needed so the
+    // panel's reservation doesn't shorten the surface underneath us.
     readonly property bool horizontal: edge === "top" || edge === "bottom"
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
     anchors {
-        left: horizontal ? true : edge !== "right"
-        right: horizontal ? false : edge !== "left"
+        left: horizontal || edge !== "right"
+        right: horizontal || edge !== "left"
         top: edge !== "bottom"
         bottom: edge !== "top"
     }
     exclusionMode: ExclusionMode.Ignore
 
-    implicitWidth: horizontal
-        ? Math.max(1, (screen ? screen.width : 1920) - ViewMode.liveWidth)
-        : thickness
+    implicitWidth: thickness      // ignored when anchored to both sides
     implicitHeight: thickness
-    // With the bar on the left the stripes start past it rather than at 0.
-    margins.left: (horizontal && barLeft) ? ViewMode.liveWidth : 0
-    color: Theme.accent
+    color: horizontal ? "transparent" : Theme.accent
+
+    // The visible stripe. Horizontal only — the vertical ones are the window
+    // itself, since their length never changes.
+    Rectangle {
+        visible: root.horizontal
+        color: Theme.accent
+        anchors {
+            top: parent.top; bottom: parent.bottom
+            left: root.barLeft ? undefined : parent.left
+            right: root.barLeft ? parent.right : undefined
+        }
+        width: Math.max(0, parent.width - ViewMode.liveWidth)
+    }
 
     WlrLayershell.layer: WlrLayer.Bottom
     WlrLayershell.namespace: "qs-edge-accent"

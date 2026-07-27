@@ -102,18 +102,25 @@ def main():
         # minimized window is still mapped and NOT hidden — just slid
         # off-screen").
         #
-        #   rolled up  -> hidden=true, but the titlebar is STILL DRAWN in place.
-        #                 It is on screen, so it must be pushed clear like
-        #                 anything else. Skipping these was the bug.
+        #   rolled up  -> hidden=true, and the titlebar is STILL DRAWN in place.
+        #                 It must be pushed clear, but NOT from here: the drawn
+        #                 bar sits at m_rollBox, a snapshot frozen at roll-up
+        #                 time, and the window is hidden so the decoration
+        #                 positioner never refreshes it. Moving the window from
+        #                 outside moves nothing visible. The plugin does these
+        #                 itself, via push_rolled() below — and it must be the
+        #                 ONLY one that touches them, or the window gets shifted
+        #                 twice for one overhang.
         #   minimized  -> not hidden; parked at monitor.x + monitor.width by
-        #                 minimizeWindow(). It is deliberately off-screen and
-        #                 must be left alone, or resizing the panel would haul
-        #                 every minimized window back into view.
+        #                 minimizeWindow(). Deliberately off-screen, so leave it
+        #                 alone or resizing the panel hauls every minimized
+        #                 window back into view.
         #
         # Minimized is detected by that parked position rather than by asking
         # the plugin: nothing in hyprctl reports it, and "entirely outside the
         # monitor" is the property we actually care about anyway.
-        rolled = bool(c.get("hidden"))
+        if c.get("hidden"):
+            continue
         if x >= mon["x"] + mon["width"] or x + w <= mon["x"]:
             continue
 
@@ -129,25 +136,17 @@ def main():
 
         addr = c["address"]
 
-        # Work in VISIBLE-BOX coordinates, then convert back to the client
+        # Work in VISIBLE-BOX coordinates — the client rect grown by the chrome,
+        # so the titlebar is pushed clear too — then convert back to the client
         # `at`/`size` the dispatchers speak.
-        #
-        # Rolled up, the client is not drawn at all — only the titlebar, which
-        # sits just past the client's right edge (m_rollBox = {winBox.x +
-        # winBox.w, y, totalBarW, h}). So its visible box is the bar alone, and
-        # it must never be "resized to fit": its width is the chrome's, fixed.
-        if rolled:
-            vis_l = x + w
-            vis_w = extra_right + border
-        else:
-            vis_l = x - border
-            vis_w = w + extra_right + 2 * border
+        vis_l = x - border
+        vis_w = w + extra_right + 2 * border
 
         # A box too wide for what's left has to shrink, or no placement can keep
         # it clear of the panel. The chrome is fixed-size, so the whole shrink
         # comes off the client area.
         new_vis_w = min(vis_w, avail_w)
-        new_w = w if rolled else max(1, new_vis_w - extra_right - 2 * border)
+        new_w = max(1, new_vis_w - extra_right - 2 * border)
 
         # Then slide it back inside: off the right first, then clamp to the left
         # (order matters for a box exactly as wide as the space).
@@ -156,7 +155,7 @@ def main():
             new_vis_l = avail_r - new_vis_w
         if new_vis_l < avail_l:
             new_vis_l = avail_l
-        new_x = (new_vis_l - w) if rolled else (new_vis_l + border)
+        new_x = new_vis_l + border
 
         if new_w != w:
             cmds.append(f'hl.dsp.window.resize({{ window = "address:{addr}", '
@@ -168,6 +167,14 @@ def main():
     for c in cmds:
         subprocess.run(["hyprctl", "dispatch", c],
                        capture_output=True, text=True)
+
+    # Rolled-up windows, which only the plugin can move (see above). One call
+    # sweeps every rolled bar on every monitor. A plugin action is a Lua
+    # function, never a dispatcher — `hyprctl dispatch <name>` would evaluate
+    # the name as a Lua expression and silently do nothing.
+    subprocess.run(["hyprctl", "eval",
+                    f"hl.plugin.hyprvtb.push_rolled({reserve}, '{edge}')"],
+                   capture_output=True, text=True)
 
 
 if __name__ == "__main__":

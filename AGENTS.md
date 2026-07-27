@@ -90,19 +90,28 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
   places this bit, all fixed the same way — put the moving edge in an ITEM
   binding inside a surface that does not resize:
   - **The panel** (`shell.qml`): the visible bar is `barBody`, an Item anchored
-    to the screen edge with `width: ViewMode.liveWidth`. The surface only grows
-    (to `maxPx`) *while dragging*, is `color: "transparent"` with
-    `mask: Region { item: barBody }`, and paints its background from a Rectangle
-    inside barBody. barBody is ANCHORED, never positioned by `x`, so the
-    surface's grow/shrink at drag start and end cannot shift it even a frame.
-    This also removed the flick-away-and-back on release, which was the surface
-    resizing once more as the committed width landed.
-  - **The accent stripes** (`EdgeAccent.qml`): the horizontal ones span
-    `screen.width - ViewMode.liveWidth` explicitly and use
-    `exclusionMode: Ignore`. They used to be anchored to both sides and shortened
-    by the exclusive zone — which stopped updating per frame once the zone was
-    frozen during drags, so they only resized on release. Invisible while the
-    panel GREW (the stripe was simply covered) and an obvious gap the other way.
+    to the screen edge with `width: ViewMode.liveWidth`. The surface is a
+    CONSTANT `ViewMode.maxPx`, transparent, input-masked to the bar, painting
+    its background from a Rectangle inside barBody. It must stay constant:
+    sizing it to the bar except while dragging put a resize on the press and
+    another on the release, and each made the panel visibly JUMP (right on
+    click, left on release) — resizing a surface anchored to the right edge
+    moves it too, and the compositor can apply the new geometry a frame before
+    the matching buffer arrives. Same cause as the old flick-away-and-back when
+    the committed width landed.
+  - **The accent stripes** (`EdgeAccent.qml`): the horizontal ones are
+    FULL-WIDTH surfaces (`exclusionMode: Ignore`) that never resize, with the
+    visible stripe an inner Rectangle of `parent.width - ViewMode.liveWidth`.
+    Two earlier versions were wrong: anchored to both sides and shortened by the
+    exclusive zone (which stops updating once the zone is frozen during a drag,
+    so they only resized on release — invisible while the panel GREW because the
+    stripe was covered, an obvious gap the other way), then with the WINDOW's
+    implicitWidth bound to liveWidth, which is a surface resize and so lagged
+    the cursor.
+  - **The wallpaper is the deliberate exception**: `WallpaperLayer.qml` tracks
+    the COMMITTED `barWidth` and glides to it, because re-cropping a
+    full-screen texture per pointer event costs real work for an image nobody
+    is watching mid-drag — the panel edge is what the eye follows.
   - **The grip** (`EdgeGrip.qml`), below.
 - **The resize handle is its OWN full-screen surface** (`EdgeGrip.qml`), not an
   item in the panel, and that is load-bearing. Wayland delivers pointer
