@@ -81,7 +81,12 @@ Item {
     // the tile's Loader is asynchronous: a binding through `loader.item` would
     // be undefined for the first frames and the grid would re-lay itself out
     // when it resolved.
-    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 6
+    // Mirrors WeatherContent's `minCondensed`: its padding, one line of text,
+    // the 3px gap and `minMiniGraph` (24) — because the condensed forecast is
+    // not a bare line, it keeps a miniature of the graph, and asking for that
+    // form is asking for the room it needs. Raising this is what buys the room;
+    // on this panel it takes the drawer from four rows to three.
+    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 3 + 24
     readonly property int minWeatherRows: cellHeight > 0
         ? Math.max(1, Math.ceil((minWeatherPx + spacing) / (cellHeight + spacing))) : 2
     // 6 is the forecast's own `rs` below; it may not be reduced past its minimum.

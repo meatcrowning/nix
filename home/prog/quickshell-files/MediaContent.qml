@@ -19,7 +19,7 @@ Item {
     readonly property real inner: Math.max(180, width - 24)
 
     onActiveChanged: Media.watch(root, active)
-    Component.onCompleted: { Media.watch(root, active); drawerOut = Media.queueOpen; }
+    Component.onCompleted: { Media.watch(root, active); drawerOut = Media.queueOpen; noteRestSlack(); }
     Component.onDestruction: Media.watch(root, false)
 
     // ---- a transport button: pixel-font glyph, themed frame -------------
@@ -420,8 +420,41 @@ Item {
     // panel reloaded with the drawer already out would balloon the artwork
     // exactly once, on the next close, and behave from then on.
     property bool drawerOut: false
+
+    // The tile's height above the widget's NATURAL size while the drawer is in.
+    // The drawer gives back exactly the rows the grid added and no more, so the
+    // artwork row — which is the leftover — is the same size open and closed.
+    //
+    // Without it the drawer took everything above `naturalRest`, including the
+    // slack the tile already had (`qs ipc call live tiles` reports it: 7px
+    // here, and a whole row on a taller grid). That slack belongs to the
+    // artwork when the drawer is in, so the cover measured 65x65 closed and
+    // 60x60 open — and because `artBox.width` follows `mid.height`, the cover
+    // changed in BOTH dimensions and the spectrum's left edge moved with it.
+    // The entire top of the widget visibly reflowed around a queue that is
+    // supposed to open underneath it.
+    //
+    // It is sampled, not derived, because it is only knowable while the drawer
+    // is in — and the sample has to be taken on `drawerOut` as well as on
+    // height, since the tile has finished gliding by the time the close hold
+    // expires and no further height change is coming.
+    property real restSlack: 0
+    // Both flags, and `Media.queueOpen` is the load-bearing half. On a reload
+    // with the drawer already out, the tile is laid out at its OPEN height
+    // before this component has decided that the drawer is out — `drawerOut` is
+    // seeded from a setting that arrives at the end of the load pass — so a
+    // sample taken on `!drawerOut` alone recorded the open slack (measured: 98px
+    // instead of 5) and the drawer then computed a height of zero for the rest
+    // of the session. `Media.queueOpen` is already true at that point.
+    function noteRestSlack() {
+        if (!drawerOut && !Media.queueOpen)
+            restSlack = Math.max(0, height - naturalRest);
+    }
+    onHeightChanged: noteRestSlack()
+    onDrawerOutChanged: noteRestSlack()
+
     readonly property real queueH: drawerOut
-        ? Math.max(0, root.height - naturalRest) : 0
+        ? Math.max(0, root.height - naturalRest - restSlack) : 0
 
     Timer {
         id: closeHold
