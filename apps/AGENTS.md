@@ -31,7 +31,10 @@ can't decode makes it the thing that fails to open it.
 
 Being a **file picker** is a different mechanism entirely — the
 `org.freedesktop.impl.portal.FileChooser` D-Bus backend, not a MIME
-association. Nothing here implements it today.
+association. **filer implements it** (`filer/portal.py` + `filer/pick.py`,
+packaged by `home/prog/filer-portal.nix`), and it **ships dormant**: turn it on
+with `filer-portal-switch on`, off with `filer-portal-switch off`. See
+[`filer/AGENTS.md`](filer/AGENTS.md).
 
 ## Why this tree is OUTSIDE `home/` and `sys/`
 

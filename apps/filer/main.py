@@ -44,6 +44,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
+from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
 
 # Preview classification. `kind` is the scaffold for file previews: the QML side
 # groups/renders entries by it (images get a thumbnail grid at the top of the
@@ -589,14 +590,37 @@ def main():
 
     settings = Settings()
 
-    # Start directory: an explicit existing-directory argument (e.g. `filer
-    # /mnt/foo`, used by the disk widget's open button) wins; otherwise reopen
-    # the last-viewed directory; otherwise fall back to home.
+    # `filer --pick <spec.json>` runs the window as a modal file chooser for the
+    # portal backend (pick.py / portal.py). An unusable spec is a hard exit: the
+    # backend reads "no result file" as a cancel, so opening an ordinary browser
+    # window here would leave the calling app's dialog waiting on a window the
+    # user has no reason to close.
+    spec = None
+    if "--pick" in sys.argv[1:]:
+        i = sys.argv.index("--pick")
+        if i + 1 >= len(sys.argv):
+            print("filer: --pick needs a spec file", file=sys.stderr)
+            sys.exit(2)
+        spec = load_spec(sys.argv[i + 1])
+        if spec is None:
+            sys.exit(2)
+    picker = Picker(spec)
+
+    # Start directory: while picking, the requested current_folder wins (falling
+    # through to the same rules if it is missing or gone). Otherwise an explicit
+    # existing-directory argument (e.g. `filer /mnt/foo`, used by the disk
+    # widget's open button); otherwise reopen the last-viewed directory;
+    # otherwise home.
     start_dir = None
-    for arg in sys.argv[1:]:
-        if os.path.isdir(arg):
-            start_dir = os.path.abspath(arg)
-            break
+    if spec:
+        cf = spec.get("current_folder")
+        if cf and os.path.isdir(cf):
+            start_dir = os.path.abspath(cf)
+    if start_dir is None:
+        for arg in sys.argv[1:]:
+            if arg != "--pick" and os.path.isdir(arg):
+                start_dir = os.path.abspath(arg)
+                break
     if start_dir is None:
         saved = settings.value("dir", "")
         start_dir = saved if saved and os.path.isdir(saved) else str(Path.home())
@@ -626,6 +650,7 @@ def main():
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("VideoConv", videoconv)
+    ctx.setContextProperty("Picker", picker)
     ctx.setContextProperty("startDir", start_dir)
     # Last-used sort + hidden-files toggle, restored into the view on startup.
     ctx.setContextProperty("startSortField", settings.value("sortField", "name"))
