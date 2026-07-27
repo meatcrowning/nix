@@ -59,7 +59,12 @@ let
             >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
         }
         [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync pull
-        /usr/bin/python3 /home/lam/nix/apps/surfer/main.py "$@"
+        # Launched from the runner, so the app's own stdio has nowhere to go and
+        # Qt/Chromium diagnostics were being thrown away. Keep one session's
+        # worth (truncated per launch) — this is how the mid-session GPU/raster
+        # fallback gets caught alongside ~/.cache/surfer-gpu.log.
+        /usr/bin/python3 /home/lam/nix/apps/surfer/main.py "$@" \
+          > "$HOME/.cache/surfer.log" 2>&1
         rc=$?
         [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync push
         exit $rc

@@ -42,6 +42,11 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
 
+# True on air/book, where surfer runs Fedora's system python3 + python3-pyside6
+# (nixpkgs Mesa has no Apple Silicon GBM driver); False on top, which runs the
+# nixpkgs build. The GPU workarounds below are air's alone.
+ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
+
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 
@@ -541,6 +546,66 @@ IMAGE_CLICK_JS = r"""
 """
 
 
+# air-only diagnostic for "after a while, all page text renders badly
+# antialiased, and only a restart fixes it" (chrome text stays crisp, so the
+# fault is inside Chromium's raster path, not Qt's). The suspicion is that the
+# GPU context is lost mid-session and Chromium silently falls back to software
+# raster for the rest of the run — but chrome://gpu is useless here (QtWebEngine
+# loads the page and never populates it) and Chromium's own logging prints
+# nothing even at --log-level=0, so the state has to be sampled from inside a
+# real, visible renderer.
+#
+# That is what this is: ONE 1x1 WebGL context per page, whose UNMASKED_RENDERER
+# string names the driver actually serving this renderer process. Hardware says
+# "Apple M2 …"; a fallback says llvmpipe/SwiftShader. It reports through the
+# same surfercmd:// channel as the image-click handler. Delete this (and the
+# `gpu` arm of CmdHandler) once the cause is nailed down.
+#
+# The context is created once and then only POLLED. An earlier version dropped
+# it between samples with WEBGL_lose_context.loseContext(), which measurably
+# took the shared context down with it in the same breath — "RasterDecoderImpl:
+# Context lost during MakeCurrent" the instant the probe fired. An instrument
+# that induces the fallback it is looking for is worse than none, so: never
+# force-lose a context here, and never create a fresh one per sample either
+# (Chromium force-loses the oldest once a page passes its context cap, which
+# amounts to the same thing).
+GPU_PROBE_JS = r"""
+(function(){
+  if (window.__surfer_gpuprobe) return;
+  window.__surfer_gpuprobe = true;
+  var gl = null, last = '';
+  try {
+    var c = document.createElement('canvas');
+    c.width = c.height = 1;
+    gl = c.getContext('webgl2') || c.getContext('webgl');
+    window.__surfer_gpuprobe_ctx = gl;     // keep it alive; do NOT lose it
+  } catch(_){}
+  function probe(){
+    var r = 'no-webgl', ver = '';
+    try {
+      if (gl && gl.isContextLost()) {
+        r = 'CONTEXT-LOST';
+      } else if (gl) {
+        var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        r = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+                       : gl.getParameter(gl.RENDERER));
+        ver = String(gl.getParameter(gl.VERSION));
+      }
+    } catch (e) { r = 'probe-error:' + e; }
+    var line = r + (ver ? ' | ' + ver : '');
+    if (line === last) return;             // one report per page, then only on change
+    last = line;
+    try {
+      fetch('surfercmd://gpu/?r=' + encodeURIComponent(line)
+            + '&h=' + encodeURIComponent(location.host)).catch(function(){});
+    } catch(_){}
+  }
+  probe();
+  setInterval(probe, 60000);               // background tabs are throttled to ~1/min anyway
+})();
+"""
+
+
 class CmdHandler(QWebEngineUrlSchemeHandler):
     """Serves ``surfercmd://<verb>/?...`` — a one-way page->app command channel
     (the page fetches it; there's no meaningful response). Currently just
@@ -550,10 +615,35 @@ class CmdHandler(QWebEngineUrlSchemeHandler):
 
     openTab = Signal(str)
 
+    GPU_LOG = Path.home() / ".cache" / "surfer-gpu.log"
+
+    def _log_gpu(self, line, host):
+        """Append a GPU-renderer sample, deduped: only a change of renderer
+        string gets a line (plus one at the first sample and a 15-minute
+        heartbeat), so an all-day session leaves a log you can read at a glance
+        and the moment of any fallback is timestamped."""
+        now = time.time()
+        prev = getattr(self, "_gpu_last", None)
+        if prev == line and now - getattr(self, "_gpu_at", 0) < 900:
+            return
+        tag = "CHANGED" if (prev is not None and prev != line) else "sample"
+        self._gpu_last, self._gpu_at = line, now
+        try:
+            with open(self.GPU_LOG, "a", encoding="utf-8") as f:
+                f.write("%s %-7s %s   (%s)\n"
+                        % (time.strftime("%Y-%m-%dT%H:%M:%S"), tag, line, host))
+        except OSError:
+            pass
+
     def requestStarted(self, job):
         try:
             u = job.requestUrl()
-            if u.host() == "open":
+            if u.host() == "gpu":
+                from PySide6.QtCore import QUrlQuery
+                q = QUrlQuery(u)
+                fmt = QUrl.ComponentFormattingOption.FullyDecoded
+                self._log_gpu(q.queryItemValue("r", fmt), q.queryItemValue("h", fmt))
+            elif u.host() == "open":
                 from PySide6.QtCore import QUrlQuery
                 target = QUrlQuery(u).queryItemValue("u", QUrl.ComponentFormattingOption.FullyDecoded)
                 # Any page can fetch surfercmd://open, so only honour schemes the
@@ -1697,12 +1787,24 @@ def main():
     # video frames travel through, which is the part Asahi actually breaks, and
     # leaves page compositing on the GPU where scrolling needs it.
     #
-    # If video ever glitches again, `SURFER_GPU=safe surfer` restores the old
-    # blunt behaviour without an edit.
-    if os.path.realpath(sys.executable).startswith("/usr/"):
+    # SURFER_GPU picks the workaround without an edit:
+    #   (unset)    the narrow flag above — current default
+    #   softraster + --disable-gpu-rasterization. Page COMPOSITING stays on the
+    #              GPU (so scrolling keeps its framerate) but every tile,
+    #              glyphs included, is rasterised on the CPU by one code path
+    #              that cannot be lost mid-session. This is the candidate fix
+    #              for "text degrades into bad antialiasing after a while";
+    #              costs some raster throughput on heavy pages.
+    #   safe       the old blunt --disable-gpu-compositing, if video ever
+    #              glitches out again.
+    if ON_AIR:
         _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-        _gpu = ("--disable-gpu-compositing" if os.environ.get("SURFER_GPU") == "safe"
-                else "--disable-gpu-memory-buffer-video-frames")
+        _mode = os.environ.get("SURFER_GPU", "")
+        _gpu = "--disable-gpu-memory-buffer-video-frames"
+        if _mode == "safe":
+            _gpu = "--disable-gpu-compositing"
+        elif _mode == "softraster":
+            _gpu += " --disable-gpu-rasterization"
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " " + _gpu).strip()
 
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
@@ -1779,6 +1881,7 @@ def main():
     pagecmd = CmdHandler(app)
     ctx.setContextProperty("PageCmd", pagecmd)
     ctx.setContextProperty("imageClickJs", IMAGE_CLICK_JS)
+    ctx.setContextProperty("gpuProbeJs", GPU_PROBE_JS if ON_AIR else "")
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
 
