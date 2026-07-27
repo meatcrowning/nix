@@ -70,6 +70,28 @@ in
     };
   };
 
+  # smbd must not start before the library is actually mounted. The SSD
+  # (sys/disks.nix) is `nofail`, so it is NOT part of local-fs.target's
+  # requirements and smbd's own ordering lets it win the race — on the
+  # 2026-07-26 boot it did: smbd came up at 12:32:38, one second before the
+  # exfat mount, logged
+  #     canonicalize_connect_path failed for service aud
+  # and answered book's reconnect with BAD_NETWORK_NAME. That is not a
+  # transient: the client's tcon is dead for good, so the mount on book stayed
+  # "active" while every access returned ESTALE, and the player refused to
+  # launch. RequiresMountsFor pulls in and orders after the mount unit; if the
+  # drive is genuinely absent smbd simply does not run, which is right — `aud`
+  # is the only share, and not listening beats listening with no library.
+  #
+  # Named as the mount UNIT rather than via RequiresMountsFor: upstream's
+  # samba.nix already defines that option (for /var/lib/samba) and a second
+  # definition is an eval conflict, not a merge. requires+after on
+  # run-media-lam-SSD.mount is exactly equivalent for a path inside it.
+  systemd.services.samba-smbd = {
+    requires = [ "run-media-lam-SSD.mount" ];
+    after = [ "run-media-lam-SSD.mount" ];
+  };
+
   # Samba keeps its OWN password database, seeded once by hand:
   #     sudo smbpasswd -a lam
   # NixOS cannot declare that (it is a secret), so it is a documented one-time
