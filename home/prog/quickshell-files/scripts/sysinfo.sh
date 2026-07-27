@@ -1,6 +1,6 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount|dskReadSectors|dskWriteSectors|psiCpu|psiIo|psiMem|powerW
 #
 # Fields are POSITIONAL and SysInfo.qml indexes them, so new ones go on the
 # END. Everything after batteryCharging was added for the dock's task manager;
@@ -145,4 +145,63 @@ for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/
     break
 done
 
-printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans"
+# ---- the three book replaces gpu/vram/fan with ---------------------------
+# book has no source at all for those: Asahi's DRM driver publishes no fdinfo
+# engine counters and no devfreq node (so there is no GPU utilization to read),
+# its GPU memory is the system's (so there is no separate pool), and the machine
+# is fanless. These three are what it CAN measure, and they are collected on
+# both hosts anyway — they are three sysfs reads, and the panel picks the card
+# set by host.
+
+# Disk throughput: cumulative sectors read/written, summed over the PHYSICAL
+# block devices only. /proc/diskstats lists partitions alongside their parent
+# disk, so an unfiltered sum counts every I/O two or three times over. Raw
+# counters like rxBytes/txBytes above — SysInfo.qml diffs two polls for a rate.
+# Sectors are 512B in this interface regardless of the drive's real block size.
+dsk=$(awk '$3 ~ /^(nvme[0-9]+n[0-9]+|sd[a-z]+|mmcblk[0-9]+|vd[a-z]+)$/ { r += $6; w += $10 }
+    END { printf "%d|%d", r, w }' /proc/diskstats 2>/dev/null)
+[ -z "$dsk" ] && dsk="0|0"
+
+# Pressure stall information: the percentage of the last 10s during which at
+# least one task was blocked waiting on cpu, io or memory. "some", not "full" —
+# full means EVERY task was stalled, which on an interactive desktop is rare
+# enough to read as a flat zero, while some is exactly the "why does this feel
+# slow right now" signal. Printed by a function rather than an awk over all
+# three, so a missing /proc/pressure/* yields "-1" instead of dropping the field
+# and shifting every position after it.
+psi_of() {
+    v=$(awk '/^some /{ sub(/^avg10=/, "", $2); print $2; exit }' "/proc/pressure/$1" 2>/dev/null)
+    [ -n "$v" ] || v=-1
+    printf '%s' "$v"
+}
+psi="$(psi_of cpu)|$(psi_of io)|$(psi_of memory)"
+
+# Whole-machine power draw, watts. book publishes it as macsmc_hwmon's "Total
+# System Power": measured across an idle->busy step it tracks
+# macsmc-battery/power_now exactly, one sample behind (4.7W idle, 18.7W with
+# four spinners), so it is the system's draw and not just the SoC's. Falls back
+# to a generic ACPI power_now. -1 where nothing reports it (top, a desktop),
+# where this card is not drawn anyway.
+powerw=-1
+for dir in /sys/class/hwmon/hwmon*/; do
+    [ "$(cat "$dir/name" 2>/dev/null)" = "macsmc_hwmon" ] || continue
+    for lbl in "$dir"power*_label; do
+        [ -f "$lbl" ] || continue
+        [ "$(cat "$lbl" 2>/dev/null)" = "Total System Power" ] || continue
+        raw=$(cat "${lbl%_label}_input" 2>/dev/null)
+        [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ printf "%.2f", u / 1000000 }')
+        break
+    done
+    break
+done
+if [ "$powerw" = "-1" ]; then
+    for dir in /sys/class/power_supply/BAT*/; do
+        [ -r "$dir/power_now" ] || continue
+        raw=$(cat "$dir/power_now" 2>/dev/null)
+        # sign convention varies by driver; the magnitude is the draw either way
+        [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ if (u < 0) u = -u; printf "%.2f", u / 1000000 }')
+        break
+    done
+fi
+
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans" "$dsk" "$psi" "$powerw"
