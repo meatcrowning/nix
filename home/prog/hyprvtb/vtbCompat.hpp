@@ -69,6 +69,7 @@
 #include <hyprland/src/desktop/view/View.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/layout/target/Target.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -198,6 +199,44 @@ namespace Vtb::Hl {
     // Jump straight to a position/size with no animation.
     inline void warpPos(PHLWINDOW w, const Vector2D& p) {
         posAnim(w)->setValueAndWarp(p);
+    }
+    // Where the LAYOUT thinks the window is — the box a native drag seeds
+    // itself from. Normally identical to posGoal(); they diverge exactly when
+    // something warped the animation without telling the layout, which is the
+    // bug warpPosLogical() below exists to prevent.
+    inline Vector2D posLogical(PHLWINDOW w) {
+        const auto TARGET = w->layoutTarget();
+        return TARGET ? TARGET->position().pos() : posGoal(w);
+    }
+
+    // Move a window and tell the LAYOUT about it. Use this, not warpPos(), for
+    // any relocation the plugin performs outside a native drag.
+    //
+    // warpPos() writes only the animated variable (value + goal). The layout
+    // target keeps its OWN logical box (ITarget::m_box.logicalBox), and that is
+    // the authoritative position: CDragStateController::updateDragWindow seeds
+    // m_beginDragPositionXY from `DRAGGINGTARGET->position()`, i.e. the logical
+    // box, and every subsequent motion sets `logical + DELTA`. So a window the
+    // plugin moved by warping alone LOOKS moved but is still filed at its old
+    // spot — and the first frame of the next native drag teleports it back
+    // there. That is the "drag a rolled-up bar, unroll it, drag it: the window
+    // jumps" bug (fixed 2.84); an older comment here claimed setValueAndWarp
+    // kept the logical position in sync, which was true of the pre-0.55 layout
+    // and is not true of the target-based one.
+    //
+    // Route through the target the same way updateEdgeResize does
+    // (setPositionGlobal + warpPositionSize: instant, no rubber-banding). Size
+    // is carried through unchanged. Falls back to a plain warp if the window
+    // has no target — nothing else can be done then, and a visibly-stuck window
+    // would be worse than a stale logical box.
+    inline void warpPosLogical(PHLWINDOW w, const Vector2D& p) {
+        const auto TARGET = w->layoutTarget();
+        if (!TARGET) {
+            posAnim(w)->setValueAndWarp(p);
+            return;
+        }
+        TARGET->setPositionGlobal(CBox{p, sizeGoal(w)});
+        TARGET->warpPositionSize();
     }
     // Land the window on its goal immediately — kills a residual animation tail.
     inline void warpToGoal(PHLWINDOW w) {

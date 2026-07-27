@@ -2597,12 +2597,13 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
                 m_iHoverCell = -1;
                 if (PWINDOW) {
                     // Move the hidden window so it reappears here on restore.
-                    // setValueAndWarp sets both value and goal, so the logical
-                    // position (position(GEOMETRIC_GOAL)) tracks it too — a later
-                    // real drag no longer snaps back to the pre-shade spot before
-                    // following the cursor (the "skips positions" bug).
+                    // warpPosLogical, NOT warpPos: the layout target owns the
+                    // authoritative position and is what the next native drag
+                    // seeds itself from, so warping the animation alone left the
+                    // window filed at its pre-shade spot and the first frame of
+                    // a post-unroll drag teleported it back there.
                     const Vector2D NEWPOS = m_rollDragWinStart + DELTA;
-                    Hl::warpPos(PWINDOW, NEWPOS);
+                    Hl::warpPosLogical(PWINDOW, NEWPOS);
                 }
                 Hl::damage(CBox{effectiveBoxGlobal()}.expand(2)); // new spot, same cushion
             }
@@ -2972,7 +2973,7 @@ void CVtbDeco::handleRolledDown(Event::SCallbackInfo& info) {
     m_iRollPressCell     = CELL;
     m_rollDragMouseStart = MOUSE;
     m_rollDragBoxStart   = m_rollBox;
-    m_rollDragWinStart   = Hl::posGoal(PWINDOW); // logical box, same as a real drag reads
+    m_rollDragWinStart   = Hl::posLogical(PWINDOW); // the layout's box — same origin a real drag reads
 }
 
 void CVtbDeco::handleRolledUp(Event::SCallbackInfo& info) {
@@ -3257,10 +3258,10 @@ bool CVtbDeco::pushRolledIntoBand(double reserve, bool edgeRight) {
     m_rollBox.x += dx;
     m_iHoverCell = -1; // the bar moved out from under the cursor
     // Move the hidden window too, so it reappears under its bar on unroll.
-    // warpPos is setValueAndWarp, so the logical goal tracks as well and a later
-    // real drag doesn't snap back to the pre-push spot — same semantics (and the
-    // same posGoal-relative arithmetic) the drag uses via m_rollDragWinStart.
-    Hl::warpPos(PWINDOW, Hl::posGoal(PWINDOW) + Vector2D{dx, 0.0});
+    // Through the layout target (warpPosLogical), for the same reason the drag
+    // does: warping only the animation leaves the layout filed at the pre-push
+    // spot, and the next native drag snaps the window back there.
+    Hl::warpPosLogical(PWINDOW, Hl::posLogical(PWINDOW) + Vector2D{dx, 0.0});
     Hl::damage(CBox{effectiveBoxGlobal()}.expand(2)); // new spot, same cushion
     return true;
 }
