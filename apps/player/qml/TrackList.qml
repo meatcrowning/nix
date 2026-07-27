@@ -9,10 +9,83 @@ Item {
     id: root
     property alias model: list.model
     property bool showArtist: true
-    // Artist name to LEAVE OFF a row (the queue passes the now-playing track's
-    // artist): in a queue that is mostly one artist, repeating their name on
-    // every row says nothing — the rows that differ are the ones worth naming.
+    // Artist name to LEAVE OFF every row, set explicitly. Normally you want
+    // autoHideArtist instead.
     property string hideArtist: ""
+    // Work the redundant name out from the LIST rather than being told it (the
+    // queue): in a listing that is mostly one artist, repeating their name on
+    // every row says nothing — the rows that differ are the ones worth naming.
+    //
+    // This used to be the now-playing track's artist, passed in verbatim, and
+    // it never once fired: that string is the FULL credit ("J Dilla feat. MED
+    // & Guilty Simpson"), so it matched no row — not even its own siblings on
+    // the same album — and all 24 rows of The Shining rendered "title - J
+    // Dilla" clipped mid-name to "J Dill" / "J Di" / "J". Match on the BASE
+    // artist (the credit with its feature tail stripped) and the tail is what
+    // survives on the row, which is the only part that differs anyway.
+    property bool autoHideArtist: false
+
+    // Credit with any "feat. X" / "ft X" / "featuring X" / "with X" tail cut off.
+    function baseArtist(a) {
+        if (!a) return "";
+        var m = String(a).match(/^(.*?)\s+(?:feat\.?|ft\.?|featuring|w\/|with)\s+/i);
+        return (m ? m[1] : String(a)).trim();
+    }
+
+    // The one name worth suppressing, or "" if the list has no clear majority.
+    // Driven by a function and an explicit modelReset hook, NOT by a binding on
+    // list.count: the models here are replaced wholesale (DictListModel.set_rows
+    // → beginResetModel), and swapping one 12-track album queue for another
+    // leaves count untouched, so a count-dependent binding would keep the
+    // previous album's artist suppressed.
+    property string autoHidden: ""
+    function recomputeAutoHidden() {
+        if (!autoHideArtist || !list.model || list.count < 3 || !list.model.get) {
+            autoHidden = "";
+            return;
+        }
+        var tally = ({}), best = "", bestN = 0;
+        for (var i = 0; i < list.count; i++) {
+            var r = list.model.get(i);
+            if (!r) { autoHidden = ""; return; }
+            var b = root.baseArtist(r.artist);
+            if (b === "") continue;
+            tally[b] = (tally[b] || 0) + 1;
+            if (tally[b] > bestN) { bestN = tally[b]; best = b; }
+        }
+        // A bare majority isn't enough — half a list of names is still worth
+        // reading. Two thirds means the column has stopped saying anything.
+        autoHidden = bestN >= list.count * 0.66 ? best : "";
+    }
+    onAutoHideArtistChanged: recomputeAutoHidden()
+    Connections {
+        target: list.model
+        ignoreUnknownSignals: true
+        function onModelReset() { root.recomputeAutoHidden(); }
+    }
+    readonly property string effectiveHide: hideArtist !== "" ? hideArtist : autoHidden
+
+    // What a row prints for `artist`: nothing when it IS the hidden name, just
+    // the feature tail when it's that name plus guests, the full credit
+    // otherwise.
+    function artistLabel(a) {
+        if (!showArtist || !a) return "";
+        var hide = root.effectiveHide;
+        if (hide === "") return String(a);
+        if (String(a).toLowerCase() === hide.toLowerCase()) return "";
+        var b = root.baseArtist(a);
+        if (b.toLowerCase() !== hide.toLowerCase()) return String(a);
+        return String(a).substring(b.length).trim();
+    }
+
+    // True when the label is only the guest tail of the suppressed name, i.e.
+    // supplementary. A label that is a whole, DIFFERENT credit is not: on a
+    // mixed listing that name is the point of the column and must survive even
+    // clipped, whereas "feat. Dwele" is worth dropping before it gets cut.
+    function artistIsTail(a) {
+        if (root.effectiveHide === "" || !a) return false;
+        return root.baseArtist(a).toLowerCase() === root.effectiveHide.toLowerCase();
+    }
     property bool showNumber: true
     // false where the owner sizes itself to hold every row (the gallery's
     // inline album section): no scrollbar, and wheel notches pass through to
@@ -41,7 +114,7 @@ Item {
         list.positionViewAtIndex(currentRow, ListView.Center);
     }
     onCurrentRowChanged: centerCurrent()
-    Component.onCompleted: centerCurrent()
+    Component.onCompleted: { centerCurrent(); recomputeAutoHidden(); }
 
     ListView {
         id: list
@@ -55,7 +128,8 @@ Item {
         // and model both arrive after this component is built, and a
         // positionViewAtIndex against a 0-height or empty view does nothing).
         onHeightChanged: root.centerCurrent()
-        onCountChanged: root.centerCurrent()
+        onCountChanged: { root.centerCurrent(); root.recomputeAutoHidden(); }
+        onModelChanged: root.recomputeAutoHidden()
 
         delegate: Rectangle {
             id: row
@@ -96,23 +170,67 @@ Item {
                 text: track > 0 ? ((disc > 1 ? disc + "-" : "") + track) : ""
                 color: Theme.textDim
             }
-            PixelText {
+            // Title and artist are two texts, not one concatenated string, so
+            // the TITLE gets first claim on the width and only the artist is
+            // allowed to run off the end. Concatenated, a narrow column (the
+            // queue is ~240px on air) clipped both as one run and the cut
+            // landed mid-artist with nothing to say it had been cut — "Body
+            // Movin' - J Dilla" read as "Body Movin' - J Dill". Dimming the
+            // artist is what marks the tail as secondary; there is no ellipsis
+            // to mark it with, since More Perfect DOS VGA has no U+2026 and
+            // the fallback that supplies it drops the whole line 5px out of
+            // the row rect.
+            Item {
+                id: nameCell
                 anchors.left: root.showNumber ? numText.right : parent.left
                 anchors.leftMargin: root.showNumber ? 4 : 8
                 anchors.right: rightBits.left
                 anchors.rightMargin: 8
                 y: 1
-                // ASCII hyphen, NOT an em dash: More Perfect DOS VGA has no
-                // U+2014, and the fallback font that supplies it carries a
-                // taller ascent that drops the whole line 5px (ink at row
-                // offsets 8-16 instead of 3-11) — out the bottom of the row
-                // rect, which is what made the current-row highlight and the
-                // hover band look offset from their own text.
-                text: title + (root.showArtist && artist && artist !== root.hideArtist
-                               ? "  -  " + artist : "")
-                clip: true
                 height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                color: row.fg
+                clip: true
+
+                readonly property string artistText: root.artistLabel(artist)
+                readonly property bool artistOptional: root.artistIsTail(artist)
+
+                PixelText {
+                    id: titleText
+                    // The title is the primary datum and never yields width to
+                    // the artist — it clips only against the cell itself.
+                    width: Math.max(0, Math.min(implicitWidth, nameCell.width))
+                    height: parent.height
+                    clip: true
+                    text: title
+                    color: row.fg
+                }
+                PixelText {
+                    id: artistText
+                    // A guest tail is all-or-nothing: half of one ("feat.
+                    // Dwel") is worse than none, because it reads as part of
+                    // the title and there is no ellipsis available to disown
+                    // it — the playing track's full credit is on the header
+                    // above anyway. A whole different credit still clips
+                    // rather than vanish. Compared against IMPLICIT widths
+                    // only; reading titleText.width here is a binding loop.
+                    readonly property real room:
+                        nameCell.width - Math.min(titleText.implicitWidth, nameCell.width) - 6
+                    readonly property bool fits: room >= implicitWidth
+                    // ...and even a clippable credit needs somewhere to start:
+                    // "Starpoint" cut down to "S" is a stray letter hanging off
+                    // the title, not a column.
+                    readonly property bool worthDrawing:
+                        room >= 4 * (implicitWidth / Math.max(1, text.length))
+                    visible: nameCell.artistText !== ""
+                             && worthDrawing
+                             && (!nameCell.artistOptional || fits)
+                    anchors.left: titleText.right
+                    anchors.leftMargin: 6
+                    anchors.right: parent.right
+                    clip: true
+                    height: parent.height
+                    text: nameCell.artistText
+                    color: available ? Theme.textDim : Theme.inactive
+                }
             }
             Row {
                 id: rightBits

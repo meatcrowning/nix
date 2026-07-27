@@ -306,8 +306,9 @@ Item {
                 anchors.bottom: parent.bottom
                 model: QueueModel
                 showNumber: false
-                // only name the artist on rows that aren't the playing one's
-                hideArtist: root.cur.artist || ""
+                // A queue is usually one artist deep; let the list work out
+                // whose name has stopped carrying information and drop it.
+                autoHideArtist: true
                 // the queue model IS the play order, so identify the playing row
                 // by index (a queue can hold the same track twice) and scroll it
                 // to the middle as playback advances.
