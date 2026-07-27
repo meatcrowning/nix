@@ -29,6 +29,36 @@ PanelWindow {
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
+    // ---- the blurred backdrop --------------------------------------------
+    // Fills the whole monitor, behind everything, and NEVER moves or resizes.
+    //
+    // It exists for the gap: the sharp wallpaper tracks the COMMITTED width and
+    // glides to it after the drag is released, so while the panel is being
+    // narrowed there is a strip between the panel's new edge and the wallpaper's
+    // old one. That strip used to be flat background — a black band opening up
+    // as you dragged. Now the blur shows through it.
+    //
+    // The blur is free. There is no blur effect and no live filter: the image is
+    // DECODED at ~96px wide and stretched over the monitor, and the bilinear
+    // upscale is the blur. It costs one tiny texture per wallpaper, decoded
+    // once, and nothing at all per frame — which is the point, since it is on
+    // screen precisely while the compositor is busiest.
+    readonly property int blurSize: 96
+
+    Image {
+        anchors.fill: parent
+        z: -1
+        source: Wall.url
+        // Deliberately PreserveAspectCrop over the FULL monitor, so the blur is
+        // a plausible continuation of the sharp copy rather than a squashed one.
+        fillMode: Image.PreserveAspectCrop
+        sourceSize.width: root.blurSize
+        smooth: true
+        asynchronous: true
+        cache: false
+        visible: Wall.url.length > 0
+    }
+
     // The desktop the user can actually see. Everything is centred in HERE.
     //
     // Tracks the COMMITTED width (barWidth), not the live drag. Re-centring the

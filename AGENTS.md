@@ -201,6 +201,13 @@ There is no toggle button — you grab the bar's inner edge (`edgeGrip` in
     every frame of a drag and would re-decode a multi-megapixel image per frame.
     It's the monitor resolution for `scale`, and 0 (natural size) for `tile`,
     since a tile scaled to the screen no longer tiles.
+  - **The blurred backdrop** behind everything is the same image decoded at
+    ~96px and stretched over the monitor — the bilinear upscale IS the blur.
+    There is no blur effect and no live filter, so it costs one tiny texture per
+    wallpaper and nothing per frame. It exists to fill the strip that opens up
+    between the panel edge and the sharp wallpaper while the panel is being
+    narrowed (the sharp copy only glides to the new width on release). Keep it
+    static: it is on screen exactly when the compositor is busiest.
   - Verify without looking: **`qs ipc call wallpaper status`** reports the path,
     mode, and whether the visible frame actually DECODED (`front=ready`). That
     is the check that made switching hyprpaper off safe rather than a gamble on
