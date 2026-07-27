@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // A dropdown.  Options always come from the backend's /object_info rather than a
 // hardcoded list, so a ComfyUI update that adds a sampler shows it here with no
@@ -54,7 +55,7 @@ Item {
         border.color: Theme.accent
         border.width: 1
 
-        ListView {
+        KineticListView {
             id: list
             anchors.fill: parent
             anchors.margins: 1

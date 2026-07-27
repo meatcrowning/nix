@@ -13,6 +13,7 @@ five apps.
 - `openFile` shells out to `viewer <path>` for images — the image overlay used
   to live in here and was split out into [`../viewer`](../viewer/AGENTS.md).
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
+- **The preview grid and the tree list are `KineticGridView` / `KineticListView`** (`../qmlcommon/`), not bare views — the desktop's momentum is compositor-side and Qt's own flick fights it. Any new scrollable surface here must use those too; see [`../AGENTS.md`](../AGENTS.md).
 - **`videoconv.py`** — the context menu's "compress to <10MB" (an upload-limit
   squeeze). Exposed as the `VideoConv` context property; the only part of filer
   that shells out to `ffmpeg`/`ffprobe`/`notify-send` (all PATH-resolved from the

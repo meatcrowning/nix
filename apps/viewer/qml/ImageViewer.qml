@@ -117,6 +117,14 @@ Rectangle {
         contentHeight: content.height
         boundsBehavior: Flickable.StopAtBounds
 
+        // THE ONE bare Flickable left in apps/ (everything else is a
+        // KineticFlickable/KineticListView/KineticGridView — see
+        // apps/qmlcommon/). Deliberate: `interactive` here buys DRAG-panning of
+        // a zoomed image, not wheel scrolling, and the WheelHandler below eats
+        // every wheel event before this can see one. So Qt never gets to flick
+        // against the compositor's momentum, and the coast lands on the zoom
+        // instead — which is why viewer came off `kinetic_deny_classes`.
+
         // 1.0 = fit-to-window; the content box grows past the viewport as it
         // climbs, and the image (PreserveAspectFit inside that box) grows with
         // it, so panning falls out of the Flickable for free.
@@ -154,7 +162,11 @@ Rectangle {
         WheelHandler {
             target: null
             enabled: !viewer.isVideo   // the wheel scrubs the titlebar bar for video
-            acceptedModifiers: Qt.NoModifier
+            // EVERY modifier, not just Qt.NoModifier: a Ctrl+wheel used to fall
+            // past this handler into the Flickable, which then drag-flicked the
+            // image with Qt's own deceleration on top of the compositor's
+            // momentum. Nothing else in viewer binds Ctrl+wheel, and zooming on
+            // Ctrl+wheel is what every other app on this desktop does anyway.
             onWheel: (e) => {
                 // pixelDelta ×3: ~40px of finger travel ≈ one detent's worth.
                 // A sub-pixel event (pixelDelta rounds to 0) carries the same

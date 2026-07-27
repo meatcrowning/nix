@@ -49,6 +49,8 @@ ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
+from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
+                     is_wheel_detent as _is_wheel_detent)
 
 # Same live wallpaper palette source filer parses (rewritten by wal-set.sh).
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
@@ -1221,37 +1223,12 @@ class DarkMode(QObject):
         )
 
 
-# QtWebEngine ignores pixelDelta() entirely and scrolls by
-# angleDelta/120 * wheelScrollLines(3) * 20 px (web_event_factory.cpp), while
-# QtWayland synthesizes angleDelta = pixelDelta * 12 for touchpads — so one
-# finger-pixel of trackpad scroll moves a page ~6 px where the QML apps
-# (player/filer, pixelDelta 1:1) move 1. This factor cancels that: 1/6 puts a
-# web page at parity with the rest of the desktop, drag phase and kinetic
-# coast alike (scaling at the event source keeps the coast consistent with
-# the drag — deliberately NOT special-cased in the compositor's momentum
-# engine). Raise it if pages should feel a bit brisker than lists.
-#
-# IT APPLIES TO TOUCHPADS ONLY. The correction above is entirely about
-# QtWayland's angleDelta = 12 x finger-pixels synthesis; a real mouse wheel
-# has no such inflation — one detent is 120, which QtWebEngine turns into the
-# same 3 lines x 20 px every other Chromium on the planet scrolls. Applying
-# the gain there made top's wheel scroll web pages at 1/6 speed, which is the
-# bug this note exists to prevent a third time.
-#
-# Telling them apart is exact, not a heuristic (qtbase 6.11
-# qwaylandinputdevice.cpp): FrameData::hasPixelDelta() returns false for
-# axis_source_wheel unconditionally, so a wheel NEVER carries a pixelDelta and
-# always reports angleDelta = -delta120, i.e. +-120 per detent; a touchpad
-# reports either a non-null pixelDelta or, when the finger moved under a
-# pixel, a bare angleDelta below 120. Same discriminator the QML apps use in
-# WheelScroll.qml — keep the two in step.
-WHEEL_GAIN = 1 / 6
-
-
-def _is_wheel_detent(px, ang):
-    """True for a real mouse wheel notch (leave it alone), False for a
-    touchpad's high-resolution stream (scale it)."""
-    return px.isNull() and max(abs(ang.x()), abs(ang.y())) >= 120
+# Wheel handling here is the QtWebEngine half of the desktop's kinetic-scroll
+# contract; momentum itself is synthesized COMPOSITOR-side (hyprvtb, see
+# apps/pylib/kinetic.py and docs/kinetic-scroll.md). WHEEL_GAIN and the
+# touchpad/wheel discriminator live in pylib/kinetic.py — the ONE place — so
+# they cannot drift from apps/qmlcommon/WheelScroll.qml the way two hand-kept
+# copies did.
 
 
 class ZoomFilter(QObject):
@@ -1270,8 +1247,10 @@ class ZoomFilter(QObject):
     a kinetic glide is not rounded to death; real mouse-wheel detents
     (_is_wheel_detent) and zero-delta phase markers
     (ScrollBegin/ScrollEnd) passed through untouched so scroll sequences stay
-    coherent. NB this is window-wide: wheel over the file picker / drawers is
-    scaled too — acceptable, those are small keyboard-first surfaces."""
+    coherent. NB this is window-wide: wheel over the QML overlays is scaled
+    too, so the file picker's KineticListView takes `wheelGain: WheelGain`
+    (= 1/WHEEL_GAIN, published from pylib/kinetic.py) to undo it. Any future
+    scrollable QML surface in this window must do the same."""
 
     _ZOOM_IN_KEYS = (Qt.Key.Key_Plus, Qt.Key.Key_Equal)  # Ctrl++ and Ctrl+=
 
@@ -1884,6 +1863,10 @@ def main():
     ctx.setContextProperty("gpuProbeJs", GPU_PROBE_JS if ON_AIR else "")
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
+    # QML overlays in this window (the file picker) see wheel events that
+    # ZoomFilter has already divided by WHEEL_GAIN for the web view; this is
+    # what their WheelScroll multiplies back by. One source: pylib/kinetic.py.
+    ctx.setContextProperty("WheelGain", QML_WHEEL_GAIN)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()

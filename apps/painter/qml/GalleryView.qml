@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // Results, newest first.  Every image carries the parameters that made it in a
 // PNG text chunk, so "reuse" reads them straight back out of the file.
@@ -12,7 +13,7 @@ Item {
         PixelText { text: Gallery.count + " images"; color: Theme.textDim }
     }
 
-    GridView {
+    KineticGridView {
         id: grid
         anchors.top: head.bottom
         anchors.topMargin: 8
@@ -24,7 +25,8 @@ Item {
         model: Gallery
         cellWidth: Math.max(150, Math.floor(width / Math.max(1, Math.floor(width / 210))))
         cellHeight: cellWidth
-        boundsBehavior: Flickable.StopAtBounds
+        wheelLines: 1
+        wheelStep: cellHeight
 
         delegate: Item {
             width: grid.cellWidth

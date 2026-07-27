@@ -20,6 +20,8 @@ because plugin builds ≤2.44 abort the compositor on a zero-height fill rect
 (fixed plugin-side in v2.45 — guard every computed rect when adding hyprvtb
 drawing).
 
+**Track list, album grid and both lyrics panes are `Kinetic*` views from `../qmlcommon/`** — player's scrolling policy is the scrollbar and the wheel only, never drag-flicking, so the compositor's momentum is the only momentum. `WheelScroll.qml` used to live in `player/qml/`; it is shared now and player is no longer its owner. `TrackList` passes `wheelEnabled: root.scrollable` so a table sized to hold every row (AlbumPanel) hands the wheel out to the gallery behind it. See [`../AGENTS.md`](../AGENTS.md).
+
 ## The queue socket (`start_queue_server`)
 
 The desktop panel's media widget draws a queue drawer, and MPRIS cannot carry
