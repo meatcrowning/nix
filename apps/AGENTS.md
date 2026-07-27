@@ -14,6 +14,25 @@ helpers they all import. Each has its own `AGENTS.md` with the detail:
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
+## They are the system defaults
+
+Three of them are what the rest of the desktop opens things with: **filer** for
+`inode/directory`, **viewer** for every image and video type in its
+`IMAGE_EXTS`/`VIDEO_EXTS`, **surfer** for `text/html` and `x-scheme-handler/
+http(s)` (plus Plasma's separate `kdeglobals` `BrowserApplication` key and
+`$BROWSER`).
+
+Each app's `.desktop` entry — with its `MimeType=` and its `Exec=` field code —
+is written by its own `home/prog/<app>.nix`, because only that file knows the
+store path. Which of the eligible apps is the **default** is one central list in
+`home/prog/mime-defaults.nix`. Keep viewer's `MimeType=` and its
+`IMAGE_EXTS`/`VIDEO_EXTS` in sync with that list; registering a type viewer
+can't decode makes it the thing that fails to open it.
+
+Being a **file picker** is a different mechanism entirely — the
+`org.freedesktop.impl.portal.FileChooser` D-Bus backend, not a MIME
+association. Nothing here implements it today.
+
 ## Why this tree is OUTSIDE `home/` and `sys/`
 
 Non-negotiable: `home/default.nix` and `sys/default.nix` use `umport`, which

@@ -5,7 +5,8 @@
 # This module:
 #   * builds a fast-launching `filer` wrapper binary (task: instant cold start),
 #   * registers its desktop entry so it appears in the Quickshell runner, and
-#   * makes it the default handler for directories (task: default file manager).
+#   * declares it a directory handler (being the DEFAULT one is set centrally,
+#     in home/prog/mime-defaults.nix).
 #
 # INSTANT COLD START: the wrapper is a plain store binary — `python3` (with
 # PySide6) + Qt env baked in by wrapQtAppsHook — so launching it is just an
@@ -66,7 +67,7 @@ in
     Name=filer
     GenericName=File Browser
     Comment=Standalone file browser for the top desktop
-    Exec=${filer}/bin/filer
+    Exec=${filer}/bin/filer %f
     Icon=system-file-manager
     Terminal=false
     Categories=Utility;System;FileTools;
@@ -74,16 +75,9 @@ in
     MimeType=inode/directory;
   '';
 
-  # Default application for opening directories → filer.
-  #
-  # Done via xdg-mime (not xdg.mimeApps) on purpose: a real ~/.config/mimeapps.list
-  # already exists with the user's own associations (kate, umpv, …), and letting
-  # home-manager take the file over would either refuse (clobber error) or, with
-  # force, discard those. `xdg-mime default` edits the [Default Applications]
-  # section in place — adding just inode/directory — and leaves everything else
-  # untouched. Idempotent, so it's safe to re-run on every switch.
-  home.activation.filerDefaultFileManager =
-    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      run ${pkgs.xdg-utils}/bin/xdg-mime default filer.desktop inode/directory
-    '';
+  # Making filer the DEFAULT directory handler (rather than merely an eligible
+  # one) now lives in home/prog/mime-defaults.nix, alongside viewer's and
+  # surfer's — one list of "what opens what" instead of three activation
+  # snippets racing for the same file. It used to be an `xdg-mime default` call
+  # here; see that file for why it no longer is.
 }
