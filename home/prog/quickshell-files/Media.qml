@@ -62,8 +62,12 @@ Singleton {
     readonly property bool useSnap: !hasPlayer && _settling && snap !== null
     readonly property string dispIdentity: hasPlayer ? (player.identity || "media")
         : useSnap ? (snap.id || "media") : "media"
-    readonly property string dispTitle: hasPlayer ? (player.trackTitle || "—")
-        : useSnap ? (snap.title || "—") : "nothing playing"
+    // ASCII "-", not an em dash: More Perfect DOS VGA has no U+2014, so a line
+    // containing one falls back to another font for that glyph and loses ~5px
+    // of ascent, which clips the whole line. Same reason "reading..." is not
+    // "reading…" anywhere in this tree.
+    readonly property string dispTitle: hasPlayer ? (player.trackTitle || "-")
+        : useSnap ? (snap.title || "-") : "nothing playing"
     readonly property string dispArtist: hasPlayer ? (player.trackArtist || "")
         : useSnap ? (snap.artist || "") : ""
     readonly property string dispArt: hasPlayer ? (player.trackArtUrl || "")

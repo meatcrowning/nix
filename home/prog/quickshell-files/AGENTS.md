@@ -206,6 +206,12 @@ thing the user drags and the thing that gets persisted, and
 
 Reading bottom-up, the layout is calendar+clock side by side on the bottom row,
 weather above them, media above that, and the task manager taking the rest.
+
+The forecast is a GRAPH, not a table: twenty points (09:00 and 21:00 for ten
+days, `Weather.slots`) in the height a seven-row table spent on hi/lo pairs.
+Night halves are shaded, so the two-per-day structure reads. The daily block
+can't drive it — a daily max isn't tied to a time of day — hence the `hourly=`
+query.
 **The disk widget currently has no dock tile** — it is classic-mode only.
 
 **Dead space is a number, not an opinion:**
@@ -241,11 +247,18 @@ loop, since the popup takes its height from `implicitHeight`.
 - **Kill is SIGTERM on left click, SIGKILL on RIGHT.** The rows re-sort under the
   cursor every 2s; an unrecoverable action must not be one mis-timed left click
   away.
-- The charts are a 2x2 block of cards (cpu/gpu/mem/net) over a two-line sensor
-  strip (load, swap, uptime, vram, power, fan). They share `ChartCanvas.qml`
-  with the popups, so there is one implementation of the plot. Card height is
-  CAPPED — a taller tile has to turn into more visible processes, not bigger
-  charts.
+- The charts are a 4x2 block of SQUARE cards — cpu, gpu, mem, net, load, vram,
+  swap, fan — sharing `ChartCanvas.qml` with the popups. Square means the card
+  height follows the panel WIDTH, so a taller tile turns into more visible
+  processes rather than letterboxed charts.
+- **The chassis-fan bar hides itself, and on `top` that means it never shows.**
+  `/sys/class/hwmon` exposes no `fan*_input` at all here — the only hwmon
+  devices are nvme, spd5118, k10temp, amdgpu, mt7921 and the trackball battery,
+  because no Super-I/O driver (`nct6775` &c) is loaded for the B650's sensor
+  chip. `SysInfo.fanCount` is 0 and the bar is `visible: false`; it lights up on
+  its own if that driver is ever loaded. The `fan` CARD is a different sensor —
+  the GPU fan, via nvidia-smi, as a percentage — and its 0% at idle is a real
+  reading, since the card stops its fans when cool.
 - `sysinfo.sh`'s fields are POSITIONAL and `SysInfo.qml` indexes them, so new
   ones go on the END; everything past `batteryCharging` is the task manager's,
   and the parser guards on the field count. The nvidia extras (fan, power, vram)
@@ -261,14 +274,26 @@ segment) from one Canvas, cycled by the button in its own top-right corner. The
 choice is a persisted setting (`clockFace`), not local state, so it survives the
 reload that every wallpaper change causes and both copies of the widget agree.
 
-**The unlit colour is load-bearing, and was wrong twice.** `Theme.dim` against
-`Theme.accent` is nowhere near enough contrast: a whole 5x7 grid at that colour
-reads as a solid block with the digits invisible inside it. The dot grid needs
-`Theme.border`; the segment face needs to go all the way down to `Theme.bgAlt`,
-because its unlit segments are far larger and at `border` every digit still reads
-as an 8. Both were established by rendering the same glyph data and layout maths
-out to a PNG and looking at it — which is the way to check a Canvas face without
-making the user click through three modes.
+`dots` is NOT a Canvas: it is a `Repeater` of `PixelText` items drawing the
+font's own U+25A0, one per LIT cell, so the dots rasterise like every other
+glyph on this desktop. Only lit cells exist — there is no unlit grid. (Checked
+against the font's cmap: More Perfect DOS VGA has U+25A0 and U+2588 but not the
+bullet or the circle.) It is driven by a MINUTE-precision `SystemClock`; the
+seconds clock would rebuild the cell model 60x more often than anything changes.
+
+**For `seg`, the unlit colour is load-bearing and was wrong twice.** `Theme.dim`
+against `Theme.accent` is nowhere near enough contrast — every digit reads as an
+8 — so unlit segments go all the way down to `Theme.bgAlt`. The dot face had the
+same problem before the unlit grid was dropped entirely. Both were settled by
+rendering the same glyph data and layout maths out to a PNG and looking at it,
+which is how to check a face like this without making the user click through
+three modes.
+
+**Check new glyphs against the font's cmap before shipping them.** More Perfect
+DOS VGA has `°` `·` `■` `█` but NOT `—` `…` `•` `↑` `−` `♫`. A `PixelText`
+containing a missing glyph falls back to another font for it and loses ~5px of
+ascent, clipping the whole line — which is why the media widget's empty-title
+placeholder is `"-"` and every "reading..." is three dots.
 
 > Adding several new `.qml` files in one rebuild produces a burst of **failed**
 > reloads in `qs log` ("`X is not a type`") as home-manager writes them one at a

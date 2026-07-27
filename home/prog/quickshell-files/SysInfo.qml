@@ -43,6 +43,14 @@ Singleton {
     property int    gpuMemTotalMb: -1
     readonly property int gpuMemUsage: gpuMemTotalMb > 0
         ? Math.round(100 * gpuMemUsedMb / gpuMemTotalMb) : -1
+    // Chassis/CPU fans (hwmon), which are NOT the GPU fan above: a different
+    // set of hardware, and the one that says whether the box as a whole is
+    // working. `fanCount` is 0 where no tachometer is exposed at all — which is
+    // the case on `top` as it stands, since no Super-I/O driver (nct6775 &c) is
+    // loaded for the B650's sensor chip. Consumers must hide rather than draw a
+    // permanent zero.
+    property int fanAvgRpm: 0
+    property int fanCount: 0
 
     // Brightness. On a machine with a real panel backlight (laptops) this
     // goes through brightnessctl against /sys/class/backlight, which is
@@ -110,6 +118,10 @@ Singleton {
     property var rxHist: []
     property var txHist: []
     property var memHist: []
+    property var loadHist: []
+    property var swapHist: []
+    property var vramHist: []
+    property var gpuFanHist: []
 
     function _pushHist(arr, v) {
         const h = arr.slice();
@@ -141,6 +153,8 @@ Singleton {
             mtk: memTotalKb, mak: memAvailKb, stk: swapTotalKb, sfk: swapFreeKb,
             l1: load1, up: uptimeSec, gf: gpuFanPct, gp: gpuPowerW,
             gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
+            far: fanAvgRpm, fc: fanCount,
+            lh: loadHist, swh: swapHist, vh: vramHist, gfh: gpuFanHist,
             // the running counters the next poll diffs against — without them
             // the first sample after a reload has no baseline and the readouts
             // sit at "--" for one interval, which is the flicker this avoids
@@ -168,6 +182,9 @@ Singleton {
         gpuPowerW = d.gp === undefined ? -1 : d.gp;
         gpuMemUsedMb = d.gmu === undefined ? -1 : d.gmu;
         gpuMemTotalMb = d.gmt === undefined ? -1 : d.gmt;
+        fanAvgRpm = d.far || 0; fanCount = d.fc || 0;
+        loadHist = d.lh || []; swapHist = d.swh || [];
+        vramHist = d.vh || []; gpuFanHist = d.gfh || [];
         _prevRx = d.prx; _prevTx = d.ptx; _prevAt = d.pat || 0;
         _prevCpuTotal = d.pct; _prevCpuIdle = d.pci;
     }
@@ -252,7 +269,16 @@ Singleton {
             gpuMemUsedMb = isNaN(gmu) || gmu < 0 ? -1 : gmu;
             const gmt = parseInt(f[22]);
             gpuMemTotalMb = isNaN(gmt) || gmt < 0 ? -1 : gmt;
+            if (f.length >= 25) {
+                fanAvgRpm = parseInt(f[23]) || 0;
+                fanCount  = parseInt(f[24]) || 0;
+            }
+
             if (memUsage >= 0) memHist = _pushHist(memHist, memUsage);
+            if (load1 >= 0) loadHist = _pushHist(loadHist, load1);
+            if (swapUsage >= 0) swapHist = _pushHist(swapHist, swapUsage);
+            if (gpuMemUsage >= 0) vramHist = _pushHist(vramHist, gpuMemUsage);
+            if (gpuFanPct >= 0) gpuFanHist = _pushHist(gpuFanHist, gpuFanPct);
         }
 
         const now = Date.now();

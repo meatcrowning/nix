@@ -1,6 +1,6 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount
 #
 # Fields are POSITIONAL and SysInfo.qml indexes them, so new ones go on the
 # END. Everything after batteryCharging was added for the dock's task manager;
@@ -83,6 +83,16 @@ mem=$(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^Swap
 load1=$(awk '{print $1}' /proc/loadavg)
 uptime=$(awk '{printf "%d", $1}' /proc/uptime)
 
+# Average CHASSIS/CPU fan speed across every hwmon fan that reports a nonzero
+# RPM, plus how many were counted. This is deliberately not the GPU fan (which
+# nvidia-smi reports as a percentage below) — it is the case and cooler fans,
+# a different set of hardware and the one that tells you whether the box as a
+# whole is working hard. "0|0" where no fan node exists at all (book).
+fans=$(awk 'BEGIN{ n=0; s=0 }
+    { if ($1+0 > 0) { s += $1; n++ } }
+    END{ printf "%d|%d", (n ? s/n : 0), n }' /sys/class/hwmon/hwmon*/fan*_input 2>/dev/null)
+[ -z "$fans" ] && fans="0|0"
+
 # GPU utilization + temp via nvidia-smi (NVIDIA proprietary driver). One cheap
 # (~20ms) query for both. "gpuUsePct|gpuTempC"; -1|-1 if nvidia-smi is missing
 # or errors (so the panel shows "--" rather than a stale value).
@@ -135,4 +145,4 @@ for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/
     break
 done
 
-printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux"
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans"
