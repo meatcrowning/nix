@@ -268,10 +268,11 @@ timer cannot supply). Full spec and provenance: `docs/kinetic-scroll.md` and
   hyprctl eval "hl.plugin.hyprvtb.kinetic_set(\"friction\", 3.6)"  # 2.6..7.0, default 3.6 (mac-anchored)
   ```
 
-  **`hyprctl reload` clears the runtime override**, so every plugin hot-swap
-  disables momentum until it is re-enabled — or until the
-  `plugin:hyprvtb:kinetic` config key is promoted into both `hyprland.lua`
-  copies. That is a deliberate trial-mode property, not a bug.
+  **`hyprctl reload` CLEARS the runtime override.** `kinetic_set(true)` is a
+  trial mode, not a setting: never rely on it for anything that must survive a
+  reload, a plugin hot-swap or a relogin. Momentum is on for real on air/book
+  only because the `plugin:hyprvtb:kinetic` **config key** is set in both
+  `hyprland.lua` copies (from `host.kinetic`); use the key, not the setter.
 - **Testing:** `kinetic_test(dy, n, ms)` injects through the real estimator,
   DRY by default (trace-only, safe in the live session). A wet run is refused
   without a prior `kinetic_set("unsafe_wet", 1)` and must only ever happen in a
@@ -281,6 +282,49 @@ timer cannot supply). Full spec and provenance: `docs/kinetic-scroll.md` and
   `nested-smoke.sh` (crash-class). Run frame-starved nested (sandbox on book)
   with `VTBSMOKE_EXPECT_FRAMES=0` — nested compositors never step render-driven
   animations there; an environment artifact, not a regression.
+
+### Every new scroll surface must honour the kinetic config
+
+**Any scrollable view added anywhere in this desktop — panel, app, script —
+MUST take the compositor's momentum as-is.** Momentum arrives as ordinary
+high-resolution finger-source axis events, so "honouring it" is three
+obligations on the receiving code:
+
+1. **Delta-proportional, never sign-only and never notch-quantised.** A handler
+   that reads only the sign, or rounds to a detent, turns a 60 Hz coast into
+   dozens of full-size steps. This is what put `viewer` on the deny list
+   originally (sign-only zoom, 12 events saturated 1..8) and what keeps `mpv`
+   on it now (`add volume ±2` per wheel event).
+2. **No toolkit-side momentum stacked on top.** One decay curve, generated
+   compositor-side. Do not add a flick/fling/deceleration animation to a view
+   that already receives synthetic axis events.
+3. **Handle the sub-pixel/detent discriminator.** Distinguish a
+   high-resolution pixel delta from a mouse detent and scale each
+   appropriately, or a wheel notch moves one pixel while a coast moves pages.
+
+**The single source of truth for the feel is the `plugin:hyprvtb:kinetic*`
+keys in `hypr-files/hyprland.lua` (BOTH copies — seed-once), with the per-host
+`kinetic` flag generated into `host.lua` by `hypr-host.nix`.** Tune there, never
+with a per-file literal, and never by re-deriving the physics client-side.
+
+**Known non-participants — do not re-chase these:**
+
+- **XWayland clients** (`kinetic_deny_xwayland = true`): the axis →
+  core-button-4/5 conversion inside Xwayland was never observed, and a leaked
+  tail in a core-button client is a long click train. `feh`, `vlc` and wine/SDL
+  are XWayland on book (verified via `hyprctl clients -j`); Firefox, Chromium,
+  qutebrowser, GTK3/4 and every Qt app here are native Wayland and do get
+  momentum.
+- **Clients that own their own fling** (Chromium 200 ms, GTK/kitty 150,
+  Firefox 100) are neutralised by the ≥300 ms withheld stop, not by config.
+  kitty additionally ships `momentum_scroll 0.96` (Wayland, finger devices):
+  end-gated, so the withhold zeroes it; `momentum_scroll 0` in
+  `kitty-files/kitty.conf` is the documented kill switch if doubling is ever
+  *felt* — it has never been measured.
+- **kitty's TUI passthrough is line-quantised by the terminal protocol.**
+  `pixel_scroll` keeps kitty's own scrollback sub-line, but full-screen TUIs
+  receive discrete line events; that cannot be made smooth from this side.
+- **`top` gets none of this** — `host.kinetic = false` there, no finger source.
 
 ---
 
