@@ -33,6 +33,12 @@ Singleton {
 
     property string _path: ""
     property string _mode: "scale"
+    property string _blur: ""
+
+    // The pre-blurred backdrop wal-prepare.sh cached for this image. Empty until
+    // it exists; WallpaperLayer falls back to blurring the source itself, so a
+    // missing file is a quality regression for one wallpaper, never a black gap.
+    readonly property string blurUrl: _blur.length ? "file://" + _blur : ""
 
     // Diagnostics, published by WallpaperLayer and read with
     // `qs ipc call wallpaper status`. There is no other way to confirm from
@@ -66,6 +72,16 @@ Singleton {
         onLoaded: root._mode = text().trim()
     }
 
+    FileView {
+        id: blurFile
+        path: root.cacheDir + "/current.blur"
+        watchChanges: true
+        blockLoading: true
+        printErrors: false
+        onTextChanged: root._blur = text().trim()
+        onLoaded: root._blur = text().trim()
+    }
+
     // Fallback poll. watchChanges alone is not quite enough here for the same
     // reason SettingsStore polls: an inotify watch follows the INODE, so any
     // writer that replaces the file (temp + rename) silently detaches it.
@@ -77,6 +93,6 @@ Singleton {
         interval: 500
         running: true
         repeat: true
-        onTriggered: { curFile.reload(); modeFile.reload(); }
+        onTriggered: { curFile.reload(); modeFile.reload(); blurFile.reload(); }
     }
 }

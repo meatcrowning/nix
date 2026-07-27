@@ -97,6 +97,11 @@ KEY="$(printf '%s' "$WALL" | md5sum | cut -d' ' -f1)"
 # Theme.qml in step 7. One tiny write, so the truncated window is not observable
 # in practice. No trailing newline, matching $STATE's own convention.
 printf '%s' "$MODE" > "$STATE.mode"
+# $CACHE/current.blur is the pre-blurred backdrop wal-prepare.sh cached for this
+# image (see there for why it is a real Gaussian and not a runtime effect). The
+# panel falls back to blurring the source itself if this is missing or stale, so
+# it is safe to publish the path unconditionally.
+printf '%s' "$CACHE/blur-$KEY.png" > "$STATE.blur"
 
 if [ "$WALLPAPER_ONLY" = 1 ]; then
     # Preview path (the picker, arrow-keying through images): writing $STATE and

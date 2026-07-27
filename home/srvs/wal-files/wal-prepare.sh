@@ -78,6 +78,26 @@ if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ] || [ "$SCRIPTS/wal-extr
     "$SCRIPTS/wal-extract.py" "$WALL" > "$THEMEFILE"
 fi
 
+# ---- blurred backdrop -----------------------------------------------------
+# The panel draws this behind the sharp wallpaper, filling the strip that opens
+# up between the panel edge and the wallpaper while the panel is being narrowed
+# (WallpaperLayer.qml).
+#
+# It is a REAL Gaussian, computed once and cached, not a runtime effect. The
+# first attempt just decoded the wallpaper at ~96px and let the GPU stretch it,
+# on the theory that a bilinear upscale is a free blur — it is free, but it is
+# not a blur: at 20x magnification the image was still plainly legible, with
+# interpolation facets. Downscaling to 400px and applying a real blur gives
+# something genuinely diffuse and smooth, and upscaling THAT is invisible
+# because the content no longer has any high frequencies left to alias.
+#
+# PNG, not JPEG: the output is nothing but smooth gradients, which is the exact
+# case where JPEG bands visibly. It costs ~35K and a third of a second, once.
+BLUR="$CACHE/blur-$KEY.png"
+if [ ! -f "$BLUR" ] || [ "$WALL" -nt "$BLUR" ]; then
+    magick "${WALL}[0]" -auto-orient -resize 400x -blur 0x36 -strip "$BLUR" 2>/dev/null || true
+fi
+
 # ---- picker thumbnail -----------------------------------------------------
 # A small, persistent thumbnail so WallpaperPicker.qml's grid paints instantly
 # instead of decoding the full-res original (some are 4000px+) on every open —

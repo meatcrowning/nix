@@ -196,16 +196,14 @@ PanelWindow {
         // classic mode, and in dock mode it takes a third of the screen — so
         // sizing off the fixed setting would run the card under the panel.
         //
-        // The fallback is ViewMode.screenWidth, NOT parent.width. This is a
-        // single instance with no `screen` assigned, so the fallback is the path
-        // actually taken — and parent.width is this window's own width, which
-        // depends on whether it is mapped, which depends on `visible`, which is
-        // derived from card.x, which is derived from this. Qt reported exactly
-        // that: "Binding loop detected for property avail". Reading the screen
-        // width from ViewMode instead is a value nothing here can feed back into.
-        readonly property real avail: (root.screen ? root.screen.width
-                                                   : ViewMode.screenWidth)
-                                      - ViewMode.barWidth
+        // Sized off ViewMode.screenWidth and NOTHING belonging to this window —
+        // not parent.width, and not root.screen either. Both are properties of
+        // where the window is MAPPED, and mapping depends on `visible`, which is
+        // derived from card.x, which is derived from this: Qt reported it as
+        // "Binding loop detected for property avail" with each of them in turn.
+        // (This is a single instance, not one per monitor, so root.screen was
+        // never load-bearing here anyway.)
+        readonly property real avail: ViewMode.screenWidth - ViewMode.barWidth
         width: Math.round(avail * 2 / 3)
 
         // Slide in horizontally from the right edge — out from behind the bar.
