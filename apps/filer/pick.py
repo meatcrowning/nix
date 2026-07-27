@@ -1,0 +1,194 @@
+"""filer's picker mode — the UI half of the FileChooser portal backend.
+
+`filer --pick <spec.json>` turns the ordinary browser window into a modal file
+chooser: the tree, the preview grid, the sort strip and the titlebar address bar
+all still work, but a bar appears along the bottom with cancel/accept, the
+listing is narrowed to the requested filter, and choosing writes the answer to
+the `result` path from the spec and quits.
+
+`portal.py` (same directory) writes the spec and reads the result; its module
+docstring has the D-Bus side and explains why this is a subprocess. The contract
+between the two is only this file format, so either half can be exercised alone
+— which is what makes the picker testable without a bus and the backend testable
+without a GUI.
+
+  spec.json   {mode: "open"|"dir", multiple, title, accept_label,
+               current_folder, current_name, filters: [{name, patterns, mimes}],
+               current_filter: {name,...}|null, result: "<path>"}
+  result.json {uris: ["file:///..."], current_filter: "<filter name>"}
+
+**No result file means "cancelled".** That is the whole error protocol: if this
+process dies, is killed by the backend's `Close()`, or the user shuts the window,
+the absent file is read as a cancel and the calling app gets a clean response 1
+rather than a hung dialog. So `accept()` writes the file and only then quits, and
+nothing else ever writes it.
+"""
+import fnmatch
+import json
+import mimetypes
+import os
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Property, Signal, Slot
+
+
+def _uri(path):
+    """Absolute path -> a percent-encoded file:// URI. The portal spec requires
+    every returned URI to have the file:// scheme."""
+    return Path(os.path.abspath(path)).as_uri()
+
+
+class Picker(QObject):
+    """Context property `Picker`. Inactive (`active == false`) in a normal filer
+    window, and every picker-only branch in Main.qml keys off that — so the
+    ordinary browser is exactly what it was."""
+
+    changed = Signal()
+
+    def __init__(self, spec=None, parent=None):
+        super().__init__(parent)
+        self._spec = spec or {}
+        self._done = False
+        self._filter = None
+        filters = self._spec.get("filters") or []
+        want = (self._spec.get("current_filter") or {}).get("name")
+        # Honour current_filter when it names one of the offered filters; the
+        # spec also allows it standalone with an empty filter list.
+        self._filter = next((f for f in filters if f["name"] == want), None)
+        if self._filter is None and self._spec.get("current_filter"):
+            self._filter = self._spec["current_filter"]
+        if self._filter is None and filters:
+            self._filter = filters[0]
+
+    # -- state QML reads ------------------------------------------------------
+
+    @Property(bool, constant=True)
+    def active(self):
+        return bool(self._spec)
+
+    @Property(str, constant=True)
+    def mode(self):
+        return str(self._spec.get("mode", "open"))
+
+    @Property(bool, constant=True)
+    def multiple(self):
+        return bool(self._spec.get("multiple", False))
+
+    @Property(str, constant=True)
+    def title(self):
+        return str(self._spec.get("title") or
+                   ("choose a folder" if self.mode == "dir" else "choose a file"))
+
+    @Property(str, constant=True)
+    def acceptLabel(self):
+        # Mnemonic underlines are allowed in the wire value; strip them, nothing
+        # in this UI has mnemonics.
+        lbl = str(self._spec.get("accept_label") or "").replace("_", "")
+        return lbl or ("choose" if self.mode == "dir" else "open")
+
+    @Property("QVariantList", constant=True)
+    def filterNames(self):
+        return [f["name"] for f in (self._spec.get("filters") or [])]
+
+    @Property(str, notify=changed)
+    def filterName(self):
+        return self._filter["name"] if self._filter else ""
+
+    @Slot(str)
+    def setFilter(self, name):
+        for f in self._spec.get("filters") or []:
+            if f["name"] == name:
+                self._filter = f
+                self.changed.emit()
+                return
+
+    # -- filtering ------------------------------------------------------------
+
+    @Slot(str, bool, result=bool)
+    def accepts(self, name, is_dir):
+        """Should this entry be listed?
+
+        Directories always are — they are how you navigate — and in `dir` mode
+        nothing else is. Otherwise a file shows if it matches the active filter;
+        with no filter, everything does. Glob patterns are case-sensitive per
+        the spec (which is why it tells apps to write `*.[iI][cC][oO]`)."""
+        if is_dir:
+            return True
+        if self.mode == "dir":
+            return False
+        f = self._filter
+        if not f:
+            return True
+        for pat in f.get("patterns") or []:
+            if fnmatch.fnmatchcase(name, pat):
+                return True
+        mimes = f.get("mimes") or []
+        if mimes:
+            guessed = mimetypes.guess_type(name)[0]
+            if guessed:
+                for m in mimes:
+                    if m == guessed:
+                        return True
+                    # MIME filters may wildcard the subtype ("image/*").
+                    if m.endswith("/*") and guessed.startswith(m[:-1]):
+                        return True
+        return False
+
+    @Slot(str, result=bool)
+    def selectable(self, path):
+        """Whether choosing this entry is a valid answer (drives the accept
+        button's enabled state)."""
+        is_dir = os.path.isdir(path)
+        return is_dir if self.mode == "dir" else not is_dir
+
+    # -- the answer -----------------------------------------------------------
+
+    @Slot("QVariantList")
+    def accept(self, paths):
+        """Write the result file and quit. Guarded against a second call: the
+        result must describe exactly one user decision."""
+        if self._done:
+            return
+        picked = [str(p) for p in paths if os.path.exists(str(p))]
+        if not picked:
+            return
+        if not self.multiple:
+            picked = picked[:1]
+        out = {"uris": [_uri(p) for p in picked]}
+        if self._filter:
+            out["current_filter"] = self._filter["name"]
+        try:
+            with open(self._spec["result"], "w", encoding="utf-8") as f:
+                json.dump(out, f)
+            self._done = True
+        except (OSError, KeyError) as e:
+            # Leave no result file: the backend reads that as a cancel, which is
+            # the safe failure. Never quit pretending we answered.
+            print("filer --pick: could not write result:", e)
+            return
+        self._quit()
+
+    @Slot()
+    def cancel(self):
+        self._quit()
+
+    def _quit(self):
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.quit()
+
+
+def load_spec(path):
+    """Read a pick spec, or None if it is unusable — in which case filer should
+    refuse to start rather than open a browser window the backend will read as a
+    cancel only once the user closes it."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            spec = json.load(f)
+    except (OSError, ValueError) as e:
+        print("filer --pick: unreadable spec:", e)
+        return None
+    if not isinstance(spec, dict) or not spec.get("result"):
+        print("filer --pick: spec has no result path")
+        return None
+    spec.setdefault("mode", "open")
+    return spec

@@ -14,6 +14,74 @@ five apps.
   to live in here and was split out into [`../viewer`](../viewer/AGENTS.md).
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
 - **The preview grid and the tree list are `KineticGridView` / `KineticListView`** (`../qmlcommon/`), not bare views — the desktop's momentum is compositor-side and Qt's own flick fights it. Any new scrollable surface here must use those too; see [`../AGENTS.md`](../AGENTS.md).
+
+## filer as the desktop's FILE PICKER (`portal.py` + `pick.py`) — ships DORMANT
+
+`filer` can be the dialog that appears when an app says "Upload File". That is
+**not** a MIME association (which is what makes it the default *directory*
+handler — `home/prog/filer.nix` + `mime-defaults.nix`); it is the
+`org.freedesktop.impl.portal.FileChooser` D-Bus **backend** interface, and it is
+packaged separately by `home/prog/filer-portal.nix`.
+
+```bash
+filer-portal-switch status     # is it on, and what would xdp pick?
+filer-portal-switch on         # writes ~/.config/xdg-desktop-portal/hyprland-portals.conf
+filer-portal-switch off        # deletes it. No rebuild either way.
+```
+
+**It is installed but inert until you run `on`.** xdg-desktop-portal only
+consults backends *named in a portals.conf*, so the `filer.portal` file on disk
+changes nothing by itself — verified against xdp 1.22.1's own
+`Using <x>.portal for <interface>` trace, not assumed.
+
+Four things to know before touching any of it:
+
+- **Backend selection is per INTERFACE, not per method.** Claiming FileChooser
+  claims `OpenFile`, `SaveFile` *and* `SaveFiles`; there is no per-method
+  fallback, and an `UnknownMethod` reaches the calling app as a broken dialog.
+  So "implement OpenFile only" is not a thing that can be configured. What
+  `portal.py` does instead is implement all three and **proxy** SaveFile and
+  SaveFiles to the backend that answers them today (`gtk` on book, `kde` on
+  top — `FILER_PORTAL_DELEGATE`), handle unchanged, so save dialogs are
+  bit-for-bit what they were.
+- **The backend's `Request` object has only `Close()` — there is no `Response`
+  signal on this side.** A backend answers by *returning from the method*, which
+  is why the reply is delayed. The `Response` signal apps see is emitted by xdp
+  on the frontend object. Getting this backwards hangs every file dialog on the
+  machine.
+- **A hang is the worst outcome, worse than a wrong answer.** Every exit path
+  ends in exactly one reply (`_Reply` latches it), an absent result file is read
+  as "cancelled", and a picker that cannot even be spawned falls through to the
+  delegate. `FILER_PORTAL_OPEN=delegate` turns the whole service into a
+  pass-through, which is the way to bisect a problem without editing config.
+- **The picker is a SUBPROCESS** (`filer --pick <spec.json>`), not QML hosted in
+  the backend, so a crash or a wedge costs one dialog instead of every future
+  one — and `Close()` has something to kill. The two halves talk only through
+  the spec/result JSON described in `pick.py`, which is what lets each be tested
+  without the other.
+
+Picker mode reuses the whole browser — tree, expand, sort, preview grid,
+titlebar address bar — and adds `qml/PickerBar.qml` along the bottom. Every
+picker branch in `qml/Main.qml` is gated on `win.picking` (`Picker.active`), so
+an ordinary filer window is unchanged; notably `openFile()` returns the
+selection instead of shelling out to `viewer`/`xdg-open` (which would be
+circular), and `persist()` no-ops so a dialog never moves where your real filer
+window reopens.
+
+**Verify headlessly, never by opening a dialog** — a malformed response hangs
+the app that asked, so the "obvious" test is the one test you must not run:
+
+```bash
+apps/filer/tools/portal-tests.sh    # ~40 checks, no window, no session bus touched
+```
+
+Three harnesses: the D-Bus contract against a stub delegate and a stub `filer`
+on a private bus (`dbus-run-session`); the picker by loading the real `Main.qml`
+under `QT_QPA_PLATFORM=offscreen`; and the seam between them, the real backend
+spawning the real `filer --pick`. Most of it is failure paths — cancel, crash,
+missing binary, `Close()` mid-flight — because each of those is a candidate
+hang.
+
 - **`videoconv.py`** — the context menu's "compress to <10MB" (an upload-limit
   squeeze). Exposed as the `VideoConv` context property; the only part of filer
   that shells out to `ffmpeg`/`ffprobe`/`notify-send` (all PATH-resolved from the

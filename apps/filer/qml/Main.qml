@@ -25,6 +25,12 @@ Window {
     readonly property color fgAccent: win.active ? Theme.accent : Theme.inactive
     readonly property color fgText:   win.active ? Theme.text  : Theme.inactive
 
+    // In picker mode the window IS the file dialog (`filer --pick`, see
+    // ../pick.py): same tree, same navigation, plus the bar along the bottom.
+    // Every picker branch in this file is gated on this, which is false in an
+    // ordinary filer window.
+    readonly property bool picking: Picker.active
+
     // The window title IS the address bar: the hyprvtb plugin renders it as an
     // editable path field (setTitleEdit below), same as surfer's URL bar. It
     // mirrors the current directory and, on submit, navigates there.
@@ -343,7 +349,14 @@ Window {
         // Open a file with the right thing for its kind: images go to `viewer`
         // (the standalone image/media viewer — it scans the file's directory
         // itself for the flip-through set), the rest to xdg-open. (Dirs → go().)
+        // In picker mode "open" means "this is my answer" — double-clicking a
+        // file returns it. Launching viewer/xdg-open from inside a dialog the
+        // portal spawned would be both wrong and, for xdg-open, circular.
         function openFile(p, kind) {
+            if (win.picking) {
+                if (Picker.selectable(p)) { selectSingle(p, false); pickBar.submit(); }
+                return;
+            }
             if (kind === "image") FileOps.execDetached(["viewer", p]);
             else FileOps.execDetached(["xdg-open", p]);
         }
@@ -366,7 +379,12 @@ Window {
 
         // Persist the last directory + sort + hidden toggle so filer reopens
         // how you left it (main.py's Settings writes ~/.local/state/filer/state.json).
-        function persist() { Settings.save(path, sortField, sortAsc, showHidden); }
+        // A picker is a transient errand, not a browsing session: it must not
+        // move where the user's own filer window reopens.
+        function persist() {
+            if (win.picking) return;
+            Settings.save(path, sortField, sortAsc, showHidden);
+        }
 
         // total size of the files directly in the current dir (not recursive —
         // instant, no du). Shown at the bottom of the titlebar (via the window
@@ -425,6 +443,10 @@ Window {
             for (let i = 0; i < entries.length; i++) {
                 const e = entries[i];
                 if (!view.showHidden && e.hidden) continue;   // "h" toggle: drop dotfiles
+                // picker mode: narrow the listing to what the calling app asked
+                // for. Directories always survive — they are how you navigate —
+                // so `dir` mode leaves a pure folder tree. (pick.py::accepts)
+                if (win.picking && !Picker.accepts(e.name, e.isDir)) continue;
                 if (depth === 0 && e.kind === "image") { imgOut.push(e); continue; }
                 const exp = e.isDir && view.expandedPaths.has(e.path);
                 out.push({ name: e.name, path: e.path, isDir: e.isDir, kind: e.kind,
@@ -572,7 +594,7 @@ Window {
         // titlebar address bar, and "up" is the "^" titlebar button.)
         KineticListView {
             id: list
-            anchors { top: splitter.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
+            anchors { top: splitter.bottom; left: parent.left; right: parent.right; bottom: pickBar.top; margins: 2 }
             visible: view.hasRows
             clip: true
             model: view.rows
@@ -716,6 +738,39 @@ Window {
                     }
                 }
             }
+        }
+
+        // ---- picker bar ----
+        // Anchored to the bottom and given zero height when not picking, so an
+        // ordinary filer window lays out exactly as before (the list anchors to
+        // pickBar.top either way). `picked` is the selection filtered down to
+        // what this mode can actually return — files for "open", folders for
+        // "dir" — so selecting a folder in a file picker greys accept rather
+        // than returning something the app cannot use.
+        PickerBar {
+            id: pickBar
+            visible: win.picking
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: win.picking ? implicitHeight : 0
+            winActive: win.active
+            currentDir: view.path
+            picked: {
+                if (!win.picking) return [];
+                return view.selection.filter(p => Picker.selectable(p));
+            }
+        }
+
+        // Enter accepts, Escape cancels — the two keys every file dialog owes
+        // the user. Only bound while picking, so they stay free in the browser.
+        Shortcut {
+            enabled: win.picking
+            sequences: [StandardKey.Cancel]
+            onActivated: Picker.cancel()
+        }
+        Shortcut {
+            enabled: win.picking
+            sequences: ["Return", "Enter"]
+            onActivated: pickBar.submit()
         }
 
         // ---- right-click layer ----
