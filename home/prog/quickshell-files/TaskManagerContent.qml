@@ -4,13 +4,17 @@ import Quickshell
 // The task manager: the machine's load at a glance, and the processes causing
 // it, with the means to end them.
 //
-// The three history charts appear here as SPARKLINE STRIPS rather than as the
-// full cpu/gpu/eth cards. At the dock's width three of those cards side by side
-// would each be ~85px wide — narrower than their own legend line — so they are
-// laid out one per row instead: a label, the current readout, and the same
-// ChartCanvas the popups use filling whatever is left. Same data, same drawing
-// code, a quarter of the height, which is the whole point: the process table is
-// what this widget is FOR, so the charts must not eat the space.
+// Three sections, top to bottom: a 2x2 block of chart cards (cpu / gpu / mem /
+// net), a two-line sensor strip for the readouts with no history worth
+// plotting, and the process table taking everything that is left. The table is
+// the point of the widget, so it gets the slack — the cards are CAPPED at
+// roughly square rather than allowed to grow, so a taller tile turns into more
+// visible processes, not bigger charts.
+//
+// The cards draw through the same ChartCanvas the cpu/gpu/eth popups use, so
+// there is one implementation of the plot. They were thin sparkline strips
+// first, to save height; tightening the dock's other widgets bought back the
+// room for the real thing.
 Item {
     id: root
 
@@ -24,80 +28,93 @@ Item {
     readonly property real inner: Math.max(160, width - pad * 2)
 
     implicitWidth: 300
-    implicitHeight: 320
+    implicitHeight: 360
 
     onActiveChanged: Procs.watch(root, active)
     Component.onCompleted: Procs.watch(root, active)
     Component.onDestruction: Procs.watch(root, false)
 
-    // ---- one metric as a label + readout + sparkline --------------------
-    component SparkRow: Item {
-        id: srow
+    function fmtUptime(s) {
+        if (!s || s <= 0) return "--";
+        const d = Math.floor(s / 86400);
+        const h = Math.floor((s % 86400) / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        if (d > 0) return d + "d" + h + "h";
+        if (h > 0) return h + "h" + m + "m";
+        return m + "m";
+    }
+
+    // ---- one metric as a card: label + readout over its history ----------
+    component MetricCard: Item {
+        id: card
         property string label: ""
         property string value: ""
-        property alias series: spark.series
-        property alias scaleMax: spark.scaleMax
-        property alias autoFloor: spark.autoFloor
-        height: 26
+        property alias series: plot.series
+        property alias scaleMax: plot.scaleMax
+        property alias autoFloor: plot.autoFloor
 
         PixelText {
-            id: lbl
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-            width: 30
-            text: srow.label
+            id: cardLabel
+            anchors { left: parent.left; top: parent.top }
+            text: card.label
             color: Theme.accent
         }
         PixelText {
-            id: val
-            anchors { left: lbl.right; verticalCenter: parent.verticalCenter }
-            width: 82
-            text: srow.value
+            anchors { right: parent.right; top: parent.top }
+            text: card.value
             color: Theme.textDim
         }
         ChartCanvas {
-            id: spark
+            id: plot
             active: root.active
             anchors {
-                left: val.right; right: parent.right
-                top: parent.top; bottom: parent.bottom
-                topMargin: 2; bottomMargin: 2
+                left: parent.left; right: parent.right
+                top: cardLabel.bottom; topMargin: 3
+                bottom: parent.bottom
             }
-            // no frame and no midline: at 22px tall they would be most of the
-            // ink on screen and the trace would be lost in them
-            frame: false
-            midline: false
-            lineWidth: 1
         }
     }
 
-    Column {
-        id: stats
+    readonly property real cardW: (inner - Theme.gap) / 2
+    readonly property real cardH: Math.max(52, Math.min(cardW * 0.55, 80))
+
+    Grid {
+        id: cards
         anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
-        spacing: 2
+        columns: 2
+        columnSpacing: Theme.gap
+        rowSpacing: Theme.gap
 
-        SparkRow {
-            width: parent.width
+        MetricCard {
+            width: root.cardW; height: root.cardH
             label: "cpu"
             value: (SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + "%")
-                   + "  " + (SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + "C")
+                   + " " + (SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + "C")
             series: [
                 { data: SysInfo.tempHist, color: Theme.crit },
                 { data: SysInfo.cpuHist,  color: Theme.accent },
             ]
         }
-        SparkRow {
-            width: parent.width
+        MetricCard {
+            width: root.cardW; height: root.cardH
             label: "gpu"
             value: (SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + "%")
-                   + "  " + (SysInfo.gpuTemp < 0 ? "--" : SysInfo.gpuTemp + "C")
+                   + " " + (SysInfo.gpuTemp < 0 ? "--" : SysInfo.gpuTemp + "C")
             series: [
                 { data: SysInfo.gpuTempHist, color: Theme.crit },
                 { data: SysInfo.gpuHist,     color: Theme.accent },
             ]
         }
-        SparkRow {
-            width: parent.width
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            label: "mem"
+            value: (SysInfo.memUsage < 0 ? "--" : SysInfo.memUsage + "%")
+                   + " " + SysInfo.fmtSize(SysInfo.memUsedKb)
+            series: [ { data: SysInfo.memHist, color: Theme.accent } ]
+        }
+        MetricCard {
+            width: root.cardW; height: root.cardH
             label: "net"
             value: SysInfo.fmtSpeed(SysInfo.rxSpeed) + " " + SysInfo.fmtSpeed(SysInfo.txSpeed)
             scaleMax: 0
@@ -109,10 +126,72 @@ Item {
         }
     }
 
+    // ---- the readouts with no history worth plotting ---------------------
+    component Sensor: Row {
+        id: sen
+        property string label: ""
+        property string value: ""
+        property color tint: Theme.text
+        spacing: 4
+        PixelText { text: sen.label; color: Theme.textDim }
+        PixelText { text: sen.value; color: sen.tint }
+    }
+
+    Column {
+        id: sensors
+        anchors { top: cards.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
+        width: root.inner
+        spacing: 1
+
+        Row {
+            width: parent.width
+            Sensor {
+                width: root.inner / 3
+                label: "load"
+                value: SysInfo.load1 < 0 ? "--" : SysInfo.load1.toFixed(2)
+                // this box has 16 threads; a run queue past a quarter of them is
+                // where it starts being something you can feel
+                tint: SysInfo.load1 >= 8 ? Theme.crit
+                    : SysInfo.load1 >= 4 ? Theme.warn : Theme.text
+            }
+            Sensor {
+                width: root.inner / 3
+                label: "swap"
+                value: SysInfo.swapUsage < 0 ? "--" : SysInfo.swapUsage + "%"
+                tint: SysInfo.swapUsage >= 25 ? Theme.warn : Theme.text
+            }
+            Sensor {
+                width: root.inner / 3
+                label: "up"
+                value: root.fmtUptime(SysInfo.uptimeSec)
+            }
+        }
+        Row {
+            width: parent.width
+            Sensor {
+                width: root.inner / 3
+                label: "vram"
+                value: SysInfo.gpuMemUsage < 0 ? "--"
+                     : SysInfo.gpuMemUsage + "% " + (SysInfo.gpuMemUsedMb / 1024).toFixed(1) + "G"
+                tint: SysInfo.gpuMemUsage >= 90 ? Theme.crit : Theme.text
+            }
+            Sensor {
+                width: root.inner / 3
+                label: "pwr"
+                value: SysInfo.gpuPowerW < 0 ? "--" : Math.round(SysInfo.gpuPowerW) + "W"
+            }
+            Sensor {
+                width: root.inner / 3
+                label: "fan"
+                value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
+            }
+        }
+    }
+
     // ---- process table ---------------------------------------------------
     Rectangle {
         id: rule
-        anchors { top: stats.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
+        anchors { top: sensors.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 1
         color: Theme.border

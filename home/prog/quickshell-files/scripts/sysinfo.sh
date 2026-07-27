@@ -1,6 +1,11 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB
+#
+# Fields are POSITIONAL and SysInfo.qml indexes them, so new ones go on the
+# END. Everything after batteryCharging was added for the dock's task manager;
+# each degrades to -1 where the host can't produce it (book has no nvidia-smi),
+# so the readout shows "--" rather than a wrong number.
 #
 # Wifi stays dropped (both hosts are wired). Battery is back, scoped to
 # /sys/class/power_supply/BAT* (generic ACPI laptops) and macsmc-battery
@@ -68,14 +73,34 @@ if [ "$cputemp" = "-1" ]; then
     done
 fi
 
+# Memory and swap, straight from /proc/meminfo. MemAvailable (not MemFree) is
+# the kernel's own estimate of what a new allocation could actually get, i.e.
+# free plus the reclaimable page cache — MemFree alone reads as "almost none"
+# on any machine that has been up a while and is simply wrong to show a user.
+mem=$(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2} END{printf "%d|%d|%d|%d", t, a, st, sf}' /proc/meminfo)
+
+# 1-minute load average and uptime in whole seconds.
+load1=$(awk '{print $1}' /proc/loadavg)
+uptime=$(awk '{printf "%d", $1}' /proc/uptime)
+
 # GPU utilization + temp via nvidia-smi (NVIDIA proprietary driver). One cheap
 # (~20ms) query for both. "gpuUsePct|gpuTempC"; -1|-1 if nvidia-smi is missing
 # or errors (so the panel shows "--" rather than a stale value).
+# The extra four (fan/power/vram) ride along in the SAME query — nvidia-smi's
+# cost is process startup, not the number of columns, so they are free.
 gpu="-1|-1"
+gpux="-1|-1|-1|-1"
 if command -v nvidia-smi >/dev/null 2>&1; then
-    graw=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null)
+    graw=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu,fan.speed,power.draw,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null)
     g=$(printf '%s\n' "$graw" | awk -F',' 'NR==1{gsub(/ /,""); if($1!="" && $2!="") printf "%d|%d", $1, $2}')
     [ -n "$g" ] && gpu="$g"
+    gx=$(printf '%s\n' "$graw" | awk -F',' 'NR==1{gsub(/ /,"");
+        f=($3=="" || $3=="[N/A]") ? -1 : $3;
+        p=($4=="" || $4=="[N/A]") ? -1 : $4;
+        mu=($5=="" || $5=="[N/A]") ? -1 : $5;
+        mt=($6=="" || $6=="[N/A]") ? -1 : $6;
+        printf "%d|%.1f|%d|%d", f, p, mu, mt}')
+    [ -n "$gx" ] && gpux="$gx"
 fi
 
 # Battery percentage + charging flag via /sys/class/power_supply/BAT*
@@ -110,4 +135,4 @@ for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/
     break
 done
 
-printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat"
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux"

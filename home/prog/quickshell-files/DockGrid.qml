@@ -30,7 +30,7 @@ Item {
     property bool active: true
 
     readonly property int columns: 4
-    readonly property int rows: 26
+    readonly property int rows: 29
     readonly property int spacing: Theme.gap
 
     readonly property real cellWidth: (width - spacing * (columns - 1)) / columns
@@ -41,17 +41,29 @@ Item {
     function cellW(colSpan) { return colSpan * cellWidth + (colSpan - 1) * spacing; }
     function cellH(rowSpan) { return rowSpan * cellHeight + (rowSpan - 1) * spacing; }
 
-    // Reading bottom-up, which is how it was asked for: clock and calendar side
+    // Reading bottom-up, which is how it was asked for: calendar and clock side
     // by side on the bottom row, the forecast above them, the player above that,
     // and the task manager taking everything that's left — it is the one widget
     // whose usefulness scales with the space it gets, since every extra row is
     // another process you can see.
+    //
+    // The other four are sized to what they actually need, which is measurable
+    // rather than a matter of taste:
+    //
+    //     qs ipc call live tiles      # per tile: got, wants, slack
+    //
+    // Aim for a small POSITIVE slack. But read it knowing that `wants` is the
+    // widget's NATURAL height, not a minimum: the calendar's weeks, the clock's
+    // face and the player's artwork all grow or shrink into the tile they are
+    // given rather than leaving a gap under them, so the clock sitting at a
+    // large negative slack just means it is drawing a smaller face — which is
+    // the point, since the bottom row is sized by the calendar.
     readonly property var placements: [
-        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,  cs: 4, rs: 8 },
-        { key: "media",    src: "MediaContent.qml",       col: 0, row: 8,  cs: 4, rs: 6 },
-        { key: "weather",  src: "WeatherContent.qml",     col: 0, row: 14, cs: 4, rs: 6 },
-        { key: "clock",    src: "ClockContent.qml",       col: 0, row: 20, cs: 2, rs: 6 },
-        { key: "calendar", src: "CalendarContent.qml",    col: 2, row: 20, cs: 2, rs: 6 },
+        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,  cs: 4, rs: 12 },
+        { key: "media",    src: "MediaContent.qml",       col: 0, row: 12, cs: 4, rs: 6 },
+        { key: "weather",  src: "WeatherContent.qml",     col: 0, row: 18, cs: 4, rs: 6 },
+        { key: "calendar", src: "CalendarContent.qml",    col: 0, row: 24, cs: 2, rs: 5 },
+        { key: "clock",    src: "ClockContent.qml",       col: 2, row: 24, cs: 2, rs: 5 },
     ]
 
     Repeater {
@@ -64,6 +76,7 @@ Item {
             width: root.cellW(modelData.cs)
             height: root.cellH(modelData.rs)
 
+            tileKey: modelData.key
             source: modelData.src
             // Only the visible mode's copy of a widget polls. The popup copies
             // gate on their own `open`; these gate on the dock being on screen.

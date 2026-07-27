@@ -24,15 +24,24 @@ Item {
     // live in, and a digit in this font is 8px wide, so anything larger would
     // overflow the tile rather than shrink to fit it.
     readonly property real cellW: Math.max(14, Math.min(40, inner / 7))
-    readonly property real cellH: Math.round(cellW * 20 / 26)
+    // Natural row height (what the popup is sized to) and the one actually
+    // used, which GROWS to fill a taller tile. Without that the month sat at
+    // its natural height with dead space under it, which is exactly the space
+    // the dock is short of. `naturalCellH` is what implicitHeight is built
+    // from — deriving it from `height` instead would be a binding loop, since
+    // the popup takes its height from implicitHeight.
+    readonly property real naturalCellH: Math.round(cellW * 20 / 26)
+    readonly property int weekRows: Math.max(1, Math.ceil(cells.length / 7))
+    readonly property real _chrome: pad * 2 + head.height + 8 + 18 + 8
+    readonly property real cellH:
+        Math.max(naturalCellH, (height - _chrome) / weekRows)
 
     property string title: ""
     property int today: 0
     property var cells: []    // flat 7xN day numbers, 0 = blank pad cell
 
     implicitWidth: 7 * 26 + 24
-    implicitHeight: pad * 2 + head.height + col.spacing * 2
-                    + dowRow.height + Math.ceil(cells.length / 7) * cellH
+    implicitHeight: _chrome + weekRows * naturalCellH
 
     SystemClock {
         id: clock

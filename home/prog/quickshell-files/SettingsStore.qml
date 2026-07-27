@@ -200,6 +200,10 @@ Singleton {
             property bool   tapToClick: true
             property bool   clock24h: false
             property bool   weekStartsMonday: false
+            // How the dock's clock widget draws the time: an analog face, a
+            // 5x7 dot-matrix readout, or a seven-segment one. Cycled by the
+            // button in the widget's own top-right corner.
+            property string clockFace: "analog"       // analog | dots | seg
             property real   weatherLat: 0.0
             property real   weatherLon: 0.0
             property string weatherPlace: "redacted-city"
@@ -256,7 +260,8 @@ Singleton {
         cmdLogout: "pkill Hyprland", cmdSleep: "systemctl suspend",
         cmdReboot: "systemctl reboot", cmdPoweroff: "systemctl poweroff", lidCloseAction: "suspend",
         keyRepeatDelay: 300, keyRepeatRate: 40, pointerSpeed: 0.0, naturalScroll: false,
-        tapToClick: true, clock24h: false, weekStartsMonday: false, weatherLat: 0.0,
+        tapToClick: true, clock24h: false, weekStartsMonday: false, clockFace: "analog",
+        weatherLat: 0.0,
         weatherLon: 0.0, weatherPlace: "redacted-city", weatherUnit: "F", weatherRefreshMin: 20,
         worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
         brightnessStep: 5, brightnessBackend: "auto", nightLight: false,

@@ -18,9 +18,6 @@ Item {
     property int pad: 10
     readonly property real inner: Math.max(180, width - 24)
 
-    implicitWidth: 300
-    implicitHeight: pad * 2 + col.implicitHeight
-
     onActiveChanged: Media.watch(root, active)
     Component.onCompleted: Media.watch(root, active)
     Component.onDestruction: Media.watch(root, false)
@@ -129,8 +126,18 @@ Item {
         }
     }
 
+    // Layout: the text block pinned to the top, the seekbar + transport pinned
+    // to the bottom, and the artwork/spectrum row taking EVERYTHING in between.
+    // That middle row is what absorbs a tall tile, so the widget has no dead
+    // space at the bottom whatever height the grid gives it — and a bigger tile
+    // buys a bigger cover and a taller spectrum rather than emptiness.
+    readonly property int naturalArt: 60
+
+    implicitWidth: 300
+    implicitHeight: pad * 2 + top.implicitHeight + 6 + naturalArt + 6 + bottom.implicitHeight
+
     Column {
-        id: col
+        id: top
         anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         spacing: 6
@@ -158,48 +165,64 @@ Item {
             text: Media.dispArtist
             color: Theme.textDim
         }
+    }
 
-        // artwork + spectrum
-        Row {
-            width: parent.width
-            height: 60
-            spacing: 8
+    // artwork + spectrum, filling the gap between the two blocks
+    Row {
+        id: mid
+        anchors {
+            top: top.bottom; topMargin: 6
+            bottom: bottom.top; bottomMargin: 6
+            horizontalCenter: parent.horizontalCenter
+        }
+        width: root.inner
+        spacing: 8
 
-            Item {
-                width: 60
-                height: 60
-                Rectangle {
-                    anchors.fill: parent
-                    color: Theme.bgAlt
-                    border.width: 1
-                    border.color: Theme.border
-                }
-                Image {
-                    id: art
-                    anchors { fill: parent; margins: 1 }
-                    source: Media.dispArt
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: true
-                    clip: true
-                    sourceSize.width: 120
-                    sourceSize.height: 120
-                    visible: status === Image.Ready
-                }
-                // CP437 note glyph placeholder when there's no cover art
-                PixelText {
-                    anchors.centerIn: parent
-                    visible: !art.visible
-                    text: "♫"
-                    color: Theme.textDim
-                }
+        Item {
+            id: artBox
+            width: Math.min(mid.height, mid.width * 0.45)
+            height: mid.height
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.bgAlt
+                border.width: 1
+                border.color: Theme.border
             }
-
-            Spectrum {
-                width: parent.width - 68
-                height: 60
+            Image {
+                id: art
+                anchors { fill: parent; margins: 1 }
+                source: Media.dispArt
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+                clip: true
+                // Decoded at twice the natural size so a tall tile's larger
+                // cover is still sharp; NOT bound to the item's width, which
+                // changes on every frame of a panel drag.
+                sourceSize.width: 240
+                sourceSize.height: 240
+                visible: status === Image.Ready
+            }
+            // CP437 note glyph placeholder when there's no cover art
+            PixelText {
+                anchors.centerIn: parent
+                visible: !art.visible
+                text: "\u266b"
+                color: Theme.textDim
             }
         }
+
+        Spectrum {
+            width: mid.width - artBox.width - 8
+            height: mid.height
+        }
+    }
+
+    Column {
+        id: bottom
+        anchors { bottom: parent.bottom; bottomMargin: root.pad; horizontalCenter: parent.horizontalCenter }
+        width: root.inner
+        spacing: 6
 
         // seekbar: elapsed | draggable track | total
         Row {
