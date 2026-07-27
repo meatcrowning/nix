@@ -138,6 +138,27 @@ qs ipc call view toggle|dock|classic|mode
   `Component.onCompleted` returns early in dock mode, so neither the reload
   restore nor the login fan re-pins anything.
 
+### Anything the user changes by USING a widget goes in `SettingsStore`
+
+Not a local property, and not a `PersistentProperties` slot. `PersistentProperties`
+only survives a reload; `SettingsStore` writes
+`~/.config/quickshell/settings.json`, which survives a **logout** too — and a
+setting the user chose must not quietly revert at either boundary.
+
+That covers the clicked column heading in the task manager (`procSort`), the
+clock's face (`clockFace`), repeat on a player with no `LoopStatus` of its own
+(`mediaLocalLoop`), the view mode and the dock's width. The pattern is a
+`readonly` property bound to the store plus a setter that writes it, so there is
+exactly one copy of the state and no binding to break:
+
+```qml
+readonly property string sortKey: SettingsStore.d.procSort
+function setSort(k) { SettingsStore.d.procSort = k; }
+```
+
+Transient state — a hover index, a list's scroll position — stays local. The
+test is whether the user would notice it reverting.
+
 ### One widget, two places: `*Content.qml` + a data singleton
 
 A widget is drawn by a **content component** and its data belongs to a

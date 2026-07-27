@@ -62,12 +62,14 @@ Singleton {
     readonly property bool useSnap: !hasPlayer && _settling && snap !== null
     readonly property string dispIdentity: hasPlayer ? (player.identity || "media")
         : useSnap ? (snap.id || "media") : "media"
-    // ASCII "-", not an em dash: More Perfect DOS VGA has no U+2014, so a line
-    // containing one falls back to another font for that glyph and loses ~5px
-    // of ascent, which clips the whole line. Same reason "reading..." is not
-    // "reading…" anywhere in this tree.
-    readonly property string dispTitle: hasPlayer ? (player.trackTitle || "-")
-        : useSnap ? (snap.title || "-") : "nothing playing"
+    // EMPTY when there is nothing to say, rather than a placeholder. The widget
+    // reserves the line's height either way (MediaContent's top row is a fixed
+    // height), so a blank line is stable where "nothing playing" was just noise
+    // — and the em dash it used to fall back to was worse than noise: More
+    // Perfect DOS VGA has no U+2014, so the line fell back to another font for
+    // that glyph, lost ~5px of ascent, and clipped.
+    readonly property string dispTitle: hasPlayer ? (player.trackTitle || "")
+        : useSnap ? (snap.title || "") : ""
     readonly property string dispArtist: hasPlayer ? (player.trackArtist || "")
         : useSnap ? (snap.artist || "") : ""
     readonly property string dispArt: hasPlayer ? (player.trackArtUrl || "")
@@ -118,7 +120,9 @@ Singleton {
     // LoopStatus. When it doesn't (localLoop path), we fake repeat-track by
     // seeking back to 0 just before the current track ends — the one loop mode we
     // can honestly implement without owning the player's queue.
-    property int localLoop: 0     // 0 = off, 1 = repeat-track; only when !loopSupported
+    // Persisted: on a player with no LoopStatus this is the ONLY record that
+    // repeat is on, and losing it on a reload silently stopped repeating.
+    readonly property int localLoop: SettingsStore.d.mediaLocalLoop
 
     readonly property int repeatMode: {
         if (!hasPlayer) return 0;
@@ -142,7 +146,7 @@ Singleton {
                 : (s === MprisLoopState.Track) ? MprisLoopState.Playlist
                 : MprisLoopState.None;
         } else {
-            localLoop = localLoop === 0 ? 1 : 0;
+            SettingsStore.d.mediaLocalLoop = localLoop === 0 ? 1 : 0;
         }
     }
 
