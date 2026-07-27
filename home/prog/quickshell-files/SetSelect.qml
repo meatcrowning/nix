@@ -29,7 +29,7 @@ Rectangle {
 
     PixelText {
         anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
-        text: "‹"
+        text: "<"
         color: Theme.textDim
     }
     PixelText {
@@ -40,7 +40,7 @@ Rectangle {
     }
     PixelText {
         anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-        text: "›"
+        text: ">"
         color: Theme.textDim
     }
 

@@ -246,11 +246,11 @@ Scope {
                         }
                     }
 
-                    // Status line: error, or "checking…" while PAM runs.
+                    // Status line: error, or "checking..." while PAM runs.
                     PixelText {
                         anchors.horizontalCenter: parent.horizontalCenter
                         opacity: surface.revealed ? 1 : 0
-                        text: surface.authenticating ? "checking…" : surface.errorText
+                        text: surface.authenticating ? "checking..." : surface.errorText
                         color: surface.authenticating ? Theme.textDim : Theme.crit
                     }
                 }

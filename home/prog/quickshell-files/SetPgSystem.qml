@@ -13,7 +13,7 @@ Column {
     // Machine name for the read-only profile row. Read via `hostname` rather
     // than the nix-generated Host singleton so this page has no dependency on a
     // file that only exists in the deployed config.
-    property string hostName: "…"
+    property string hostName: "..."
     Process {
         running: true
         command: ["hostname"]
@@ -46,7 +46,7 @@ Column {
         title: "pointer"
         SetRow {
             label: "speed"
-            desc: "libinput acceleration, -1 slow … 1 fast"
+            desc: "libinput acceleration, -1 slow ... 1 fast"
             SetSlider {
                 from: -1.0; to: 1.0; step: 0.1
                 value: page.d.pointerSpeed
