@@ -171,6 +171,24 @@ if [ -n "$batdir" ]; then
         *)             batstat=5 ;;
     esac
 
+    # `status` is authoritative and is NOT second-guessed — a laptop on a
+    # too-small charger really is discharging while plugged in, and overriding
+    # that with "on ac" would be a lie the card draws for hours. The mains
+    # supply is consulted for the UNKNOWN case only, where the gauge has told
+    # us nothing and a coin-flip between "draining" and "plugged in" is worse
+    # than one sysfs read.
+    #
+    # type=Mains ONLY. book also publishes two tps6598x type=USB *source*
+    # nodes, which describe power the laptop is SUPPLYING to a peripheral;
+    # their `online` has nothing to do with whether it is on the charger.
+    if [ "$batstat" = "5" ]; then
+        batstat=1
+        for dir in /sys/class/power_supply/*/; do
+            [ "$(cat "$dir/type" 2>/dev/null)" = "Mains" ] || continue
+            [ "$(cat "$dir/online" 2>/dev/null)" = "1" ] && { batstat=4; break; }
+        done
+    fi
+
     now=""; full=""
     if [ -r "$batdir/energy_now" ] && [ -r "$batdir/energy_full" ]; then
         now=$(cat "$batdir/energy_now" 2>/dev/null); full=$(cat "$batdir/energy_full" 2>/dev/null)
