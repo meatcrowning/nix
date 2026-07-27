@@ -128,6 +128,16 @@ itself is Chromium's scroller and cannot be made to use `WheelScroll`; parity
 there is the gain plus the compositor's ≥300 ms withheld stop, which zeroes
 Chromium's 200 ms fling estimator so it never adds a fling of its own.
 
+**The panel has the same convention under a different roof**
+(`home/prog/quickshell-files/Kinetic.qml` + its `Kinetic*` types, documented in
+that directory's `AGENTS.md`). The two trees cannot share a component — the
+panel's QML is Quickshell's and this is plain Qt — so they are deliberate
+parallel implementations of one rule, anchored to the same
+`kinetic_friction`. Retune one and retune the other. Note the panel additionally
+needs its own Qt-side deceleration because hyprvtb refuses to coast over a
+*layer surface* at all, which almost all of the panel is; the apps are ordinary
+toplevels and do get compositor momentum.
+
 **Momentum has to be ON to be honoured, and `hyprctl reload` clears a runtime
 `kinetic_set(true)`.** The durable switch is the `plugin:hyprvtb:kinetic`
 config key, set in **both** copies of `hyprland.lua` and per-host via
