@@ -13,9 +13,26 @@ PanelWindow {
     property bool recording: false
     signal stopRequested()
 
-    // Stay mapped through the slide-back-in, then hide once fully off-screen —
-    // same lifecycle idiom as WallpaperPicker/Launcher.
-    visible: recording || card.x < card.hidden - 1
+    // Stay mapped through the slide-back-in, then unmap once it is fully
+    // off-screen. An IMPERATIVE flag, not a test on the card's x: `visible`
+    // gates layer-surface mapping, and the card's geometry depends on the
+    // window being mapped, so deriving one from the other maps and unmaps the
+    // surface for no reason. It did — Hyprland logged an openlayer/closelayer
+    // pair for `qs-recording` on every reload, because the label's implicit
+    // width lands a moment after construction and the slide Behavior then
+    // animated x across the "still on screen" test with nobody recording.
+    // Same idiom, and the same reason for it, as SlidePopup's `_visSurface`.
+    property bool _vis: false
+    visible: recording || _vis
+    onRecordingChanged: {
+        if (recording) { hideTimer.stop(); _vis = true; }
+        else hideTimer.restart();
+    }
+    Timer {
+        id: hideTimer
+        interval: 260               // the slide-out, plus a frame
+        onTriggered: if (!root.recording) root._vis = false
+    }
     color: "transparent"
 
     anchors { top: true; right: true }
@@ -37,8 +54,18 @@ PanelWindow {
         width: parent.width
 
         // Slide in from just past the right edge of our own window.
+        //
+        // NOT `width`, which is the WINDOW's mapped width — 0 while unmapped,
+        // and `visible` above is derived from x, so reading it here closed the
+        // loop visible -> width -> hidden -> x -> visible. Qt reported it as a
+        // binding loop on this Rectangle's width on every single load, and
+        // resolving it flickered the surface: Hyprland logged an
+        // openlayer+closelayer pair for `qs-recording` on every reload, i.e. a
+        // toast nobody had asked for was mapped and unmapped behind the scenes.
+        // `root.implicitWidth` is a plain constant off the label, which is what
+        // SlidePopup's card uses for exactly the same reason.
         readonly property real shown: 0
-        readonly property real hidden: width + Theme.gap
+        readonly property real hidden: root.implicitWidth + Theme.gap
         x: root.recording ? shown : hidden
         Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 

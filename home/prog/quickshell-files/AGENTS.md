@@ -155,6 +155,58 @@ qs ipc call view geom     # ...dragging=false settling=false
 
 `settling=true` when nothing is happening means the timer never fired.
 
+**A one-shot handler cannot be gated — it must LOAD. `SettingsStore.loadNow()`.**
+Snapping an animation is enough for a binding, which will be re-evaluated when
+the truth arrives. A `Component.onCompleted` runs once and is simply wrong. The
+reload restore in `shell.qml` opens `if (ViewMode.dock) return;` — and read
+`false` on every reload, so in dock mode it re-pinned the saved widget set onto
+the wallpaper and had it torn down again ~25ms later when the real mode landed
+and `onDockChanged` fired. On Hyprland's event socket that is the
+openlayer/closelayer pair per widget this section forbids, on every theme or
+wallpaper change.
+
+```qml
+function loadNow() { file.reload(); return file.text(); }   // SettingsStore
+```
+
+**Both calls, in that order, and the `text()` is the one that does the work.**
+`reload()` alone does not deliver — measured three ways (the FileView's own
+`blockLoading` initial load, a `reload()` from a binding's side effect, and a
+bare `reload()` here) and in all three the next line still read
+`viewMode: "classic"`. Reading `text()` forces the blocking read to complete, and
+the adapter's properties — and every binding on them — are updated before the
+call returns: `dockBefore=false dockAfter=true`. Call it first in any
+`Component.onCompleted` that branches on a persisted value.
+
+### `visible` gates layer-surface mapping — never derive it from geometry
+
+A `PanelWindow`'s `visible` is what maps and unmaps its Wayland surface, and an
+unmapped window has width 0. So a `visible` computed from the contents' geometry
+closes a loop through the compositor, and it does not merely warn: it maps and
+unmaps a real surface. `RecordingToast` had `visible: recording || card.x <
+card.hidden - 1` over a card whose `hidden` read the window's own `width`, which
+Qt reported as a binding loop on every load — and Hyprland logged an
+openlayer/closelayer pair for `qs-recording` on every reload, a toast nobody had
+asked for being mapped and unmapped behind the scenes. Fixing only the loop was
+not enough: the label's implicit width lands a moment after construction, the
+slide `Behavior` then animated `x` across the "still on screen" test, and the
+surface flickered again.
+
+The idiom, which `SlidePopup` (`_visSurface`) already used and is why it never
+had this: **keep an imperative flag**, set it when opening, clear it on a timer a
+slide-duration after closing, and let `visible` read the flag.
+
+```bash
+# What a clean reload looks like on the event socket:
+socat -u UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HIS/.socket2.sock -   # then force a reload
+```
+
+No `openlayer`/`closelayer` for any `qs-*` namespace. The one legitimate
+exception is `qs-notifications`: `NotificationServer` is `keepOnReload: false`,
+so a reload drops the toasts and unmaps it, and `onReloadCompleted`'s own
+"config reloaded" toast re-opens it ~300ms later. That pair is the reload
+announcing itself, not a surface being remapped.
+
 ---
 
 ## Two view modes, and the drag handle IS the switch

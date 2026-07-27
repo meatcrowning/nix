@@ -36,6 +36,16 @@ Singleton {
     function save() { saveTimer.restart(); }
     // Drop unsaved edits and re-read what's on disk.
     function revert() { file.reload(); }
+    // Pull the file in NOW, synchronously (blockLoading), and let the bindings
+    // that depend on it re-evaluate before this call returns.
+    //
+    // For IMPERATIVE code in a Component.onCompleted this is mandatory, not an
+    // optimisation: the tree is built from the shipped defaults, so a handler
+    // that branches on a persisted value — `if (ViewMode.dock) return;` in
+    // shell.qml's reload restore — reads the DEFAULT and takes the wrong branch,
+    // a good 25ms before the real value lands and anything can react to it. A
+    // binding merely flickers; a one-shot handler is simply wrong.
+    function loadNow() { file.reload(); return file.text(); }
     // Reset every key to its shipped default, then persist.
     function restoreDefaults() {
         const def = root.defaults;
