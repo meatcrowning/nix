@@ -91,9 +91,36 @@ A store path in `SUDO_ASKPASS` means that recurs on every rebuild — and lets
 `nix-collect-garbage` break `sudo -A` outright by deleting a wrapper that live
 shells still reference.
 
-Nothing can rescue a process that already holds a store path, so **a shell
-started before this change keeps the old dialog until it is restarted.** That is
-a one-time cost, not a recurring one.
+A stable path is only half of it, because `home.sessionVariables` lands in
+`hm-session-vars.sh`, **which guards itself with `__HM_SESS_VARS_SOURCED`**. A
+long-lived process that sourced it once has the guard set in its environment, so
+every shell it spawns inherits the guard, skips the file, and keeps the stale
+value. So `askpass.nix` also sets `programs.zsh.envExtra`, exporting
+`SUDO_ASKPASS` **unconditionally from `.zshenv`** — which zsh sources on every
+invocation, interactive or not, outside every guard. That is the half that
+rescues sessions already running: the next command an existing agent shell runs
+already picks up the current wrapper, with no restart.
+
+The residual gap is a process that invokes `sudo -A` **without spawning a shell**
+(a direct `execve`, a `subprocess` with `shell=False`). Those keep whatever they
+were started with. Agents here go through zsh, so in practice they are covered.
+
+## Never run `sudo -A` as a test
+
+It pops a **real** password dialog on the user's screen and demands their root
+password while they are doing something else — and if you feed it a stub, sudo
+burns real authentication attempts and logs failures against their account. This
+happened: `sudo[1791493]: lam : 3 incorrect password attempts ; COMMAND=/usr/sbin/true`,
+with the user meta-dragging the window away mid-task. **Verify without sudo:**
+
+```bash
+/usr/bin/python3 apps/askpass/tools/askpass-selftest.py   # the contracts
+/usr/bin/zsh -c 'echo $SUDO_ASKPASS'                      # what a new shell resolves
+readlink -f /home/lam/.local/bin/sudo-askpass             # which wrapper that is
+```
+
+That covers the whole chain except sudo's own `read`, which is sudo's contract,
+not ours, and does not need re-proving at the user's expense.
 
 ## The app-id `vista-askpass` is load-bearing in THREE places
 

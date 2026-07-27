@@ -90,4 +90,27 @@ in
   # and breaks `sudo -A` outright.
   home.file.".local/bin/sudo-askpass".source = "${sudo-askpass}/bin/sudo-askpass";
   home.sessionVariables.SUDO_ASKPASS = "/home/lam/.local/bin/sudo-askpass";
+
+  # ...AND re-export it unconditionally from .zshenv, which is the half that
+  # actually rescues the shells that are already running.
+  #
+  # home.sessionVariables lands in hm-session-vars.sh, and that file guards
+  # itself with __HM_SESS_VARS_SOURCED. A long-lived process that sourced it
+  # once already has the guard set in its environment, so every shell it spawns
+  # inherits the guard, skips the file, and keeps the STALE value — which is how
+  # 31 live processes went on invoking the previous generation's wrapper (and
+  # therefore ksshaskpass, confirmed in the journal: `ksshaskpass[1762281]:
+  # Unable to parse phrase "[sudo] password for lam: "`) long after the dialog
+  # was replaced. Waiting for the user to restart every shell is not a fix when
+  # agents run `sudo -A` from those shells constantly.
+  #
+  # zsh sources .zshenv on EVERY invocation, interactive or not, and this export
+  # sits outside every guard — so the next command an existing agent session runs
+  # already gets the current wrapper. Placed here rather than in zsh.nix so the
+  # whole askpass seam stays in one file; home-manager merges the option.
+  programs.zsh.envExtra = ''
+    # See home/prog/askpass.nix — unconditional on purpose, overrides the stale
+    # value a long-lived parent process may have inherited.
+    export SUDO_ASKPASS="/home/lam/.local/bin/sudo-askpass"
+  '';
 }
