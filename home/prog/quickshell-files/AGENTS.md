@@ -658,6 +658,17 @@ against the font's cmap: More Perfect DOS VGA has U+25A0 and U+2588 but not the
 bullet or the circle.) It is driven by a MINUTE-precision `SystemClock`; the
 seconds clock would rebuild the cell model 60x more often than anything changes.
 
+**Both digital faces blink their colon on `seconds % 2`, in `Theme.bgAlt` when
+unlit** — one beat, one unlit colour, so cycling between `dots` and `seg`
+doesn't change the rhythm. On `dots` the colon is NOT in `dotCells`: that array
+is a Repeater model, and a model replaced once a second destroys and re-creates
+all ~64 digit delegates every tick. Its column is published separately as
+`colonCol` (walked the same way `dotCells` walks the string) and its two dots
+are their own fixed `model: 2` Repeater, so a tick recolours exactly two items —
+no model rebuild, no relayout, no Canvas repaint. The seconds `SystemClock` is
+`enabled: root.active`, and its `onDateChanged` skips the Canvas entirely in
+`dots` mode, so an off-screen copy of the widget costs nothing per second.
+
 **For `seg`, the unlit colour is load-bearing and was wrong twice.** `Theme.dim`
 against `Theme.accent` is nowhere near enough contrast — every digit reads as an
 8 — so unlit segments go all the way down to `Theme.bgAlt`. The dot face had the

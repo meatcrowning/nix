@@ -62,10 +62,18 @@ Item {
     implicitWidth: 168
     implicitHeight: naturalFace + _chrome
 
+    // The seconds clock. `enabled` follows `active` so an off-screen copy of
+    // the widget (a condensed dock, a closed popup) is not woken once a second
+    // for a face nobody is looking at — both faces repaint on activation
+    // anyway, via onActiveChanged below.
     SystemClock {
         id: sc
         precision: SystemClock.Seconds
-        onDateChanged: if (root.active) face.requestPaint()
+        enabled: root.active
+        // `dots` is not a Canvas, and its digits only move once a minute — so
+        // the per-second tick must not ask the (hidden) Canvas to repaint in
+        // that mode. onModeChanged repaints it when the face is cycled back.
+        onDateChanged: if (root.active && root.mode !== "dots") face.requestPaint()
     }
     // The digit faces only change once a minute. Driving them off the seconds
     // clock would rebuild the dot-matrix cell model 60 times more often than
@@ -146,6 +154,12 @@ Item {
     // nothing to pick a dim colour for (which is what made the first version
     // unreadable). Bound to the minute clock, so this list is rebuilt once a
     // minute rather than once a second.
+    //
+    // The COLON is deliberately not in here: it blinks once a second, and this
+    // array is a Repeater model, so putting it here would destroy and rebuild
+    // all sixty-odd digit delegates (64 for "09:07") on every tick. Its column
+    // is published separately as `colonCol` and its two dots are their own
+    // items, so a tick recolours exactly two of them.
     readonly property var dotCells: {
         const txt = root.timeText();
         let out = [];
@@ -153,8 +167,6 @@ Item {
         for (let ci = 0; ci < txt.length; ci++) {
             const ch = txt.charAt(ci);
             if (ch === ":") {
-                out.push({ c: col, r: 2 });
-                out.push({ c: col, r: 4 });
                 col += 2;
                 continue;
             }
@@ -167,6 +179,19 @@ Item {
             col += 6;
         }
         return out;
+    }
+
+    // Which grid column the colon sits in — walked the same way `dotCells`
+    // walks the string, so a future format change moves both together. -1 if
+    // the text has no colon at all.
+    readonly property int colonCol: {
+        const txt = root.timeText();
+        let col = 0;
+        for (let ci = 0; ci < txt.length; ci++) {
+            if (txt.charAt(ci) === ":") return col;
+            col += 6;
+        }
+        return -1;
     }
 
     // The dot-matrix face, drawn out of the pixel font's own U+25A0 block
@@ -189,6 +214,14 @@ Item {
         readonly property real ox: (width - cols * unit) / 2
         readonly property real oy: (height - rows * unit) / 2
 
+        // The colon flashes with the seconds, on the same beat and with the
+        // same unlit colour as the `seg` face's colon — cycling between the
+        // two digital faces must not change the rhythm. `seconds % 2` toggles
+        // exactly on the second tick; `Theme.bgAlt` is a ghost rather than a
+        // hole, so a dot that is off still reads as an unlit cell instead of
+        // as something failing to draw.
+        readonly property bool colonLit: sc.date.getSeconds() % 2 === 0
+
         Repeater {
             model: root.dotCells
             PixelText {
@@ -202,6 +235,26 @@ Item {
                 height: dotFace.unit
                 x: dotFace.ox + modelData.c * dotFace.unit
                 y: dotFace.oy + modelData.r * dotFace.unit
+            }
+        }
+
+        // Rows 2 and 4 of `colonCol`. A constant integer model, so these two
+        // delegates are created once and only their `color` changes per tick —
+        // no model rebuild, no relayout, no Canvas repaint.
+        Repeater {
+            model: 2
+            PixelText {
+                required property int index
+                visible: root.colonCol >= 0
+                text: "\u25a0"
+                color: dotFace.colonLit ? Theme.accent : Theme.bgAlt
+                font.pixelSize: Math.max(6, Math.round(dotFace.unit * 1.5))
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                width: dotFace.unit
+                height: dotFace.unit
+                x: dotFace.ox + root.colonCol * dotFace.unit
+                y: dotFace.oy + (2 + index * 2) * dotFace.unit
             }
         }
     }
