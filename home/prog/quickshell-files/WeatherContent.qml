@@ -1,15 +1,16 @@
 import QtQuick
 
-// Current conditions over the 7-day forecast — a pure view over the Weather
-// singleton, which already owns the fetch, so it costs nothing to instantiate
-// twice (once in the popup, once as a dock tile).
+// Current conditions on one line, over a ten-day temperature graph sampled
+// twice a day.
 //
-// Two things make it fill whatever it is given rather than sit in a pool of
-// dead space: the four columns are PROPORTIONAL (the same component has to read
-// at the popup's 252px and at whatever a dock cell hands it), and the day rows
-// GROW to take up any slack height. `naturalRow` is what implicitHeight is built
-// from — deriving it from `height` would be a binding loop, since the popup
-// takes its height from implicitHeight.
+// The graph replaced a table of seven rows because a table spends a whole line
+// of height per day to say two numbers. Twenty points of the same height show
+// ten days AND the shape of the week — which day the warm spell breaks, whether
+// nights are dropping — none of which a column of hi/lo pairs conveys.
+//
+// "Morning" and "night" are the 09:00 and 21:00 hourly samples (Weather.amHour
+// / pmHour), not the daily max and min: a daily max is not tied to a time of
+// day, so it cannot be plotted against one.
 Item {
     id: root
 
@@ -19,103 +20,194 @@ Item {
     property int pad: 10
     readonly property real inner: Math.max(80, width - pad * 2)
 
-    readonly property int naturalRow: 16
-    readonly property int dayCount: Math.max(1, Weather.days.length)
-    readonly property real _chrome: pad * 2 + now.height + 4 + head.height + 4
-                                    + 1 + 4 + labels.height + 4
-    readonly property real rowH:
-        Math.max(naturalRow, (height - _chrome) / dayCount)
-
     implicitWidth: 252
-    implicitHeight: _chrome + dayCount * naturalRow
+    implicitHeight: pad * 2 + head.height + 6 + 120 + 2 + dayLabels.height
 
-    // Column geometry, shared by the rows and the labels under them.
-    readonly property real cName: inner * 0.19
-    readonly property real cSky:  inner * 0.24
-    readonly property real cTemp: inner * 0.32
-    readonly property real cRain: inner * 0.25
-
-    // What it is doing RIGHT NOW, which the forecast rows don't tell you — the
-    // same two values the classic bar's weather block shows.
-    PixelText {
-        id: now
-        anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
-        text: (Weather.tempF <= -999 ? "--" : Weather.tempF + "°")
-              + "  " + Weather.cond
-        color: Theme.text
-    }
-
-    PixelText {
+    // ---- header: where, and what it is doing right now -------------------
+    Item {
         id: head
-        anchors { top: now.bottom; topMargin: 4; horizontalCenter: parent.horizontalCenter }
-        text: SettingsStore.d.weatherPlace
-        color: Theme.accent
-    }
-
-    Column {
-        id: col
-        anchors { top: head.bottom; topMargin: 4; horizontalCenter: parent.horizontalCenter }
+        anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
-        spacing: 0
-
-        Repeater {
-            model: Weather.days
-            Row {
-                required property var modelData
-                width: root.inner
-                height: root.rowH
-                spacing: 0
-                PixelText {
-                    width: root.cName; height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: parent.modelData.name; color: Theme.textDim
-                }
-                PixelText {
-                    width: root.cSky; height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: parent.modelData.cond; color: Theme.info; elide: Text.ElideRight
-                }
-                PixelText {
-                    width: root.cTemp; height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: parent.modelData.hi + "/" + parent.modelData.lo
-                    color: Theme.text
-                }
-                PixelText {
-                    width: root.cRain; height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: parent.modelData.prob >= 0 ? parent.modelData.prob + "%" : "-"
-                    color: parent.modelData.precip >= 0.05 ? Theme.info : Theme.textDim
-                }
-            }
-        }
+        height: place.implicitHeight
 
         PixelText {
-            visible: Weather.days.length === 0
-            anchors.horizontalCenter: parent.horizontalCenter
-            height: root.rowH
-            verticalAlignment: Text.AlignVCenter
-            text: "no data yet"
-            color: Theme.textDim
+            id: place
+            anchors.left: parent.left
+            text: SettingsStore.d.weatherPlace
+            color: Theme.accent
+            elide: Text.ElideRight
+            width: Math.min(implicitWidth, parent.width * 0.4)
+        }
+
+        // temp, sky, wind — right-aligned, in that order
+        Row {
+            anchors.right: parent.right
+            spacing: 6
+            PixelText {
+                text: Weather.tempF <= -999 ? "--" : Weather.tempF + "°"
+                color: Theme.text
+            }
+            PixelText {
+                text: Weather.cond
+                color: Theme.info
+            }
+            PixelText {
+                text: Weather.windSpeed < 0 ? "--"
+                    : Math.round(Weather.windSpeed) + (Weather.windName.length ? " " + Weather.windName : "")
+                color: Theme.textDim
+            }
         }
     }
 
-    // column labels, pinned under the rows
-    Rectangle {
-        id: rule
-        anchors { bottom: labels.top; bottomMargin: 4; horizontalCenter: parent.horizontalCenter }
-        width: root.inner
-        height: 1
-        color: Theme.border
+    // ---- the ten-day graph -----------------------------------------------
+    readonly property var slots: Weather.slots
+    readonly property real tMin: {
+        let m = 1e9;
+        for (const s of slots) if (s.temp < m) m = s.temp;
+        return m === 1e9 ? 0 : m;
     }
+    readonly property real tMax: {
+        let m = -1e9;
+        for (const s of slots) if (s.temp > m) m = s.temp;
+        return m === -1e9 ? 1 : m;
+    }
+
+    Canvas {
+        id: graph
+        anchors {
+            top: head.bottom; topMargin: 6
+            bottom: dayLabels.top; bottomMargin: 2
+            left: parent.left; right: parent.right
+            leftMargin: root.pad; rightMargin: root.pad
+        }
+
+        // Repaint whenever the data or the scale moves. `slots` is a binding
+        // over the Weather singleton, so this is the only trigger needed.
+        Connections {
+            target: root
+            function onSlotsChanged() { if (root.active) graph.requestPaint(); }
+        }
+        Connections {
+            target: root
+            function onActiveChanged() { if (root.active) graph.requestPaint(); }
+        }
+
+        onPaint: {
+            const ctx = getContext("2d");
+            ctx.reset();
+            ctx.clearRect(0, 0, width, height);
+
+            const n = root.slots.length;
+            if (n < 2) {
+                ctx.strokeStyle = Theme.border;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
+                return;
+            }
+
+            // A degree or two of range would otherwise be amplified into a
+            // mountain profile, so keep a floor under the span.
+            const lo = root.tMin, hi = root.tMax;
+            const span = Math.max(6, hi - lo);
+            const mid = (hi + lo) / 2;
+            const y0 = mid + span / 2, y1 = mid - span / 2;
+            const top = 12, bot = height - 4;          // room for the value labels
+            function ty(t) { return top + (bot - top) * (y0 - t) / (y0 - y1); }
+            function tx(i) { return width * (i + 0.5) / n; }
+
+            // night bands: every second slot is a 21:00 sample, so shade its
+            // half of the day. This is what makes the two-per-day structure
+            // legible rather than just a wigglier line.
+            ctx.fillStyle = Theme.bgAlt;
+            for (let i = 0; i < n; i++) {
+                if (root.slots[i].part !== "pm") continue;
+                const x = width * i / n;
+                ctx.fillRect(x, 0, width / n, height);
+            }
+
+            // day separators
+            ctx.strokeStyle = Theme.border;
+            ctx.lineWidth = 1;
+            for (let i = 2; i < n; i += 2) {
+                const x = Math.round(width * i / n) + 0.5;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+
+            // precipitation probability, as a column rising from the floor
+            for (let i = 0; i < n; i++) {
+                const p = root.slots[i].prob;
+                if (!(p > 0)) continue;
+                const h = (height - 2) * Math.min(100, p) / 100;
+                ctx.fillStyle = Theme.info;
+                ctx.globalAlpha = 0.22;
+                ctx.fillRect(tx(i) - width / n * 0.3, height - h, width / n * 0.6, h);
+                ctx.globalAlpha = 1;
+            }
+
+            // the temperature line
+            ctx.strokeStyle = Theme.accent;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) {
+                const x = tx(i), y = ty(root.slots[i].temp);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // a marker per sample: filled for midday, hollow for night
+            for (let i = 0; i < n; i++) {
+                const x = tx(i), y = ty(root.slots[i].temp);
+                if (root.slots[i].part === "am") {
+                    ctx.fillStyle = Theme.accent;
+                    ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+                } else {
+                    ctx.strokeStyle = Theme.accent;
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x - 1.5, y - 1.5, 3, 3);
+                }
+            }
+
+            // high and low of the whole window, on the axis
+            ctx.fillStyle = Theme.textDim;
+            ctx.font = Theme.fontSize + "px \"" + Theme.font + "\"";
+            ctx.textBaseline = "top";
+            ctx.fillText(Math.round(hi) + "°", 1, 0);
+            ctx.textBaseline = "bottom";
+            ctx.fillText(Math.round(lo) + "°", 1, height);
+        }
+    }
+
+    // ---- day names, one per pair of samples ------------------------------
     Row {
-        id: labels
-        anchors { bottom: parent.bottom; bottomMargin: root.pad; horizontalCenter: parent.horizontalCenter }
-        width: root.inner
-        spacing: 0
-        PixelText { width: root.cName; text: "day";   color: Theme.textDim }
-        PixelText { width: root.cSky;  text: "sky";   color: Theme.textDim }
-        PixelText { width: root.cTemp; text: "hi/lo"; color: Theme.textDim }
-        PixelText { width: root.cRain; text: "rain%"; color: Theme.textDim }
+        id: dayLabels
+        anchors {
+            bottom: parent.bottom; bottomMargin: root.pad
+            left: parent.left; right: parent.right
+            leftMargin: root.pad; rightMargin: root.pad
+        }
+        height: 16
+
+        Repeater {
+            // one entry per DAY, i.e. every second slot
+            model: Math.floor(root.slots.length / 2)
+            PixelText {
+                required property int index
+                width: dayLabels.width / Math.max(1, Math.floor(root.slots.length / 2))
+                horizontalAlignment: Text.AlignHCenter
+                text: root.slots[index * 2] ? root.slots[index * 2].name : ""
+                color: index === 0 ? Theme.accent : Theme.textDim
+                elide: Text.ElideRight
+            }
+        }
+    }
+
+    PixelText {
+        anchors.centerIn: parent
+        visible: root.slots.length === 0
+        text: "no data yet"
+        color: Theme.textDim
     }
 }

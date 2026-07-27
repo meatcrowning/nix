@@ -59,8 +59,8 @@ Item {
     // large negative slack just means it is drawing a smaller face — which is
     // the point, since the bottom row is sized by the calendar.
     readonly property var placements: [
-        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,  cs: 4, rs: 12 },
-        { key: "media",    src: "MediaContent.qml",       col: 0, row: 12, cs: 4, rs: 6 },
+        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,  cs: 4, rs: 13 },
+        { key: "media",    src: "MediaContent.qml",       col: 0, row: 13, cs: 4, rs: 5 },
         { key: "weather",  src: "WeatherContent.qml",     col: 0, row: 18, cs: 4, rs: 6 },
         { key: "calendar", src: "CalendarContent.qml",    col: 0, row: 24, cs: 2, rs: 5 },
         { key: "clock",    src: "ClockContent.qml",       col: 2, row: 24, cs: 2, rs: 5 },

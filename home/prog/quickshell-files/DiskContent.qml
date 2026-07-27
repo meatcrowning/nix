@@ -154,7 +154,7 @@ Item {
         PixelText {
             visible: Disks.drives.length === 0
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "reading…"
+            text: "reading..."
             color: Theme.textDim
         }
     }

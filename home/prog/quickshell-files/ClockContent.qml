@@ -62,6 +62,13 @@ Item {
         precision: SystemClock.Seconds
         onDateChanged: if (root.active) face.requestPaint()
     }
+    // The digit faces only change once a minute. Driving them off the seconds
+    // clock would rebuild the dot-matrix cell model 60 times more often than
+    // anything on screen changes.
+    SystemClock {
+        id: scMin
+        precision: SystemClock.Minutes
+    }
 
     // one process prints every zone's time, newline-separated, in `zones` order
     Process {
@@ -119,7 +126,7 @@ Item {
     })
 
     function timeText() {
-        const d = sc.date;
+        const d = scMin.date;
         let h = d.getHours();
         if (!SettingsStore.d.clock24h) {
             h = h % 12;
@@ -129,8 +136,74 @@ Item {
         return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
     }
 
+    // Lit cells of the dot-matrix face: [{c, r}] in 25x7 grid coordinates.
+    // Only the LIT ones — the unlit grid is not drawn at all, so there is
+    // nothing to pick a dim colour for (which is what made the first version
+    // unreadable). Bound to the minute clock, so this list is rebuilt once a
+    // minute rather than once a second.
+    readonly property var dotCells: {
+        const txt = root.timeText();
+        let out = [];
+        let col = 0;
+        for (let ci = 0; ci < txt.length; ci++) {
+            const ch = txt.charAt(ci);
+            if (ch === ":") {
+                out.push({ c: col, r: 2 });
+                out.push({ c: col, r: 4 });
+                col += 2;
+                continue;
+            }
+            const g = root.dotGlyphs[ch];
+            if (g) {
+                for (let r = 0; r < 7; r++)
+                    for (let c = 0; c < 5; c++)
+                        if ((g[r] >> (4 - c)) & 1) out.push({ c: col + c, r: r });
+            }
+            col += 6;
+        }
+        return out;
+    }
+
+    // The dot-matrix face, drawn out of the pixel font's own U+25A0 block
+    // rather than filled rectangles, so the dots rasterise exactly like every
+    // other glyph on this desktop. (Checked against the font's cmap: More
+    // Perfect DOS VGA has U+25A0 and U+2588, but not the bullet or the circle.)
+    Item {
+        id: dotFace
+        visible: root.mode === "dots"
+        anchors {
+            top: parent.top; topMargin: root.pad
+            left: parent.left; right: parent.right
+            leftMargin: root.pad; rightMargin: root.pad
+        }
+        height: root.faceBoxH
+
+        readonly property int cols: 25
+        readonly property int rows: 7
+        readonly property real unit: Math.min(width / cols, height / rows)
+        readonly property real ox: (width - cols * unit) / 2
+        readonly property real oy: (height - rows * unit) / 2
+
+        Repeater {
+            model: root.dotCells
+            PixelText {
+                required property var modelData
+                text: "\u25a0"
+                color: Theme.accent
+                font.pixelSize: Math.max(6, Math.round(dotFace.unit * 1.5))
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                width: dotFace.unit
+                height: dotFace.unit
+                x: dotFace.ox + modelData.c * dotFace.unit
+                y: dotFace.oy + modelData.r * dotFace.unit
+            }
+        }
+    }
+
     Canvas {
         id: face
+        visible: root.mode !== "dots"
         anchors {
             top: parent.top; topMargin: root.pad
             left: parent.left; right: parent.right
@@ -178,51 +251,6 @@ Item {
 
             ctx.fillStyle = Theme.accent;
             ctx.fillRect(cx - 2, cy - 2, 4, 4);
-        }
-
-        // ---- dot matrix: "HH:MM" on a 25x7 grid of dots ------------------
-        // Every dot is drawn, lit or not — an unlit grid is what makes it read
-        // as a matrix display rather than as floating squares.
-        //
-        // The unlit colour is load-bearing and was wrong twice. Theme.dim
-        // (#2a4354) against Theme.accent (#5c9fcc) is nowhere near enough
-        // contrast: rendered out, a whole 5x7 grid at that colour reads as a
-        // solid block and the digits vanish into it. Theme.border is the level
-        // where the grid is still visible as texture but the lit dots clearly
-        // win. The segment face below needs to go dimmer still — its unlit
-        // segments are much larger, so they carry far more ink.
-        function paintDots(ctx, w, h) {
-            const txt = root.timeText();
-            const cols = 25, rows = 7;
-            const u = Math.min(w / cols, h / rows);
-            const ox = (w - cols * u) / 2, oy = (h - rows * u) / 2;
-            const lit = sc.date.getSeconds() % 2 === 0;
-            const dot = Math.max(1, u * 0.78);
-            const inset = (u - dot) / 2;
-
-            let col = 0;
-            for (let ci = 0; ci < txt.length; ci++) {
-                const ch = txt.charAt(ci);
-                if (ch === ":") {
-                    for (let r = 0; r < rows; r++) {
-                        const on = lit && (r === 2 || r === 4);
-                        ctx.fillStyle = on ? Theme.accent : Theme.border;
-                        ctx.fillRect(ox + col * u + inset, oy + r * u + inset, dot, dot);
-                    }
-                    col += 2;
-                    continue;
-                }
-                const g = root.dotGlyphs[ch];
-                for (let r = 0; r < rows; r++) {
-                    const bits = g ? g[r] : 0;
-                    for (let c = 0; c < 5; c++) {
-                        const on = (bits >> (4 - c)) & 1;
-                        ctx.fillStyle = on ? Theme.accent : Theme.border;
-                        ctx.fillRect(ox + (col + c) * u + inset, oy + r * u + inset, dot, dot);
-                    }
-                }
-                col += 6;
-            }
         }
 
         // ---- seven segment: "HH:MM", each digit in a 3x5 unit box --------
@@ -278,8 +306,7 @@ Item {
             const ctx = getContext("2d");
             ctx.reset();
             ctx.clearRect(0, 0, width, height);
-            if (root.mode === "dots") paintDots(ctx, width, height);
-            else if (root.mode === "seg") paintSeg(ctx, width, height);
+            if (root.mode === "seg") paintSeg(ctx, width, height);
             else paintAnalog(ctx, width, height);
         }
     }

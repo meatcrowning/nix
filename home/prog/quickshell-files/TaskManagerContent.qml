@@ -4,12 +4,12 @@ import Quickshell
 // The task manager: the machine's load at a glance, and the processes causing
 // it, with the means to end them.
 //
-// Three sections, top to bottom: a 2x2 block of chart cards (cpu / gpu / mem /
-// net), a two-line sensor strip for the readouts with no history worth
-// plotting, and the process table taking everything that is left. The table is
-// the point of the widget, so it gets the slack — the cards are CAPPED at
-// roughly square rather than allowed to grow, so a taller tile turns into more
-// visible processes, not bigger charts.
+// Three sections, top to bottom: a 4x2 block of square chart cards (cpu, gpu,
+// mem, net, load, vram, swap, fan), a chassis-fan bar, and the process table
+// taking everything that is left. The table is the point of the widget, so it
+// gets the slack — the cards are SQUARE, i.e. their height follows the panel
+// width, and a taller tile turns into more visible processes rather than
+// letterboxed charts.
 //
 // The cards draw through the same ChartCanvas the cpu/gpu/eth popups use, so
 // there is one implementation of the plot. They were thin sparkline strips
@@ -49,6 +49,10 @@ Item {
         id: card
         property string label: ""
         property string value: ""
+        // Secondary reading, shown under the primary one — a card is square now,
+        // so there is a line's room for it but not for both on one line.
+        property string sub: ""
+        property color valueColor: Theme.text
         property alias series: plot.series
         property alias scaleMax: plot.scaleMax
         property alias autoFloor: plot.autoFloor
@@ -60,8 +64,16 @@ Item {
             color: Theme.accent
         }
         PixelText {
+            id: cardValue
             anchors { right: parent.right; top: parent.top }
             text: card.value
+            color: card.valueColor
+        }
+        PixelText {
+            id: cardSub
+            anchors { right: parent.right; top: cardValue.bottom }
+            visible: card.sub.length > 0
+            text: card.sub
             color: Theme.textDim
         }
         ChartCanvas {
@@ -69,28 +81,32 @@ Item {
             active: root.active
             anchors {
                 left: parent.left; right: parent.right
-                top: cardLabel.bottom; topMargin: 3
+                top: cardSub.visible ? cardSub.bottom : cardValue.bottom
+                topMargin: 3
                 bottom: parent.bottom
             }
         }
     }
 
-    readonly property real cardW: (inner - Theme.gap) / 2
-    readonly property real cardH: Math.max(52, Math.min(cardW * 0.55, 80))
+    // Eight squares, 4 x 2. Square is the point: the width is whatever the
+    // panel is, so the HEIGHT follows it, and the block grows and shrinks with
+    // the panel instead of the charts going letterbox at one end of the range.
+    readonly property real cardW: (inner - Theme.gap * 3) / 4
+    readonly property real cardH: cardW
 
     Grid {
         id: cards
         anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
-        columns: 2
+        columns: 4
         columnSpacing: Theme.gap
         rowSpacing: Theme.gap
 
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "cpu"
-            value: (SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + "%")
-                   + " " + (SysInfo.cpuTemp < 0 ? "--" : SysInfo.cpuTemp + "C")
+            value: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + "%"
+            sub: SysInfo.cpuTemp < 0 ? "" : SysInfo.cpuTemp + "C"
             series: [
                 { data: SysInfo.tempHist, color: Theme.crit },
                 { data: SysInfo.cpuHist,  color: Theme.accent },
@@ -99,8 +115,8 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "gpu"
-            value: (SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + "%")
-                   + " " + (SysInfo.gpuTemp < 0 ? "--" : SysInfo.gpuTemp + "C")
+            value: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + "%"
+            sub: SysInfo.gpuTemp < 0 ? "" : SysInfo.gpuTemp + "C"
             series: [
                 { data: SysInfo.gpuTempHist, color: Theme.crit },
                 { data: SysInfo.gpuHist,     color: Theme.accent },
@@ -109,14 +125,15 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "mem"
-            value: (SysInfo.memUsage < 0 ? "--" : SysInfo.memUsage + "%")
-                   + " " + SysInfo.fmtSize(SysInfo.memUsedKb)
+            value: SysInfo.memUsage < 0 ? "--" : SysInfo.memUsage + "%"
+            sub: SysInfo.fmtSize(SysInfo.memUsedKb)
             series: [ { data: SysInfo.memHist, color: Theme.accent } ]
         }
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "net"
-            value: SysInfo.fmtSpeed(SysInfo.rxSpeed) + " " + SysInfo.fmtSpeed(SysInfo.txSpeed)
+            value: SysInfo.fmtSpeed(SysInfo.rxSpeed)
+            sub: SysInfo.fmtSpeed(SysInfo.txSpeed)
             scaleMax: 0
             autoFloor: 64 * 1024
             series: [
@@ -124,74 +141,108 @@ Item {
                 { data: SysInfo.rxHist, color: Theme.info },
             ]
         }
+
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            label: "load"
+            value: SysInfo.load1 < 0 ? "--" : SysInfo.load1.toFixed(2)
+            // 16 threads on this box; a run queue past a quarter of them is
+            // where it starts being something you can feel
+            valueColor: SysInfo.load1 >= 8 ? Theme.crit
+                      : SysInfo.load1 >= 4 ? Theme.warn : Theme.text
+            scaleMax: 0
+            autoFloor: 4
+            series: [ { data: SysInfo.loadHist, color: Theme.accent } ]
+        }
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            label: "vram"
+            value: SysInfo.gpuMemUsage < 0 ? "--" : SysInfo.gpuMemUsage + "%"
+            sub: SysInfo.gpuMemUsedMb < 0 ? "" : (SysInfo.gpuMemUsedMb / 1024).toFixed(1) + "G"
+            valueColor: SysInfo.gpuMemUsage >= 90 ? Theme.crit : Theme.text
+            series: [ { data: SysInfo.vramHist, color: Theme.accent } ]
+        }
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            label: "swap"
+            value: SysInfo.swapUsage < 0 ? "--" : SysInfo.swapUsage + "%"
+            sub: SysInfo.swapTotalKb > 0
+                 ? SysInfo.fmtSize(SysInfo.swapTotalKb - SysInfo.swapFreeKb) : ""
+            valueColor: SysInfo.swapUsage >= 25 ? Theme.warn : Theme.text
+            series: [ { data: SysInfo.swapHist, color: Theme.accent } ]
+        }
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            label: "fan"
+            // The GPU fan, as a percentage. Zero is a real reading, not a
+            // missing one — this card idles at 0% because the card stops its
+            // fans entirely when it is cool.
+            value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
+            series: [ { data: SysInfo.gpuFanHist, color: Theme.accent } ]
+        }
     }
 
-    // ---- the readouts with no history worth plotting ---------------------
-    component Sensor: Row {
-        id: sen
-        property string label: ""
-        property string value: ""
-        property color tint: Theme.text
-        spacing: 4
-        PixelText { text: sen.label; color: Theme.textDim }
-        PixelText { text: sen.value; color: sen.tint }
-    }
-
-    Column {
-        id: sensors
+    // ---- chassis fans, and uptime ----------------------------------------
+    // A bar rather than a ninth square: it is one number with no interesting
+    // history, and it belongs to the whole box rather than to one component.
+    //
+    // HIDDEN when nothing reports a tachometer, which is the case on `top` as
+    // it stands — no Super-I/O driver is loaded for the B650's sensor chip, so
+    // /sys/class/hwmon has no fan*_input at all. Drawing a permanent zero would
+    // be worse than drawing nothing. It lights up by itself if that driver is
+    // ever loaded.
+    Item {
+        id: fanBar
         anchors { top: cards.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
         width: root.inner
-        spacing: 1
+        height: visible ? 14 : 0
+        visible: SysInfo.fanCount > 0
 
-        Row {
-            width: parent.width
-            Sensor {
-                width: root.inner / 3
-                label: "load"
-                value: SysInfo.load1 < 0 ? "--" : SysInfo.load1.toFixed(2)
-                // this box has 16 threads; a run queue past a quarter of them is
-                // where it starts being something you can feel
-                tint: SysInfo.load1 >= 8 ? Theme.crit
-                    : SysInfo.load1 >= 4 ? Theme.warn : Theme.text
+        // 2000 rpm full scale: case fans live well under that, and a scale that
+        // autoranged would make an idle machine look like it was screaming.
+        readonly property real frac: Math.max(0, Math.min(1, SysInfo.fanAvgRpm / 2000))
+
+        PixelText {
+            id: fanLabel
+            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            text: "fans"
+            color: Theme.textDim
+        }
+        PixelText {
+            id: fanVal
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            text: SysInfo.fanAvgRpm + "rpm"
+            color: Theme.text
+        }
+        Rectangle {
+            anchors {
+                left: fanLabel.right; leftMargin: 6
+                right: fanVal.left; rightMargin: 6
+                verticalCenter: parent.verticalCenter
             }
-            Sensor {
-                width: root.inner / 3
-                label: "swap"
-                value: SysInfo.swapUsage < 0 ? "--" : SysInfo.swapUsage + "%"
-                tint: SysInfo.swapUsage >= 25 ? Theme.warn : Theme.text
-            }
-            Sensor {
-                width: root.inner / 3
-                label: "up"
-                value: root.fmtUptime(SysInfo.uptimeSec)
+            height: 6
+            color: Theme.bgAlt
+            border.width: 1
+            border.color: Theme.border
+            Rectangle {
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
+                width: Math.round((parent.width - 2) * fanBar.frac)
+                color: Theme.accent
             }
         }
-        Row {
-            width: parent.width
-            Sensor {
-                width: root.inner / 3
-                label: "vram"
-                value: SysInfo.gpuMemUsage < 0 ? "--"
-                     : SysInfo.gpuMemUsage + "% " + (SysInfo.gpuMemUsedMb / 1024).toFixed(1) + "G"
-                tint: SysInfo.gpuMemUsage >= 90 ? Theme.crit : Theme.text
-            }
-            Sensor {
-                width: root.inner / 3
-                label: "pwr"
-                value: SysInfo.gpuPowerW < 0 ? "--" : Math.round(SysInfo.gpuPowerW) + "W"
-            }
-            Sensor {
-                width: root.inner / 3
-                label: "fan"
-                value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
-            }
-        }
+    }
+
+    PixelText {
+        id: uptime
+        anchors { top: fanBar.bottom; topMargin: 4; right: parent.right; rightMargin: root.pad }
+        text: "up " + root.fmtUptime(SysInfo.uptimeSec)
+        color: Theme.textDim
     }
 
     // ---- process table ---------------------------------------------------
     Rectangle {
         id: rule
-        anchors { top: sensors.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
+        anchors { top: uptime.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 1
         color: Theme.border
@@ -328,7 +379,7 @@ Item {
         PixelText {
             anchors.centerIn: parent
             visible: Procs.rows.length === 0
-            text: "reading…"
+            text: "reading..."
             color: Theme.textDim
         }
     }

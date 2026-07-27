@@ -38,8 +38,11 @@ Item {
             : kind === "repeat" ? "o"
             : ">"   // play
 
-        width: 26
-        height: 26
+        // 24, not 26: five of these now share a row with the seekbar, and at the
+        // narrow end of the panel's range every pixel they take comes straight
+        // out of the seekbar's width.
+        width: 24
+        height: 24
         // toggled (repeat/shuffle on) inverts like the titlebar roll button:
         // accent fill + background-coloured glyph. Hover is the lighter bgAlt tint.
         color: btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
@@ -134,7 +137,7 @@ Item {
     readonly property int naturalArt: 60
 
     implicitWidth: 300
-    implicitHeight: pad * 2 + top.implicitHeight + 6 + naturalArt + 6 + bottom.implicitHeight
+    implicitHeight: pad * 2 + top.implicitHeight + 6 + naturalArt + 6 + bottom.height
 
     Column {
         id: top
@@ -142,16 +145,9 @@ Item {
         width: root.inner
         spacing: 6
 
-        // header: the source app, or a generic label when nothing's playing
-        PixelText {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
-            text: Media.dispIdentity
-            color: Theme.accent
-        }
-
-        // track title / artist
+        // track title / artist. The source-app line that used to sit above
+        // these is gone: it named the player, which the user already knows,
+        // and cost a row of a widget that is short of them.
         PixelText {
             width: parent.width
             elide: Text.ElideRight
@@ -177,6 +173,50 @@ Item {
         }
         width: root.inner
         spacing: 8
+
+        // Vertical output volume, left of the cover. Same value and the same
+        // absolute setter the bar's VU meter drags (SysInfo.setVolume), so the
+        // two never disagree. Click or drag anywhere in the column to set it;
+        // the wheel steps it.
+        Item {
+            id: vol
+            width: 12
+            height: mid.height
+
+            readonly property real frac: SysInfo.volume < 0 ? 0 : SysInfo.volume / 100
+
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.bgAlt
+                border.width: 1
+                border.color: Theme.border
+            }
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 1 }
+                height: Math.round((parent.height - 2) * vol.frac)
+                color: SysInfo.muted ? Theme.textDim : Theme.accent
+            }
+            // level line, so the exact setting is readable even at a glance
+            Rectangle {
+                anchors { left: parent.left; right: parent.right }
+                y: Math.max(0, Math.min(parent.height - 1,
+                       Math.round((parent.height - 1) * (1 - vol.frac))))
+                height: 1
+                color: Theme.text
+            }
+
+            MouseArea {
+                anchors { fill: parent; leftMargin: -3; rightMargin: -3 }
+                acceptedButtons: Qt.LeftButton
+                function setAt(y) {
+                    SysInfo.setVolume(100 * (1 - Math.max(0, Math.min(1, y / vol.height))));
+                }
+                onPressed: (mouse) => setAt(mouse.y)
+                onPositionChanged: (mouse) => { if (pressed) setAt(mouse.y); }
+                onWheel: (wheel) => SysInfo.adjustVolume(
+                    wheel.angleDelta.y > 0 ? SettingsStore.d.volumeStep : -SettingsStore.d.volumeStep)
+            }
+        }
 
         Item {
             id: artBox
@@ -213,86 +253,30 @@ Item {
         }
 
         Spectrum {
-            width: mid.width - artBox.width - 8
+            width: mid.width - artBox.width - vol.width - 16
             height: mid.height
         }
     }
 
-    Column {
+    // Transport to the LEFT of the seekbar, on one line — the controls used to
+    // sit on their own row under it, which cost a row for five buttons.
+    //
+    // Widths are tight at the narrow end of the panel's range (14% of screen),
+    // so the buttons are compact and the total duration is dropped below
+    // ~300px of inner width rather than squeezing the seekbar to nothing.
+    Row {
         id: bottom
         anchors { bottom: parent.bottom; bottomMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
+        height: 22
         spacing: 6
 
-        // seekbar: elapsed | draggable track | total
+        readonly property real timeW: root.inner >= 300 ? 76 : 34
+
         Row {
-            width: parent.width
-            height: 14
-            spacing: 6
-
-            PixelText {
-                width: 36
-                anchors.verticalCenter: parent.verticalCenter
-                horizontalAlignment: Text.AlignLeft
-                text: Media.fmtTime(Media.dispPos)
-                color: Theme.textDim
-            }
-
-            Item {
-                id: seek
-                width: parent.width - 84
-                height: parent.height
-                anchors.verticalCenter: parent.verticalCenter
-
-                readonly property bool seekable: Media.hasPlayer && Media.player.canSeek
-                    && Media.player.lengthSupported && Media.player.length > 0
-                // driven by the DISPLAY position/length, not the live player's, so
-                // the fill holds its place through the MPRIS reconnect instead of
-                // collapsing to zero and springing back
-                readonly property real frac: Media.dispLen > 0
-                    ? Math.max(0, Math.min(1, Media.dispPos / Media.dispLen)) : 0
-
-                Rectangle { // track
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width
-                    height: 6
-                    color: Theme.bgAlt
-                    border.width: 1
-                    border.color: Theme.border
-                    Rectangle { // fill
-                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
-                        width: Math.round((parent.width - 2) * seek.frac)
-                        color: Theme.accent
-                    }
-                }
-
-                function seekTo(x) {
-                    if (!seek.seekable) return;
-                    Media.player.position = Math.max(0, Math.min(1, x / width)) * Media.player.length;
-                }
-                MouseArea {
-                    anchors { fill: parent; topMargin: -4; bottomMargin: -4 }
-                    enabled: seek.seekable
-                    cursorShape: seek.seekable ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onPressed: (mouse) => seek.seekTo(mouse.x)
-                    onPositionChanged: (mouse) => { if (pressed) seek.seekTo(mouse.x); }
-                }
-            }
-
-            PixelText {
-                width: 36
-                anchors.verticalCenter: parent.verticalCenter
-                horizontalAlignment: Text.AlignRight
-                text: Media.fmtTime(Media.dispLen)
-                color: Theme.textDim
-            }
-        }
-
-        // transport controls
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 12
-            topPadding: 2
+            id: transport
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 5
 
             MediaButton {
                 kind: "shuffle"
@@ -321,6 +305,57 @@ Item {
                 toggled: Media.repeatMode !== 0
                 onClicked: Media.cycleRepeat()
             }
+        }
+
+        Item {
+            id: seek
+            width: bottom.width - transport.width - bottom.timeW - bottom.spacing * 2
+            height: parent.height
+            anchors.verticalCenter: parent.verticalCenter
+
+            readonly property bool seekable: Media.hasPlayer && Media.player.canSeek
+                && Media.player.lengthSupported && Media.player.length > 0
+            // driven by the DISPLAY position/length, not the live player's, so
+            // the fill holds its place through the MPRIS reconnect instead of
+            // collapsing to zero and springing back
+            readonly property real frac: Media.dispLen > 0
+                ? Math.max(0, Math.min(1, Media.dispPos / Media.dispLen)) : 0
+
+            Rectangle { // track
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                height: 6
+                color: Theme.bgAlt
+                border.width: 1
+                border.color: Theme.border
+                Rectangle { // fill
+                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
+                    width: Math.round((parent.width - 2) * seek.frac)
+                    color: Theme.accent
+                }
+            }
+
+            function seekTo(x) {
+                if (!seek.seekable) return;
+                Media.player.position = Math.max(0, Math.min(1, x / width)) * Media.player.length;
+            }
+            MouseArea {
+                anchors { fill: parent; topMargin: -4; bottomMargin: -4 }
+                enabled: seek.seekable
+                cursorShape: seek.seekable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onPressed: (mouse) => seek.seekTo(mouse.x)
+                onPositionChanged: (mouse) => { if (pressed) seek.seekTo(mouse.x); }
+            }
+        }
+
+        PixelText {
+            width: bottom.timeW
+            anchors.verticalCenter: parent.verticalCenter
+            horizontalAlignment: Text.AlignRight
+            text: root.inner >= 300
+                ? Media.fmtTime(Media.dispPos) + "/" + Media.fmtTime(Media.dispLen)
+                : Media.fmtTime(Media.dispPos)
+            color: Theme.textDim
         }
     }
 }
