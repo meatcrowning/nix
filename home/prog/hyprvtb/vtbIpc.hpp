@@ -108,4 +108,12 @@ namespace VtbIpc {
 
     // Bumped on every registration/footer/disconnect change.
     extern std::atomic<uint64_t> serial;
+
+    // Diagnostic snapshot of the server: the socket path, whether it is bound
+    // and still NAMED on disk, live connection count, and every registration
+    // (pid -> button count + flags). JSON, one line. Published to
+    // $HOME/.local/state/hyprvtb/ipc-dump.json by hyprvtb.ipc_dump() — there is
+    // no other way to see whether an app's REGISTER actually landed, and
+    // "the inner column is empty" has more than one cause.
+    std::string dumpJson();
 }
