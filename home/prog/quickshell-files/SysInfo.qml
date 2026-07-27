@@ -17,8 +17,44 @@ Singleton {
     property int    cpuTemp: -1         // Celsius, k10temp's Tctl (or book's Battery Hotspot fallback), or -1
     property int    gpuUsage: -1        // 0-100, nvidia-smi utilization, or -1 (no nvidia-smi, e.g. book)
     property int    gpuTemp: -1         // Celsius, nvidia-smi temperature, or -1 (no nvidia-smi, e.g. book)
-    property int    batteryPct: -1      // 0-100, or -1 when no BAT*/macsmc-battery node (desktop)
+    property int    batteryPct: -1      // 0-100, or -1 when no system battery was found (desktop)
     property bool   batteryCharging: false
+    // The sysfs `status` as a code, so nothing here string-matches a kernel
+    // label: 0 none, 1 discharging, 2 charging, 3 full, 4 not charging (on AC
+    // and idle), 5 present but unknown. See sysinfo.sh. "on AC" and
+    // "discharging" are deliberately distinct — the same wattage means
+    // opposite things in each, and a battery card that could not tell them
+    // apart would read as a machine draining while it is plugged in.
+    property int    batteryStatus: 0
+
+    // The battery card's secondary reading: the state IN WORDS, plus how fast
+    // the charge is moving. Lives here rather than in the card because a
+    // *Content component draws and nothing else.
+    //
+    // Discharging gets no word — it is the unremarkable state, and the word
+    // would only crowd out the number — so every word that IS there means the
+    // machine is plugged in. Which way the line is about to go is the whole
+    // point of the card, and the sign of a wattage is too quiet to carry it:
+    // the card ALSO prefixes its percentage with "+" while charging, on the
+    // line that is never dropped for want of room (see MetricCard.sub, which
+    // is). Two markers rather than one because the loud one has to survive a
+    // narrow panel.
+    //
+    // ASCII on purpose: More Perfect DOS VGA has no minus sign (U+2212) and a
+    // PixelText that falls back to another font for one glyph loses ~5px of
+    // ascent and clips the whole line.
+    readonly property string batteryLabel: {
+        if (batteryPct < 0) return "";
+        // "full" is a terminal state, not a rate: pairing it with a wattage
+        // reads as a battery still doing something.
+        if (batteryStatus === 3) return "full";
+        const word = batteryStatus === 2 ? "chg" : batteryStatus === 4 ? "ac" : "";
+        const watts = powerW >= 0 ? powerW.toFixed(1) + "W" : "";
+        if (word && watts) return word + " " + watts;
+        // Nothing reports watts: the word alone, and "bat" where there'd be no
+        // word at all, so the slot is never blank while a battery is present.
+        return word || watts || "bat";
+    }
 
     // ---- the dock task manager's extra sensors ---------------------------
     // MemAvailable, not MemFree: the kernel's estimate of what a new allocation
@@ -176,6 +212,18 @@ Singleton {
     property var dskRHist: []
     property var dskWHist: []
 
+    // Battery charge is the ONE metric here that is sub-sampled rather than
+    // pushed every poll. chartLen at the 2s poll is a three-minute window, over
+    // which a battery does not measurably move — the card would draw a
+    // permanently flat line and say nothing. One sample per battStepSec instead
+    // gives the same 90 points an HOUR of span, which is long enough for the
+    // slope (i.e. how long you have left) to be the thing you read off it.
+    // Wall-clock gated, not a poll counter, so it is unaffected by the poll
+    // interval setting and by the timer restarting on every panel reload.
+    property var batteryHist: []
+    readonly property int battStepSec: 40
+    property real _battAt: 0
+
     function _pushHist(arr, v) {
         const h = arr.slice();
         h.push(v);
@@ -200,6 +248,7 @@ Singleton {
             rx: rxSpeed, tx: txSpeed, dfk: diskFreeKb, dup: diskUsePct,
             vol: volume, mut: muted, cu: cpuUsage, ct: cpuTemp,
             gu: gpuUsage, gt: gpuTemp, bp: batteryPct, bc: batteryCharging,
+            bst: batteryStatus, bh: batteryHist, bat: _battAt,
             bri: brightness, hbl: _hasBacklight,
             h: history, ch: cpuHist, th: tempHist,
             gh: gpuHist, gth: gpuTempHist, rh: rxHist, tht: txHist,
@@ -227,6 +276,7 @@ Singleton {
         rxSpeed = d.rx; txSpeed = d.tx; diskFreeKb = d.dfk; diskUsePct = d.dup;
         volume = d.vol; muted = d.mut; cpuUsage = d.cu; cpuTemp = d.ct;
         gpuUsage = d.gu; gpuTemp = d.gt; batteryPct = d.bp; batteryCharging = d.bc;
+        batteryStatus = d.bst || 0; batteryHist = d.bh || []; _battAt = d.bat || 0;
         brightness = d.bri; _hasBacklight = d.hbl;
         history = d.h || []; cpuHist = d.ch || []; tempHist = d.th || [];
         gpuHist = d.gh || []; gpuTempHist = d.gth || [];
@@ -318,6 +368,27 @@ Singleton {
         const bp = parseInt(f[11]);
         batteryPct = isNaN(bp) || bp < 0 ? -1 : bp;
         batteryCharging = f[12] === "1";
+
+        // batStatus was appended last of all, so an older or foreign line is
+        // simply a battery whose state we don't know rather than a parse
+        // failure — and with no battery at all it stays 0 either way.
+        if (f.length >= 32) {
+            const bs = parseInt(f[31]);
+            batteryStatus = isNaN(bs) || bs < 0 ? 0 : bs;
+        } else if (batteryPct >= 0) {
+            batteryStatus = batteryCharging ? 2 : 5;
+        }
+
+        // One sample per battStepSec — see batteryHist. The first reading is
+        // taken immediately so the card is not empty for the first 40s of a
+        // fresh login; after that the gate is the wall clock.
+        if (batteryPct >= 0) {
+            const tb = Date.now();
+            if (_battAt <= 0 || tb - _battAt >= battStepSec * 1000) {
+                batteryHist = _pushHist(batteryHist, batteryPct);
+                _battAt = tb;
+            }
+        }
 
         // Everything past here was appended for the task manager (see
         // sysinfo.sh) — guarded so an older/foreign line still parses.
