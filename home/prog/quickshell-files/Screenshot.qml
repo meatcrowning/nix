@@ -319,7 +319,7 @@ PanelWindow {
         visible: root.hole.width === 0
         anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 40 }
         readonly property string verb: root.action === "record" ? " to record" : ""
-        text: root.mode === "fullscreen" ? (root.action === "record" ? "fullscreen — press record" : "fullscreen")
+        text: root.mode === "fullscreen" ? (root.action === "record" ? "fullscreen - press record" : "fullscreen")
             : root.mode === "region"     ? "drag to select a region" + verb
                                          : "click a window" + verb
         color: Theme.text

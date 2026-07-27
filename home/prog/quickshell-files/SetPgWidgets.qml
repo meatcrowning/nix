@@ -261,7 +261,7 @@ Column {
                     border.color: rmMa.containsMouse ? Theme.crit : Theme.border
                     PixelText {
                         anchors.centerIn: parent
-                        text: "−"
+                        text: "-"
                         color: rmMa.containsMouse ? Theme.crit : Theme.textDim
                     }
                     MouseArea {

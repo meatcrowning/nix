@@ -60,11 +60,11 @@ PanelWindow {
 
     function prettyKey(k) {
         switch ((k || "").toLowerCase()) {
-        case "left":  return "←";
-        case "right": return "→";
-        case "up":    return "↑";
-        case "down":  return "↓";
-        case "":      return "•";
+        case "left":  return "<-";
+        case "right": return "->";
+        case "up":    return "^";
+        case "down":  return "v";
+        case "":      return "*";
         }
         // Single letters read better uppercased ("q" -> "Q").
         return k.length === 1 ? k.toUpperCase() : k;
