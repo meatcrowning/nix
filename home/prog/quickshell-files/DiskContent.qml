@@ -57,7 +57,10 @@ Item {
                         id: browseBtn
                         anchors.verticalCenter: parent.verticalCenter
                         label: "open"
-                        onClicked: Quickshell.execDetached(["filer", modelData.mount])
+                        // NixPath.run, not execDetached: `filer` is one of the
+                        // vendored nix apps and the panel's PATH on book is
+                        // Fedora's, so a bare exec silently did nothing there.
+                        onClicked: NixPath.run(["filer", modelData.mount])
                     }
 
                     // name: click to rename (edits the real fs label), or an

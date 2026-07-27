@@ -1012,24 +1012,48 @@ rpm 0.55.4 compositor, and Fedora's own `hyprctl hyprsunset gamma|temperature`
 drives its socket fine — the dim is a CTM the compositor applies in its own
 render pass, so Asahi's lack of a DRM gamma LUT never enters into it).
 
-So **before you exec a binary from QML, check it exists on a stock Fedora
-PATH.** If it doesn't, fall back rather than hardcoding — `~/.nix-profile/bin`
-is book's user profile, but on `top` home-manager is a NixOS module and that
-path does not exist at all (it is `/etc/profiles/per-user/lam/bin`):
+**`NixPath.qml` is the one definition of the fix. Route launches through it
+rather than writing the snippet again** — it existed as two hand-rolled copies
+(both cava spawns) before it was a singleton, and the user had separately
+symlinked `/usr/local/sbin/cava` into the nix profile by hand, which is three
+workarounds for one problem:
 
 ```qml
-readonly property string pathFix:
-    "command -v foo >/dev/null || PATH=\"$HOME/.nix-profile/bin:$PATH\"; "
+NixPath.run(["filer", dir])                       // instead of Quickshell.execDetached
+command: ["sh", "-c", NixPath.sh + "exec cava …"] // instead of a bare sh body
 ```
+
+`NixPath.sh` **appends** — the distro binary keeps winning wherever there is one
+— so it is unconditional rather than branched on `host`, and a no-op on top.
+Do not hardcode `~/.nix-profile/bin`: that is book's user profile, but on `top`
+home-manager is a NixOS module and the path does not exist at all (it is
+`/etc/profiles/per-user/lam/bin`, and `/run/current-system/sw/bin` beside it).
+
+`NixPath.launchTargets` is probed once at startup and warns into `qs log` for
+anything unresolvable. **Add your binary to that list when you add a launch
+site** — silence, not breakage, is what let this rot unnoticed for so long.
 
 ```bash
-# the audit, from this directory:
-grep -rhno 'execDetached(\[\s*"[^"]*"' *.qml | sed 's/.*"\(.*\)"/\1/' | sort -u \
-  | while read b; do [ -x /usr/bin/$b ] || [ -x /usr/sbin/$b ] || echo "MISSING: $b"; done
+# the audit, from this directory — every launch site, against the bare PATH:
+BARE=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+grep -rhno 'execDetached(\[\s*"[^"]*"\|command: \[\s*"[^"]*"' *.qml \
+  | sed 's/.*"\(.*\)"/\1/' | sort -u \
+  | while read b; do PATH=$BARE command -v "$b" >/dev/null || echo "MISSING: $b"; done
 ```
 
-It currently reports one more: **`filer`** (`DiskContent.qml`'s mount click) is
-nix-only too, so that click does nothing on book — same class, not yet fixed.
+Everything else the panel launches is distro-supplied on both machines and was
+checked empirically: `sh pkill pgrep kill hyprctl qs wpctl pactl notify-send
+grim wl-copy xdg-open kitty brightnessctl ddcutil curl jq python3 hostname
+pw-play pw-dump` and the coreutils. The scripts under `scripts/` are `/bin/sh`
+and `/usr/bin/env python3` and call nothing nix-only.
+
+**One find here was NOT a PATH bug and needed a nix fix instead**: `wf-recorder`
+(Screenshot.qml's record mode) resolved on *neither* path on book, because
+`home/pkgs/desktop/wm.nix` skipped it for `air` under "already native on air" —
+true of kitty/hypridle/wl-clipboard/brightnessctl, false of wf-recorder, which
+Fedora Asahi does not package. Screen recording had simply never worked there.
+It is now in the common list. If `NixPath` warns about a target, check whether
+the binary is *installed* before assuming PATH.
 
 ---
 

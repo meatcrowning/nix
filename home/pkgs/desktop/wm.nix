@@ -17,6 +17,14 @@ in
     networkmanagerapplet
     pamixer
     cliphist
+    # screen recording (Screenshot.qml's record mode execs it by bare name) —
+    # lightweight wlroots screencopy grabber, no audio, matches the display
+    # refresh rate. COMMON, not in the `host != "air"` block below: unlike
+    # kitty/brightnessctl/wl-clipboard/hypridle, Fedora Asahi ships no
+    # wf-recorder, so skipping it there left `command -v wf-recorder` empty on
+    # both paths and the recorder silently never started. NixPath.qml's startup
+    # probe is what surfaced it.
+    wf-recorder
   # already native on air (this Fedora install, including the Hyprland this
   # very session is running under) — skip duplicating there. Tried swapping
   # air to nixpkgs' own hyprland as the actual compositor instead (so
