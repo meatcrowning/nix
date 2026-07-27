@@ -185,7 +185,23 @@ Singleton {
                 pos: player.position,
                 len: player.lengthSupported ? player.length : 0,
                 play: player.isPlaying,
-            } : snap,
+            // `useSnap`, not a bare `snap`: the snapshot exists to cover the
+            // ~1.5s MPRIS round trip of ONE reload, and re-emitting it
+            // unconditionally made it immortal. Once a player goes away the
+            // last snapshot was carried into every subsequent reload forever,
+            // each one re-arming `_settling` — so the widget showed a ghost
+            // track for 1.5s on every wallpaper or theme change (the exact
+            // thing the `_settling` comment above says it prevents), and
+            // MediaContent's cover Image re-opened a dead artUrl each time.
+            // Chromium's MPRIS artUrl is a `/tmp/.org.chromium.Chromium.XXXXXX`
+            // temp file it deletes on exit, so `qs log` collected two
+            // `Cannot open: file:///tmp/.org.chromium.Chromium.*` per reload
+            // (one per live copy of the widget — the popup and the dock tile)
+            // for the rest of the session. `useSnap` is already
+            // `!hasPlayer && _settling && snap !== null`, so back-to-back
+            // reloads still chain the snapshot across; only a settled tree with
+            // no player carries nothing, which is what it is showing anyway.
+            } : (useSnap ? snap : null),
         });
     }
     function restoreState(s) {
