@@ -36,13 +36,29 @@ Singleton {
     function setFilter(t) { root.filter = t || ""; }
     // Whether the filter box holds the keyboard, and whether the pointer is
     // over it. The bar's layer surface only offers keyboard focus while one of
-    // the two is true (shell.qml) — an always-focusable panel would swallow a
+    // these is true (shell.qml) — an always-focusable panel would swallow a
     // keystroke meant for the window you were typing in. `filterHover` is what
-    // ARMS it: the compositor grants on-demand keyboard focus on a CLICK, so the
-    // surface has to already be focusable by the time that click lands, and
-    // hovering the box is the last moment before it that we hear about.
+    // ARMS it: measured in a nested Hyprland, an on-demand layer surface is
+    // granted the keyboard by the compositor on the next pointer MOTION over it
+    // — not on a click — so the surface has to already be focusable before the
+    // pointer gets there.
     property bool filterFocus: false
     property bool filterHover: false
+    // …and `filterLatch` is what makes GIVING IT BACK safe. Dropping the layer
+    // from on-demand to none while it holds the keyboard and the pointer is
+    // still over the PANEL leaves the compositor focused on nothing at all:
+    // CLayerSurface::commit calls refocusLastWindow, which looks for a window
+    // under the pointer, finds this panel instead, and gives up — and with
+    // `input:follow_mouse = 2` nothing later restores it, so the keyboard is
+    // dead until the user clicks. Measured, not reasoned: the transition posts
+    // Hyprland's `activewindow>>,` and both the window and the panel report no
+    // keyboard.
+    //
+    // So the surface stays on-demand from the moment the filter box is hovered
+    // until the pointer LEAVES the bar entirely (shell.qml clears this). The
+    // hand-back then happens with the pointer over a window, which is the case
+    // the compositor gets right: it moves the keyboard straight to that window.
+    property bool filterLatch: false
     // Bumped to ask the box to give the keyboard back — clicking anywhere else
     // in the panel. The box watches this rather than being reached into,
     // because it lives inside an asynchronous Loader in the dock grid.

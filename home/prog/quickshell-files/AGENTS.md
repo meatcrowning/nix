@@ -447,11 +447,31 @@ loop, since the popup takes its height from `implicitHeight`.
   itself; the tooltip is where "psi" or "res" gets to say what it measures.
 - **The filter box is the only thing on this desktop that takes the keyboard**,
   and it gives it back. `shell.qml` sets `WlrLayershell.keyboardFocus: OnDemand`
-  on the bar while `Procs.filterHover || Procs.filterFocus` (and dock mode), and
-  `None` otherwise. Two halves, both load-bearing:
-  - **HOVER is what arms it.** On-demand keyboard focus is granted by the
-    compositor ON a click, so the surface has to already be focusable when that
-    click lands — arming it from the click handler would need a second click.
+  on the bar while `Procs.filterHover || Procs.filterFocus || Procs.filterLatch`
+  (and dock mode), and `None` otherwise. Three halves, all load-bearing:
+  - **HOVER is what arms it.** Hyprland grants an on-demand layer surface the
+    keyboard on the next pointer MOTION over it — measured in a nested
+    compositor, not on a click (`processMouseDownNormal` only calls `refocus()`
+    when the press lands on a *window*). So the surface has to already be
+    focusable before the pointer gets to the box.
+  - **`filterLatch` is what makes giving it back safe, and it is the fix for
+    "focus is stolen and no window ends up focused".** Dropping the surface from
+    on-demand to none *while it holds the keyboard and the pointer is still over
+    the panel* leaves the compositor focused on **nothing**:
+    `CLayerSurface::commit` calls `refocusLastWindow`, which looks for a window
+    under the pointer, finds this panel, and gives up — and with
+    `input:follow_mouse = 2` nothing later restores it, so the keyboard is dead
+    until the user clicks. The transition posts Hyprland's `activewindow>>,`;
+    both the window and the panel then report no keyboard. That is exactly what
+    the documented "click somewhere else in the dock to blur the box" gesture
+    did. So the latch holds the surface focusable from the hover until the
+    pointer leaves the **bar** (a passive `HoverHandler` on `barBody` clears it),
+    and the hand-back happens with the pointer over a window — the case the
+    compositor gets right. Repro harness: a nested Hyprland plus a probe layer
+    surface, driven by `hl.dsp.cursor.move` and read back through each surface's
+    own `activeFocus`. `hyprctl activewindow` is **not** an instrument here: it
+    reports `CFocusState::window()`, which `rawSurfaceFocus` never clears, so it
+    keeps naming a window that has not had the keyboard for minutes.
   - **OnDemand, not Exclusive.** Exclusive keeps sending us the keyboard after
     the user clicks into a window, so their next keystroke goes to the filter box
     instead of what they just clicked on. OnDemand hands it back as part of that

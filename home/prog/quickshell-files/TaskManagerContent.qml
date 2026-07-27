@@ -49,10 +49,15 @@ Item {
             filterInput.focus = false;
             Procs.filterFocus = false;
             Procs.filterHover = false;
+            Procs.filterLatch = false;
         }
     }
     Component.onCompleted: Procs.watch(root, active)
-    Component.onDestruction: { Procs.watch(root, false); Procs.filterFocus = false; }
+    Component.onDestruction: {
+        Procs.watch(root, false);
+        Procs.filterFocus = false;
+        Procs.filterLatch = false;
+    }
 
     function fmtUptime(s) {
         if (!s || s <= 0) return "--";
@@ -451,7 +456,12 @@ Item {
             z: -1
             hoverEnabled: true
             cursorShape: Qt.IBeamCursor
-            onEntered: Procs.filterHover = true
+            // Hovering ARMS the layer's keyboard focus and LATCHES it: the
+            // latch is what keeps the surface focusable until the pointer has
+            // left the bar, so the hand-back never happens while the pointer is
+            // still over the panel (that is the transition that leaves the
+            // compositor focused on nothing — see Procs.filterLatch).
+            onEntered: { Procs.filterHover = true; Procs.filterLatch = true; }
             onExited: Procs.filterHover = false
             onClicked: filterInput.forceActiveFocus()
         }
