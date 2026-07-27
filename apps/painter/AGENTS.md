@@ -24,6 +24,22 @@ hard-won part. `home/prog/painter.nix` only adds a `systemd --user` unit
 starts on demand and deliberately does **not** stop on exit, so 8-16G of weights
 stay warm between launches. Logs: `journalctl --user -u comfy-painter -f`.
 
+The unit passes `--listen 127.0.0.1`, and that is a **security boundary, not a
+default**: ComfyUI has no authentication and a workflow graph is arbitrary code
+with filesystem access. Never rebind it to `0.0.0.0`, and never add 8188 to the
+tailnet allowlist in `sys/net/tailscale.nix`. To drive top's backend from air,
+tunnel it behind ssh's key auth:
+
+```bash
+apps/painter/tools/comfy-tunnel.sh            # start it on top, forward 8188
+apps/painter/tools/comfy-tunnel.sh -- painter # ...and run painter over it
+```
+
+`comfy.py`'s `DEFAULT_URL` stays `http://127.0.0.1:8188` so the app needs no
+configuration — it talks to the local end of the forward. `PAINTER_COMFY_URL`
+overrides it, for a forward parked on another *local* port; pointing it at a
+remote host would put the unauthenticated API on the wire.
+
 ## Models live at `/home/lam/models`
 
 ~246G — consolidated 2026-07-25 from the two former roots,

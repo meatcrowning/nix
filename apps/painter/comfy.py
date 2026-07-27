@@ -21,7 +21,15 @@ import uuid
 
 from PySide6 import QtCore, QtNetwork, QtWebSockets
 
-DEFAULT_URL = "http://127.0.0.1:8188"
+# The backend is loopback-only BY DESIGN (home/prog/painter.nix passes
+# `--listen 127.0.0.1`): ComfyUI runs arbitrary workflow graphs and reads and
+# writes the filesystem as lam, so it must never get a listener on the LAN or
+# the tailnet. To drive top's backend from air, forward the port over ssh —
+#     ssh -N -L 8188:127.0.0.1:8188 top
+# — and leave this default alone. PAINTER_COMFY_URL is the escape hatch for a
+# forward parked on some other local port; pointing it at a remote host would
+# put the API on the wire unauthenticated, so don't.
+DEFAULT_URL = os.environ.get("PAINTER_COMFY_URL", "http://127.0.0.1:8188")
 
 
 def _host_of(url: str) -> str:
