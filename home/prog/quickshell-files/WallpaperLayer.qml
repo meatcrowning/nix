@@ -38,25 +38,34 @@ PanelWindow {
     // old one. That strip used to be flat background — a black band opening up
     // as you dragged. Now the blur shows through it.
     //
-    // The blur is free. There is no blur effect and no live filter: the image is
-    // DECODED at ~96px wide and stretched over the monitor, and the bilinear
-    // upscale is the blur. It costs one tiny texture per wallpaper, decoded
-    // once, and nothing at all per frame — which is the point, since it is on
-    // screen precisely while the compositor is busiest.
-    readonly property int blurSize: 96
+    // The blur is PRE-COMPUTED, not a runtime effect: wal-prepare.sh caches a
+    // 400px-wide real Gaussian per wallpaper and the panel just draws it. So it
+    // costs one small static texture and nothing at all per frame — which is the
+    // point, since it is on screen precisely while the compositor is busiest.
+    //
+    // The first version had no cached file: it decoded the wallpaper itself at
+    // ~96px and let the GPU stretch that over the monitor, on the theory that a
+    // bilinear upscale is a free blur. It is free, but it is not a blur — at 20x
+    // magnification the picture was still plainly legible, with interpolation
+    // facets. That path survives only as the FALLBACK below, for the moment
+    // before wal-prepare.sh has produced the real one.
+    readonly property int fallbackBlurSize: 96
+    readonly property bool haveBlur: Wall.blurUrl.length > 0
 
     Image {
         anchors.fill: parent
         z: -1
-        source: Wall.url
-        // Deliberately PreserveAspectCrop over the FULL monitor, so the blur is
-        // a plausible continuation of the sharp copy rather than a squashed one.
+        source: root.haveBlur ? Wall.blurUrl : Wall.url
+        // PreserveAspectCrop over the FULL monitor, so the blur reads as a
+        // continuation of the sharp copy rather than a squashed one.
         fillMode: Image.PreserveAspectCrop
-        sourceSize.width: root.blurSize
+        // The cached blur is already tiny and already smooth — decode it at its
+        // natural size. Only the fallback needs shrinking to fake a blur.
+        sourceSize.width: root.haveBlur ? 0 : root.fallbackBlurSize
         smooth: true
         asynchronous: true
         cache: false
-        visible: Wall.url.length > 0
+        visible: source.toString().length > 0
     }
 
     // The desktop the user can actually see. Everything is centred in HERE.
