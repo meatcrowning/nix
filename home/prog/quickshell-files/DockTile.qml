@@ -40,9 +40,17 @@ Item {
         NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
     }
 
+    // The grid's generation, so ViewMode can tell this panel's numbers from
+    // those of the one a reload is in the middle of replacing. Reporting again
+    // when it lands matters: the delegates complete BEFORE the grid does, so the
+    // first reports go out stamped 0 and are dropped.
+    property int gen: 0
+    onGenChanged: report()
+
     readonly property real contentHeight: loader.item ? loader.item.implicitHeight : -1
-    onContentHeightChanged: ViewMode.reportTile(tileKey, height, contentHeight)
-    onHeightChanged: ViewMode.reportTile(tileKey, height, contentHeight)
+    function report() { ViewMode.reportTile(tileKey, height, contentHeight, gen); }
+    onContentHeightChanged: report()
+    onHeightChanged: report()
 
     // The frame. Deliberately quieter than a popup card's: these sit inside the
     // panel, against its own background, not out on the wallpaper.

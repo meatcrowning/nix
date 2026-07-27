@@ -426,6 +426,33 @@ face to match. Each of those widgets keeps a `natural*` constant that
 `implicitHeight` is built from; deriving it from `height` instead is a binding
 loop, since the popup takes its height from `implicitHeight`.
 
+**A MEASURING INSTRUMENT HAS TO BE HARDER TO POISON THAN THE THING IT
+MEASURES**, and this one was not. It was plain last-writer-wins into a
+singleton, and a whole session was spent reasoning from numbers belonging to a
+panel that no longer existed — `tasks got=257` from a tree whose panel was 583px
+tall, printed next to `media got=148` while the live tiles were 397 and 241 and
+reporting alongside. Two causes, both measured with a per-tile id in the log:
+
+- **A reload overlaps two live panel trees.** Quickshell hands the outgoing
+  window's layer surface to the incoming object and the old tree keeps ticking —
+  timers and all — for a while after. Both own a full set of `DockTile`s
+  reporting under the SAME keys, and the dying one could win the last write and
+  keep it forever, because a tile whose height never changes again never
+  corrects it. **That overlap is BY DESIGN** — it is what stops every widget
+  blinking on a theme change — so the tree is not the thing to fix.
+- **Construction and teardown lay a tile out at a degenerate size** (`h=-87
+  want=-1` inside a parent -185px tall). Nothing true can be said about a tile
+  that is not on screen.
+
+So `DockGrid` takes a GENERATION from `ViewMode.nextGen()` at completion and
+stamps every report; older generations are dropped, a newer one wipes the table
+first, and non-positive geometry is refused outright. The instrument shows one
+panel — the newest — or nothing, never a mixture of two. `DockTile` re-reports
+on `onGenChanged` because the delegates complete BEFORE the grid does, so the
+first reports go out stamped 0. The regression test is a burst of three forced
+reloads followed immediately by `live tiles`: every number must match the panel
+you are looking at.
+
 ### The task manager
 
 `TaskManagerContent.qml` + the `Procs` singleton + `scripts/proc-list.py`.

@@ -135,11 +135,42 @@ Singleton {
 
     // Diagnostic only: what each dock tile was allotted vs what its content
     // wants, published by DockTile and read back through
-    // `qs ipc call live tiles`. Single-monitor by nature — the last panel to
-    // report a given key wins, which on one screen is the only one.
+    // `qs ipc call live tiles`.
+    //
+    // IT IS A MEASURING INSTRUMENT, SO IT HAS TO BE HARDER TO POISON THAN THE
+    // THING IT MEASURES. Plain last-writer-wins was not: several agents,
+    // including the one that wrote this, spent a session reasoning from numbers
+    // that belonged to a panel which no longer existed. Two ways it went wrong,
+    // both measured rather than supposed:
+    //
+    // - **A RELOAD OVERLAPS TWO LIVE PANEL TREES.** Quickshell hands the
+    //   outgoing window's layer surface to the incoming object, and the old tree
+    //   keeps ticking — timers and all — for a while afterwards. Both trees own
+    //   a full set of DockTiles reporting under the SAME keys, so the dying one
+    //   could win the last write and leave its geometry here permanently: a tile
+    //   whose height never changes again never corrects it. Caught with a
+    //   per-tile id in the log — `tasks got=257` from a tree whose panel was
+    //   583px tall, while the live tile was 397px and reporting alongside it.
+    //   The overlap is BY DESIGN (it is what stops the widgets blinking on every
+    //   theme change), so the tree is not the thing to fix — this channel is.
+    // - **Construction and teardown both lay a tile out at a degenerate size.**
+    //   Measured: `h=-87 want=-1` with a parent 185px tall in the wrong
+    //   direction. Nothing true can be said about a tile that is not on screen.
+    //
+    // So a grid takes a GENERATION at completion and stamps every report with
+    // it. A report from an older generation is dropped; a newer one wipes the
+    // table first, so the instrument shows exactly one panel — the newest — and
+    // never a mixture.
     property var tileInfo: ({})
-    function reportTile(key, allotted, wanted) {
+    property int tileGen: 0
+    property int lastGen: 0
+    function nextGen() { return ++lastGen; }
+    function reportTile(key, allotted, wanted, gen) {
         if (!key) return;
+        if (!(allotted > 0) || !(wanted >= 0)) return;
+        const g = gen || 0;
+        if (g < tileGen) return;
+        if (g > tileGen) { tileGen = g; tileInfo = ({}); }
         tileInfo[key] = { a: Math.round(allotted), w: Math.round(wanted) };
     }
     function traceAdd() {

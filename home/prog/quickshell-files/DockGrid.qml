@@ -60,10 +60,11 @@ Item {
     // the point, since the bottom row is sized by the calendar.
     // The player's queue drawer takes its rows FROM THE FORECAST, not from the
     // task manager: the forecast is the one widget below it that has a genuine
-    // condensed form (current conditions on one line, graph dropped — see
-    // WeatherContent's `condensed`), whereas a shorter task table just shows
-    // fewer processes and a shorter queue is the thing being asked for. Four
-    // rows leaves the forecast two, which is its header plus its legend line.
+    // condensed form (current conditions on one line over a MINIATURE of the
+    // graph — see WeatherContent's `condensed`), whereas a shorter task table
+    // just shows fewer processes and a shorter queue is the thing being asked
+    // for. Four rows is the most it may take, and the cap below is what it
+    // actually gets.
     readonly property int queueRows: 4
     readonly property bool queueOpen: SettingsStore.d.mediaQueueOpen
 
@@ -115,6 +116,11 @@ Item {
         { key: "clock",    src: "ClockContent.qml",       col: 2, row: 24, cs: 2, rs: 5,  qRow: 0, qSpan:  0 },
     ]
 
+    // Taken at completion, NOT as a `readonly property int gen: ViewMode.nextGen()`
+    // — that reads `lastGen` inside its own initialiser, which makes the binding
+    // depend on the counter it increments.
+    property int gen: 0
+    Component.onCompleted: gen = ViewMode.nextGen()
     Repeater {
         model: root.placements
         delegate: DockTile {
@@ -127,6 +133,7 @@ Item {
 
             tileKey: modelData.key
             source: modelData.src
+            gen: root.gen
             // Only the visible mode's copy of a widget polls. The popup copies
             // gate on their own `open`; these gate on the dock being on screen.
             active: root.active
