@@ -418,7 +418,16 @@ Item {
             clip: true
             text: Procs.filter
             onTextEdited: Procs.setFilter(text)
-            onActiveFocusChanged: Procs.filterFocus = activeFocus
+            // The window is only ACTIVE while this layer surface holds the
+            // wl_keyboard, so losing activeFocus is how the box hears that the
+            // user clicked into a window or onto the desktop — the compositor
+            // moved the keyboard and never told the panel anything else. Drop
+            // the item's own focus with it, or the caret silently comes back
+            // the next time the pointer crosses the box.
+            onActiveFocusChanged: {
+                Procs.filterFocus = activeFocus;
+                if (!activeFocus) filterInput.focus = false;
+            }
             Keys.onEscapePressed: {
                 Procs.setFilter("");
                 filterInput.focus = false;
@@ -456,11 +465,11 @@ Item {
             z: -1
             hoverEnabled: true
             cursorShape: Qt.IBeamCursor
-            // Hovering ARMS the layer's keyboard focus and LATCHES it: the
-            // latch is what keeps the surface focusable until the pointer has
-            // left the bar, so the hand-back never happens while the pointer is
-            // still over the panel (that is the transition that leaves the
-            // compositor focused on nothing — see Procs.filterLatch).
+            // Hovering ARMS the layer's keyboard focus and LATCHES it. The
+            // compositor grants the keyboard on the next pointer motion over
+            // the surface, so it has to be offered before the pointer gets
+            // here; the latch is what defers giving it back until the pointer
+            // has left the bar, which is the only place that is safe.
             onEntered: { Procs.filterHover = true; Procs.filterLatch = true; }
             onExited: Procs.filterHover = false
             onClicked: filterInput.forceActiveFocus()

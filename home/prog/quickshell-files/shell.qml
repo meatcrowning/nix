@@ -786,10 +786,11 @@ Scope {
             WlrLayershell.namespace: "qs-bar"
 
             // The bar is focusable ONLY around the task manager's filter box,
-            // and only in dock mode: while the pointer is over it (so the click
-            // that follows can be granted focus — on-demand focus is granted ON
-            // a click, so arming it in the click handler would need a second
-            // click) and while it holds focus.
+            // and only in dock mode: while the pointer is over it and while it
+            // holds focus. Hovering is what ARMS it — Hyprland grants an
+            // on-demand layer surface the keyboard on the next pointer MOTION
+            // over it, not on a click, so the surface has to be focusable
+            // before the pointer arrives.
             //
             // OnDemand, NOT Exclusive. Exclusive means the compositor keeps
             // sending us the keyboard even after the user clicks into a window,
@@ -801,14 +802,13 @@ Scope {
             // `filterFocus` set, closing the panel still gives the keyboard back.
             //
             // `filterLatch` is the third term and it is load-bearing: it holds
-            // the surface focusable from the hover until the pointer leaves the
-            // BAR, not merely the filter box. Dropping to `None` while this
-            // surface holds the keyboard and the pointer is still over the
-            // panel is what left the compositor focused on nothing at all —
-            // Hyprland's own recovery looks for a window under the pointer and
-            // finds the panel. Handing it back once the pointer is over a
-            // window is the case the compositor gets right. See
-            // Procs.filterLatch for the measurement.
+            // the surface focusable until the pointer has left the BAR, which
+            // is the ONLY moment it is safe to stop offering keyboard focus.
+            // Drop it while the pointer is still over the panel and Hyprland's
+            // own recovery looks for a window under the pointer, finds this
+            // panel, and gives up — leaving the compositor focused on nothing.
+            // See Procs.filterLatch for the measurement and for why there is no
+            // explicit hand-back to use instead.
             WlrLayershell.keyboardFocus: ((Procs.filterFocus || Procs.filterHover
                                            || Procs.filterLatch)
                                           && ViewMode.showDock)
@@ -844,8 +844,8 @@ Scope {
                 onWidthChanged: if (bar._reports) ViewMode.surfaceWidth = width;
 
                 // "The pointer has left the panel" — the one moment at which it
-                // is safe to stop offering keyboard focus, because Hyprland can
-                // then hand the keyboard to the window the pointer is over. A
+                // is safe to stop offering keyboard focus, because only then
+                // can Hyprland hand it to whatever is under the pointer. A
                 // HoverHandler, not a MouseArea: it is passive, so it neither
                 // swallows a click nor blocks hover reaching the widgets under
                 // it (a hoverEnabled MouseArea filling the bar would eat every
@@ -853,6 +853,33 @@ Scope {
                 HoverHandler {
                     id: barHover
                     onHoveredChanged: if (!hovered) Procs.filterLatch = false;
+                }
+
+                // CLICKING ANYWHERE OUTSIDE THE FILTER BOX GIVES THE KEYBOARD
+                // BACK. "Anywhere" means the whole desktop, so there are two
+                // halves and this is only one of them: a click into a WINDOW or
+                // onto the wallpaper never reaches this surface at all — the
+                // compositor moves the keyboard itself (that is what on-demand
+                // focus is) and the box sees its window deactivate. A click
+                // that lands anywhere on the PANEL is invisible to the
+                // compositor, so it has to be caught here.
+                //
+                // It sits on `barBody`, not on `dockLayout`: the dock is inset
+                // by a margin and does not cover the bar's own edges, and a
+                // click on that strip is just as much "outside the box".
+                //
+                // Disabled — and so fully transparent to events — whenever the
+                // box does not have focus, and it declines the press it saw so
+                // the widget underneath still gets its click.
+                MouseArea {
+                    anchors.fill: parent
+                    z: 9999
+                    enabled: Procs.filterFocus
+                    acceptedButtons: Qt.AllButtons
+                    onPressed: (mouse) => {
+                        Procs.blurFilter();
+                        mouse.accepted = false;
+                    }
                 }
 
                 // the bar's own background, which the surface no longer paints
@@ -1095,25 +1122,6 @@ Scope {
                         }
                     }
 
-                    // Clicking anything else in the dock takes the keyboard back
-                    // off the filter box. Clicks into a WINDOW are handled by
-                    // the compositor (that is what on-demand focus is), but a
-                    // click that stays inside this surface never reaches it, so
-                    // the box would keep the keyboard while the user was plainly
-                    // done with it. Disabled — and so fully transparent to
-                    // events — whenever the box does not have focus, and it
-                    // declines the press it saw so the widget underneath still
-                    // gets its click.
-                    MouseArea {
-                        anchors.fill: parent
-                        z: 9999
-                        enabled: Procs.filterFocus
-                        acceptedButtons: Qt.AllButtons
-                        onPressed: (mouse) => {
-                            Procs.blurFilter();
-                            mouse.accepted = false;
-                        }
-                    }
                 }
             }
         }
