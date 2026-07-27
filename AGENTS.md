@@ -264,6 +264,37 @@ the conditional session and `aeroshell` activation.
 
 ---
 
+## Off-LAN: the tailnet
+
+`air` reaches `top` from any network over Tailscale. `top`'s side is
+`sys/net/tailscale.nix`; MagicDNS name is `top`, operator is `lam` on both (so
+`tailscale up`/`status` need no sudo — that is how an agent drives it).
+
+**Every hole is an allowlist, per interface.** `share.nix` scopes the LAN holes
+to `enp12s0`; `tailscale.nix` opens exactly **22 (ssh) and 445 (SMB)** on
+`tailscale0`. It is deliberately *not* a trusted interface — that setting
+published every listener on the box, including OpenRGB's unauthenticated SDK
+server on `0.0.0.0:6742`. **Anything loopback-pinned stays loopback-pinned**:
+ComfyUI (`127.0.0.1:8188`) is reached from air through
+`apps/painter/tools/comfy-tunnel.sh`, an ssh port-forward, never a new
+listener. Adding a port here is a security decision — take it deliberately.
+
+**`book`'s side is not in this repo and cannot be.** `tailscaled` is a system
+daemon and book has home-manager only, so it is Fedora state: `dnf install
+tailscale`, `systemctl enable --now tailscaled`,
+`sudo tailscale set --operator=lam`, then `tailscale up`. Redo by hand after a
+reinstall. Book's `/etc/fstab` mounts the library from **`//top/aud`** (the
+MagicDNS name), not `//top.local/aud` — `.local` is mDNS and answers only at
+home, so the old name meant no music off-LAN. That mount therefore depends on
+the tailnet being up even when book *is* at home.
+
+**Joining is interactive and cannot be automated**: `tailscale up` on each
+machine prints a URL a human must open, into the **same** account. After that,
+turn key expiry off for both nodes in the admin console — otherwise the link
+dies ~180 days later, while the user is away from home.
+
+---
+
 ## Git, and landing your work
 
 **Commit and push after a working change** — `git add` the specific files you
