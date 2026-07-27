@@ -651,6 +651,23 @@ minimized ones, parked off-screen deliberately.
 
 ---
 
+## The bar dims itself for the sudo modal (`Askpass.qml`)
+
+Hyprland's `dim_around` — the `askpass-dim` window rule that gives the `sudo -A`
+password dialog its Vista-UAC treatment — is drawn in the **window** pass. The
+bar is a layer-shell surface on the `top` layer, which renders *above* that, so
+the desktop went dark and the panel stayed bright. `Askpass.qml` is the switch
+and `shell.qml` paints a matching scrim over `barBody` at
+`decoration:dim_strength` (0.5) — change one and change the other.
+
+Detection is **self-observed**, off the `ToplevelManager` list the taskbar
+already runs on, matching `appId === "vista-askpass"`. There is deliberately no
+IPC call from the dialog into the panel: `sudo -A` is load-bearing here, and a
+dead or wedged panel must never be able to break it. The worst this design can
+do is leave the bar undimmed. Full seam: `apps/askpass/AGENTS.md`.
+
+---
+
 ## The panel draws the wallpaper — hyprpaper is gone
 
 Removed 2026-07-26. `Wall.qml` (which image + tile/scale), `WallpaperLayer.qml`

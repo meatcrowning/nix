@@ -684,12 +684,22 @@ hl.window_rule({
 })
 
 hl.window_rule({
-    -- Vista-UAC treatment for the sudo password dialog (ksshaskpass, spawned
+    -- Vista-UAC treatment for the sudo password dialog (apps/askpass, spawned
     -- by the sudo-askpass wrapper in ~/nix/home/prog/askpass.nix): dim
     -- everything around it, centre it, pin it above the stack. The wrapper
     -- plays the UAC chime alongside.
+    --
+    -- dim_around only covers the WINDOW pass, so the Quickshell bar (a
+    -- layer-shell surface on the `top` layer) stays bright — the panel dims
+    -- itself in lock-step, keyed off this same app-id, in Askpass.qml. The
+    -- app-id `vista-askpass` is therefore load-bearing in three places: here,
+    -- Askpass.qml, and apps/askpass/main.py.
+    --
+    -- The old ksshaskpass class (^org\.kde\.ksshaskpass$) is kept as a second
+    -- alternative so the fallback path in askpass.nix — which fires if the Qt
+    -- dialog cannot start — still gets the same treatment.
     name  = "askpass-dim",
-    match = { class = "^org\\.kde\\.ksshaskpass$" },
+    match = { class = "^(vista-askpass|org\\.kde\\.ksshaskpass)$" },
 
     dim_around = true,
     center     = true,

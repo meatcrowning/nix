@@ -41,9 +41,11 @@ nixos-rebuild build --flake /home/lam/nix#top   # optional, no sudo at all, warm
 host, so the NOPASSWD rule (`sys/nixos-rebuild.nix`) cannot be abused into
 arbitrary root — which is why bare `sudo nixos-rebuild switch …` is **not**
 covered and will hang on the missing tty. Use the wrapper. For any *other* root command use
-`sudo -A <cmd>`: `SUDO_ASKPASS` is wired to a ksshaskpass dialog
-(`home/prog/askpass.nix`), so it prompts the user instead of failing. Plain
-`sudo <cmd>` just fails in an agent shell.
+`sudo -A <cmd>`: `SUDO_ASKPASS` is wired to our own dialog
+(`home/prog/askpass.nix` → `apps/askpass`), so it prompts the user instead of
+failing. Plain `sudo <cmd>` just fails in an agent shell. The wrapper falls back
+to ksshaskpass if that dialog cannot start (exit 3), so `sudo -A` cannot be
+taken out by a Qt/PySide6 breakage — see `apps/askpass/AGENTS.md`.
 
 Get an edit live:
 
@@ -151,8 +153,8 @@ Never run bare `qs` — it launches a second panel.
 - `home/` — home-manager config for `lam`, auto-imported. `home/pkgs/` package
   categories, `home/prog/` per-program config, `home/srvs/` user services.
 - `lam.nix` — the home-manager entry point; imports `home/`.
-- `apps/` — five vendored Qt/QML apps (`filer`, `viewer`, `player`, `painter`,
-  `surfer`) plus `pylib/`, the shared Python helpers — most importantly
+- `apps/` — six vendored Qt/QML apps (`filer`, `viewer`, `player`, `painter`,
+  `surfer`, `askpass`) plus `pylib/`, the shared Python helpers — most importantly
   `vtbclient.py`, the hyprvtb titlebar-button socket bridge each app draws its
   chrome through.
     - It lives **outside** `home/`/`sys/` on purpose: `umport` would try to

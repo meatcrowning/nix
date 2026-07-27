@@ -1,6 +1,6 @@
 # `apps/` — the vendored desktop apps
 
-Five standalone Qt/QML apps that ship with this config, plus the shared Python
+Six standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
 | dir | what it is | packaged by |
@@ -10,6 +10,7 @@ helpers they all import. Each has its own `AGENTS.md` with the detail:
 | [`player/`](player/AGENTS.md) | tag-driven music player (mpv + MPRIS) | `home/prog/player.nix` |
 | [`painter/`](painter/AGENTS.md) | text-to-image front end for headless ComfyUI | `home/prog/painter.nix` |
 | [`surfer/`](surfer/AGENTS.md) | QtWebEngine browser | `home/prog/surfer.nix` |
+| [`askpass/`](askpass/AGENTS.md) | the `sudo -A` password dialog | `home/prog/askpass.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 
 ## Why this tree is OUTSIDE `home/` and `sys/`
@@ -23,7 +24,7 @@ travels with the repo so a `git pull` carries the apps to every machine.
 (This is why they sat at the repo *root* historically; the constraint was only
 ever "outside `home/`/`sys/`", so `apps/` satisfies it just as well.)
 
-## The live-source pattern — all five work this way
+## The live-source pattern — all six work this way
 
 `home/prog/<app>.nix` builds a wrapper that runs the **live** source at the
 absolute path `/home/lam/nix/apps/<app>/main.py` — valid on both `top` and
