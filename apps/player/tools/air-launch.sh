@@ -9,13 +9,21 @@
 #     probe top -> touch the automount -> pull the db -> pull thumbs
 #     -> run the player -> push the db back
 #
-# Every one of those steps is allowed to fail. If top is asleep or air is off
-# the LAN, the player still starts against the local database: the scanner
-# bails without pruning when the root is not a directory, so tracks simply show
-# unavailable and nothing is lost. Being off-network must never cost you your
-# library. See docs/air-library-share.md.
+# REACHING TOP IS A PRECONDITION, NOT A NICETY. This used to degrade: if top was
+# asleep the player still opened, against the local database, with every track
+# marked unavailable. That is a worse experience than not opening — a window
+# full of music that cannot play, and no statement anywhere of why. So the two
+# checks that decide whether there IS a library (top answers on :445, and the
+# share actually mounted) are now fatal: say so in a desktop notification and
+# exit without starting the app.
+#
+# Escape hatch: PLAYER_OFFLINE=1 restores the old degrade-and-launch behaviour,
+# for looking at metadata (ratings, lyrics, play counts) with no library
+# present. Nothing on the happy path changes. See docs/air-library-share.md.
 #
 # Only ever invoked on air (home/prog/player.nix picks it for host == "air").
+# On top the library is local and none of this exists — player.nix runs main.py
+# directly there, so there is no reachability check to get wrong.
 set -uo pipefail
 
 # Names for top, tried in order: the mDNS name answers only on the home LAN;
@@ -34,7 +42,30 @@ ART_LOCAL="${XDG_CACHE_HOME:-$HOME/.cache}/player/art"
 PREFS="${XDG_STATE_HOME:-$HOME/.local/state}/player/prefs.json"
 PY="${PLAYER_PYTHON:-/usr/bin/python3}"
 
+# ssh connection multiplexing. dbsync and the two art rsyncs are four separate
+# ssh invocations, each otherwise paying a full TCP + key-exchange + auth
+# handshake (~0.17s on this LAN, and it is ~0.28s cold). Naming one control
+# socket here — and handing the same name to dbsync.py through the env — makes
+# the first connection a master that the rest ride on, measured at ~0.05s each.
+# %C is a hash of (host, port, user), so top.local and top can't collide.
+# ControlPersist lets the master outlive this script's first ssh but not the
+# session; nothing needs cleaning up.
+export PLAYER_SSH_CONTROL="${XDG_RUNTIME_DIR:-/tmp}/player-dbsync-ssh-%C"
+SSH_MUX=(-o ControlMaster=auto -o ControlPersist=30
+         -o "ControlPath=$PLAYER_SSH_CONTROL")
+
 say() { printf 'player: %s\n' "$*" >&2; }
+
+# Fatal, with somewhere the message can actually be SEEN: the player is started
+# from the runner, so stderr goes nowhere a person is looking. notify-send is
+# how the rest of this desktop talks (surfer's toasts go the same way); the
+# stderr copy is for when it's run from a terminal.
+die_ui() {
+    say "$1"
+    command -v notify-send >/dev/null 2>&1 &&
+        notify-send -a player -u critical -i audio-x-generic "player" "$1" || true
+    exit 1
+}
 
 # ---- dependency preflight -------------------------------------------------
 # air runs Fedora's system python, so the deps are dnf/pip's problem, not nix's.
@@ -101,12 +132,25 @@ for cand in "${CANDIDATES[@]}"; do
         break
     fi
 done
-[ "$ONLINE" = 1 ] || say "top unreachable (tried: ${CANDIDATES[*]}) — starting offline against the local database"
+# No top means no library, so stop here and SAY so rather than opening a window
+# full of unplayable tracks. PLAYER_OFFLINE=1 opts back into degrading.
+if [ "$ONLINE" != 1 ]; then
+    if [ -z "${PLAYER_OFFLINE:-}" ]; then
+        die_ui "can't reach top (tried: ${CANDIDATES[*]}) — the music lives there, so there is nothing to play. Wake it or join the tailnet, then try again."
+    fi
+    say "top unreachable (tried: ${CANDIDATES[*]}) — PLAYER_OFFLINE set, starting against the local database"
+fi
 
 if [ "$ONLINE" = 1 ]; then
     # Touch the path to fire the systemd automount (fstab: noauto,
-    # x-systemd.automount). Failure here is not fatal: the app degrades.
+    # x-systemd.automount). top answering on :445 is not the same as the share
+    # being usable — a mount that doesn't come up leaves every track
+    # unavailable, which is the same non-experience as top being down, so it
+    # gets the same treatment.
     if ! timeout 10 ls "$MOUNT" >/dev/null 2>&1; then
+        if [ -z "${PLAYER_OFFLINE:-}" ]; then
+            die_ui "top is up but the library share did not mount at $MOUNT — nothing would be playable. Check the mount, then try again."
+        fi
         say "share did not mount at $MOUNT — tracks will show unavailable"
     fi
 
@@ -119,11 +163,15 @@ if [ "$ONLINE" = 1 ]; then
     "$PY" "$DBSYNC" --host "$HOST" pull || say "db pull failed (continuing)"
 
     # Art: thumbs (~21 MB) block launch because the album grid is the first
-    # thing you see; the full-size covers (~192 MB) trickle in behind it, since
-    # only the now-playing view wants them.
+    # thing you see, and QML reads each thumb off disk once as the grid renders
+    # — a thumb that lands later stays blank until the next launch, which is why
+    # this one step is still synchronous. The full-size covers (~192 MB) trickle
+    # in behind it, since only the now-playing view wants them.
     # Same first-contact rule as dbsync's SSH: a new name (top vs top.local)
     # must not wedge on the host-key prompt, a changed key must still fail.
-    RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    # SSH_MUX rides the connection dbsync just opened instead of building a
+    # third and fourth of its own.
+    RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new ${SSH_MUX[*]}"
     mkdir -p "$ART_LOCAL"
     rsync -a -e "$RSH" --timeout=20 --include='*-t.jpg' --exclude='*' \
         "$HOST:.cache/player/art/" "$ART_LOCAL/" 2>/dev/null \
