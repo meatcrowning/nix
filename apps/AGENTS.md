@@ -121,6 +121,22 @@ synthetic coast — 30 × 8px `pixelDelta`, `ScrollBegin` + updates, no
 and one classic detent animates a bare Flickable 0 → 72 px on its own timeline.
 That second decay curve is not "more kinetic", it is two curves fighting.
 
+**The overlay sits at `z: -1`, BEHIND the content, and it must stay there.**
+The reparent (`Component.onCompleted: parent = view`) makes it a *sibling* of
+the view's `contentItem`, appended after it — so at the default z it is the
+topmost item over the whole viewport and sees every wheel first, silently
+shadowing every wheel handler nested in the content. That shipped for a few
+hours and painter is where it showed: its `Spin` steppers, the model and LoRA
+lists, an open `Picker` dropdown and both `PromptBox` editors all live inside
+one `KineticFlickable`, and none of them responded to the wheel while the left
+column could scroll. Measured offscreen against the real components — a nested
+handler went 5/5 → 0/5 wheel events, and a nested `KineticListView` never
+scrolled. `z: -1` restores the ordinary rule: the content gets the wheel, and
+anything that declines it (a delegate with no `onWheel`, or a nested
+`WheelScroll` with nothing left to scroll — it leaves those unaccepted on
+purpose) falls through to the overlay. Both branches are verified offscreen;
+re-check them if the reparent is ever touched.
+
 Knobs, all optional: `wheelLines` / `wheelStep` (how far one *classic mouse
 detent* moves — the touchpad path is 1:1 finger pixels and has no knob),
 `wheelEnabled: false` (let the wheel bubble out of a view that must not eat it),
