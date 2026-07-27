@@ -52,6 +52,16 @@ let
       # or mid-session just logs and launches anyway. Chatter goes to
       # ~/.cache/surfer-sync.log, not the terminal.
       pkgs.writeShellScriptBin "surfer" ''
+        # Single instance FIRST, before anything else in this wrapper runs.
+        # surfer is the default browser now (home/prog/mime-defaults.nix), so a
+        # link clicked in another app lands here; apps/surfer/singleton.py hands
+        # the URL to the running instance over its socket and exits 0, and only
+        # exits 10 (falling through to a real launch) when nobody is listening.
+        # It has to happen before the sync bracket and before the log
+        # truncation below: those would otherwise refuse twice per click and
+        # truncate the LIVE session's log out from under its open fd.
+        if /usr/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi
+
         LOG="$HOME/.cache/surfer-sync.log"
         vtbsync() {
           echo "--- $(date -Is) $1" >> "$LOG"
