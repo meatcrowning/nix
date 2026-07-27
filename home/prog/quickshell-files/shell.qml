@@ -403,7 +403,20 @@ Scope {
         }
     }
 
+    readonly property bool _dockProbe: ViewMode.dock
     Component.onCompleted: {
+        // Read settings.json before asking anything about the view mode. A
+        // fresh tree is built from the shipped defaults (viewMode "classic"),
+        // and they are not corrected until after every Component.onCompleted
+        // has run — so without this the dock guard below saw `false` on every
+        // reload, re-pinned the saved widget set onto the wallpaper, and had it
+        // torn down again ~25ms later when the real mode landed and
+        // onDockChanged fired. On Hyprland's event socket that was an
+        // openlayer/closelayer pair per widget on every theme or wallpaper
+        // change, against the rule that a reload must not remap these surfaces.
+        console.warn("RLD2 restore t=" + Date.now() + " dockBefore=" + _dockProbe + " dockAfter=" + ViewMode.dock + " pins=[" + livePinsFile.text().trim() + "]");
+        SettingsStore.loadNow();
+
         // Dock mode owns the widgets; neither the reload restore nor the login
         // fan should put any of them back on the wallpaper. Returning early
         // leaves _preDockPins empty, so a later switch to classic comes up on
@@ -788,7 +801,18 @@ Scope {
             //
             // The dock-mode term is the safety net: if anything ever left
             // `filterFocus` set, closing the panel still gives the keyboard back.
-            WlrLayershell.keyboardFocus: ((Procs.filterFocus || Procs.filterHover)
+            //
+            // `filterLatch` is the third term and it is load-bearing: it holds
+            // the surface focusable from the hover until the pointer leaves the
+            // BAR, not merely the filter box. Dropping to `None` while this
+            // surface holds the keyboard and the pointer is still over the
+            // panel is what left the compositor focused on nothing at all —
+            // Hyprland's own recovery looks for a window under the pointer and
+            // finds the panel. Handing it back once the pointer is over a
+            // window is the case the compositor gets right. See
+            // Procs.filterLatch for the measurement.
+            WlrLayershell.keyboardFocus: ((Procs.filterFocus || Procs.filterHover
+                                           || Procs.filterLatch)
                                           && ViewMode.showDock)
                 ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
@@ -820,6 +844,18 @@ Scope {
                 }
 
                 onWidthChanged: if (bar._reports) ViewMode.surfaceWidth = width;
+
+                // "The pointer has left the panel" — the one moment at which it
+                // is safe to stop offering keyboard focus, because Hyprland can
+                // then hand the keyboard to the window the pointer is over. A
+                // HoverHandler, not a MouseArea: it is passive, so it neither
+                // swallows a click nor blocks hover reaching the widgets under
+                // it (a hoverEnabled MouseArea filling the bar would eat every
+                // tooltip and highlight in the dock).
+                HoverHandler {
+                    id: barHover
+                    onHoveredChanged: if (!hovered) Procs.filterLatch = false;
+                }
 
                 // the bar's own background, which the surface no longer paints
                 Rectangle {
