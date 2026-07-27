@@ -479,6 +479,16 @@ Scope {
                 + " samples=" + ViewMode.dragTrace.length;
         }
         function trace(): string { return ViewMode.dragTrace.join(" "); }
+
+        // Slow every view-mode animation down by a factor, so a glitch that
+        // lasts two frames at 1x can be recorded and watched:
+        // `qs ipc call view slowmo 10`, and `... slowmo 1` to put it back.
+        // Not persisted — a reload resets it to 1.
+        function slowmo(factor: string): string {
+            const f = parseFloat(factor);
+            ViewMode.animScale = (isFinite(f) && f > 0) ? f : 1.0;
+            return "animScale=" + ViewMode.animScale;
+        }
     }
 
     // Reload-continuity probe: `qs ipc call state carried`. Reports how much of
@@ -746,7 +756,7 @@ Scope {
 
                 Behavior on width {
                     enabled: !ViewMode.dragging || ViewMode.snapping
-                    NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                    NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
                 }
 
                 onWidthChanged: if (bar._reports) ViewMode.surfaceWidth = width;
@@ -786,7 +796,7 @@ Scope {
                     anchors.fill: parent
                     visible: opacity > 0
                     opacity: ViewMode.showDock ? 0 : 1
-                    Behavior on opacity { NumberAnimation { duration: 140 } }
+                    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(140) } }
 
                     // ---- top cluster: launcher, workspaces, tray ----
                     Column {
@@ -924,7 +934,7 @@ Scope {
                     anchors.margins: Theme.gap
                     visible: opacity > 0
                     opacity: ViewMode.showDock ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 140 } }
+                    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(140) } }
 
                     DockHeader {
                         id: dockHeader

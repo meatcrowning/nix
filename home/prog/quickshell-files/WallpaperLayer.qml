@@ -9,9 +9,8 @@ import Quickshell.Wayland
 // screen minus whatever the panel covers — rather than on the monitor. In dock
 // mode the panel takes a quarter to a third of the width, and centring on the
 // monitor would bury the subject of the picture behind it. That recentring is
-// just this Item's geometry, so it follows the panel edge live, at frame rate,
-// while the edge is being dragged. hyprpaper needed a freshly composited
-// full-screen PNG per panel width to achieve the same thing, and flashed.
+// just this Item's geometry — a binding, not a freshly composited full-screen
+// PNG per panel width, which is what hyprpaper needed and why it flashed.
 PanelWindow {
     id: root
     required property var modelData
@@ -46,8 +45,8 @@ PanelWindow {
         width: Math.max(1, parent.width - ViewMode.barWidth)
         clip: true
 
-        Behavior on x { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-        Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic } }
 
         // The two frames of the cross-fade. Only one is showing at a time; a new
         // wallpaper is loaded into whichever is hidden and revealed once it has

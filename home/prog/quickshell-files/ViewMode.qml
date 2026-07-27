@@ -104,6 +104,19 @@ Singleton {
         return Math.round(Math.max(minPx, Math.min(maxPx, dragWidth)));
     }
 
+    // ---- slow motion, for diagnosing the settle after a release -----------
+    // Multiplies the duration of EVERY animation involved in a view-mode change
+    // — the bar's width settle, the wallpaper's glide, the layout crossfade, the
+    // grip highlight — so a glitch that lasts a couple of frames at 1x can be
+    // recorded and watched. Set at runtime with `qs ipc call view slowmo 10`,
+    // back with `qs ipc call view slowmo 1`.
+    //
+    // Deliberately NOT persisted and NOT in SettingsStore: it is a debug knob,
+    // and it resets to 1 on the next panel reload so it can't be left on by
+    // accident. (SettingsStore.d.animSpeed is a different, user-facing thing.)
+    property real animScale: 1.0
+    function ms(base) { return Math.round(base * animScale); }
+
     // Diagnostic trace of the last drag, read with `qs ipc call view trace`:
     // one "dragWidth,surfaceWidth,liveWidth" sample per pointer event. The
     // surface width is what the compositor actually gave us, so comparing the
