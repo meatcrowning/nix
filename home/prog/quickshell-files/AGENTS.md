@@ -138,6 +138,55 @@ qs ipc call view toggle|dock|classic|mode
   `Component.onCompleted` returns early in dock mode, so neither the reload
   restore nor the login fan re-pins anything.
 
+### One widget, two places: `*Content.qml` + a data singleton
+
+A widget is drawn by a **content component** and its data belongs to a
+**singleton**. Neither half may live in the popup, because the popup is no longer
+the only thing that shows it — the same widget is also a tile in the dock grid,
+and **both copies exist in the QML tree at once.**
+
+| Layer | Files | Owns |
+|---|---|---|
+| data | `SysInfo`, `Weather`, `Disks`, `Media` | polling, scripts, carried state |
+| view | `CpuContent`, `GpuContent`, `EthContent` (all on `MetricChart`), `WeatherContent`, `CalendarContent`, `ClockContent`, `DiskContent`, `MediaContent` | drawing, and nothing else |
+| host | `<Name>Panel.qml` (a `SlidePopup`), `DockTile` in `DockGrid` | where it sits |
+
+Three rules, all of which exist because there are two live copies:
+
+- **`active` is the contract.** Every content component takes it, and everything
+  that costs something — a Canvas repaint, a `Process`, a `Timer` — hangs off it.
+  The popup passes `root.open` (**not** `visible`: a pin flips the layer, which
+  unmaps the surface for 32ms, and cava would stop and respawn every time); the
+  grid passes `dockLayout.visible`. Get this wrong and you get two cavas, two
+  `smartctl` timers, and two different answers from `state carried`.
+- **Consumers register with `watch(obj, on)`, which is a SET, not a counter.**
+  Re-registering is a no-op, so a re-evaluated binding or a reload restore cannot
+  leak a reference and leave the scripts running against nobody.
+- **Content components must STRETCH.** A popup gives one its implicit size; a
+  grid cell gives it the cell. So: title top, legend bottom, chart taking the
+  rest — never a fixed `196x96`, and widths derived from `width`, not literals.
+  `implicitWidth` stays a CONSTANT, since the host derives its own width from it
+  and a width-dependent `implicitWidth` is a loop.
+
+`MetricChart.qml` is the shared body of cpu/gpu/eth; each is ~10 lines of series
+and legend on top of it. Its `series` is a binding over the source ring buffers,
+so `onSeriesChanged` is the only repaint trigger any of them needs — don't add
+`Connections` back. Note it exposes `axisMax`, not `scale`: `scale` is a
+`QQuickItem` property (the transform), and shadowing it breaks rendering.
+
+`DockGrid.qml`'s `placements` is plain data — `{key, src, col, row, cs, rs}` —
+loaded by file name through `DockTile`'s `Loader`. That is deliberate: phase 3
+makes that array the thing the user drags and the thing that gets persisted, and
+`cellX/cellY/cellW/cellH` stay the single place grid coordinates become pixels.
+The grid is a `Flickable` because the default layout is ~1900px tall against a
+1080px screen.
+
+> Adding several new `.qml` files in one rebuild produces a burst of **failed**
+> reloads in `qs log` ("`X is not a type`") as home-manager writes them one at a
+> time. Harmless — the reload guard keeps the old tree up — but don't read the
+> first failure as the change being broken. Check for the final
+> `Configuration Loaded`.
+
 ### Verify the drag by MEASURING it
 
 ```bash
@@ -276,13 +325,19 @@ change is a cross-fade.
   every frame of a drag and would re-decode a multi-megapixel image per frame.
   It is the monitor resolution for `scale`, and 0 (natural size) for `tile`,
   since a tile scaled to the screen no longer tiles.
-- **The blurred backdrop** behind everything is the same image decoded at ~96px
-  and stretched over the monitor — the bilinear upscale IS the blur. There is no
-  blur effect and no live filter, so it costs one tiny texture per wallpaper and
-  nothing per frame. It exists to fill the strip that opens up between the panel
-  edge and the sharp wallpaper while the panel is being narrowed (the sharp copy
-  only glides to the new width on release). **Keep it static** — it is on screen
-  exactly when the compositor is busiest.
+- **The blurred backdrop** behind everything is a PRE-COMPUTED file:
+  `wal-prepare.sh` caches a 400px-wide real Gaussian per wallpaper
+  (`~/.cache/wal/blur-$KEY.png`, path published in `current.blur`) and the panel
+  just draws it, so it costs one small static texture and nothing per frame. It
+  fills the strip that opens up between the panel edge and the sharp wallpaper
+  while the panel is being narrowed (the sharp copy only glides to the new width
+  on release). **Keep it static** — it is on screen exactly when the compositor
+  is busiest. Two things it encodes: **PNG, not JPEG** (the output is nothing but
+  smooth gradients, which is exactly what JPEG bands), and it is a real blur
+  rather than the original trick of decoding the wallpaper at ~96px and letting
+  the GPU stretch it. That upscale is free but it is *not* a blur — rendered out
+  and looked at, the picture was still plainly legible with interpolation facets.
+  That path survives only as the fallback for the moment before the cache exists.
 
 ```bash
 qs ipc call wallpaper status   # path, mode, and whether the visible frame actually DECODED (front=ready)

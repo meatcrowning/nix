@@ -364,8 +364,8 @@ Scope {
             SysInfo.restoreState(sysinfo);
             SysInfo.restoreMeters(meters);
             Weather.restoreState(weather);
-            diskPanel.restoreState(disk);
-            mediaPanel.restoreState(media);
+            Disks.restoreState(disk);
+            Media.restoreState(media);
         }
     }
 
@@ -381,8 +381,8 @@ Scope {
         function onStateRevChanged() { persist.weather = Weather.stateJson(); }
     }
     Connections {
-        target: diskPanel
-        function onStateRevChanged() { persist.disk = diskPanel.stateJson(); }
+        target: Disks
+        function onStateRevChanged() { persist.disk = Disks.stateJson(); }
     }
     // The VU and spectrum feeds run at cava's 60fps — far too hot to stringify
     // per frame, and a snapshot a quarter-second old is indistinguishable from
@@ -393,7 +393,7 @@ Scope {
         repeat: true
         onTriggered: {
             persist.meters = SysInfo.metersJson();
-            persist.media = mediaPanel.stateJson();
+            persist.media = Media.stateJson();
         }
     }
 
@@ -505,9 +505,9 @@ Scope {
                 + " disk=" + persist.disk.length
                 + " media=" + persist.media.length
                 + " cpuHist=" + SysInfo.cpuHist.length
-                + " drives=" + diskPanel.drives.length
+                + " drives=" + Disks.drives.length
                 + " days=" + Weather.days.length
-                + " spectrum=" + mediaPanel.spectrumLevels.length;
+                + " spectrum=" + Media.spectrumLevels.length;
         }
     }
 
@@ -926,8 +926,9 @@ Scope {
 
                 // ================= DOCK LAYOUT =================
                 // The wide panel: runner + wrapping task icons across the top, the
-                // widget grid filling everything below. Phase 1 ships the header and
-                // the grid substrate; the widgets themselves move in next.
+                // widget grid filling everything below. The grid's tiles are the
+                // SAME widgets the popups show — one *Content.qml each — so the
+                // two modes can't drift apart (see DockGrid.qml).
                 Item {
                     id: dockLayout
                     anchors.fill: parent
@@ -954,6 +955,11 @@ Scope {
                     }
 
                     DockGrid {
+                        // Only the mode on screen polls: the popup copies of each
+                        // widget gate on their own `open`, the grid's copies on
+                        // this. Both layouts are always instantiated, so without
+                        // it every widget would have two live instances.
+                        active: dockLayout.visible
                         anchors {
                             left: parent.left; right: parent.right
                             top: dockDivider.bottom; topMargin: Theme.gap
