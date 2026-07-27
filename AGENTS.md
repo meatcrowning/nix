@@ -47,6 +47,13 @@ failing. Plain `sudo <cmd>` just fails in an agent shell. The wrapper falls back
 to ksshaskpass if that dialog cannot start (exit 3), so `sudo -A` cannot be
 taken out by a Qt/PySide6 breakage — see `apps/askpass/AGENTS.md`.
 
+**Say why you need root.** The dialog shows a reason, supplied by the caller and
+never invented by the dialog; set it on every `sudo -A` you run:
+
+```bash
+SUDO_ASKPASS_REASON="installing the new kernel module" sudo -A <cmd>
+```
+
 Get an edit live:
 
 ```bash

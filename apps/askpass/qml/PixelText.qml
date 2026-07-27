@@ -14,6 +14,14 @@ import QtQuick
 // to a fractional pixel height that lands between the font's design grid and
 // reintroduces blur. Integer pixel sizes on the 16px grid stay sharp.
 Text {
+    // PLAIN TEXT, ALWAYS. This dialog renders two caller-supplied strings
+    // (sudo's argv[1] prompt and $SUDO_ASKPASS_REASON). QML's Text defaults to
+    // AutoText, which sniffs for HTML and INTERPRETS it — that would let any
+    // caller style a password prompt, forge its chrome, or hide text. main.py's
+    // sanitize() strips control characters and clamps length; this line is the
+    // other half, and it must stay on every label in this app.
+    textFormat: Text.PlainText
+
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
     font.hintingPreference: Font.PreferFullHinting

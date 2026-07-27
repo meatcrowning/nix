@@ -50,6 +50,51 @@ this repo) would leave the machine with no way to authenticate at all. That is
 why ksshaskpass is still installed in `askpass.nix` — it is the parachute, not
 dead weight.
 
+## Telling the user WHY root is being asked for
+
+The caller states the reason; the dialog never invents one.
+
+```bash
+SUDO_ASKPASS_REASON="rebuilding the flake" sudo -A nixos-rebuild switch ...
+```
+
+**Agents in this repo should set it on every `sudo -A` call.** One short clause
+describing the action, in the user's terms — they are being asked to approve
+something and deserve to know what. Unset is handled honestly: the panel reads
+`NO REASON GIVEN` rather than going blank or guessing.
+
+Both displayed strings — the reason and sudo's own argv[1] prompt — are
+**untrusted**, and a password dialog whose body text is caller-controlled is a
+phishing surface. Two defences, and **neither may be removed**:
+
+- `sanitize()` in `main.py` drops C0/C1 control characters, collapses
+  newlines/tabs to spaces, and clamps length (240 chars, 120 for the prompt), so
+  nothing can escape its line, forge a blank region, or grow the window enough to
+  push the password field off-screen. Measured: a 400-char hostile reason yields
+  a 520x293 window.
+- `PixelText.qml` sets `textFormat: Text.PlainText`. QML's `Text` defaults to
+  `AutoText`, which **sniffs for HTML and interprets it** — markup must be shown,
+  never rendered.
+
+The reason is also walled off in its own inset box under a caption naming whose
+words they are, so it can never read as the dialog's own voice.
+
+## `SUDO_ASKPASS` must stay a STABLE path
+
+`home/prog/askpass.nix` points it at `~/.local/bin/sudo-askpass`, a
+home-manager symlink — **not** at the wrapper's `/nix/store` path. A process
+reads its environment once, and this repo's agents hold shells open across many
+rebuilds. When the dialog was first replaced, 31 live processes still held the
+previous generation's store path and kept popping the OLD ksshaskpass dialog;
+the user reported "it still looks like the light theme" and was exactly right.
+A store path in `SUDO_ASKPASS` means that recurs on every rebuild — and lets
+`nix-collect-garbage` break `sudo -A` outright by deleting a wrapper that live
+shells still reference.
+
+Nothing can rescue a process that already holds a store path, so **a shell
+started before this change keeps the old dialog until it is restarted.** That is
+a one-time cost, not a recurring one.
+
 ## The app-id `vista-askpass` is load-bearing in THREE places
 
 Rename it and you must change all three together:
@@ -94,6 +139,14 @@ tools/sandbox.sh stop
 
 Note this briefly dims the user's bar, because the panel is doing exactly what
 it is supposed to.
+
+**The dialog is excluded from hyprvtb's geometry memory** (`vtbNeverRemembersGeometry`
+in `hyprvtb/main.cpp`, ≥2.88) — in all three directions: not restored on open,
+not saved on close, and dropped when `geometry.tsv` is read, so a stale entry
+self-cleans at the next plugin load instead of being rewritten forever by
+`vtbSaveGeometry` (which rewrites the whole map whenever *any* window closes).
+That last part is why deleting the line by hand was not enough. A modal must
+land where its window rule puts it, every time.
 
 ## Layout traps already paid for
 

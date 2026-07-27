@@ -138,6 +138,42 @@ class Palette(QObject):
     def info(self): return self._c("info")
 
 
+def sanitize(text, limit=240):
+    """Make caller-supplied text safe to render on a password prompt.
+
+    Both strings this dialog displays are UNTRUSTED: sudo's prompt is argv[1],
+    and the reason is $SUDO_ASKPASS_REASON, which any caller can set to
+    anything. A password dialog whose body text is attacker-controlled is a
+    phishing surface, so:
+
+      * control characters (C0 and C1) are dropped, and newlines/tabs collapse
+        into single spaces — nothing can escape its line, fake a blank region,
+        or push the real chrome off the window,
+      * the length is clamped, so nothing can grow the dialog or shove the
+        password field off-screen,
+      * "..." not the ellipsis glyph, because the pixel font has no "…" and one
+        missing glyph re-renders the whole line in a fallback face.
+
+    The remaining half of the defence is in QML: PixelText sets
+    `textFormat: Text.PlainText`, so markup is shown, never interpreted.
+    """
+    if not text:
+        return ""
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if ch in "\n\r\t":
+            out.append(" ")
+        elif o < 0x20 or 0x7F <= o <= 0x9F:
+            continue     # control characters, including the C1 block
+        else:
+            out.append(ch)
+    flat = " ".join("".join(out).split())
+    if len(flat) > limit:
+        flat = flat[:limit - 3].rstrip() + "..."
+    return flat
+
+
 class Sudo(QObject):
     """The only route out of the QML engine.
 
@@ -176,10 +212,20 @@ def main():
 
     # sudo passes its prompt as argv[1] ("[sudo] password for lam:" or
     # $SUDO_PROMPT). It is a prompt, not a secret; still, it is only ever shown,
-    # never echoed to stdout.
-    prompt = sys.argv[1].strip() if len(sys.argv) > 1 else ""
+    # never echoed to stdout — and it is untrusted, so it goes through sanitize.
+    prompt = sanitize(sys.argv[1] if len(sys.argv) > 1 else "", limit=120)
     if not prompt:
         prompt = f"[sudo] password for {os.environ.get('USER', 'user')}:"
+
+    # WHY root is being asked for, supplied by whoever is running sudo:
+    #
+    #     SUDO_ASKPASS_REASON="rebuilding the flake" sudo -A nixos-rebuild switch
+    #
+    # The caller states it; this dialog never invents one. Unset means unset —
+    # the panel says so plainly rather than guessing or going blank, because a
+    # prompt that fabricates a justification for its own privilege request is
+    # worse than one that admits it does not know.
+    reason = sanitize(os.environ.get("SUDO_ASKPASS_REASON", ""))
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -189,6 +235,7 @@ def main():
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Sudo", sudo)
     ctx.setContextProperty("startPrompt", prompt)
+    ctx.setContextProperty("startReason", reason)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
