@@ -146,7 +146,10 @@ Singleton {
                 : (s === MprisLoopState.Track) ? MprisLoopState.Playlist
                 : MprisLoopState.None;
         } else {
+            // save(), or the reader poll reverts it within ~350ms (see
+            // SettingsStore) and it never reaches disk
             SettingsStore.d.mediaLocalLoop = localLoop === 0 ? 1 : 0;
+            SettingsStore.save();
         }
     }
 

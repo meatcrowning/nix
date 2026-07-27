@@ -773,6 +773,16 @@ Scope {
 
             WlrLayershell.namespace: "qs-bar"
 
+            // The bar takes the keyboard ONLY while the task manager's filter
+            // box has focus, and only in dock mode. Exclusive rather than
+            // OnDemand because OnDemand is granted on CLICK: the click that
+            // focuses the box would have to be followed by a second one before
+            // a keystroke arrived. The dock-mode term is the safety net — if
+            // anything ever left `filterFocus` set, closing the panel still
+            // gives the keyboard back.
+            WlrLayershell.keyboardFocus: (Procs.filterFocus && ViewMode.showDock)
+                ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
             // THE VISIBLE BAR. Its width is the only thing that moves when the
             // panel is resized — a plain binding, applied in the frame it
             // changes, with no compositor roundtrip. Deliberately NOT animated

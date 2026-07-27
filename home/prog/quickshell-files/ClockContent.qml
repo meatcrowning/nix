@@ -33,9 +33,14 @@ Item {
         return (m === "dots" || m === "seg") ? m : "analog";
     }
     readonly property var modeOrder: ["analog", "dots", "seg"]
+    // The chosen face is a SETTING, so it has to be written to disk, not just
+    // assigned: SettingsStore's reader poll re-reads settings.json a few times a
+    // second and an unsaved adapter change is reverted by the next reload — the
+    // face flipped back on its own, and never survived a logout at all.
     function cycleFace() {
         const i = modeOrder.indexOf(root.mode);
         SettingsStore.d.clockFace = modeOrder[(i + 1) % modeOrder.length];
+        SettingsStore.save();
     }
 
     // Natural (popup) face size, and the actual box it gets in a tile.

@@ -138,6 +138,31 @@ qs ipc call view toggle|dock|classic|mode
   `Component.onCompleted` returns early in dock mode, so neither the reload
   restore nor the login fan re-pins anything.
 
+### A task cell shows FOUR window states, and the compositor is the source
+
+`TaskCell.qml` (shared by the classic `Taskbar` and the dock header) colours its
+border on a ramp: full `Theme.accent` focused and on screen, a third of the way
+to `Theme.dim` unfocused, three quarters of the way rolled up, and `Theme.dim`
+minimized — with the icon knocked back in the last two, and the filled
+background left to mean FOCUS alone. Roll and minimize outrank focus, because a
+rolled-up window can still hold the keyboard.
+
+**Neither state is in the Wayland toplevel list** — they are hyprvtb's, not the
+protocol's — so `WinState.qml` polls `hyprctl clients -j` (~4 ms, once a second,
+idle when no windows) and derives them from what the plugin actually does:
+
+- **rolled up** = `hidden`, geometry untouched (`vtbDeco` calls `setHidden`).
+  `hidden` is also true for a window on a workspace that is not showing, so it
+  only counts when the window's workspace is active on some monitor.
+- **minimized** = NOT hidden and parked at or past its monitor's right edge
+  (`minimizeWindow` moves it to `m_position.x + m_size.x`, in LOGICAL pixels —
+  `hyprctl` reports monitor size in device pixels, hence the divide by `scale`).
+
+Both signatures were measured on a live window, not inferred. The join back to
+the toplevel list is class + title, which is all this build offers (no Hyprland
+window-mapping protocol); two windows of one app sharing a title are the one
+case that cannot be told apart.
+
 ### Anything the user changes by USING a widget goes in `SettingsStore`
 
 Not a local property, and not a `PersistentProperties` slot. `PersistentProperties`
@@ -153,8 +178,15 @@ exactly one copy of the state and no binding to break:
 
 ```qml
 readonly property string sortKey: SettingsStore.d.procSort
-function setSort(k) { SettingsStore.d.procSort = k; }
+function setSort(k) { SettingsStore.d.procSort = k; SettingsStore.save(); }
 ```
+
+**The `SettingsStore.save()` is not decoration — without it the change is
+reverted within the second.** The reader instance re-reads `settings.json` every
+~350 ms (see the polling Timer in `SettingsStore.qml`), so an assignment that
+never reaches disk is undone by the next reload, and nothing survives a logout
+either. Three settings shipped without it and quietly forgot what the user
+chose: the clock's face, the sort column, and the local repeat toggle.
 
 Transient state — a hover index, a list's scroll position — stays local. The
 test is whether the user would notice it reverting.
@@ -300,6 +332,19 @@ loop, since the popup takes its height from `implicitHeight`.
   the number of columns.
 - Memory is `MemAvailable`, not `MemFree`. MemFree alone reads as "almost none"
   on any machine that has been up a while and is simply a wrong thing to show.
+- Every card carries a `tip`, shown on hover through the shared `Tooltip`. The
+  labels are four characters of jargon each and the card has no room to explain
+  itself; the tooltip is where "psi" or "res" gets to say what it measures.
+- **The filter box is the only thing on this desktop that takes the keyboard.**
+  It sets `Procs.filterFocus`, and `shell.qml` turns that into
+  `WlrLayershell.keyboardFocus: Exclusive` on the bar — **Exclusive, not
+  OnDemand**, because OnDemand is granted on a click, so the click that focuses
+  the box would need a second one behind it before a keystroke arrived. It is
+  additionally gated on `ViewMode.showDock`, and the widget clears the flag when
+  it goes inactive or is destroyed: a stale `filterFocus` would leave the panel
+  holding the keyboard with nothing on screen to type into. The filter itself is
+  deliberately NOT in `SettingsStore` (it is a question you are asking now, not a
+  preference) but IS carried across a reload in `Procs.stateJson`.
 
 ### The clock's three faces
 

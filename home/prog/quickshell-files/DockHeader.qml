@@ -49,7 +49,12 @@ Item {
 
     PixelText {
         id: uptime
-        anchors { right: parent.right; top: parent.top }
+        anchors.right: parent.right
+        // Centred on the FIRST ROW of icons, not on the header as a whole: the
+        // Flow wraps onto further rows as windows accumulate, so centring on the
+        // box would walk this text down the panel every time one opened. One
+        // cell tall is the row height, whether there is one row or four.
+        y: Math.round((Theme.wsCell - height) / 2)
         text: "up " + root.fmtUptime(SysInfo.uptimeSec)
         color: Theme.textDim
     }

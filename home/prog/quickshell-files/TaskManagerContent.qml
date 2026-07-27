@@ -39,9 +39,16 @@ Item {
     implicitWidth: 300
     implicitHeight: 360
 
-    onActiveChanged: Procs.watch(root, active)
+    // Handing the keyboard back is not optional: the dock closing (or this
+    // widget being torn down by a reload) while the filter box still held focus
+    // would leave the bar's layer holding a keyboard grab with nothing on screen
+    // to type into.
+    onActiveChanged: {
+        Procs.watch(root, active);
+        if (!active) { filterInput.focus = false; Procs.filterFocus = false; }
+    }
     Component.onCompleted: Procs.watch(root, active)
-    Component.onDestruction: Procs.watch(root, false)
+    Component.onDestruction: { Procs.watch(root, false); Procs.filterFocus = false; }
 
     function fmtUptime(s) {
         if (!s || s <= 0) return "--";
@@ -62,6 +69,10 @@ Item {
         // line.
         property string sub: ""
         property color valueColor: Theme.text
+        // Hover text. These labels are four characters of jargon each — "psi",
+        // "vram", "res" — and the card cannot say what it is measuring in the
+        // space it has, so it says it here instead.
+        property string tip: ""
         property alias series: plot.series
         property alias scaleMax: plot.scaleMax
         property alias autoFloor: plot.autoFloor
@@ -95,6 +106,15 @@ Item {
             text: card.sub
             color: Theme.textDim
         }
+        // Hover anywhere on the card, chart included. HoverHandler rather than a
+        // MouseArea so it cannot eat a click the card might want later.
+        HoverHandler { id: cardHover }
+        Tooltip {
+            target: card
+            visible: cardHover.hovered && card.tip !== "" && card.visible
+            text: card.tip
+        }
+
         ChartCanvas {
             id: plot
             // Both card sets are instantiated and the unused three are hidden
@@ -127,6 +147,7 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "cpu"
+            tip: "busy time across all cores, sampled every poll\nred: package temperature"
             value: SysInfo.cpuUsage < 0 ? "--" : SysInfo.cpuUsage + "%"
             sub: SysInfo.cpuTemp < 0 ? "" : SysInfo.cpuTemp + "C"
             series: [
@@ -138,6 +159,7 @@ Item {
             width: root.cardW; height: root.cardH
             visible: !root.noGpu
             label: "gpu"
+            tip: "nvidia-smi utilization\nred: gpu temperature"
             value: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + "%"
             sub: SysInfo.gpuTemp < 0 ? "" : SysInfo.gpuTemp + "C"
             series: [
@@ -154,6 +176,7 @@ Item {
             width: root.cardW; height: root.cardH
             visible: root.noGpu
             label: "psi"
+            tip: "pressure stall: share of the last 10s spent\nwaiting on cpu (blue), disk io (amber), memory (red)"
             value: SysInfo.psiCpu < 0 ? "--" : SysInfo.psiCpu.toFixed(1) + "%"
             sub: SysInfo.psiIo < 0 ? "" : "io" + SysInfo.psiIo.toFixed(0)
             valueColor: SysInfo.psiCpu >= 50 ? Theme.crit
@@ -171,6 +194,7 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "mem"
+            tip: "memory in use: total minus MemAvailable,\ni.e. what a new allocation could not have"
             value: SysInfo.memUsage < 0 ? "--" : SysInfo.memUsage + "%"
             sub: SysInfo.fmtSize(SysInfo.memUsedKb)
             series: [ { data: SysInfo.memHist, color: Theme.accent } ]
@@ -178,6 +202,7 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "net"
+            tip: "network throughput\nblue: down (the readout)   amber: up"
             value: SysInfo.fmtSpeed(SysInfo.rxSpeed)
             sub: SysInfo.fmtSpeed(SysInfo.txSpeed)
             scaleMax: 0
@@ -191,6 +216,7 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "load"
+            tip: "load average over 1 minute:\nthreads running or waiting for a core"
             value: SysInfo.load1 < 0 ? "--" : SysInfo.load1.toFixed(2)
             // 16 threads on this box; a run queue past a quarter of them is
             // where it starts being something you can feel
@@ -204,6 +230,7 @@ Item {
             width: root.cardW; height: root.cardH
             visible: !root.noGpu
             label: "vram"
+            tip: "gpu memory in use, and how much of it"
             value: SysInfo.gpuMemUsage < 0 ? "--" : SysInfo.gpuMemUsage + "%"
             sub: SysInfo.gpuMemUsedMb < 0 ? "" : (SysInfo.gpuMemUsedMb / 1024).toFixed(1) + "G"
             valueColor: SysInfo.gpuMemUsage >= 90 ? Theme.crit : Theme.text
@@ -217,6 +244,7 @@ Item {
             width: root.cardW; height: root.cardH
             visible: root.noGpu
             label: "io"
+            tip: "disk throughput across the physical drives\nblue: read (the readout)   amber: write"
             value: SysInfo.fmtSpeed(SysInfo.dskRead)
             sub: SysInfo.fmtSpeed(SysInfo.dskWrite)
             scaleMax: 0
@@ -229,6 +257,7 @@ Item {
         MetricCard {
             width: root.cardW; height: root.cardH
             label: "swap"
+            tip: "swap in use; anything sustained here\nmeans the machine is short of memory"
             value: SysInfo.swapUsage < 0 ? "--" : SysInfo.swapUsage + "%"
             sub: SysInfo.swapTotalKb > 0
                  ? SysInfo.fmtSize(SysInfo.swapTotalKb - SysInfo.swapFreeKb) : ""
@@ -239,6 +268,7 @@ Item {
             width: root.cardW; height: root.cardH
             visible: !root.noGpu
             label: "fan"
+            tip: "gpu fan speed. 0% is a real reading -\nthe card stops its fans when it is cool"
             // The GPU fan, as a percentage. Zero is a real reading, not a
             // missing one — this card idles at 0% because the card stops its
             // fans entirely when it is cool.
@@ -254,6 +284,7 @@ Item {
             width: root.cardW; height: root.cardH
             visible: root.noGpu
             label: "power"
+            tip: "whole-machine power draw, and the battery charge\n(+ while charging). 4-5W idle, ~19W all-out"
             value: SysInfo.powerW < 0 ? "--" : SysInfo.powerW.toFixed(1) + "W"
             sub: SysInfo.batteryPct < 0 ? ""
                  : (SysInfo.batteryCharging ? "+" : "") + SysInfo.batteryPct + "%"
@@ -317,10 +348,90 @@ Item {
         }
     }
 
+    // ---- filter box ------------------------------------------------------
+    // Substring match on name or pid, live as you type. The panel's layer
+    // surface takes the keyboard ONLY while this box holds it (Procs.filterFocus,
+    // read in shell.qml): a bar that were always focusable would swallow the
+    // keystroke you meant for the window you were working in. Escape clears and
+    // hands it straight back.
+    Rectangle {
+        id: filterBox
+        anchors { top: fanBar.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
+        width: root.inner
+        height: 19
+        color: Theme.bgAlt
+        border.width: 1
+        border.color: filterInput.activeFocus ? Theme.accent : Theme.border
+
+        PixelText {
+            id: filterIcon
+            anchors { left: parent.left; leftMargin: 5; verticalCenter: parent.verticalCenter }
+            text: "/"
+            color: filterInput.activeFocus ? Theme.accent : Theme.textDim
+        }
+        TextInput {
+            id: filterInput
+            anchors {
+                left: filterIcon.right; leftMargin: 5
+                right: filterClear.left; rightMargin: 5
+                verticalCenter: parent.verticalCenter
+            }
+            // A TextInput is not a Text, so it inherits none of PixelText's
+            // settings and would rasterise the pixel font through the
+            // distance-field path — blurry, next to a panel of crisp text.
+            font.family: Theme.font
+            font.pixelSize: Theme.fontSize
+            font.hintingPreference: Font.PreferFullHinting
+            renderType: Text.NativeRendering
+            color: Theme.text
+            selectionColor: Theme.accent
+            selectedTextColor: Theme.bg
+            clip: true
+            text: Procs.filter
+            onTextEdited: Procs.setFilter(text)
+            onActiveFocusChanged: Procs.filterFocus = activeFocus
+            Keys.onEscapePressed: {
+                Procs.setFilter("");
+                filterInput.focus = false;
+            }
+            PixelText {
+                anchors.fill: parent
+                visible: filterInput.text === "" && !filterInput.activeFocus
+                text: "filter"
+                color: Theme.textDim
+            }
+        }
+        // How much of the machine the filter is hiding, and the click target
+        // that clears it. Only while filtering — with an empty box the table is
+        // the whole list and the count would be noise.
+        PixelText {
+            id: filterClear
+            anchors { right: parent.right; rightMargin: 5; verticalCenter: parent.verticalCenter }
+            visible: Procs.filter !== ""
+            text: Procs.sorted.length + "/" + Procs.total + " x"
+            color: clearMa.containsMouse ? Theme.crit : Theme.textDim
+            MouseArea {
+                id: clearMa
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: { Procs.setFilter(""); filterInput.focus = false; }
+            }
+        }
+        // Click anywhere in the box to type. z below the clear button so it
+        // doesn't swallow that click.
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            cursorShape: Qt.IBeamCursor
+            onClicked: filterInput.forceActiveFocus()
+        }
+    }
+
     // ---- process table ---------------------------------------------------
     Rectangle {
         id: rule
-        anchors { top: fanBar.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
+        anchors { top: filterBox.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 1
         color: Theme.border
@@ -362,13 +473,19 @@ Item {
         width: root.inner
         spacing: 0
 
+        // process name first, then pid: the name is what you scan for, and the
+        // pid is a detail about the row you already found. The numeric columns
+        // stay grouped on the right, so pid sits between them and the name.
+        Head { width: root.colName; key: "name"; text: "process" }
         Head {
             width: root.colPid
             visible: root.showPid
             key: "pid"
             text: "pid"
+            horizontalAlignment: Text.AlignRight
+            // keeps the number off cpu%'s left edge, which is right-aligned too
+            rightPadding: 6
         }
-        Head { width: root.colName; key: "name"; text: "process" }
         Head { width: root.colCpu;  key: "cpu";  text: "cpu%"; horizontalAlignment: Text.AlignRight }
         Head { width: root.colMem;  key: "mem";  text: "mem%"; horizontalAlignment: Text.AlignRight }
         Head { width: root.colRss;  key: "mem";  text: "res";  horizontalAlignment: Text.AlignRight }
@@ -415,16 +532,18 @@ Item {
                 spacing: 0
 
                 PixelText {
-                    width: root.colPid
-                    visible: root.showPid
-                    text: row.modelData.pid
-                    color: Theme.textDim
-                }
-                PixelText {
                     width: root.colName
                     text: row.modelData.name
                     color: Theme.text
                     elide: Text.ElideRight
+                }
+                PixelText {
+                    width: root.colPid
+                    visible: root.showPid
+                    horizontalAlignment: Text.AlignRight
+                    rightPadding: 6
+                    text: row.modelData.pid
+                    color: Theme.textDim
                 }
                 PixelText {
                     width: root.colCpu

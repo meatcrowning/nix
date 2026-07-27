@@ -20,8 +20,25 @@ Singleton {
     // survives both a panel reload and a logout — a heading the user chose is a
     // setting, not scratch state.
     readonly property string sortKey: SettingsStore.d.procSort
-    function setSort(k) { SettingsStore.d.procSort = k; }
+    // save() is not optional: SettingsStore's reader poll re-reads the file
+    // every ~350ms, so an assignment that is never written is undone within the
+    // second — which is why the heading used to forget what you clicked.
+    function setSort(k) { SettingsStore.d.procSort = k; SettingsStore.save(); }
     readonly property int count: rows.length
+
+    // ---- the filter box above the table ----------------------------------
+    // Substring match on the process name, case-insensitive. NOT persisted to
+    // settings.json: a sort column is a preference, but a filter is a question
+    // you are asking right now, and coming back to a table that silently hides
+    // most of the machine would be a trap. It IS carried across a panel reload
+    // (see stateJson), because a reload is not the user putting it down.
+    property string filter: ""
+    function setFilter(t) { root.filter = t || ""; }
+    // Whether the filter box holds the keyboard. The bar's layer surface only
+    // takes keyboard focus while this is true (shell.qml) — an always-focusable
+    // panel would swallow a keystroke meant for the window you were typing in.
+    property bool filterFocus: false
+    readonly property int total: rows.length
 
     property var _watchers: []
     readonly property bool live: _watchers.length > 0
@@ -35,7 +52,11 @@ Singleton {
     }
 
     readonly property var sorted: {
-        const r = rows.slice();
+        const f = root.filter.trim().toLowerCase();
+        const r = f === ""
+            ? rows.slice()
+            : rows.filter(p => p.name.toLowerCase().indexOf(f) >= 0
+                            || String(p.pid).indexOf(f) >= 0);
         if (sortKey === "mem") r.sort((a, b) => b.mem - a.mem);
         else if (sortKey === "name") r.sort((a, b) => a.name.localeCompare(b.name));
         // pid ascending is start order, which is the only reading of a pid that
@@ -51,10 +72,17 @@ Singleton {
     // A reload would otherwise empty the table and refill it 0.4s later, which
     // in a fixed-height tile reads as the whole list blinking out.
     property int stateRev: 0
-    function stateJson() { return JSON.stringify(rows); }
+    function stateJson() { return JSON.stringify({ r: rows, f: filter }); }
     function restoreState(str) {
         if (!str) return;
-        try { root.rows = JSON.parse(str) || []; } catch (e) {}
+        try {
+            const d = JSON.parse(str);
+            // Tolerate the older shape (a bare rows array), so a reload across
+            // this change doesn't drop the table on the floor.
+            if (Array.isArray(d)) { root.rows = d; return; }
+            root.rows = d.r || [];
+            root.filter = d.f || "";
+        } catch (e) {}
     }
 
     Process {
