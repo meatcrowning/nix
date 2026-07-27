@@ -563,6 +563,11 @@ Window {
                         webview.runJavaScript(DarkMode.js("" + webview.url));
                         // click a plain content image -> open it in a new tab
                         webview.runJavaScript(imageClickJs);
+                        // air only (empty string on top): sample which GL
+                        // driver is actually serving this renderer, to catch
+                        // the mid-session fallback that wrecks text antialiasing
+                        // — see GPU_PROBE_JS / CmdHandler._log_gpu in main.py
+                        if (gpuProbeJs) webview.runJavaScript(gpuProbeJs);
                         // cosmetic ad-blocking (element hiding) — the half the
                         // network interceptor can't do. Specific (per-site)
                         // rules first; then gather the page's classes/ids and
