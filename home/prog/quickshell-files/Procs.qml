@@ -44,26 +44,52 @@ Singleton {
     // pointer gets there.
     property bool filterFocus: false
     property bool filterHover: false
-    // …and `filterLatch` is what makes GIVING IT BACK safe. Dropping the layer
-    // from on-demand to none while it holds the keyboard and the pointer is
-    // still over the PANEL leaves the compositor focused on nothing at all:
-    // CLayerSurface::commit calls refocusLastWindow, which looks for a window
-    // under the pointer, finds this panel instead, and gives up — and with
-    // `input:follow_mouse = 2` nothing later restores it, so the keyboard is
-    // dead until the user clicks. Measured, not reasoned: the transition posts
-    // Hyprland's `activewindow>>,` and both the window and the panel report no
-    // keyboard.
-    //
-    // So the surface stays on-demand from the moment the filter box is hovered
-    // until the pointer LEAVES the bar entirely (shell.qml clears this). The
-    // hand-back then happens with the pointer over a window, which is the case
-    // the compositor gets right: it moves the keyboard straight to that window.
-    property bool filterLatch: false
     // Bumped to ask the box to give the keyboard back — clicking anywhere else
     // in the panel. The box watches this rather than being reached into,
     // because it lives inside an asynchronous Loader in the dock grid.
     property int blurSeq: 0
     function blurFilter() { root.blurSeq++; }
+
+    // ---- letting go of the keyboard ----------------------------------------
+    //
+    // Taking the keyboard and giving it back are NOT symmetrical, and there is
+    // exactly one place it is unsafe to give it back: **with the pointer still
+    // over the panel.** Dropping the surface from on-demand to none there runs
+    // Hyprland's `CLayerSurface::commit` -> `refocusLastWindow`, which looks
+    // for a window UNDER THE POINTER, finds this panel, and gives up — the
+    // compositor is left focused on nothing at all (`activewindow>>,` on the
+    // event socket) and with `input:follow_mouse = 2` nothing later puts it
+    // back. Measured, all three cases, in a nested compositor:
+    //
+    //     disarm, pointer over the PANEL     -> activewindow>>,  keyboard: NOBODY
+    //     disarm, pointer over a WINDOW      -> clean, the window gets it
+    //     disarm, pointer over the WALLPAPER -> clean, the last window gets it
+    //
+    // (the wallpaper is safe because `refocusLastWindow` only searches the
+    // OVERLAY and TOP layers, so a Background surface under the pointer is not
+    // found and it falls through to the last focused window.)
+    //
+    // **There is no explicit hand-back to reach for instead** — that was tried
+    // and measured. `hl.dsp.focus({window = X})` reports `ok` and does nothing
+    // in this state: `CA::focus` passes a null surface to
+    // `CFocusState::rawWindowFocus`, which early-returns on
+    // `pWindow == m_focusWindow && surface == m_focusSurface` — and a layer
+    // surface taking the keyboard leaves `m_focusWindow` naming the window
+    // while `rawSurfaceFocus(nullptr)` has reset `m_focusSurface`, so both
+    // halves match and the call is a no-op.
+    //
+    // So `filterLatch` holds the surface focusable from the hover until the
+    // pointer has LEFT THE BAR (shell.qml's HoverHandler clears it), which is
+    // the only moment the hand-back is the compositor's to get right.
+    //
+    // THE CARET IS A SEPARATE QUESTION, and that separation is the whole
+    // design. "Click anywhere outside the box and it stops taking the
+    // keyboard" is about the caret: `blurFilter` clears it the instant the
+    // click lands, wherever it lands, so the box stops receiving keystrokes
+    // immediately. The surface goes on offering itself for a moment longer —
+    // until the pointer leaves — because that is the compositor's constraint,
+    // not the user's.
+    property bool filterLatch: false
     readonly property int total: rows.length
 
     property var _watchers: []
