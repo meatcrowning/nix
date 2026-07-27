@@ -711,18 +711,42 @@ ascent, clipping the whole line — which is why the media widget's empty-title
 placeholder is `"-"` and every "reading..." is three dots.
 
 **That rule covers hardcoded UI strings. Text that comes from OUTSIDE — track
-tags, window titles, filenames — cannot be written to suit the font, so it has
-to be mapped on the way in.** `Media.px()` does that for the player: the
-typographic punctuation the font lacks (`’ ‘ “ ” – — ‐ … − • ′ ″ ⁄ ﬁ ﬂ`, plus
-the exotic spaces) onto ASCII equivalents, applied to `dispTitle`/`dispArtist`
-and to the queue rows where they are parsed. It is **display only** — the tags
-on disk and the queue index sent back down the socket never go through it — and
-it is deliberately a lookup table, not "strip anything the font lacks": 427 of
+tags, window titles, filenames, notification bodies, process names — cannot be
+written to suit the font, so it has to be mapped on the way in instead.**
+`Glyphs.px()` is that map: the glyphs More Perfect DOS VGA lacks (the
+typographic punctuation `’ ‘ “ ” – — ‐ … − • ′ ″ ⁄ ﬁ ﬂ`, the exotic spaces,
+the arrows, `™ © ® ℗`, `×` and `ø`) onto ASCII equivalents. Every widget that
+draws text it did not author calls it — which is why it is its own singleton
+and not the player's, where it started.
+
+**Map at the INGEST point where there is one** (`Notifications.plain()`, the
+`Procs` parse, `Media`'s queue), so it costs one pass per data change rather
+than one per delegate on every scroll. Where the data belongs to a Qt or
+Quickshell model this panel does not own — toplevel titles, `FolderListModel`
+rows, `DesktopEntries` — map at the display site instead.
+
+**It is DISPLAY ONLY, and that is a safety rule, not a stylistic one.** Nothing
+identifying may go through it: `TaskCell`'s raw title is the join key into
+`WinState` and the address the click dispatches on; `FileBrowser`'s `path` and
+`selected` are handed to `gio`/`mv`/`rm`; `Procs`' pid is what `kill()` signals;
+`Launcher`'s `entry.command` is the argv. Two prefill sites are the sharp edge —
+`FileBrowser`'s rename dialog and `DiskContent`'s inline label editor both put a
+value in front of the user that is then written back by `mv` and by
+`Disks.relabel()`. Map either and the panel quietly renames the user's file or
+their filesystem. Both carry a comment saying so; leave them.
+
+It is deliberately a lookup table, not "strip anything the font lacks": 427 of
 the 11k tracks in the library carry U+2019 and 140 carry U+2010, but ~830 have
 CJK or fullwidth titles with no ASCII form at all, and a title turned into
 question marks is worse than one drawn in the wrong font. Those still sit low;
-fixing them needs a pixel font with CJK coverage. Anything else on this panel
-that renders library or window metadata wants the same treatment.
+fixing them needs a pixel font with CJK coverage.
+
+**Audit the hardcoded half by asking the FONT, not by eye.**
+`QRawFont("…/MorePerfectDOSVGA.ttf").glyphIndexesForString(ch)[0] == 0` is the
+test (`fc-list :charset=` and `QRawFont.supportsCharacter` both lie — the
+latter answers `True` for characters it maps to glyph 0). Run it over every
+string literal in this directory; it found fifteen the day it was written, in
+`Cheatsheet`, `SetSelect`, `SetPgWidgets`, `Lock`, `Screenshot` and others.
 
 > Adding several new `.qml` files in one rebuild produces a burst of **failed**
 > reloads in `qs log` ("`X is not a type`") as home-manager writes them one at a
