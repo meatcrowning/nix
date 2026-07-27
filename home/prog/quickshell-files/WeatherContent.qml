@@ -24,13 +24,28 @@ Item {
     implicitHeight: pad * 2 + head.height + 2 + legend.height + 4
                     + 110 + 2 + dayLabels.height
 
-    // A tile too short for the graph (the player's queue drawer takes four of
-    // the forecast's six rows) drops to CURRENT CONDITIONS ONLY: header line,
-    // nothing else. Clipping the graph instead would leave a half-drawn axis and
-    // a row of day names cut through the middle, which reads as broken rather
-    // than as compact. The threshold is the header plus the legend plus the
-    // smallest graph worth drawing.
-    readonly property bool condensed: height < pad * 2 + 16 + 14 + 40
+    // A tile too short for the graph (the player's queue drawer takes rows off
+    // the forecast) drops to CURRENT CONDITIONS ONLY: header line, nothing else.
+    // Clipping the graph instead would leave a half-drawn axis and a row of day
+    // names cut through the middle, which reads as broken rather than compact.
+    //
+    // The threshold is derived from the SAME constants the layout below is built
+    // from, never a magic number. The old one — `pad*2 + 16 + 14 + 40` — counted
+    // the padding, the header and the legend but forgot the day-label row and
+    // the three inter-element margins, so it was 24px short. Everything in that
+    // 24px band claimed it could draw a forecast and then handed the Canvas
+    // 0-18px: two 16px axis temperatures drawn on top of each other over a line
+    // with nowhere to go, with the day names jammed under the legend. That is
+    // the "the weather widget displays nothing" state — not an empty widget, an
+    // expanded one with no room to be expanded in.
+    readonly property real chromeH:
+        pad * 2 + head.height + 2 + legend.height + 4 + 2 + dayLabels.height
+    readonly property real minGraph: 40
+    readonly property bool condensed: height - chromeH < minGraph
+
+    // The smallest this widget can be and still say something: its one line.
+    // DockGrid reads it to decide how many rows the queue drawer may take.
+    readonly property real minCondensed: pad * 2 + head.height
 
     // Which sample the pointer is over, or -1. Drives both the readout that
     // replaces the legend and the cursor drawn on the graph.
@@ -41,12 +56,16 @@ Item {
         id: head
         // Condensed, this line IS the widget, so it sits in the middle of the
         // tile rather than pinned to the top with the space the graph left.
-        anchors {
-            top: root.condensed ? undefined : parent.top
-            topMargin: root.pad
-            verticalCenter: root.condensed ? parent.verticalCenter : undefined
-            horizontalCenter: parent.horizontalCenter
-        }
+        //
+        // A plain `y`, NOT a pair of anchors switched on `condensed`. Binding
+        // `top` and `verticalCenter` to alternating `undefined`s means both are
+        // briefly set during the switch, which Qt answers with "Cannot specify
+        // top, bottom, verticalCenter anchors together" and by ignoring one of
+        // them — leaving the line wherever the losing anchor put it. The clamp
+        // is the other half: centring a 16px line in a tile shorter than 16px
+        // gives it a negative y, and the tile's Loader clips it away to nothing.
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: root.condensed ? Math.max(0, (root.height - height) / 2) : root.pad
         width: root.inner
         height: place.implicitHeight
 
