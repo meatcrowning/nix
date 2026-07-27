@@ -8,8 +8,16 @@ five apps.
 
 - A compat symlink `~/Projects/filer → ~/nix/apps/filer` preserves the old
   source path.
-- filer's own flake builds on `x86_64-linux` + `aarch64-linux`, so
-  `nix run ~/nix/apps/filer` and `run.sh` work on book too.
+- filer's own flake declares both `x86_64-linux` and `aarch64-linux`, so `run.sh`
+  (which is `nix develop` + the **live** `main.py`, the way filer is actually
+  run) works on book too. **`nix run ~/nix/apps/filer` does NOT work** and has
+  not since the app grew past one file: the `installPhase` copies only `main.py`
+  and `qml/`, while `main.py` imports `videoconv`, `pick` (both beside it) and
+  `vtbclient` (from `../pylib`, via `sys.path.insert(HERE.parent / "pylib")`) at
+  module scope — so the packaged binary dies on the first import. The flake is
+  kept for its `devShells`, which is what `run.sh` consumes; fixing `nix run`
+  means copying those files and `../pylib` in, and `../pylib` is outside the
+  flake's `src`.
 - `openFile` shells out to `viewer <path>` for images — the image overlay used
   to live in here and was split out into [`../viewer`](../viewer/AGENTS.md).
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
