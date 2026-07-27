@@ -25,17 +25,23 @@ Singleton {
     // We advertise a plain-text-only server, but apps send markup anyway
     // (e.g. "<b>x</b>"). Strip tags + unescape the common entities so the pixel
     // font renders clean text instead of literal angle brackets.
+    //
+    // Then Glyphs.px, for the other half of the same problem: what an app sends
+    // is prose, and prose is full of curly quotes, ellipses and en dashes that
+    // More Perfect DOS VGA has no glyph for — each of which drops the line it
+    // sits on out of its row. This is the ingest point for every notification
+    // the panel draws, so it is the only place that needs it.
     function plain(s) {
         if (!s)
             return "";
-        return s.replace(/<[^>]*>/g, "")
+        return Glyphs.px(s.replace(/<[^>]*>/g, "")
                 .replace(/&amp;/g, "&")
                 .replace(/&lt;/g, "<")
                 .replace(/&gt;/g, ">")
                 .replace(/&quot;/g, "\"")
                 .replace(/&apos;/g, "'")
                 .replace(/&#39;/g, "'")
-                .trim();
+                .trim());
     }
 
     NotificationServer {

@@ -374,7 +374,9 @@ PanelWindow {
                             width: parent.width - 8
                             elide: Text.ElideMiddle
                             horizontalAlignment: Text.AlignHCenter
-                            text: root.fileName(cell.path)
+                            // Label only; `cell.path` is what gets set as the
+                            // wallpaper and must stay byte-exact.
+                            text: Glyphs.px(root.fileName(cell.path))
                             color: Theme.text
                         }
                     }

@@ -227,7 +227,10 @@ PanelWindow {
                         PixelText {
                             anchors.verticalCenter: parent.verticalCenter
                             width: list.width - 40
-                            text: modelData.name
+                            // Label only. The search above still matches on the
+                            // raw `name`, and `entry.command` — the argv that
+                            // actually gets executed — never comes near this.
+                            text: Glyphs.px(modelData.name)
                             elide: Text.ElideRight
                             color: Theme.text
                         }

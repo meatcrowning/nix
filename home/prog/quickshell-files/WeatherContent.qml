@@ -93,7 +93,9 @@ Item {
         PixelText {
             id: place
             anchors.left: parent.left
-            text: SettingsStore.d.weatherPlace
+            // Display only — the raw setting is what goes into the geocoding
+            // query in Weather.qml.
+            text: Glyphs.px(SettingsStore.d.weatherPlace)
             color: Theme.accent
             elide: Text.ElideRight
             width: Math.min(implicitWidth, parent.width * 0.4)

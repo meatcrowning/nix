@@ -46,7 +46,8 @@ Rectangle {
         // app name — the tinted header line
         PixelText {
             width: parent.width
-            text: (card.notif && card.notif.appName) ? card.notif.appName : "notification"
+            text: (card.notif && card.notif.appName)
+                  ? Glyphs.px(card.notif.appName) : "notification"
             color: card.tint
             font.pixelSize: Theme.fontSize
             elide: Text.ElideRight
@@ -55,7 +56,10 @@ Rectangle {
         // summary — the headline
         PixelText {
             width: parent.width
-            text: card.notif ? card.notif.summary : ""
+            // Summary skips Notifications.plain() on purpose — a headline is not
+            // supposed to carry markup — but it is prose from a stranger just
+            // like the body, so it still needs the font map.
+            text: card.notif ? Glyphs.px(card.notif.summary) : ""
             color: Theme.text
             font.pixelSize: Theme.fontSize
             wrapMode: Text.WordWrap
