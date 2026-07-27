@@ -371,7 +371,7 @@ roundtrip behind every step of the animation it is supposed to be.
 
 ### The dock grid is ONE PAGE, and must stay one
 
-`DockGrid.qml` is `columns` x `rows` (4 x 26) filling the panel exactly: the row
+`DockGrid.qml` is `columns` x `rows` (4 x 29) filling the panel exactly: the row
 height is DERIVED from the panel's height, not a fixed pixel value, so every
 widget is on screen at once at any panel height. **No scrolling.** A first version
 used 44px rows and a `Flickable`, which made the default layout ~1900px tall on a
