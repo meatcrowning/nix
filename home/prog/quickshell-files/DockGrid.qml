@@ -68,12 +68,27 @@ Item {
     readonly property bool queueOpen: SettingsStore.d.mediaQueueOpen
     readonly property int q: queueOpen ? queueRows : 0
 
+    // PLACEMENTS MUST NOT DEPEND ON ANYTHING THAT CHANGES AT RUNTIME. It is the
+    // Repeater's model, and a JS array model is replaced wholesale when the
+    // expression re-evaluates: the Repeater destroys and re-creates EVERY
+    // delegate. When `q` was inlined here, opening or closing the queue tore
+    // down all five tiles — with `DockTile`'s Loader being asynchronous, every
+    // other widget (charts, task table, forecast, calendar, clock) came back
+    // as an empty framed rectangle for a frame or more, which is exactly the
+    // "everything flashes black" the drawer was reported for. Proved with a
+    // `Component.onDestruction` warn in DockTile: five destroys + five creates
+    // per toggle, none after this change.
+    //
+    // So the queue's effect is a per-tile DELTA applied in the delegate's own
+    // y/height bindings instead: `qRow` rows the tile moves down and `qSpan`
+    // rows it gains, each multiplied by `q`. Those are ordinary property
+    // bindings on items that survive, so DockTile's Behaviors glide them.
     readonly property var placements: [
-        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,      cs: 4, rs: 13 },
-        { key: "media",    src: "MediaContent.qml",       col: 0, row: 13,     cs: 4, rs: 5 + q },
-        { key: "weather",  src: "WeatherContent.qml",     col: 0, row: 18 + q, cs: 4, rs: 6 - q },
-        { key: "calendar", src: "CalendarContent.qml",    col: 0, row: 24,     cs: 2, rs: 5 },
-        { key: "clock",    src: "ClockContent.qml",       col: 2, row: 24,     cs: 2, rs: 5 },
+        { key: "tasks",    src: "TaskManagerContent.qml", col: 0, row: 0,  cs: 4, rs: 13, qRow: 0, qSpan:  0 },
+        { key: "media",    src: "MediaContent.qml",       col: 0, row: 13, cs: 4, rs: 5,  qRow: 0, qSpan:  1 },
+        { key: "weather",  src: "WeatherContent.qml",     col: 0, row: 18, cs: 4, rs: 6,  qRow: 1, qSpan: -1 },
+        { key: "calendar", src: "CalendarContent.qml",    col: 0, row: 24, cs: 2, rs: 5,  qRow: 0, qSpan:  0 },
+        { key: "clock",    src: "ClockContent.qml",       col: 2, row: 24, cs: 2, rs: 5,  qRow: 0, qSpan:  0 },
     ]
 
     Repeater {
@@ -82,9 +97,9 @@ Item {
             required property var modelData
 
             x: root.cellX(modelData.col)
-            y: root.cellY(modelData.row)
+            y: root.cellY(modelData.row + (modelData.qRow || 0) * root.q)
             width: root.cellW(modelData.cs)
-            height: root.cellH(modelData.rs)
+            height: root.cellH(modelData.rs + (modelData.qSpan || 0) * root.q)
 
             tileKey: modelData.key
             source: modelData.src
