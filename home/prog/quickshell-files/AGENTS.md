@@ -383,10 +383,22 @@ the panel WIDTH — the panel ranges over 14-33% of the screen, and changing the
 geometry inside that range would invalidate every saved placement each time the
 edge was dragged. Widening the panel widens the columns instead.
 
-`placements` is plain data — `{key, src, col, row, cs, rs}` — loaded by file name
-through `DockTile`'s `Loader`. That is deliberate: phase 3 makes that array the
-thing the user drags and the thing that gets persisted, and
+`placements` is plain data — `{key, src, col, row, cs, rs, qRow, qSpan}` — loaded
+by file name through `DockTile`'s `Loader`. That is deliberate: phase 3 makes
+that array the thing the user drags and the thing that gets persisted, and
 `cellX/cellY/cellW/cellH` stay the single place grid coordinates become pixels.
+
+**It is the Repeater's MODEL, so it must not depend on anything that changes at
+runtime.** A JS-array model is replaced wholesale when its expression
+re-evaluates, and the Repeater answers that by destroying and re-creating every
+delegate — with `DockTile`'s `Loader` being asynchronous, every widget comes back
+as an empty framed rectangle for a frame or more. That is what "the other widgets
+all flash black" meant when the queue drawer's row count was inlined here; five
+destroys and five creates per toggle, in a `Component.onDestruction` warn. A tile
+that has to move with some state gets a per-tile DELTA (`qRow` rows down, `qSpan`
+rows gained, each times `DockGrid.q`) applied in the delegate's own `y`/`height`
+bindings, where it is an ordinary property change that the tile's Behaviors
+glide.
 
 Reading bottom-up, the layout is calendar+clock side by side on the bottom row,
 weather above them, media above that, and the task manager taking the rest.
@@ -562,14 +574,71 @@ draws it.
   `DockGrid.queueRows` (4) moves them between the two tiles and
   `SettingsStore.d.mediaQueueOpen` is the switch, which is why that flag lives in
   the store rather than inside the widget. The forecast has a real condensed form
-  (`WeatherContent.condensed` — current conditions on one line, graph and day
-  labels dropped, header recentred); a shorter process table would just be a
-  shorter list, and a clipped graph reads as broken rather than compact.
-- **The drawer takes the height the grid handed over** (everything past the
-  widget's natural size), so the artwork returns to its natural size instead of
-  being squeezed by a guessed pixel count. `implicitHeight` adds a CONSTANT for
-  the open state — deriving it from the drawer's own height, which is derived
-  from the item's height, is a binding loop.
+  (`WeatherContent.condensed` — current conditions on one line over a MINIATURE
+  of the graph, with the legend, the day names, the axis temperatures and the
+  per-sample markers dropped); a shorter process table would just be a shorter
+  list, and a clipped graph reads as broken rather than compact.
+  **`condensed`'s threshold is derived from the same constants the layout is
+  built from** (`chromeH` + `minGraph`), never a literal. The literal it
+  replaced forgot the day-label row and three margins, so it was 24px short —
+  and everything in that band claimed it could draw a forecast and then handed
+  the Canvas 0-18px, two axis temperatures on top of each other with the day
+  names under the legend. That is the "the weather widget displays nothing"
+  state: not an empty widget, an expanded one with no room to be expanded in.
+  The header is positioned by a clamped `y`, not by anchors switched on
+  `condensed` — alternating `top` and `verticalCenter` through `undefined`
+  leaves both briefly set, which Qt resolves by ignoring one of them.
+  **Condensing is not the same as dropping the graph** — there are THREE tiers,
+  and each one is a derived threshold rather than a literal. Full (`chromeH` +
+  `minGraph`, 40px). Condensed-with-miniature (`miniChromeH` + `minMiniGraph`,
+  24px): the same twenty points and night bands drawn thinner, because at that
+  size it is the labels and markers that stop being readable, not the line, and
+  the line is what the forecast is for. Bare header only, below that — the graph
+  is dropped ENTIRELY rather than drawn illegibly, since a canvas handed less
+  than `minMiniGraph` is the same overlapping-temperatures sliver the derived
+  threshold exists to prevent, and it must not come back in through the
+  condensed door.
+  `queueRows` is a MAXIMUM, capped so the forecast keeps at least
+  `minWeatherRows` — the row height is derived from the panel height, so on a
+  short panel (or under a tall dock header) two rows can be shorter than the
+  form the widget is being asked to draw, and a widget squeezed below its own
+  minimum draws nothing at all. `DockGrid.minWeatherPx` mirrors
+  `WeatherContent.minCondensed` and therefore INCLUDES the miniature graph:
+  asking for that form is asking for the room it needs, and on this panel it is
+  what takes the drawer from four rows to three. The cap is legal only because
+  `q` is not in `placements`.
+- **The drawer takes the rows the grid ADDED** — `height - naturalRest -
+  restSlack`, with NO floor and NO animation of its own — so the artwork row,
+  which is the leftover, is the same size at every frame of the slide AND at
+  both ends of it. `restSlack` is the slack the tile already had while the
+  drawer was in (`qs ipc call live tiles` reports it), and it is the difference
+  between the two: without it the drawer took that slack too, so the cover
+  measured 65x65 closed and 60x60 open — and since `artBox.width` follows
+  `mid.height`, the cover changed in both dimensions and the spectrum's left
+  edge moved with it. The whole top of the widget reflowed around a queue that
+  opens underneath it. It is SAMPLED, not derived, and the sample is guarded on
+  `!drawerOut && !Media.queueOpen`: on a reload with the drawer already out the
+  tile is laid out at its open height before this component has decided the
+  drawer is out, and a sample taken on `!drawerOut` alone recorded 98px instead
+  of 5 and computed a zero-height drawer for the rest of the session.
+  `implicitHeight` adds a CONSTANT for the open state; deriving it from the
+  drawer's own height, which is derived from the item's height, is a binding
+  loop. **Both of the drawer's own animations were bugs**, and both showed up as
+  the cover art ballooning before the queue arrived:
+  - A `Behavior on height` here is an animation chasing a target that is ITSELF
+    animating (the tile's glide), so it retargets every frame and permanently
+    trails. Measured: the tile went 217→270px while the drawer was still at
+    25px and the artwork absorbed all of it — 111, 126, 139, 148, 154, 159,
+    162, 164 — then snapped back to 60.
+  - On the close the flag flips in one frame while the tile takes 200ms to shed
+    its rows, so the drawer tracks `drawerOut`, which is `Media.queueOpen` held
+    true for one animation on the way down. `drawerOut` must be a plain property
+    seeded in `Component.onCompleted`, not `property bool drawerOut:
+    Media.queueOpen` — an untouched binding wins the first close outright.
+    Gating a `Behavior` on `enabled: !Media.queueOpen` does NOT work: both
+    bindings hang off the same flag and the height was written before `enabled`
+    had been re-evaluated (measured — the popup copy animated and the tile did
+    not).
 - `DockTile` glides `y` and `height` so the two tiles trade rows visibly. **Only
   those two** — `x`/`width` follow the panel edge during a resize drag, and
   animating anything that tracks the pointer is the law this panel does not

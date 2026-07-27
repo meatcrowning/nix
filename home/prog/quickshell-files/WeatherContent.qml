@@ -43,9 +43,27 @@ Item {
     readonly property real minGraph: 40
     readonly property bool condensed: height - chromeH < minGraph
 
-    // The smallest this widget can be and still say something: its one line.
-    // DockGrid reads it to decide how many rows the queue drawer may take.
-    readonly property real minCondensed: pad * 2 + head.height
+    // Condensed does NOT mean the graph is gone. It keeps a miniature of it —
+    // the same twenty points, the same night bands, with the legend, the day
+    // names, the axis temperatures and the per-sample markers dropped, because
+    // at this size those are the parts that stop being readable rather than the
+    // line, and the line is the thing the forecast is for.
+    //
+    // `miniChromeH` is the same sum for that layout, and `minMiniGraph` is the
+    // floor under what is worth drawing. Below it the graph is dropped
+    // ENTIRELY and the header re-centres — a canvas handed less than this
+    // draws a temperature trace inside a band a few pixels tall, which is the
+    // illegible-sliver state the derived threshold above exists to prevent, and
+    // it must not come back in through the condensed door.
+    readonly property real miniChromeH: pad * 2 + head.height + 3
+    readonly property real minMiniGraph: 24
+    readonly property bool miniGraph: condensed && height - miniChromeH >= minMiniGraph
+
+    // The smallest this widget can be and still say something. DockGrid reads
+    // it (as a mirrored constant) to decide how many rows the queue drawer may
+    // take, and it now includes the miniature graph — asking for the mini form
+    // is asking for the room it needs.
+    readonly property real minCondensed: miniChromeH + minMiniGraph
 
     // Which sample the pointer is over, or -1. Drives both the readout that
     // replaces the legend and the cursor drawn on the graph.
@@ -65,7 +83,10 @@ Item {
         // is the other half: centring a 16px line in a tile shorter than 16px
         // gives it a negative y, and the tile's Loader clips it away to nothing.
         anchors.horizontalCenter: parent.horizontalCenter
-        y: root.condensed ? Math.max(0, (root.height - height) / 2) : root.pad
+        // Centred only in the BARE state — with the miniature graph below it the
+        // header is a header again and goes back to the top.
+        y: (root.condensed && !root.miniGraph)
+            ? Math.max(0, (root.height - height) / 2) : root.pad
         width: root.inner
         height: place.implicitHeight
 
@@ -199,10 +220,15 @@ Item {
 
     Canvas {
         id: graph
-        visible: !root.condensed
+        visible: !root.condensed || root.miniGraph
+        // Both branches anchor to a real item — never to `undefined` — so this
+        // is an ordinary target switch, not the anchor-clearing hazard the
+        // header comment above describes.
         anchors {
-            top: legend.bottom; topMargin: 4
-            bottom: dayLabels.top; bottomMargin: 2
+            top: root.condensed ? head.bottom : legend.bottom
+            topMargin: root.condensed ? 3 : 4
+            bottom: root.condensed ? parent.bottom : dayLabels.top
+            bottomMargin: root.condensed ? root.pad : 2
             left: parent.left; right: parent.right
             leftMargin: root.pad; rightMargin: root.pad
         }
@@ -220,6 +246,13 @@ Item {
         Connections {
             target: root
             function onHoverIdxChanged() { if (root.active) graph.requestPaint(); }
+        }
+        // The mini form draws a DIFFERENT picture, so the mode is a repaint
+        // trigger in its own right — a tile that crosses the threshold without
+        // changing size otherwise keeps the full drawing.
+        Connections {
+            target: root
+            function onMiniGraphChanged() { if (root.active) graph.requestPaint(); }
         }
 
         MouseArea {
@@ -253,7 +286,10 @@ Item {
             const span = Math.max(6, hi - lo);
             const mid = (hi + lo) / 2;
             const y0 = mid + span / 2, y1 = mid - span / 2;
-            const top = 12, bot = height - 4;          // room for the value labels
+            const mini = root.miniGraph;
+            // 12px at the top is room for the axis temperatures; the mini form
+            // does not draw them, so it uses the full height instead.
+            const top = mini ? 2 : 12, bot = height - (mini ? 2 : 4);
             function ty(t) { return top + (bot - top) * (y0 - t) / (y0 - y1); }
             function tx(i) { return width * (i + 0.5) / n; }
 
@@ -270,7 +306,7 @@ Item {
             // day separators
             ctx.strokeStyle = Theme.border;
             ctx.lineWidth = 1;
-            for (let i = 2; i < n; i += 2) {
+            for (let i = 2; !mini && i < n; i += 2) {
                 const x = Math.round(width * i / n) + 0.5;
                 ctx.beginPath();
                 ctx.moveTo(x, 0);
@@ -291,7 +327,7 @@ Item {
 
             // the temperature line
             ctx.strokeStyle = Theme.accent;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = mini ? 1 : 1.5;
             ctx.beginPath();
             for (let i = 0; i < n; i++) {
                 const x = tx(i), y = ty(root.slots[i].temp);
@@ -299,8 +335,10 @@ Item {
             }
             ctx.stroke();
 
-            // a marker per sample: filled for midday, hollow for night
-            for (let i = 0; i < n; i++) {
+            // a marker per sample: filled for midday, hollow for night. Dropped
+            // in the mini form — a 3px square every few pixels reads as noise on
+            // the line rather than as two samples a day.
+            for (let i = 0; !mini && i < n; i++) {
                 const x = tx(i), y = ty(root.slots[i].temp);
                 if (root.slots[i].part === "am") {
                     ctx.fillStyle = Theme.accent;
@@ -324,7 +362,10 @@ Item {
                 ctx.stroke();
             }
 
-            // high and low of the whole window, on the axis
+            // high and low of the whole window, on the axis. NOT in the mini
+            // form: two lines of 16px text is most of a 24px canvas, and drawing
+            // them there is exactly the overlap this widget was reported for.
+            if (mini) return;
             ctx.fillStyle = Theme.textDim;
             ctx.font = Theme.fontSize + "px \"" + Theme.font + "\"";
             ctx.textBaseline = "top";
