@@ -2186,6 +2186,91 @@ class Bridge(QObject):
 # MPRIS
 # ---------------------------------------------------------------------------
 
+def start_queue_server(player, app):
+    """Serve the play queue to the desktop panel's media widget.
+
+    MPRIS carries the CURRENT track and nothing else — its TrackList interface
+    is optional and Quickshell implements no client for it — so the panel's
+    queue drawer needs its own channel. This is a line-based unix socket at
+    $XDG_RUNTIME_DIR/player-queue.sock:
+
+        server -> client   one JSON line, {"index": n, "tracks": [...]}, on
+                           connect and again on every queue/index change
+        client -> server   GOTO <index>
+
+    PUSH, not poll: the panel is drawing this at 60fps behind a slide animation
+    and a file it had to re-read on a timer would be both later and more work.
+    A stale socket file from a crash would make listen() fail, so it is removed
+    first — safe because two players never run at once (the second would fail on
+    the library lock long before this).
+
+    Every failure here is caught and printed: the panel's queue drawer is a
+    convenience, and nothing about it may take the music player down with it.
+    """
+    try:
+        from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    except Exception as e:
+        print("queue server: unavailable:", e, flush=True)
+        return
+
+    path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "player-queue.sock")
+    QLocalServer.removeServer(path)
+    server = QLocalServer(app)
+    if not server.listen(path):
+        print("queue server: listen failed:", server.errorString(), flush=True)
+        return
+
+    clients = []
+
+    def snapshot():
+        # Only what the drawer draws. The panel has no library and no art cache,
+        # so sending rows it cannot use would just be bytes per queue change.
+        tracks = [{"title": t.get("title") or "",
+                   "artist": t.get("artist") or "",
+                   "dur": float(t.get("duration") or 0.0)}
+                  for t in player.queue_dicts()]
+        return (json.dumps({"index": player.index, "tracks": tracks},
+                           separators=(",", ":")) + "\n").encode()
+
+    def push():
+        line = snapshot()
+        for c in list(clients):
+            if c.state() != QLocalSocket.LocalSocketState.ConnectedState:
+                clients.remove(c)
+                continue
+            try:
+                c.write(line)
+                c.flush()
+            except Exception:
+                pass
+
+    def on_ready(c):
+        while c.canReadLine():
+            parts = bytes(c.readLine()).decode("utf-8", "replace").strip().split()
+            if len(parts) == 2 and parts[0] == "GOTO":
+                try:
+                    player.jumpTo(int(parts[1]))
+                except Exception as e:
+                    print("queue server: bad GOTO:", e, flush=True)
+
+    def on_connection():
+        while server.hasPendingConnections():
+            c = server.nextPendingConnection()
+            clients.append(c)
+            c.readyRead.connect(lambda c=c: on_ready(c))
+            c.disconnected.connect(lambda c=c: c in clients and clients.remove(c))
+            c.write(snapshot())
+            c.flush()
+
+    server.newConnection.connect(on_connection)
+    # currentChanged as well as indexChanged: a track's own row can change under
+    # a stationary index (a rating write patches the cached dict).
+    player.queueChanged.connect(push)
+    player.indexChanged.connect(push)
+    player.currentChanged.connect(push)
+    print("queue server: listening on", path, flush=True)
+
+
 def start_mpris(player, app):
     """Export org.mpris.MediaPlayer2.player via mpris_server so the panel's
     MediaPanel widget (Quickshell.Services.Mpris) controls this app. pydbus
@@ -2345,6 +2430,7 @@ def main():
     bridge.refreshAlbums()
     player.restore_state()
     start_mpris(player, app)
+    start_queue_server(player, app)
     QTimer.singleShot(400, library.rescan)  # incremental; UI is already up
 
     app.aboutToQuit.connect(player.save_state)

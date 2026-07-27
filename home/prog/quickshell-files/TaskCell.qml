@@ -110,7 +110,7 @@ Rectangle {
 
     Tooltip {
         target: cell
-        visible: cellMouse.containsMouse && !cellMenu.visible
+        show: cellMouse.containsMouse && !cellMenu.visible
         // The state is spelled out here as well as coloured: the ramp says which
         // of the four a cell is in only if you can see two of them at once.
         text: (cell.modelData.title || cell.modelData.appId || "?")

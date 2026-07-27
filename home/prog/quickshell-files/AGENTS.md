@@ -216,6 +216,14 @@ Three rules, all of which exist because there are two live copies:
   `Binding` on an asynchronous `Loader`: a `true` default meant every grid tile
   ran one full `/proc` scan and one drive scan at construction, before that
   binding landed, for a widget nobody was looking at.
+- **A per-monitor widget must not own a process.** The VU meter's cava lives in
+  `SysInfo`, not in `VuMeter.qml`: that item is instantiated once per MONITOR
+  (`StatusPanel` sits inside a `Variants`), so a `Process` in it is one cava per
+  screen — two of the three running on this machine were the same meter, the
+  second belonging to a leftover sandbox monitor. The levels were already in the
+  singleton for reload continuity; the reader belongs there with them. Check with
+  `pgrep -a cava`: exactly two, ever — the VU and the media spectrum — however
+  many monitors are attached.
 - **Consumers register with `watch(obj, on)`, which is a SET, not a counter.**
   Re-registering is a no-op, so a re-evaluated binding or a reload restore cannot
   leak a reference and leave the scripts running against nobody.
@@ -237,6 +245,19 @@ qs ipc call live all     # mode + which data singletons are actually polling
 
 That is the check for it. A `true` for something not on screen is the bug; two
 copies of a widget both live is the bug this whole split exists to prevent.
+
+### Tooltips are driven by `show`, not `visible`
+
+`Tooltip.qml` owns its own visibility: it waits `delayMs` (350) before appearing
+and slides out over 220ms — a clipped chip growing leftward from a FIXED right
+edge, the same reveal surfer draws for page tooltips and hyprvtb for titlebar
+ones. So callers set **`show`** (the hover state) and never touch `visible`;
+assigning `visible` from a call site overrides the animation's own binding and
+the tooltip is back to blinking in and out.
+
+The window is FULL SIZE throughout and the clip inside it grows. Animating the
+popup's own width instead would be a surface resize per frame — a configure
+roundtrip behind every step of the animation it is supposed to be.
 
 ### The dock grid is ONE PAGE, and must stay one
 
@@ -335,16 +356,63 @@ loop, since the popup takes its height from `implicitHeight`.
 - Every card carries a `tip`, shown on hover through the shared `Tooltip`. The
   labels are four characters of jargon each and the card has no room to explain
   itself; the tooltip is where "psi" or "res" gets to say what it measures.
-- **The filter box is the only thing on this desktop that takes the keyboard.**
-  It sets `Procs.filterFocus`, and `shell.qml` turns that into
-  `WlrLayershell.keyboardFocus: Exclusive` on the bar — **Exclusive, not
-  OnDemand**, because OnDemand is granted on a click, so the click that focuses
-  the box would need a second one behind it before a keystroke arrived. It is
-  additionally gated on `ViewMode.showDock`, and the widget clears the flag when
-  it goes inactive or is destroyed: a stale `filterFocus` would leave the panel
-  holding the keyboard with nothing on screen to type into. The filter itself is
-  deliberately NOT in `SettingsStore` (it is a question you are asking now, not a
-  preference) but IS carried across a reload in `Procs.stateJson`.
+- **The filter box is the only thing on this desktop that takes the keyboard**,
+  and it gives it back. `shell.qml` sets `WlrLayershell.keyboardFocus: OnDemand`
+  on the bar while `Procs.filterHover || Procs.filterFocus` (and dock mode), and
+  `None` otherwise. Two halves, both load-bearing:
+  - **HOVER is what arms it.** On-demand keyboard focus is granted by the
+    compositor ON a click, so the surface has to already be focusable when that
+    click lands — arming it from the click handler would need a second click.
+  - **OnDemand, not Exclusive.** Exclusive keeps sending us the keyboard after
+    the user clicks into a window, so their next keystroke goes to the filter box
+    instead of what they just clicked on. OnDemand hands it back as part of that
+    click. A click that stays INSIDE the panel never reaches the compositor's
+    focus logic, so a catcher in `dockLayout` calls `Procs.blurFilter()` and
+    declines the press (`mouse.accepted = false`) so the widget underneath still
+    gets it.
+
+  The widget clears both flags when it goes inactive or is destroyed: a stale
+  `filterFocus` would leave the panel holding the keyboard with nothing on screen
+  to type into. The filter text is deliberately NOT in `SettingsStore` (it is a
+  question you are asking now, not a preference) but IS carried across a reload
+  in `Procs.stateJson`.
+
+### The player's queue drawer, and where its rows come from
+
+The queue is **served by the player app**, not scraped: MPRIS carries the current
+track and nothing else (its TrackList interface is optional, and Quickshell
+implements no client for it). `apps/player/main.py`'s `start_queue_server`
+listens on `$XDG_RUNTIME_DIR/player-queue.sock` and speaks one line at a time —
+`{"index": n, "tracks": [...]}` pushed on connect and on every queue/index
+change, `GOTO <index>` back. `Media.qml` holds the socket; `MediaContent.qml`
+draws it.
+
+- **Push, not poll.** The drawer is on screen behind a slide animation; a file
+  re-read on a timer would be both later and more work.
+- **Only connect while the player has a WINDOW open** (`Media.playerUp`, from
+  the toplevel list). Quickshell logs a warning on every failed connect and
+  `qs log` is cumulative, so a blind retry timer fills it with
+  `ServerNotFoundError` all day on a machine where nobody is playing music. The
+  window list — not "is there an MPRIS player" — because book's player may have
+  no `mpris_server` at all.
+- **The parsed queue is derived from the raw LINE**, and it is the line that is
+  carried across a reload: only strings survive the engine swap.
+- **The drawer's rows come off the FORECAST**, not the task table:
+  `DockGrid.queueRows` (4) moves them between the two tiles and
+  `SettingsStore.d.mediaQueueOpen` is the switch, which is why that flag lives in
+  the store rather than inside the widget. The forecast has a real condensed form
+  (`WeatherContent.condensed` — current conditions on one line, graph and day
+  labels dropped, header recentred); a shorter process table would just be a
+  shorter list, and a clipped graph reads as broken rather than compact.
+- **The drawer takes the height the grid handed over** (everything past the
+  widget's natural size), so the artwork returns to its natural size instead of
+  being squeezed by a guessed pixel count. `implicitHeight` adds a CONSTANT for
+  the open state — deriving it from the drawer's own height, which is derived
+  from the item's height, is a binding loop.
+- `DockTile` glides `y` and `height` so the two tiles trade rows visibly. **Only
+  those two** — `x`/`width` follow the panel edge during a resize drag, and
+  animating anything that tracks the pointer is the law this panel does not
+  break.
 
 ### The clock's three faces
 

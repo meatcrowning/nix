@@ -45,7 +45,11 @@ Item {
     // to type into.
     onActiveChanged: {
         Procs.watch(root, active);
-        if (!active) { filterInput.focus = false; Procs.filterFocus = false; }
+        if (!active) {
+            filterInput.focus = false;
+            Procs.filterFocus = false;
+            Procs.filterHover = false;
+        }
     }
     Component.onCompleted: Procs.watch(root, active)
     Component.onDestruction: { Procs.watch(root, false); Procs.filterFocus = false; }
@@ -111,7 +115,7 @@ Item {
         HoverHandler { id: cardHover }
         Tooltip {
             target: card
-            visible: cardHover.hovered && card.tip !== "" && card.visible
+            show: cardHover.hovered && card.tip !== "" && card.visible
             text: card.tip
         }
 
@@ -419,13 +423,26 @@ Item {
             }
         }
         // Click anywhere in the box to type. z below the clear button so it
-        // doesn't swallow that click.
+        // doesn't swallow that click. Hover ARMS the layer's keyboard focus (see
+        // shell.qml) — the compositor grants it on the click, so it has to be
+        // offered before the click, not from inside its handler.
         MouseArea {
             anchors.fill: parent
             z: -1
+            hoverEnabled: true
             cursorShape: Qt.IBeamCursor
+            onEntered: Procs.filterHover = true
+            onExited: Procs.filterHover = false
             onClicked: filterInput.forceActiveFocus()
         }
+    }
+
+    // "Give the keyboard back" from anywhere else in the panel (shell.qml's
+    // catcher). A counter rather than a call, because this widget is behind an
+    // asynchronous Loader and there is nothing stable to reach into.
+    Connections {
+        target: Procs
+        function onBlurSeqChanged() { filterInput.focus = false; }
     }
 
     // ---- process table ---------------------------------------------------

@@ -132,6 +132,10 @@ Singleton {
             // logout, and a setting the user changed should not quietly revert.
             property string procSort: "cpu"            // cpu | mem | name | pid
             property int    mediaLocalLoop: 0          // 0 = off, 1 = repeat-track
+            // The player widget's queue drawer. Here rather than in the widget
+            // because the dock GRID reads it too — the drawer's rows come off
+            // the forecast tile (see DockGrid).
+            property bool   mediaQueueOpen: false
             property int    fanStepMs: 300
             // which widgets are pinned at login (subset of the known set)
             property var    defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"]
@@ -250,7 +254,7 @@ Singleton {
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
-        procSort: "cpu", mediaLocalLoop: 0,
+        procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false,
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],
         monPollSec: 2, cpuWarn: 75, cpuCrit: 90, tempWarn: 65, tempCrit: 80, diskWarn: 75,
         diskCrit: 90, batteryWarn: 30, batteryCrit: 15, netInterface: "auto", rootMount: "/",

@@ -121,6 +121,36 @@ Singleton {
     property int vuL: 0
     property int vuR: 0
 
+    // ...and so does the cava that feeds them. It used to live in VuMeter.qml,
+    // which is instantiated per MONITOR (StatusPanel sits inside a Variants), so
+    // there was one cava process per screen — two of the three running on this
+    // machine were the same VU meter, the second belonging to a leftover sandbox
+    // monitor. One reader, one process, however many bars draw it.
+    Process {
+        id: cavaVu
+        running: true
+        // quickshell is launched from the Fedora session with a bare PATH that
+        // omits ~/.nix-profile/bin, where cava (a nix pkg) lives — so prepend it
+        // or every spawn dies with "cava: not found" and the bars go dead.
+        command: ["sh", "-c", "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; exec cava -p \"$HOME/.config/quickshell/scripts/cava-vu.conf\""]
+        stdout: SplitParser {
+            onRead: data => {
+                const parts = data.split(";");
+                if (parts.length >= 2) {
+                    root.vuL = Math.min(100, parseInt(parts[0], 10) || 0);
+                    root.vuR = Math.min(100, parseInt(parts[1], 10) || 0);
+                }
+            }
+        }
+        // cava dying (e.g. pipewire restart) shouldn't leave dead bars
+        onExited: cavaVuRestart.restart()
+    }
+    Timer {
+        id: cavaVuRestart
+        interval: 2000
+        onTriggered: cavaVu.running = true
+    }
+
     // throughput history for the sparkline (bytes/s totals)
     property var history: []
     readonly property int historyLen: 24

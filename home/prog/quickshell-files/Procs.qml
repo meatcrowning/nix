@@ -34,10 +34,20 @@ Singleton {
     // (see stateJson), because a reload is not the user putting it down.
     property string filter: ""
     function setFilter(t) { root.filter = t || ""; }
-    // Whether the filter box holds the keyboard. The bar's layer surface only
-    // takes keyboard focus while this is true (shell.qml) — an always-focusable
-    // panel would swallow a keystroke meant for the window you were typing in.
+    // Whether the filter box holds the keyboard, and whether the pointer is
+    // over it. The bar's layer surface only offers keyboard focus while one of
+    // the two is true (shell.qml) — an always-focusable panel would swallow a
+    // keystroke meant for the window you were typing in. `filterHover` is what
+    // ARMS it: the compositor grants on-demand keyboard focus on a CLICK, so the
+    // surface has to already be focusable by the time that click lands, and
+    // hovering the box is the last moment before it that we hear about.
     property bool filterFocus: false
+    property bool filterHover: false
+    // Bumped to ask the box to give the keyboard back — clicking anywhere else
+    // in the panel. The box watches this rather than being reached into,
+    // because it lives inside an asynchronous Loader in the dock grid.
+    property int blurSeq: 0
+    function blurFilter() { root.blurSeq++; }
     readonly property int total: rows.length
 
     property var _watchers: []
