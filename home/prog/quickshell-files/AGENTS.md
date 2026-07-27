@@ -325,19 +325,50 @@ loop, since the popup takes its height from `implicitHeight`.
   swap, fan — sharing `ChartCanvas.qml` with the popups. Square means the card
   height follows the panel WIDTH, so a taller tile turns into more visible
   processes rather than letterboxed charts.
-- **On book, gpu/vram/fan are replaced by psi, io and power** (`root.noGpu`,
+- **On book, gpu/vram/fan are replaced by psi, io and batt** (`root.noGpu`,
   keyed on the `Host` singleton). That machine cannot produce the first three at
   all: Asahi's DRM driver exposes no fdinfo engine counters and no devfreq node,
   so there is no GPU utilization anywhere in sysfs; GPU memory *is* system
   memory; and the machine is fanless. What it gets instead is `/proc/pressure`
   ("some avg10" for cpu/io/memory — how much time the machine is costing you,
   which utilization does not say), physical-disk throughput from
-  `/proc/diskstats` (parents only, or partitions double-count), and
-  `macsmc_hwmon`'s "Total System Power" in watts, which tracks
-  `macsmc-battery/power_now` one sample behind (4.7W idle, 18.7W loaded). All
-  six fields are collected on BOTH hosts — they are sysfs reads — and the host
-  only picks which cards to draw. Keyed on `Host`, not on the readings being
-  -1, so the grid can't relabel itself two seconds after it opens.
+  `/proc/diskstats` (parents only, or partitions double-count), and the
+  **battery**. All those fields are collected on BOTH hosts — they are sysfs
+  reads — and the host only picks which cards to draw. Keyed on `Host`, not on
+  the readings being -1, so the grid can't relabel itself two seconds after it
+  opens.
+- **The `batt` card is book's only per-host reading, and it is a SLOPE.** It
+  held whole-machine watts first (`macsmc_hwmon`'s "Total System Power", which
+  tracks `macsmc-battery/power_now` one sample behind — 4.7W idle, 18.7W
+  loaded); that reading survives as the card's *secondary*, next to the state
+  in words — `chg`, `ac`, `full`, and nothing at all while discharging, from
+  `SysInfo.batteryLabel`. The graph is charge percent, because "how hard is
+  the box working" was already the cpu, psi and io cards' answer three times
+  over and "how long have I got" was nobody's. Four things it encodes:
+  - **Charging is said TWICE, on purpose.** The sub line is what `MetricCard`
+    drops when three readings won't fit the card, and a panel dragged narrow is
+    exactly when you still want to know you are plugged in — so the percentage
+    itself is prefixed `+` while charging, on the line that is never dropped,
+    and the readout goes `Theme.info` with it. Charging also outranks the
+    level in the colour ramp: 15% and climbing is not a warning.
+  - **Fixed 0-100 axis.** The one card here that must not autoscale — a
+    battery resting at 96% would otherwise be drawn against a 96% ceiling and
+    read as full-to-empty.
+  - **`SysInfo.batteryHist` is SUB-SAMPLED**, one point per `battStepSec`
+    (40s) off the wall clock, so the same `chartLen` 90 points span an HOUR
+    instead of the poll's three minutes — a battery does not move in three
+    minutes and the card drew a flat line. It is the only history here that is
+    not pushed every poll.
+  - **The battery node is DISCOVERED, never hardcoded** (`sysinfo.sh`):
+    `BAT*/` then `macsmc-battery/`, and only if neither exists a scan for a
+    `type=Battery` whose `scope` is explicitly **`System`**. "System" rather
+    than "not Device" is what keeps `top` unchanged — a HID++ peripheral
+    publishes a `type=Battery` node too (that is how the trackball once became
+    the desktop's "laptop battery"), and anything that declines to say what it
+    belongs to is not claimed. `batStatus` (last field, a code — 0 none,
+    1 discharging, 2 charging, 3 full, 4 not charging, 5 unknown) exists so
+    "on AC" and "discharging" are distinguishable; the same wattage means
+    opposite things in each.
 - **The chassis-fan bar hides itself, and on `top` that means it never shows.**
   `/sys/class/hwmon` exposes no `fan*_input` at all here — the only hwmon
   devices are nvme, spd5118, k10temp, amdgpu, mt7921 and the trackball battery,

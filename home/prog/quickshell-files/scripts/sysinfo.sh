@@ -1,19 +1,20 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount|dskReadSectors|dskWriteSectors|psiCpu|psiIo|psiMem|powerW
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount|dskReadSectors|dskWriteSectors|psiCpu|psiIo|psiMem|powerW|batStatus
 #
 # Fields are POSITIONAL and SysInfo.qml indexes them, so new ones go on the
 # END. Everything after batteryCharging was added for the dock's task manager;
 # each degrades to -1 where the host can't produce it (book has no nvidia-smi),
 # so the readout shows "--" rather than a wrong number.
 #
-# Wifi stays dropped (both hosts are wired). Battery is back, scoped to
-# /sys/class/power_supply/BAT* (generic ACPI laptops) and macsmc-battery
-# (Apple Silicon under Asahi, book's driver) specifically — not a generic
-# power_supply type=Battery scan, since that's what previously picked up the
-# Logitech trackball's own hidpp battery on a desktop with no laptop battery
-# at all. -1|0 when neither node exists, so the panel shows "--" and stays
-# hidden on a desktop.
+# Wifi stays dropped (both hosts are wired). Battery is DISCOVERED, not
+# hardcoded — the node name differs per platform (BAT0/BAT1 on generic ACPI,
+# `macsmc-battery` on Apple Silicon under Asahi, and neither is guaranteed) —
+# but a bare type=Battery scan is what once picked up the Logitech trackball's
+# own hidpp battery on a desktop with no laptop battery at all, so the scan
+# also requires scope != Device, which is exactly what a peripheral sets and a
+# system battery does not. -1|0|0 when nothing qualifies, so the panel shows
+# "--" and stays hidden on a desktop.
 # Brightness was dropped too: this machine's display is external (DDC/CI
 # over I2C via ddcutil), and ddcutil takes ~1.5s per call — too slow for
 # this 2s poll loop, so SysInfo.qml polls it separately on its own longer
@@ -113,9 +114,22 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     [ -n "$gx" ] && gpux="$gx"
 fi
 
-# Battery percentage + charging flag via /sys/class/power_supply/BAT*
-# (generic ACPI, e.g. top if it ever had one) or macsmc-battery (book).
-# "-1|0" when neither node exists (desktop box, no battery).
+# Battery percentage + charging flag + state code.
+#
+# The node is FOUND, never assumed. Well-known names first (BAT*/ for generic
+# ACPI, macsmc-battery/ for Apple Silicon under Asahi), then — only if neither
+# exists — a scan of every power_supply device for a type=Battery whose scope
+# is explicitly "System".
+#
+# That last clause is the whole reason this isn't a plain type=Battery scan.
+# A HID++ peripheral publishes a type=Battery node too, which is how the
+# Logitech trackball on `top` once became "the laptop battery" of a desktop
+# with no battery at all; every peripheral gauge (hid-logitech-hidpp,
+# hid-input's generic one) reports scope=Device. Requiring "System" — not
+# merely "not Device" — keeps the discovery pass from ever claiming a node
+# that declines to say what it belongs to, which is the only failure mode that
+# would change `top`'s panel. A real laptop battery is either named BAT* or
+# says System (book's macsmc-battery does).
 #
 # Percentage is computed from the energy_now/energy_full ratio (equivalently
 # charge_now/charge_full) — the same figure `upower -b` reports — NOT the raw
@@ -123,27 +137,59 @@ fi
 # and reads several points high (e.g. 99 vs upower's 93), so the panel used to
 # disagree with upower. Falls back to `capacity` on hosts lacking the
 # energy/charge_* pair, where capacity already matches.
+#
+# batStatus is a code, so the panel never string-matches a kernel label:
+# 0 no battery, 1 discharging, 2 charging, 3 full, 4 not charging (on AC and
+# idle), 5 present but unknown. "on AC" and "discharging" are separate states
+# on purpose — the same wattage means opposite things in each.
 bat="-1|0"
+batstat=0
+batdir=""
 for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/; do
     [ -f "$dir/capacity" ] || continue
-    status=$(cat "$dir/status" 2>/dev/null)
+    [ "$(cat "$dir/scope" 2>/dev/null)" = "Device" ] && continue
+    batdir="$dir"
+    break
+done
+if [ -z "$batdir" ]; then
+    for dir in /sys/class/power_supply/*/; do
+        [ -f "$dir/capacity" ] || continue
+        [ "$(cat "$dir/type" 2>/dev/null)" = "Battery" ] || continue
+        [ "$(cat "$dir/scope" 2>/dev/null)" = "System" ] || continue
+        batdir="$dir"
+        break
+    done
+fi
+
+if [ -n "$batdir" ]; then
     chg=0
-    [ "$status" = "Charging" ] && chg=1
+    case "$(cat "$batdir/status" 2>/dev/null)" in
+        Charging)      chg=1; batstat=2 ;;
+        Discharging)   batstat=1 ;;
+        Full)          batstat=3 ;;
+        "Not charging") batstat=4 ;;
+        *)             batstat=5 ;;
+    esac
 
     now=""; full=""
-    if [ -r "$dir/energy_now" ] && [ -r "$dir/energy_full" ]; then
-        now=$(cat "$dir/energy_now" 2>/dev/null); full=$(cat "$dir/energy_full" 2>/dev/null)
-    elif [ -r "$dir/charge_now" ] && [ -r "$dir/charge_full" ]; then
-        now=$(cat "$dir/charge_now" 2>/dev/null); full=$(cat "$dir/charge_full" 2>/dev/null)
+    if [ -r "$batdir/energy_now" ] && [ -r "$batdir/energy_full" ]; then
+        now=$(cat "$batdir/energy_now" 2>/dev/null); full=$(cat "$batdir/energy_full" 2>/dev/null)
+    elif [ -r "$batdir/charge_now" ] && [ -r "$batdir/charge_full" ]; then
+        now=$(cat "$batdir/charge_now" 2>/dev/null); full=$(cat "$batdir/charge_full" 2>/dev/null)
     fi
+    # energy_full can legitimately be 0 or missing on a freshly-reset gauge, so
+    # the ratio is only taken when the denominator is genuinely positive.
     if [ -n "$now" ] && [ -n "$full" ] && [ "$full" -gt 0 ] 2>/dev/null; then
         cap=$(awk -v n="$now" -v f="$full" 'BEGIN{ printf "%d", n*100/f + 0.5 }')  # rounded, float-safe
     else
-        cap=$(cat "$dir/capacity" 2>/dev/null)
+        cap=$(cat "$batdir/capacity" 2>/dev/null)
     fi
-    [ -n "$cap" ] && bat="$cap|$chg"
-    break
-done
+    if [ -n "$cap" ]; then
+        bat="$cap|$chg"
+    else
+        batstat=0   # a node with no readable charge is no better than none
+    fi
+fi
 
 # ---- the three book replaces gpu/vram/fan with ---------------------------
 # book has no source at all for those: Asahi's DRM driver publishes no fdinfo
@@ -194,14 +240,13 @@ for dir in /sys/class/hwmon/hwmon*/; do
     done
     break
 done
-if [ "$powerw" = "-1" ]; then
-    for dir in /sys/class/power_supply/BAT*/; do
-        [ -r "$dir/power_now" ] || continue
-        raw=$(cat "$dir/power_now" 2>/dev/null)
-        # sign convention varies by driver; the magnitude is the draw either way
-        [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ if (u < 0) u = -u; printf "%.2f", u / 1000000 }')
-        break
-    done
+# Fall back to the discovered battery's own power_now (see the battery block
+# above) rather than re-globbing BAT*, so a machine whose node is named
+# something else still gets a wattage.
+if [ "$powerw" = "-1" ] && [ -n "$batdir" ] && [ -r "$batdir/power_now" ]; then
+    raw=$(cat "$batdir/power_now" 2>/dev/null)
+    # sign convention varies by driver; the magnitude is the draw either way
+    [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ if (u < 0) u = -u; printf "%.2f", u / 1000000 }')
 fi
 
-printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans" "$dsk" "$psi" "$powerw"
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans" "$dsk" "$psi" "$powerw" "$batstat"

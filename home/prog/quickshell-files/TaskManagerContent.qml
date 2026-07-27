@@ -5,8 +5,8 @@ import Quickshell
 // it, with the means to end them.
 //
 // Three sections, top to bottom: a 4x2 block of square chart cards (cpu, gpu,
-// mem, net, load, vram, swap, fan — see `noGpu` for what book puts in the
-// gpu/vram/fan slots instead), a chassis-fan bar, and the process table
+// mem, net, load, vram, swap, fan — see `noGpu` for the psi/io/batt set book
+// puts in the gpu/vram/fan slots instead), a chassis-fan bar, and the process table
 // taking everything that is left. The table is the point of the widget, so it
 // gets the slack — the cards are SQUARE, i.e. their height follows the panel
 // width, and a taller tile turns into more visible processes rather than
@@ -30,7 +30,7 @@ Item {
 
     // book has no gpu, vram or fan to draw: Asahi's DRM driver publishes no
     // utilization counter, its GPU memory IS system memory, and the machine is
-    // fanless. Those three slots go to psi, io and power there instead — see
+    // fanless. Those three slots go to psi, io and batt there instead — see
     // sysinfo.sh. Keyed on the build-time Host singleton rather than on the
     // readings being -1, so the card set is fixed before the first poll and the
     // grid can't relabel itself two seconds after it opens.
@@ -279,26 +279,46 @@ Item {
             value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
             series: [ { data: SysInfo.gpuFanHist, color: Theme.accent } ]
         }
-        // In the fan slot on book: whole-machine watts, with the battery charge
-        // as the secondary reading. It is the closest thing the fanless machine
-        // has to the signal a fan gauge carries — how hard the box is working —
-        // and it is measured rather than inferred. The charge is prefixed "+"
-        // while charging, since the same wattage means opposite things then.
+        // In the fan slot on book: the BATTERY — charge over the last hour, with
+        // the wattage kept as the secondary reading.
+        //
+        // This slot held whole-machine watts first, on the reasoning that it is
+        // what a fanless box has in place of a fan gauge. But "how hard is it
+        // working" is already the cpu, psi and io cards' job three times over,
+        // while on a laptop the one question none of them answer is how long it
+        // has left — which is a slope, and therefore exactly the thing a graph
+        // says better than a number. The watts did not have to be given up for
+        // it: they are the sub reading, next to the state in words ("chg", "ac",
+        // "full"), so the card still shows the draw AND says which way it is
+        // pushing the line.
+        //
+        // CHARGING is called twice, deliberately. The sub line is the one the
+        // card drops when the three readings won't fit (MetricCard.sub), and a
+        // panel dragged narrow is exactly when you'd still want to know you are
+        // plugged in — so the percentage itself carries a "+" as well, on the
+        // line that is never dropped, and the readout goes Theme.info with it.
+        //
+        // FIXED 0-100 axis, and no arithmetic on a capacity that could be zero:
+        // this is the one card that must not autoscale, or a battery sitting at
+        // 96% would be drawn against a 96% ceiling and read as full-to-empty.
+        // With no battery found at all (a desktop, or a node named something
+        // nobody predicted) `batteryPct` is -1: the readout is "--", the history
+        // stays empty and the plot draws its frame with no line in it — the same
+        // way every other card here reports a sensor it hasn't got.
         MetricCard {
             width: root.cardW; height: root.cardH
             visible: root.noGpu
-            label: "power"
-            tip: "whole-machine power draw, and the battery charge\n(+ while charging). 4-5W idle, ~19W all-out"
-            value: SysInfo.powerW < 0 ? "--" : SysInfo.powerW.toFixed(1) + "W"
-            sub: SysInfo.batteryPct < 0 ? ""
-                 : (SysInfo.batteryCharging ? "+" : "") + SysInfo.batteryPct + "%"
-            // 4-5W idle, ~19W with every core spinning: 15 is already a machine
-            // under real load, 25 is the top of what it sustains.
-            valueColor: SysInfo.powerW >= 25 ? Theme.crit
-                      : SysInfo.powerW >= 15 ? Theme.warn : Theme.text
-            scaleMax: 0
-            autoFloor: 20
-            series: [ { data: SysInfo.powerHist, color: Theme.accent } ]
+            label: "batt"
+            tip: "battery charge, one sample per 40s (an hour across).\n+ and \"chg\" mean charging; \"ac\" is plugged in but idle"
+            value: SysInfo.batteryPct < 0 ? "--"
+                   : (SysInfo.batteryStatus === 2 ? "+" : "") + SysInfo.batteryPct + "%"
+            sub: SysInfo.batteryLabel
+            // Charging outranks the level: 15% and climbing is not a warning.
+            valueColor: SysInfo.batteryPct < 0 ? Theme.text
+                      : SysInfo.batteryStatus === 2 ? Theme.info
+                      : SysInfo.batteryPct <= 10 ? Theme.crit
+                      : SysInfo.batteryPct <= 20 ? Theme.warn : Theme.text
+            series: [ { data: SysInfo.batteryHist, color: Theme.accent } ]
         }
     }
 

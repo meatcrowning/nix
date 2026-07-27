@@ -188,9 +188,12 @@ Column {
     }
 
     // ---------- Battery ----------
-    // Auto-hides on a host with no BAT* node (SysInfo.batteryPct stays -1) —
-    // no host check needed here, same hardware-detection pattern as bri's
-    // useBacklight below.
+    // Auto-hides on a host where sysinfo.sh discovered no system battery
+    // (SysInfo.batteryPct stays -1) — no host check needed here, same
+    // hardware-detection pattern as bri's useBacklight below. Contrast the
+    // task manager's `batt` card, which IS keyed on Host: a card that appeared
+    // two seconds after the grid opened would reshuffle it, while a status row
+    // that does is just one more row.
     Stat {
         visible: SysInfo.batteryPct >= 0
         // label flips to "chg" while charging — an unmistakable indicator on
