@@ -1,5 +1,6 @@
 import QtQuick
 import QtWebEngine
+import "../../qmlcommon"
 
 // The file picker a page's <input type=file> (or upload button) pops.
 //
@@ -256,12 +257,15 @@ Item {
             border.color: Theme.border
             border.width: 1
 
-            ListView {
+            KineticListView {
                 id: list
                 anchors { fill: parent; margins: 1 }
                 clip: true
                 model: root.entries
-                boundsBehavior: Flickable.StopAtBounds
+                // surfer's ZoomFilter divides every touchpad wheel event in this
+                // WINDOW by pylib/kinetic.py's WHEEL_GAIN so web pages track the
+                // finger; this overlay sits in that same window and must undo it.
+                wheelGain: WheelGain
 
                 delegate: Rectangle {
                     required property var modelData

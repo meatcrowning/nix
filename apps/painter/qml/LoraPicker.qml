@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // Compatible LoRAs first and one click away.  Incompatible ones are hidden
 // behind a count rather than removed, each carrying the reason it did not match
@@ -38,13 +39,12 @@ Rectangle {
             }
         }
 
-        ListView {
+        KineticListView {
             id: list
             width: parent.width
             height: parent.height - 22
             clip: true
             model: LoraChoices
-            boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: VScroll {}
 
             delegate: Item {

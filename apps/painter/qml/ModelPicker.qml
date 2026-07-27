@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // Choosing a model is the only decision required: the line under each name is
 // what painter worked out to go with it.  Anything it could not place sinks to
@@ -17,7 +18,7 @@ Panel {
         border.color: Theme.border
         border.width: 1
 
-        ListView {
+        KineticListView {
             id: list
             anchors.fill: parent
             anchors.margins: 1
@@ -25,7 +26,6 @@ Panel {
             model: Models
             currentIndex: App.selectedIndex
             highlightMoveDuration: 0
-            boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: VScroll {}
 
             delegate: Rectangle {

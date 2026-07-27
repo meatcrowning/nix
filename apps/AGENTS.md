@@ -12,6 +12,7 @@ helpers they all import. Each has its own `AGENTS.md` with the detail:
 | [`surfer/`](surfer/AGENTS.md) | QtWebEngine browser | `home/prog/surfer.nix` |
 | [`askpass/`](askpass/AGENTS.md) | the `sudo -A` password dialog | `home/prog/askpass.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
+| `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
 ## Why this tree is OUTSIDE `home/` and `sys/`
 
@@ -56,6 +57,83 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   see `player/AGENTS.md`.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
+
+## `qmlcommon/` — shared QML, resolved relatively
+
+The QML counterpart of `pylib/`: components every app's `.qml` can reach with a
+plain relative **directory** import, from `apps/<app>/qml/`:
+
+```qml
+import "../../qmlcommon"
+```
+
+No wrapper change is needed for this — `home/prog/<app>.nix` sets no QML import
+path and does not have to. `Theme` resolves inside these components because
+every app installs it as a root **context property** in `main.py`, and context
+properties are visible to every file-based component whatever directory it
+lives in.
+
+### Scrolling: every scrollable view is kinetic BY CONSTRUCTION
+
+**Never write a bare `ListView`, `GridView`, `Flickable` or `ScrollView` in
+`apps/`.** Use `KineticListView`, `KineticGridView` or `KineticFlickable` from
+`qmlcommon/`. They are the same types with Qt's own flicking off
+(`interactive: false`, `boundsBehavior: StopAtBounds`) and one `WheelScroll`
+overlay wired to themselves; everything else — model, delegate,
+`positionViewAtIndex`, `ScrollBar.vertical` — behaves exactly as before.
+
+Because momentum on this desktop is **compositor-side**: hyprvtb synthesizes
+macOS-style decay at the seat, so a coast reaches a client as an ordinary
+high-resolution wheel/axis stream (`docs/kinetic-scroll.md`,
+`home/prog/AGENTS.md`). A view honours it only if it moves *proportionally to
+the delta* and adds *no momentum of its own*, and Qt's default `Flickable`
+fails both halves. Measured offscreen (PySide6 6.11, 5000px of content, a 240px
+synthetic coast — 30 × 8px `pixelDelta`, `ScrollBegin` + updates, no
+`ScrollEnd`, since the compositor withholds the terminal stop ≥300 ms):
+
+| | during the stream | after it stops |
+| --- | --- | --- |
+| bare `Flickable` | 285 px | flicks on to **342 px** (+43%) |
+| `Kinetic*` | 240 px | 240 px, dead stop |
+
+and one classic detent animates a bare Flickable 0 → 72 px on its own timeline.
+That second decay curve is not "more kinetic", it is two curves fighting.
+
+Knobs, all optional: `wheelLines` / `wheelStep` (how far one *classic mouse
+detent* moves — the touchpad path is 1:1 finger pixels and has no knob),
+`wheelEnabled: false` (let the wheel bubble out of a view that must not eat it),
+`wheelGain` (**surfer only**, below), `onWheelScrolled` (the view moved because
+the user drove it).
+
+**One place for the values.** `qmlcommon/WheelScroll.qml` is the only QML
+implementation — it used to exist twice, in `player/qml/` and `painter/qml/`,
+while `filer/qml/Main.qml` merely quoted its rationale in a comment and had no
+copy at all. `apps/pylib/kinetic.py` is the only Python one (`DETENT`,
+`ANGLE_PER_PIXEL`, `WHEEL_GAIN`, `is_wheel_detent()`); anything touching
+`QWheelEvent` in Python imports from there rather than re-deriving the numbers.
+
+**The one exception, and why it is one:** `viewer/qml/ImageViewer.qml` keeps a
+bare `Flickable`. Its `interactive` buys DRAG-panning of a zoomed image, and its
+`WheelHandler` (delta-proportional, `exp(ln1.2/120 · d)`) consumes every wheel
+event before the Flickable can see one — so a coast lands on the zoom, which is
+why viewer came off `kinetic_deny_classes`. Add a comment like that one if you
+ever need another exception.
+
+**surfer is special.** Its window-scoped `ZoomFilter` divides every touchpad
+wheel event by `WHEEL_GAIN` (1/6) so QtWebEngine pages track the finger like the
+QML apps do — and that scaling hits surfer's own QML overlays too. Any
+scrollable view in surfer's window must therefore take `wheelGain: WheelGain`
+(the reciprocal, published by `main.py` from `pylib/kinetic.py`). The web page
+itself is Chromium's scroller and cannot be made to use `WheelScroll`; parity
+there is the gain plus the compositor's ≥300 ms withheld stop, which zeroes
+Chromium's 200 ms fling estimator so it never adds a fling of its own.
+
+**Momentum has to be ON to be honoured, and `hyprctl reload` clears a runtime
+`kinetic_set(true)`.** The durable switch is the `plugin:hyprvtb:kinetic`
+config key, set in **both** copies of `hyprland.lua` and per-host via
+`home/prog/hypr-host.nix` (on for air/book, off on top, which drives a wheel
+mouse). None of that is in `apps/` — if momentum seems absent, check there
+before suspecting a view.
 
 **Guard every rect you hand hyprvtb.** Hyprland's `renderRect` aborts the
 compositor on a zero-size box, so an app feeding the vtb socket can take the

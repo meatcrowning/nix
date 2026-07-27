@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // Two panes: the controls on the left, results on the right.  Window chrome is
 // the hyprvtb titlebar (see the Titlebar block at the bottom), so there is no
@@ -94,13 +95,12 @@ Window {
             color: Theme.bg
             visible: root.view === 0 || root.width > 900
 
-            Flickable {
+            KineticFlickable {
                 id: leftFlick
                 anchors.fill: parent
                 anchors.margins: 10
                 contentHeight: leftCol.implicitHeight
                 clip: true
-                boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: VScroll {}
 
                 Column {

@@ -14,6 +14,8 @@ per-family reason string rather than a silent failure). Chrome is hyprvtb
 titlebar buttons (generate/cancel/view switch + bottom-anchored settings
 drawer).
 
+**Every scrollable surface here is a `Kinetic*` view from `../qmlcommon/`** — the gallery grid, the model/LoRA/dropdown lists, the left parameter column and the prompt boxes. painter used to carry its own copy of `WheelScroll.qml` that nothing imported, so every one of those was a bare Flickable adding Qt's flick on top of the compositor's momentum. Never write a bare `ListView`/`GridView`/`Flickable` here; see [`../AGENTS.md`](../AGENTS.md).
+
 ## The backend is NOT packaged
 
 ComfyUI stays the venv+`nix-shell` checkout at `/home/lam/comfy` (symlink →

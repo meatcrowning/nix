@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 Rectangle {
     id: box
@@ -13,15 +14,13 @@ Rectangle {
     border.width: 1
     radius: 1
 
-    Flickable {
+    KineticFlickable {
         id: flick
         anchors.fill: parent
         anchors.margins: 5
         contentWidth: width
         contentHeight: input.implicitHeight
         clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height
         ScrollBar.vertical: VScroll {}
 
         TextEdit {

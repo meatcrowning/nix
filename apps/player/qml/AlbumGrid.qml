@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // The album gallery: edge-to-edge cover tiles with ZERO gap — the cell size
 // adapts so whole covers tile the full width exactly. Title / artist / year
@@ -93,15 +94,17 @@ Item {
         onTriggered: list.showExpanded()
     }
 
-    ListView {
+    // Wheel notches move whole cover rows; nothing drag-flicks.
+    KineticListView {
         id: list
         objectName: "albumList"
         anchors.fill: parent
         clip: true
         model: Math.max(0, Math.ceil(AlbumsModel.count / root.safeCols))
         cacheBuffer: 900
-        interactive: false     // scrollbar + wheel only — no drag-flicking
-        boundsBehavior: Flickable.StopAtBounds
+        wheelLines: 1
+        wheelStep: root.cellW
+        onWheelScrolled: rememberPos()   // wheel scrolling counts as browsing
         ScrollBar.vertical: VScroll { id: vbar }
 
         function showExpanded() {
@@ -319,14 +322,6 @@ Item {
                 }
             }
         }
-    }
-
-    // Wheel notches move whole cover rows; nothing drag-flicks.
-    WheelScroll {
-        view: list
-        lines: 1
-        step: root.cellW
-        onScrolled: list.rememberPos()   // wheel scrolling counts as browsing
     }
 
     PixelText {

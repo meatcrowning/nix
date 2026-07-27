@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // Lyrics pane. Synced (.lrc-style) lyrics scroll a ListView, the current line
 // lit in Theme.text and the rest dimmed, following Player.position; clicking
@@ -102,7 +103,7 @@ Item {
     }
 
     // ---- synced ----
-    ListView {
+    KineticListView {
         id: lyricsList
         anchors.top: head.bottom
         anchors.topMargin: 4
@@ -113,11 +114,10 @@ Item {
         visible: root.lyricsData.synced
         clip: true
         model: root.lyricsData.synced ? root.lyricsData.lines : []
-        interactive: false     // scrollbar + wheel only — no drag-flicking
-        boundsBehavior: Flickable.StopAtBounds
-        // interactive:false means no flick/drag signal ever fires here, so the
-        // handle is the only user motion besides the wheel; grabbing it stands
-        // the follow down the same way. Press only — the scrollbar's `position`
+        onWheelScrolled: root.lastUserScrollMs = Date.now()   // you are driving now
+        // KineticListView means interactive:false, so no flick/drag signal ever
+        // fires here and the handle is the only user motion besides the wheel;
+        // grabbing it stands the follow down the same way. Press only — the scrollbar's `position`
         // also moves when the FOLLOW scrolls, which would self-suppress forever.
         ScrollBar.vertical: VScroll {
             onPressedChanged: if (pressed) root.lastUserScrollMs = Date.now()
@@ -143,7 +143,7 @@ Item {
     }
 
     // ---- plain ----
-    Flickable {
+    KineticFlickable {
         id: plainFlick
         anchors.top: head.bottom
         anchors.topMargin: 4
@@ -154,8 +154,7 @@ Item {
         visible: !root.lyricsData.synced && root.lyricsData.text.length > 0
         clip: true
         contentHeight: plainText.implicitHeight
-        interactive: false     // scrollbar + wheel only — no drag-flicking
-        boundsBehavior: Flickable.StopAtBounds
+        onWheelScrolled: root.lastUserScrollMs = Date.now()
         ScrollBar.vertical: VScroll {}
 
         PixelText {
@@ -169,17 +168,6 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             color: Theme.textDim
         }
-    }
-
-    WheelScroll {
-        anchors.fill: lyricsList
-        view: lyricsList.visible ? lyricsList : null
-        onScrolled: root.lastUserScrollMs = Date.now()   // you are driving now
-    }
-    WheelScroll {
-        anchors.fill: plainFlick
-        view: plainFlick.visible ? plainFlick : null
-        onScrolled: root.lastUserScrollMs = Date.now()
     }
 
     // ---- nothing to show: say WHICH kind of nothing ----

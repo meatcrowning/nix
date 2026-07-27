@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // A reusable track table (album detail, playlists, search, queue): one packed
 // pixel-text row per track — number, title, optional artist, rating stars,
@@ -116,12 +117,14 @@ Item {
     onCurrentRowChanged: centerCurrent()
     Component.onCompleted: { centerCurrent(); recomputeAutoHidden(); }
 
-    ListView {
+    KineticListView {
         id: list
         anchors.fill: parent
         clip: true
-        interactive: false     // scrollbar + wheel only — no drag-flicking
-        boundsBehavior: Flickable.StopAtBounds
+        // A non-scrollable table (AlbumPanel sizes itself to hold every row)
+        // hands the wheel straight out to whatever is behind it — the album
+        // gallery keeps scrolling under an open album section.
+        wheelEnabled: root.scrollable
         ScrollBar.vertical: VScroll { visible: root.scrollable }
 
         // Re-centre once the view actually has a size / rows (the queue's height
@@ -301,7 +304,4 @@ Item {
         }
     }
 
-    WheelScroll {
-        view: root.scrollable ? list : null
-    }
 }

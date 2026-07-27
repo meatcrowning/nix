@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
+import "../../qmlcommon"
 
 // Standalone port of the Quickshell panel's FileBrowser.qml. Runs as its own
 // PySide6 process (main.py), so Quickshell config hot-reloads no longer restart
@@ -503,7 +504,7 @@ Window {
         // thumbnails are requested — a folder of thousands of images stays cheap,
         // the way Dolphin recycles item widgets. `cacheBuffer` prefetches ~2 rows
         // for smooth scrolling without an unbounded request storm.
-        GridView {
+        KineticGridView {
             id: pgrid
             anchors { top: parent.top; left: parent.left; right: parent.right; margins: 2 }
             // no list below → the panel takes the whole window; otherwise it's the
@@ -517,7 +518,8 @@ Window {
             cellWidth: 100
             cellHeight: 100
             cacheBuffer: cellHeight * 2
-            boundsBehavior: Flickable.StopAtBounds
+            wheelLines: 1
+            wheelStep: cellHeight
             ScrollBar.vertical: VScroll {}
 
             delegate: Item {
@@ -568,13 +570,12 @@ Window {
         // ---- tree list ----
         // (No in-window location bar any more — the editable path lives in the
         // titlebar address bar, and "up" is the "^" titlebar button.)
-        ListView {
+        KineticListView {
             id: list
             anchors { top: splitter.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; margins: 2 }
             visible: view.hasRows
             clip: true
             model: view.rows
-            boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: VScroll {}
 
             delegate: Rectangle {
@@ -635,9 +636,10 @@ Window {
                 MouseArea {
                     id: rowMa
                     anchors.fill: parent
-                    // preventStealing so the ListView's Flickable can't grab the
-                    // press-drag and scroll instead of starting the file drag.
-                    // (Scroll the list with the wheel/trackpad.)
+                    // preventStealing so nothing above can grab the press-drag
+                    // and scroll instead of starting the file drag. (The list is
+                    // a KineticListView, so its own flicking is already off; the
+                    // wheel/trackpad scrolls it.)
                     preventStealing: true
                     drag.target: dragProxy
                     onPressed: (m) => {
