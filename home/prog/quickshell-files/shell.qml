@@ -834,6 +834,30 @@ Scope {
                     color: Theme.accent
                 }
 
+                // THE UAC SCRIM. While a `vista-askpass` window is up, Hyprland's
+                // `dim_around` rule dims the desktop and every window — but not
+                // this panel: `qs-bar` is a layer surface on the `top` layer,
+                // which is composited ABOVE the dim the window pass draws. The
+                // bar has to dim itself, or the modal reads as half-applied.
+                //
+                // Strength is Hyprland's own `decoration:dim_strength` (0.5, the
+                // default — `hyprctl getoption decoration:dim_strength`), so the
+                // two halves land on the same value; change both together.
+                //
+                // Purely visual: no MouseArea, so it swallows nothing, and the
+                // surface's `mask: Region` (input) is untouched. z above every
+                // sibling, including the accent strip at z:1.
+                Rectangle {
+                    z: 999
+                    anchors.fill: parent
+                    color: "black"
+                    opacity: Askpass.active ? 0.5 : 0
+                    visible: opacity > 0
+                    Behavior on opacity {
+                        NumberAnimation { duration: ViewMode.ms(140); easing.type: Easing.OutCubic }
+                    }
+                }
+
                 // ================= CLASSIC LAYOUT =================
                 // The 48px bar this config has always been: launcher/tasks/tray at
                 // the top, status + clock + date + reveal toggle at the bottom.
