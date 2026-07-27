@@ -49,8 +49,8 @@ Item {
         id: card
         property string label: ""
         property string value: ""
-        // Secondary reading, shown under the primary one — a card is square now,
-        // so there is a line's room for it but not for both on one line.
+        // Secondary reading, shown to the left of the primary one on the same
+        // line.
         property string sub: ""
         property color valueColor: Theme.text
         property alias series: plot.series
@@ -69,10 +69,20 @@ Item {
             text: card.value
             color: card.valueColor
         }
+        // The secondary reading sits to the LEFT of the primary one on the SAME
+        // line, not under it: two stacked lines cost a card of this size a
+        // third of its chart.
+        //
+        // Dropped when the three would not all fit, measured against their own
+        // implicit widths rather than a guessed card width — a fixed threshold
+        // was wrong for "vram 0.5G 4%", whose label and value are both wider
+        // than cpu's, so it collided while the others had room.
         PixelText {
             id: cardSub
-            anchors { right: parent.right; top: cardValue.bottom }
+            anchors { right: cardValue.left; rightMargin: 5; top: parent.top }
             visible: card.sub.length > 0
+                     && cardLabel.implicitWidth + implicitWidth
+                        + cardValue.implicitWidth + 10 <= card.width
             text: card.sub
             color: Theme.textDim
         }
@@ -81,7 +91,7 @@ Item {
             active: root.active
             anchors {
                 left: parent.left; right: parent.right
-                top: cardSub.visible ? cardSub.bottom : cardValue.bottom
+                top: cardValue.bottom
                 topMargin: 3
                 bottom: parent.bottom
             }
@@ -182,7 +192,7 @@ Item {
         }
     }
 
-    // ---- chassis fans, and uptime ----------------------------------------
+    // ---- chassis fans ----------------------------------------------------
     // A bar rather than a ninth square: it is one number with no interesting
     // history, and it belongs to the whole box rather than to one component.
     //
@@ -232,28 +242,29 @@ Item {
         }
     }
 
-    PixelText {
-        id: uptime
-        anchors { top: fanBar.bottom; topMargin: 4; right: parent.right; rightMargin: root.pad }
-        text: "up " + root.fmtUptime(SysInfo.uptimeSec)
-        color: Theme.textDim
-    }
-
     // ---- process table ---------------------------------------------------
     Rectangle {
         id: rule
-        anchors { top: uptime.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
+        anchors { top: fanBar.bottom; topMargin: 5; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 1
         color: Theme.border
     }
 
     // Column geometry, shared by the header and every row so they line up.
+    // The pid column is dropped on a narrow panel rather than squeezed: at 14%
+    // of the screen the process NAME is already down to a few characters, and
+    // that is the column you actually read.
+    readonly property bool showPid: inner >= 300
+    // 58, not 44: this kernel hands out six-digit pids routinely (pid_max is
+    // 4194304), and at 44 they ran straight into the process name.
+    readonly property real colPid: showPid ? 58 : 0
     readonly property real colKill: 14
     readonly property real colCpu: 44
     readonly property real colMem: 44
     readonly property real colRss: 42
-    readonly property real colName: Math.max(40, inner - colCpu - colMem - colRss - colKill)
+    readonly property real colName:
+        Math.max(40, inner - colPid - colCpu - colMem - colRss - colKill)
 
     // A clickable column heading. Inline components have to be members of the
     // file's root object, so it is declared here rather than inside the Row.
@@ -264,7 +275,7 @@ Item {
         MouseArea {
             anchors { fill: parent; topMargin: -3; bottomMargin: -3 }
             cursorShape: Qt.PointingHandCursor
-            onClicked: Procs.sortKey = head.key
+            onClicked: Procs.setSort(head.key)
         }
     }
 
@@ -276,6 +287,12 @@ Item {
         width: root.inner
         spacing: 0
 
+        Head {
+            width: root.colPid
+            visible: root.showPid
+            key: "pid"
+            text: "pid"
+        }
         Head { width: root.colName; key: "name"; text: "process" }
         Head { width: root.colCpu;  key: "cpu";  text: "cpu%"; horizontalAlignment: Text.AlignRight }
         Head { width: root.colMem;  key: "mem";  text: "mem%"; horizontalAlignment: Text.AlignRight }
@@ -322,6 +339,12 @@ Item {
                 width: parent.width
                 spacing: 0
 
+                PixelText {
+                    width: root.colPid
+                    visible: root.showPid
+                    text: row.modelData.pid
+                    color: Theme.textDim
+                }
                 PixelText {
                     width: root.colName
                     text: row.modelData.name

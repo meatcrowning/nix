@@ -16,7 +16,11 @@ Singleton {
 
     // [{pid, name, cpu, mem, rss}] as produced, i.e. already busiest-first.
     property var rows: []
-    property string sortKey: "cpu"    // cpu | mem | name
+    // Which column the user last clicked. Persisted rather than local, so it
+    // survives both a panel reload and a logout — a heading the user chose is a
+    // setting, not scratch state.
+    readonly property string sortKey: SettingsStore.d.procSort
+    function setSort(k) { SettingsStore.d.procSort = k; }
     readonly property int count: rows.length
 
     property var _watchers: []
@@ -34,6 +38,9 @@ Singleton {
         const r = rows.slice();
         if (sortKey === "mem") r.sort((a, b) => b.mem - a.mem);
         else if (sortKey === "name") r.sort((a, b) => a.name.localeCompare(b.name));
+        // pid ascending is start order, which is the only reading of a pid that
+        // means anything — descending would just be "newest first" spelled oddly.
+        else if (sortKey === "pid") r.sort((a, b) => Number(a.pid) - Number(b.pid));
         else r.sort((a, b) => b.cpu - a.cpu);
         return r;
     }

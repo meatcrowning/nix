@@ -137,27 +137,34 @@ Item {
     readonly property int naturalArt: 60
 
     implicitWidth: 300
-    implicitHeight: pad * 2 + top.implicitHeight + 6 + naturalArt + 6 + bottom.height
+    implicitHeight: pad * 2 + top.height + 6 + naturalArt + 6 + bottom.height
 
-    Column {
+    // ONE line: track on the left, artist on the right. It keeps its height when
+    // both are empty, so nothing below it moves when playback stops — which is
+    // the whole reason the strings are empty rather than a "nothing playing"
+    // placeholder (see Media.dispTitle).
+    Item {
         id: top
         anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
-        spacing: 6
+        height: 16
 
-        // track title / artist. The source-app line that used to sit above
-        // these is gone: it named the player, which the user already knows,
-        // and cost a row of a widget that is short of them.
         PixelText {
-            width: parent.width
+            id: trackTitle
+            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+            // Give the artist at most a third, and only what it actually needs,
+            // so a long title uses the rest instead of eliding against a gap.
+            width: parent.width - artistText.width - (artistText.width > 0 ? 8 : 0)
             elide: Text.ElideRight
             text: Media.dispTitle
             color: Theme.text
         }
         PixelText {
-            width: parent.width
+            id: artistText
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: Math.min(implicitWidth, parent.width / 3)
+            horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
-            visible: Media.dispArtist !== ""
             text: Media.dispArtist
             color: Theme.textDim
         }

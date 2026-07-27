@@ -21,7 +21,12 @@ Item {
     readonly property real inner: Math.max(80, width - pad * 2)
 
     implicitWidth: 252
-    implicitHeight: pad * 2 + head.height + 6 + 120 + 2 + dayLabels.height
+    implicitHeight: pad * 2 + head.height + 2 + legend.height + 4
+                    + 110 + 2 + dayLabels.height
+
+    // Which sample the pointer is over, or -1. Drives both the readout that
+    // replaces the legend and the cursor drawn on the graph.
+    property int hoverIdx: -1
 
     // ---- header: where, and what it is doing right now -------------------
     Item {
@@ -59,6 +64,91 @@ Item {
         }
     }
 
+    // ---- legend, or the hovered sample -----------------------------------
+    // A line chart with no key is a squiggle: this says, in the widget itself,
+    // that the line is temperature, the columns are rain chance, and the two
+    // marker shapes are the morning and night samples. Hovering replaces it
+    // with the actual numbers for the sample under the pointer, which is the
+    // other half of the same question.
+    Item {
+        id: legend
+        anchors { top: head.bottom; topMargin: 2; horizontalCenter: parent.horizontalCenter }
+        width: root.inner
+        height: 14
+
+        readonly property var hov: (root.hoverIdx >= 0 && root.hoverIdx < root.slots.length)
+            ? root.slots[root.hoverIdx] : null
+
+        // swatch + word, so the key is the mark itself rather than a colour name
+        component Key: Row {
+            id: keyRow
+            property string label: ""
+            spacing: 3
+            visible: root.inner >= 210
+            default property alias mark: markHolder.data
+            Item {
+                id: markHolder
+                width: 8
+                height: 14
+            }
+            PixelText { text: keyRow.label; color: Theme.textDim }
+        }
+
+        Row {
+            anchors.left: parent.left
+            spacing: 10
+            visible: legend.hov === null
+
+            Key {
+                label: "temp"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 8; height: 2
+                    color: Theme.accent
+                }
+            }
+            Key {
+                label: "rain"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 6; height: 8
+                    color: Theme.info
+                    opacity: 0.22
+                }
+            }
+            Key {
+                label: "am"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 4; height: 4
+                    color: Theme.accent
+                }
+            }
+            Key {
+                label: "pm"
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 4; height: 4
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Theme.accent
+                }
+            }
+        }
+
+        PixelText {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            visible: legend.hov !== null
+            text: legend.hov
+                ? legend.hov.name + " " + (legend.hov.part === "am" ? "9am" : "9pm")
+                  + "   " + legend.hov.temp + "\u00b0  " + legend.hov.cond
+                  + (legend.hov.prob >= 0 ? "   rain " + legend.hov.prob + "%" : "")
+                : ""
+            color: Theme.text
+        }
+    }
+
     // ---- the ten-day graph -----------------------------------------------
     readonly property var slots: Weather.slots
     readonly property real tMin: {
@@ -75,7 +165,7 @@ Item {
     Canvas {
         id: graph
         anchors {
-            top: head.bottom; topMargin: 6
+            top: legend.bottom; topMargin: 4
             bottom: dayLabels.top; bottomMargin: 2
             left: parent.left; right: parent.right
             leftMargin: root.pad; rightMargin: root.pad
@@ -90,6 +180,22 @@ Item {
         Connections {
             target: root
             function onActiveChanged() { if (root.active) graph.requestPaint(); }
+        }
+        Connections {
+            target: root
+            function onHoverIdxChanged() { if (root.active) graph.requestPaint(); }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onPositionChanged: (mouse) => {
+                const n = root.slots.length;
+                root.hoverIdx = n < 1 ? -1
+                    : Math.max(0, Math.min(n - 1, Math.floor(mouse.x / (width / n))));
+            }
+            onExited: root.hoverIdx = -1
         }
 
         onPaint: {
@@ -168,6 +274,18 @@ Item {
                     ctx.lineWidth = 1;
                     ctx.strokeRect(x - 1.5, y - 1.5, 3, 3);
                 }
+            }
+
+            // the hover cursor, behind nothing — drawn last so it reads over
+            // the bands and the line
+            if (root.hoverIdx >= 0 && root.hoverIdx < n) {
+                const hx = tx(root.hoverIdx);
+                ctx.strokeStyle = Theme.text;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(Math.round(hx) + 0.5, 0);
+                ctx.lineTo(Math.round(hx) + 0.5, height);
+                ctx.stroke();
             }
 
             // high and low of the whole window, on the axis
