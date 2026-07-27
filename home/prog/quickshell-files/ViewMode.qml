@@ -123,10 +123,14 @@ Singleton {
     // emit a change signal and copy the array on every pointer event, which
     // would itself cost more than the thing being measured.
     property var dragTrace: []
-    function traceAdd(surfaceW) {
+    // The panel publishes its ACTUAL surface width here (shell.qml), which is
+    // what exposed the original tracking bug: it lagged the requested width, and
+    // the computed target moved with it instead of with the pointer.
+    property real surfaceWidth: 0
+    function traceAdd() {
         if (dragTrace.length < 500)
             dragTrace.push(Math.round(dragWidth) + ","
-                           + Math.round(surfaceW) + "," + liveWidth);
+                           + Math.round(surfaceWidth) + "," + liveWidth);
     }
 
     // True while liveWidth is a SNAPPED value (the entry jump, or the preview of
