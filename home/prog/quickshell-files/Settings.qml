@@ -170,7 +170,7 @@ Scope {
             }
 
             // ---- page body: scrollable, fills the rest ----
-            Flickable {
+            KineticFlickable {
                 id: scroller
                 anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
                 anchors.margins: 16

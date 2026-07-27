@@ -98,7 +98,7 @@ FloatingWindow {
         }
 
         // ---- file list ----
-        ListView {
+        KineticListView {
             id: list
             anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: toolbar.top; margins: 2 }
             clip: true

@@ -908,6 +908,86 @@ a blank desktop.
 
 ---
 
+## Scrolling: use the `Kinetic*` types, never a bare `Flickable`
+
+**Every new scroll area in this directory MUST be a `KineticListView`,
+`KineticGridView` or `KineticFlickable`** — never a bare `ListView`, `GridView`,
+`Flickable` or `ScrollView`. They are the base type with three lines bound to
+the `Kinetic` singleton and nothing else, so `model`, `delegate`, `header`,
+`section` and the attached `ListView.*`/`GridView.*` properties all behave
+exactly as before; the only thing you give up is the chance to be inconsistent.
+
+**`Kinetic.qml` is the single source of truth** for the panel's scroll physics.
+Change a number there and every scroll area changes with it; do not write a
+deceleration literal into a widget. Set `flickDeceleration` per instance only if
+that surface genuinely needs to differ, and say why in a comment.
+
+**Wheel handlers on DISCRETE controls (volume, brightness, tray `Scroll()`) MUST
+go through `WheelNotch`**, never a sign test. Declare one inside the MouseArea
+and act on `notch.steps(wheel)`.
+
+### Why the panel needs its own deceleration at all
+
+Momentum on this desktop is synthesized by the **compositor** — hyprvtb's
+`vtbKinetic` (≥2.78), `../AGENTS.md` and `docs/kinetic-scroll.md` — so it
+normally reaches every toolkit as ordinary high-resolution axis events and no
+client has to implement anything. **But hyprvtb refuses to coast over a layer
+surface, wholesale and deliberately** (`vtbKinetic.cpp`, the `layer-focus` start
+gate): the bar's brightness/volume steppers act per event, so a one-second coast
+would be forty `wpctl` spawns. Almost all of this panel *is* layer surfaces —
+the bar, every `SlidePopup`, `Launcher`, `WallpaperPicker`, `Cheatsheet`. Only
+`Settings.qml` and `FileBrowser.qml` are Quickshell `FloatingWindow`s, i.e. real
+toplevels, and only those two get compositor momentum today.
+
+So the panel supplies its own, and the job of `Kinetic.qml` is to make it feel
+like the rest of the desktop. The two models do not have the same shape and the
+arithmetic that reconciles them is written out in that file: the compositor
+decays exponentially (`v0·e^(−friction·t)`, coast `v0/friction`), Qt decelerates
+linearly (`flickDeceleration` px/s², coast `v0²/2a`), so they can only agree at
+one velocity — anchored at a brisk 1200 px/s flick, `a = v0·friction/2 = 2160`.
+Qt's default 1500 is the same as anchoring at 833 px/s, i.e. overshooting every
+flick brisker than a slow drag.
+
+**`Kinetic.friction` mirrors `plugin:hyprvtb:kinetic_friction` in
+`../hypr-files/hyprland.lua`.** If that key is retuned, this one moves with it —
+they are two files, so it is a hand-copy, and that is the one duplication the
+design could not remove.
+
+### Sign tests are the defect class
+
+`if (wheel.angleDelta.y > 0) stepUp()` treats every event as one full step. A
+touchpad is a ~125 Hz stream of events whose individual deltas are a fraction of
+a pixel (measured in the player: 226 of 413 events in one gesture carried
+`pixelDelta == 0`), so a two-finger nudge over the bar's `vol` fired dozens of
+5 % steps and spawned a `wpctl` per event. `WheelNotch` accumulates instead:
+both branches of a Qt wheel event reduce to the same unit — a real wheel click
+is `angleDelta` 120 with `pixelDelta` 0, and QtWayland sets `angleDelta = 12 ×`
+the surface-pixel delta — so it banks `pixelDelta*12` (or `angleDelta` when
+there is no pixel delta) and emits one step per `Kinetic.detent`. One physical
+wheel click stays exactly one step; 10 px of finger travel is also one step; the
+sub-notch remainder is carried, and a burst is clamped to `maxSteps`.
+
+Keeping these controls notch-based is the *right* answer, not a compromise: they
+are steppers, not scroll surfaces, and a coast that walks brightness to 0 is a
+bug. Notching them is also what would make hyprvtb's blanket layer-surface
+exemption narrowable later — the panel is no longer the reason it exists.
+
+### The reload caveat
+
+Compositor momentum is on here because of the **`kinetic` config key in
+`hyprland.lua`** (per host via `hypr-host.nix` → `host.lua`: on for `air`/`book`,
+off on `top`), which survives reloads and relogins. A runtime
+`hyprctl eval "hl.plugin.hyprvtb.kinetic_set(true)"` does **not** — `hyprctl
+reload` clears it, and so does every plugin hot-swap. Never make anything here
+depend on the runtime override being set. Nothing in this directory does: the
+`Kinetic*` types are Qt-side and work whether the compositor is coasting or not.
+
+```bash
+grep -n "kinetic" ~/nix/home/prog/hypr-files/hyprland.lua   # BOTH copies: seed-once
+```
+
+---
+
 ## Verifying
 
 The user does **all** visual, animation and interaction checks — screenshots,

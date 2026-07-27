@@ -280,7 +280,7 @@ PanelWindow {
             color: Theme.accent
         }
 
-        GridView {
+        KineticGridView {
             id: list
             focus: true
             anchors {
