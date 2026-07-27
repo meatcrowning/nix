@@ -83,20 +83,38 @@ def main():
     extra_right, border = frame_extents()
     cmds = []
     for c in hypr("clients"):
-        # Tiled windows are already handled by the exclusive zone. `hidden`
-        # windows are hyprvtb's rolled-up/minimized ones, parked off-screen on
-        # purpose — moving them would drag them back into view and lose the
-        # position the plugin restores them to. Negative workspace ids are
-        # special/scratch workspaces, which aren't part of the desktop layout.
+        # Tiled windows are already handled by the exclusive zone. Negative
+        # workspace ids are special/scratch workspaces, not part of the layout.
         if not c.get("floating") or not c.get("mapped"):
-            continue
-        if c.get("hidden"):
             continue
         if c.get("workspace", {}).get("id", 0) < 0:
             continue
 
         mon = monitors.get(c.get("monitor"))
         if not mon:
+            continue
+
+        x, y = c["at"]
+        w, h = c["size"]
+
+        # ROLLED UP vs MINIMIZED — these are NOT the same, and hyprctl's
+        # `hidden` flag means the first, not the second (vtbDeco.cpp: "A
+        # minimized window is still mapped and NOT hidden — just slid
+        # off-screen").
+        #
+        #   rolled up  -> hidden=true, but the titlebar is STILL DRAWN in place.
+        #                 It is on screen, so it must be pushed clear like
+        #                 anything else. Skipping these was the bug.
+        #   minimized  -> not hidden; parked at monitor.x + monitor.width by
+        #                 minimizeWindow(). It is deliberately off-screen and
+        #                 must be left alone, or resizing the panel would haul
+        #                 every minimized window back into view.
+        #
+        # Minimized is detected by that parked position rather than by asking
+        # the plugin: nothing in hyprctl reports it, and "entirely outside the
+        # monitor" is the property we actually care about anyway.
+        rolled = bool(c.get("hidden"))
+        if x >= mon["x"] + mon["width"] or x + w <= mon["x"]:
             continue
 
         if edge == "right":
@@ -109,30 +127,36 @@ def main():
         if avail_w <= 0:
             continue
 
-        x, y = c["at"]
-        w, h = c["size"]
         addr = c["address"]
 
-        # Work in FRAME coordinates — client rect grown by the chrome — so the
-        # titlebar is pushed clear too, then convert back to the client `at`/
-        # `size` the dispatchers speak.
-        frame_l = x - border
-        frame_w = w + extra_right + 2 * border
+        # Work in VISIBLE-BOX coordinates, then convert back to the client
+        # `at`/`size` the dispatchers speak.
+        #
+        # Rolled up, the client is not drawn at all — only the titlebar, which
+        # sits just past the client's right edge (m_rollBox = {winBox.x +
+        # winBox.w, y, totalBarW, h}). So its visible box is the bar alone, and
+        # it must never be "resized to fit": its width is the chrome's, fixed.
+        if rolled:
+            vis_l = x + w
+            vis_w = extra_right + border
+        else:
+            vis_l = x - border
+            vis_w = w + extra_right + 2 * border
 
-        # A frame too wide for what's left has to shrink, or no placement can
-        # keep it clear of the panel. The chrome is fixed-size, so all of the
-        # shrink comes off the client area.
-        new_frame_w = min(frame_w, avail_w)
-        new_w = max(1, new_frame_w - extra_right - 2 * border)
+        # A box too wide for what's left has to shrink, or no placement can keep
+        # it clear of the panel. The chrome is fixed-size, so the whole shrink
+        # comes off the client area.
+        new_vis_w = min(vis_w, avail_w)
+        new_w = w if rolled else max(1, new_vis_w - extra_right - 2 * border)
 
         # Then slide it back inside: off the right first, then clamp to the left
-        # (order matters for a frame exactly as wide as the space).
-        new_frame_l = frame_l
-        if new_frame_l + new_frame_w > avail_r:
-            new_frame_l = avail_r - new_frame_w
-        if new_frame_l < avail_l:
-            new_frame_l = avail_l
-        new_x = new_frame_l + border
+        # (order matters for a box exactly as wide as the space).
+        new_vis_l = vis_l
+        if new_vis_l + new_vis_w > avail_r:
+            new_vis_l = avail_r - new_vis_w
+        if new_vis_l < avail_l:
+            new_vis_l = avail_l
+        new_x = (new_vis_l - w) if rolled else (new_vis_l + border)
 
         if new_w != w:
             cmds.append(f'hl.dsp.window.resize({{ window = "address:{addr}", '

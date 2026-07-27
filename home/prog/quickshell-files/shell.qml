@@ -654,6 +654,12 @@ Scope {
             // to the dock width, and the collapse preview — all of which are
             // discrete jumps that should glide rather than teleport.
             implicitWidth: ViewMode.liveWidth
+            // Publish the REAL surface width for the drag trace (`qs ipc call
+            // view trace`). Diagnostic only, and single-monitor by nature — the
+            // first screen's panel wins, which is the one the fractions are
+            // measured against anyway.
+            onWidthChanged: if (screen === Quickshell.screens[0])
+                                ViewMode.surfaceWidth = width;
             Behavior on implicitWidth {
                 enabled: !ViewMode.dragging || ViewMode.snapping
                 NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
@@ -875,94 +881,14 @@ Scope {
                     }
                 }
             }
-
-            // ================= THE MODE SWITCH =================
-            // Dragging this strip along the bar's inner edge IS how the desktop
-            // changes view mode — there is no separate toggle. Pull the classic
-            // bar out far enough and it becomes the dock panel; shove the dock
-            // panel in far enough and it collapses back. ViewMode owns the
-            // thresholds and the commit; this only translates pointer motion
-            // into a width.
-            //
-            // z: 2 puts it over the accent strip (z: 1) that shares these pixels,
-            // so the grab target isn't shadowed by decoration.
-            MouseArea {
-                id: edgeGrip
-                z: 2
-                anchors {
-                    top: parent.top; bottom: parent.bottom
-                    left: bar.barLeft ? undefined : parent.left
-                    right: bar.barLeft ? parent.right : undefined
-                }
-                width: 8
-                hoverEnabled: true
-                cursorShape: Qt.SizeHorCursor
-
-                // Offset of the grab point within the grip, so the edge doesn't
-                // jump to the cursor on press.
-                property real grabOffset: 0
-
-                // Width implied by a pointer position, measured from the SCREEN
-                // EDGE the bar is anchored to — the one part of this geometry
-                // that never moves.
-                //
-                // This is ABSOLUTE, and it has to be. The first version computed
-                // the width incrementally (add this event's pointer delta to the
-                // current width) and it visibly bounced: resizing a layer surface
-                // is not synchronous — it takes a configure/ack roundtrip with
-                // the compositor — so for several events the pointer coordinates
-                // still describe the OLD surface while the requested width had
-                // already moved on. Every event then over-corrected against a
-                // width that hadn't happened yet, and the edge oscillated around
-                // the cursor.
-                //
-                // Measuring from the fixed screen edge removes the feedback loop
-                // entirely: bar.width and the pointer position are always read
-                // from the SAME frame, so their difference is exact whether or
-                // not the surface has caught up. Late frames are then merely
-                // late, never wrong.
-                //
-                // The pointer is put into the panel's frame by hand rather than
-                // with mapToItem(bar, ...): a PanelWindow is NOT a QQuickItem
-                // (it's a WaylandPanelInterface), so that call throws a
-                // conversion TypeError — silently, from inside onPressed, which
-                // means the drag simply never starts. qmllint can't see it. The
-                // grip is anchored flush to one edge of the panel's content
-                // item, so `edgeGrip.x + mx` is that same coordinate directly.
-                function widthAt(mx) {
-                    const px = edgeGrip.x + mx;
-                    return (bar.barLeft ? px : bar.width - px) + grabOffset;
-                }
-
-                onPressed: (mouse) => {
-                    grabOffset = 0;
-                    grabOffset = bar.width - widthAt(mouse.x);
-                    ViewMode.dragWidth = bar.width;
-                    ViewMode.dragTrace.length = 0;
-                    ViewMode.dragging = true;
-                }
-
-                onPositionChanged: (mouse) => {
-                    if (!ViewMode.dragging) return;
-                    ViewMode.dragWidth = widthAt(mouse.x);
-                    ViewMode.traceAdd(bar.width);
-                }
-
-                onReleased: ViewMode.commitDrag(ViewMode.dragWidth)
-                // A cancelled grab (the compositor taking the pointer, a monitor
-                // change) must still settle the bar somewhere valid rather than
-                // leaving dragging latched true forever.
-                onCanceled: ViewMode.commitDrag(ViewMode.dragWidth)
-
-                // Affordance: the inner edge brightens under the cursor, so the
-                // handle is discoverable without a visible chrome element.
-                Rectangle {
-                    anchors.fill: parent
-                    color: Theme.accent
-                    opacity: (edgeGrip.containsMouse || ViewMode.dragging) ? 0.25 : 0
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                }
-            }
         }
+    }
+
+    // The panel's resize / mode-switch handle. A separate full-screen surface
+    // per monitor, masked to an 8px strip over the panel's inner edge — see
+    // EdgeGrip.qml for why it cannot live inside the panel it resizes.
+    Variants {
+        model: Quickshell.screens
+        EdgeGrip {}
     }
 }
