@@ -710,6 +710,20 @@ containing a missing glyph falls back to another font for it and loses ~5px of
 ascent, clipping the whole line — which is why the media widget's empty-title
 placeholder is `"-"` and every "reading..." is three dots.
 
+**That rule covers hardcoded UI strings. Text that comes from OUTSIDE — track
+tags, window titles, filenames — cannot be written to suit the font, so it has
+to be mapped on the way in.** `Media.px()` does that for the player: the
+typographic punctuation the font lacks (`’ ‘ “ ” – — ‐ … − • ′ ″ ⁄ ﬁ ﬂ`, plus
+the exotic spaces) onto ASCII equivalents, applied to `dispTitle`/`dispArtist`
+and to the queue rows where they are parsed. It is **display only** — the tags
+on disk and the queue index sent back down the socket never go through it — and
+it is deliberately a lookup table, not "strip anything the font lacks": 427 of
+the 11k tracks in the library carry U+2019 and 140 carry U+2010, but ~830 have
+CJK or fullwidth titles with no ASCII form at all, and a title turned into
+question marks is worse than one drawn in the wrong font. Those still sit low;
+fixing them needs a pixel font with CJK coverage. Anything else on this panel
+that renders library or window metadata wants the same treatment.
+
 > Adding several new `.qml` files in one rebuild produces a burst of **failed**
 > reloads in `qs log` ("`X is not a type`") as home-manager writes them one at a
 > time. Harmless — the reload guard keeps the old tree up — but don't read the
