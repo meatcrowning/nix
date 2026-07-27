@@ -57,9 +57,18 @@ Window {
     onClosing: { win.saveSession(); Qt.quit(); }
 
     // ---- tabs ----
-    // Each row is { tid, seed }: tid is a stable id (survives reorder/remove so
-    // titlebar button ids and the active-tab pointer stay valid); seed is only
+    // Each row is { tid, seed, cold }: tid is a stable id (survives reorder/remove
+    // so titlebar button ids and the active-tab pointer stay valid); seed is only
     // the initial url — live navigation state stays inside each WebEngineView.
+    //
+    // `cold` marks a restored tab that has not been navigated yet. Its view is
+    // real (so tab order, ids, drag-reorder and the titlebar buttons all behave
+    // normally) but carries no url, which means no renderer process, no network
+    // and no paint for it. Restoring a session used to load every tab at once:
+    // two tabs kept Chromium busy for ~7s after the window had already appeared,
+    // for pages nobody was looking at. A cold tab warms on first activation and
+    // is an ordinary tab from then on. Every append must set this role — the
+    // first one defines it for the model.
     ListModel { id: tabs }
     property int nextTid: 1
     property int currentTab: 0
@@ -76,16 +85,31 @@ Window {
     property int dlSeq: 0   // per-download key for download toasts
 
     function newTab(url) {
-        tabs.append({ tid: nextTid, seed: url });
+        tabs.append({ tid: nextTid, seed: url, cold: false });
         nextTid += 1;
         currentTab = tabs.count - 1;
         tabRev += 1;
     }
     // like newTab but leaves focus on the current tab (middle-click a link)
     function newTabBg(url) {
-        tabs.append({ tid: nextTid, seed: (url && url !== "") ? url : homeUrl });
+        tabs.append({ tid: nextTid, seed: (url && url !== "") ? url : homeUrl, cold: false });
         nextTid += 1;
         tabRev += 1;
+    }
+    // Navigate a restored tab for the first time. Clearing `cold` is what the
+    // delegate watches; it then sets its own url from the seed.
+    function warmTab(i) {
+        if (i < 0 || i >= tabs.count) return;
+        if (!tabs.get(i).cold) return;
+        tabs.setProperty(i, "cold", false);
+        tabRev += 1;
+    }
+    // 2-letter label for a tab with no title yet (cold, or still loading):
+    // the start of its host, which is far more use than a placeholder dot.
+    function seedLabel(u) {
+        var h = ("" + (u || "")).replace(/^[a-z-]+:\/\//, "").replace(/^www\./, "");
+        h = h.replace(/[\/?#].*$/, "");
+        return h.length > 0 ? h.substring(0, 2) : "·";
     }
     function tabIndexByTid(tid) {
         for (var i = 0; i < tabs.count; i++)
@@ -119,11 +143,11 @@ Window {
     // Strip a leading notification counter — "(3) ", "[3] ", bullet markers —
     // so a site that blinks its title for unread counts doesn't flip the label
     // back and forth.
-    function tabLabel(v) {
+    function tabLabel(v, seed) {
         var t = (v && v.title) ? v.title.trim() : "";
         t = t.replace(/^\s*[\(\[]\s*\d+\s*[\)\]]\s*/, "");
         t = t.replace(/^\s*[•·*•●✱]\s*/, "").trim();
-        if (t.length === 0) return "·";
+        if (t.length === 0) return seedLabel(seed);
         return t.substring(0, 2);
     }
 
@@ -284,8 +308,13 @@ Window {
         var urls = [];
         for (var i = 0; i < tabs.count; i++) {
             var v = viewRep.count > i ? viewRep.itemAt(i) : null;
-            var u = (v && v.url) ? v.url.toString() : tabs.get(i).seed;
-            urls.push(u && u !== "" ? u : win.homeUrl);
+            // A cold tab has a real view with an EMPTY url, so the live value
+            // has to be tested as a string and the seed used when it is blank —
+            // otherwise a session saved before you ever visited that tab would
+            // write the home page over the url you actually had open.
+            var live = (v && v.url) ? ("" + v.url) : "";
+            var u = live !== "" ? live : ("" + (tabs.get(i).seed || ""));
+            urls.push(u !== "" ? u : win.homeUrl);
         }
         Session.save(urls, currentTab);
     }
@@ -341,9 +370,11 @@ Window {
         ];
         for (var i = 0; i < tabs.count; i++) {
             var v = viewRep.count > i ? viewRep.itemAt(i) : null;
-            var ttl = v && v.title ? v.title : "tab";
+            var sd = tabs.get(i).seed;
+            // a cold tab has no title yet — name it by the url it will open
+            var ttl = v && v.title ? v.title : (sd ? "" + sd : "tab");
             var asks = waitingFor(v) > 0 ? "asks · " : "";
-            arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v),
+            arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v, sd),
                        state: i === currentTab ? 1 : 0,
                        tip: asks + (i === currentTab ? "close · " + ttl : ttl), drag: true });
         }
@@ -399,8 +430,27 @@ Window {
         } else {
             var s = Session.load();
             if (s.tabs && s.tabs.length > 0) {
-                for (var i = 0; i < s.tabs.length; i++) newTab(s.tabs[i]);
-                currentTab = Math.min(Math.max(0, s.current), tabs.count - 1);
+                // Append directly rather than through newTab(): newTab moves
+                // currentTab to each tab as it is added, and a tab that is
+                // momentarily current would warm itself. Only the tab you were
+                // last on is born hot; the rest load when you first go to them.
+                //
+                // currentTab is set BEFORE the loop, and that ordering is the
+                // whole trick. A delegate's `activeTab` binding starts at the
+                // default false and evaluating it to true counts as a CHANGE, so
+                // the handler fires during construction — with currentTab still
+                // 0, tab 0 warmed itself every time and quietly loaded a page
+                // nobody asked for (caught by pointing a restored session at a
+                // local server and watching which paths were requested). Set it
+                // first and every delegate but `cur` evaluates false, which
+                // matches the default and emits nothing.
+                var cur = Math.min(Math.max(0, s.current), s.tabs.length - 1);
+                currentTab = cur;
+                for (var i = 0; i < s.tabs.length; i++) {
+                    tabs.append({ tid: nextTid, seed: s.tabs[i], cold: i !== cur });
+                    nextTid += 1;
+                }
+                tabRev += 1;
             } else {
                 newTab(homeUrl);
             }
@@ -457,6 +507,7 @@ Window {
                 id: webview
                 required property int index
                 required property string seed
+                required property bool cold
                 anchors.fill: parent
                 visible: win.currentTab === index && !win.nudging
                 profile: sharedProfile
@@ -480,7 +531,16 @@ Window {
                 // ignores a Python QWebEngineProfile) — GM shim, document-start,
                 // isolated worlds; see UserScripts in main.py
                 userScripts.collection: UserScripts.scriptObjects
-                Component.onCompleted: { zoomFactor = Zoom.level; url = seed; }
+                // A cold tab is created with NO url on purpose — that is what
+                // keeps it from spawning a renderer and loading the page.
+                Component.onCompleted: { zoomFactor = Zoom.level; if (!cold) url = seed; }
+                // …and this is where it stops being cold. Two triggers, because
+                // a tab can be made current either by becoming the active index
+                // (clicking its titlebar button) or by warmTab clearing the role
+                // directly; whichever fires first, the other is then a no-op.
+                readonly property bool activeTab: win.currentTab === index
+                onActiveTabChanged: if (activeTab && cold) win.warmTab(index)
+                onColdChanged: if (!cold && ("" + url) === "") url = seed
                 // closing this tab kills any dialog/picker it was holding — the
                 // requests die with the view, so the queues must let go of them
                 // here, while the view is still a valid key.
