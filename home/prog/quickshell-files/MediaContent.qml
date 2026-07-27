@@ -136,11 +136,26 @@ Item {
     // buys a bigger cover and a taller spectrum rather than emptiness.
     readonly property int naturalArt: 60
 
+    // The drawer's own padding, above the first queue row AND below the last.
+    // Before it there was 10px above the drawer and nothing below: the last
+    // row's bottom edge WAS the handle's top edge, measured gap=0, which is why
+    // the toggle was reported as untouchable without hitting the last track.
+    //
+    // Half of it is paid for by the gap it replaces (10 above became 6 above and
+    // 6 below), but only half — the separation does cost queue: measured, the
+    // list went from 98px to 87px, so the drawer shows ~5.5 rows where it showed
+    // ~6.1. That is the honest price of the margin and it is taken from the
+    // drawer's own padding, NOT from `DockGrid`'s row allocation, which is
+    // already down to three rows to guarantee the forecast its miniature graph.
+    // Do not buy it back by shrinking the artwork: that block is size-invariant
+    // by request (see `restSlack`).
+    readonly property int drawerPad: 6
+
     implicitWidth: 300
     // The open drawer's 90 is a CONSTANT, not `queueH`: queueH is derived from
     // the item's height, and feeding it back into implicitHeight — which is what
     // the popup takes its height FROM — is a binding loop.
-    implicitHeight: pad * 2 + top.height + 6 + naturalArt + 6 + bottom.height
+    implicitHeight: pad + drawerPad + top.height + 6 + naturalArt + 6 + bottom.height
                     + handle.height + (Media.queueOpen ? 90 : 0)
 
     // ONE line: track on the left, artist on the right. It keeps its height when
@@ -283,7 +298,7 @@ Item {
     // ~300px of inner width rather than squeezing the seekbar to nothing.
     Row {
         id: bottom
-        anchors { bottom: queueBox.top; bottomMargin: root.pad; horizontalCenter: parent.horizontalCenter }
+        anchors { bottom: queueBox.top; bottomMargin: root.drawerPad; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 22
         spacing: 6
@@ -388,8 +403,11 @@ Item {
     // as tall as the rows it was given and the artwork above it goes back to its
     // natural size instead of being squeezed by a guess. A floor of 60 keeps it
     // usable in the popup copy, which has no extra rows to give.
+    // pad above the title line, drawerPad below the transport row — the two
+    // vertical margins the layout below actually uses. It must stay EXACTLY the
+    // non-drawer height or the artwork stops being size-invariant.
     readonly property real naturalRest:
-        pad * 2 + top.height + 6 + naturalArt + 6 + bottom.height + handle.height
+        pad + drawerPad + top.height + 6 + naturalArt + 6 + bottom.height + handle.height
     // EXACTLY the height past the widget's natural size, with NO floor and NO
     // animation of its own. Both were wrong, and together they are why the cover
     // art visibly ballooned before the queue arrived.
@@ -483,7 +501,13 @@ Item {
 
         KineticListView {
             id: queueList
-            anchors { fill: parent; leftMargin: root.pad; rightMargin: root.pad }
+            anchors {
+                fill: parent
+                leftMargin: root.pad; rightMargin: root.pad
+                // Clamped, so a closed drawer (height 0) does not hand the
+                // list a NEGATIVE height on its way down.
+                bottomMargin: Math.min(root.drawerPad, queueBox.height)
+            }
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             model: Media.queue
@@ -570,7 +594,7 @@ Item {
     Item {
         id: handle
         anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-        height: 11
+        height: 14
 
         Rectangle {
             anchors.fill: parent
@@ -595,7 +619,20 @@ Item {
         }
         MouseArea {
             id: hma
+            // The TARGET is bigger than the strip. Growing the drawn chrome
+            // instead would cost a queue row for every pixel and put a heavier
+            // line across the bottom of the widget; a negative margin costs
+            // nothing at all.
+            //
+            // `drawerPad - 1`, not `drawerPad`: the extension has to stop one
+            // pixel SHORT of the gap it grows into, or it starts swallowing
+            // clicks meant for something else. Open, the pixel keeps it clear of
+            // the last queue row's own MouseArea (which fills its 16px row and
+            // plays that track). Closed there is no drawer, so it grows into the
+            // gap under the transport row instead — where the 24px buttons
+            // overhang their 22px row by a pixel at each end.
             anchors.fill: parent
+            anchors.topMargin: -(root.drawerPad - 1)
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: Media.setQueueOpen(!Media.queueOpen)
