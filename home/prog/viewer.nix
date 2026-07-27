@@ -47,9 +47,14 @@ in
 {
   home.packages = [ viewer ];
 
-  # Desktop entry so viewer shows up in the runner and can be picked as an image
-  # handler. Not forced as the default for image/* (the user's mimeapps.list has
-  # its own associations — kate, umpv); filer invokes `viewer` by name directly.
+  # Desktop entry so viewer shows up in the runner and is eligible for image and
+  # video types. Being the DEFAULT for them is set centrally, in
+  # home/prog/mime-defaults.nix. (filer invokes `viewer` by name directly and
+  # does not go through the MIME database at all.)
+  #
+  # MimeType mirrors viewer's IMAGE_EXTS + VIDEO_EXTS (apps/viewer/main.py) —
+  # keep the three in sync. Video really is played, through QtMultimedia's
+  # ffmpeg backend, with the transport controls in the hyprvtb titlebar.
   home.file.".local/share/applications/viewer.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -61,6 +66,6 @@ in
     Terminal=false
     Categories=Graphics;Viewer;AudioVideo;
     Keywords=bespoke;
-    MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;image/avif;image/tiff;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;
+    MimeType=image/png;image/jpeg;image/gif;image/webp;image/bmp;image/svg+xml;image/avif;image/jxl;image/tiff;image/x-icon;image/vnd.microsoft.icon;image/x-portable-pixmap;image/x-portable-graymap;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/x-ms-wmv;video/x-flv;video/mp2t;video/ogg;video/3gpp;
   '';
 }

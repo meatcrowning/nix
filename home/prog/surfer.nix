@@ -93,9 +93,11 @@ in
 {
   home.packages = [ surfer ];
 
-  # Desktop entry so surfer shows up in the runner. Not registered as the
-  # default browser (x-scheme-handler/http) yet — it's a prototype; flip that
-  # on deliberately once it's earned it.
+  # Desktop entry so surfer shows up in the runner and is eligible for http(s).
+  # It IS now the default browser — that association, plus Plasma's separate
+  # kdeglobals BrowserApplication key and $BROWSER, is set centrally in
+  # home/prog/mime-defaults.nix. `%U` is load-bearing for that: main.py takes
+  # the first non-flag argv as the start URL.
   home.file.".local/share/applications/surfer.desktop".text = ''
     [Desktop Entry]
     Type=Application
