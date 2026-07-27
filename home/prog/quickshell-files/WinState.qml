@@ -40,10 +40,18 @@ Singleton {
     // when the poll has not landed yet.
     property var byKey: ({})
 
+    // "class\ntitle" -> "0x…", the Hyprland window address, for the SAME windows
+    // byKey covers. It is filled in the same pass, so any key with a state also
+    // has an address: hyprvtb's `rollup(address)` is the only way to act on a
+    // window that is not the active one, and the toplevel list carries no
+    // handle the compositor would recognise.
+    property var addrByKey: ({})
+
     function keyOf(appId, title) { return (appId || "") + "\n" + (title || ""); }
     // Reading root.byKey inside the call is what registers the binding
     // dependency, so cells recolour when a poll changes something.
     function stateOf(appId, title) { return root.byKey[keyOf(appId, title)] || ""; }
+    function addrOf(appId, title) { return root.addrByKey[keyOf(appId, title)] || ""; }
 
     function refresh() { if (!clientsProc.running) clientsProc.running = true; }
 
@@ -99,18 +107,24 @@ Singleton {
                 }
 
                 const next = {};
+                const addrs = {};
                 for (const c of clients) {
                     if (!c.mapped) continue;
                     const b = box[c.monitor];
                     // 4px of slack: the park position is the monitor's right
                     // edge, and width/scale can round a pixel or two off it.
                     const parked = b && c.at && c.at[0] >= b.right - 4;
+                    const k = root.keyOf(c.class, c.title);
                     if (!c.hidden && parked)
-                        next[root.keyOf(c.class, c.title)] = "minimized";
+                        next[k] = "minimized";
                     else if (c.hidden && c.workspace && shown[c.workspace.id])
-                        next[root.keyOf(c.class, c.title)] = "rolled";
+                        next[k] = "rolled";
+                    else
+                        continue;
+                    addrs[k] = c.address || "";
                 }
                 root.byKey = next;
+                root.addrByKey = addrs;
             }
         }
     }

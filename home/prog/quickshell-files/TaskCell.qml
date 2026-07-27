@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Widgets
 
 // ONE running-program cell: app icon, focus treatment, click-to-focus /
-// click-to-minimize, right-click menu, hover tooltip.
+// click-to-unroll / click-to-minimize, right-click menu, hover tooltip.
 //
 // Extracted from Taskbar.qml so the same cell can be laid out two ways without
 // the behaviour existing twice: Taskbar.qml stacks these in a Column down the
@@ -89,17 +89,44 @@ Rectangle {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        // Left-click the ACTIVE program's icon to minimize it (hyprvtb slides it
-        // off-screen); left-click any other icon to focus it, which also slides
-        // a minimized window back in. The minimize-on-click is gated on
-        // taskbarClickMinimizes — when off, clicking the focused icon is a
-        // no-op. Right-click opens the Close / Force Quit menu.
+        // Left click, in the order the cases are tested:
+        //
+        //   ROLLED UP    un-shade it. NOT activate(): a rolled-up window is
+        //                setHidden(true), so focusing it gives the keyboard to
+        //                something with nothing on screen — and because a rolled
+        //                window can still be `activated`, the old code read it as
+        //                "the active one" and MINIMIZED it instead. This case has
+        //                to be tested before the activated one for that reason.
+        //   MINIMIZED    activate() — that is what slides it back in.
+        //   focused      minimize (hyprvtb parks it off-screen), gated on
+        //                taskbarClickMinimizes; a no-op when that is off.
+        //   anything else focus it.
+        //
+        // Un-shading also FOCUSES, because the plugin's roll-out does
+        // (Hl::focusWindow at the end of the animation) — the same thing the
+        // titlebar's own >> button does. The taskbar must not disagree with the
+        // titlebar about what un-rolling means.
+        //
+        // The plugin has no dispatcher (see ../AGENTS.md): actions are Lua
+        // functions reached through `hyprctl eval`, and `rollup` is the only one
+        // that takes a target — everything else acts on the ACTIVE window, which
+        // is never the window whose cell was clicked. The address comes from the
+        // same `hyprctl clients` poll that decided the window was rolled, so it
+        // is present whenever this branch is taken; the guard is for the poll
+        // landing between the two reads.
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
                 cellMenu.open();
                 return;
             }
-            if (cell.modelData.activated) {
+            if (cell.winState === "rolled") {
+                const addr = WinState.addrOf(cell.modelData.appId, cell.modelData.title);
+                if (addr)
+                    Quickshell.execDetached(["hyprctl", "eval",
+                        "hl.plugin.hyprvtb.rollup(\"" + addr + "\")"]);
+                return;
+            }
+            if (cell.modelData.activated && cell.winState === "") {
                 if (SettingsStore.d.taskbarClickMinimizes)
                     Quickshell.execDetached(["hyprctl", "eval", "hl.plugin.hyprvtb.minimize_active()"]);
             } else {

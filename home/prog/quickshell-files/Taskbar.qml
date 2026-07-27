@@ -12,7 +12,8 @@ import Quickshell.Wayland
 // Clicking a cell activates its window. That's also how minimized windows come
 // back: the hyprvtb titlebar plugin slides a minimized window off the right
 // screen edge and slides it back in when the window is focused again — which is
-// exactly what activate() causes.
+// exactly what activate() causes. A ROLLED-UP window is the exception, since
+// it is hidden rather than parked: clicking it un-shades it instead (TaskCell).
 //
 // Uses the Wayland foreign-toplevel list (works standalone on this build; it's
 // only the Hyprland IPC *mapping* protocol that's missing, which we don't need
