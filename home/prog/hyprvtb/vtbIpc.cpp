@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -34,6 +35,17 @@ namespace {
     int                                            g_listenFd    = -1;
     int                                            g_wakePipe[2] = {-1, -1};
     std::string                                    g_sockPath;
+
+    // Identity of the inode WE created with bind(). stop() unlinks the path
+    // only if it still names this exact socket — during a `hyprctl reload`
+    // hot-swap the incoming instance runs PLUGIN_INIT (and so bind(), which
+    // creates a NEW inode at the same path) BEFORE the outgoing instance runs
+    // PLUGIN_EXIT, so an unconditional unlink() there deletes the *successor's*
+    // name. The listener survives headless — `ss -xl` still shows it LISTENing —
+    // but no client can ever connect(), so nothing registers and every window
+    // comes up without its inner column. Empirically observed at 2.84.
+    dev_t                                          g_sockDev = 0;
+    ino_t                                          g_sockIno = 0;
 
     std::string socketPath() {
         const char* rt = std::getenv("XDG_RUNTIME_DIR");
@@ -349,6 +361,14 @@ void VtbIpc::start() {
         return;
     }
 
+    // Remember which inode is ours, so stop() cannot unlink a successor's.
+    struct stat st{};
+    if (stat(g_sockPath.c_str(), &st) == 0) {
+        g_sockDev = st.st_dev;
+        g_sockIno = st.st_ino;
+    } else
+        g_sockDev = g_sockIno = 0;
+
     g_running.store(true);
     g_thread = std::thread(ioLoop);
 }
@@ -366,7 +386,12 @@ void VtbIpc::stop() {
     close(g_wakePipe[0]);
     close(g_wakePipe[1]);
     g_listenFd = g_wakePipe[0] = g_wakePipe[1] = -1;
-    unlink(g_sockPath.c_str());
+
+    // Only if the path still names the inode we bound (see g_sockDev above).
+    struct stat st{};
+    if (g_sockIno && stat(g_sockPath.c_str(), &st) == 0 && st.st_dev == g_sockDev && st.st_ino == g_sockIno)
+        unlink(g_sockPath.c_str());
+    g_sockDev = g_sockIno = 0;
 
     std::lock_guard lk(g_lk);
     g_regs.clear();
