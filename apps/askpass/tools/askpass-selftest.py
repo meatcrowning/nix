@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Headless contract test for the askpass dialog — no screen, no user.
+
+Runs the REAL apps/askpass/main.py under QT_QPA_PLATFORM=offscreen, drives the
+QML from Python, and asserts the only three things that matter:
+
+  accept  -> exit 0, stdout is EXACTLY the typed password + "\n", nothing else
+  cancel  -> exit 1, stdout EMPTY
+  broken  -> exit 3 (so the wrapper falls back to ksshaskpass instead of
+             leaving `sudo -A` with no way to authenticate)
+
+Run it as a whole:  python3 apps/askpass/tools/askpass-selftest.py
+Internally it re-execs itself per case (`--case accept|cancel|broken`) because
+Sudo.accept/cancel end the process with os._exit, which is the behaviour under
+test.
+"""
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+APP = Path(__file__).resolve().parent.parent / "main.py"
+SECRET = "correct horse battery staple"
+
+
+def run_case(case):
+    """Child half: load main.py as a module, swap its engine for one that drives
+    the dialog once loaded, then hand control to its real main()."""
+    from PySide6.QtCore import QObject, QTimer, QMetaObject
+    from PySide6.QtQml import QQmlApplicationEngine
+
+    spec = importlib.util.spec_from_file_location("askpass_main", APP)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)   # top level only; main() is under __main__
+
+    class DrivenEngine(QQmlApplicationEngine):
+        def load(self, url):
+            super().load(url)
+            QTimer.singleShot(50, self._drive)
+
+        def _drive(self):
+            roots = self.rootObjects()
+            if not roots:
+                os._exit(9)
+            root = roots[0]
+            if case == "cancel":
+                mod_sudo = self.rootContext().contextProperty("Sudo")
+                QMetaObject.invokeMethod(mod_sudo, "cancel")
+                return
+            field = root.findChild(QObject, "pwField")
+            if field is None:
+                print("selftest: pwField not found", file=sys.stderr)
+                os._exit(9)
+            field.setProperty("text", SECRET)
+            QMetaObject.invokeMethod(root, "submit")
+
+    mod.QQmlApplicationEngine = DrivenEngine
+    sys.argv = ["main.py", "[sudo] password for lam:"]
+    mod.main()
+
+
+NOPYSIDE = None   # tempdir shadowing PySide6, set up in main()
+
+
+def child_env(case):
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    if case == "broken":
+        # Make `import PySide6` fail the way a broken Fedora python3-pyside6
+        # would, and assert the exit code the wrapper's fallback keys off.
+        env["PYTHONPATH"] = NOPYSIDE
+    return env
+
+
+def main():
+    global NOPYSIDE
+    if "--case" in sys.argv:
+        run_case(sys.argv[sys.argv.index("--case") + 1])
+        return
+
+    # A tempdir, not a directory in the repo: this tree is a live checkout with
+    # a shared git index and nothing here should leave droppings in it.
+    NOPYSIDE = tempfile.mkdtemp(prefix="askpass-selftest-")
+    Path(NOPYSIDE, "PySide6.py").write_text('raise ImportError("simulated")\n')
+
+    fails = []
+
+    def check(name, ok, detail=""):
+        print(f"{'PASS' if ok else 'FAIL'}  {name}{'  ' + detail if detail else ''}")
+        if not ok:
+            fails.append(name)
+
+    # --- accept ---
+    p = subprocess.run([sys.executable, __file__, "--case", "accept"],
+                       capture_output=True, env=child_env("accept"))
+    check("accept: exit 0", p.returncode == 0, f"rc={p.returncode} err={p.stderr[-300:]!r}")
+    check("accept: stdout is exactly the password",
+          p.stdout == (SECRET + "\n").encode(), f"stdout={p.stdout!r}")
+
+    # --- cancel ---
+    p = subprocess.run([sys.executable, __file__, "--case", "cancel"],
+                       capture_output=True, env=child_env("cancel"))
+    check("cancel: exit 1", p.returncode == 1, f"rc={p.returncode}")
+    check("cancel: stdout empty", p.stdout == b"", f"stdout={p.stdout!r}")
+
+    # --- broken (no PySide6) -> exit 3 so the wrapper falls back ---
+    p = subprocess.run([sys.executable, str(APP), "prompt:"],
+                       capture_output=True, env=child_env("broken"))
+    check("broken: exit 3", p.returncode == 3, f"rc={p.returncode}")
+    check("broken: stdout empty", p.stdout == b"", f"stdout={p.stdout!r}")
+
+    print("\n" + ("ALL PASS" if not fails else f"FAILED: {', '.join(fails)}"))
+    sys.exit(1 if fails else 0)
+
+
+if __name__ == "__main__":
+    main()
