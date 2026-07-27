@@ -655,29 +655,43 @@ Scope {
             readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
             anchors { top: true; bottom: true; left: bar.barLeft; right: !bar.barLeft }
-            // The bar's width is owned by ViewMode, not Theme, because it is no
-            // longer a constant: it is Theme.barWidth in classic mode, a
-            // fraction of the screen in dock mode, and the live pointer position
-            // while the inner edge is being dragged between the two.
+
+            // THE SURFACE NEVER RESIZES. It is always as wide as the widest the
+            // panel may ever be; the VISIBLE bar is `barBody` inside it, and
+            // that is what changes width.
             //
-            // A width that is TRACKING THE POINTER must never be animated — an
-            // animation there means the edge is always chasing the cursor from
-            // behind, which is precisely what reads as lag and bounce. So the
-            // Behavior runs for everything EXCEPT the tracked in-dock resize:
-            // the release snap, and ViewMode.snapping — the entry jump from 48px
-            // to the dock width, and the collapse preview — all of which are
-            // discrete jumps that should glide rather than teleport.
-            implicitWidth: ViewMode.liveWidth
-            // Publish the REAL surface width for the drag trace (`qs ipc call
+            // This is the same lesson as EdgeGrip.qml, applied to the thing
+            // being dragged. Resizing a layer surface is a configure/ack
+            // roundtrip with the compositor, so a surface whose width tracks the
+            // pointer is always a frame or more behind it — and everything
+            // pinned to the panel edge (the wallpaper boundary, the accent
+            // stripes, the grip's hover highlight) is computed from
+            // ViewMode.liveWidth and therefore lands EXACTLY, while the panel
+            // itself trailed. They disagreed on screen for the whole drag.
+            //
+            // With a fixed surface, the edge is an Item's x/width binding, which
+            // takes effect in the frame it is set. Everything now moves together
+            // and none of it waits on a roundtrip. It also removes the jump on
+            // release: the surface used to resize once more as the committed
+            // width landed, which read as the edge flicking away and back.
+            //
+            // The surface is transparent and input-masked to barBody, so the
+            // part of it hanging over the desktop neither paints nor takes
+            // clicks. It is only oversized WHILE DRAGGING — the rest of the time
+            // it is exactly the bar, so the mask covers the whole surface and a
+            // permanent screen-wide overlay never exists. barBody is anchored to
+            // the screen edge rather than positioned by `x`, so the surface
+            // growing at drag start and shrinking at drag end cannot move it
+            // even if those resizes land a frame late.
+            implicitWidth: ViewMode.dragging ? ViewMode.maxPx : ViewMode.liveWidth
+            color: "transparent"
+            mask: Region { item: barBody }
+
+            // Publish the VISIBLE bar width for the drag trace (`qs ipc call
             // view trace`). Diagnostic only, and single-monitor by nature — the
             // first screen's panel wins, which is the one the fractions are
             // measured against anyway.
-            onWidthChanged: if (screen === Quickshell.screens[0])
-                                ViewMode.surfaceWidth = width;
-            Behavior on implicitWidth {
-                enabled: !ViewMode.dragging || ViewMode.snapping
-                NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
-            }
+            readonly property bool _reports: screen === Quickshell.screens[0]
             // Reserve one window-border less than the bar's real width. The bar
             // still occupies its full barWidth (it's anchored right and this
             // layer sits above windows), but a maximized window is now allowed
@@ -697,201 +711,230 @@ Scope {
             exclusiveZone: (ViewMode.dragging ? ViewMode.barWidth
                                               : ViewMode.liveWidth)
                            - Theme.windowBorderWidth
-            color: Theme.bg
 
             WlrLayershell.namespace: "qs-bar"
 
-            // accent strip down the bar's inner edge — same width as the window
-            // border. Sits on the left when the bar is anchored right, and flips
-            // to the right when barEdge moves the bar to the left screen edge.
-            Rectangle {
-                z: 1
+            // THE VISIBLE BAR. Its width is the only thing that moves when the
+            // panel is resized — a plain binding, applied in the frame it
+            // changes, with no compositor roundtrip. Deliberately NOT animated
+            // while the pointer is driving it (an animation on a value that is
+            // already following the cursor is just added lag); ViewMode.snapping
+            // marks the discrete jumps — the entry from 48px to the dock width,
+            // the collapse preview — which do glide.
+            Item {
+                id: barBody
                 anchors {
                     top: parent.top; bottom: parent.bottom
-                    left: bar.barLeft ? undefined : parent.left
-                    right: bar.barLeft ? parent.right : undefined
+                    left: bar.barLeft ? parent.left : undefined
+                    right: bar.barLeft ? undefined : parent.right
                 }
-                width: 2
-                color: Theme.accent
-            }
+                width: ViewMode.liveWidth
 
-            // ================= CLASSIC LAYOUT =================
-            // The 48px bar this config has always been: launcher/tasks/tray at
-            // the top, status + clock + date + reveal toggle at the bottom.
-            // Wrapped in one Item purely so the whole thing can be crossfaded
-            // against the dock layout below — the children are unchanged and
-            // still anchor to a parent that exactly fills the bar.
-            //
-            // `visible: opacity > 0` matters: a fully faded-out layout must stop
-            // taking input, or the classic hover zones would keep firing popups
-            // from underneath the dock panel.
-            Item {
-                id: classicLayout
-                anchors.fill: parent
-                visible: opacity > 0
-                opacity: ViewMode.showDock ? 0 : 1
-                Behavior on opacity { NumberAnimation { duration: 140 } }
-
-                // ---- top cluster: launcher, workspaces, tray ----
-                Column {
-                    id: top
-                    anchors { top: parent.top; horizontalCenter: parent.horizontalCenter }
-                    anchors.topMargin: Theme.gap
-                    spacing: Theme.gap
-
-                    RunnerButton {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        active: launcher.open
-                        onToggled: launcher.open = !launcher.open
-                    }
-
-                    // divider
-                    Rectangle {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Theme.cell - 8
-                        height: 1
-                        color: Theme.border
-                    }
-
-                    Taskbar {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
-
-                    // divider
-                    Rectangle {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Theme.cell - 8
-                        height: 1
-                        color: Theme.border
-                    }
-
-                    Tray {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        hostWindow: bar
-                    }
+                Behavior on width {
+                    enabled: !ViewMode.dragging || ViewMode.snapping
+                    NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
                 }
 
-                // ---- system status, sitting just above the clock ----
-                StatusPanel {
-                    width: parent.width
+                onWidthChanged: if (bar._reports) ViewMode.surfaceWidth = width;
+
+                // the bar's own background, which the surface no longer paints
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.bg
+                }
+
+                // accent strip down the bar's inner edge — same width as the window
+                // border. Sits on the left when the bar is anchored right, and flips
+                // to the right when barEdge moves the bar to the left screen edge.
+                Rectangle {
+                    z: 1
                     anchors {
-                        bottom: statusDivider.top
-                        bottomMargin: Theme.gap * 2
-                        horizontalCenter: parent.horizontalCenter
+                        top: parent.top; bottom: parent.bottom
+                        left: bar.barLeft ? undefined : parent.left
+                        right: bar.barLeft ? parent.right : undefined
                     }
-                    // weather slides out at the BOTTOM like the clock/date popups
-                    // (anchorCenterY stays -1), not centered on its bar module
-                    onWeatherHovered: (h, cy) => weatherPanel.hoverChanged(h)
-                    // disk slides out at the BOTTOM (anchorCenterY stays -1) — it's
-                    // tall, so bottom-anchoring reads better than centering
-                    onDiskHovered: (h, cy) => diskPanel.hoverChanged(h)
-                    // hovering the VU/volume bar slides out the media widget
-                    onMediaHovered: (h) => mediaPanel.hoverChanged(h)
-                    onCpuHovered: (h, cy) => { if (h) cpuPanel.anchorCenterY = cy; cpuPanel.hoverChanged(h); }
-                    onGpuHovered: (h, cy) => { if (h) gpuPanel.anchorCenterY = cy; gpuPanel.hoverChanged(h); }
-                    onEthHovered: (h, cy) => { if (h) ethPanel.anchorCenterY = cy; ethPanel.hoverChanged(h); }
+                    width: 2
+                    color: Theme.accent
                 }
 
-                // divider between the status indicators and the clock
-                Rectangle {
-                    id: statusDivider
-                    anchors { bottom: clock.top; bottomMargin: Theme.gap * 2; horizontalCenter: parent.horizontalCenter }
-                    width: Theme.cell - 8
-                    height: 1
-                    color: Theme.border
-                }
+                // ================= CLASSIC LAYOUT =================
+                // The 48px bar this config has always been: launcher/tasks/tray at
+                // the top, status + clock + date + reveal toggle at the bottom.
+                // Wrapped in one Item purely so the whole thing can be crossfaded
+                // against the dock layout below — the children are unchanged and
+                // still anchor to a parent that exactly fills the bar.
+                //
+                // `visible: opacity > 0` matters: a fully faded-out layout must stop
+                // taking input, or the classic hover zones would keep firing popups
+                // from underneath the dock panel.
+                Item {
+                    id: classicLayout
+                    anchors.fill: parent
+                    visible: opacity > 0
+                    opacity: ViewMode.showDock ? 0 : 1
+                    Behavior on opacity { NumberAnimation { duration: 140 } }
 
-                // ---- time, on top of the date ----
-                Clock {
-                    id: clock
-                    anchors { bottom: dateDisplay.top; horizontalCenter: parent.horizontalCenter }
-                    anchors.bottomMargin: 6
-                }
+                    // ---- top cluster: launcher, workspaces, tray ----
+                    Column {
+                        id: top
+                        anchors { top: parent.top; horizontalCenter: parent.horizontalCenter }
+                        anchors.topMargin: Theme.gap
+                        spacing: Theme.gap
 
-                // ---- date (month / day / year), above the reveal button ----
-                DateDisplay {
-                    id: dateDisplay
-                    anchors { bottom: revealBtn.top; horizontalCenter: parent.horizontalCenter }
-                    anchors.bottomMargin: 6
-                }
+                        RunnerButton {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            active: launcher.open
+                            onToggled: launcher.open = !launcher.open
+                        }
 
-                // ---- reveal-all-widgets toggle, at the very bottom ----
-                Rectangle {
-                    id: revealBtn
-                    anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
-                    anchors.bottomMargin: Theme.gap
-                    width: Theme.wsCell
-                    height: 16
-                    color: shell.allRevealed ? Theme.bgAlt : "transparent"
-                    border.width: shell.allRevealed ? 2 : 1
-                    border.color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.border
-                    PixelText {
-                        anchors.centerIn: parent
-                        text: shell.allRevealed ? ">" : "<"
-                        color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.text
+                        // divider
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: Theme.cell - 8
+                            height: 1
+                            color: Theme.border
+                        }
+
+                        Taskbar {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                        }
+
+                        // divider
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: Theme.cell - 8
+                            height: 1
+                            color: Theme.border
+                        }
+
+                        Tray {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            hostWindow: bar
+                        }
+                    }
+
+                    // ---- system status, sitting just above the clock ----
+                    StatusPanel {
+                        width: parent.width
+                        anchors {
+                            bottom: statusDivider.top
+                            bottomMargin: Theme.gap * 2
+                            horizontalCenter: parent.horizontalCenter
+                        }
+                        // weather slides out at the BOTTOM like the clock/date popups
+                        // (anchorCenterY stays -1), not centered on its bar module
+                        onWeatherHovered: (h, cy) => weatherPanel.hoverChanged(h)
+                        // disk slides out at the BOTTOM (anchorCenterY stays -1) — it's
+                        // tall, so bottom-anchoring reads better than centering
+                        onDiskHovered: (h, cy) => diskPanel.hoverChanged(h)
+                        // hovering the VU/volume bar slides out the media widget
+                        onMediaHovered: (h) => mediaPanel.hoverChanged(h)
+                        onCpuHovered: (h, cy) => { if (h) cpuPanel.anchorCenterY = cy; cpuPanel.hoverChanged(h); }
+                        onGpuHovered: (h, cy) => { if (h) gpuPanel.anchorCenterY = cy; gpuPanel.hoverChanged(h); }
+                        onEthHovered: (h, cy) => { if (h) ethPanel.anchorCenterY = cy; ethPanel.hoverChanged(h); }
+                    }
+
+                    // divider between the status indicators and the clock
+                    Rectangle {
+                        id: statusDivider
+                        anchors { bottom: clock.top; bottomMargin: Theme.gap * 2; horizontalCenter: parent.horizontalCenter }
+                        width: Theme.cell - 8
+                        height: 1
+                        color: Theme.border
+                    }
+
+                    // ---- time, on top of the date ----
+                    Clock {
+                        id: clock
+                        anchors { bottom: dateDisplay.top; horizontalCenter: parent.horizontalCenter }
+                        anchors.bottomMargin: 6
+                    }
+
+                    // ---- date (month / day / year), above the reveal button ----
+                    DateDisplay {
+                        id: dateDisplay
+                        anchors { bottom: revealBtn.top; horizontalCenter: parent.horizontalCenter }
+                        anchors.bottomMargin: 6
+                    }
+
+                    // ---- reveal-all-widgets toggle, at the very bottom ----
+                    Rectangle {
+                        id: revealBtn
+                        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
+                        anchors.bottomMargin: Theme.gap
+                        width: Theme.wsCell
+                        height: 16
+                        color: shell.allRevealed ? Theme.bgAlt : "transparent"
+                        border.width: shell.allRevealed ? 2 : 1
+                        border.color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.border
+                        PixelText {
+                            anchors.centerIn: parent
+                            text: shell.allRevealed ? ">" : "<"
+                            color: (shell.allRevealed || revealMa.containsMouse) ? Theme.accent : Theme.text
+                        }
+                        MouseArea {
+                            id: revealMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: shell.toggleRevealAll()
+                        }
+                    }
+
+                    // Hover zones for the popups: the whole lower strip of the bar at
+                    // full width, not just the glyphs. The clock band pops the analog
+                    // clock; the date band pops the calendar. NoButton = hover only.
+                    MouseArea {
+                        anchors { top: clock.top; topMargin: -Theme.gap; bottom: dateDisplay.top; left: parent.left; right: parent.right }
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                        onEntered: analogClock.hoverChanged(true)
+                        onExited: analogClock.hoverChanged(false)
                     }
                     MouseArea {
-                        id: revealMa
-                        anchors.fill: parent
+                        anchors { top: dateDisplay.top; bottom: revealBtn.top; left: parent.left; right: parent.right }
                         hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: shell.toggleRevealAll()
+                        acceptedButtons: Qt.NoButton
+                        onEntered: calendar.hoverChanged(true)
+                        onExited: calendar.hoverChanged(false)
                     }
                 }
 
-                // Hover zones for the popups: the whole lower strip of the bar at
-                // full width, not just the glyphs. The clock band pops the analog
-                // clock; the date band pops the calendar. NoButton = hover only.
-                MouseArea {
-                    anchors { top: clock.top; topMargin: -Theme.gap; bottom: dateDisplay.top; left: parent.left; right: parent.right }
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                    onEntered: analogClock.hoverChanged(true)
-                    onExited: analogClock.hoverChanged(false)
-                }
-                MouseArea {
-                    anchors { top: dateDisplay.top; bottom: revealBtn.top; left: parent.left; right: parent.right }
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
-                    onEntered: calendar.hoverChanged(true)
-                    onExited: calendar.hoverChanged(false)
-                }
-            }
+                // ================= DOCK LAYOUT =================
+                // The wide panel: runner + wrapping task icons across the top, the
+                // widget grid filling everything below. Phase 1 ships the header and
+                // the grid substrate; the widgets themselves move in next.
+                Item {
+                    id: dockLayout
+                    anchors.fill: parent
+                    anchors.margins: Theme.gap
+                    visible: opacity > 0
+                    opacity: ViewMode.showDock ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 140 } }
 
-            // ================= DOCK LAYOUT =================
-            // The wide panel: runner + wrapping task icons across the top, the
-            // widget grid filling everything below. Phase 1 ships the header and
-            // the grid substrate; the widgets themselves move in next.
-            Item {
-                id: dockLayout
-                anchors.fill: parent
-                anchors.margins: Theme.gap
-                visible: opacity > 0
-                opacity: ViewMode.showDock ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 140 } }
-
-                DockHeader {
-                    id: dockHeader
-                    anchors { left: parent.left; right: parent.right; top: parent.top }
-                    runnerActive: launcher.open
-                    onRunnerToggled: launcher.open = !launcher.open
-                }
-
-                Rectangle {
-                    id: dockDivider
-                    anchors {
-                        left: parent.left; right: parent.right
-                        top: dockHeader.bottom; topMargin: Theme.gap
+                    DockHeader {
+                        id: dockHeader
+                        anchors { left: parent.left; right: parent.right; top: parent.top }
+                        runnerActive: launcher.open
+                        onRunnerToggled: launcher.open = !launcher.open
                     }
-                    height: 1
-                    color: Theme.border
-                }
 
-                DockGrid {
-                    anchors {
-                        left: parent.left; right: parent.right
-                        top: dockDivider.bottom; topMargin: Theme.gap
-                        bottom: parent.bottom
+                    Rectangle {
+                        id: dockDivider
+                        anchors {
+                            left: parent.left; right: parent.right
+                            top: dockHeader.bottom; topMargin: Theme.gap
+                        }
+                        height: 1
+                        color: Theme.border
+                    }
+
+                    DockGrid {
+                        anchors {
+                            left: parent.left; right: parent.right
+                            top: dockDivider.bottom; topMargin: Theme.gap
+                            bottom: parent.bottom
+                        }
                     }
                 }
             }
