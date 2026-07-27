@@ -431,23 +431,41 @@ MEASURES**, and this one was not. It was plain last-writer-wins into a
 singleton, and a whole session was spent reasoning from numbers belonging to a
 panel that no longer existed — `tasks got=257` from a tree whose panel was 583px
 tall, printed next to `media got=148` while the live tiles were 397 and 241 and
-reporting alongside. Two causes, both measured with a per-tile id in the log:
+reporting alongside. Measured with a per-tile id in the log:
 
-- **A reload overlaps two live panel trees.** Quickshell hands the outgoing
-  window's layer surface to the incoming object and the old tree keeps ticking —
-  timers and all — for a while after. Both own a full set of `DockTile`s
-  reporting under the SAME keys, and the dying one could win the last write and
-  keep it forever, because a tile whose height never changes again never
-  corrects it. **That overlap is BY DESIGN** — it is what stops every widget
-  blinking on a theme change — so the tree is not the thing to fix.
 - **Construction and teardown lay a tile out at a degenerate size** (`h=-87
   want=-1` inside a parent -185px tall). Nothing true can be said about a tile
-  that is not on screen.
+  that is not on screen. This is the cause that actually poisoned the table.
+- **More than one grid reports under the same keys at once**, and the reload is
+  NOT where that comes from. It is one grid PER MONITOR — a leftover
+  `tools/sandbox.sh` headless output is enough — each of which takes its own
+  `nextGen()` and therefore *wins* the table from the other, at a different
+  panel height. Check `hyprctl monitors` before trusting a surprising number.
+
+**What a reload does NOT do is leave old trees running.** The surface handoff is
+real and load-bearing, but it is a handoff of the *surface*, not an overlap of
+two ticking trees, and the earlier note here claiming "the old tree keeps ticking
+— timers and all — for a while after" was wrong. Measured on book by putting a
+2 s `Timer` + a random per-instance id into the live `Theme.qml` (a singleton, so
+exactly one instance per engine generation) and tallying the log across **19
+generations**: every generation stopped ticking *before* its successor was even
+constructed — `ticks_after_successor_born = 0`, nineteen times out of nineteen.
+Process-level over 12 forced reloads: RSS 130.9 MB → 153.7 MB immediately after
+→ **120.7 MB** three minutes later (below where it started), fds 68 → 91 → 77,
+inotify watches 123 → 125, `pgrep -c cava` never above 2. Nothing accumulates,
+so there is no per-reload ghost tree, no doubled polling and no idle battery cost
+to chase. **Five "distinct grids across four forced reloads" is just five
+sequential generations appearing in a cumulative log**, times however many
+monitors are attached — count what is ticking inside a WINDOW, never how many
+distinct ids the whole burst printed.
 
 So `DockGrid` takes a GENERATION from `ViewMode.nextGen()` at completion and
 stamps every report; older generations are dropped, a newer one wipes the table
 first, and non-positive geometry is refused outright. The instrument shows one
-panel — the newest — or nothing, never a mixture of two. `DockTile` re-reports
+panel — the newest — or nothing, never a mixture. On a multi-monitor desktop
+"the newest" means whichever MONITOR's grid completed last, which is a different
+panel height; the numbers are still self-consistent, just not necessarily the
+screen you are looking at. `DockTile` re-reports
 on `onGenChanged` because the delegates complete BEFORE the grid does, so the
 first reports go out stamped 0. The regression test is a burst of three forced
 reloads followed immediately by `live tiles`: every number must match the panel
