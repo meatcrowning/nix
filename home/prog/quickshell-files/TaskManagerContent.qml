@@ -548,7 +548,7 @@ Item {
         Item { width: root.colKill; height: 1 }
     }
 
-    ListView {
+    KineticListView {
         id: list
         anchors {
             top: header.bottom; topMargin: 3

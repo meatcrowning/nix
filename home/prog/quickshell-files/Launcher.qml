@@ -194,7 +194,7 @@ PanelWindow {
             }
 
             // results
-            ListView {
+            KineticListView {
                 id: list
                 width: parent.width
                 height: parent.height - 42

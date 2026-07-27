@@ -61,10 +61,19 @@ Column {
             hoverEnabled: true
             onEntered: parent.hovered(true, root._cy(parent))
             onExited: parent.hovered(false, 0)
+            // Discrete stepper, so it stays NOTCH-based (a coast should not
+            // walk brightness to 0) — but a notch is a fixed amount of scroll,
+            // not "one event". WheelNotch.qml has the measurements; without it
+            // a touchpad's ~125 Hz stream fired a full step per event and
+            // spawned a brightnessctl/wpctl with it. At most one spawn per
+            // event by construction: multi-notch bursts are collapsed, not
+            // replayed.
+            WheelNotch { id: notch }
             onWheel: (wheel) => {
-                if (wheel.angleDelta.y > 0) {
+                const n = notch.steps(wheel);
+                if (n > 0) {
                     if (onWheelUp) onWheelUp();
-                } else if (wheel.angleDelta.y < 0) {
+                } else if (n < 0) {
                     if (onWheelDown) onWheelDown();
                 }
             }

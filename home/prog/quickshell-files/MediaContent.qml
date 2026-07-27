@@ -224,8 +224,14 @@ Item {
                 }
                 onPressed: (mouse) => setAt(mouse.y)
                 onPositionChanged: (mouse) => { if (pressed) setAt(mouse.y); }
-                onWheel: (wheel) => SysInfo.adjustVolume(
-                    wheel.angleDelta.y > 0 ? SettingsStore.d.volumeStep : -SettingsStore.d.volumeStep)
+                // Notch-based on purpose (a discrete control), but a notch is a
+                // fixed amount of scroll rather than one event — see
+                // WheelNotch.qml.
+                WheelNotch { id: notch }
+                onWheel: (wheel) => {
+                    const n = notch.steps(wheel);
+                    if (n !== 0) SysInfo.adjustVolume(n * SettingsStore.d.volumeStep);
+                }
             }
         }
 
@@ -475,7 +481,7 @@ Item {
         height: root.queueH
         clip: true
 
-        ListView {
+        KineticListView {
             id: queueList
             anchors { fill: parent; leftMargin: root.pad; rightMargin: root.pad }
             clip: true

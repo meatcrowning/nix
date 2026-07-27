@@ -132,6 +132,13 @@ Item {
         onExited: root.hovered(false)
         onPressed: (mouse) => setFromY(mouse.y)
         onPositionChanged: (mouse) => { if (pressed) setFromY(mouse.y); }
-        onWheel: (wheel) => SysInfo.adjustVolume(wheel.angleDelta.y > 0 ? SettingsStore.d.volumeStep : -SettingsStore.d.volumeStep)
+        // Notch-based on purpose (a discrete control, see WheelNotch.qml), but
+        // a notch is a fixed amount of scroll rather than one event — the old
+        // sign test stepped the volume once per touchpad report.
+        WheelNotch { id: notch }
+        onWheel: (wheel) => {
+            const n = notch.steps(wheel);
+            if (n !== 0) SysInfo.adjustVolume(n * SettingsStore.d.volumeStep);
+        }
     }
 }

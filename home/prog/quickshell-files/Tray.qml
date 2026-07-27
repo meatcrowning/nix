@@ -68,8 +68,15 @@ Column {
                         menu.open();
                     }
                 }
-                onWheel: (wheel) =>
-                    entry.item.scroll(wheel.angleDelta.y, false)
+                // The SNI Scroll() call is a discrete step to every tray app
+                // that implements it (they read the delta in 120-unit wheel
+                // clicks), and it is a D-Bus round trip — so notch it rather
+                // than forwarding each touchpad report raw. See WheelNotch.qml.
+                WheelNotch { id: notch }
+                onWheel: (wheel) => {
+                    const n = notch.steps(wheel);
+                    if (n !== 0) entry.item.scroll(n * Kinetic.detent, false);
+                }
             }
         }
     }
