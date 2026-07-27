@@ -403,7 +403,6 @@ Scope {
         }
     }
 
-    readonly property bool _dockProbe: ViewMode.dock
     Component.onCompleted: {
         // Read settings.json before asking anything about the view mode. A
         // fresh tree is built from the shipped defaults (viewMode "classic"),
@@ -414,7 +413,6 @@ Scope {
         // onDockChanged fired. On Hyprland's event socket that was an
         // openlayer/closelayer pair per widget on every theme or wallpaper
         // change, against the rule that a reload must not remap these surfaces.
-        console.warn("RLD2 restore t=" + Date.now() + " dockBefore=" + _dockProbe + " dockAfter=" + ViewMode.dock + " pins=[" + livePinsFile.text().trim() + "]");
         SettingsStore.loadNow();
 
         // Dock mode owns the widgets; neither the reload restore nor the login
