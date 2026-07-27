@@ -422,6 +422,27 @@ Window {
         function onWake() { win.nudgeCurrent(); }
     }
 
+    // A later `surfer <url>` launch (a link clicked in another app — surfer is
+    // the system default browser) handed its URL to THIS process over the
+    // single-instance socket and exited, instead of starting a second owner of
+    // the persistent WebEngineProfile below. Open it the same way the address
+    // bar and startUrl do: normalize() -> newTab().
+    Connections {
+        target: Instance
+        function onOpenUrl(u) {
+            win.newTab(("" + u).trim() !== "" ? win.normalize("" + u) : win.homeUrl);
+            // Wayland gives a client no way to raise or focus ITSELF — that
+            // needs an xdg-activation token from the launching app — so these
+            // are very likely no-ops under Hyprland. They are free and correct
+            // wherever they do work, so they stay. Do NOT reach for `hyprctl
+            // dispatch` instead: under this Lua config it evaluates its
+            // argument as Lua and `hl.dsp.focuswindow` is nil, so it would act
+            // on the USER'S active window.
+            win.raise();
+            win.requestActivate();
+        }
+    }
+
     Component.onCompleted: {
         Titlebar.setTitleEdit(true);
         Titlebar.setLoading(currentLoading);

@@ -28,6 +28,19 @@ import time
 import urllib.request
 from pathlib import Path
 
+# ---- single instance, BEFORE anything expensive -----------------------------
+# surfer is the system default browser, so every link clicked elsewhere runs
+# `surfer <url>` — and Main.qml's persistent WebEngineProfile can only be owned
+# by ONE process. If a surfer is already up, hand it the URL and exit right
+# here: `singleton` is stdlib-only and Qt-free precisely so this path never pays
+# for importing PySide6 or initializing Chromium. Every failure inside it means
+# "carry on and launch normally". See apps/surfer/singleton.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import singleton  # noqa: E402
+
+if __name__ == "__main__":
+    singleton.try_handoff(sys.argv[1:])   # exits 0 if a running surfer took it
+
 from PySide6.QtCore import (QObject, Slot, Signal, QUrl, QFileSystemWatcher, Property,
                             QBuffer, QIODevice, QEvent, Qt, QPoint, QCoreApplication)
 from PySide6.QtGui import QGuiApplication, QColor, QWheelEvent
@@ -37,7 +50,8 @@ from PySide6.QtWebEngineCore import (QWebEngineScript, QWebEngineUrlScheme,
                                      QWebEngineUrlSchemeHandler, QWebEnginePermission,
                                      QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo,
                                      QWebEngineUrlRequestJob, QWebEngineProfile)
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from PySide6.QtNetwork import (QNetworkAccessManager, QNetworkRequest,
+                               QLocalServer)
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -1749,6 +1763,75 @@ class Cosmetic(QObject):
         return self._inject(self._css(sels, {}), "")
 
 
+class SingleInstance(QObject):
+    """Server half of the single-instance handoff — client is `singleton.py`,
+    which documents the wire protocol.
+
+    A QLocalServer is an ordinary AF_UNIX SOCK_STREAM listener, so the stdlib
+    client in singleton.py talks to it directly with no Qt on that side.
+
+    Failure is never fatal: if the address cannot be bound we simply run without
+    a server (subsequent launches then start their own process, i.e. exactly
+    today's behaviour) rather than refusing to be a browser.
+    """
+
+    openUrl = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._server = None
+        self._buf = {}
+        path = singleton.socket_path()
+        if not singleton.enabled():
+            return
+        try:
+            srv = QLocalServer(self)
+            # 0600. The path is usually inside $XDG_RUNTIME_DIR (already
+            # 0700-per-user) but the /tmp fallback is not.
+            srv.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
+            # NO removeServer() here. singleton.send() already unlinked the
+            # address if — and only if — a connect to it failed; a listen that
+            # fails now means another surfer won the startup race and is live at
+            # that address, and stealing it would leave TWO half-owners.
+            if not srv.listen(path):
+                sys.stderr.write(
+                    f"surfer: single-instance listen on {path} failed "
+                    f"({srv.errorString()}) — running without handoff\n")
+                return
+            srv.newConnection.connect(self._accept)
+            self._server = srv
+        except Exception as e:
+            sys.stderr.write(f"surfer: single-instance server failed ({e})\n")
+
+    def _accept(self):
+        while self._server is not None and self._server.hasPendingConnections():
+            c = self._server.nextPendingConnection()
+            if c is None:
+                return
+            self._buf[c] = b""
+            c.readyRead.connect(lambda c=c: self._read(c))
+            c.disconnected.connect(lambda c=c: self._buf.pop(c, None))
+
+    def _read(self, c):
+        try:
+            self._buf[c] = self._buf.get(c, b"") + bytes(c.readAll())
+        except RuntimeError:            # connection died mid-read
+            return
+        while b"\n" in self._buf.get(c, b""):
+            line, _, rest = self._buf[c].partition(b"\n")
+            self._buf[c] = rest
+            self._handle(c, line.decode("utf-8", "replace").strip())
+
+    def _handle(self, c, line):
+        try:
+            c.write(b"OK\n")
+            c.flush()
+        except RuntimeError:
+            pass
+        if line.startswith("OPEN"):
+            self.openUrl.emit(line[4:].strip())
+
+
 def main():
     # air (Fedora/Asahi) has no working VA-API or Vulkan (the GPU logs show
     # vaInitialize failing + Vulkan disabled), and Chromium's handling of video
@@ -1817,11 +1900,15 @@ def main():
     app.setOrganizationName("surfer")  # keys the QtWebEngine profile dirs
     app.setDesktopFileName("surfer")
 
-    start_url = ""
-    for arg in sys.argv[1:]:
-        if not arg.startswith("-"):
-            start_url = arg
-            break
+    # One rule for "which argv is the URL", shared with the handoff client so a
+    # second launch can never disagree with the first about what it was asked
+    # to open.
+    start_url = singleton.pick_url(sys.argv[1:])
+
+    # We got here, so no other surfer answered the probe at import time: become
+    # the server. Later `surfer <url>` launches hand their URL to us instead of
+    # contending for the Chromium profile.
+    instance = SingleInstance(app)
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -1863,6 +1950,7 @@ def main():
     ctx.setContextProperty("gpuProbeJs", GPU_PROBE_JS if ON_AIR else "")
     ctx.setContextProperty("downloadDir", download_dir)
     ctx.setContextProperty("startUrl", start_url)
+    ctx.setContextProperty("Instance", instance)
     # QML overlays in this window (the file picker) see wheel events that
     # ZoomFilter has already divided by WHEEL_GAIN for the web view; this is
     # what their WheelScroll multiplies back by. One source: pylib/kinetic.py.
