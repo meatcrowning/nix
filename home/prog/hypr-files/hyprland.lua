@@ -219,11 +219,20 @@ hl.config({
             -- `hyprctl eval "hl.plugin.hyprvtb.kinetic_set('friction', X)"`:
             -- 2.6 floaty, 3.6 mac-anchored, 5.2 snappy. coast = v0/friction.
             kinetic_friction      = 3.6,
-            -- Empty: momentum everywhere it is safe. viewer used to be denied
-            -- because its wheel ZOOMS and was sign-only (12 events saturated
-            -- 1..8); that handler is delta-proportional now, so a coast there
-            -- just keeps zooming smoothly and the clamp still holds.
-            kinetic_deny_classes  = "",
+            -- Deny only clients whose wheel drives a DISCRETE, state-changing
+            -- action rather than scrolling content — a coast fires those dozens
+            -- of times. mpv is the live one: its builtin bindings are
+            -- `add volume ±2` vertically and `seek ∓10` horizontally (verified
+            -- via mpv's own input-bindings IPC property), and Fedora's mpv on
+            -- book is Wayland-native (class `mpv`), so momentum does reach it.
+            -- vlc (`add volume`, hotkeys-y-wheel-mode) and feh (next/prev image)
+            -- are X11-only here and already excluded by kinetic_deny_xwayland,
+            -- but are listed so the policy survives that default being flipped.
+            -- Everything else gets momentum: viewer used to be denied because
+            -- its wheel ZOOMS and was sign-only (12 events saturated 1..8); that
+            -- handler is delta-proportional now, so a coast there just keeps
+            -- zooming smoothly and the clamp still holds.
+            kinetic_deny_classes  = "mpv,vlc,feh",
         },
     },
 })
