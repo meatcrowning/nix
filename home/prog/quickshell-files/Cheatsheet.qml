@@ -16,6 +16,13 @@ PanelWindow {
 
     property bool open: false
 
+    // True only for the length of a close animation, so the card's slide
+    // Behavior can be gated to "opening or closing" — see the note on it. At
+    // rest the card must snap to its endpoint rather than animate, or a panel
+    // resize drags the shut sheet across the screen.
+    property bool _closing: false
+    Timer { id: closeAnim; interval: 260; onTriggered: root._closing = false }
+
     // Stay mapped through the slide-out so the close animation can play out,
     // then hide once the card has travelled back off the right edge.
     visible: open || card.x < card.hidden - 1
@@ -119,6 +126,10 @@ PanelWindow {
         if (open) {
             refresh();
             keys.forceActiveFocus();
+        } else {
+            // arm the slide-out; see the _closing note above
+            _closing = true;
+            closeAnim.restart();
         }
     }
 
@@ -184,8 +195,17 @@ PanelWindow {
         // ViewMode.barWidth, not Theme.barWidth: the bar is only 48px wide in
         // classic mode, and in dock mode it takes a third of the screen — so
         // sizing off the fixed setting would run the card under the panel.
-        readonly property real avail: root.screen ? root.screen.width - ViewMode.barWidth
-                                                  : parent.width
+        //
+        // The fallback is ViewMode.screenWidth, NOT parent.width. This is a
+        // single instance with no `screen` assigned, so the fallback is the path
+        // actually taken — and parent.width is this window's own width, which
+        // depends on whether it is mapped, which depends on `visible`, which is
+        // derived from card.x, which is derived from this. Qt reported exactly
+        // that: "Binding loop detected for property avail". Reading the screen
+        // width from ViewMode instead is a value nothing here can feed back into.
+        readonly property real avail: (root.screen ? root.screen.width
+                                                   : ViewMode.screenWidth)
+                                      - ViewMode.barWidth
         width: Math.round(avail * 2 / 3)
 
         // Slide in horizontally from the right edge — out from behind the bar.
@@ -193,7 +213,22 @@ PanelWindow {
         readonly property real shown: avail - width - Theme.gap
         readonly property real hidden: avail
         x: root.open ? shown : hidden
-        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        // A CLOSED card must never animate. `hidden` is derived from `avail`,
+        // which changes every time the panel is resized — and with the Behavior
+        // unconditionally on, that change animated the closed card from its old
+        // resting place to its new one over 220ms. Because the window's
+        // `visible` is derived from `x < hidden`, that mapped the surface and
+        // drew the card mid-slide, now left of the panel's edge: the keybindings
+        // sheet visibly swept across the desktop on every panel resize.
+        //
+        // Gated to opening/closing only, the resting x tracks `hidden` instantly
+        // and the window never maps. General rule for these slide popups: if an
+        // endpoint can move while the popup is shut, the Behavior has to be
+        // gated, or the popup will animate itself into view.
+        Behavior on x {
+            enabled: root.open || root._closing
+            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
 
         color: Theme.bg
         border.color: Theme.windowBorder
