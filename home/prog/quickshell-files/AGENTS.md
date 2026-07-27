@@ -988,6 +988,45 @@ grep -n "kinetic" ~/nix/home/prog/hypr-files/hyprland.lua   # BOTH copies: seed-
 
 ---
 
+## On book the panel can only exec what FEDORA ships
+
+`qs -d` is started by Hyprland, and on book Hyprland is started by the **Fedora**
+session — so the panel's PATH is `/usr/local/sbin:…:/bin` and nothing else. No
+nix profile. (`tr '\0' '\n' < /proc/$(pgrep -x qs)/environ | grep ^PATH`; even
+`/usr/bin/qs` is the rpm quickshell there.) On `top` everything is nix, so the
+difference is invisible until a feature simply stops existing on one machine.
+
+**`execDetached` has no stdout and no exit code**, so a missing binary is a
+perfect silent no-op. That is exactly what happened to `hyprsunset` — a nix-only
+package with no Fedora rpm — and with it night light *and* negative brightness,
+for their whole life on book: `sh: exec: hyprsunset: not found`, while
+`SettingsApply` set `_sunsetUp = true` on the next line. Nothing else in the
+chain was wrong (hyprsunset 0.4.0 binds `hyprland-ctm-control-v1` v2 against the
+rpm 0.55.4 compositor, and Fedora's own `hyprctl hyprsunset gamma|temperature`
+drives its socket fine — the dim is a CTM the compositor applies in its own
+render pass, so Asahi's lack of a DRM gamma LUT never enters into it).
+
+So **before you exec a binary from QML, check it exists on a stock Fedora
+PATH.** If it doesn't, fall back rather than hardcoding — `~/.nix-profile/bin`
+is book's user profile, but on `top` home-manager is a NixOS module and that
+path does not exist at all (it is `/etc/profiles/per-user/lam/bin`):
+
+```qml
+readonly property string pathFix:
+    "command -v foo >/dev/null || PATH=\"$HOME/.nix-profile/bin:$PATH\"; "
+```
+
+```bash
+# the audit, from this directory:
+grep -rhno 'execDetached(\[\s*"[^"]*"' *.qml | sed 's/.*"\(.*\)"/\1/' | sort -u \
+  | while read b; do [ -x /usr/bin/$b ] || [ -x /usr/sbin/$b ] || echo "MISSING: $b"; done
+```
+
+It currently reports one more: **`filer`** (`DiskContent.qml`'s mount click) is
+nix-only too, so that click does nothing on book — same class, not yet fixed.
+
+---
+
 ## Verifying
 
 The user does **all** visual, animation and interaction checks — screenshots,

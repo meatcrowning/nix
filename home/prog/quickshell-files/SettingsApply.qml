@@ -86,6 +86,41 @@ Item {
     property bool _sunsetOurs: false
     property bool _sunsetProbed: false
 
+    // `hyprsunset` is a NIX package, and on book the panel does NOT inherit a
+    // PATH that can see it. Fedora Asahi starts the session, so Hyprland — and
+    // therefore `qs -d`, which it execs — runs with the stock
+    // /usr/local/sbin:…:/bin and nothing else (`tr '\0' '\n' < /proc/<qs>/environ`).
+    // Fedora ships no hyprsunset rpm, so the launch line's `exec hyprsunset`
+    // died with `sh: exec: hyprsunset: not found`, silently: execDetached has
+    // no stdout and `_sunsetUp` was set true optimistically the line after.
+    // That, and nothing else, is why negative brightness and night light were
+    // a no-op on book for their whole life — the rest of the chain is fine
+    // (hyprsunset 0.4.0 binds hyprland-ctm-control-v1 v2 against the rpm
+    // compositor, and Fedora's own hyprctl 0.55.4 drives its socket happily).
+    //
+    // So fall back to the user's nix profile if the name doesn't resolve. Only
+    // as a fallback: on top hyprsunset IS on PATH, and its profile is
+    // /etc/profiles/per-user/lam/bin — `~/.nix-profile` doesn't even exist
+    // there, home-manager being a NixOS module. Nothing else in this launch
+    // line is nix-only (sh, pkill, sleep, hyprctl all come from the distro).
+    readonly property string sunsetPathFix:
+        "command -v hyprsunset >/dev/null || PATH=\"$HOME/.nix-profile/bin:$PATH\"; "
+
+    // One-shot: say so in `qs log` if hyprsunset cannot be found even with the
+    // fallback, rather than leaving the brightness keys to walk into a region
+    // that quietly does nothing.
+    Process {
+        id: sunsetWhich
+        running: true
+        command: ["sh", "-c", root.sunsetPathFix + "command -v hyprsunset"]
+        onExited: (code) => {
+            if (code !== 0)
+                console.warn("SettingsApply: hyprsunset not found on PATH or in "
+                    + "~/.nix-profile/bin — night light and negative brightness "
+                    + "will do nothing.");
+        }
+    }
+
     Process {
         id: sunsetProbe
         command: ["pgrep", "-x", "hyprsunset"]
@@ -111,7 +146,8 @@ Item {
         root._sunsetOurs = true;
         if (!root._sunsetUp) {
             Quickshell.execDetached(["sh", "-c",
-                "pkill -x hyprsunset; sleep 0.3; exec hyprsunset -t "
+                "pkill -x hyprsunset; sleep 0.3; " + root.sunsetPathFix
+                + "exec hyprsunset -t "
                 + root.sunsetTemp + " -g " + root.sunsetGamma]);
             root._sunsetUp = true;
         } else {
