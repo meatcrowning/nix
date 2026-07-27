@@ -47,6 +47,8 @@ namespace {
     dev_t                                          g_sockDev = 0;
     ino_t                                          g_sockIno = 0;
 
+    std::atomic<int>                               g_nClients{0}; // dumpJson() only
+
     std::string socketPath() {
         const char* rt = std::getenv("XDG_RUNTIME_DIR");
         return std::string(rt ? rt : "/tmp") + "/hyprvtb-buttons.sock";
@@ -328,10 +330,12 @@ namespace {
                 if (fd >= 0)
                     clients.push_back(SClient{fd});
             }
+            g_nClients.store((int)clients.size(), std::memory_order_relaxed); // dumpJson() only
         }
 
         for (auto& c : clients)
             close(c.fd);
+        g_nClients.store(0, std::memory_order_relaxed);
     }
 }
 
@@ -396,6 +400,32 @@ void VtbIpc::stop() {
     std::lock_guard lk(g_lk);
     g_regs.clear();
     g_regFd.clear();
+}
+
+std::string VtbIpc::dumpJson() {
+    // "named" is the failure this exists for: the listener can be alive while
+    // its filesystem name is gone (a swap-time unlink), in which case no client
+    // can ever connect and every inner column stays empty.
+    const std::string PATH = g_sockPath.empty() ? socketPath() : g_sockPath;
+    struct stat       st{};
+    const bool        NAMED = stat(PATH.c_str(), &st) == 0;
+
+    std::string out = "{\"running\":" + std::string(g_running.load() ? "true" : "false") + ",\"listenFd\":" + std::to_string(g_listenFd) + ",\"path\":\"" + PATH +
+        "\",\"named\":" + (NAMED ? "true" : "false") + ",\"clients\":" + std::to_string(g_nClients.load(std::memory_order_relaxed)) +
+        ",\"serial\":" + std::to_string(VtbIpc::serial.load(std::memory_order_relaxed)) + ",\"regs\":[";
+
+    std::lock_guard lk(g_lk);
+    bool            first = true;
+    for (const auto& [pid, reg] : g_regs) {
+        if (!first)
+            out += ",";
+        first = false;
+        out += "{\"pid\":" + std::to_string(pid) + ",\"buttons\":" + std::to_string(reg.buttons.size()) +
+            ",\"titleEdit\":" + (reg.titleEdit ? "true" : "false") + ",\"loading\":" + (reg.loading ? "true" : "false") +
+            ",\"playbar\":" + (reg.playbar ? "true" : "false") + ",\"footer\":" + (reg.footer.empty() ? "false" : "true") + "}";
+    }
+    out += "]}";
+    return out;
 }
 
 bool VtbIpc::get(pid_t pid, SVtbAppReg& out) {

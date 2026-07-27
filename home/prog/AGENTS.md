@@ -60,6 +60,18 @@ atomically with a `seq` freshness token. Those paths are `$HOME`-relative, so a
 nested harness instance (`HOME=$RUN/home`) is isolated for free. Follow that
 pattern.
 
+**Empty inner column? Dump the app-button server before touching the plugin:**
+
+```bash
+hyprctl eval "hl.plugin.hyprvtb.ipc_dump()"      # -> ~/.local/state/hyprvtb/ipc-dump.json
+```
+
+It separates the three causes that all look identical on screen: `"named":
+false` (the socket lost its filesystem name — the listener is alive but
+unreachable, see 2.85), no entry in `regs` for the window's pid (the app never
+connected, or connected under a different pid than `getPID()` reports for its
+window), or a `regs` entry that IS there, which moves the hunt to rendering.
+
 Also note `hyprctl keyword` refuses outright here ("keyword can't work with
 non-legacy parsers") — use `hyprctl eval`. And dispatchers are `hl.dsp.*`
 objects passed to `hyprctl dispatch`; a bare dispatcher name is a nil global.

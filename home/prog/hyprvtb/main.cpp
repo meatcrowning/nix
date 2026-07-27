@@ -885,6 +885,33 @@ static int luaKineticCancel(lua_State* L) {
     return 0;
 }
 
+// lua: hyprvtb.ipc_dump() — publish the app-button server's state to
+// $HOME/.local/state/hyprvtb/ipc-dump.json. `hyprctl eval` has no value
+// channel (it prints only "ok"), so like kinetic_dump this answers through a
+// file. Tells you which of the three "no inner column" causes you have: the
+// socket lost its name, the app never connected, or it connected under a pid
+// that isn't the window's.
+static int luaIpcDump(lua_State* L) {
+    const auto        BODY = VtbIpc::dumpJson();
+    std::error_code   ec;
+    const auto        DIR = std::filesystem::path(vtbStateDir());
+    std::filesystem::create_directories(DIR, ec);
+    const auto FINAL = DIR / "ipc-dump.json";
+    const auto TMP   = DIR / "ipc-dump.json.tmp";
+    {
+        std::ofstream f(TMP, std::ios::trunc);
+        if (!f.good())
+            return 0;
+        f << BODY << "\n";
+        if (!f.good())
+            return 0;
+    }
+    std::filesystem::rename(TMP, FINAL, ec);
+    if (ec)
+        std::filesystem::remove(TMP, ec);
+    return 0;
+}
+
 static int luaSaveSession(lua_State* L) {
     if (g_pGlobalState)
         vtbSaveSession();
@@ -1215,6 +1242,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_all", ::luaCloseAll);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "push_rolled", ::luaPushRolled);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "ipc_dump", ::luaIpcDump);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_set", ::luaKineticSet);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_test", ::luaKineticTest);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "kinetic_dump", ::luaKineticDump);
@@ -1265,7 +1293,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.85"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.86"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
