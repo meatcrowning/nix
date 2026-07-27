@@ -14,6 +14,16 @@ import QtQuick
 // to a fractional pixel height that lands between the font's design grid and
 // reintroduces blur. Integer pixel sizes on the 16px grid stay sharp.
 Text {
+    // PLAIN TEXT, ALWAYS. QML's Text defaults to AutoText, which sniffs for
+    // HTML and INTERPRETS it — so any string this app did not write itself (a
+    // filename, an ID3 tag, a web page title, a JS alert() body, a portal
+    // caller's dialog title) could style the chrome, hide text, or pull a
+    // remote <img>. Every label in every one of these apps goes through this
+    // type, so pinning it here is the whole defence. Nothing in this tree
+    // relies on markup being rendered: the one ingest point that receives it
+    // (the panel's Notifications.plain()) strips tags instead.
+    textFormat: Text.PlainText
+
     font.family: Theme.font
     font.pixelSize: Theme.fontSize
     font.hintingPreference: Font.PreferFullHinting
