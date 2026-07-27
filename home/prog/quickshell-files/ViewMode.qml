@@ -235,5 +235,42 @@ Singleton {
     // reload) the windows are already wherever the user left them, and a reload
     // is not a width change. The -1 sentinel above is what distinguishes "first
     // observation" from "the panel grew".
-    Component.onCompleted: applyReserve()
+    // ---- the reload settle -----------------------------------------------
+    // A RELOAD MUST NOT ANIMATE. Quickshell rebuilds the whole QML tree on every
+    // theme or wallpaper change, and the tree is built before the settings have
+    // been read back off disk — so for the first moments of a reload every
+    // consumer of this singleton sees the SHIPPED DEFAULTS: viewMode "classic",
+    // dockWidthFrac 0.15. Measured on book, in dock mode at 356px, the sequence
+    // is barWidth 48 -> 230 -> 356 within ~30ms of "Configuration Loaded".
+    //
+    // The values landing late is harmless on its own: it happens inside the load
+    // pass, so nothing renders in between. What is NOT harmless is that every
+    // Behavior in the tree is armed by then, so those two steps were played as
+    // ANIMATIONS — the panel visibly grew from the classic bar out to the dock
+    // width, the classic layout faded out behind the dock one, and the wallpaper
+    // slid across the screen over 260ms. That is the "the panel fails to hot
+    // reload in place" report: the desktop re-entered dock mode instead of
+    // simply being in it.
+    //
+    // So: everything that animates a view-mode change gates its Behavior on
+    // `!ViewMode.settling`. Anything that changes while this is true snaps.
+    // It is deliberately a wall-clock window rather than a signal from
+    // SettingsStore — the values arrive from several independent sources (the
+    // settings file, Quickshell.screens, the panel's own surface size) and the
+    // gate has to outlast the last of them, not the first.
+    property bool settling: true
+    Timer {
+        id: settleTimer
+        interval: 400
+        running: true
+        onTriggered: {
+            root.settling = false;
+            // Seed _lastReservePx from the SETTLED width. Done here rather than
+            // at completion because at completion `dock` is still the default
+            // false, which would seed 0 and make the next release look like the
+            // panel had grown from nothing and push every window.
+            root._lastReservePx = -1;
+            root.applyReserve();
+        }
+    }
 }

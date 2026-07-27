@@ -97,6 +97,64 @@ qs ipc call state carried   # sizes of each carried blob + live buffer lengths
 Poll that repeatedly across a forced reload: all non-zero and `cpuHist` counting
 up monotonically means the swap worked; a reset to 0 means something regressed.
 
+### A reload builds the tree from the shipped DEFAULTS — so it must not animate
+
+Carrying the state across is only half of it. The other half is that **every
+binding in a fresh tree is first evaluated before `settings.json` has been read
+back**, so for the first moments of a reload the whole desktop believes it is in
+the shipped default configuration: `viewMode` "classic", `dockWidthFrac` 0.15,
+`barWidth` 48. Measured in dock mode at 356px (`console.warn` on
+`ViewMode.barWidth`, book):
+
+```
+Reloading configuration...
+  vm.barWidth -> 48   dock=false        <- shipped defaults
+  wp.w        -> 1                      <- surface has no size yet either
+  wp.w        -> 1488                   <- classic-width wallpaper
+Configuration Loaded
+  vm.barWidth -> 230  dock=true         <- default dockWidthFrac
+  vm.barWidth -> 356  dock=true         <- the real one, ~25ms later
+```
+
+That correction is harmless *as a correction* — it lands inside the load pass,
+before a frame. What was not harmless is that the Behaviors were already armed,
+so it was played as an ANIMATION: the panel grew out of the screen edge over
+200ms, the classic layout crossfaded away behind the dock, and the wallpaper
+slid across the screen over 260ms (seventeen intermediate widths in the trace).
+The user's report was that the larger panel "fails to hot reload in place" —
+correctly, because the desktop was visibly *re-entering* dock mode on every
+theme or wallpaper change rather than simply being in it.
+
+**So `ViewMode.settling` is true for the first 400ms of every tree, and
+everything that animates a view-mode change gates its `Behavior` on it**: the
+bar's width and the two layout crossfades (`shell.qml`), the wallpaper's
+`visibleArea` x/width (`WallpaperLayer.qml`), the dock tiles' y/height
+(`DockTile.qml`). Anything that changes during the settle SNAPS. It is a
+wall-clock window rather than a signal from `SettingsStore`, because the values
+arrive from three independent places — the settings file, `Quickshell.screens`,
+and the compositor telling the surface its size — and the gate has to outlast
+the last of them.
+
+- **Add a `Behavior` on anything that follows a persisted geometry value and you
+  must gate it too**, or you have re-added the glitch for that one widget.
+- It cannot be fixed by loading the settings earlier. Both alternatives were
+  tried and measured: `FileView`'s own `blockLoading` initial load and an
+  explicit `reload()` forced from a binding's side effect *both* still leave the
+  first evaluation seeing `viewMode: "classic"`, because bindings run before any
+  `Component.onCompleted` in the tree and a singleton's completion is at the end
+  of the pass. `SettingsStore` does the end-of-pass `reload()` anyway, to bound
+  how late the values can be; the gate is what makes it invisible.
+- `ViewMode.applyReserve()` is seeded from the settle timer, not from
+  `Component.onCompleted`. At completion `dock` is still the default `false`, so
+  `_lastReservePx` was seeded 0 — and the next drag release then looked like the
+  panel had grown from nothing and pushed every floating window.
+
+```bash
+qs ipc call view geom     # ...dragging=false settling=false
+```
+
+`settling=true` when nothing is happening means the timer never fired.
+
 ---
 
 ## Two view modes, and the drag handle IS the switch

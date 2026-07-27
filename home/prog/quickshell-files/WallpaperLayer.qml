@@ -84,8 +84,20 @@ PanelWindow {
         width: Math.max(1, parent.width - ViewMode.barWidth)
         clip: true
 
-        Behavior on x { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic } }
-        Behavior on width { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic } }
+        // Gated on the reload settle. A fresh tree is built before the settings
+        // have been read back and before the surface has been told its size, so
+        // this Item is created at width 1 against a default-classic bar and only
+        // then learns the truth — which, animated, is the wallpaper visibly
+        // sliding across the screen on every theme or wallpaper change. During
+        // the settle it snaps; after it, a committed panel width still glides.
+        Behavior on x {
+            enabled: !ViewMode.settling
+            NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic }
+        }
+        Behavior on width {
+            enabled: !ViewMode.settling
+            NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic }
+        }
 
         // The two frames of the cross-fade. Only one is showing at a time; a new
         // wallpaper is loaded into whichever is hidden and revealed once it has

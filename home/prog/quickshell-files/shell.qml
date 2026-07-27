@@ -482,6 +482,7 @@ Scope {
                 + " enterPx=" + Math.round(ViewMode.enterPx)
                 + " exitPx=" + Math.round(ViewMode.exitPx)
                 + " dragging=" + ViewMode.dragging
+                + " settling=" + ViewMode.settling
                 + " samples=" + ViewMode.dragTrace.length;
         }
         function trace(): string { return ViewMode.dragTrace.join(" "); }
@@ -807,8 +808,14 @@ Scope {
                 }
                 width: ViewMode.liveWidth
 
+                // ...and NOT while the tree is settling after a reload. The
+                // panel is built from the shipped settings defaults — a 48px
+                // classic bar — and only learns the real dock width a moment
+                // later, inside the same load pass. Animated, that plays as the
+                // panel growing out of the screen edge on every theme or
+                // wallpaper change: a re-entry, not a state change in place.
                 Behavior on width {
-                    enabled: !ViewMode.dragging || ViewMode.snapping
+                    enabled: (!ViewMode.dragging || ViewMode.snapping) && !ViewMode.settling
                     NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
                 }
 
@@ -873,7 +880,14 @@ Scope {
                     anchors.fill: parent
                     visible: opacity > 0
                     opacity: ViewMode.showDock ? 0 : 1
-                    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(140) } }
+                    // Gated on the settle for the same reason as the width
+                    // above: showDock is false until the settings land, so
+                    // without it every reload in dock mode crossfades the
+                    // classic bar out from under the dock.
+                    Behavior on opacity {
+                        enabled: !ViewMode.settling
+                        NumberAnimation { duration: ViewMode.ms(140) }
+                    }
 
                     // ---- top cluster: launcher, workspaces, tray ----
                     Column {
@@ -1012,7 +1026,10 @@ Scope {
                     anchors.margins: Theme.gap
                     visible: opacity > 0
                     opacity: ViewMode.showDock ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(140) } }
+                    Behavior on opacity {
+                        enabled: !ViewMode.settling
+                        NumberAnimation { duration: ViewMode.ms(140) }
+                    }
 
                     DockHeader {
                         id: dockHeader
