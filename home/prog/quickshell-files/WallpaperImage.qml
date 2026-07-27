@@ -39,7 +39,7 @@ Image {
     sourceSize.height: mode === "tile" ? 0 : decodeH
 
     opacity: showing ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.InOutQuad } }
+    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.InOutQuad } }
 
     onStatusChanged: if (status === Image.Ready) root.ready()
 }

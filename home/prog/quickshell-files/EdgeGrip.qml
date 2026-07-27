@@ -108,6 +108,6 @@ PanelWindow {
         height: root.height
         color: Theme.accent
         opacity: (ma.containsMouse || ViewMode.dragging) ? 0.25 : 0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        Behavior on opacity { NumberAnimation { duration: ViewMode.ms(120) } }
     }
 }
