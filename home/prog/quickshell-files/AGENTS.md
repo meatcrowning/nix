@@ -953,6 +953,12 @@ flick brisker than a slow drag.
 they are two files, so it is a hand-copy, and that is the one duplication the
 design could not remove.
 
+**The vendored apps have the same convention under a different roof**
+(`apps/qmlcommon/`, `apps/AGENTS.md`): same rule, same friction, same reasoning.
+The two trees cannot share a component — the panel's QML is Quickshell's and the
+apps' is plain Qt — so they are deliberate parallel implementations. Retune one
+and retune the other, or the desktop stops feeling like one thing.
+
 ### Sign tests are the defect class
 
 `if (wheel.angleDelta.y > 0) stepUp()` treats every event as one full step. A
