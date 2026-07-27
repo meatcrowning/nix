@@ -14,6 +14,31 @@ Rectangle {
     required property var modelData
 
     readonly property bool focusedWin: modelData.activated
+
+    // ---- what the cell says about its window ------------------------------
+    // Four states, one ramp from the accent down to the same dim the cells have
+    // always used when idle:
+    //
+    //   focused, on screen   full accent
+    //   unfocused, on screen accent, a third of the way to dim
+    //   rolled up            accent, three quarters of the way to dim
+    //   minimized            dim
+    //
+    // Roll-up and minimize outrank focus: a rolled-up window can still hold the
+    // keyboard, and drawing it as if it were on screen is the one thing this is
+    // meant to fix. The state itself comes from WinState (the compositor knows;
+    // the Wayland toplevel list does not).
+    readonly property string winState: WinState.stateOf(modelData.appId, modelData.title)
+    readonly property bool offScreen: winState !== ""
+    function _mix(a, b, t) {
+        return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
+                       a.b + (b.b - a.b) * t, 1);
+    }
+    readonly property color stateColor:
+          winState === "minimized" ? Theme.dim
+        : winState === "rolled"    ? _mix(Theme.accent, Theme.dim, 0.75)
+        : focusedWin               ? Theme.accent
+                                   : _mix(Theme.accent, Theme.dim, 0.35)
     // DesktopEntries scans lazily/asynchronously on first access, so at panel
     // startup (windows already open) heuristicLookup can return null before the
     // scan populates. A plain function-call binding would latch that null
@@ -32,22 +57,30 @@ Rectangle {
     width: Theme.wsCell
     height: Theme.wsCell
     radius: 0
-    color: focusedWin ? Theme.bgAlt : "transparent"
+    // The filled background stays the FOCUS marker alone — it is the one thing
+    // you look for to answer "where am I typing", and folding roll/minimize into
+    // it would cost that reading. Those speak through the border colour instead.
+    color: focusedWin && !cell.offScreen ? Theme.bgAlt : "transparent"
     border.width: focusedWin ? 2 : 1
-    border.color: focusedWin ? Theme.accent : Theme.dim
+    border.color: cell.stateColor
 
     IconImage {
         anchors.centerIn: parent
         visible: cell.iconName !== ""
         implicitSize: Theme.wsCell - 12
         source: Quickshell.iconPath(cell.iconName, "application-x-executable")
+        // A window that isn't on screen has its icon knocked back to match,
+        // since the icon is most of the cell's ink and a border alone is easy to
+        // miss on a busy row.
+        opacity: cell.winState === "minimized" ? 0.45
+               : cell.winState === "rolled" ? 0.7 : 1
     }
     // fallback: first letter of the app id in the pixel font
     PixelText {
         anchors.centerIn: parent
         visible: cell.iconName === ""
         text: (cell.modelData.appId || cell.modelData.title || "?").charAt(0)
-        color: Theme.dim
+        color: cell.stateColor
     }
 
     MouseArea {
@@ -78,7 +111,10 @@ Rectangle {
     Tooltip {
         target: cell
         visible: cellMouse.containsMouse && !cellMenu.visible
+        // The state is spelled out here as well as coloured: the ramp says which
+        // of the four a cell is in only if you can see two of them at once.
         text: (cell.modelData.title || cell.modelData.appId || "?")
+              + (cell.winState === "" ? "" : "\n(" + cell.winState + ")")
     }
 
     TaskMenu {
