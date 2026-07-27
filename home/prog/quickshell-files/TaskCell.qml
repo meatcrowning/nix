@@ -79,7 +79,7 @@ Rectangle {
     PixelText {
         anchors.centerIn: parent
         visible: cell.iconName === ""
-        text: (cell.modelData.appId || cell.modelData.title || "?").charAt(0)
+        text: Glyphs.px((cell.modelData.appId || cell.modelData.title || "?").charAt(0))
         color: cell.stateColor
     }
 
@@ -140,7 +140,11 @@ Rectangle {
         show: cellMouse.containsMouse && !cellMenu.visible
         // The state is spelled out here as well as coloured: the ramp says which
         // of the four a cell is in only if you can see two of them at once.
-        text: (cell.modelData.title || cell.modelData.appId || "?")
+        // Glyphs.px on the DISPLAYED title only. The raw title is the join key
+        // into WinState (stateOf/addrOf above), and the address it returns is
+        // what the click dispatches on — map that and the cell would look up a
+        // window that does not exist and silently stop rolling up.
+        text: Glyphs.px(cell.modelData.title || cell.modelData.appId || "?")
               + (cell.winState === "" ? "" : "\n(" + cell.winState + ")")
     }
 

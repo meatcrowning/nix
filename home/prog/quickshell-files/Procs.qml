@@ -147,7 +147,10 @@ Singleton {
                     if (!ln) continue;
                     const f = ln.split("|");
                     if (f.length < 5) continue;
-                    out.push({ pid: f[0], name: f[1],
+                    // Glyphs.px on the NAME only. It is display + filter text;
+                    // the pid beside it is what kill() signals, and that stays
+                    // exactly as the sampler reported it.
+                    out.push({ pid: f[0], name: Glyphs.px(f[1]),
                                cpu: parseFloat(f[2]) || 0,
                                mem: parseFloat(f[3]) || 0,
                                rss: parseInt(f[4], 10) || 0 });

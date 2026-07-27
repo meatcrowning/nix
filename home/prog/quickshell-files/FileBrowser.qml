@@ -87,11 +87,14 @@ FloatingWindow {
             Row {
                 anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
                 spacing: 8
-                BrowserButton { label: "↑ up"; onClicked: view.go(view.parentOf(view.path)) }
+                BrowserButton { label: "^ up"; onClicked: view.go(view.parentOf(view.path)) }
             }
             PixelText {
                 anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 70; rightMargin: 8 }
-                text: view.path
+                // Displayed only. `view.path` itself stays raw — it is what the
+                // FolderListModel is pointed at and what every gio/mv/rm below
+                // is handed.
+                text: Glyphs.px(view.path)
                 elide: Text.ElideMiddle
                 color: Theme.text
             }
@@ -124,7 +127,8 @@ FloatingWindow {
                     PixelText {
                         width: parent.width - szText.width - 6
                         elide: Text.ElideRight
-                        text: (parent.parent.fileIsDir ? "[ ] " : "    ") + parent.parent.fileName
+                        text: (parent.parent.fileIsDir ? "[ ] " : "    ")
+                              + Glyphs.px(parent.parent.fileName)
                         color: parent.parent.fileIsDir ? Theme.accent : Theme.text
                     }
                     PixelText {
@@ -169,6 +173,9 @@ FloatingWindow {
                 BrowserButton { label: "new"; onClicked: newDlg.open() }
                 BrowserButton {
                     label: "rename"; enabled: view.selected !== ""
+                    // NOT Glyphs.px: this prefills an editable field whose value
+                    // is handed to `mv`. Mapping it would quietly rename
+                    // "Sigur Ros - Takk" the moment the user pressed enter.
                     onClicked: { renameDlg.value = view.dirNameOf(view.selected); renameDlg.open(); }
                 }
                 BrowserButton {
@@ -227,7 +234,7 @@ FloatingWindow {
         }
         BrowserConfirm {
             id: delDlg
-            text: "permanently delete?\n" + view.dirNameOf(view.selected)
+            text: "permanently delete?\n" + Glyphs.px(view.dirNameOf(view.selected))
             onConfirmed: { view.run(["rm", "-rf", "--", view.selected], ""); view.selected = ""; }
         }
     }
