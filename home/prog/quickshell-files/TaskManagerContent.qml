@@ -5,7 +5,8 @@ import Quickshell
 // it, with the means to end them.
 //
 // Three sections, top to bottom: a 4x2 block of square chart cards (cpu, gpu,
-// mem, net, load, vram, swap, fan), a chassis-fan bar, and the process table
+// mem, net, load, vram, swap, fan — see `noGpu` for what book puts in the
+// gpu/vram/fan slots instead), a chassis-fan bar, and the process table
 // taking everything that is left. The table is the point of the widget, so it
 // gets the slack — the cards are SQUARE, i.e. their height follows the panel
 // width, and a taller tile turns into more visible processes rather than
@@ -26,6 +27,14 @@ Item {
     property bool active: false
     property int pad: 8
     readonly property real inner: Math.max(160, width - pad * 2)
+
+    // book has no gpu, vram or fan to draw: Asahi's DRM driver publishes no
+    // utilization counter, its GPU memory IS system memory, and the machine is
+    // fanless. Those three slots go to psi, io and power there instead — see
+    // sysinfo.sh. Keyed on the build-time Host singleton rather than on the
+    // readings being -1, so the card set is fixed before the first poll and the
+    // grid can't relabel itself two seconds after it opens.
+    readonly property bool noGpu: Host.name === "air"
 
     implicitWidth: 300
     implicitHeight: 360
@@ -88,7 +97,10 @@ Item {
         }
         ChartCanvas {
             id: plot
-            active: root.active
+            // Both card sets are instantiated and the unused three are hidden
+            // (a Grid lays out only its visible children), so gate the canvas on
+            // visibility too — otherwise the hidden trio repaints every poll.
+            active: root.active && card.visible
             anchors {
                 left: parent.left; right: parent.right
                 top: cardValue.bottom
@@ -124,12 +136,36 @@ Item {
         }
         MetricCard {
             width: root.cardW; height: root.cardH
+            visible: !root.noGpu
             label: "gpu"
             value: SysInfo.gpuUsage < 0 ? "--" : SysInfo.gpuUsage + "%"
             sub: SysInfo.gpuTemp < 0 ? "" : SysInfo.gpuTemp + "C"
             series: [
                 { data: SysInfo.gpuTempHist, color: Theme.crit },
                 { data: SysInfo.gpuHist,     color: Theme.accent },
+            ]
+        }
+        // In the gpu slot on book: pressure stall, the share of the last 10s in
+        // which something was blocked waiting for cpu / io / memory. Unlike
+        // utilization it says whether the machine is actually costing you time —
+        // a pegged cpu with nothing waiting on it reads 0 here. Three series,
+        // cpu on top because it is the one the readout shows.
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            visible: root.noGpu
+            label: "psi"
+            value: SysInfo.psiCpu < 0 ? "--" : SysInfo.psiCpu.toFixed(1) + "%"
+            sub: SysInfo.psiIo < 0 ? "" : "io" + SysInfo.psiIo.toFixed(0)
+            valueColor: SysInfo.psiCpu >= 50 ? Theme.crit
+                      : SysInfo.psiCpu >= 20 ? Theme.warn : Theme.text
+            // Autoscaled off a floor of 20%: a desktop sits in the low single
+            // digits, so a fixed 0-100 axis would draw a permanent flat line.
+            scaleMax: 0
+            autoFloor: 20
+            series: [
+                { data: SysInfo.psiMemHist, color: Theme.crit },
+                { data: SysInfo.psiIoHist,  color: Theme.warn },
+                { data: SysInfo.psiCpuHist, color: Theme.accent },
             ]
         }
         MetricCard {
@@ -166,11 +202,29 @@ Item {
         }
         MetricCard {
             width: root.cardW; height: root.cardH
+            visible: !root.noGpu
             label: "vram"
             value: SysInfo.gpuMemUsage < 0 ? "--" : SysInfo.gpuMemUsage + "%"
             sub: SysInfo.gpuMemUsedMb < 0 ? "" : (SysInfo.gpuMemUsedMb / 1024).toFixed(1) + "G"
             valueColor: SysInfo.gpuMemUsage >= 90 ? Theme.crit : Theme.text
             series: [ { data: SysInfo.vramHist, color: Theme.accent } ]
+        }
+        // In the vram slot on book: disk throughput, drawn exactly like the net
+        // card next to it — read as the primary reading, write as the secondary,
+        // both autoscaled together off a shared floor so the two lines stay
+        // comparable to each other.
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            visible: root.noGpu
+            label: "io"
+            value: SysInfo.fmtSpeed(SysInfo.dskRead)
+            sub: SysInfo.fmtSpeed(SysInfo.dskWrite)
+            scaleMax: 0
+            autoFloor: 1024 * 1024
+            series: [
+                { data: SysInfo.dskWHist, color: Theme.warn },
+                { data: SysInfo.dskRHist, color: Theme.info },
+            ]
         }
         MetricCard {
             width: root.cardW; height: root.cardH
@@ -183,12 +237,33 @@ Item {
         }
         MetricCard {
             width: root.cardW; height: root.cardH
+            visible: !root.noGpu
             label: "fan"
             // The GPU fan, as a percentage. Zero is a real reading, not a
             // missing one — this card idles at 0% because the card stops its
             // fans entirely when it is cool.
             value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
             series: [ { data: SysInfo.gpuFanHist, color: Theme.accent } ]
+        }
+        // In the fan slot on book: whole-machine watts, with the battery charge
+        // as the secondary reading. It is the closest thing the fanless machine
+        // has to the signal a fan gauge carries — how hard the box is working —
+        // and it is measured rather than inferred. The charge is prefixed "+"
+        // while charging, since the same wattage means opposite things then.
+        MetricCard {
+            width: root.cardW; height: root.cardH
+            visible: root.noGpu
+            label: "power"
+            value: SysInfo.powerW < 0 ? "--" : SysInfo.powerW.toFixed(1) + "W"
+            sub: SysInfo.batteryPct < 0 ? ""
+                 : (SysInfo.batteryCharging ? "+" : "") + SysInfo.batteryPct + "%"
+            // 4-5W idle, ~19W with every core spinning: 15 is already a machine
+            // under real load, 25 is the top of what it sustains.
+            valueColor: SysInfo.powerW >= 25 ? Theme.crit
+                      : SysInfo.powerW >= 15 ? Theme.warn : Theme.text
+            scaleMax: 0
+            autoFloor: 20
+            series: [ { data: SysInfo.powerHist, color: Theme.accent } ]
         }
     }
 

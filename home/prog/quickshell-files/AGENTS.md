@@ -272,6 +272,19 @@ loop, since the popup takes its height from `implicitHeight`.
   swap, fan — sharing `ChartCanvas.qml` with the popups. Square means the card
   height follows the panel WIDTH, so a taller tile turns into more visible
   processes rather than letterboxed charts.
+- **On book, gpu/vram/fan are replaced by psi, io and power** (`root.noGpu`,
+  keyed on the `Host` singleton). That machine cannot produce the first three at
+  all: Asahi's DRM driver exposes no fdinfo engine counters and no devfreq node,
+  so there is no GPU utilization anywhere in sysfs; GPU memory *is* system
+  memory; and the machine is fanless. What it gets instead is `/proc/pressure`
+  ("some avg10" for cpu/io/memory — how much time the machine is costing you,
+  which utilization does not say), physical-disk throughput from
+  `/proc/diskstats` (parents only, or partitions double-count), and
+  `macsmc_hwmon`'s "Total System Power" in watts, which tracks
+  `macsmc-battery/power_now` one sample behind (4.7W idle, 18.7W loaded). All
+  six fields are collected on BOTH hosts — they are sysfs reads — and the host
+  only picks which cards to draw. Keyed on `Host`, not on the readings being
+  -1, so the grid can't relabel itself two seconds after it opens.
 - **The chassis-fan bar hides itself, and on `top` that means it never shows.**
   `/sys/class/hwmon` exposes no `fan*_input` at all here — the only hwmon
   devices are nvme, spd5118, k10temp, amdgpu, mt7921 and the trackball battery,

@@ -52,6 +52,23 @@ Singleton {
     property int fanAvgRpm: 0
     property int fanCount: 0
 
+    // ---- what book shows in place of gpu/vram/fan ------------------------
+    // See sysinfo.sh: that machine has no source for any of the three, so the
+    // task manager gives those slots to these instead. Collected on both hosts.
+    //
+    // Pressure stall, "some avg10": the percentage of the last 10 seconds in
+    // which at least one task was blocked on that resource. -1 without
+    // /proc/pressure.
+    property real psiCpu: -1
+    property real psiIo: -1
+    property real psiMem: -1
+    // Whole-machine draw in watts, -1 where nothing reports it (top).
+    property real powerW: -1
+    // Physical-disk throughput, bytes/s — the same treatment as rxSpeed/txSpeed,
+    // diffed from the cumulative sector counters below.
+    property real dskRead: 0
+    property real dskWrite: 0
+
     // Brightness. On a machine with a real panel backlight (laptops) this
     // goes through brightnessctl against /sys/class/backlight, which is
     // fast. Otherwise it falls back to DDC/CI over I2C via ddcutil for an
@@ -122,6 +139,12 @@ Singleton {
     property var swapHist: []
     property var vramHist: []
     property var gpuFanHist: []
+    property var psiCpuHist: []
+    property var psiIoHist: []
+    property var psiMemHist: []
+    property var powerHist: []
+    property var dskRHist: []
+    property var dskWHist: []
 
     function _pushHist(arr, v) {
         const h = arr.slice();
@@ -155,6 +178,10 @@ Singleton {
             gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
             far: fanAvgRpm, fc: fanCount,
             lh: loadHist, swh: swapHist, vh: vramHist, gfh: gpuFanHist,
+            pc: psiCpu, pio: psiIo, pm: psiMem, pw: powerW,
+            dr: dskRead, dw: dskWrite,
+            pch: psiCpuHist, pih: psiIoHist, pmh: psiMemHist, pwh: powerHist,
+            drh: dskRHist, dwh: dskWHist, pdr: _prevDskR, pdw: _prevDskW,
             // the running counters the next poll diffs against — without them
             // the first sample after a reload has no baseline and the readouts
             // sit at "--" for one interval, which is the flicker this avoids
@@ -185,6 +212,15 @@ Singleton {
         fanAvgRpm = d.far || 0; fanCount = d.fc || 0;
         loadHist = d.lh || []; swapHist = d.swh || [];
         vramHist = d.vh || []; gpuFanHist = d.gfh || [];
+        psiCpu = d.pc === undefined ? -1 : d.pc;
+        psiIo = d.pio === undefined ? -1 : d.pio;
+        psiMem = d.pm === undefined ? -1 : d.pm;
+        powerW = d.pw === undefined ? -1 : d.pw;
+        dskRead = d.dr || 0; dskWrite = d.dw || 0;
+        psiCpuHist = d.pch || []; psiIoHist = d.pih || []; psiMemHist = d.pmh || [];
+        powerHist = d.pwh || []; dskRHist = d.drh || []; dskWHist = d.dwh || [];
+        _prevDskR = d.pdr === undefined ? -1 : d.pdr;
+        _prevDskW = d.pdw === undefined ? -1 : d.pdw;
         _prevRx = d.prx; _prevTx = d.ptx; _prevAt = d.pat || 0;
         _prevCpuTotal = d.pct; _prevCpuIdle = d.pci;
     }
@@ -211,6 +247,8 @@ Singleton {
     property real _prevAt: 0
     property real _prevCpuTotal: -1
     property real _prevCpuIdle: -1
+    property real _prevDskR: -1
+    property real _prevDskW: -1
     readonly property real intervalSec: SettingsStore.d.monPollSec
 
     readonly property string scriptPath:
@@ -281,6 +319,28 @@ Singleton {
             if (gpuFanPct >= 0) gpuFanHist = _pushHist(gpuFanHist, gpuFanPct);
         }
 
+        // The pressure/power/disk block (book's replacements for gpu, vram and
+        // fan), guarded the same way so a line from an older script still parses.
+        let dskR = -1, dskW = -1;
+        if (f.length >= 31) {
+            dskR = parseFloat(f[25]);
+            dskW = parseFloat(f[26]);
+            if (isNaN(dskR) || isNaN(dskW)) { dskR = -1; dskW = -1; }
+            const pc  = parseFloat(f[27]);
+            psiCpu = isNaN(pc) || pc < 0 ? -1 : pc;
+            const pio = parseFloat(f[28]);
+            psiIo = isNaN(pio) || pio < 0 ? -1 : pio;
+            const pm  = parseFloat(f[29]);
+            psiMem = isNaN(pm) || pm < 0 ? -1 : pm;
+            const pw  = parseFloat(f[30]);
+            powerW = isNaN(pw) || pw < 0 ? -1 : pw;
+
+            if (psiCpu >= 0) psiCpuHist = _pushHist(psiCpuHist, psiCpu);
+            if (psiIo >= 0) psiIoHist = _pushHist(psiIoHist, psiIo);
+            if (psiMem >= 0) psiMemHist = _pushHist(psiMemHist, psiMem);
+            if (powerW >= 0) powerHist = _pushHist(powerHist, powerW);
+        }
+
         const now = Date.now();
         if (_prevRx >= 0) {
             // real elapsed time, floored so a fast double-poll can't divide by
@@ -294,10 +354,21 @@ Singleton {
             history = h;
             rxHist = _pushHist(rxHist, rxSpeed);
             txHist = _pushHist(txHist, txSpeed);
+
+            // Same elapsed-time denominator as the network counters, and the
+            // same reason: the first poll after a reload covers a fraction of
+            // an interval. 512B sectors (the /proc/diskstats unit).
+            if (dskR >= 0 && _prevDskR >= 0) {
+                dskRead  = Math.max(0, (dskR - _prevDskR) * 512 / dt);
+                dskWrite = Math.max(0, (dskW - _prevDskW) * 512 / dt);
+                dskRHist = _pushHist(dskRHist, dskRead);
+                dskWHist = _pushHist(dskWHist, dskWrite);
+            }
         }
         _prevRx = rx;
         _prevTx = tx;
         _prevAt = now;
+        if (dskR >= 0) { _prevDskR = dskR; _prevDskW = dskW; }
 
         // CPU/temp history for the hover charts (cpuUsage/cpuTemp are set above)
         if (cpuUsage >= 0) cpuHist = _pushHist(cpuHist, cpuUsage);
