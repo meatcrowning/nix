@@ -204,9 +204,25 @@ through `DockTile`'s `Loader`. That is deliberate: phase 3 makes that array the
 thing the user drags and the thing that gets persisted, and
 `cellX/cellY/cellW/cellH` stay the single place grid coordinates become pixels.
 
-Reading bottom-up, the layout is clock+calendar side by side on the bottom row,
+Reading bottom-up, the layout is calendar+clock side by side on the bottom row,
 weather above them, media above that, and the task manager taking the rest.
 **The disk widget currently has no dock tile** — it is classic-mode only.
+
+**Dead space is a number, not an opinion:**
+
+```bash
+qs ipc call live tiles     # per tile: got, wants, slack
+```
+
+Aim for a small POSITIVE slack — but read it knowing `wants` is the widget's
+NATURAL height, not a minimum. The widgets absorb slack themselves: the
+calendar's week rows, the clock's face, the forecast's day rows and the player's
+artwork all grow or shrink into the tile they are handed rather than leaving a
+gap under them. A large negative slack on the clock is therefore correct, not a
+bug — the bottom row is sized by the CALENDAR, and the clock draws a smaller
+face to match. Each of those widgets keeps a `natural*` constant that
+`implicitHeight` is built from; deriving it from `height` instead is a binding
+loop, since the popup takes its height from `implicitHeight`.
 
 ### The task manager
 
@@ -225,10 +241,34 @@ weather above them, media above that, and the task manager taking the rest.
 - **Kill is SIGTERM on left click, SIGKILL on RIGHT.** The rows re-sort under the
   cursor every 2s; an unrecoverable action must not be one mis-timed left click
   away.
-- The three history charts appear here as sparkline STRIPS, not as the cpu/gpu/eth
-  cards: at dock width three of those side by side would each be ~85px, narrower
-  than their own legend line. They share `ChartCanvas.qml` with the popups, so
-  there is still one implementation of the drawing.
+- The charts are a 2x2 block of cards (cpu/gpu/mem/net) over a two-line sensor
+  strip (load, swap, uptime, vram, power, fan). They share `ChartCanvas.qml`
+  with the popups, so there is one implementation of the plot. Card height is
+  CAPPED — a taller tile has to turn into more visible processes, not bigger
+  charts.
+- `sysinfo.sh`'s fields are POSITIONAL and `SysInfo.qml` indexes them, so new
+  ones go on the END; everything past `batteryCharging` is the task manager's,
+  and the parser guards on the field count. The nvidia extras (fan, power, vram)
+  ride along in the SAME `nvidia-smi` query — its cost is process startup, not
+  the number of columns.
+- Memory is `MemAvailable`, not `MemFree`. MemFree alone reads as "almost none"
+  on any machine that has been up a while and is simply a wrong thing to show.
+
+### The clock's three faces
+
+`ClockContent.qml` draws `analog`, `dots` (5x7 dot matrix) or `seg` (seven
+segment) from one Canvas, cycled by the button in its own top-right corner. The
+choice is a persisted setting (`clockFace`), not local state, so it survives the
+reload that every wallpaper change causes and both copies of the widget agree.
+
+**The unlit colour is load-bearing, and was wrong twice.** `Theme.dim` against
+`Theme.accent` is nowhere near enough contrast: a whole 5x7 grid at that colour
+reads as a solid block with the digits invisible inside it. The dot grid needs
+`Theme.border`; the segment face needs to go all the way down to `Theme.bgAlt`,
+because its unlit segments are far larger and at `border` every digit still reads
+as an 8. Both were established by rendering the same glyph data and layout maths
+out to a PNG and looking at it — which is the way to check a Canvas face without
+making the user click through three modes.
 
 > Adding several new `.qml` files in one rebuild produces a burst of **failed**
 > reloads in `qs log` ("`X is not a type`") as home-manager writes them one at a

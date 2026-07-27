@@ -20,6 +20,30 @@ Singleton {
     property int    batteryPct: -1      // 0-100, or -1 when no BAT*/macsmc-battery node (desktop)
     property bool   batteryCharging: false
 
+    // ---- the dock task manager's extra sensors ---------------------------
+    // MemAvailable, not MemFree: the kernel's estimate of what a new allocation
+    // could actually get (free plus reclaimable cache). MemFree alone reads as
+    // "almost none" on any machine that has been up a while, which is simply a
+    // wrong thing to show a user.
+    property int    memTotalKb: 0
+    property int    memAvailKb: 0
+    readonly property int memUsedKb: Math.max(0, memTotalKb - memAvailKb)
+    readonly property int memUsage: memTotalKb > 0
+        ? Math.round(100 * memUsedKb / memTotalKb) : -1
+    property int    swapTotalKb: 0
+    property int    swapFreeKb: 0
+    readonly property int swapUsage: swapTotalKb > 0
+        ? Math.round(100 * (swapTotalKb - swapFreeKb) / swapTotalKb) : -1
+    property real   load1: -1
+    property int    uptimeSec: 0
+    // nvidia-smi extras, all -1 where the host has no nvidia-smi (book).
+    property int    gpuFanPct: -1
+    property real   gpuPowerW: -1
+    property int    gpuMemUsedMb: -1
+    property int    gpuMemTotalMb: -1
+    readonly property int gpuMemUsage: gpuMemTotalMb > 0
+        ? Math.round(100 * gpuMemUsedMb / gpuMemTotalMb) : -1
+
     // Brightness. On a machine with a real panel backlight (laptops) this
     // goes through brightnessctl against /sys/class/backlight, which is
     // fast. Otherwise it falls back to DDC/CI over I2C via ddcutil for an
@@ -85,6 +109,7 @@ Singleton {
     property var gpuTempHist: []
     property var rxHist: []
     property var txHist: []
+    property var memHist: []
 
     function _pushHist(arr, v) {
         const h = arr.slice();
@@ -113,6 +138,9 @@ Singleton {
             bri: brightness, hbl: _hasBacklight,
             h: history, ch: cpuHist, th: tempHist,
             gh: gpuHist, gth: gpuTempHist, rh: rxHist, tht: txHist,
+            mtk: memTotalKb, mak: memAvailKb, stk: swapTotalKb, sfk: swapFreeKb,
+            l1: load1, up: uptimeSec, gf: gpuFanPct, gp: gpuPowerW,
+            gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
             // the running counters the next poll diffs against — without them
             // the first sample after a reload has no baseline and the readouts
             // sit at "--" for one interval, which is the flicker this avoids
@@ -131,7 +159,15 @@ Singleton {
         brightness = d.bri; _hasBacklight = d.hbl;
         history = d.h || []; cpuHist = d.ch || []; tempHist = d.th || [];
         gpuHist = d.gh || []; gpuTempHist = d.gth || [];
-        rxHist = d.rh || []; txHist = d.tht || [];
+        rxHist = d.rh || []; txHist = d.tht || []; memHist = d.mh || [];
+        memTotalKb = d.mtk || 0; memAvailKb = d.mak || 0;
+        swapTotalKb = d.stk || 0; swapFreeKb = d.sfk || 0;
+        load1 = d.l1 === undefined ? -1 : d.l1;
+        uptimeSec = d.up || 0;
+        gpuFanPct = d.gf === undefined ? -1 : d.gf;
+        gpuPowerW = d.gp === undefined ? -1 : d.gp;
+        gpuMemUsedMb = d.gmu === undefined ? -1 : d.gmu;
+        gpuMemTotalMb = d.gmt === undefined ? -1 : d.gmt;
         _prevRx = d.prx; _prevTx = d.ptx; _prevAt = d.pat || 0;
         _prevCpuTotal = d.pct; _prevCpuIdle = d.pci;
     }
@@ -197,6 +233,27 @@ Singleton {
         const bp = parseInt(f[11]);
         batteryPct = isNaN(bp) || bp < 0 ? -1 : bp;
         batteryCharging = f[12] === "1";
+
+        // Everything past here was appended for the task manager (see
+        // sysinfo.sh) — guarded so an older/foreign line still parses.
+        if (f.length >= 23) {
+            memTotalKb  = parseInt(f[13]) || 0;
+            memAvailKb  = parseInt(f[14]) || 0;
+            swapTotalKb = parseInt(f[15]) || 0;
+            swapFreeKb  = parseInt(f[16]) || 0;
+            const l1 = parseFloat(f[17]);
+            load1 = isNaN(l1) ? -1 : l1;
+            uptimeSec = parseInt(f[18]) || 0;
+            const gf = parseInt(f[19]);
+            gpuFanPct = isNaN(gf) || gf < 0 ? -1 : gf;
+            const gp = parseFloat(f[20]);
+            gpuPowerW = isNaN(gp) || gp < 0 ? -1 : gp;
+            const gmu = parseInt(f[21]);
+            gpuMemUsedMb = isNaN(gmu) || gmu < 0 ? -1 : gmu;
+            const gmt = parseInt(f[22]);
+            gpuMemTotalMb = isNaN(gmt) || gmt < 0 ? -1 : gmt;
+            if (memUsage >= 0) memHist = _pushHist(memHist, memUsage);
+        }
 
         const now = Date.now();
         if (_prevRx >= 0) {

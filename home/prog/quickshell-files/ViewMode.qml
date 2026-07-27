@@ -132,6 +132,16 @@ Singleton {
     // what exposed the original tracking bug: it lagged the requested width, and
     // the computed target moved with it instead of with the pointer.
     property real surfaceWidth: 0
+
+    // Diagnostic only: what each dock tile was allotted vs what its content
+    // wants, published by DockTile and read back through
+    // `qs ipc call live tiles`. Single-monitor by nature — the last panel to
+    // report a given key wins, which on one screen is the only one.
+    property var tileInfo: ({})
+    function reportTile(key, allotted, wanted) {
+        if (!key) return;
+        tileInfo[key] = { a: Math.round(allotted), w: Math.round(wanted) };
+    }
     function traceAdd() {
         if (dragTrace.length < 500)
             dragTrace.push(Math.round(dragWidth) + ","

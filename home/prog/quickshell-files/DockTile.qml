@@ -18,7 +18,14 @@ Item {
     id: root
 
     property string source: ""
+    property string tileKey: ""
     property bool active: true
+
+    // Publish allotted-vs-wanted for `qs ipc call live tiles`. "No blank space"
+    // is a number, not an opinion, and this is where it can be read.
+    readonly property real contentHeight: loader.item ? loader.item.implicitHeight : -1
+    onContentHeightChanged: ViewMode.reportTile(tileKey, height, contentHeight)
+    onHeightChanged: ViewMode.reportTile(tileKey, height, contentHeight)
 
     // The frame. Deliberately quieter than a popup card's: these sit inside the
     // panel, against its own background, not out on the wallpaper.

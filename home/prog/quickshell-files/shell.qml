@@ -533,6 +533,17 @@ Scope {
                 + " watchers=" + (Disks._watchers.length + Media._watchers.length
                                   + Procs._watchers.length);
         }
+        // Per dock tile: the height the grid gave it, the height its content
+        // wants, and the difference. Negative slack = the tile is clipping;
+        // a large positive one = the dead space this layout exists to avoid.
+        function tiles(): string {
+            let out = [];
+            for (const k in ViewMode.tileInfo) {
+                const t = ViewMode.tileInfo[k];
+                out.push(k + " got=" + t.a + " wants=" + t.w + " slack=" + (t.a - t.w));
+            }
+            return out.join("\n");
+        }
     }
 
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
