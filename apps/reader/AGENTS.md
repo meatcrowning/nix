@@ -40,6 +40,19 @@ re-assembled out of several `PixelText`s with no drift. `cellW` is **measured**
 once in `Main.qml` (a `TextMetrics` over ten `M`s — 8.4px at 15, not §2.7's
 rounded 8), so it stays right if the desktop font family is ever changed.
 
+- **A segment of prose is ONE item.** A `DelegateChooser` on the run's kind
+  gives a plain word a bare `PixelText`, and builds a background or a hit target
+  only for code and links. It used to be an `Item`, two `Rectangle`s, a
+  `PixelText` and a `MouseArea` around every segment — half the cost of building
+  a delegate, to draw nothing on almost every one of them. The wrap also returns
+  nothing until a width arrives, because `cols` floors to 8 before layout
+  reaches a delegate and wrapping there builds ~10x the rows it keeps. Both are
+  measured by `docs/agents/perf-harness/h3.py` and asserted by
+  `tools/reader-test.py`; the findings are in `docs/perf-cpu-hotspots.md`.
+- **Do not position the code/link backgrounds by character arithmetic.** The
+  font advances 8.9px but Qt rounds each `Text`'s width up to 9, so a separate
+  chrome layer at `N * cellW` drifts off its text a pixel at a time. The `Row`
+  lays chrome and prose out together, which is what makes it exact.
 - **Emphasis markers are stripped and carry nothing.** §2.2's "bold emphasis is
   a deliberately accepted loss", applied.
 - **Inline code takes `Theme.bgAlt`**, the inset background every other inset
