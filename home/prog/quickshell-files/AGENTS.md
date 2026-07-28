@@ -727,10 +727,33 @@ you are looking at.
   - **OnDemand, not Exclusive.** Exclusive keeps sending us the keyboard after
     the user clicks into a window, so their next keystroke goes to the filter box
     instead of what they just clicked on. OnDemand hands it back as part of that
-    click. A click that stays INSIDE the panel never reaches the compositor's
-    focus logic, so a catcher in `dockLayout` calls `Procs.blurFilter()` and
-    declines the press (`mouse.accepted = false`) so the widget underneath still
-    gets it.
+    click.
+
+  **"Click anywhere outside the box and it stops taking keystrokes" has THREE
+  cases, one per kind of thing that can be under the click, and each is
+  somebody else's:**
+
+  | under the click | who handles it | where |
+  |---|---|---|
+  | the PANEL | us — a click inside a layer surface moves no focus at all, so the compositor never hears about it | the catcher on `barBody` (`shell.qml`): `Procs.blurFilter()` then `mouse.accepted = false`, so the widget underneath still gets its click |
+  | a WINDOW | the COMPOSITOR, and it is already right | the pointer merely ARRIVING over a window revokes this layer's keyboard; Qt clears the TextInput's `activeFocus` with it and `onActiveFocusChanged` does the rest. No click needed, nothing to add |
+  | the WALLPAPER | us — and this was the missing one | the catcher in `WallpaperLayer.qml`, same shape as the bar's |
+
+  The wallpaper case is the bug the user reported as "I have to click back in
+  the bar to get rid of the caret": `processMouseDownNormal` only calls
+  `refocus()` when the press lands on a **window**, so a press on a Background
+  layer surface moves no focus, and with `filterFocus` still true the bar went
+  on offering `OnDemand` forever. It is fixable in-process only because the
+  wallpaper is *our* surface — there is no channel through which the panel could
+  see a click on somebody else's.
+
+  **Handing the keyboard back from the wallpaper is the SAFE direction**, which
+  is why that catcher can drop focus outright where the bar's cannot:
+  `refocusLastWindow` searches only the OVERLAY and TOP layers, so it does not
+  find a Background surface under the pointer and falls through to the last
+  focused window. Measured on the event socket: `activewindow>>,` for 2 ms, then
+  the window. Contrast `filterLatch` above, which exists because the same
+  transition with the pointer over the PANEL strands the keyboard on nothing.
 
   The widget clears both flags when it goes inactive or is destroyed: a stale
   `filterFocus` would leave the panel holding the keyboard with nothing on screen

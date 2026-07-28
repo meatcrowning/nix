@@ -118,6 +118,53 @@ PanelWindow {
         }
     }
 
+    // ---- clicking the DESKTOP gives the keyboard back --------------------
+    //
+    // The task manager's filter box is the only thing on this desktop that
+    // takes the keyboard, and "click anywhere outside it and it stops taking
+    // keystrokes" has THREE cases, because three different things can be under
+    // that click and only one of them was ever handled here:
+    //
+    //   the PANEL     — invisible to the compositor (a click inside a layer
+    //                   surface moves no focus), so `shell.qml`'s catcher on
+    //                   `barBody` has to see it. Already there.
+    //   a WINDOW      — the compositor's, and already correct. Measured in a
+    //                   nested Hyprland: the pointer merely ARRIVING over a
+    //                   window revokes this layer's keyboard, Qt clears the
+    //                   TextInput's `activeFocus` with it, and the caret and
+    //                   the accent border go. No click needed and nothing for
+    //                   the panel to do.
+    //   the WALLPAPER — nobody's, which is the bug this block fixes.
+    //                   `processMouseDownNormal` only calls `refocus()` when
+    //                   the press lands on a window, so a press on a
+    //                   BACKGROUND layer surface moves no focus at all: the
+    //                   panel kept the keyboard and the box kept its caret
+    //                   indefinitely, and the only way out was a click back
+    //                   inside the panel. This surface is OURS, so the click
+    //                   is ours to see — the compositor never has to.
+    //
+    // Handing the keyboard back from HERE is the safe direction, and that is
+    // not an assumption: `refocusLastWindow` searches only the OVERLAY and TOP
+    // layers, so it does not find this Background surface under the pointer
+    // and falls through to the last focused window. Measured on the event
+    // socket — `activewindow>>,` for 2 ms, then `activewindow>>` the window.
+    // Doing the same with the pointer over the PANEL is what strands the
+    // keyboard on nothing; see `Procs.filterLatch` for that half.
+    //
+    // Enabled — and so opaque to events — only while the box actually holds
+    // focus, and it declines the press it saw, so the wallpaper is inert the
+    // rest of the time.
+    MouseArea {
+        anchors.fill: parent
+        z: 1
+        enabled: Procs.filterFocus
+        acceptedButtons: Qt.AllButtons
+        onPressed: (mouse) => {
+            Procs.blurFilter();
+            mouse.accepted = false;
+        }
+    }
+
     // ---- cross-fade bookkeeping -----------------------------------------
     property bool _showA: true
     readonly property var _front: _showA ? imgA : imgB
