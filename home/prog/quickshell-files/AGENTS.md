@@ -702,14 +702,64 @@ you are looking at.
     1 discharging, 2 charging, 3 full, 4 not charging, 5 unknown) exists so
     "on AC" and "discharging" are distinguishable; the same wattage means
     opposite things in each.
-- **The chassis-fan bar hides itself, and on `top` that means it never shows.**
-  `/sys/class/hwmon` exposes no `fan*_input` at all here — the only hwmon
-  devices are nvme, spd5118, k10temp, amdgpu, mt7921 and the trackball battery,
-  because no Super-I/O driver (`nct6775` &c) is loaded for the B650's sensor
-  chip. `SysInfo.fanCount` is 0 and the bar is `visible: false`; it lights up on
-  its own if that driver is ever loaded. The `fan` CARD is a different sensor —
-  the GPU fan, via nvidia-smi, as a percentage — and its 0% at idle is a real
-  reading, since the card stops its fans when cool.
+- **The `fan` card is EVERY fan in the box, one line each** — the chassis and
+  cooler fans from hwmon plus the GPU fan, which used to have the card to
+  itself. There is no longer a separate horizontal chassis-fan bar; it was one
+  averaged number, and an average is the wrong summary here (one fan pinned at
+  2400 with four idling reads identically to five fans working moderately, and
+  it is the pinned one you can hear). `Fans.qml` is the derivation —
+  headline, per-line colours, the series, and the tooltip — and it is a plain
+  `QtObject` rather than a singleton **on purpose**: it is pure derivation over
+  `SysInfo.fans`/`fanPctHist`, which is what lets `tools/fan-harness.sh` drive
+  it offscreen against synthetic fan sets. Keep it free of Quickshell imports.
+- **What the percentage IS, and what it is not.** The card's readout is the
+  fastest fan going as a share of *its own* full scale. For the chassis fans
+  that is the **commanded pwm duty** (`pwm/255`), NOT a fraction of maximum RPM
+  — sysfs publishes no maximum, so there is no honest denominator for one and
+  we do not invent it. For the GPU it is nvidia-smi's reported speed. That is
+  the only axis both sensors can share, and the lines are *not* comparable in
+  air moved or noise. **A fan with no percentage anywhere is not plotted at
+  all**: it keeps its tooltip row with its exact RPM, because putting it on a
+  0-100 axis would mean inventing that denominator. Exact speeds live in the
+  tooltip and are never rounded into the axis.
+- **A fan is listed only when it TURNS (`rpm > 0`), whatever its pwm says.**
+  The rule was "rpm > 0 OR duty commanded" first, reasoning that a fan being
+  driven while reading 0 rpm is stalled and worth surfacing. This board
+  disproves it: `top`'s **nct6687** (driver `nct6683`, not `nct6775` — that one
+  does not probe this EC at all; no `acpi_enforce_resources=lax` was needed)
+  publishes **ten** `fan*_input` and eight `pwm`, of which exactly **four**
+  headers have a fan (fan1-4); the other four sit at 0 rpm with 23-100% duty.
+  So a nonzero pwm over a dead tachometer is an *empty header* here, not a
+  fault, and the first rule showed eight fans on a machine with four. sysfs
+  offers nothing that tells the two apart.
+- **The lines are a BRIGHTNESS LADDER, not different colours** (`Fans.shade`).
+  The wal palette is one hue by construction, so there are no distinguishable
+  hues to hand out — see `DESIGN.md` 3.1/3.3. It stays legible to ~5-6 fans;
+  past that it degrades to "two lines look alike" rather than to an unreadable
+  widget, because the tooltip names every fan with its exact speed in the same
+  order.
+- **Mainline exposes no `fan*_label` on this chip**, so the names are `fan1`..
+  `fanN` — deliberately not the `CPU_FAN1`/`PUMP_FAN1` names LibreHardwareMonitor
+  infers from the same registers, which are unverified against the physical
+  board. Render whichever channels are nonzero; never assume an index means a
+  particular header.
+- **Scrolling the fan card is screen brightness**, through
+  `SysInfo.adjustBrightness` — the same function the `bri` status row and the
+  `XF86MonBrightness` keys use, so all three share one debounce, one OSD and one
+  continuous range (hardware to 0, then the gamma layer below it). `MetricCard`
+  carries a generic `onWheelUp`/`onWheelDown` pair for it, notch-based via
+  `WheelNotch`, with multi-notch bursts collapsed rather than replayed so a
+  flick cannot stack ~1.5s DDC writes.
+
+```bash
+qs ipc call live fans          # per fan: rpm, pct, and its history length
+qs ipc call brightness status  # level/hw/gamma/floor/backend, without driving it
+./tools/fan-harness.sh         # sysinfo.sh + Fans.qml against synthetic fan sets
+```
+
+  `live fans` is the only way to check this card without looking: the readout is
+  a summary and the lines are a squiggle, so neither says whether the right fan
+  is on the right line. A `hist=0` is a line that is not being fed.
 - `sysinfo.sh`'s fields are POSITIONAL and `SysInfo.qml` indexes them, so new
   ones go on the END; everything past `batteryCharging` is the task manager's,
   and the parser guards on the field count. The nvidia extras (fan, power, vram)

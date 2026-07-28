@@ -1,6 +1,10 @@
 #!/bin/sh
 # Emits one pipe-delimited line:
-#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount|dskReadSectors|dskWriteSectors|psiCpu|psiIo|psiMem|powerW|batStatus
+#   rxBytes|txBytes|freeKb|usePct|volume|muted|cpuTotal|cpuIdle|cpuTempMilliC|gpuUsePct|gpuTempC|batteryPct|batteryCharging|memTotalKb|memAvailKb|swapTotalKb|swapFreeKb|load1|uptimeSec|gpuFanPct|gpuPowerW|gpuMemUsedMB|gpuMemTotalMB|fanAvgRpm|fanCount|dskReadSectors|dskWriteSectors|psiCpu|psiIo|psiMem|powerW|batStatus|fanDetail
+#
+# fanDetail is the one non-scalar field: comma-separated "name:rpm:pct" per
+# hwmon fan (pct = pwm duty, -1 where the chip has none), empty where nothing
+# reports a tachometer. See the fan block below for what is and is not listed.
 #
 # Fields are POSITIONAL and SysInfo.qml indexes them, so new ones go on the
 # END. Everything after batteryCharging was added for the dock's task manager;
@@ -106,10 +110,85 @@ uptime=$(awk '{printf "%d", $1}' /proc/uptime)
 # nvidia-smi reports as a percentage below) — it is the case and cooler fans,
 # a different set of hardware and the one that tells you whether the box as a
 # whole is working hard. "0|0" where no fan node exists at all (book).
+#
+# HWMON_ROOT is overridable so tools/fan-harness.sh can drive this whole block
+# against a SYNTHETIC hwmon tree. That is not a convenience: `top` reports no
+# fans at all (no Super-I/O driver is loaded for the B650's sensor chip) and
+# book is fanless, so there is no machine here on which this code path can
+# otherwise be executed even once, let alone regression-tested.
+HWMON_ROOT="${SYSINFO_HWMON:-/sys/class/hwmon}"
 fans=$(awk 'BEGIN{ n=0; s=0 }
     { if ($1+0 > 0) { s += $1; n++ } }
-    END{ printf "%d|%d", (n ? s/n : 0), n }' /sys/class/hwmon/hwmon*/fan*_input 2>/dev/null)
+    END{ printf "%d|%d", (n ? s/n : 0), n }' "$HWMON_ROOT"/hwmon*/fan*_input 2>/dev/null)
 [ -z "$fans" ] && fans="0|0"
+
+# PER-FAN detail, so the panel can show each fan instead of one average:
+# comma-separated "name:rpm:pct" entries, empty where nothing reports a
+# tachometer. Ordering is by chip directory then fan index — stable across
+# polls, which matters because each entry is drawn as its own row.
+#
+# WHAT "pct" IS, EXACTLY: the sibling pwmN duty cycle (0-255) as a percentage,
+# i.e. what the chip is COMMANDING the fan to do — NOT the fraction of the
+# fan's maximum RPM. sysfs publishes no maximum, so there is no honest
+# denominator available for the latter and we do not invent one. -1 where the
+# chip exposes no pwm for that fan, and the panel then shows RPM alone rather
+# than a made-up percentage.
+#
+# A fan is LISTED only when it TURNS (rpm > 0), and this rule was written the
+# other way round first — "rpm > 0 OR duty commanded", on the reasoning that a
+# fan being told to spin while reading 0 rpm is a stalled fan and a fault worth
+# surfacing. This board disproves that. `top`'s nct6687 publishes ten
+# fan*_input and eight pwm, of which exactly four headers have a fan on them
+# (fan1-4); the other four read 0 rpm while their pwm registers sit at 23-100%
+# duty. So a nonzero pwm on a dead tachometer is the ORDINARY state of an empty
+# header here, not a fault, and the first rule listed eight fans on a machine
+# with four. Measured, not inferred — and the reason a stalled fan is not
+# distinguishable from an empty header in sysfs at all.
+fandetail=""
+_nchips=0
+for _c in "$HWMON_ROOT"/hwmon*; do
+    [ -d "$_c" ] || continue
+    for _f in "$_c"/fan*_input; do
+        [ -r "$_f" ] || continue
+        _nchips=$((_nchips + 1))
+        break
+    done
+done
+for _c in "$HWMON_ROOT"/hwmon*; do
+    [ -d "$_c" ] || continue
+    _cn=$(cat "$_c/name" 2>/dev/null) || _cn=""
+    [ -z "$_cn" ] && _cn="hwmon"
+    for _f in "$_c"/fan*_input; do
+        [ -r "$_f" ] || continue
+        _i=${_f##*/}; _i=${_i%_input}; _i=${_i#fan}
+        _rpm=$(cat "$_f" 2>/dev/null)
+        case "$_rpm" in ''|*[!0-9]*) _rpm=0 ;; esac
+        _pct=-1
+        if [ -r "$_c/pwm$_i" ]; then
+            _pwm=$(cat "$_c/pwm$_i" 2>/dev/null)
+            case "$_pwm" in
+                ''|*[!0-9]*) ;;
+                *) [ "$_pwm" -gt 255 ] && _pwm=255
+                   _pct=$(( (_pwm * 100 + 127) / 255 )) ;;
+            esac
+        fi
+        [ "$_rpm" -eq 0 ] && continue
+        # The driver's own label where it has one (some boards name the headers
+        # "CPU Fan", "Chassis Fan 2"); fanN otherwise. Prefixed with the chip
+        # only when more than one chip reports fans, so the common single-chip
+        # case stays short — these are drawn in an 8px-per-character pixel font
+        # in a panel that can be 270px wide.
+        _lbl=""
+        [ -r "$_c/fan${_i}_label" ] && _lbl=$(cat "$_c/fan${_i}_label" 2>/dev/null)
+        [ -z "$_lbl" ] && _lbl="fan$_i"
+        [ "$_nchips" -gt 1 ] && _lbl="$_cn.$_lbl"
+        # ':' and ',' are this field's own delimiters and '|' is the line's, so
+        # a driver-supplied label must not be able to carry any of them.
+        _lbl=$(printf '%s' "$_lbl" | tr ' ' '_' | tr -cd 'A-Za-z0-9._-' | cut -c1-12)
+        [ -z "$_lbl" ] && _lbl="fan$_i"
+        fandetail="${fandetail:+$fandetail,}$_lbl:$_rpm:$_pct"
+    done
+done
 
 # GPU utilization + temp via nvidia-smi (NVIDIA proprietary driver). One cheap
 # (~20ms) query for both. "gpuUsePct|gpuTempC"; -1|-1 if nvidia-smi is missing
@@ -284,4 +363,4 @@ if [ "$powerw" = "-1" ] && [ -n "$batdir" ] && [ -r "$batdir/power_now" ]; then
     [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ if (u < 0) u = -u; printf "%.2f", u / 1000000 }')
 fi
 
-printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans" "$dsk" "$psi" "$powerw" "$batstat"
+printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$net" "$disk" "$vol" "$mute" "$cpu" "$cputemp" "$gpu" "$bat" "$mem" "$load1" "$uptime" "$gpux" "$fans" "$dsk" "$psi" "$powerw" "$batstat" "$fandetail"

@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# Exercise the panel's per-fan readout against a SYNTHETIC hwmon tree.
+#
+# WHY THIS EXISTS. Neither machine in this flake can produce a fan reading.
+# `top` exposes no fan*_input at all (no Super-I/O driver is loaded for the
+# B650's sensor chip — the hwmon devices are nvme, spd5118, k10temp, amdgpu,
+# mt7921 and a trackball battery), and book is fanless. So the whole per-fan
+# path — discovery, ordering, labelling, the pwm-duty percentage, the
+# hide-at-zero case — has no hardware anywhere here to run against, not once.
+# This script is the only way it is ever executed, and therefore the only way
+# it can be regression-tested. Do not delete it when the user loads nct6775:
+# it still covers the shapes that board does not happen to have (labels, two
+# chips, a commanded-but-stalled fan).
+#
+# Two halves:
+#   data — scripts/sysinfo.sh against fake sysfs, asserting the emitted field
+#   derivation — Fans.qml driven offscreen at 0/1/2/5 fans, asserting the
+#                headline, the line count, the tooltip and the colour ladder
+#
+#   ./tools/fan-harness.sh            # both halves, quiet on success
+#
+# Exit 0 = every case passed.
+set -uo pipefail
+
+HERE=$(cd -- "$(dirname -- "$0")" && pwd)
+REPO=$(cd -- "$HERE/.." && pwd)
+QSDIR="$REPO/home/prog/quickshell-files"
+SYSINFO="$QSDIR/scripts/sysinfo.sh"
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+pass=0
+fail=0
+ok()   { pass=$((pass + 1)); }
+bad()  { fail=$((fail + 1)); printf 'FAIL  %s\n' "$*"; }
+check() { # check <what> <expected> <actual>
+    if [ "$2" = "$3" ]; then ok; else bad "$1: expected [$2] got [$3]"; fi
+}
+
+# ---------------------------------------------------------------- fake sysfs
+# mkchip <root> <hwmonN> <name> [fanIdx:rpm[:pwm] ...]
+# A fan with no pwm term gets no pwmN node at all, which is the case this must
+# cover: the chip is then unable to report a percentage and the panel has to
+# fall back to RPM rather than invent a denominator.
+mkchip() {
+    local root=$1 dir=$2 name=$3; shift 3
+    mkdir -p "$root/$dir"
+    printf '%s\n' "$name" > "$root/$dir/name"
+    local spec idx rpm pwm
+    for spec in "$@"; do
+        idx=${spec%%:*}; spec=${spec#*:}
+        rpm=${spec%%:*}
+        printf '%s\n' "$rpm" > "$root/$dir/fan${idx}_input"
+        case "$spec" in
+            *:*) pwm=${spec#*:}; printf '%s\n' "$pwm" > "$root/$dir/pwm${idx}" ;;
+        esac
+    done
+}
+
+# field <n> <line>  — 1-indexed pipe field
+field() { printf '%s' "$2" | cut -d'|' -f"$1"; }
+
+run_sysinfo() { SYSINFO_HWMON="$1" sh "$SYSINFO" 2>/dev/null; }
+
+echo "== data: scripts/sysinfo.sh against synthetic hwmon =="
+
+# --- 0 fans: nothing anywhere. This is TODAY on `top`, and the widget must
+#     stay hidden rather than draw a permanent zero.
+R=$WORK/n0; mkdir -p "$R"
+mkchip "$R" hwmon0 k10temp
+mkchip "$R" hwmon1 nvme
+L=$(run_sysinfo "$R")
+check "0 fans: fanAvgRpm" "0"  "$(field 24 "$L")"
+check "0 fans: fanCount"  "0"  "$(field 25 "$L")"
+check "0 fans: detail"    ""   "$(field 33 "$L")"
+
+# --- 1 fan, with pwm: the percentage is real (duty), so it is reported.
+R=$WORK/n1; mkdir -p "$R"
+mkchip "$R" hwmon0 nct6799 1:1180:128
+L=$(run_sysinfo "$R")
+check "1 fan: fanCount" "1"              "$(field 25 "$L")"
+check "1 fan: detail"   "fan1:1180:50"   "$(field 33 "$L")"
+
+# --- 1 fan, NO pwm: pct must be -1, never a guessed fraction of some assumed
+#     maximum. This is the honesty case.
+R=$WORK/n1b; mkdir -p "$R"
+mkchip "$R" hwmon0 nct6799 1:1180
+L=$(run_sysinfo "$R")
+check "1 fan no pwm: detail" "fan1:1180:-1" "$(field 33 "$L")"
+
+# --- 2 fans, one chip, one with pwm and one without: mixed units in one list.
+R=$WORK/n2; mkdir -p "$R"
+mkchip "$R" hwmon0 nct6799 1:1180:128 2:820
+L=$(run_sysinfo "$R")
+check "2 fans: fanCount" "2"                          "$(field 25 "$L")"
+check "2 fans: detail"   "fan1:1180:50,fan2:820:-1"   "$(field 33 "$L")"
+check "2 fans: avg"      "1000"                       "$(field 24 "$L")"
+
+# --- 5 fans across TWO chips: ordering must be stable (chip dir, then fan
+#     index) and the labels must be chip-prefixed so they stay distinguishable.
+R=$WORK/n5; mkdir -p "$R"
+mkchip "$R" hwmon0 nct6799 1:1180:128 2:820:64 3:2400:255
+mkchip "$R" hwmon2 amdgpu  1:1500:200 2:1500:200
+L=$(run_sysinfo "$R")
+check "5 fans: fanCount" "5" "$(field 25 "$L")"
+check "5 fans: detail" \
+  "nct6799.fan1:1180:50,nct6799.fan2:820:25,nct6799.fan3:2400:100,amdgpu.fan1:1500:78,amdgpu.fan2:1500:78" \
+  "$(field 33 "$L")"
+# ...and it is stable: the same tree twice must give the identical string.
+L2=$(run_sysinfo "$R")
+check "5 fans: stable ordering" "$(field 33 "$L")" "$(field 33 "$L2")"
+
+# --- a header reading 0 rpm is NOT listed, whatever its pwm register says.
+#     This is `top`'s own shape and the reason the rule is rpm-only: the board's
+#     nct6687 publishes ten fan*_input and eight pwm, four headers have fans on
+#     them, and the other four sit at 0 rpm with 23-100% duty. So a nonzero pwm
+#     over a dead tachometer is an EMPTY HEADER here, not a stalled fan — and
+#     sysfs offers nothing that tells the two apart. Listing on duty as well as
+#     rpm showed eight fans on a machine with four.
+R=$WORK/nz; mkdir -p "$R"
+mkchip "$R" hwmon0 nct6799 1:1180:128 2:0:0 3:0:180
+L=$(run_sysinfo "$R")
+check "0-rpm headers dropped whatever their duty" \
+  "fan1:1180:50" "$(field 33 "$L")"
+
+# --- a driver-supplied label wins, and cannot smuggle a delimiter into the
+#     field. "Chassis Fan, 2:x|y" must come back sanitised.
+R=$WORK/nl; mkdir -p "$R"
+mkchip "$R" hwmon0 nct6799 1:1180:128
+printf 'Chassis Fan, 2:x|y\n' > "$R/hwmon0/fan1_label"
+L=$(run_sysinfo "$R")
+D=$(field 33 "$L")
+# Spaces become '_', the delimiters ':' ',' '|' are stripped outright, and the
+# result is capped at 12 characters — so nothing a driver puts in a label can
+# add a field to this line or a row to the widget.
+check "label sanitised"    "Chassis_Fan_" "$(printf '%s' "$D" | cut -d: -f1)"
+check "label field intact" "3" "$(printf '%s' "$D" | awk -F: '{print NF}')"
+check "one entry only"     "1" "$(printf '%s' "$D" | awk -F, '{print NF}')"
+
+# --- the line still has the field count SysInfo.qml's guards expect.
+check "field count" "33" "$(printf '%s' "$L" | awk -F'|' '{print NF}')"
+
+# ---------------------------------------------------------------- the view
+echo "== derivation: Fans.qml offscreen =="
+
+QMLBIN=$(command -v qml || true)
+if [ -z "$QMLBIN" ]; then
+    echo "SKIP  qml runtime not on PATH; derivation cases not run"
+else
+    # Fans.qml is copied next to a STUB Theme rather than imported from the
+    # panel directory: the real singletons there pull in Quickshell
+    # (SettingsStore holds a FileView), which a bare `qml` cannot instantiate.
+    # The component itself is unmodified, which is the point — it is pure
+    # derivation over its `rows`/`hist` properties, and that is exactly what
+    # makes it testable without a panel, a compositor, or a particular set of
+    # fans. This board has four; the 0, 1, 2 and 5 cases have no hardware here.
+    ST=$WORK/qml; mkdir -p "$ST"
+    cp "$QSDIR/Fans.qml" "$ST/" || { echo "FAIL  cannot copy Fans.qml"; fail=$((fail+1)); }
+    cat > "$ST/Theme.qml" <<'THEOF'
+pragma Singleton
+import QtQuick
+QtObject {
+    readonly property color accent: "#5c9fcc"
+    readonly property color dim: "#2a4354"
+}
+THEOF
+    cat > "$ST/qmldir" <<'DIREOF'
+singleton Theme 1.0 Theme.qml
+Fans 1.0 Fans.qml
+DIREOF
+
+    cat > "$ST/Main.qml" <<'MAINEOF'
+import QtQuick
+
+QtObject {
+    id: win
+    property var cases: [
+        { name: "n0", rows: [] },
+        { name: "n1", rows: [ {name:"fan1", rpm:1180, pct:50} ] },
+        // mixed: one fan with a duty, one with only a tachometer. The one
+        // without must keep its row in the tooltip and get NO line.
+        { name: "n2", rows: [ {name:"fan1", rpm:1180, pct:50},
+                              {name:"fan2", rpm:820,  pct:-1} ] },
+        // nothing reports a duty at all: the headline must fall back to rpm
+        // rather than print a percent sign over a number that is not one.
+        { name: "nr", rows: [ {name:"fan1", rpm:1180, pct:-1},
+                              {name:"fan2", rpm:820,  pct:-1} ] },
+        // five, including a gpu-shaped row (a percentage and no tachometer).
+        { name: "n5", rows: [ {name:"fan1", rpm:1180, pct:50}, {name:"fan2", rpm:820, pct:25},
+                              {name:"fan3", rpm:2400, pct:100},{name:"fan4", rpm:1500, pct:78},
+                              {name:"gpu",  rpm:-1,   pct:37} ] },
+    ]
+    property var probe: Fans { }
+    Component.onCompleted: {
+        for (var c = 0; c < win.cases.length; c++) {
+            var kase = win.cases[c];
+            var h = {};
+            for (var j = 0; j < kase.rows.length; j++)
+                h[kase.rows[j].name] = [1, 2, 3];
+            win.probe.rows = kase.rows;
+            win.probe.hist = h;
+            var shades = [];
+            for (var i = 0; i < kase.rows.length; i++)
+                shades.push(String(win.probe.shade(i)));
+            console.warn("CASE " + kase.name
+                + " n=" + win.probe.count
+                + " lines=" + win.probe.series.length
+                + " headline=" + win.probe.headline
+                + " sub=[" + win.probe.subline + "]"
+                + " detail=" + win.probe.detail.split("\n").length
+                + " shades=" + shades.join("/"));
+        }
+        Qt.exit(0);
+    }
+}
+MAINEOF
+
+    # QT_FORCE_STDERR_LOGGING is NOT optional here. Without it this Qt build
+    # emits nothing at all from console.warn/log — the run exits 0 in silence,
+    # which reads exactly like a harness whose assertions all vanished. (Same
+    # family as the panel's own "qs drops console.log" trap, different cause.)
+    OUT=$(QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+          "$QMLBIN" -I "$ST" "$ST/Main.qml" 2>&1 </dev/null)
+    printf '%s\n' "$OUT" | grep -vE '^qml: CASE ' | grep -E '.' | sed 's/^/  /'
+
+    getcase() { printf '%s\n' "$OUT" | grep "CASE $1 " ; }
+    v() { printf '%s\n' "$2" | tr ' ' '\n' | grep "^$1=" | cut -d= -f2- ; }
+
+    # 0 fans: nothing to say and nothing to draw. The card's consumers hide on
+    # this, rather than drawing a permanent zero.
+    C=$(getcase n0)
+    check "n0: count"    "0"  "$(v n "$C")"
+    check "n0: no lines" "0"  "$(v lines "$C")"
+    check "n0: headline" "--" "$(v headline "$C")"
+
+    C=$(getcase n1)
+    check "n1: one line"  "1"    "$(v lines "$C")"
+    check "n1: headline"  "50%"  "$(v headline "$C")"
+    check "n1: sub"       "[1180r]" "$(v sub "$C")"
+
+    # A fan with no duty is NOT plotted — there is no honest denominator to put
+    # it on a 0-100 axis with — but it keeps its tooltip row and its exact rpm.
+    C=$(getcase n2)
+    check "n2: two fans"       "2"   "$(v n "$C")"
+    check "n2: one line only"  "1"   "$(v lines "$C")"
+    check "n2: both in tooltip" "2"  "$(v detail "$C")"
+    check "n2: headline"       "50%" "$(v headline "$C")"
+
+    # No duty anywhere: rpm headline, no lines, everything in the tooltip.
+    C=$(getcase nr)
+    check "nr: no lines"  "0"       "$(v lines "$C")"
+    check "nr: headline"  "1180rpm" "$(v headline "$C")"
+    check "nr: no sub"    "[]"      "$(v sub "$C")"
+
+    # Five fans, one of them tachometer-less (a gpu). The headline is the
+    # FASTEST going, and its sub is that same fan's rpm — not the highest rpm
+    # on the machine, which would be a second claim quietly disagreeing.
+    C=$(getcase n5)
+    check "n5: five lines"   "5"      "$(v lines "$C")"
+    check "n5: headline"     "100%"   "$(v headline "$C")"
+    check "n5: sub is ITS rpm" "[2400r]" "$(v sub "$C")"
+    check "n5: tooltip rows" "5"      "$(v detail "$C")"
+
+    # Five lines must come out as five DISTINCT shades. The palette is one hue
+    # (DESIGN.md 3.1), so these are steps on a brightness ladder rather than
+    # different colours — the check is that no two steps collapse together.
+    SH=$(v shades "$C")
+    N=$(printf '%s' "$SH" | awk -F/ '{print NF}')
+    U=$(printf '%s' "$SH" | tr '/' '\n' | sort -u | wc -l)
+    check "n5: 5 distinct shades" "$N" "$U"
+fi
+
+echo "-- $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

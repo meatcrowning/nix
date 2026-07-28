@@ -66,6 +66,17 @@ Item {
         Procs.filterLatch = false;
     }
 
+    // Every fan, reduced to lines, a headline and a tooltip. A plain object, not
+    // a singleton: it is pure derivation over SysInfo's readings, and keeping it
+    // out of the data layer is what lets tools/fan-harness.sh drive it offscreen
+    // with synthetic fan sets — 0, 1, 2 and 5 fans, none of which this board can
+    // be made to produce.
+    Fans {
+        id: fans
+        rows: SysInfo.fans
+        hist: SysInfo.fanPctHist
+    }
+
     function fmtUptime(s) {
         if (!s || s <= 0) return "--";
         const d = Math.floor(s / 86400);
@@ -308,12 +319,31 @@ Item {
             width: root.cardW; height: root.cardH
             visible: !root.noGpu
             label: "fan"
-            tip: "gpu fan speed. 0% is a real reading -\nthe card stops its fans when it is cool\nscroll: screen brightness"
-            // The GPU fan, as a percentage. Zero is a real reading, not a
-            // missing one — this card idles at 0% because the card stops its
-            // fans entirely when it is cool.
-            value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
-            series: [ { data: SysInfo.gpuFanHist, color: Theme.accent } ]
+            // EVERY fan in the box, one line each — the chassis and cooler fans
+            // from hwmon plus the GPU fan, which used to have this card to
+            // itself. It was not displaced: it is one more line, and it is still
+            // the only fan here whose 0% is a real reading rather than a missing
+            // one (the graphics card stops its fans entirely when it is cool).
+            //
+            // The readout is the FASTEST fan going. See Fans.qml for what that
+            // percentage is and — more importantly — what it is not: the chassis
+            // fans' figure is the duty the chip is COMMANDING, not a fraction of
+            // a maximum RPM, because sysfs publishes no maximum and there is no
+            // honest denominator for one. The exact speeds live in the tooltip,
+            // where they are never rounded into that axis.
+            tip: "every fan, brightest line first. the readout is the\n"
+                 + "fastest going - percent of each fan's own full scale\n"
+                 + "(commanded pwm duty for the chassis fans), not of a\n"
+                 + "maximum rpm, which sysfs does not publish\n\n"
+                 + fans.detail
+                 + "\n\nscroll: screen brightness"
+            value: fans.headline
+            sub: fans.subline
+            // Fixed 0-100 axis, for the same reason the battery card has one:
+            // these are percentages, and autoscaling a set of fans that are all
+            // idling at 20% against their own peak would draw them flat out.
+            scaleMax: 100
+            series: fans.series
             // Scrolling this card is screen brightness — asked for by name
             // ("make the fan widget something i can scroll on and change the
             // brightness of the screen"). It routes through the SAME
@@ -369,56 +399,6 @@ Item {
         }
     }
 
-    // ---- chassis fans ----------------------------------------------------
-    // A bar rather than a ninth square: it is one number with no interesting
-    // history, and it belongs to the whole box rather than to one component.
-    //
-    // HIDDEN when nothing reports a tachometer, which is the case on `top` as
-    // it stands — no Super-I/O driver is loaded for the B650's sensor chip, so
-    // /sys/class/hwmon has no fan*_input at all. Drawing a permanent zero would
-    // be worse than drawing nothing. It lights up by itself if that driver is
-    // ever loaded.
-    Item {
-        id: fanBar
-        anchors { top: cards.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
-        width: root.inner
-        height: visible ? 14 : 0
-        visible: SysInfo.fanCount > 0
-
-        // 2000 rpm full scale: case fans live well under that, and a scale that
-        // autoranged would make an idle machine look like it was screaming.
-        readonly property real frac: Math.max(0, Math.min(1, SysInfo.fanAvgRpm / 2000))
-
-        PixelText {
-            id: fanLabel
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-            text: "fans"
-            color: Theme.textDim
-        }
-        PixelText {
-            id: fanVal
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-            text: SysInfo.fanAvgRpm + "rpm"
-            color: Theme.text
-        }
-        Rectangle {
-            anchors {
-                left: fanLabel.right; leftMargin: 6
-                right: fanVal.left; rightMargin: 6
-                verticalCenter: parent.verticalCenter
-            }
-            height: 6
-            color: Theme.bgAlt
-            border.width: 1
-            border.color: Theme.border
-            Rectangle {
-                anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
-                width: Math.round((parent.width - 2) * fanBar.frac)
-                color: Theme.accent
-            }
-        }
-    }
-
     // ---- filter box ------------------------------------------------------
     // Substring match on name or pid, live as you type. The panel's layer
     // surface takes the keyboard ONLY while this box holds it (Procs.filterFocus,
@@ -427,7 +407,7 @@ Item {
     // hands it straight back.
     Rectangle {
         id: filterBox
-        anchors { top: fanBar.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
+        anchors { top: cards.bottom; topMargin: 6; horizontalCenter: parent.horizontalCenter }
         width: root.inner
         height: 19
         color: Theme.bgAlt

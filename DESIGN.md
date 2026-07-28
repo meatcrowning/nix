@@ -506,6 +506,27 @@ color of the buttons will be the minimized indicator color"*
 different colours.** Where a state outranks another, say so explicitly: roll and
 minimize outrank focus, because a rolled-up window can still hold the keyboard.
 
+### 3.3.1 N series on one hue is a LADDER, and the key is never the colour
+
+[code] The corollary of 3.1 for graphs: **a chart with N lines cannot hand out N
+colours, because there is only ever one hue to give.** Two or three series get
+away with borrowing from the status ramp (`crit` for the temperature riding over
+`accent` for the load, on the cpu and gpu cards) — but that ramp is four slots
+deep and every one of them is a near-neighbour of accent, so it does not scale
+and it is not a palette.
+
+So a set of *peers* — the `fan` card's one line per fan — is drawn as
+**monotonic steps of accent brightness**, computed from the live palette
+(`Qt.tint` toward `dim`), never as invented hues. It is 3.3's rule applied to
+series instead of states.
+
+**And the colour is never the only key**, which is what makes the degradation
+safe: every line has a named row with its exact number in the tooltip, in the
+same order as the ladder. The ladder stays legible to about five or six lines;
+past that two steps look alike, and the widget is still readable because you can
+count. Design for that, rather than for a hue rotation the palette cannot
+express — a seventh series must degrade, not break.
+
 ### 3.4 Unlit is `bgAlt`, and unlit grids are dropped entirely
 
 **An "off" segment or dot is drawn in `bgAlt`, not `dim`.** [code — recorded as
