@@ -136,7 +136,10 @@ Session *snapshots* (`~/.local/state/hyprvtb/session.tsv`, relaunched by
 `vtbRestoreSession` at the next fresh login) are a separate, deliberate act:
 `hl.plugin.hyprvtb.save_session()` on Meta+Ctrl+S. **Never call it from a
 script** — an unexpected snapshot means the next login spawns a pile of windows,
-and restored windows skip the open-reveal animation by design.
+and restored windows skip the open-reveal animation by design. To find out what
+a snapshot *would* contain, use `session_probe()` (below): it runs the same
+selection into a scratch file and arms nothing. Neither side of the snapshot
+carries an agent's sandbox windows since 2.93 — also below.
 
 ---
 
@@ -404,13 +407,36 @@ window would appear in it**, and filter on the output:
   +sandbox]` in `exec`), which is the discriminator that survives the window
   being MOVED. `stop` closes by tag as well as by workspace for that reason.
   Use the tag for "whose window is this", the monitor for "can he see it".
-- **Still open: `hl.plugin.hyprvtb.save_session()` snapshots every decorated
-  window regardless of output**, so a snapshot taken while a sandbox is up would
-  relaunch an agent's test windows on the user's desktop at the next fresh login.
-  It is manual-only (Meta+Ctrl+S), which is the only thing bounding it. The fix
-  is a monitor test in `vtbSaveSession()` (`main.cpp`) — the plugin can ask
-  Aquamarine directly (`output->getBackend()->type() == AQ_BACKEND_HEADLESS`),
-  which is more honest than either test above.
+- **The session snapshot is filtered on BOTH sides (2.93).** It used to record
+  every decorated window regardless of output, so a snapshot taken while a
+  sandbox was up would have relaunched an agent's test windows on the user's
+  desktop at the next fresh login — the leak surviving a reboot. Now:
+  - **save** skips a window on a headless output *or* carrying the `sandbox`
+    tag (`vtbAgentWindowReason`). The monitor test asks Aquamarine
+    (`Hl::headlessMonitor` → `IOutput::getBackend()->type() ==
+    AQ_BACKEND_HEADLESS`, present on both pins) rather than inferring from
+    hardware identity the way the panel must — the compositor knows which
+    backend made the output. The identity test survives only as the fallback
+    for a monitor with no `m_output` to ask. Two tests because each covers the
+    other's blind spot: a window the sandbox never launched carries no tag, and
+    a sandbox window that got MOVED is on a real monitor.
+  - **restore** drops an entry whose saved geometry lands on no visible monitor
+    (headless outputs excluded) or is degenerate, because an *older* file can
+    still hold sandbox windows. Such an entry was never restorable anyway — the
+    restore path places a window at its exact saved position with no clamp.
+- **`session_probe()` answers "what would a snapshot do?" without arming one.**
+  `save_session()` may never be called from a script, which used to leave its
+  selection untestable. This runs the same selection into
+  `~/.local/state/hyprvtb/session-probe.tsv` and the same restore filter into
+  `session-probe-restore.tsv` (with `# skipped <cls> (reason)` lines), touching
+  neither `session.tsv` nor any process. An optional path argument evaluates a
+  *fabricated* snapshot's restore verdicts, so the drop rules can be exercised
+  against geometry no live window has:
+
+  ```bash
+  hyprctl eval "hl.plugin.hyprvtb.session_probe()"
+  hyprctl eval "hl.plugin.hyprvtb.session_probe(\"/tmp/fake-session.tsv\")"
+  ```
 
 - `exec` restores keyboard focus to the user's monitor afterwards (a new window
   takes focus even with `silent`).
