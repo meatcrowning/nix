@@ -671,6 +671,26 @@ Scope {
         target: "brightness"
         function up(): void { SysInfo.adjustBrightness(SettingsStore.d.brightnessStep); }
         function down(): void { SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep); }
+        // READ-ONLY, and the only way to ask what the screen is actually set to
+        // without driving it. There was no getter here at all, so answering
+        // "how bright is it" meant a `ddcutil getvcp 10` — a ~1.5s I2C
+        // transaction racing the panel's own debounced write on the same bus,
+        // and one that cannot see the gamma half of the range at all. Every
+        // number below is the panel's own state, so it costs nothing and is
+        // consistent with what the OSD just showed.
+        //
+        // `level` is the SIGNED reading the panel and OSD display: the hardware
+        // value normally, and gamma-100 (a negative number) once scrolling past
+        // hardware 0 has pulled the compositor's ramp instead.
+        function status(): string {
+            return "level=" + SysInfo.brightnessLevel
+                 + " hw=" + SysInfo.brightness
+                 + " gamma=" + SysInfo.gamma
+                 + " floor=" + Math.max(5, Math.min(100, SettingsStore.d.gammaFloor))
+                 + " negative=" + SysInfo.negativeBrightness
+                 + " backend=" + (SysInfo.useBacklight ? "backlight" : "ddc")
+                 + " step=" + SettingsStore.d.brightnessStep;
+        }
     }
 
     // The wallpaper, one Background-layer surface per monitor. Drawn here rather
