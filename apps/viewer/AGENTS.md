@@ -9,6 +9,16 @@ rebuild. See [`../AGENTS.md`](../AGENTS.md) for the shared rules.
 - **Split out of filer's old built-in overlay.** filer's `openFile` now shells
   out to `viewer <path>`, and viewer scans that file's directory for the sibling
   images, so ‹/› flip through the folder.
+- **`--order FILE` overrides that scan** with the caller's own order: NUL-
+  separated paths (a filename may contain a newline), non-media entries and
+  directories dropped viewer-side so the caller needn't know what viewer
+  decodes. filer passes it on every image open (`FileOps.writeOrder` →
+  `orderPaths()`), so ‹/› follow the sort the user is actually looking at
+  instead of viewer's own name-sort — sort filer by size and viewer flips by
+  size. viewer **consumes** the file (unlinks it, temp roots only) and nothing
+  watches it: the order is a launch-time snapshot, so re-sorting filer while a
+  viewer is open leaves that viewer alone, by design. Falls back to the plain
+  scan if the file is unreadable or doesn't contain the opened path.
 - Its prev/next/zoom/fit/close controls live in the **hyprvtb titlebar** (the
   same `pylib/vtbclient.py` bridge filer/surfer use), not in QML.
 - **The wheel ZOOMS, and it is the one sanctioned bare `Flickable` in `apps/`.**

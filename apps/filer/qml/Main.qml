@@ -421,8 +421,15 @@ Window {
         }
 
         // Open a file with the right thing for its kind: images go to `viewer`
-        // (the standalone image/media viewer — it scans the file's directory
-        // itself for the flip-through set), the rest to xdg-open. (Dirs → go().)
+        // (the standalone image/media viewer), the rest to xdg-open. (Dirs → go().)
+        //
+        // viewer would otherwise build its flip-through set by name-sorting the
+        // file's directory itself, which contradicts what the user is looking at
+        // the moment they have sorted by size or date. So hand it `orderPaths()`
+        // — this window's exact top-to-bottom order — via FileOps.writeOrder, and
+        // its ‹ / › walk that instead. It is a snapshot taken at launch: viewer
+        // consumes the file, nothing watches it, so re-sorting filer while a
+        // viewer is open deliberately leaves that viewer's order alone.
         // In picker mode "open" means "this is my answer" — double-clicking a
         // file returns it. Launching viewer/xdg-open from inside a dialog the
         // portal spawned would be both wrong and, for xdg-open, circular.
@@ -431,7 +438,11 @@ Window {
                 if (Picker.selectable(p)) { selectSingle(p, false); pickBar.submit(); }
                 return;
             }
-            if (kind === "image") FileOps.execDetached(["viewer", p]);
+            if (kind === "image") {
+                const order = FileOps.writeOrder(orderPaths());
+                FileOps.execDetached(order ? ["viewer", "--order", order, p]
+                                           : ["viewer", p]);
+            }
             else FileOps.execDetached(["xdg-open", p]);
         }
 

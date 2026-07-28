@@ -10,13 +10,16 @@ file browser and can grow into a general media viewer without bloating filer.
 
 Given one image path it scans that file's directory for the rest (the sibling
 images, name-sorted) so ‹ / › flip through the folder; given several paths it
-uses exactly those. Theme/palette wiring mirrors filer: the live wallpaper
+uses exactly those. `--order FILE` overrides the scan with a caller-supplied
+order — that is how filer makes ‹ / › follow the sort the user is actually
+looking at. Theme/palette wiring mirrors filer: the live wallpaper
 palette is parsed from the panel's Theme.qml and watched, so viewer recolours in
 lock-step with the bar. See filer/main.py for the shared design notes.
 """
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QFileSystemWatcher
@@ -60,13 +63,77 @@ def natkey(name):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
 
 
+def _consume(path):
+    """Delete a hand-over file we were given, best effort. Only inside a temp
+    root — `--order` transfers ownership, but never let a typo'd flag delete
+    something of the user's."""
+    roots = [tempfile.gettempdir()]
+    rt = os.environ.get("XDG_RUNTIME_DIR")
+    if rt:
+        roots.append(rt)
+    real = os.path.realpath(path)
+    if any(real.startswith(os.path.realpath(r) + os.sep) for r in roots):
+        try:
+            os.unlink(real)
+        except OSError:
+            pass
+
+
+def order_from(order_file, target):
+    """(entries, index) from a caller-supplied order file, or None.
+
+    filer writes the paths it is displaying, in display order, and passes
+    `--order <file>`; viewer flips through exactly that instead of its own
+    name-sort of the directory. NUL-separated, because a filename may contain a
+    newline. Non-media entries (filer lists directories and plain files too) are
+    dropped here rather than filer-side, so the caller need not know what viewer
+    can decode.
+
+    It is a LAUNCH-TIME snapshot, deliberately: the file is consumed on read and
+    nothing watches it, so re-sorting filer afterwards leaves an open viewer's
+    order alone. None (→ fall back to the directory scan) if the file is
+    unreadable or does not contain `target`."""
+    try:
+        raw = open(order_file, "rb").read().decode("utf-8", "surrogateescape")
+    except OSError:
+        return None
+    finally:
+        _consume(order_file)
+    entries = [{"name": os.path.basename(p), "path": p}
+               for p in (os.path.abspath(q) for q in raw.split("\0") if q)
+               if is_media(p) and os.path.isfile(p)]
+    idx = next((i for i, e in enumerate(entries) if e["path"] == target), -1)
+    return (entries, idx) if idx >= 0 else None
+
+
+def split_args(argv):
+    """(--order file or None, the remaining positional paths)."""
+    order, rest, it = None, [], iter(argv)
+    for a in it:
+        if a == "--order":
+            order = next(it, None)
+        elif a.startswith("--order="):
+            order = a[len("--order="):]
+        else:
+            rest.append(a)
+    return order, rest
+
+
 def images_for(argv):
     """(list of {name, path}, start index) for the given argv.
 
     One existing media file → the name-sorted media of its directory, positioned
-    on it. Several paths → exactly those, in the order given. Anything else that
+    on it (or the caller's `--order`, if it gave one containing that file).
+    Several paths → exactly those, in the order given. Anything else that
     exists → just itself."""
+    order_file, argv = split_args(argv)
     paths = [os.path.abspath(a) for a in argv if os.path.exists(a)]
+    if order_file and len(paths) == 1 and os.path.isfile(paths[0]):
+        got = order_from(order_file, paths[0])
+        if got is not None:
+            return got
+    elif order_file:
+        _consume(order_file)
     if len(paths) == 1 and os.path.isfile(paths[0]):
         target = paths[0]
         d = os.path.dirname(target)
