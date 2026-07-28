@@ -8,23 +8,30 @@ import QtMultimedia
 // file), and the hyprvtb titlebar drives it (prev/next/zoom/close — wired in
 // Main.qml). Main.qml swaps `source` to flip through the folder's images.
 //
-// Scaling: the image is fit to the window by default (zoom 1.0 = fit); the wheel
-// zooms IN from there (fit is the floor), and dragging pans once zoomed. Flip /
-// close come from OUTSIDE — the titlebar buttons and the key handler below call
-// next()/prev()/closeRequested(); Main.qml swaps `source` to the new image.
+// **One of these per PANE**, not one per window: Main.qml lays out a grid of
+// them (split view) and swaps each pane's `source` independently, so the zoom,
+// the pan offset and the video player below are per-pane state. Nothing here
+// knows about the grid beyond `paneFocused` — which mutes an unfocused pane's
+// video, so four clips playing at once are not four soundtracks at once — and
+// `focusRequested()`, which lets a zoom over an unfocused pane point the chrome
+// at it. The KEYS live in Main.qml, on the one item that holds the window's
+// focus, precisely so that N panes never fight over active focus (surfer's
+// split learned that the hard way; here no pane takes focus at all).
+//
+// Scaling: the image is fit to the pane by default (zoom 1.0 = fit); the wheel
+// zooms IN from there (fit is the floor), and dragging pans once zoomed.
 Rectangle {
     id: viewer
 
     property url source: ""
     property string name: ""       // basename, for the "can't display" card
     property bool winActive: true
+    property bool paneFocused: true
 
-    signal next()
-    signal prev()
-    signal closeRequested()
+    // the wheel zoomed this pane — Main.qml moves the chrome here
+    signal focusRequested()
 
     color: Theme.bg
-    focus: visible
 
     readonly property real maxZoom: 8
 
@@ -92,7 +99,6 @@ Rectangle {
 
     // reset to fit whenever the shown image changes
     onSourceChanged: fit()
-    onVisibleChanged: if (visible) forceActiveFocus()
 
     function fit() { flick.zoom = 1; flick.contentX = 0; flick.contentY = 0; }
     function zoomBy(f) { zoomAround(f, flick.width / 2, flick.height / 2); }
@@ -177,15 +183,21 @@ Rectangle {
                         : Math.abs(ad) >= 120  ? ad          // real wheel detent
                         :                        ad / 4;     // touchpad sub-pixel
                 viewer.zoomAround(Math.exp(Math.log(1.2) / 120 * d), e.x, e.y);
+                // zooming a pane is using it: the chrome follows the wheel, so
+                // ‹ / › and the titlebar's zoom buttons mean the pane the user
+                // was just scrolling over.
+                if (!viewer.paneFocused) viewer.focusRequested();
             }
         }
     }
 
     // ---- video surface (VIDEO_EXTS) ----
-    // Fit to the window and looped forever (MediaPlayer.Infinite). The titlebar's
+    // Fit to the pane and looped forever (MediaPlayer.Infinite). The titlebar's
     // play/pause + scrub bar drive it (via Main.qml); source flips with the
-    // folder like the images do. Audio plays through the default output.
-    AudioOutput { id: audioOut }
+    // folder like the images do. Audio plays through the default output — but
+    // only for the FOCUSED pane: a split full of clips would otherwise mix
+    // every soundtrack together, and the titlebar can only pause one of them.
+    AudioOutput { id: audioOut; muted: !viewer.paneFocused }
     MediaPlayer {
         id: player
         source: viewer.isVideo ? viewer.source : ""
@@ -215,20 +227,5 @@ Rectangle {
             : (viewer.imgStatus === Image.Error ? ("can't display\n" + viewer.name)
               : viewer.imgStatus === Image.Loading ? "loading…" : "")
         color: viewer.winActive ? Theme.textDim : Theme.inactive
-    }
-
-    Keys.onPressed: (e) => {
-        switch (e.key) {
-        case Qt.Key_Left:                      viewer.prev(); e.accepted = true; break;
-        case Qt.Key_Right:                     viewer.next(); e.accepted = true; break;
-        // Space plays/pauses a video, else advances to the next image
-        case Qt.Key_Space:
-            if (viewer.isVideo) viewer.togglePlay(); else viewer.next();
-            e.accepted = true; break;
-        case Qt.Key_Escape:                    viewer.closeRequested(); e.accepted = true; break;
-        case Qt.Key_Plus: case Qt.Key_Equal:   viewer.zoomBy(1.25); e.accepted = true; break;
-        case Qt.Key_Minus:                     viewer.zoomBy(0.8);  e.accepted = true; break;
-        case Qt.Key_0:                         viewer.fit();        e.accepted = true; break;
-        }
     }
 }
