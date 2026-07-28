@@ -858,18 +858,23 @@ class UserScripts(QObject):
 
 class Session(QObject):
     """Persists the open tabs (their URLs) + the active tab index to
-    $XDG_STATE_HOME/surfer/session.json, so a relaunch restores what was open."""
+    $XDG_STATE_HOME/surfer/session.json, so a relaunch restores what was open.
+
+    ``split`` is the tab index in the split view's RIGHT pane, or -1 for no
+    split. It is read with a default, so a session.json written before split
+    view existed restores as an ordinary single-pane window."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
         self._path = state / "surfer" / "session.json"
 
-    @Slot("QVariantList", int)
-    def save(self, urls, current):
+    @Slot("QVariantList", int, int)
+    def save(self, urls, current, split=-1):
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"tabs": [str(u) for u in urls if str(u)], "current": int(current)}
+            data = {"tabs": [str(u) for u in urls if str(u)], "current": int(current),
+                    "split": int(split)}
             self._path.write_text(json.dumps(data), encoding="utf-8")
         except OSError:
             pass
@@ -879,9 +884,13 @@ class Session(QObject):
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
             tabs = [str(u) for u in data.get("tabs", []) if str(u)]
-            return {"tabs": tabs, "current": int(data.get("current", 0))}
+            try:
+                split = int(data.get("split", -1))
+            except (TypeError, ValueError):
+                split = -1
+            return {"tabs": tabs, "current": int(data.get("current", 0)), "split": split}
         except (OSError, ValueError, TypeError):
-            return {"tabs": [], "current": 0}
+            return {"tabs": [], "current": 0, "split": -1}
 
 
 class Prefs(QObject):
@@ -911,6 +920,26 @@ class Prefs(QObject):
     def saveZoom(self, z):
         d = self._read()
         d["zoom"] = float(z)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
+    # split view's divider position, as the left pane's fraction of the window
+    # (0.5 = even). Written on release of the drag, not on every motion event.
+    @Slot(result=float)
+    def loadSplitRatio(self):
+        try:
+            r = float(self._read().get("splitRatio", 0.5))
+        except (TypeError, ValueError):
+            return 0.5
+        return min(0.92, max(0.08, r))
+
+    @Slot(float)
+    def saveSplitRatio(self, r):
+        d = self._read()
+        d["splitRatio"] = float(r)
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._path.write_text(json.dumps(d), encoding="utf-8")

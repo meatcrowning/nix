@@ -42,12 +42,15 @@ Window {
     property bool tipShown: false
     property real tipX: 0
     property real tipY: 0
-    function showTooltip(request) {
+    // `view` is the pane the page lives in: request.x/y are VIEW-relative, and a
+    // view only spans the whole window when the split is off — so the pane's own
+    // x/y is what turns them back into window coordinates.
+    function showTooltip(view, request) {
         request.accepted = true;   // suppress the native tooltip; draw our own
         if (request.type === TooltipRequest.Show && request.text.length > 0) {
             tipText = request.text;
-            tipX = request.x;
-            tipY = request.y;
+            tipX = request.x + (view ? view.x : 0);
+            tipY = request.y + (view ? view.y : 0);
             tipShown = true;
         } else {
             tipShown = false;      // keep tipText so it stays legible while retracting
@@ -73,8 +76,94 @@ Window {
     property int nextTid: 1
     property int currentTab: 0
     property int tabRev: 0   // bumped on any add/remove/move so tbButtons re-evaluates
-    readonly property Item current: viewRep.count > currentTab && currentTab >= 0
-                                    ? viewRep.itemAt(currentTab) : null
+
+    // ---- split view ----
+    // Two tabs side by side in one window, divided by a draggable splitter. The
+    // LEFT pane always shows `currentTab`; the right one shows `splitTab` while
+    // `splitOn`. `focusPane` is which of the two the CHROME acts on — the
+    // address bar, back/fwd/reload, dark mode and the dialogs all follow it, so
+    // every pane-agnostic thing below keeps working by reading `current`, which
+    // now means "the focused pane's view" rather than "the current tab's view".
+    // The panes hold two DIFFERENT tabs by construction: one WebEngineView can
+    // only be in one place, so showInPane() swaps rather than duplicates.
+    property bool splitOn: false
+    property int splitTab: -1     // tab index in the right pane, -1 = none
+    property int focusPane: 0     // 0 = left, 1 = right
+    property real splitRatio: 0.5
+    readonly property int splitterW: 4
+    readonly property int minPaneW: 120
+    readonly property int paneLeftW: splitOn
+        ? Math.max(minPaneW, Math.min(width - splitterW - minPaneW,
+                                      Math.round((width - splitterW) * splitRatio)))
+        : width
+    readonly property int paneRightX: paneLeftW + splitterW
+    readonly property int paneRightW: Math.max(0, width - paneRightX)
+
+    readonly property int focusTab: (splitOn && focusPane === 1) ? splitTab : currentTab
+    readonly property Item current: (focusTab >= 0 && viewRep.count > focusTab)
+                                    ? viewRep.itemAt(focusTab) : null
+    // Typing goes to the pane the chrome is pointed at, and clicking into a
+    // pane points the chrome at it (the delegate's onActiveFocusChanged).
+    //
+    // `retargeting` is what keeps those two from fighting. Swapping a pane's tab
+    // hides one view and shows another, and Qt hands the active focus of the
+    // view it just hid to whatever else will take it — the OTHER pane. That
+    // reads exactly like a click over there, and the chrome followed it: with
+    // the left pane focused, clicking any off-screen tab put it in the left pane
+    // and then jumped the focus to the right one (caught headlessly, not
+    // guessed). So focus we move ourselves is flagged and ignored on the way
+    // back in, and it is applied via callLater so the visibility bindings have
+    // settled before we pick the view to focus.
+    property bool retargeting: false
+    onFocusTabChanged: focusCurrentPane()
+    function focusCurrentPane() {
+        retargeting = true;
+        Qt.callLater(applyPaneFocus);
+    }
+    function applyPaneFocus() {
+        if (current) current.forceActiveFocus();
+        retargeting = false;
+    }
+
+    function setSplitRatio(r) {
+        splitRatio = Math.max(0.08, Math.min(0.92, r));
+    }
+    // Put tab `i` in pane `pane` (0 left, 1 right). If the other pane already
+    // holds it the two panes swap, which is the only way to keep them distinct.
+    function showInPane(pane, i) {
+        if (i < 0 || i >= tabs.count) return;
+        if (pane === 1 && !splitOn) pane = 0;
+        if (pane === 1) {
+            if (i === currentTab && splitTab >= 0) currentTab = splitTab;
+            splitTab = i;
+        } else {
+            if (splitOn && i === splitTab) splitTab = currentTab;
+            currentTab = i;
+        }
+        tabRev += 1;
+    }
+    // "sp" titlebar button. Opening takes the tab to the right of the current
+    // one (or the one to its left), and makes a home tab when this is the only
+    // tab there is — a split with nothing in the second pane is not a split.
+    function toggleSplit() {
+        if (splitOn) {
+            splitOn = false;
+            splitTab = -1;
+            focusPane = 0;
+        } else {
+            var other = currentTab + 1 < tabs.count ? currentTab + 1
+                      : (currentTab - 1 >= 0 ? currentTab - 1 : -1);
+            if (other < 0) {
+                tabs.append({ tid: nextTid, seed: homeUrl, cold: false });
+                nextTid += 1;
+                other = tabs.count - 1;
+            }
+            splitTab = other;
+            splitOn = true;
+            focusPane = 1;
+        }
+        tabRev += 1;
+    }
 
     // WAKE nudge: after the window is un-hidden (roll-up restore) QtWebEngine
     // presents black until it redraws; hide+show the live view to force a frame.
@@ -84,10 +173,12 @@ Window {
 
     property int dlSeq: 0   // per-download key for download toasts
 
+    // opens in the FOCUSED pane (the left one whenever the split is off)
     function newTab(url) {
         tabs.append({ tid: nextTid, seed: url, cold: false });
         nextTid += 1;
-        currentTab = tabs.count - 1;
+        if (splitOn && focusPane === 1) splitTab = tabs.count - 1;
+        else currentTab = tabs.count - 1;
         tabRev += 1;
     }
     // like newTab but leaves focus on the current tab (middle-click a link)
@@ -116,21 +207,44 @@ Window {
             if (tabs.get(i).tid === tid) return i;
         return -1;
     }
+    // where an index lands once row `removed` is gone; -1 = it WAS that row
+    function shiftIndex(idx, removed) {
+        if (idx < 0) return -1;
+        if (idx > removed) return idx - 1;
+        if (idx === removed) return -1;
+        return idx;
+    }
     function closeTab(i) {
         if (i < 0 || i >= tabs.count) return;
         if (tabs.count <= 1) { Qt.quit(); return; }
-        var wasCur = currentTab;
+        var wasCur = currentTab, wasSplit = splitTab;
         tabs.remove(i);
-        if (wasCur > i) currentTab = wasCur - 1;
-        else if (wasCur === i) currentTab = Math.min(i, tabs.count - 1);
+        currentTab = shiftIndex(wasCur, i);
+        if (currentTab < 0) currentTab = Math.min(i, tabs.count - 1);
+        if (splitOn) {
+            splitTab = shiftIndex(wasSplit, i);
+            // the right pane's tab was the one closed (or the shift collided
+            // with the left pane): give it any other tab, and if there is no
+            // other tab left there is nothing to split — fold back to one pane.
+            if (splitTab < 0 || splitTab === currentTab) {
+                splitTab = -1;
+                for (var k = 0; k < tabs.count; k++)
+                    if (k !== currentTab) { splitTab = k; break; }
+                if (splitTab < 0) { splitOn = false; focusPane = 0; }
+            }
+        }
         tabRev += 1;
     }
     function moveTab(fromIdx, toIdx) {
         if (fromIdx < 0 || toIdx < 0 || fromIdx >= tabs.count || toIdx >= tabs.count || fromIdx === toIdx)
             return;
         var curTid = tabs.get(currentTab).tid;
+        // the panes are addressed by INDEX but reordering only moves rows, so
+        // the right pane has to be re-found by tid exactly like the left one
+        var splTid = (splitOn && splitTab >= 0) ? tabs.get(splitTab).tid : -1;
         tabs.move(fromIdx, toIdx, 1);
         currentTab = tabIndexByTid(curTid);
+        if (splTid >= 0) splitTab = tabIndexByTid(splTid);
         tabRev += 1;
     }
 
@@ -224,8 +338,8 @@ Window {
     // Build the right-click menu item list from the snapshot the webview handed
     // us (see onContextMenuRequested) and pop the reusable ContextMenu. Image /
     // clipboard bits go through the view's own web actions; navigation + search
-    // reuse our tab helpers. request.position is view-relative, and the view
-    // fills the window, so it's already in window coordinates for the overlay.
+    // reuse our tab helpers. `c.pos` is already in WINDOW coordinates — the
+    // caller adds the view's own x/y, which is zero only when the split is off.
     function showContextMenu(view, c) {
         var items = [];
         function sep() { if (items.length) items.push({ separator: true }); }
@@ -316,7 +430,7 @@ Window {
             var u = live !== "" ? live : ("" + (tabs.get(i).seed || ""));
             urls.push(u !== "" ? u : win.homeUrl);
         }
-        Session.save(urls, currentTab);
+        Session.save(urls, currentTab, splitOn ? splitTab : -1);
     }
 
     // ---- site permission prompts (notifications, camera, mic, geolocation…) ----
@@ -366,6 +480,9 @@ Window {
             // panel is open — like a pressed menu button — not for the whole
             // time dark mode is enabled.
             { id: "darkmode", label: "dm", state: dmPanelOpen ? 1 : 0,  tip: "dark mode" },
+            // split view: two tabs side by side. Lit for as long as it is on.
+            { id: "split", label: "sp", state: splitOn ? 1 : 0,
+              tip: splitOn ? "close split view" : "split view" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -374,9 +491,19 @@ Window {
             // a cold tab has no title yet — name it by the url it will open
             var ttl = v && v.title ? v.title : (sd ? "" + sd : "tab");
             var asks = waitingFor(v) > 0 ? "asks · " : "";
+            // A tab on screen is lit. Which pane it is in, and what a click will
+            // do (close it if its pane already has the chrome's attention, focus
+            // that pane otherwise), is in the tooltip — the titlebar has no
+            // third lit state to say it with.
+            var shown = (i === currentTab) || (splitOn && i === splitTab);
+            var where = "";
+            if (splitOn && shown)
+                where = (i === focusTab ? "close · " : "focus · ") + (i === currentTab ? "left · " : "right · ");
+            else if (shown)
+                where = "close · ";
             arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v, sd),
-                       state: i === currentTab ? 1 : 0,
-                       tip: asks + (i === currentTab ? "close · " + ttl : ttl), drag: true });
+                       state: shown ? 1 : 0,
+                       tip: asks + where + ttl, drag: true });
         }
         arr.push({ id: "newtab", label: "+t", state: 0, tip: "new tab" });
         // settings pins to the bottom of the inner column (hyprvtb bottom-anchor)
@@ -398,12 +525,19 @@ Window {
             if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
             if (id === "darkmode") { win.dmPanelOpen = !win.dmPanelOpen; return; }
             if (id === "newtab")  { win.newTab(win.homeUrl); return; }
+            if (id === "split")   { win.toggleSplit(); return; }
             if (id === "settings") { UserScripts.openFolder(); return; }
             if (id.indexOf("tab:") === 0) {
                 var idx = win.tabIndexByTid(parseInt(id.substring(4)));
                 if (idx < 0) return;
-                if (idx === win.currentTab) win.closeTab(idx);  // re-click active tab = close
-                else win.currentTab = idx;
+                // re-click the focused pane's tab = close it (unsplit muscle
+                // memory); click the OTHER pane's tab = move the chrome there
+                // rather than swapping two tabs that are both already visible;
+                // anything else = show it in the focused pane.
+                if (idx === win.focusTab) win.closeTab(idx);
+                else if (win.splitOn && idx === win.currentTab) win.focusPane = 0;
+                else if (win.splitOn && idx === win.splitTab) win.focusPane = 1;
+                else win.showInPane(win.focusPane, idx);
                 return;
             }
         }
@@ -446,6 +580,7 @@ Window {
     Component.onCompleted: {
         Titlebar.setTitleEdit(true);
         Titlebar.setLoading(currentLoading);
+        splitRatio = Prefs.loadSplitRatio();
         if (startUrl !== "") {
             newTab(normalize(startUrl));
         } else {
@@ -467,8 +602,17 @@ Window {
                 // matches the default and emits nothing.
                 var cur = Math.min(Math.max(0, s.current), s.tabs.length - 1);
                 currentTab = cur;
+                // …and the same ordering rule covers the right pane: its tab is
+                // on screen from the first frame, so it must be known BEFORE the
+                // delegates exist or it would warm itself from the wrong index.
+                var spl = ("split" in s) ? s.split : -1;
+                if (spl >= 0 && spl < s.tabs.length && spl !== cur) {
+                    splitTab = spl;
+                    splitOn = true;
+                }
                 for (var i = 0; i < s.tabs.length; i++) {
-                    tabs.append({ tid: nextTid, seed: s.tabs[i], cold: i !== cur });
+                    tabs.append({ tid: nextTid, seed: s.tabs[i],
+                                  cold: i !== cur && i !== splitTab });
                     nextTid += 1;
                 }
                 tabRev += 1;
@@ -477,6 +621,9 @@ Window {
             }
         }
         Titlebar.setButtons(tbButtons);
+        // …and claim the focus for the left pane, so a restored split doesn't
+        // start with the chrome pointed at whichever view Qt focused first.
+        focusCurrentPane();
     }
 
     // Persistent profile (cookies/cache/localStorage on disk — GM_setValue is
@@ -517,8 +664,10 @@ Window {
         }
     }
 
-    // ---- content: one WebEngineView per tab, only the current one visible ----
+    // ---- content: one WebEngineView per tab; the one or two on screen are laid
+    // out by `pane` (see the split-view block above) ----
     Item {
+        id: stage
         anchors.fill: parent
 
         Repeater {
@@ -529,8 +678,20 @@ Window {
                 required property int index
                 required property string seed
                 required property bool cold
-                anchors.fill: parent
-                visible: win.currentTab === index && !win.nudging
+                // -1 = not on screen. Hidden views keep the FULL window width
+                // rather than a pane's, so opening the split doesn't reflow
+                // every background tab.
+                readonly property int pane: index === win.currentTab ? 0
+                                          : ((win.splitOn && index === win.splitTab) ? 1 : -1)
+                x: pane === 1 ? win.paneRightX : 0
+                y: 0
+                width: pane === 1 ? win.paneRightW : (pane === 0 ? win.paneLeftW : stage.width)
+                height: stage.height
+                visible: pane >= 0 && !win.nudging
+                // clicking into a pane points the chrome at it — unless this is
+                // our own retargeting coming back round (see win.retargeting)
+                onActiveFocusChanged: if (activeFocus && pane >= 0 && !win.retargeting)
+                                          win.focusPane = pane
                 profile: sharedProfile
                 // Shared, persisted zoom (Ctrl+wheel or Ctrl +/-/0). zoomFactor
                 // is NOT a binding and is NEVER persisted from here: the level is
@@ -547,7 +708,7 @@ Window {
                 }
                 // render the page's tooltips ourselves (win.showTooltip), so
                 // title= tooltips actually appear and match the DE
-                onTooltipRequested: (request) => win.showTooltip(request)
+                onTooltipRequested: (request) => win.showTooltip(webview, request)
                 // userscripts inject via the view's OWN collection (the view
                 // ignores a Python QWebEngineProfile) — GM shim, document-start,
                 // isolated worlds; see UserScripts in main.py
@@ -559,7 +720,7 @@ Window {
                 // a tab can be made current either by becoming the active index
                 // (clicking its titlebar button) or by warmTab clearing the role
                 // directly; whichever fires first, the other is then a no-op.
-                readonly property bool activeTab: win.currentTab === index
+                readonly property bool activeTab: pane >= 0
                 onActiveTabChanged: if (activeTab && cold) win.warmTab(index)
                 onColdChanged: if (!cold && ("" + url) === "") url = seed
                 // closing this tab kills any dialog/picker it was holding — the
@@ -628,7 +789,10 @@ Window {
                 onContextMenuRequested: (request) => {
                     request.accepted = true;   // suppress the native menu
                     win.showContextMenu(webview, {
-                        pos:         request.position,
+                        // view-relative -> window-relative: only equal when this
+                        // view spans the window, which a split pane does not
+                        pos:         Qt.point(request.position.x + webview.x,
+                                              request.position.y + webview.y),
                         link:        "" + request.linkUrl,
                         media:       "" + request.mediaUrl,
                         isImage:     request.mediaType === ContextMenuRequest.MediaTypeImage,
@@ -661,6 +825,50 @@ Window {
                 onFullScreenRequested: (request) => request.accept()
                 // page-initiated close (window.close()) closes its tab
                 onWindowCloseRequested: win.closeTab(index)
+            }
+        }
+
+        // Which pane the chrome is pointed at. The titlebar has no room to say
+        // it (a lit tab button means "on screen", and both panes' tabs are on
+        // screen), so the window does — a 1px accent frame, drawn over the page
+        // and grabbing no input.
+        Rectangle {
+            visible: win.splitOn
+            z: 9
+            x: win.focusPane === 1 ? win.paneRightX : 0
+            y: 0
+            width: win.focusPane === 1 ? win.paneRightW : win.paneLeftW
+            height: stage.height
+            color: "transparent"
+            border.width: 1
+            border.color: Theme.accent
+        }
+
+        // the divider: drag it to trade width between the panes. The ratio is
+        // persisted (Prefs) on release, not on every motion event.
+        Rectangle {
+            id: splitter
+            visible: win.splitOn
+            z: 10
+            x: win.paneLeftW
+            y: 0
+            width: win.splitterW
+            height: stage.height
+            color: splitDrag.pressed ? Theme.accent
+                 : (splitDrag.containsMouse ? Theme.accent : Theme.border)
+
+            MouseArea {
+                id: splitDrag
+                anchors.fill: parent
+                anchors.leftMargin: -3      // a 4px divider is a 10px grab target
+                anchors.rightMargin: -3
+                hoverEnabled: true
+                cursorShape: Qt.SplitHCursor
+                onPositionChanged: (m) => {
+                    if (!pressed) return;
+                    win.setSplitRatio(mapToItem(stage, m.x, m.y).x / Math.max(1, stage.width));
+                }
+                onReleased: Prefs.saveSplitRatio(win.splitRatio)
             }
         }
     }

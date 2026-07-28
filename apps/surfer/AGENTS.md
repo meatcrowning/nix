@@ -10,6 +10,55 @@ chrome via hyprvtb like the others.
 
 **Wheel events in this window are rescaled, and QML must undo it.** `ZoomFilter` divides every touchpad wheel event by `pylib/kinetic.py`'s `WHEEL_GAIN` (1/6) so QtWebEngine pages track the finger at the same rate the QML apps do; that is window-wide, so any scrollable QML surface here takes `wheelGain: WheelGain` (the reciprocal, published by `main.py` from the same constant) — the file picker does. Real mouse detents are passed through untouched (`is_wheel_detent`); applying the gain to them made top's wheel scroll pages at 1/6 speed twice already. The page itself is Chromium's own scroller and cannot use `WheelScroll`: parity there is the gain plus the compositor's >=300 ms withheld stop, which zeroes Chromium's 200 ms fling estimator so it adds no fling of its own. See [`../AGENTS.md`](../AGENTS.md).
 
+## Split view — two tabs side by side in one window
+
+The `sp` titlebar button. The **left** pane always shows `currentTab`, the right
+one shows `splitTab` while `splitOn`, and `focusPane` says which of the two the
+CHROME acts on. Everything pane-agnostic keeps working because `current` now
+means *the focused pane's view* (`focusTab`), not *the current tab's view* — the
+address bar, back/fwd/reload, dark mode, the JS dialogs and the file picker all
+read it and needed no change.
+
+- **The two panes always hold different tabs.** One `WebEngineView` can only be
+  in one place, so `showInPane()` swaps rather than duplicates, and closing a
+  pane's tab hands that pane another one — or folds the split when there is no
+  other tab left.
+- Both panes' tabs are **lit** in the titlebar. There is no third state to say
+  which one has the chrome, so the tooltip does (`close · left · …` for the
+  focused pane, `focus · right · …` for the other) and the window draws a 1px
+  accent frame round the focused pane. Clicking a lit tab that is *not* focused
+  moves the focus rather than swapping the panes.
+- `newTab()` opens in the **focused** pane; `splitTab` is tracked by tid across
+  a drag-reorder exactly as `currentTab` is.
+- **`focusPane` cannot be driven by active focus alone.** Swapping a pane's tab
+  hides one view, and Qt gives the hidden view's active focus to the only other
+  thing that will take it — the other pane — which is indistinguishable from a
+  click over there. Left unguarded, clicking any off-screen tab put it in the
+  left pane and then jumped the chrome to the right one. Focus we move ourselves
+  is therefore flagged (`win.retargeting`) and ignored on the way back in, and
+  applied through `Qt.callLater` so the visibility bindings have settled first.
+  This is measured, not theorised — see the harness note below.
+- **A view no longer spans the window, so view-relative coordinates are not
+  window coordinates.** The context menu and the page tooltip both add the
+  view's own `x`/`y`; anything else reading a `request.position` must too.
+- Persisted: the divider position in `prefs.json` (`splitRatio`, written on
+  release of the drag, clamped 0.08–0.92) and the right pane's tab in
+  `session.json` (`split`, `-1` for none — read with a default, so a session
+  written before split view existed restores as one pane).
+- Known limitation: a JS dialog or file picker raised by the **unfocused** pane
+  waits until you focus that pane. It is queued per view, and the tab's `asks ·`
+  tooltip already says so — the same behaviour a background tab has always had.
+
+Verified headlessly the same way the single-instance work was, and the harness is
+kept: **[`tools/split-test.py`](tools/split-test.py)** plays the hyprvtb button
+server (scratch `HOME` + `XDG_RUNTIME_DIR`, `QT_QPA_PLATFORM=offscreen`,
+about:blank tabs), reads the REGISTER lines and sends CLICKs. The per-tab
+tooltips name each pane, which is what makes pane assignment, focus, the
+close-fold and the toggle assertable without a screen — 18 checks, all passing;
+it is what caught the focus bug above. Re-run it after touching the split-view
+block. The *appearance* (divider, focus frame, page layout) is the user's visual
+check.
+
 ## Single instance — `surfer <url>` opens a TAB in the running browser
 
 surfer is the system default browser, so every link clicked anywhere runs
