@@ -60,6 +60,33 @@ static bool vtbNeverRemembersGeometry(const std::string& cls) {
     return cls == "vista-askpass";
 }
 
+// Classes that get NO titlebar at all — the window and nothing else.
+//
+// [his] "the visual sudo prompt shouldnt have any titlebar at all, just the
+// window." A titlebar is a set of controls, and every control this one offers
+// is a lie on a modal privilege prompt: `vista-askpass` is fixed-size (min ==
+// max in its QML), centred and pinned by its window rule, and must never be
+// remembered, rolled up, minimized or maximized. What was left was an [x] whose
+// job the dialog's own Cancel button and Esc already do — both exit 1 with
+// nothing on stdout, which is the wrapper's contract for a cancel. So the strip
+// reserved a double-wide column (2 x bar_width) to draw controls that either did
+// nothing or undid the window rule. DESIGN.md §7.5.
+//
+// Bar-less is NOT undecorated: the window keeps its hard drop shadow
+// (CVtbShadowDeco, attached below either way) — a shadow says "this floats
+// above the dimmed desktop", which is exactly what a modal wants to say.
+// Everything keyed off `bars` therefore skips these windows, as it already does
+// for the scratchpad: no session snapshot entry, no geometry memory, no
+// open-reveal roll, and `close_all()` at logout does not click an [x] they do
+// not have (a prompt with a `sudo` waiting on it is not something logout should
+// answer for).
+//
+// Declared beside vtbNeverRemembersGeometry because they cover the same window
+// for the same reason: a modal is not a document.
+static bool vtbNeverDecorates(const std::string& cls) {
+    return cls == "vista-askpass";
+}
+
 // See the comment on the declaration in globals.hpp for why this is $HOME-based.
 std::string vtbStateDir() {
     const char* home = std::getenv("HOME");
@@ -577,16 +604,28 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
         return;
     }
 
-    if (std::ranges::any_of(window->m_windowDecorations, [](const auto& d) { return d->getDisplayName() == "Hyprvtb"; }))
+    // Already ours? Test BOTH names: a bar-less class (vtbNeverDecorates) only
+    // ever carries the shadow, so testing "Hyprvtb" alone would let every
+    // PLUGIN_INIT sweep stack another shadow decoration onto it.
+    if (std::ranges::any_of(window->m_windowDecorations, [](const auto& d) {
+            const auto NAME = d->getDisplayName();
+            return NAME == "Hyprvtb" || NAME == "HyprvtbShadow";
+        }))
         return;
 
-    auto bar = makeUnique<CVtbDeco>(window);
-    g_pGlobalState->bars.emplace_back(bar);
-    const CDecoRef thisDeco = g_pGlobalState->bars.back();
-    bar->m_self = bar;
-    HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
+    CDecoRef thisDeco;
+    if (!vtbNeverDecorates(window->m_class)) {
+        auto bar = makeUnique<CVtbDeco>(window);
+        g_pGlobalState->bars.emplace_back(bar);
+        thisDeco = g_pGlobalState->bars.back();
+        bar->m_self = bar;
+        HyprlandAPI::addWindowDecoration(PHANDLE, window, std::move(bar));
+    }
 
     // Separate decoration for the bottom-left hard shadow (see CVtbShadowDeco).
+    // A bar-less window keeps this one — it is the window's shadow, not chrome —
+    // and both the shadow layer and its damage box ask vtbHasBar() rather than
+    // assuming a titlebar strip is there to span.
     HyprlandAPI::addWindowDecoration(PHANDLE, window, makeUnique<CVtbShadowDeco>(window));
 
     // reopen where/how this app was last closed — ONLY for a genuinely new
@@ -635,6 +674,18 @@ static void onNewWindow(PHLWINDOW window, bool isNew) {
         // floating window (session-restore of a special state returned above).
         if (thisDeco)
             thisDeco->startOpenReveal();
+        else {
+            // No bar, no reveal — and the reveal is where a newly opened window
+            // on this desktop is actually handed the keyboard
+            // (beginRollReveal → Hl::focusWindow, after hideRolledWindow gave it
+            // away). Losing it silently would be the worst possible regression
+            // here: a password prompt you cannot type into. Measured with an A/B
+            // of this exact exclusion on the sandbox monitor — decorated emitted
+            // `activewindow>>vista-askpass`, bar-less emitted nothing until this
+            // line existed. So do the focus half explicitly.
+            Hl::raise(window);
+            Hl::focusWindow(window);
+        }
     }
 }
 
@@ -1571,7 +1622,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.93"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.94"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

@@ -1124,6 +1124,24 @@ static CBox vtbWindowLocalBox(PHLMONITOR pMonitor, PHLWINDOW w) {
     return b.translate(w->m_floatingOffset).scale(pMonitor->m_scale).round();
 }
 
+// Does this window actually carry one of our titlebars?
+//
+// "Every window has a bar" is not true and never was: the scratchpad has none,
+// and since the privilege prompt is bar-less too (vtbNeverDecorates in main.cpp)
+// it is now a state a *centred, visible* window is in. Anything that widens a
+// box by totalBarW() has to ask — otherwise the frame and the drop shadow run a
+// full bar's width past the window's right edge with nothing drawn above them,
+// which is what the scratchpad's shadow has been doing latently.
+static bool vtbHasBar(PHLWINDOW w) {
+    if (!w || !g_pGlobalState)
+        return false;
+    for (const auto& b : g_pGlobalState->bars) {
+        if (b && b->getOwner() == w)
+            return true;
+    }
+    return false;
+}
+
 // The visible frames of every window on this monitor — client box plus its
 // reserved titlebar strip — in monitor-local device pixels. This is what
 // occludes shadows: subtracting it is the "a shadow only ever falls on the
@@ -1149,7 +1167,7 @@ static CRegion vtbWindowFrames(PHLMONITOR pMonitor) {
             continue;
 
         const bool DECORATED = w->m_ruleApplicator->decorate().valueOrDefault();
-        frames.add(CBox{L.x, L.y, L.w + (DECORATED ? BARW : 0.0), L.h}.round());
+        frames.add(CBox{L.x, L.y, L.w + (DECORATED && vtbHasBar(w) ? BARW : 0.0), L.h}.round());
     }
 
     return frames;
@@ -3843,7 +3861,7 @@ SDecorationPositioningInfo CVtbShadowDeco::getPositioningInfo() {
     // Declare the shadow's reach so a moving window's damage box includes it:
     // left + bottom for the L-overhang, and right for the titlebar strip the
     // shadow now spans (so its under-bar bottom edge doesn't trail on moves).
-    const double BARW = g_pGlobalState && Cfg::enabled() ? (double)totalBarW() : 0.0;
+    const double BARW = g_pGlobalState && Cfg::enabled() && vtbHasBar(m_pWindow.lock()) ? (double)totalBarW() : 0.0;
     info.desiredExtents = {{(double)VTB_SHADOW_SIZE, 0.0}, {BARW, (double)VTB_SHADOW_SIZE}};
     return info;
 }
@@ -3875,8 +3893,9 @@ void CVtbShadowDeco::draw(PHLMONITOR, const float&) {
     // moving window trailed the hard shadow's left edge. Whenever the footprint
     // moves, damage its old ∪ new (global-logical, incl. the drag's
     // floatingOffset) so the trailing edge repaints. Stable when the window is.
-    const auto& FO     = PWINDOW->m_floatingOffset;
-    CBox        coverG = {g.x + FO.x - VTB_SHADOW_SIZE, g.y + FO.y, g.w + VTB_SHADOW_SIZE + totalBarW(), g.h + VTB_SHADOW_SIZE};
+    const auto&  FO     = PWINDOW->m_floatingOffset;
+    const double BARW   = vtbHasBar(PWINDOW) ? (double)totalBarW() : 0.0;
+    CBox         coverG = {g.x + FO.x - VTB_SHADOW_SIZE, g.y + FO.y, g.w + VTB_SHADOW_SIZE + BARW, g.h + VTB_SHADOW_SIZE};
     if (coverG.x != m_lastCoverBox.x || coverG.y != m_lastCoverBox.y || coverG.w != m_lastCoverBox.w || coverG.h != m_lastCoverBox.h) {
         if (m_lastCoverBox.w > 0)
             Hl::damage(CBox{m_lastCoverBox}.expand(2));
@@ -3953,8 +3972,9 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
         // up visible once the frames are subtracted. The size animvar is the client
         // surface only — the titlebar is a reserved deco on the RIGHT edge, so
         // the visible frame is that much wider; widen the shadow to match or the
-        // whole bar column casts nothing.
-        shadow.add(CBox{L.x - N, L.y + N, L.w + BARW, L.h}.round());
+        // whole bar column casts nothing. A bar-less window (scratchpad,
+        // privilege prompt) spans only its own frame.
+        shadow.add(CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round());
     }
 
     // Windows mid-roll are hidden, so the loop above skipped them entirely.
@@ -3984,7 +4004,7 @@ void CVtbShadowDeco::damageEntire() {
     const auto PWINDOW = m_pWindow.lock();
     CBox       g = Hl::boxValue(PWINDOW);
     const double N    = VTB_SHADOW_SIZE;
-    const double BARW = g_pGlobalState && Cfg::enabled() ? (double)totalBarW() : 0.0;
+    const double BARW = g_pGlobalState && Cfg::enabled() && vtbHasBar(PWINDOW) ? (double)totalBarW() : 0.0;
     // window box grown by the shadow's left + bottom overhang, plus the titlebar
     // strip on the right (the shadow now spans it too)
     Hl::damage(CBox{g.x - N, g.y, g.w + N + BARW, g.h + N});

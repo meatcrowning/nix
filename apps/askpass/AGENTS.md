@@ -201,6 +201,47 @@ self-cleans at the next plugin load instead of being rewritten forever by
 That last part is why deleting the line by hand was not enough. A modal must
 land where its window rule puts it, every time.
 
+## It has NO titlebar — and that is why Cancel/Esc are load-bearing
+
+hyprvtb draws no vertical bar on this window at all (`vtbNeverDecorates()` in
+`hyprvtb/main.cpp`, ≥2.94; DESIGN.md §7.5). Every button a bar offers is one a
+fixed-size, centred, pinned, never-remembered modal must not have, and the only
+one that did anything — [x] — is what `Cancel` and `Esc` already do. **So the
+QML's Cancel button and `Keys.onEscapePressed` are now the ONLY ways to
+dismiss it from the keyboard or mouse.** Deleting either would leave a dialog
+that can only be answered, which is a wedged `sudo` for anyone who opened it by
+mistake. The exit-code contract above is unchanged: a compositor-side close is
+still `onClosing` → `Sudo.cancel()` → exit 1, verified end to end by closing the
+real window on the sandbox monitor.
+
+It keeps the hard drop shadow (`CVtbShadowDeco`) — a shadow is the window's, not
+its chrome. Bar-less is a state the plugin already had for the scratchpad, so
+everything keyed off `bars` skips this window too: no session-snapshot entry, no
+geometry memory, no open reveal, and `close_all()` at logout does not click an
+[x] it does not have.
+
+Two things fall out that are easy to break:
+
+- **Nothing may widen this window's box by `totalBarW()`.** The shadow layer and
+  its damage box ask `vtbHasBar()` now; before 2.94 they assumed a bar was there
+  to span, which would have put a bar's width of shadow past the right edge with
+  nothing drawn above it.
+- **The plugin focuses it explicitly.** On this desktop a newly opened floating
+  window is handed the keyboard by the open reveal (`beginRollReveal()` →
+  `Hl::focusWindow`), and a bar-less window plays no reveal. `onNewWindow` does
+  the focus half itself instead. Measured, not assumed: with the bar, a
+  sandbox-launched dialog emitted `activewindow>>vista-askpass`; bar-less
+  without that line, it emitted nothing.
+
+Verify (no sudo, nothing on his screen):
+
+```bash
+tools/sandbox.sh start
+tools/sandbox.sh exec "$(command -v vista-askpass)" 'test:'
+hyprctl decorations "class:vista-askpass"   # HyprvtbShadow, and NO Hyprvtb
+tools/sandbox.sh stop
+```
+
 ## Layout traps already paid for
 
 - **Do not write `minimumHeight: height`.** The height binding then references
