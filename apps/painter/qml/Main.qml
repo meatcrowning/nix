@@ -19,6 +19,14 @@ Window {
     property int view: 0            // 0 = params, 1 = gallery
     property bool showSettings: false
 
+    // Chrome greys to the SAME tone the hyprvtb titlebar fades to when the
+    // window loses focus, so painter reads as inactive in lock-step with its
+    // own titlebar instead of staying brighter than the bar beside it — the
+    // idiom filer uses (DESIGN.md §3.1). Body text and values keep their own
+    // colours; only the accented chrome follows.
+    readonly property bool winActive: root.active
+    readonly property color fgAccent: root.active ? Theme.accent : Theme.inactive
+
     // Live generation settings, seeded from the selected model's family.
     property var gen: ({
         positive: "", negative: "",
@@ -139,10 +147,14 @@ Window {
         height: 26
     }
 
+    // Not a centred modal: it slides out from the "st" titlebar cell that owns
+    // it, the way player's and surfer's do (DESIGN.md §7.4). It owns its own
+    // visibility off `open` — assigning `visible` from here would override the
+    // slide's binding.
     SettingsDrawer {
         id: settings
         anchors.fill: parent
-        visible: root.showSettings
+        open: root.showSettings
         onClosed: root.showSettings = false
     }
 
@@ -153,7 +165,6 @@ Window {
         anchors.bottomMargin: 40
         width: Math.min(msg.implicitWidth + 24, root.width - 60)
         height: 30
-        radius: 2
         opacity: 0
         color: Theme.bgAlt
         border.color: error ? Theme.crit : Theme.border
@@ -184,15 +195,20 @@ Window {
 
     // -------------------------------------------------------------- chrome
 
+    // Labels are lowercase ASCII, one or two characters, and the settings cell
+    // is "st" — the same label player and surfer use for the same button
+    // (DESIGN.md §12.1: a function that already has a glyph keeps it in every
+    // app). They were UPPERCASE, with "*" for settings, which was painter's
+    // alone on this desktop.
     function pushButtons() {
         Titlebar.setButtons([
-            { id: "gen",  label: "GEN",  state: App.busy ? 2 : 0, tip: "Generate" },
-            { id: "stop", label: "X",    state: App.busy ? 0 : 2, tip: "Cancel all" },
+            { id: "gen",  label: "gen",  state: App.busy ? 2 : 0, tip: "Generate" },
+            { id: "stop", label: "x",    state: App.busy ? 0 : 2, tip: "Cancel all" },
             "-",
-            { id: "p",    label: "P",    state: root.view === 0 ? 1 : 0, tip: "Parameters" },
-            { id: "g",    label: "G",    state: root.view === 1 ? 1 : 0, tip: "Gallery" },
+            { id: "p",    label: "p",    state: root.view === 0 ? 1 : 0, tip: "Parameters" },
+            { id: "g",    label: "g",    state: root.view === 1 ? 1 : 0, tip: "Gallery" },
             "-",
-            { id: "set",  label: "*",    state: root.showSettings ? 1 : 0,
+            { id: "set",  label: "st",   state: root.showSettings ? 1 : 0,
               tip: "Settings", bottom: true }
         ])
         Titlebar.setFooter(App.queue > 0 ? ("Q" + App.queue) : "")

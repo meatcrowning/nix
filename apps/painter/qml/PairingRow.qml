@@ -11,19 +11,25 @@ Column {
         spacing: 6
         width: parent.width
 
-        PixelText {
-            text: rowBox.expanded ? "-" : "+"
-            color: Theme.dim
-            MouseArea { anchors.fill: parent; onClicked: rowBox.expanded = !rowBox.expanded }
+        TextButton {
+            anchors.verticalCenter: parent.verticalCenter
+            label: rowBox.expanded ? "-" : "+"
+            tone: Theme.dim
+            winActive: root.winActive
+            onClicked: rowBox.expanded = !rowBox.expanded
         }
         PixelText {
+            anchors.verticalCenter: parent.verticalCenter
             text: App.encoderName === "" ? "bundled encoder and VAE" : "auto-paired"
             color: Theme.textDim
         }
-        PixelText {
-            text: rowBox.expanded ? "" : "(override)"
-            color: Theme.dim
-            MouseArea { anchors.fill: parent; onClicked: rowBox.expanded = true }
+        TextButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !rowBox.expanded
+            label: "(override)"
+            tone: Theme.dim
+            winActive: root.winActive
+            onClicked: rowBox.expanded = true
         }
     }
 

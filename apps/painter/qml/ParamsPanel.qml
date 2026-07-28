@@ -3,7 +3,7 @@ import QtQuick
 // Sampling controls.  The sampler and scheduler lists are whatever the running
 // ComfyUI reports, not a fixed list, so they follow backend updates.
 Panel {
-    title: "SAMPLING"
+    title: "sampling"
     badge: App.samplers.length + " samplers"
 
     Field {

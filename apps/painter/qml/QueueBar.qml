@@ -49,20 +49,20 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: 10
 
-        PixelText {
-            text: "[ generate ]"
-            color: App.ready ? Theme.accent : Theme.dim
-            MouseArea {
-                anchors.fill: parent
-                enabled: App.ready
-                onClicked: root.submit()
-            }
+        TextButton {
+            anchors.verticalCenter: parent.verticalCenter
+            label: "[ generate ]"
+            enabled: App.ready
+            winActive: root.winActive
+            onClicked: root.submit()
         }
-        PixelText {
+        TextButton {
+            anchors.verticalCenter: parent.verticalCenter
             visible: App.busy
-            text: "[ cancel ]"
-            color: Theme.crit
-            MouseArea { anchors.fill: parent; onClicked: App.cancel() }
+            label: "[ cancel ]"
+            tone: Theme.crit
+            winActive: root.winActive
+            onClicked: App.cancel()
         }
     }
 }

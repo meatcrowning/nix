@@ -12,7 +12,6 @@ Rectangle {
     color: Theme.bg
     border.color: input.activeFocus ? Theme.accent : Theme.border
     border.width: 1
-    radius: 1
 
     KineticFlickable {
         id: flick
@@ -30,7 +29,7 @@ Rectangle {
             color: box.negative ? Theme.textDim : Theme.text
             font.family: Theme.font
             font.pixelSize: Theme.fontSize
-            font.hintingPreference: Font.PreferNoHinting
+            font.hintingPreference: Font.PreferFullHinting
             renderType: Text.NativeRendering
             // NO lineHeight/lineHeightMode HERE. They are Text-only properties;
             // QQuickTextEdit does not have them, so assigning them is a

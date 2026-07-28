@@ -9,7 +9,7 @@ Item {
     Row {
         id: head
         spacing: 10
-        PixelText { text: "OUTPUT"; color: Theme.accent }
+        PixelText { text: "output"; color: root.fgAccent }
         PixelText { text: Gallery.count + " images"; color: Theme.textDim }
     }
 
@@ -70,6 +70,7 @@ Item {
                     id: hover
                     anchors.fill: parent
                     hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: function (m) {
                         if (m.button === Qt.RightButton) {
@@ -87,7 +88,7 @@ Item {
     PixelText {
         anchors.centerIn: parent
         visible: Gallery.count === 0
-        text: "nothing yet - Ctrl+Enter or the GEN button"
+        text: "nothing yet - Ctrl+Enter or the gen button"
         color: Theme.dim
     }
 

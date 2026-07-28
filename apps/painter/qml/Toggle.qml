@@ -14,7 +14,7 @@ Item {
         id: box
         anchors.verticalCenter: parent.verticalCenter
         text: sw.checked ? "[x]" : "[ ]"
-        color: sw.checked ? Theme.accent : Theme.dim
+        color: sw.checked ? Theme.accent : (ma.containsMouse ? Theme.text : Theme.dim)
     }
     PixelText {
         id: txt
@@ -25,7 +25,10 @@ Item {
         color: sw.checked ? Theme.text : Theme.textDim
     }
     MouseArea {
+        id: ma
         anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
         onClicked: { sw.checked = !sw.checked; sw.toggled(sw.checked) }
     }
 }
