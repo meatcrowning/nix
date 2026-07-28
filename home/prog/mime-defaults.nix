@@ -49,10 +49,19 @@ let
     "x-scheme-handler/http" "x-scheme-handler/https" "x-scheme-handler/about"
   ];
 
+  # Markdown, to `reader`. This is also the WHOLE of filer's integration with
+  # it: filer opens a non-image with `xdg-open`, which consults this file — so
+  # a .md in filer lands in reader with no change to filer at all. Only the two
+  # types shared-mime-info actually assigns to .md/.markdown are listed; plain
+  # text stays with whatever the user has, because reader renders markdown and
+  # is not a text editor.
+  readerTypes = [ "text/markdown" "text/x-markdown" ];
+
   assoc =
     (map (t: "${t}=filer.desktop") filerTypes)
     ++ (map (t: "${t}=viewer.desktop") viewerTypes)
-    ++ (map (t: "${t}=surfer.desktop") surferTypes);
+    ++ (map (t: "${t}=surfer.desktop") surferTypes)
+    ++ (map (t: "${t}=reader.desktop") readerTypes);
 
   setDefaults = "${pkgs.python3}/bin/python3 ${./mime-files/set-defaults.py}";
 in
