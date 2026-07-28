@@ -26,6 +26,7 @@ os.environ["XDG_CONFIG_HOME"] = os.path.join(SCRATCH, "config")
 VIEWER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, VIEWER)
 sys.path.insert(0, os.path.join(os.path.dirname(VIEWER), "pylib"))
+from deskstyle import DeskStyle  # noqa: E402  (pylib; Theme.qml binds to it)
 
 from PySide6.QtCore import QUrl, QObject, Slot, QMimeData, QPoint, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import (QGuiApplication, QImage, QColor, QKeyEvent,  # noqa: E402
@@ -75,7 +76,11 @@ def build(app, entries, index=0, panes=1):
     ctx = engine.rootContext()
     keep = (viewermain.Palette(viewermain.PANEL_THEME), StubTitlebar(),
             viewermain.Files(), viewermain.Prefs())
+    _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[0])
+    # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the
+    # harness must install it too or the theme loads with an empty font.
+    ctx.setContextProperty("DeskStyle", _deskstyle)
     ctx.setContextProperty("Titlebar", keep[1])
     ctx.setContextProperty("Files", keep[2])
     ctx.setContextProperty("Prefs", keep[3])

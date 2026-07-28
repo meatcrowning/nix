@@ -13,13 +13,19 @@ import QtQuick
 // watches the panel's Theme.qml — the file wal-set.sh rewrites on every
 // wallpaper change — so filer recolours live, in lock-step with the bar.
 QtObject {
-    // Everything uses the same pixel font kitty uses.
-    readonly property string font: "More Perfect DOS VGA"
+    // Everything uses the same pixel font kitty uses, at the size the Settings
+    // window sets for the WHOLE desktop: DeskStyle (pylib/deskstyle.py, a
+    // context property installed by main.py) reads the panel's own
+    // settings.json, so one slider moves the panel, the titlebars and all six
+    // apps together — DESIGN.md 2.1. These two are deliberately NOT parsed out
+    // of the panel's Theme.qml the way the palette below is: there they are QML
+    // expressions (SettingsStore.d.*) that only Quickshell can evaluate.
+    readonly property string font: DeskStyle.fontFamily
 
     // Text size in PIXELS (not points), matched to kitty's on-screen size.
     // See PixelText.qml for why native rendering + integer pixel sizes matter.
-    readonly property int fontSize: 15
-    readonly property int clockSize: 15
+    readonly property int fontSize: DeskStyle.fontSize
+    readonly property int clockSize: DeskStyle.fontSize
 
     // Panel geometry (logical px) — kept for component compatibility.
     readonly property int barWidth: 48

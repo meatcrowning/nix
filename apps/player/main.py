@@ -59,6 +59,7 @@ QML = HERE / "qml"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 import trackmatch  # noqa: E402  (pylib; the one artist/title normaliser)
@@ -2395,6 +2396,7 @@ def main():
     bridge = Bridge(library, player, lyrics)
     titlebar = Titlebar()
     palette = Palette(PANEL_THEME)
+    style = DeskStyle()
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -2404,6 +2406,7 @@ def main():
     # on air behaves the same as going through air-launch.sh.
     ctx.setContextProperty("OnAir", socket.gethostname().split(".")[0] == "book")
     ctx.setContextProperty("WalPalette", palette)
+    ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Library", bridge)

@@ -63,6 +63,7 @@ ON_AIR = os.path.realpath(sys.executable).startswith("/usr/")
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
+from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
                      is_wheel_detent as _is_wheel_detent)
 
@@ -1972,6 +1973,7 @@ def main():
     ctx = engine.rootContext()
 
     palette = Palette(PANEL_THEME)
+    style = DeskStyle()
     titlebar = Titlebar()
     clip = Clip()
     session = Session()
@@ -1991,6 +1993,7 @@ def main():
     except OSError:
         pass
     ctx.setContextProperty("WalPalette", palette)
+    ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("Session", session)
