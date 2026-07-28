@@ -78,26 +78,50 @@ Window {
     property int tabRev: 0   // bumped on any add/remove/move so tbButtons re-evaluates
 
     // ---- split view ----
-    // Two tabs side by side in one window, divided by a draggable splitter. The
-    // LEFT pane always shows `currentTab`; the right one shows `splitTab` while
-    // `splitOn`. `focusPane` is which of the two the CHROME acts on — the
-    // address bar, back/fwd/reload, dark mode and the dialogs all follow it, so
-    // every pane-agnostic thing below keeps working by reading `current`, which
-    // now means "the focused pane's view" rather than "the current tab's view".
+    // Two tabs in one window, divided by a draggable splitter — kitty's model,
+    // and kitty's two buttons: `|` splits RIGHT (a vertical divider, panes side
+    // by side) and `_` splits DOWN (a horizontal one, panes stacked).
+    // `splitVertical` is which, and it is the ONLY thing that differs between
+    // them: pane A (always `currentTab`) takes the LEADING slice of the active
+    // axis, pane B (`splitTab`, while `splitOn`) the trailing one.
+    // `focusPane` is which of the two the CHROME acts on — the address bar,
+    // back/fwd/reload, dark mode and the dialogs all follow it, so every
+    // pane-agnostic thing below keeps working by reading `current`, which now
+    // means "the focused pane's view" rather than "the current tab's view".
     // The panes hold two DIFFERENT tabs by construction: one WebEngineView can
     // only be in one place, so showInPane() swaps rather than duplicates.
     property bool splitOn: false
-    property int splitTab: -1     // tab index in the right pane, -1 = none
-    property int focusPane: 0     // 0 = left, 1 = right
+    property bool splitVertical: true   // true = `|` side by side, false = `_` stacked
+    property int splitTab: -1     // tab index in pane B, -1 = none
+    property int focusPane: 0     // 0 = A (left/top), 1 = B (right/bottom)
+    // ONE ratio, reused on whichever axis is active, so re-orienting keeps the
+    // proportion the divider was left at.
     property real splitRatio: 0.5
     readonly property int splitterW: 4
-    readonly property int minPaneW: 120
-    readonly property int paneLeftW: splitOn
-        ? Math.max(minPaneW, Math.min(width - splitterW - minPaneW,
-                                      Math.round((width - splitterW) * splitRatio)))
-        : width
-    readonly property int paneRightX: paneLeftW + splitterW
-    readonly property int paneRightW: Math.max(0, width - paneRightX)
+    // Geometry along the ACTIVE axis: width when vertical, height when stacked.
+    // Everything here is clamped away from zero on purpose — a zero-size rect
+    // handed to the compositor aborts the session (see apps/AGENTS.md), and a
+    // window narrower/shorter than two minimum panes is otherwise exactly how
+    // you get one.
+    readonly property int splitAxisLen: splitVertical ? width : height
+    readonly property int splitAvail: Math.max(2, splitAxisLen - splitterW)
+    readonly property int minPaneLen: Math.max(1, Math.min(120, Math.floor(splitAvail / 2)))
+    readonly property int paneALen: splitOn
+        ? Math.max(minPaneLen, Math.min(splitAvail - minPaneLen,
+                                        Math.round(splitAvail * splitRatio)))
+        : splitAxisLen
+    readonly property int paneBOff: paneALen + splitterW          // B's x (or y)
+    readonly property int paneBLen: Math.max(1, splitAxisLen - paneBOff)
+
+    // …resolved to real rects, so nothing below has to know about the axis.
+    readonly property int paneAX: 0
+    readonly property int paneAY: 0
+    readonly property int paneAW: splitOn && splitVertical ? paneALen : Math.max(1, width)
+    readonly property int paneAH: splitOn && !splitVertical ? paneALen : Math.max(1, height)
+    readonly property int paneBX: splitVertical ? paneBOff : 0
+    readonly property int paneBY: splitVertical ? 0 : paneBOff
+    readonly property int paneBW: splitVertical ? paneBLen : Math.max(1, width)
+    readonly property int paneBH: splitVertical ? Math.max(1, height) : paneBLen
 
     readonly property int focusTab: (splitOn && focusPane === 1) ? splitTab : currentTab
     readonly property Item current: (focusTab >= 0 && viewRep.count > focusTab)
@@ -142,14 +166,30 @@ Window {
         }
         tabRev += 1;
     }
-    // "sp" titlebar button. Opening takes the tab to the right of the current
-    // one (or the one to its left), and makes a home tab when this is the only
-    // tab there is — a split with nothing in the second pane is not a split.
-    function toggleSplit() {
-        if (splitOn) {
+    // The orientation is a preference, not session state: it persists in
+    // prefs.json next to splitRatio, so the split comes back the way it was
+    // left. Written only when it actually changes.
+    function setSplitVertical(v) {
+        if (splitVertical === v) return;
+        splitVertical = v;
+        Prefs.saveSplitVertical(v);
+    }
+    // Both split buttons land here — `|` with true, `_` with false. Each stays a
+    // TOGGLE, the way the single "sp" button was, and the pair adds re-orienting:
+    //   split off              -> open in that orientation
+    //   split on, same button  -> close the split
+    //   split on, other button -> re-orient in place, keeping both panes
+    // Opening takes the tab to the right of the current one (or the one to its
+    // left), and makes a home tab when this is the only tab there is — a split
+    // with nothing in the second pane is not a split.
+    function toggleSplit(vertical) {
+        if (vertical === undefined) vertical = splitVertical;
+        if (splitOn && splitVertical === vertical) {
             splitOn = false;
             splitTab = -1;
             focusPane = 0;
+        } else if (splitOn) {
+            setSplitVertical(vertical);
         } else {
             var other = currentTab + 1 < tabs.count ? currentTab + 1
                       : (currentTab - 1 >= 0 ? currentTab - 1 : -1);
@@ -158,6 +198,9 @@ Window {
                 nextTid += 1;
                 other = tabs.count - 1;
             }
+            // orientation first, so the panes are never laid out for one frame
+            // along the axis we are about to leave
+            setSplitVertical(vertical);
             splitTab = other;
             splitOn = true;
             focusPane = 1;
@@ -480,9 +523,15 @@ Window {
             // panel is open — like a pressed menu button — not for the whole
             // time dark mode is enabled.
             { id: "darkmode", label: "dm", state: dmPanelOpen ? 1 : 0,  tip: "dark mode" },
-            // split view: two tabs side by side. Lit for as long as it is on.
-            { id: "split", label: "sp", state: splitOn ? 1 : 0,
-              tip: splitOn ? "close split view" : "split view" },
+            // split view, kitty's pair: `|` = split right (side by side), `_` =
+            // split down (stacked). Note `_` and not `-`: a bare "-" is the
+            // SPACER token in the vtb button protocol. Whichever orientation is
+            // live is lit, and the tip says what a click will do from here —
+            // close it (the lit one) or re-orient into it (the other).
+            { id: "vsplit", label: "|", state: splitOn && splitVertical ? 1 : 0,
+              tip: (splitOn && splitVertical) ? "close split" : "split right" },
+            { id: "hsplit", label: "_", state: splitOn && !splitVertical ? 1 : 0,
+              tip: (splitOn && !splitVertical) ? "close split" : "split down" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -498,7 +547,9 @@ Window {
             var shown = (i === currentTab) || (splitOn && i === splitTab);
             var where = "";
             if (splitOn && shown)
-                where = (i === focusTab ? "close · " : "focus · ") + (i === currentTab ? "left · " : "right · ");
+                where = (i === focusTab ? "close · " : "focus · ")
+                      + (i === currentTab ? (splitVertical ? "left · " : "top · ")
+                                          : (splitVertical ? "right · " : "bottom · "));
             else if (shown)
                 where = "close · ";
             arr.push({ id: "tab:" + tabs.get(i).tid, label: tabLabel(v, sd),
@@ -525,7 +576,8 @@ Window {
             if (id === "copyurl") { if (win.current) Clip.copy(win.current.url.toString()); return; }
             if (id === "darkmode") { win.dmPanelOpen = !win.dmPanelOpen; return; }
             if (id === "newtab")  { win.newTab(win.homeUrl); return; }
-            if (id === "split")   { win.toggleSplit(); return; }
+            if (id === "vsplit")  { win.toggleSplit(true); return; }
+            if (id === "hsplit")  { win.toggleSplit(false); return; }
             if (id === "settings") { UserScripts.openFolder(); return; }
             if (id.indexOf("tab:") === 0) {
                 var idx = win.tabIndexByTid(parseInt(id.substring(4)));
@@ -581,6 +633,9 @@ Window {
         Titlebar.setTitleEdit(true);
         Titlebar.setLoading(currentLoading);
         splitRatio = Prefs.loadSplitRatio();
+        // both read with a default, so a prefs.json written before either
+        // existed simply comes back at 0.5 and side-by-side
+        splitVertical = Prefs.loadSplitVertical();
         if (startUrl !== "") {
             newTab(normalize(startUrl));
         } else {
@@ -678,15 +733,15 @@ Window {
                 required property int index
                 required property string seed
                 required property bool cold
-                // -1 = not on screen. Hidden views keep the FULL window width
+                // -1 = not on screen. Hidden views keep the FULL window size
                 // rather than a pane's, so opening the split doesn't reflow
                 // every background tab.
                 readonly property int pane: index === win.currentTab ? 0
                                           : ((win.splitOn && index === win.splitTab) ? 1 : -1)
-                x: pane === 1 ? win.paneRightX : 0
-                y: 0
-                width: pane === 1 ? win.paneRightW : (pane === 0 ? win.paneLeftW : stage.width)
-                height: stage.height
+                x: pane === 1 ? win.paneBX : 0
+                y: pane === 1 ? win.paneBY : 0
+                width: pane === 1 ? win.paneBW : (pane === 0 ? win.paneAW : stage.width)
+                height: pane === 1 ? win.paneBH : (pane === 0 ? win.paneAH : stage.height)
                 visible: pane >= 0 && !win.nudging
                 // clicking into a pane points the chrome at it — unless this is
                 // our own retargeting coming back round (see win.retargeting)
@@ -835,38 +890,46 @@ Window {
         Rectangle {
             visible: win.splitOn
             z: 9
-            x: win.focusPane === 1 ? win.paneRightX : 0
-            y: 0
-            width: win.focusPane === 1 ? win.paneRightW : win.paneLeftW
-            height: stage.height
+            x: win.focusPane === 1 ? win.paneBX : win.paneAX
+            y: win.focusPane === 1 ? win.paneBY : win.paneAY
+            width: win.focusPane === 1 ? win.paneBW : win.paneAW
+            height: win.focusPane === 1 ? win.paneBH : win.paneAH
             color: "transparent"
             border.width: 1
             border.color: Theme.accent
         }
 
-        // the divider: drag it to trade width between the panes. The ratio is
-        // persisted (Prefs) on release, not on every motion event.
+        // The divider: drag it to trade space between the panes — sideways when
+        // the split is vertical, up/down when it is stacked, with the cursor
+        // shape to match. One `splitRatio` for both axes, persisted (Prefs) on
+        // release, not on every motion event.
         Rectangle {
             id: splitter
             visible: win.splitOn
             z: 10
-            x: win.paneLeftW
-            y: 0
-            width: win.splitterW
-            height: stage.height
+            x: win.splitVertical ? win.paneALen : 0
+            y: win.splitVertical ? 0 : win.paneALen
+            width: win.splitVertical ? win.splitterW : Math.max(1, stage.width)
+            height: win.splitVertical ? Math.max(1, stage.height) : win.splitterW
             color: splitDrag.pressed ? Theme.accent
                  : (splitDrag.containsMouse ? Theme.accent : Theme.border)
 
             MouseArea {
                 id: splitDrag
                 anchors.fill: parent
-                anchors.leftMargin: -3      // a 4px divider is a 10px grab target
-                anchors.rightMargin: -3
+                // a 4px divider is a 10px grab target, on whichever axis it runs
+                anchors.leftMargin: win.splitVertical ? -3 : 0
+                anchors.rightMargin: win.splitVertical ? -3 : 0
+                anchors.topMargin: win.splitVertical ? 0 : -3
+                anchors.bottomMargin: win.splitVertical ? 0 : -3
                 hoverEnabled: true
-                cursorShape: Qt.SplitHCursor
+                cursorShape: win.splitVertical ? Qt.SplitHCursor : Qt.SplitVCursor
                 onPositionChanged: (m) => {
                     if (!pressed) return;
-                    win.setSplitRatio(mapToItem(stage, m.x, m.y).x / Math.max(1, stage.width));
+                    var p = mapToItem(stage, m.x, m.y);
+                    win.setSplitRatio(win.splitVertical
+                                      ? p.x / Math.max(1, stage.width)
+                                      : p.y / Math.max(1, stage.height));
                 }
                 onReleased: Prefs.saveSplitRatio(win.splitRatio)
             }
