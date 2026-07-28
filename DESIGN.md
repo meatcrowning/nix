@@ -1470,12 +1470,44 @@ sessions]
 releases focus on a click anywhere else on the desktop, not just within its own
 container. Never a state where the user must click twice.**
 
+**Click-away dismisses, and "away" means the whole desktop.** [his — the third
+quote above is the rule in his own words] A click anywhere outside a control
+that holds focus drops that focus, **wherever it lands** — including the parts
+of the screen that are not the app's and not the panel's.
+
+**There are THREE cases, not two, and they are split by what the click lands
+on** [code — measured in a nested-Hyprland harness, `8d292b5`]:
+
+| the click lands on | who drops the focus |
+|---|---|
+| the **panel** | ours — `shell.qml`'s catcher, on `barBody` |
+| a **window** | the compositor's, and it needs no click at all: the layer surface's keyboard is revoked on pointer **entry** |
+| the **wallpaper** | ours, and this was the bug |
+
+The wallpaper was the missing case. Hyprland's `processMouseDownNormal` calls
+`refocus()` only when the press lands on a *window*, so a press on a
+**Background** layer surface moved no focus whatsoever and the filter bar kept
+the keyboard. **Both halves of the previous belief were wrong** — the panel's
+own guide described two cases, not three, and named `dockLayout` as the catcher
+when it is `barBody`. Which is why the case split above is written down here: it
+was reasoned about twice and only settled by measuring.
+
 Two hard-won compositor rules behind that [code]: **chrome under something else
 declines input** (no resize cursor over an occluded edge; a rolled-up bar renders
 below windows so anything at the cursor occludes it), and **the keyboard is
 handed back to a WINDOW, never to nothing** — dropping a layer surface's
 on-demand focus while the pointer is still over the panel leaves the compositor
 focused on nothing and the keyboard dead until the user clicks.
+
+**That second rule is narrower than it sounds, and the difference is measured**
+[code — `8d292b5`, correcting the fear left by `cf26f82`]: dropping to `None`
+from the **wallpaper** does *not* strand the keyboard. `refocusLastWindow`
+searches only the **OVERLAY** and **TOP** layers, so it can never find a
+Background surface under the pointer and can never hand the keyboard straight
+back to the thing the user just clicked away from. "Never to nothing" is about
+on-demand focus dropped **while the pointer is over the PANEL**. Do not let the
+scarier reading of it block a fix on a different layer — check which layer the
+surface is in first.
 
 **The resize does what the cursor icon promises.** [code — `c659ddf`, `7736c46`]
 Hyprland's native resize picks a corner by window *quadrant*, so grabbing the
