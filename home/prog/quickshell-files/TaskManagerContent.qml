@@ -75,6 +75,8 @@ Item {
         id: fans
         rows: SysInfo.fans
         hist: SysInfo.fanPctHist
+        varied: SysInfo.fanVaried
+        includeFixed: SettingsStore.d.fanHeadlineFixed
     }
 
     function fmtUptime(s) {
@@ -336,7 +338,10 @@ Item {
                  + "(commanded pwm duty for the chassis fans), not of a\n"
                  + "maximum rpm, which sysfs does not publish\n\n"
                  + fans.detail
-                 + "\n\nscroll: screen brightness"
+                 + "\n\n\"fixed\" = pinned at full and never once seen to move,\n"
+                 + "so it says nothing about load and is left out of the\n"
+                 + "readout. still drawn, still counted, still exact above\n"
+                 + "\nscroll: screen brightness"
             value: fans.headline
             sub: fans.subline
             // Fixed 0-100 axis, for the same reason the battery card has one:

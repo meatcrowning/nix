@@ -98,6 +98,13 @@ Singleton {
     // pruned of names that stopped reporting so a flapping header cannot grow
     // this without bound.
     property var fanPctHist: ({})
+    // Which fans have EVER been seen to change their commanded duty, by name.
+    // Set once and never cleared, and carried across a panel reload with the
+    // rest of this state — a fan that answers the machine is a fan whose
+    // reading means something, and that is a fact about the hardware, not about
+    // this run. Losing it on every wallpaper change would put the pump back in
+    // the headline for a minute each time. See Fans.qml for what it decides.
+    property var fanVaried: ({})
     readonly property int fanCount: fans ? fans.length : 0
 
     // ---- what book shows in place of gpu/vram/fan ------------------------
@@ -289,12 +296,23 @@ Singleton {
             out.push({ name: "gpu", rpm: -1, pct: gpuFanPct });
 
         const h = {};
+        const varied = {};
+        for (const name in fanVaried) varied[name] = fanVaried[name];
         for (const fan of out) {
             if (fan.pct < 0) continue;
-            h[fan.name] = _pushHist(fanPctHist[fan.name] || [], fan.pct);
+            const prev = fanPctHist[fan.name] || [];
+            // "Has this fan ever moved?" — the one question that separates a
+            // fan the machine is controlling from a constant. Sticky and never
+            // cleared: a chassis fan that ramped once is a real reading for
+            // good, including while it sits pinned at 100% in a thermal event,
+            // which is exactly when the headline must not drop it.
+            if (prev.length > 0 && prev[prev.length - 1] !== fan.pct)
+                varied[fan.name] = true;
+            h[fan.name] = _pushHist(prev, fan.pct);
         }
         fans = out;
         fanPctHist = h;
+        fanVaried = varied;
     }
 
     // ---- reload continuity (see shell.qml's `persist` block) --------------
@@ -321,7 +339,7 @@ Singleton {
             mtk: memTotalKb, mak: memAvailKb, stk: swapTotalKb, sfk: swapFreeKb,
             l1: load1, up: uptimeSec, gf: gpuFanPct, gp: gpuPowerW,
             gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
-            fns: fans, fph: fanPctHist,
+            fns: fans, fph: fanPctHist, fvd: fanVaried,
             lh: loadHist, swh: swapHist, vh: vramHist,
             pc: psiCpu, pio: psiIo, pm: psiMem, pw: powerW,
             dr: dskRead, dw: dskWrite,
@@ -356,6 +374,7 @@ Singleton {
         gpuMemUsedMb = d.gmu === undefined ? -1 : d.gmu;
         gpuMemTotalMb = d.gmt === undefined ? -1 : d.gmt;
         fans = d.fns || []; fanPctHist = d.fph || ({});
+        fanVaried = d.fvd || ({});
         loadHist = d.lh || []; swapHist = d.swh || [];
         vramHist = d.vh || [];
         psiCpu = d.pc === undefined ? -1 : d.pc;

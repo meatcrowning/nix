@@ -785,6 +785,20 @@ you are looking at.
   So a nonzero pwm over a dead tachometer is an *empty header* here, not a
   fault, and the first rule showed eight fans on a machine with four. sysfs
   offers nothing that tells the two apart.
+- **The PUMP is excluded from the readout, and the test is history, not level.**
+  [his] *"exclude the pump that one i cannot change even via the mobo settings
+  and im pretty sure i cant even hear it anyway"* — it sits at 255/255 for ever,
+  so it pinned the readout at 100% and said nothing. `Fans.fixed()` excludes a
+  fan only when it is at maximum duty **AND** has never once been seen to move
+  (`SysInfo.fanVaried`, sticky and carried across a reload). **Both halves are
+  load-bearing**: "at maximum" alone would hide a chassis fan ramped to 100% in
+  a thermal event, which is the moment the readout matters most; "not moving"
+  alone hides everything, since at idle all four duties here are rock steady
+  across a 20s sample. The excluded fan keeps its line, its tooltip row and its
+  exact RPM, and the row is marked `fixed`. Nothing is judged under
+  `settleSamples` (30 = 60s), and if the rule would exclude every fan it falls
+  back to all of them. Override by hand with `fanHeadlineFixed` in
+  `settings.json`; there is no Settings-window control.
 - **The lines are a BRIGHTNESS LADDER, not different colours** (`Fans.shade`).
   The wal palette is one hue by construction, so there are no distinguishable
   hues to hand out — see `DESIGN.md` 3.1/3.3. It stays legible to ~5-6 fans;

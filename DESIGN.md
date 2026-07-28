@@ -1388,6 +1388,29 @@ hyprvtb. See [Open questions](#open-questions).
   numbers converge after an hour isn't one". Memory is `MemAvailable`, not
   `MemFree`. A battery graph has a **fixed 0-100 axis** — one resting at 96%
   autoscaled against its own peak reads as full-to-empty.
+- **A summary must exclude readings that CANNOT VARY — and the test is
+  history, not level.** [his] *"exclude the pump that one i cannot change even
+  via the mobo settings and im pretty sure i cant even hear it anyway"*. The fan
+  card's readout is "the fastest fan going"; the pump sits at 255/255 duty
+  permanently, is not adjustable in the BIOS and is inaudible, so it pinned that
+  number at 100% for ever and answered nothing. A constant is not a reading.
+
+  **The obvious rule is the wrong one.** "Exclude whatever is at maximum" would
+  hide a chassis fan that has ramped to 100% in a thermal event — the exact
+  moment the number matters most. And "exclude whatever is not moving" hides
+  almost everything: measured at idle, all four chassis duties here sit rock
+  steady across a 20s sample. So it takes **both** conditions — at maximum AND
+  never once observed to move — with the "has moved" flag STICKY and carried
+  across a reload. A fan that has ever answered the machine keeps its place for
+  good, including while pinned under load. Only a fan that has been flat out for
+  its whole observed life drops out.
+
+  Three corollaries. **Nothing is hidden** — the excluded fan keeps its line and
+  its exact number, and its row says `fixed`, or the readout looks like it is
+  lying about the 100% listed above it (§3.5, say it twice). **Nothing is judged
+  before it has been watched**, so a fresh panel excludes nothing. And **the
+  rule may never empty the summary**: if it would exclude everything, it falls
+  back to everything, because summarising a constant beats summarising nothing.
 - **Alternate faces of one widget share their behavioural details** — both
   digital clock faces blink the colon on the same beat, in the same unlit
   colour, so cycling faces changes the look and never the semantics.
