@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // Numeric entry with drag-to-scrub and wheel support.  Kept deliberately plain:
 // a pixel-font text box with a thin frame, matching the rest of the desktop.
@@ -18,7 +19,6 @@ Rectangle {
     color: Theme.bg
     border.color: editing ? Theme.accent : Theme.border
     border.width: 1
-    radius: 1
 
     function clamp(v) { return Math.max(from, Math.min(to, v)) }
     function fmt(v) { return decimals > 0 ? v.toFixed(decimals) : String(Math.round(v)) }
@@ -37,7 +37,7 @@ Rectangle {
         color: Theme.text
         font.family: Theme.font
         font.pixelSize: Theme.fontSize
-        font.hintingPreference: Font.PreferNoHinting
+        font.hintingPreference: Font.PreferFullHinting
         renderType: Text.NativeRendering
         selectByMouse: true
         selectionColor: Theme.accent
@@ -50,29 +50,21 @@ Rectangle {
     // Value only follows the model while the box is not being typed into.
     onValueChanged: if (!input.activeFocus) input.text = fmt(value)
 
-    // The wheel steps by ACCUMULATED delta, not once per event.  A trackpad
-    // sends a burst of small pixelDelta events per flick, and one step each ran
-    // denoise 40% of its range (and the seed off by dozens) on a single gesture.
-    // 120 units of angleDelta / 40 px of pixelDelta = one step, so a classic
-    // wheel detent still moves the value by exactly `step` as it always did;
-    // the fractional remainder is carried, never dropped.
+    // A Spin is a DISCRETE STEPPER, not a scroll surface, so the wheel goes
+    // through the desktop's notch accumulator rather than a locally re-derived
+    // set of constants (DESIGN.md §9.2, §19). One classic detent is exactly one
+    // `step` as it always was; a touchpad's sub-notch remainder is carried, and
+    // maxSteps caps a burst — the old hand-rolled `while` loop had no ceiling,
+    // so a compositor momentum coast over a Spin could walk it across its whole
+    // range on one flick.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton
-        property real wheelAcc: 0
+        WheelNotch { id: notch }
         onWheel: function (w) {
-            // angleDelta is 12x the true pixel delta, so a sub-pixel touchpad
-            // event (pixelDelta rounds to 0) must divide by 12*40, not 120 —
-            // otherwise slow scrolling steps 4x faster than normal scrolling.
-            // >= 120 means a real wheel detent: one step, as it always was.
-            var ad = w.angleDelta.y
-            wheelAcc += w.pixelDelta.y !== 0 ? w.pixelDelta.y / 40
-                      : Math.abs(ad) >= 120  ? ad / 120
-                      :                        ad / 480
-            while (Math.abs(wheelAcc) >= 1) {
-                if (wheelAcc > 0) { spin.commit(spin.value + spin.step); wheelAcc -= 1 }
-                else              { spin.commit(spin.value - spin.step); wheelAcc += 1 }
-            }
+            var n = notch.steps(w)
+            if (n !== 0)
+                spin.commit(spin.value + n * spin.step)
             w.accepted = true
         }
     }
