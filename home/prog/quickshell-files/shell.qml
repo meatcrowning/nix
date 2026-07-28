@@ -501,6 +501,16 @@ Scope {
                 + " exitPx=" + Math.round(ViewMode.exitPx)
                 + " dragging=" + ViewMode.dragging
                 + " settling=" + ViewMode.settling
+                // The desktop's motion, as this panel currently resolves it.
+                // slideMs is read from the compositor's published motion.json
+                // (plugin:hyprvtb:slide_duration_ms) and falls back to 260 if
+                // that file is absent — the two are indistinguishable on screen,
+                // so without this line there is no way to tell whether the panel
+                // is tracking the key or merely agreeing with it by default.
+                // `eff` is what a Behavior actually gets, i.e. after
+                // reduceMotion / animSpeed / the slowmo knob.
+                + " slideMs=" + ViewMode.slideMs
+                + " eff=" + ViewMode.ms(ViewMode.slideMs)
                 + " samples=" + ViewMode.dragTrace.length;
         }
         function trace(): string { return ViewMode.dragTrace.join(" "); }
