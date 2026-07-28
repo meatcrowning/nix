@@ -21,7 +21,9 @@ PanelWindow {
     // rest the card must snap to its endpoint rather than animate, or a panel
     // resize drags the shut sheet across the screen.
     property bool _closing: false
-    Timer { id: closeAnim; interval: 260; onTriggered: root._closing = false }
+    // Mirrors the card's slide-out and must outlast it at any animScale or
+    // animSpeed — hence ms(slideMs) plus a fixed frame, never a literal.
+    Timer { id: closeAnim; interval: ViewMode.ms(ViewMode.slideMs) + 20; onTriggered: root._closing = false }
 
     // Stay mapped through the slide-out so the close animation can play out,
     // then hide once the card has travelled back off the right edge.
@@ -225,7 +227,7 @@ PanelWindow {
         // gated, or the popup will animate itself into view.
         Behavior on x {
             enabled: root.open || root._closing
-            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
 
         color: Theme.bg

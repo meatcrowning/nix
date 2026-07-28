@@ -844,9 +844,16 @@ Scope {
                 // later, inside the same load pass. Animated, that plays as the
                 // panel growing out of the screen edge on every theme or
                 // wallpaper change: a re-entry, not a state change in place.
+                // DELIBERATELY NOT the desktop's 260ms slide. This is the tail
+                // of a GESTURE — the snap that finishes a drag the pointer was
+                // driving — not a reveal between two rest states, so DESIGN.md
+                // §6.4 governs it, not §6.2. It animates at all only under
+                // protest (see the `enabled:` gate) and a longer one would make
+                // the release feel like the panel was catching up with a hand
+                // that had already stopped.
                 Behavior on width {
                     enabled: (!ViewMode.dragging || ViewMode.snapping) && !ViewMode.settling
-                    NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
+                    NumberAnimation { duration: ViewMode.ms(200); easing.type: ViewMode.slideEasing }
                 }
 
                 onWidthChanged: if (bar._reports) ViewMode.surfaceWidth = width;
@@ -930,7 +937,7 @@ Scope {
                     opacity: Askpass.active ? 0.5 : 0
                     visible: opacity > 0
                     Behavior on opacity {
-                        NumberAnimation { duration: ViewMode.ms(140); easing.type: Easing.OutCubic }
+                        NumberAnimation { duration: ViewMode.ms(140); easing.type: ViewMode.slideEasing }
                     }
                 }
 
@@ -955,7 +962,7 @@ Scope {
                     // classic bar out from under the dock.
                     Behavior on opacity {
                         enabled: !ViewMode.settling
-                        NumberAnimation { duration: ViewMode.ms(140) }
+                        NumberAnimation { duration: ViewMode.ms(140); easing.type: ViewMode.slideEasing }
                     }
 
                     // ---- top cluster: launcher, workspaces, tray ----
@@ -1097,7 +1104,7 @@ Scope {
                     opacity: ViewMode.showDock ? 1 : 0
                     Behavior on opacity {
                         enabled: !ViewMode.settling
-                        NumberAnimation { duration: ViewMode.ms(140) }
+                        NumberAnimation { duration: ViewMode.ms(140); easing.type: ViewMode.slideEasing }
                     }
 
                     DockHeader {

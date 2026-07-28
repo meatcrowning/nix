@@ -36,7 +36,7 @@ PopupWindow {
     // 0 = retracted, 1 = fully out. The window lives exactly as long as this is
     // off zero, so the slide back in finishes before it unmaps.
     property real slide: 0
-    Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    Behavior on slide { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
     Timer {
         id: dwell

@@ -35,7 +35,12 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         x: root.checked ? parent.width - width - 3 : 3
         color: root.checked ? Theme.accent : Theme.dim
-        Behavior on x { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+        // 90ms, deliberately NOT the desktop's 260. This is a ~14px knob inside
+        // a control the user just clicked — direct feedback on a press, which
+        // §6.4 says belongs with the pointer, not a reveal sliding out of an
+        // edge. At 260 the switch lags the click that threw it. The curve and
+        // the motion settings are still the desktop's.
+        Behavior on x { NumberAnimation { duration: ViewMode.ms(90); easing.type: ViewMode.slideEasing } }
     }
 
     MouseArea {

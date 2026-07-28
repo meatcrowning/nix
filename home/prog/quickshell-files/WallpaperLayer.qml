@@ -92,11 +92,11 @@ PanelWindow {
         // the settle it snaps; after it, a committed panel width still glides.
         Behavior on x {
             enabled: !ViewMode.settling
-            NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
         Behavior on width {
             enabled: !ViewMode.settling
-            NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.OutCubic }
+            NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
 
         // The two frames of the cross-fade. Only one is showing at a time; a new

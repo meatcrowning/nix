@@ -44,10 +44,12 @@ PanelWindow {
         // slide new toasts in from the bar-facing (outer) edge; ease the stack
         // when one leaves
         add: Transition {
-            NumberAnimation { properties: "x"; from: win._left ? -48 : 48; duration: 180; easing.type: Easing.OutCubic }
+            NumberAnimation { properties: "x"; from: win._left ? -48 : 48
+                              duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
         move: Transition {
-            NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic }
+            NumberAnimation { properties: "y"
+                              duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
         }
 
         Repeater {

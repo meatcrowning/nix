@@ -152,9 +152,21 @@ Scope {
                 Component.onCompleted: panel.entered = true
 
                 x: panel.entered ? 0 : width
-                Behavior on x { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+                // The lock panel slides in off the screen edge — an ordinary
+                // reveal, so it takes the desktop's slide (DESIGN.md §6.2).
+                Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
                 opacity: root.unlocking ? 0 : 1
+                // THIS ONE KEEPS ITS LITERAL, ON PURPOSE. Releasing the session
+                // lock is a SIDE EFFECT of this animation finishing — see
+                // onRunningChanged below — so it is the one duration on the
+                // desktop that must not be reachable by a setting. Routed
+                // through ViewMode.ms() it would become 0 under reduceMotion,
+                // and a zero-length animation is an immediate assignment that
+                // need never report a running->stopped edge: the fade would
+                // "finish" with nobody left to unlock the screen. The failure
+                // mode is the user locked out of their own session, so the
+                // rule here is a plain number and a comment saying why.
                 Behavior on opacity {
                     NumberAnimation {
                         duration: 300
@@ -187,7 +199,7 @@ Scope {
                         width: 220
                         height: 34
                         opacity: surface.revealed ? 1 : 0
-                        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on opacity { NumberAnimation { duration: ViewMode.ms(200); easing.type: ViewMode.slideEasing } }
 
                         Rectangle {
                             anchors.fill: parent

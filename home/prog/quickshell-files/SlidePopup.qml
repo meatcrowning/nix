@@ -62,7 +62,7 @@ PanelWindow {
     // surface is destroyed and a new one opened, which Hyprland fades out and
     // back in — the reload blink this restore path exists to remove).
     property bool _snapReused: false
-    Behavior on _fanY { enabled: root._fanYAnim; NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+    Behavior on _fanY { enabled: root._fanYAnim; NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
     // Scene-Y of our top edge while pinned in-place, recomputed LIVE (not
     // frozen at pin time) so an obstacle growing below us — the disk widget
@@ -243,9 +243,16 @@ PanelWindow {
         _fanY = implicitHeight + Theme.gap;
         fanHideTimer.restart();
     }
+    // Guards below: each must OUTLAST the slide it is mirroring, at every
+    // animScale and animSpeed. They were hand-maintained 260ms literals against
+    // a 220ms slide; when the slide moved to the canonical 260 a literal here
+    // would have fired ON the animation's last frame, and with the slowmo knob
+    // (or a user animSpeed > 1) they already fired long before it. So they are
+    // ViewMode.ms(slideMs) plus a FIXED frame of margin — the margin must not
+    // scale, or reduceMotion would leave no margin at all.
     Timer {
         id: fanHideTimer
-        interval: 260
+        interval: ViewMode.ms(ViewMode.slideMs) + 20
         onTriggered: root.pinnedOpen = false
     }
 
@@ -281,13 +288,13 @@ PanelWindow {
     // animate off first). Only fires when genuinely closed, never when pinned.
     Timer {
         id: hideTimer
-        interval: 260
+        interval: ViewMode.ms(ViewMode.slideMs) + 20
         onTriggered: if (!root.open && !root.pinnedOpen) root._visSurface = false
     }
 
     Timer {
         id: pendTimer
-        interval: 260
+        interval: ViewMode.ms(ViewMode.slideMs)
         onTriggered: root.reallyOpen()
     }
     Timer {
@@ -322,7 +329,7 @@ PanelWindow {
         // horizontal slide for hover/tiled popups; suppressed during a fan
         // reveal, where the card rises vertically (transform below) instead,
         // and during a snapPinned() reload restore, which must not animate
-        Behavior on x { enabled: !root._fanActive && !root._snapPin; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on x { enabled: !root._fanActive && !root._snapPin; NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
         // vertical fan emerge/collapse (0 = in place; +height = tucked below)
         transform: Translate { y: root._fanY }

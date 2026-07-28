@@ -16,6 +16,11 @@ import "../../qmlcommon"
 // a re-sort/re-filter/rescan repaints the tiles even when the count is equal.
 Item {
     id: root
+
+    // The desktop's motion, from the plugin's published key. ONE instance for
+    // the whole grid — a delegate-owned copy would be one file read per album
+    // row (qmlcommon/Motion.qml).
+    Motion { id: motion }
     // The album to expand; 0 collapses. Owned by Main (so the mouse
     // back/forward history can restore it), toggled through `opened`.
     property int expandedAlbumId: 0
@@ -168,7 +173,11 @@ Item {
             // just unloading) is what makes closing mirror opening: the panel
             // stays alive, clipped, until it has slid back up under the covers.
             property real panelH: expanded ? panelLoader.panelHeight : 0
-            Behavior on panelH { NumberAnimation { duration: 130; easing.type: Easing.OutQuad } }
+            // The desktop's slide. This is the largest reveal in the app —
+            // a section growing out from under a cover row — and it ran at
+            // 130ms on the tree's only OutQuad, so it opened at twice the
+            // speed of a window rolling out beside it.
+            Behavior on panelH { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
 
             width: list.width
             height: root.cellW + panelH

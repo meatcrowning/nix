@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // player's pseudo-settings drawer, the same idiom as surfer's dark-mode panel:
 // the hyprvtb titlebar lives on the window's RIGHT edge and the "st" button is
@@ -32,11 +33,16 @@ Item {
         onClicked: root.closeRequested()
     }
 
+    Motion { id: motion }
+
     Rectangle {
         id: drawer
         // slide 0 (hidden, fully off the right edge) -> 1 (docked at the edge)
         property real slide: root.open ? 1 : 0
-        Behavior on slide { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        // The desktop's slide (qmlcommon/Motion.qml), not a local 200ms. This
+        // drawer docks to the same edge the hyprvtb titlebar is on and opens
+        // next to a window that rolls; at 200 it visibly beat the roll.
+        Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
 
         width: Math.min(248, root.width - 16)
         height: Math.min(col.implicitHeight + 24, root.height - 16)

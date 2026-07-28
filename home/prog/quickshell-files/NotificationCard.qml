@@ -38,7 +38,11 @@ Rectangle {
     // fade in on arrival (removal is instant when the model drops the item)
     opacity: 0
     Component.onCompleted: opacity = 1
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    // A fade, not a slide, so it keeps its own (shorter) duration — but it goes
+    // through ViewMode.ms() like everything else, so reduceMotion and animSpeed
+    // reach it. DESIGN.md §6.2: the CURVE is the desktop's, the duration is a
+    // fade's to choose.
+    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(160); easing.type: ViewMode.slideEasing } }
 
     // left urgency strip
     Rectangle {

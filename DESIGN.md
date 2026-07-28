@@ -812,43 +812,102 @@ earlier the same day. That is precisely the class of thing this document exists
 to stop him having to say. **When you add anything that moves, this section is
 the answer — do not re-decide it.**
 
-> **Pending:** the exact roll duration and curve, and a full inventory of every
-> animation in the panel and in `apps/` that already matches versus has silently
-> diverged, are being measured out of the hyprvtb C++ source by a concurrent
-> change. When that lands, the numbers below are reconciled against the roll and
-> this note comes out. Until then, §6.2.1's table is the *observed* state of the
-> tree, not the ratified target.
+**The number is 260 ms on `Easing.OutCubic`, and it is the roll's own.** Not a
+preference — measured out of the reference itself: the roll runs over
+`slide_duration_ms` (260) in two beats, the drawer slide over the first
+`roll_slide_frac` (55%) on an ease-out cubic and the set-down over the rest on
+an ease-in-out. `slideEasing` matches the *leading* beat, the one that carries
+the visible travel. The residual difference is the last ~45%: the roll eases
+back *in* as the bar sets down, and a QML `NumberAnimation` does not. Nothing in
+the panel needs that second beat, because it exists because the bar changes
+DIRECTION and no panel drawer does.
 
-**There is a structural obstacle to this rule and it is worth knowing about.**
-Animation durations are currently **hardcoded per widget across ~15 files** —
-which is also why the `reduceMotion` and `animSpeed` settings exist in the
-Settings UI and control nothing (`docs/quickshell-nextsteps.md`). One shared
-`Theme.animDuration` (or a small named set: reveal / settle / fade) would make
-this rule enforceable by construction instead of by audit, and would light up
-two dead settings at the same time. Flagged in
-[Open questions](#open-questions) — but **every `Behavior` you add with a
-literal duration deepens that debt.**
+**There is exactly one home for it, and it is a config key.** Until hyprvtb 2.89
+the roll's timing was a compiled-in `static constexpr` with nothing to read, so
+every other codebase hand-copied the number out of a C++ comment — which is how
+the panel spent its life at 220 against a roll at 260. It is now
+**`plugin:hyprvtb:slide_duration_ms`** (and `roll_slide_frac`), set in
+`hyprland.lua`, and the plugin publishes the resolved values on every config
+reload so the other two runtimes *read* it instead of copying it:
 
-#### 6.2.1 The vocabulary as it stands today
+| reader | mechanism | liveness |
+|---|---|---|
+| hyprvtb itself | `Cfg::slideDurationMs()` | live, every frame |
+| the panel | `ViewMode.slideMs`, a `FileView` on `~/.local/state/hyprvtb/motion.json` with `watchChanges` | live — `hyprctl reload` reaches a running panel |
+| the six apps | `qmlcommon/Motion.qml`, a `Loader` on the generated `~/.local/state/hyprvtb/DeskMotion.qml` | at app start (these apps have no hot reload at all) |
 
-**A reveal, a slide, a flash or a card movement is 220ms on an OutCubic curve
-unless there is a stated reason otherwise.** [code — 25 of 30 easing
-declarations in the panel and apps are `OutCubic`; 220 is the most common
-duration by a factor of four] It is deliberately the same number in three
-codebases:
+So retuning the whole desktop's motion is one number in `hyprland.lua` plus
+`hyprctl reload`. Each reader keeps 260 as a **fallback**, because the panel and
+the apps must draw a correct desktop with the plugin disabled or quarantined —
+those literals have to stay equal to the key's default in `hyprvtb/main.cpp`.
+
+> Two files rather than one because the two readers cannot read the same thing.
+> Quickshell has `FileView`; plain Qt QML has no file reader at all —
+> `XMLHttpRequest` refuses a `file://` URL unless `QML_XHR_ALLOW_FILE_READ` is
+> exported into the app, which is a blanket local-file-read permission granted
+> to, among others, a web browser. A `Loader` on an absolute `file:` URL needs no
+> permission and reports `Loader.Error` for a missing file, which is exactly the
+> fallback signal wanted. Both were measured offscreen before this was written.
+
+**And every duration goes through a scaling function** — `ViewMode.ms()` in the
+panel, `Motion.ms()` in the apps. That is what finally made `reduceMotion` and
+`animSpeed` real: both settings had existed in `SettingsStore` and in the
+Settings window since the day they shipped and drove **nothing**, because every
+`Behavior` in the tree carried its own literal. `reduceMotion` returns 0, which
+a `NumberAnimation` treats as an immediate assignment — the desktop still
+changes state, it just stops travelling to get there.
+
+**So: never write a duration literal into a widget.** `ViewMode.ms(ViewMode.slideMs)`
+/ `motion.ms(motion.slideMs)`, and `ViewMode.slideEasing` / `motion.slideEasing`.
+A literal is not merely untidy now; it is a widget that opts out of the user's
+own settings and out of the compositor's key at the same time.
+
+#### 6.2.1 The vocabulary, and what is deliberately not in it
+
+**A reveal, a slide or a card movement is `slideMs` (260 ms) on `OutCubic`
+unless there is a stated reason otherwise**, and the reason belongs in a comment
+next to the number. [code — 25 of 30 easing declarations in the panel and apps
+are `OutCubic`]
+
+> **How this section used to read, and why the history stays.** It ratified
+> **220 ms** as the house slide, on the evidence that 220 was the most common
+> duration in the tree by a factor of four and was deliberately the same number
+> in three codebases — `SlidePopup.qml`'s card slide, surfer's page tooltips
+> commented as matching it, and `hyprvtb`'s `VTB_TT_SLIDE_MS = 220.f;
+> // matches SlidePopup's 220ms card slide`. That reasoning was sound and its
+> conclusion was still wrong: it counted call sites instead of asking what the
+> rule above actually names. **The user overrode it explicitly** — *"make the
+> sliding animations ... match the sliding animation speed / timing of the
+> window roll in and out"* — and the roll was 260 the whole time. The three
+> codebases had converged on each other while all three drifted from the
+> reference. Left here because the failure mode is worth keeping: a majority
+> vote among call sites is not a design decision, and the next audit will find
+> the same tempting evidence.
 
 | | |
 |---|---|
-| `SlidePopup.qml:325` | `Behavior on x` — 220ms OutCubic |
-| `Tooltip.qml` | 350ms dwell, then a 220ms slide |
-| `surfer/qml/Main.qml:946,1018` | 220ms OutCubic, commented as matching |
-| `hyprvtb/vtbDeco.cpp:1311` | `VTB_TT_SLIDE_MS = 220.f; // matches SlidePopup's 220ms card slide` |
-| `hyprvtb/vtbDeco.cpp:88` | `VTB_FLASH_MS = 220.f` — click-activation flash |
+| `hyprvtb/vtbDeco.cpp` | the roll — `Cfg::slideDurationSec()` / `Cfg::rollSlideFrac()`, the reference |
+| `hyprvtb/vtbDeco.cpp` | the titlebar tooltip — the same key, no second number |
+| `home/prog/quickshell-files/` | `ViewMode.ms(ViewMode.slideMs)` / `ViewMode.slideEasing` |
+| `apps/*/qml/` | `motion.ms(motion.slideMs)` / `motion.slideEasing`, from `qmlcommon/Motion.qml` |
 | `hyprland.lua` | `workspaces` at speed 2.2 on a hand-fitted `easeOutCubic` bezier, whose comment says it exists to be *"identical to the Quickshell workspace-outline slide … so the windows and the panel indicator move as one"* |
 
 That last one is the principle in its clearest form: **a compositor bezier was
 hand-fitted to Qt's easing curve specifically so two different renderers would
 agree.** Hold that line.
+
+**The deliberate non-participants.** Every one of these is a number with a
+comment saying why, not an oversight — do not "converge" them:
+
+| | | |
+|---|---|---|
+| `shell.qml` bar width settle | 200 ms | the tail of a **gesture**, not a reveal between rest states — §6.4 governs it, and it animates at all only under protest |
+| `SetToggle.qml` knob | 90 ms | a ~14px knob inside the control you just clicked: press feedback, which belongs with the pointer |
+| `vtbDeco.cpp` `VTB_FLASH_MS` | 220 ms | the compositor-side sibling of that knob — a clicked cell's activation flash. It now shares 220 with nothing, which is the point |
+| crossfades, hover, scrollbars | 140 / 120 / 160 ms | opacity, with no travel to read. They take the house **curve** and go through `ms()`, but not the slide's duration |
+| `WallpaperImage.qml` | 260 ms **InOutQuad** | a cross-fade between two full-screen pictures. An ease-out dumps most of the change into the first third, which reads as the old wallpaper being snatched away; the duration is the desktop's, the curve is symmetric on purpose |
+| `Lock.qml` unlock fade | 300 ms, a **literal** | releasing the session lock is a side effect of this animation finishing. Through `ms()` it would be 0 under `reduceMotion`, and a zero-length animation need never report a running→stopped edge — the fade would "finish" with nobody left to unlock the screen. The failure mode is the user locked out of their own session |
+| `VuMeter` / spectrum | 25 ms, no easing | already-smoothed 60fps data; a `Behavior` here is a second low-pass re-adding the lag cava was told to drop (§6.9) |
 
 **Things slide OUT of the edge they belong to; they do not fade in from
 nowhere.** [his] *"tooltips should slide out (like the surfer ones) and not
@@ -867,9 +926,19 @@ supposed to be. And in QML the idiom is `Behavior on x` driven by a boolean,
 tooltip did not un-slide.
 
 Other established durations — reuse rather than re-pick: **120ms** scrollbar
-opacity fade, **260ms** widget fan (also the delay before a replacing popup
-slides in, §7), **0.26s** hyprvtb roll-up, **0.16s** its fade, **90ms** the
-unroll reveal-hold.
+opacity fade, **0.16s** the hyprvtb lone-bar fade, **90ms** the unroll
+reveal-hold. The widget fan and the delay before a replacing popup slides in
+(§7.3) are both one slide's worth and take `slideMs` itself.
+
+**A timer that guards an animation is derived from it, never written out.** Five
+`Timer`s in the panel exist only to outlast a slide — unmapping a layer surface
+after the card has travelled off it, holding a `_closing` flag through the
+animation it gates. They were hand-maintained 260ms literals sitting against a
+220ms slide, i.e. right by accident; converging the slide to 260 would have
+landed every one of them **on the animation's last frame**, and at any
+`animScale` other than 1 they were already firing before the thing they guard
+had finished. The form is `ViewMode.ms(ViewMode.slideMs) + 20` — the margin is a
+fixed frame and must NOT scale, or `reduceMotion` leaves no margin at all.
 
 ### 6.3 Nothing bounces, overshoots or settles
 
@@ -1963,12 +2032,15 @@ Agent *proposals*, listed separately on purpose. Nothing above depends on them.
 7. **Should the sound set ever grow?** §17 records a deliberate narrowing. Is
    "no new sounds without asking" the rule, or is the current set simply where
    it stopped?
-8. **A shared `Theme.animDuration`?** Your motion rule (§6.2) is currently
-   unenforceable: durations are literals in ~15 files, which is also why
-   `reduceMotion` and `animSpeed` do nothing. One named set — reveal / settle /
-   fade — would make "everything moves at the same speed" true by construction
-   and light up two dead settings. This is the highest-leverage item on the
-   list.
+8. ~~**A shared `Theme.animDuration`?**~~ **Done**, and the answer turned out
+   not to be a theme property at all: the duration lives in the compositor, as
+   `plugin:hyprvtb:slide_duration_ms`, because the roll is the reference and the
+   reference should not be a copy of itself. The panel takes it through
+   `ViewMode.slideMs`/`ms()` and the apps through `qmlcommon/Motion.qml`; both
+   settings are live. §6.2. One loose end: `reduceMotion`/`animSpeed` reach the
+   apps only once `pylib/deskstyle.py` exposes them alongside
+   `fontFamily`/`fontSize` — `Motion.qml` already reads them from `DeskStyle`
+   and falls back cleanly until it does.
 9. **The five other dead settings** (`themeMode`, `accentOverride`,
    `paletteColorCount`, `pureBlackBg`, and whichever of the above survives):
    wire them, or remove the controls? §10 says a control that is drawn is a
