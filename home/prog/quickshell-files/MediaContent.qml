@@ -363,10 +363,19 @@ Item {
                     text: Media.dispTitle
                     color: Theme.text
                 }
+                // The natural width of the artist, measured by something that
+                // has no width of its own. See `qartistNat` in the queue row
+                // below for why an eliding Text may not be asked its own
+                // `implicitWidth` when that answer is what sets its width.
+                TextMetrics {
+                    id: artistNat
+                    font: artistText.font
+                    text: artistText.text
+                }
                 PixelText {
                     id: artistText
                     anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                    width: Math.min(implicitWidth, parent.width / 3)
+                    width: Math.min(artistNat.advanceWidth, parent.width / 3)
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     text: Media.dispArtist
@@ -692,6 +701,27 @@ Item {
                     text: Media.fmtTime(qrow.modelData.dur || 0)
                     color: Theme.textDim
                 }
+                // The artist column is as wide as its text, capped at a third of
+                // the row — but that natural width may NOT be read off the item
+                // itself. A `Text` with `elide` lays out against the width it has
+                // been given, and until something has asked it for its implicit
+                // width it publishes the ELIDED width as `implicitWidth`; so
+                // `width: Math.min(implicitWidth, …)` is width defined in terms
+                // of width, and whichever of the two evaluates first at delegate
+                // creation decides whether it converges or spins. It spun:
+                // 27 `Binding loop detected for property "width"` in one panel
+                // generation, one per realized row, invisible on screen because
+                // the loop settles at a width that merely looks a little short.
+                // Same class as the zero-size popup in AGENTS.md — an implicit
+                // size must be computed only from things that do not follow the
+                // item's own size. `TextMetrics` has no geometry at all, so it
+                // answers the same question (`advanceWidth` == the unelided
+                // `implicitWidth`, measured) with nothing to feed back.
+                TextMetrics {
+                    id: qartistNat
+                    font: qartist.font
+                    text: qartist.text
+                }
                 PixelText {
                     id: qartist
                     anchors {
@@ -704,7 +734,7 @@ Item {
                     }
                     visible: !root.showLyrics
                     width: root.showLyrics ? 0
-                         : Math.min(implicitWidth, parent.width / 3)
+                         : Math.min(qartistNat.advanceWidth, parent.width / 3)
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     text: qrow.modelData.artist || ""
