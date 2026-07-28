@@ -83,10 +83,15 @@ Item {
     // be undefined for the first frames and the grid would re-lay itself out
     // when it resolved.
     // Mirrors WeatherContent's `minCondensed`: its padding, one line of text,
-    // the 3px gap and `minMiniGraph` (24) — because the condensed forecast is
+    // the 3px gap and `minMiniGraph` (20) — because the condensed forecast is
     // not a bare line, it keeps a miniature of the graph, and asking for that
-    // form is asking for the room it needs. Raising this is what buys the room;
-    // on this panel it takes the drawer from four rows to three.
+    // form is asking for the room it needs. Raising this is what buys the room,
+    // and it buys it in whole ROWS (35.3px on this panel) — there is no smaller
+    // unit, so a few pixels either side of a row boundary decide whether the
+    // forecast takes two rows or three. At `minMiniGraph` 24 it demanded three
+    // (97.9px of tile) and the drawer got three rows; at 20 it fits in two
+    // (62.6px of tile = 60.6px of content against a 58px minimum, the miniature
+    // graph still drawn at 22.6px) and the drawer has its fourth row back.
     //
     // PLUS `tileInset`, and that term is not a rounding allowance — leaving it
     // out is what made the condensed forecast a bare header line for its whole
@@ -99,7 +104,7 @@ Item {
     // exists for panels with no room at all. Any floor mirrored from a content
     // component has to carry the frame it is drawn inside.
     readonly property real tileInset: 2
-    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 3 + 24 + tileInset
+    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 3 + 20 + tileInset
     readonly property int minWeatherRows: cellHeight > 0
         ? Math.max(1, Math.ceil((minWeatherPx + spacing) / (cellHeight + spacing))) : 2
     // 6 is the forecast's own `rs` below; it may not be reduced past its minimum.

@@ -55,8 +55,18 @@ Item {
     // draws a temperature trace inside a band a few pixels tall, which is the
     // illegible-sliver state the derived threshold above exists to prevent, and
     // it must not come back in through the condensed door.
+    //
+    // It was 24, and lowering it to 20 is what makes the condensed tile SHORTER
+    // rather than what makes the graph thinner: this floor feeds
+    // `DockGrid.minWeatherPx`, and the dock grid can only spend height in whole
+    // rows (35.3px on this panel), so 24 demanded a third row and 20 fits in
+    // two — 97.9px of tile down to 62.6px, and the queue drawer's fourth row
+    // back. What the canvas is actually handed at that size is 22.6px, still
+    // above this floor; the number is the guard for other panel heights, not
+    // the height in use. Do not raise it back without re-running the arithmetic
+    // in DockGrid — the two are one calculation split across two files.
     readonly property real miniChromeH: pad * 2 + head.height + 3
-    readonly property real minMiniGraph: 24
+    readonly property real minMiniGraph: 20
     readonly property bool miniGraph: condensed && height - miniChromeH >= minMiniGraph
 
     // The smallest this widget can be and still say something. DockGrid reads
@@ -257,9 +267,15 @@ Item {
             function onMiniGraphChanged() { if (root.active) graph.requestPaint(); }
         }
 
+        // Hover belongs to the FULL form only. The miniature draws no cursor
+        // (see below) and the legend that would show the hovered sample's
+        // numbers is not on screen either, so tracking the pointer there is a
+        // full Canvas repaint per motion event that changes nothing.
         MouseArea {
             anchors.fill: parent
-            hoverEnabled: true
+            enabled: !root.condensed
+            hoverEnabled: !root.condensed
+            onEnabledChanged: if (!enabled) root.hoverIdx = -1
             acceptedButtons: Qt.NoButton
             onPositionChanged: (mouse) => {
                 const n = root.slots.length;
@@ -353,8 +369,11 @@ Item {
             }
 
             // the hover cursor, behind nothing — drawn last so it reads over
-            // the bands and the line
-            if (root.hoverIdx >= 0 && root.hoverIdx < n) {
+            // the bands and the line. NOT in the mini form: a full-height rule
+            // over a ~22px canvas is a third of the widget, and there is no
+            // legend there for it to be pointing at. The MouseArea above stops
+            // tracking in that mode, so this is belt and braces.
+            if (!mini && root.hoverIdx >= 0 && root.hoverIdx < n) {
                 const hx = tx(root.hoverIdx);
                 ctx.strokeStyle = Theme.text;
                 ctx.lineWidth = 1;
