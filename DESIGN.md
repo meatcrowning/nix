@@ -242,12 +242,21 @@ lineHeightMode: Text.FixedHeight
   synthetic bold "smears and reads as a heavier, slightly larger, different
   typeface next to the regular glyphs". Bold emphasis is a deliberately accepted
   loss.
-- **`Text.elide` is banned.** [code — `7584956`] Its ellipsis is U+2026, which
-  the font lacks (§2.3) — so elide is a *hidden* trigger for the clipping trap:
-  only the rows long enough to elide drop 2-5px, which reads as "uneven list
-  spacing". That was a real report. **Use `clip: true` instead, with the item
-  height at `fontSize + 2`** — the glyph ink is 16px (12 ascent + 4 descent), so
-  a tighter box clips descenders.
+- **`Text.elide` is FINE with this font — do not hand-roll an ASCII elide.**
+  [code — measured] Qt substitutes three ASCII periods by itself when the
+  family has no U+2026, so an elided `PixelText` never takes the fallback
+  ascent. Measured against the real font at 15px:
+  `QFontMetrics.elidedText(…, Qt.ElideRight)` came back
+  `'a very long ...'` — `0x2e 0x2e 0x2e`, no U+2026 anywhere. This entry
+  previously said elide was *banned* (from `7584956`, where the real fault was
+  an uneven-row report) and it was wrong: it contradicted
+  `quickshell-files/AGENTS.md`, which had measured the same thing, and it
+  condemned ~45 correct call sites across the panel and all six apps. **The
+  substitution depends on the family lacking the glyph**, so it is a property of
+  this font, not of Qt in general — check again if the font is ever changed.
+- **Where you clip instead of eliding, the item height is `fontSize + 2`** —
+  the glyph ink is 16px (12 ascent + 4 descent), so a tighter box clips
+  descenders.
 
 ### 2.3 The font's cmap is short — and a missing glyph CLIPS THE LINE
 
@@ -757,9 +766,17 @@ What that costs you, mechanically:
   value gates its `Behavior` on it. **Add a `Behavior` on anything that follows
   a persisted value and you must gate it too**, or you have re-added the glitch
   for that one widget.
-- **The first paint of a tree loads synchronously — only the first paint, never
-  a cross-fade** (`efccc34`). Async decode showed flat `Theme.bg` full-screen
-  for ~100ms on every theme change.
+- **NOTHING ON SCREEN MAY LOAD ASYNCHRONOUSLY.** The first paint of a tree is
+  synchronous — only the first paint, never a cross-fade. Twice in one day the
+  same shape produced the same report: async image decode showed flat
+  `Theme.bg` full-screen for ~100ms on every theme change (`efccc34`), and
+  `DockTile`'s asynchronous `Loader` put every dock widget **82-95 ms after**
+  the frame that painted the panel (`79e9dea`) — a panel of empty frames, which
+  is what "the widgets all flash black" meant. *Async is the right default for
+  everything else*, and it stays: a cross-fade must stay asynchronous, because
+  the outgoing frame is still on screen. **The rule is about the FIRST frame of
+  a tree** — anything that has to be in it loads blocking, and `loadNow()` is
+  the idiom (`SettingsStore`, `Wall`, `WallpaperImage`).
 - **A one-shot handler cannot be gated; it must LOAD.** `SettingsStore.loadNow()`
   / `Wall.loadNow()` first in any `Component.onCompleted` that branches on a
   persisted value.
@@ -1703,6 +1720,122 @@ tree**: it flips its own label to `scanning`, lights up, and guards the handler.
 
 ---
 
+### 19.2 Second-pass findings — behaviour, states, strings
+
+§19.1 came out of a pass over `Theme.qml`, the QML, the area guides and the git
+log, so it found *appearance*. A second pass looked where that one structurally
+could not — non-default states, keyboard vocabulary, failure paths, wording and
+ordering. **Findings, not rules.** Fixed ones are struck; the rest are ranked by
+how badly they read, and the ones marked **RULE?** are his to settle, not an
+agent's.
+
+**Fixed in the same pass** (each was a ratified rule already, applied):
+
+- ~~`BrowserConfirm` (both copies) had no keyboard handling at all~~ — Escape
+  now cancels, as it always has in `BrowserPrompt` beside it. The *destructive*
+  dialog was the one that needed the mouse. Enter stays unbound on purpose.
+- ~~`Media.queueAvailable` was `connected && queue.length > 0`~~ — so
+  `MediaContent`'s empty-state label, drawn only when the queue *is* empty,
+  could never take its `"queue is empty"` branch. A running player with nothing
+  queued always read `"player not running"` (§10).
+- ~~filer's preview tiles drew `▢` / `✕` / `…`~~ and ~~viewer drew
+  `"loading…"`~~ — all four absent from the font (§2.3), so every not-ready,
+  failed and loading tile clipped. Now `■` (which the font *does* have, §3.4),
+  `x` and `...`.
+
+**Open, ranked:**
+
+1. **filer reports success for every file operation that fails.** `FileOps.run`
+   (`apps/filer/main.py`) wires both `finished` *and* `errorOccurred` to one
+   handler that inspects neither the exit code nor stderr, and the QML just
+   refreshes. A denied `rm -rf`, a cross-device `mv`, a full disk and a
+   successful copy are indistinguishable on screen. This is §10's headline rule
+   and §10.2's own worked example. Note `filer/videoconv.py` *does* toast
+   success and failure — so the pattern exists in the same app.
+2. **The panel's own two menus are the desktop's only Title Case menus.**
+   `ProcMenu` (7/7) and `TaskMenu` (2/2) — `End Task`, `Force Quit`,
+   `Copy PID` — against filer's, player's and painter's all-lowercase. The
+   reference implementation is the deviant. (surfer's 20-item context menu is
+   Sentence case and is arguable — it mirrors Chromium's wording — but surfer's
+   own titlebar tooltips are lowercase, so the app disagrees with itself one
+   click apart.)
+3. **`ProcMenu` puts the two destructive entries FIRST**, where filer puts
+   `open`, on a table its own comment says re-sorts under the pointer every 2s,
+   with no confirm. Every other menu on the desktop puts its destructive item
+   last and behind a separator (§10.3). `TaskMenu` puts `Force Quit` directly
+   under `Close` with no separator at all — and paints the same label
+   `Theme.accent` where `ProcMenu` paints it `Theme.crit`.
+4. **The apps' context menus hover-LIGHTEN.** §7.2 says the spec is identical
+   in the panel and in filer/player/surfer and that hover fills `Theme.bg`,
+   *darker* than the menu. The panel does that; all three apps' `CtxMenu`
+   /`ContextMenu` use `Theme.highlight`, which is brighter than `bgAlt`.
+5. **§7.1 gaps.** player's track list — its most-used list — has no context
+   menu, nor do the queue or `PlaylistsView`; viewer *accepts* `RightButton` and
+   then discards it, so nothing else can offer one; painter's gallery binds
+   right-click to a hidden direct action and needs a permanent caption to be
+   discoverable. The tray is the one menu on the desktop drawn by another
+   toolkit (`QsMenuAnchor`), against §7.2.
+6. **Keyboard vocabulary is per-app, not desktop-wide.** filer has no shortcut
+   for any file operation and no arrow-key navigation in its list or grid;
+   surfer — the browser — has no find-in-page, no tab shortcuts and no
+   `Alt+Left`, while *player* wires the mouse's side buttons and `Ctrl+F`;
+   painter's gallery has no keyboard handling at all. Escape means four
+   different things across five apps (quit / cancel the queue / dismiss the
+   innermost thing / nothing). **RULE?** — each is locally defensible; what is
+   missing is a stated vocabulary. askpass is the reference implementation of a
+   dialog's keyboard contract.
+7. **Ordering conventions disagree.** filer sorts hidden entries above
+   everything, surfer's picker sorts directories first and interleaves hidden by
+   name, the panel's browser does dirs-first only — three comparable file lists,
+   three group orders. filer's location-bar completion (`main.py`) is the one
+   **case-sensitive** name sort in the tree, and its prefix match is
+   case-sensitive too, so `doc` never finds `Documents`. **No list anywhere
+   sorts numerically**, so `track2` follows `track10` everywhere.
+8. **`♫` and `♥` are not in the font** — verified, `glyphIndexesForString`
+   returns 0 for U+266A, U+266B and U+2665. `MediaContent.qml` draws `♫` under a
+   comment asserting it is "the CP437 note glyph"; player's `NowPlaying` draws
+   it at `pixelSize: 60` and `♥` in two places. **RULE?** — unlike `…`/`×` these
+   have no ASCII equivalent, so replacing them is a design decision, not a
+   sweep. §2.3's list was right; the comment is wrong.
+9. **There is no loading idiom.** One spinner exists on the whole desktop and it
+   is in the plugin's C++ (surfer's tab). Everything else — disk scan, weather
+   fetch, library rescan, thumbnail decode — is static dim text, in three
+   grammars (`reading...` / `checking...` / `scanning`, the last without dots).
+   Empty states likewise come in three (`no X` / `nothing …` / `X is empty`),
+   and the tray draws no empty state at all where every sibling widget does.
+10. **Wording, small but visible:** `"up a directory"` and
+    `"new file or folder"` four lines apart in filer's own button strip;
+    `"search artist"` vs `"search for artist"` in one app; askpass's `OK`/`Cancel`
+    against everyone else's `ok`/`cancel`. The ellipsis convention (an action
+    that opens a dialog gets `...`) is followed perfectly inside filer and
+    nowhere else — the panel's own `FileBrowser` offers the same four operations
+    with the opposite convention.
+11. **Two icon paths for one app.** `TaskCell` resolves through
+    `DesktopEntries.heuristicLookup` and degrades to a letter; `Launcher` uses
+    `entry.icon` verbatim and degrades to the freedesktop generic. For an app
+    whose window class ≠ desktop-entry name — the case `TaskCell` says it was
+    written for — the launcher tile and the task cell can show different icons
+    for the same program. Four surfaces, four fallback strategies (letter /
+    generic / note glyph / nothing). Material for Open question 6.
+12. **player's `cursorShape` coverage is 3 of ~21 `MouseArea`s**, including the
+    track row and the favourite heart. filer and surfer set it on a third to a
+    half of theirs. (painter's was fixed in the painter pass.)
+13. `QueueBar`'s fill omits the `round()` §8.1's progress-bar geometry calls
+    for, and player's `AlbumGrid` uses `Theme.textDim` for an empty state where
+    the same app uses `Theme.dim` twice — the token whose own comment reads
+    *"empty & unviewed"*.
+
+**Justified, so nobody re-files them:** surfer imposing only the font family on
+pages (§20); painter's gallery sorting newest-first (a generation queue is
+chronological); askpass's UPPERCASE captions (§7.5 gravity, and coherent);
+filer's `compress to <10MB` carrying no ellipsis (it only asks when the estimate
+is bad); `ProcMenu`/`TaskMenu` not honouring Escape (they are `PopupWindow`s
+with no focus grab, so `Keys` would be dead code — but §7.2's wording implies
+otherwise and should say so); viewer keeping bare `+`/`-` zoom where surfer
+cannot (a web page owns those keys).
+
+---
+
 ## 20. Recorded exceptions
 
 **Every deliberate divergence from a rule above lives here. A difference that is
@@ -1732,6 +1865,7 @@ new candidates add rows here rather than editing the rules above.
 | §16 the desktop's idiom applies to everything drawn | `[surfer]` | the desktop's *font family* is imposed on a page; its sizes and palette are not, and the choice is per-site | forcing size and palette is reader-mode territory and breaks real sites — a full reskin was built and explicitly retracted (`ad868e4`) | [his] |
 | §5.1 zero-gap, edge-to-edge | global | an interactive target never touches its neighbour, and its hit band may exceed its ink | he reported the queue's collapse handle as unclickable at `gap = 0` (§5.3) | [his] |
 | §18 the dock shows the system's tiles | `[panel]` | the disk tile is classic-mode only | by choice (§18) | [his] |
+| §6.1 nothing on screen loads asynchronously | `[panel]` | `MediaContent`'s cover art (`asynchronous`+`cache`, over a placeholder) and `TaskCell`'s lazy `DesktopEntries` scan (over a letter fallback) still load async | **under review.** Both were inspected during `79e9dea` and deliberately left: neither can produce an empty frame, because each draws over something, and neither was changed without measuring first | candidate |
 | §8 one tooltip dwell | `[hyprvtb]` | 450ms, against the panel's 350ms | **unruled.** The titlebar is a place the cursor passes through more often, so a longer dwell *may* be deliberate — nothing records it as such (Open question 4) | candidate |
 
 ---

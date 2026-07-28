@@ -119,7 +119,13 @@ Singleton {
         try { const i = JSON.parse(queueJson).index; return i === undefined ? -1 : i; }
         catch (e) { return -1; }
     }
-    readonly property bool queueAvailable: queueSock.connected && queue.length > 0
+    // "the player is up and serving us a queue" — NOT "the queue has rows in it".
+    // Its only consumer is MediaContent's empty-state label, which is drawn
+    // exactly when `queue.length === 0`; with a `length > 0` term in here that
+    // label could never take its "queue is empty" branch and a running player
+    // with nothing queued always read "player not running" (DESIGN.md §10 —
+    // feedback must reflect reality).
+    readonly property bool queueAvailable: queueSock.connected
 
     // Whether the drawer is open. In SettingsStore, not a local property: the
     // dock grid reads it to decide how many rows the player and the forecast

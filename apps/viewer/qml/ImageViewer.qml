@@ -225,7 +225,9 @@ Rectangle {
         text: viewer.isVideo
             ? (player.error !== MediaPlayer.NoError ? ("can't play\n" + viewer.name) : "")
             : (viewer.imgStatus === Image.Error ? ("can't display\n" + viewer.name)
-              : viewer.imgStatus === Image.Loading ? "loading…" : "")
+              // "..." not U+2026 — the pixel font has no ellipsis, and a
+              // fallback glyph clips the line (DESIGN.md §2.3).
+              : viewer.imgStatus === Image.Loading ? "loading..." : "")
         color: viewer.winActive ? Theme.textDim : Theme.inactive
     }
 }
