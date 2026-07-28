@@ -156,12 +156,17 @@ Singleton {
     // nobody is playing music. The window list is the cheapest true answer
     // available here: it needs no poll of its own, and unlike "is there an MPRIS
     // player" it is still right on a host where mpris_server is missing.
+    //
+    // A player on an agent's sandbox monitor does NOT count: the queue socket is
+    // per-user, so connecting to a test instance would put an agent's queue in
+    // the user's dock. Same rule as the taskbar cells (WinState's OUTPUTS block).
     readonly property bool playerUp: {
         const t = ToplevelManager.toplevels;
         const v = t ? t.values : null;
         if (!v) return false;
         for (let i = 0; i < v.length; i++)
-            if ((v[i].appId || "") === "player") return true;
+            if ((v[i].appId || "") === "player"
+                && !WinState.offOutput(v[i].appId, v[i].title)) return true;
         return false;
     }
     // Re-asserting `connected` is a no-op while the socket is up, so this is the

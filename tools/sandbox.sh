@@ -47,6 +47,14 @@
 #    focus left sitting on an invisible monitor means the user's next keystroke
 #    goes somewhere they cannot see. That is the one thing here that would
 #    genuinely disturb them, so it is handled on every launch.
+#  * Every window launched here is TAGGED `sandbox` (an exec rule, so the
+#    compositor applies it at map time — `hyprctl clients -j` shows
+#    "tags": ["sandbox*"]). The monitor is what the panel filters on, since a
+#    second REAL monitor's windows must keep appearing in the taskbar and
+#    "which output" is the honest question there. The tag answers the other
+#    one — "whose window is this" — which survives the window being moved, and
+#    is what `stop` uses so a window dragged off the sandbox workspace is still
+#    torn down instead of being left on the user's desktop.
 #  * `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
 #    migrates the windows of a removed monitor onto a real one, which is
 #    exactly what this exists to prevent. It then prunes the classes it
@@ -96,19 +104,40 @@ for m in json.load(sys.stdin):
         print(m["name"]); break'
 }
 
-ws_windows() { # addresses of everything on the sandbox workspace
+ws_windows() { # addresses of everything on the sandbox workspace, OR tagged ours
+  # The tag is the half that still holds after a window has been moved: a
+  # sandbox window that ended up somewhere else is exactly the one `stop` must
+  # not leave behind on the user's desktop.
   hyprctl clients -j | python3 -c '
 import json, sys
 for c in json.load(sys.stdin):
-    if c["workspace"]["id"] == int(sys.argv[1]):
+    tags = [t.rstrip("*") for t in c.get("tags") or []]
+    if c["workspace"]["id"] == int(sys.argv[1]) or "sandbox" in tags:
         print(c["address"])' "$1"
 }
 
+# load_state [lenient] — `lenient` warns instead of dying when the monitor has
+# gone, so `stop` and `status` can still clean up after a vanished sandbox.
 load_state() {
   [ -f "$STATE" ] || die "not started — tools/sandbox.sh start"
   # shellcheck disable=SC1090
   . "$STATE"
   [ -n "${MON:-}" ] && [ -n "${WS:-}" ] || die "state file is incomplete"
+  # The monitor can go away underneath the state file — another agent's `stop`,
+  # a stray `hyprctl output remove`, a compositor restart. Hyprland then moves
+  # that workspace onto a REAL monitor, so a stale WS is no longer off-screen
+  # and `exec` would put an agent's test window in front of the user. Checked
+  # here rather than per-subcommand, because every one of them is wrong
+  # afterwards.
+  hyprctl monitors -j | python3 -c '
+import json, sys
+mons = {m["name"]: m for m in json.load(sys.stdin)}
+m = mons.get(sys.argv[1])
+sys.exit(0 if m and m["activeWorkspace"]["id"] == int(sys.argv[2]) else 1)' \
+    "$MON" "$WS" && return 0
+  [ "${1:-}" = "lenient" ] \
+    || die "$MON no longer holds workspace $WS (monitor removed?) — re-run: tools/sandbox.sh start"
+  echo "sandbox: warning — $MON no longer holds workspace $WS" >&2
 }
 
 case "${1:-}" in
@@ -137,9 +166,10 @@ case "${1:-}" in
     have_hypr
     load_state
     prev="$(focused_mon)"
-    # [workspace N silent] is the exec dispatcher's own rule syntax: put the
-    # window there without dragging the user's view along.
-    hyprctl dispatch "hl.dsp.exec_cmd(\"[workspace $WS silent] $*\")" >/dev/null \
+    # The bracket list is the exec dispatcher's own rule syntax: put the window
+    # on the sandbox workspace without dragging the user's view along, and tag
+    # it as ours so it stays identifiable wherever it ends up (see the notes).
+    hyprctl dispatch "hl.dsp.exec_cmd(\"[workspace $WS silent; tag +sandbox] $*\")" >/dev/null \
       || die "exec dispatch failed"
     basename "$1" >> "$CLASSES" # for the geometry-memory prune in stop
     sleep 2
@@ -183,7 +213,7 @@ for c in rows:
       echo "sandbox: not started"
       exit 0
     fi
-    load_state
+    load_state lenient
     echo "sandbox: $MON, workspace $WS, $(ws_windows "$WS" | wc -l) window(s)"
     ;;
 
@@ -193,7 +223,7 @@ for c in rows:
       echo "sandbox: not started"
       exit 0
     fi
-    load_state
+    load_state lenient
     # Close the windows BEFORE the monitor goes away — see the notes.
     for addr in $(ws_windows "$WS"); do
       hyprctl dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" >/dev/null 2>&1

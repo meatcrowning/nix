@@ -21,12 +21,17 @@ import Quickshell.Wayland
 Singleton {
     id: root
 
+    // A dialog on an agent's sandbox monitor must NOT dim the bar: the window
+    // it belongs to is invisible to the user, so the scrim would be the only
+    // thing he saw of it — the panel darkening for no reason he can point at.
+    // Same rule as the taskbar cells (WinState's OUTPUTS block).
     readonly property bool active: {
         const t = ToplevelManager.toplevels;
         const v = t ? t.values : null;
         if (!v) return false;
         for (let i = 0; i < v.length; i++)
-            if ((v[i].appId || "") === "vista-askpass") return true;
+            if ((v[i].appId || "") === "vista-askpass"
+                && !WinState.offOutput(v[i].appId, v[i].title)) return true;
         return false;
     }
 }

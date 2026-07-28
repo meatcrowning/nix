@@ -406,6 +406,59 @@ the toplevel list is class + title, which is all this build offers (no Hyprland
 window-mapping protocol); two windows of one app sharing a title are the one
 case that cannot be told apart.
 
+### The toplevel list has no MONITOR, and the sandbox's promise depends on one
+
+`tools/sandbox.sh` gives agents an off-screen headless monitor so nothing they
+open reaches the user's screen. It hides the window's *pixels*. It does nothing
+about the **Wayland foreign-toplevel list**, which carries appId, title and
+activated and no output at all — so every agent test window appeared in the
+user's taskbar, for the whole life of the sandbox. He reported it, having watched
+programs he did not launch come and go in his bar.
+
+**`WinState` owns the answer and everything that walks the toplevel list must ask
+it: `WinState.offOutput(appId, title)`.** It already polls `hyprctl -j monitors;
+hyprctl -j clients` for roll-up and minimize, so the monitor is free — the same
+shape of problem (the compositor knows, the protocol does not) answered from the
+same poll. Three consumers today, and a fourth is a bug waiting to happen:
+
+| consumer | why it must filter |
+|---|---|
+| `TaskCell.qml` | `visible: !offOutput(...)`. Both hosts are Positioners (Taskbar's `Column`, DockHeader's `Flow`), so an invisible cell leaves no gap |
+| `Media.playerUp` | the queue socket is per-user — a sandbox player would put an agent's queue in the dock |
+| `Askpass.active` | the bar would dim for a dialog that is nowhere on his screen |
+
+- **The discriminator is HARDWARE IDENTITY, not the name.** A monitor is physical
+  if it has a non-zero physical size or any of make/model/serial/description;
+  a headless output has none (measured: DP-5 "Dell Inc. DELL P2422HE 5XP45L3",
+  530x300mm — HEADLESS-6 "" and 0x0). The user may attach a **second real
+  monitor** one day and its windows must still appear, which is exactly what
+  keying on `HEADLESS-` alone would get wrong the first time it mattered. That
+  name is ORed in as corroboration only: it can add a virtual output, never
+  subtract a real one, since no DRM connector is ever named it.
+- **The join is fail-VISIBLE.** A class+title key counts as off-screen only when
+  EVERY mapped client under it is on a virtual output. Two windows of one app
+  with the same title are indistinguishable here (above), and hiding one of the
+  user's own windows is far worse than showing one of an agent's for a poll.
+- **`WinState.screenIsVirtual(shellScreen)`** is the same question asked of a
+  `Quickshell.screens` entry, for a per-monitor widget that has no window to ask
+  about. It is deliberately SYNCHRONOUS — it reads `name`/`model`/`serialNumber`
+  off the screen object and never waits on the poll, so anything gated on it is
+  correct in the first frame of a reload rather than absent for it.
+- `tools/sandbox.sh` additionally TAGS every window it launches (`tag +sandbox`).
+  That is the discriminator for "whose window is this" — it survives the window
+  being moved — where the monitor answers "can he see it". The panel filters on
+  the monitor on purpose: a sandbox window that ends up on the real screen is
+  something he should be able to find and close.
+
+**A grid on a monitor he cannot see must not MEASURE either.** `DockGrid` takes
+`gen: -1` when `screenIsVirtual(screenRef)`, and `ViewMode.reportTile` refuses a
+negative generation. There is one grid per monitor and one `tileInfo` singleton,
+so whichever completes last wins the table — while a sandbox monitor was up,
+`qs ipc call live tiles` answered about a panel on a screen nobody was looking
+at, at a different height (`tasks got=433` against a true 451), with nothing in
+the output to say so. Same rule as everywhere else here: a measuring instrument
+has to be harder to poison than the thing it measures.
+
 ### Anything the user changes by USING a widget goes in `SettingsStore`
 
 Not a local property, and not a `PersistentProperties` slot. `PersistentProperties`

@@ -54,6 +54,15 @@ Rectangle {
     readonly property string iconName: appEntry && appEntry.icon
         ? appEntry.icon : (modelData.appId || "")
 
+    // A window on an output the user cannot see is not one of HIS windows, and
+    // the taskbar is the one place the sandbox's promise leaked: `tools/
+    // sandbox.sh` keeps an agent's test windows off his screen, but the Wayland
+    // toplevel list this cell is built from carries no monitor, so they turned
+    // up in his bar anyway. WinState joins the monitor back on (see its OUTPUTS
+    // block). Both hosts of this cell are Positioners — Taskbar's Column and
+    // DockHeader's Flow — so an invisible cell takes no slot and leaves no gap.
+    visible: !WinState.offOutput(modelData.appId, modelData.title)
+
     width: Theme.wsCell
     height: Theme.wsCell
     radius: 0
