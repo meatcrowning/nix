@@ -207,6 +207,60 @@ so a reload drops the toasts and unmaps it, and `onReloadCompleted`'s own
 "config reloaded" toast re-opens it ~300ms later. That pair is the reload
 announcing itself, not a surface being remapped.
 
+### A popup that maps at ZERO SIZE kills the whole panel
+
+`xdg_positioner.set_size` rejects a non-positive width or height with a Wayland
+**protocol error**, and a protocol error disconnects the client. So a
+`PopupWindow` whose `implicitWidth` or `implicitHeight` resolves to 0 does not
+draw wrong — quickshell **exits**, and the bar, the wallpaper and every popup go
+with it, on the first click that opens it.
+
+**There is almost nothing to find afterwards**, which is why this is written
+down rather than left to be re-derived. `SIGKILL`-class death, so no coredump;
+`qs log` simply stops mid-sentence with no QML exception; the only record
+anywhere is Hyprland's `error in client communication (pid N)` in the journal
+(`journalctl -t xsession`), where N is the dead instance — cross-check it
+against `$XDG_RUNTIME_DIR/quickshell/by-pid/`. It reads exactly like "some agent
+killed the panel".
+
+`ProcMenu.qml` shipped like this on 2026-07-27 and took the desktop down on the
+user's first right-click:
+
+```qml
+Rectangle { id: box
+    anchors.fill: parent                    // = the popup
+    implicitWidth: col.implicitWidth        // <- the popup's size…
+    Column { id: col
+        anchors.fill: parent
+        component MenuRow: Rectangle { width: box.width }   // …from its own size
+    }
+}
+```
+
+A `Column` that `anchors.fill`s its parent takes its implicit size from its
+children's **laid-out widths**, so the popup's width was defined in terms of
+itself: it resolved to 0 and stayed there. Two rules, both in that file:
+
+- **Compute a popup's implicit size only from things that do not follow the
+  popup's size.** `TaskMenu.qml` and `Tooltip.qml` do it with explicit
+  `Math.max(a.implicitWidth, b.implicitWidth)` over named children; `ProcMenu`
+  has a variable entry list, so it MEASURES in `openFor()` (walking the entries'
+  `implicitWidth`/`implicitHeight`) and refuses to open on a degenerate result.
+  `implicitWidth: Math.max(1, …)` is the floor under both.
+- **Measure on your own flag, never on `visible`.** `Item.visible` is EFFECTIVE
+  visibility and is false for everything inside an unmapped window — and a popup
+  is unmapped whenever it is closed. Measuring over `visible` gives a correct
+  size on the first open and 0x0 on every one after it, i.e. the menu works once
+  per panel lifetime and then silently refuses forever. `ProcMenu`'s entries
+  carry `property bool shown` and let `visible` follow it.
+
+Verify off-screen, never on the live panel: put the popup in a `FloatingWindow`
+in a throwaway config, `tools/sandbox.sh exec` it, and open the popup from a
+`Timer`. A zero-size one prints `error 0: Invalid size` then
+`The Wayland connection experienced a fatal error: Protocol error` and exits
+255; a good one prints its size and lives. Cycle close→open at least twice —
+that second open is the case above.
+
 ---
 
 ## Two view modes, and the drag handle IS the switch
@@ -502,6 +556,12 @@ you are looking at.
   hover-out (this config never imports `Quickshell.Hyprland`, so there is no
   focus grab), and `TaskManagerContent` closes it explicitly when the widget
   goes inactive or is destroyed — nothing else unmaps a popup surface.
+- **The panel is in its own process table, and it is not offered a way to end
+  itself.** Its row draws no `[x]`, the menu replaces the signalling entries
+  with `this is the panel - signals refused`, and `Procs.signal()` refuses
+  `Quickshell.processId` a second time at the call site. The bar, the wallpaper
+  and every popup are one process; there is no undo and nothing left on screen
+  to explain what happened.
 - **An action `execDetached` cannot report on must not be OFFERED.** There is no
   exit code and no stderr, so signalling or renicing another user's process is a
   perfect silent no-op. `proc-list.py` therefore reports `mine` (owner uid ==

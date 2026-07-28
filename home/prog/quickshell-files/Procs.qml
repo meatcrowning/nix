@@ -184,6 +184,13 @@ Singleton {
     // reports `mine` and the menu refuses to offer these on a row we do not
     // own — the check has to happen BEFORE the call, because nothing after it
     // can tell success from failure.
+    //
+    // The panel is in its own table, so every one of these can be pointed at
+    // the process running them. `selfPid` is the backstop: ProcMenu already
+    // hides the signalling entries on our own row, but a signal that takes the
+    // bar, the wallpaper and every popup off screen at once — with no undo and
+    // nothing left to explain it — is worth refusing twice.
+    readonly property string selfPid: String(Quickshell.processId)
 
     // SIGTERM by default: "click the [x]", not "shoot it". force=true is
     // SIGKILL, which the row offers only through the context menu — an
@@ -194,6 +201,10 @@ Singleton {
     // SIGSTOP/SIGCONT are the interesting pair beyond ending a process: a
     // runaway can be frozen and inspected rather than lost.
     function signal(pid, sig) {
+        if (String(pid) === root.selfPid) {
+            console.warn("Procs: refusing SIG" + sig + " on the panel's own pid " + pid);
+            return;
+        }
         Quickshell.execDetached(["kill", "-" + sig, String(pid)]);
         // reflect it immediately rather than at the next poll
         refreshSoon.restart();
