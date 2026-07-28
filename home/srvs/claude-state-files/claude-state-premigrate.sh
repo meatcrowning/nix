@@ -76,4 +76,22 @@ done
 # leaving the target file — our version — in place).
 git -C "$REPO" config merge.ours.driver true
 
+# Same deal for `claudemd`, the frontmatter-aware driver for the memory store —
+# and the same failure mode if it is missing: .gitattributes names it, git finds
+# no driver, and silently falls back to the `*.md merge=union` line above, which
+# is the exact behaviour that fused two revisions of one memory into a malformed
+# document. Registered here rather than in the shared sync engine because that
+# script is generic and reused by nix-docs.nix, which has no memory store.
+DRIVER="${CM_SYNC_MERGE_DRIVER:-$HOME/.config/scripts/claude-memory-merge.sh}"
+if [ -x "$DRIVER" ]; then
+  git -C "$REPO" config merge.claudemd.driver "$DRIVER %O %A %B %L %P"
+  git -C "$REPO" config merge.claudemd.name "Claude memory store (frontmatter-aware)"
+else
+  # Do not leave a stale registration pointing at a path that no longer exists:
+  # git would fail the merge outright and wedge the sync for every other file.
+  # Unsetting falls back to union — degraded, but it keeps syncing.
+  git -C "$REPO" config --unset merge.claudemd.driver 2>/dev/null
+  log "WARNING: merge driver missing at $DRIVER — memory merges fall back to union"
+fi
+
 exit 0
