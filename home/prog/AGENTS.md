@@ -93,9 +93,22 @@ hyprctl eval "hl.plugin.hyprvtb.ipc_dump()"      # -> ~/.local/state/hyprvtb/ipc
 
 It separates the three causes that all look identical on screen: `"named":
 false` (the socket lost its filesystem name — the listener is alive but
-unreachable, see 2.85), no entry in `regs` for the window's pid (the app never
+unreachable, see 2.85 and 2.92), no entry in `regs` for the window's pid (the app never
 connected, or connected under a different pid than `getPID()` reports for its
 window), or a `regs` entry that IS there, which moves the hunt to rendering.
+
+**`"named": false` is now self-correcting, and that is load-bearing.** The name
+only ever changes hands by `rename()` (bind a temp path, rename it into place),
+and the I/O thread re-takes the name within a second if the path stops naming
+its inode — because a nameless listener is invisible: every app already
+connected keeps its inner column while every app launched afterwards gets
+`ENOENT` from `connect()` and can never recover. It read to the user as "the
+inner titlebar buttons of windows are no longer visible" and to an agent as an
+app-startup bug, since the apps genuinely were not registering. **Diagnose it
+from outside the plugin before suspecting `apps/`:** a bare
+`python3 -c "…VtbClient()…"` that cannot connect proves the socket, not the app.
+Do not replace either half with an `unlink()`; both causes (2.92) were an
+unlink with a gap after it.
 
 Also note `hyprctl keyword` refuses outright here ("keyword can't work with
 non-legacy parsers") — use `hyprctl eval`. And dispatchers are `hl.dsp.*`
@@ -368,8 +381,44 @@ headless`) and launches windows onto it: a real monitor to the compositor —
 workspaces, decorations, animations, every frame rendered — that no cable leads
 to, so nothing appears in front of the user.
 
+**The promise is "nothing of the agent's reaches his screen", and the monitor is
+not the only way onto it.** A headless output hides the window's PIXELS. Anything
+that enumerates windows without asking which output they are on puts them back in
+front of the user — the Wayland foreign-toplevel list carries appId, title and
+activated and no monitor at all, so the panel's taskbar showed every agent's test
+window in the user's bar for the whole life of the sandbox (found 2026-07-27, by
+him). **Before you add anything that walks the window list, ask whether a sandbox
+window would appear in it**, and filter on the output:
+
+- **The panel** joins the monitor back on through `WinState.qml`, whose poll
+  already reads `hyprctl -j monitors; hyprctl -j clients`. It owns the one
+  definition of "physical output" and every consumer asks it
+  (`WinState.offOutput(appId, title)`): the taskbar cells, `Media.playerUp`,
+  `Askpass.active`. See `quickshell-files/AGENTS.md`.
+- **A monitor is physical if the compositor has any hardware identity for it** —
+  non-zero physical size, or a make/model/serial/description. A headless output
+  has none of those. Do NOT key on the name alone: the user may attach a second
+  REAL monitor and its windows must still appear. (`HEADLESS-n` is ORed in as
+  corroboration only — it can add virtual outputs, never subtract a real one.)
+- **Every sandbox window is also TAGGED `sandbox`** (`[workspace N silent; tag
+  +sandbox]` in `exec`), which is the discriminator that survives the window
+  being MOVED. `stop` closes by tag as well as by workspace for that reason.
+  Use the tag for "whose window is this", the monitor for "can he see it".
+- **Still open: `hl.plugin.hyprvtb.save_session()` snapshots every decorated
+  window regardless of output**, so a snapshot taken while a sandbox is up would
+  relaunch an agent's test windows on the user's desktop at the next fresh login.
+  It is manual-only (Meta+Ctrl+S), which is the only thing bounding it. The fix
+  is a monitor test in `vtbSaveSession()` (`main.cpp`) — the plugin can ask
+  Aquamarine directly (`output->getBackend()->type() == AQ_BACKEND_HEADLESS`),
+  which is more honest than either test above.
+
 - `exec` restores keyboard focus to the user's monitor afterwards (a new window
   takes focus even with `silent`).
+- **`load_state` now refuses to run if the monitor named in `/tmp/vtb-sandbox/
+  state` has gone** (another agent's `stop`, a stray `hyprctl output remove`).
+  Hyprland moves that workspace onto a REAL monitor when the output disappears,
+  so a stale state file turned `exec` into "open a window on the user's screen".
+  `stop`/`status` still run, with a warning; `start` re-resolves.
 - `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
   migrates a removed monitor's windows onto a real one — then prunes the classes
   it launched from the plugin's per-class geometry memory.
