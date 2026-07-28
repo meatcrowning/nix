@@ -399,7 +399,7 @@ setting. Nothing that reads as a *window or surface* is rounded.
 tooltips use `radius: 3` (`ProcMenu`, `TaskMenu`, `Tooltip`), and its text-entry
 boxes use `radius: 2` (`Launcher`, `Lock`). Five of the six apps have **zero**
 `radius:` anywhere; painter has six, which is a divergence, not a precedent
-(§18.1). **Do not introduce a third rounding value.**
+(§19.1). **Do not introduce a third rounding value.**
 
 **Borders: 1px resting, 2px active.** [code] The single most-repeated idiom in
 the panel, written out identically in six places and worth knowing by heart:
