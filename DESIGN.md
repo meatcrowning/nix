@@ -1946,13 +1946,24 @@ agent's.
 
 **Open, ranked:**
 
-1. **filer reports success for every file operation that fails.** `FileOps.run`
-   (`apps/filer/main.py`) wires both `finished` *and* `errorOccurred` to one
-   handler that inspects neither the exit code nor stderr, and the QML just
-   refreshes. A denied `rm -rf`, a cross-device `mv`, a full disk and a
-   successful copy are indistinguishable on screen. This is §10's headline rule
-   and §10.2's own worked example. Note `filer/videoconv.py` *does* toast
-   success and failure — so the pattern exists in the same app.
+1. ~~**filer reports success for every file operation that fails.**~~
+   **Fixed.** `FileOps.run` (`apps/filer/main.py`) now reads the exit code and
+   raises a critical toast carrying the helper's own stderr, through
+   `videoconv`'s toast path (extracted to `filer/notify.py`, one implementation
+   for the app). Four states that used to be one: **succeeded**, **failed**
+   (`copy failed` + `cp: … Permission denied`), **could not be started**
+   (`cannot run gio` — a missing binary is a different sentence and a different
+   fix), and **partly failed** — a ten-item paste is ten processes, so
+   `beginBatch`/`endBatch` reports `copy: 3 of 10 failed` once instead of a flat
+   verdict either way. The no-clobber flags exit 0 when they skip, so the
+   overwrite confirm is untouched: a conflict is still a dialog, never a toast.
+   Regression test `apps/filer/tools/fileop-test.py` injects real failures (a
+   chmod 500 dir, a root-owned destination, ENOSPC via `/dev/full`, a missing
+   binary). **It hid a second bug for filer's whole life:** `gio` was on no PATH
+   the app could see, so *trash* — the safe default delete — did nothing at all,
+   silently, while the selection cleared and the list refreshed
+   (`home/prog/filer.nix` now puts `glib` on the wrapper's PATH). §10's
+   "silence, not breakage, is what let this rot unnoticed", exactly.
 2. ~~**The panel's own two menus are the desktop's only Title Case menus.**~~
    **Fixed.** `ProcMenu` and `TaskMenu` are lowercase (`end task`, `force quit`,
    `copy pid`, `filter by name`, `close`), and §7.2 now states the rule.
