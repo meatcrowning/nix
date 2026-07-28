@@ -92,6 +92,15 @@ Item {
         property alias series: plot.series
         property alias scaleMax: plot.scaleMax
         property alias autoFloor: plot.autoFloor
+        // Optional wheel stepper, null on every card that has none. Same two
+        // signals and the same semantics as StatusPanel's Stat, so a card and a
+        // status row scroll identically: NOTCH-based via WheelNotch (a coast
+        // must not walk a value to 0), and a multi-notch burst is COLLAPSED to
+        // one call rather than replayed — at most one subprocess spawn per
+        // event by construction, which is what keeps a flick off the ~1.5s DDC
+        // write. The card stays generic: what a step does is the caller's.
+        property var onWheelUp: null
+        property var onWheelDown: null
 
         PixelText {
             id: cardLabel
@@ -125,6 +134,21 @@ Item {
         // Hover anywhere on the card, chart included. HoverHandler rather than a
         // MouseArea so it cannot eat a click the card might want later.
         HoverHandler { id: cardHover }
+        // The wheel zone. `acceptedButtons: Qt.NoButton` is what keeps the rule
+        // above intact — a MouseArea is the only way to reach `onWheel` here,
+        // but with no buttons accepted it still declines every press, so the
+        // card is exactly as clickable as it was before.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            enabled: card.onWheelUp !== null || card.onWheelDown !== null
+            WheelNotch { id: cardNotch }
+            onWheel: (wheel) => {
+                const n = cardNotch.steps(wheel);
+                if (n > 0) { if (card.onWheelUp) card.onWheelUp(); }
+                else if (n < 0) { if (card.onWheelDown) card.onWheelDown(); }
+            }
+        }
         Tooltip {
             target: card
             show: cardHover.hovered && card.tip !== "" && card.visible
@@ -284,12 +308,23 @@ Item {
             width: root.cardW; height: root.cardH
             visible: !root.noGpu
             label: "fan"
-            tip: "gpu fan speed. 0% is a real reading -\nthe card stops its fans when it is cool"
+            tip: "gpu fan speed. 0% is a real reading -\nthe card stops its fans when it is cool\nscroll: screen brightness"
             // The GPU fan, as a percentage. Zero is a real reading, not a
             // missing one — this card idles at 0% because the card stops its
             // fans entirely when it is cool.
             value: SysInfo.gpuFanPct < 0 ? "--" : SysInfo.gpuFanPct + "%"
             series: [ { data: SysInfo.gpuFanHist, color: Theme.accent } ]
+            // Scrolling this card is screen brightness — asked for by name
+            // ("make the fan widget something i can scroll on and change the
+            // brightness of the screen"). It routes through the SAME
+            // SysInfo.adjustBrightness the `bri` status row and the
+            // XF86MonBrightness keys use, so all three share one debounce, one
+            // OSD, and one continuous range: the hardware level down to 0, then
+            // the gamma layer below it, and the gamma given back in full before
+            // the hardware climbs again. The tip says so, because a wheel is
+            // otherwise an invisible affordance.
+            onWheelUp: () => SysInfo.adjustBrightness(SettingsStore.d.brightnessStep)
+            onWheelDown: () => SysInfo.adjustBrightness(-SettingsStore.d.brightnessStep)
         }
         // In the fan slot on book: the BATTERY — charge over the last hour, with
         // the wattage kept as the secondary reading.
