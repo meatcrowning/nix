@@ -1292,6 +1292,22 @@ button dropped — the outer titlebar's [x] does that"* (`1eb7ede`).
   ignorance". Untrusted strings are sanitized (C0/C1 stripped, newlines
   flattened, length clamped) and **the reason sits in its own captioned box so
   it can never read as the dialog's own voice**.
+- **The privilege prompt has NO titlebar at all — the window and nothing else.**
+  [his] `[askpass]` *"the visual sudo prompt shouldnt have any titlebar at all,
+  just the window."* This is §1's honesty rule read backwards: a control that is
+  drawn is a control that works, so a control that cannot work is not drawn.
+  Every cell the bar offers is one this modal must not have — it is fixed-size
+  (min == max), centred and pinned by its window rule, never remembered, and
+  rolled up or minimized it would leave a `sudo` blocked on a window you can no
+  longer see. What was left was an [x] that duplicated the dialog's own Cancel
+  (both: exit 1, empty stdout) at the price of a bar's width of reserved
+  chrome. So hyprvtb attaches no titlebar to `vista-askpass` at all —
+  `vtbNeverDecorates()`, ≥2.94, the same treatment the scratchpad has always
+  had. **§4's hard drop shadow stays**: it is the window's, not its chrome, and
+  it is what says "this floats above the dimmed desktop". The plugin hands the
+  window the keyboard explicitly in place of the open reveal's focus grant —
+  a password prompt that opens unfocused is the one regression this must never
+  ship.
 
 ---
 
