@@ -82,31 +82,51 @@ Item {
         // the eye something fixed to read a level against. No labels, by
         // request — so they carry no numbers, but they are still placed where
         // the DATA falls rather than at even pixel divisions: the bars are drawn
-        // through `gamma`, so 25/50/75 of cava's 0-100 scale lands at 47/68/86%
-        // of the height. A peak marker resting on a rule therefore means exactly
-        // that fraction of full scale; even pixel thirds would be rules that
-        // measure nothing.
+        // through `gamma`, so a rule marks a real fraction of cava's 0-100
+        // scale. A peak marker resting on one therefore means exactly that
+        // fraction of full scale; even pixel steps would be rules that measure
+        // nothing.
         //
-        // Those three are also where the bars actually live — measured medians
-        // 15 (-> 35% of height) and p90 49 (-> 68%) — so the grid brackets the
-        // working range instead of hiding beneath it. A rule below ~40% would
-        // spend almost all its time buried under a bar.
+        // The series is quarters of full scale down to 25, then HALVING — which
+        // is the same thing said twice, since halving amplitude is -6 dB, so the
+        // six rules are 0, -2.5, -6, -12, -18 and -24 dB. Linear quarters cannot
+        // continue below 25 (the next step is the floor) and a fifth of the
+        // scale is not a number anything here thinks in; the octave ladder is,
+        // and it keeps the drawn spacing even where the gamma curve is steepest.
+        //
+        //   scale  100    75    50    25   12.5  6.25
+        //   height 100%  85.5% 68.3% 47.2% 31.9% 21.8%
+        //
+        // 100 lands on y=0: the ceiling of the plot area, and exactly where a
+        // full-scale peak marker is clamped to sit.
+        //
+        // Honest limitation of the bottom two: the bars' measured working range
+        // is ~35-68% of the height (median level 15, p90 49), so 12.5 and 6.25
+        // sit BELOW where a bar usually tops out and are occluded whenever that
+        // bucket is loud. They are not decoration — a bucket quiet enough to
+        // show them is a bucket below -18 dB, which is the reading — but they
+        // are read per-column and intermittently, not as continuous rules.
         //
         // BEHIND the bars (declared first, so the bars paint over them), in
         // Theme.border — the hairline the volume column and the tile frames are
         // already drawn with, so the widget gains a grid without gaining a
         // colour.
+        readonly property var gridLevels: [6.25, 12.5, 25, 50, 75, 100]
+        // Minimum legible separation between two rules. The threshold is
+        // derived from the level COUNT rather than written as a literal, so
+        // adding or removing a rule moves it by itself.
+        readonly property int minGridPx: 6
         Repeater {
-            model: [25, 50, 75]
+            model: spec.gridLevels
             Rectangle {
-                required property int modelData
+                required property real modelData
                 anchors { left: parent.left; right: parent.right }
                 height: 1
                 y: Math.round(spec.height * (1 - Math.pow(modelData / 100, spec.gamma)))
                 color: Theme.border
-                // Nothing true to draw in a spectrum with no room; also keeps
-                // the rules out of a degenerate layout pass.
-                visible: spec.height > 8
+                // Six rules in a spectrum with no room are a smear, not a grid;
+                // this also keeps them out of a degenerate layout pass.
+                visible: spec.height >= spec.gridLevels.length * spec.minGridPx
             }
         }
 
@@ -130,7 +150,20 @@ Item {
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                     height: Math.max(1, spec.height
                         * Math.pow(Math.max(0, Media.spectrumLevels[index] || 0) / 100, spec.gamma))
-                    color: Theme.textDim
+                    // Every other bucket one rung down the same ladder. The bars
+                    // are gapless by construction, so a loud passage is a solid
+                    // wall of one colour with no bucket structure left in it —
+                    // the comb is what keeps them countable, and it reads as
+                    // structure rather than state because it never moves.
+                    //
+                    // `dim` is the NEAREST named step below `textDim` (the
+                    // ladder continues border -> highlight -> bgAlt), so this is
+                    // the smallest alternation the palette can express — a
+                    // shade, not a second colour, per the two-tier rule that
+                    // keeps every fill dim and leaves bright to the indicator.
+                    // The peak markers stay `accent` on both, since they are
+                    // that indicator and must read across the whole row.
+                    color: index % 2 ? Theme.dim : Theme.textDim
                     // cava already smooths (noise_reduction) and feeds 60fps, so
                     // this is a second low-pass on top. Keep it just long enough
                     // to absorb a dropped frame, not to re-add lag.
@@ -144,7 +177,8 @@ Item {
                 // supposed to be pinning.
                 //
                 // The bar/marker pair is a light-on-dark split of the same hue:
-                // the bars take Theme.textDim (the elapsed/remaining time colour)
+                // the bars take Theme.textDim/Theme.dim (the former is the
+                // elapsed/remaining time colour)
                 // and the markers the brighter Theme.accent, so a marker reads
                 // both against the background it usually floats over and against
                 // its own bar on the frames it rides the top. 2px tall — at 1px a
