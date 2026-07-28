@@ -79,14 +79,26 @@ Singleton {
     property int    gpuMemTotalMb: -1
     readonly property int gpuMemUsage: gpuMemTotalMb > 0
         ? Math.round(100 * gpuMemUsedMb / gpuMemTotalMb) : -1
-    // Chassis/CPU fans (hwmon), which are NOT the GPU fan above: a different
-    // set of hardware, and the one that says whether the box as a whole is
-    // working. `fanCount` is 0 where no tachometer is exposed at all — which is
-    // the case on `top` as it stands, since no Super-I/O driver (nct6775 &c) is
-    // loaded for the B650's sensor chip. Consumers must hide rather than draw a
-    // permanent zero.
-    property int fanAvgRpm: 0
-    property int fanCount: 0
+    // EVERY fan on the machine, one entry each: { name, rpm, pct }. The chassis
+    // and cooler fans come from hwmon (`fanDetail` in sysinfo.sh, which is where
+    // the discovery and the pwm-duty arithmetic live); the GPU fan is appended
+    // from the nvidia-smi reading above, because it is a fan and "the fastest
+    // fan going" is a wrong answer if the loudest one in the box is left out of
+    // the search. `rpm` is -1 for the GPU (nvidia-smi reports no tachometer) and
+    // `pct` is -1 for any fan whose chip exposes no pwm.
+    //
+    // EMPTY where nothing reports a fan at all, and consumers hide rather than
+    // draw a permanent zero. That was `top`'s state until the nct6683 driver was
+    // loaded for the board's EC, and it is book's permanently — that machine is
+    // fanless.
+    property var fans: []
+    // Per-fan history of `pct`, keyed by NAME rather than by index: a fan
+    // appearing or disappearing must not slide every other fan's history onto
+    // the wrong line. Trimmed to chartLen like the other ring buffers, and
+    // pruned of names that stopped reporting so a flapping header cannot grow
+    // this without bound.
+    property var fanPctHist: ({})
+    readonly property int fanCount: fans ? fans.length : 0
 
     // ---- what book shows in place of gpu/vram/fan ------------------------
     // See sysinfo.sh: that machine has no source for any of the three, so the
@@ -218,7 +230,6 @@ Singleton {
     property var loadHist: []
     property var swapHist: []
     property var vramHist: []
-    property var gpuFanHist: []
     property var psiCpuHist: []
     property var psiIoHist: []
     property var psiMemHist: []
@@ -245,6 +256,47 @@ Singleton {
         return h;
     }
 
+    // Parse sysinfo.sh's `fanDetail` field ("name:rpm:pct,name:rpm:pct,…") into
+    // `fans`, append the GPU fan, and push this poll's sample onto each fan's
+    // own history.
+    //
+    // The GPU fan is appended rather than kept separate because the card's
+    // headline is "the fastest fan going", and on this desktop the loudest fan
+    // in the box is frequently the one on the graphics card. It carries rpm -1:
+    // nvidia-smi reports a percentage and no tachometer, and a fan with no
+    // tachometer says so rather than borrowing a plausible number.
+    //
+    // Histories are keyed by NAME and PRUNED to the names still reporting, so a
+    // header that flaps in and out cannot grow this object forever, and a fan
+    // that vanishes does not leave its trace on another fan's line.
+    function _setFans(raw) {
+        const out = [];
+        if (raw) {
+            for (const e of String(raw).split(",")) {
+                if (!e) continue;
+                const p = e.split(":");
+                if (p.length < 3) continue;
+                const rpm = parseInt(p[1]);
+                const pct = parseInt(p[2]);
+                out.push({
+                    name: p[0],
+                    rpm: isNaN(rpm) ? -1 : rpm,
+                    pct: isNaN(pct) || pct < 0 ? -1 : pct,
+                });
+            }
+        }
+        if (gpuFanPct >= 0)
+            out.push({ name: "gpu", rpm: -1, pct: gpuFanPct });
+
+        const h = {};
+        for (const fan of out) {
+            if (fan.pct < 0) continue;
+            h[fan.name] = _pushHist(fanPctHist[fan.name] || [], fan.pct);
+        }
+        fans = out;
+        fanPctHist = h;
+    }
+
     // ---- reload continuity (see shell.qml's `persist` block) --------------
     // Quickshell rebuilds the whole QML tree on every reload — a QML edit, or
     // wal-set.sh rewriting Theme.qml on a wallpaper/theme change — so all of
@@ -269,8 +321,8 @@ Singleton {
             mtk: memTotalKb, mak: memAvailKb, stk: swapTotalKb, sfk: swapFreeKb,
             l1: load1, up: uptimeSec, gf: gpuFanPct, gp: gpuPowerW,
             gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
-            far: fanAvgRpm, fc: fanCount,
-            lh: loadHist, swh: swapHist, vh: vramHist, gfh: gpuFanHist,
+            fns: fans, fph: fanPctHist,
+            lh: loadHist, swh: swapHist, vh: vramHist,
             pc: psiCpu, pio: psiIo, pm: psiMem, pw: powerW,
             dr: dskRead, dw: dskWrite,
             pch: psiCpuHist, pih: psiIoHist, pmh: psiMemHist, pwh: powerHist,
@@ -303,9 +355,9 @@ Singleton {
         gpuPowerW = d.gp === undefined ? -1 : d.gp;
         gpuMemUsedMb = d.gmu === undefined ? -1 : d.gmu;
         gpuMemTotalMb = d.gmt === undefined ? -1 : d.gmt;
-        fanAvgRpm = d.far || 0; fanCount = d.fc || 0;
+        fans = d.fns || []; fanPctHist = d.fph || ({});
         loadHist = d.lh || []; swapHist = d.swh || [];
-        vramHist = d.vh || []; gpuFanHist = d.gfh || [];
+        vramHist = d.vh || [];
         psiCpu = d.pc === undefined ? -1 : d.pc;
         psiIo = d.pio === undefined ? -1 : d.pio;
         psiMem = d.pm === undefined ? -1 : d.pm;
@@ -422,16 +474,22 @@ Singleton {
             gpuMemUsedMb = isNaN(gmu) || gmu < 0 ? -1 : gmu;
             const gmt = parseInt(f[22]);
             gpuMemTotalMb = isNaN(gmt) || gmt < 0 ? -1 : gmt;
-            if (f.length >= 25) {
-                fanAvgRpm = parseInt(f[23]) || 0;
-                fanCount  = parseInt(f[24]) || 0;
-            }
+            // f[23]/f[24] are the old fanAvgRpm/fanCount. They are still emitted
+            // — the fields are POSITIONAL, so dropping two from the middle would
+            // renumber eight downstream ones for nothing — but nothing reads
+            // them any more: an average is the wrong summary for this data (one
+            // fan pinned at 2400 with four idling reads the same as five fans
+            // working moderately, and it is the pinned one you can hear), and
+            // the per-fan list below supersedes both.
+            if (f.length >= 33)
+                _setFans(f[32]);
 
             if (memUsage >= 0) memHist = _pushHist(memHist, memUsage);
             if (load1 >= 0) loadHist = _pushHist(loadHist, load1);
             if (swapUsage >= 0) swapHist = _pushHist(swapHist, swapUsage);
             if (gpuMemUsage >= 0) vramHist = _pushHist(vramHist, gpuMemUsage);
-            if (gpuFanPct >= 0) gpuFanHist = _pushHist(gpuFanHist, gpuFanPct);
+            // the GPU fan's own history now rides in fanPctHist["gpu"], with
+            // every other fan's — see _setFans()
         }
 
         // The pressure/power/disk block (book's replacements for gpu, vram and

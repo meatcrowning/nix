@@ -573,6 +573,24 @@ Scope {
             }
             return out.join("\n");
         }
+        // Every fan as the panel currently has it, which is the only way to
+        // check the `fan` card without looking at the screen: the readout is a
+        // summary and the lines are a squiggle, so neither says whether the
+        // right fan is on the right line. `pct` is each fan's share of its own
+        // full scale (commanded pwm duty for the chassis fans, nvidia-smi's
+        // reported speed for the gpu) and `-1` means the source publishes none;
+        // `rpm -1` means no tachometer. `hist` is that fan's sample count, so a
+        // line that is not being fed is visible as a 0 here.
+        function fans(): string {
+            const f = SysInfo.fans || [];
+            if (f.length === 0) return "no fan reports a tachometer";
+            const h = SysInfo.fanPctHist || {};
+            let out = [];
+            for (let i = 0; i < f.length; i++)
+                out.push(f[i].name + " rpm=" + f[i].rpm + " pct=" + f[i].pct
+                         + " hist=" + ((h[f[i].name] || []).length));
+            return out.join("\n");
+        }
     }
 
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
