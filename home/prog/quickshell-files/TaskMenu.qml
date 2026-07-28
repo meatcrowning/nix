@@ -75,7 +75,10 @@ PopupWindow {
         id: box
         anchors.fill: parent
         implicitWidth: Math.max(closeRow.implicitWidth, killRow.implicitWidth)
-        implicitHeight: closeRow.implicitHeight + killRow.implicitHeight
+        // The separator's height counts too — an implicit height that forgot a
+        // row would clip it, and a popup is not allowed to be measured wrong
+        // (see ProcMenu.qml's header for what a zero costs).
+        implicitHeight: closeRow.implicitHeight + killSep.implicitHeight + killRow.implicitHeight
         color: Theme.bgAlt
         border.color: Theme.border
         border.width: 1
@@ -103,7 +106,10 @@ PopupWindow {
                 // kitty-exact menu row: the text line box itself (no padding),
                 // vs the old +12 that left dead space above/below each label
                 implicitHeight: rowText.implicitHeight
-                color: rowMouse.containsMouse ? Theme.bg : "transparent"
+                // Hover LIGHTENS, one step up the brightness ladder (§3.3):
+                // `highlight` is the desktop's selection fill, and the row under
+                // the pointer is the pending selection. DESIGN.md §7.2.
+                color: rowMouse.containsMouse ? Theme.highlight : "transparent"
                 PixelText {
                     id: rowText
                     anchors.left: parent.left
@@ -124,17 +130,33 @@ PopupWindow {
 
             MenuRow {
                 id: closeRow
-                label: "Close"
+                label: "close"
                 onActivated: {
                     if (menu.toplevel)
                         menu.toplevel.close();
                     menu.close();
                 }
             }
+            // The destructive entry is last and behind a separator, like every
+            // other menu on this desktop (§10.3) — the pointer lands on the
+            // graceful close, never on the SIGKILL.
+            Item {
+                id: killSep
+                width: box.width
+                implicitWidth: 1
+                implicitHeight: 5
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter }
+                    height: 1
+                    color: Theme.border
+                }
+            }
             MenuRow {
                 id: killRow
-                label: "Force Quit"
-                labelColor: Theme.accent
+                label: "force quit"
+                // crit, not accent: it is the same action ProcMenu offers, and
+                // a destructive entry is red everywhere else on the desktop.
+                labelColor: Theme.crit
                 onActivated: {
                     if (menu.toplevel)
                         Quickshell.execDetached(["sh",
