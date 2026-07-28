@@ -3,83 +3,36 @@ import QtQuick
 // Backend controls and housekeeping.  Deliberately sparse: everything that
 // affects an image lives in the main panel, and everything here is about the
 // process behind it.
-//
-// It is a DRAWER, not a centred modal. The hyprvtb titlebar runs down the
-// window's right edge and the "st" cell is bottom-anchored in it, so this docks
-// bottom-right and slides in from that edge — secondary UI slides out from the
-// button that owns it (DESIGN.md §7.4), and nothing on this desktop appears
-// centred without moving (§6.2). Same construction as player's SettingsPanel.
-//
-// The backend controls report the UNIT'S state, not the last click's intent:
-// `[ start ]` is dead while it is already running and `[ stop ]` while it is
-// not, and both refuse rather than pretending (§10). App.stopBackend() now
-// checks systemctl's exit code before it claims anything.
 Item {
     id: drawer
-    property bool open: false
     signal closed()
 
-    // Nothing to hit-test while it is fully retracted.
-    visible: card.slide > 0.001
-
     MouseArea {
-        id: scrim
         anchors.fill: parent
         onClicked: drawer.closed()
     }
 
     Rectangle {
-        id: card
-        // slide 0 (hidden, fully off the right edge) -> 1 (docked at the edge)
-        property real slide: drawer.open ? 1 : 0
-        Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-
-        width: Math.min(420, drawer.width - 16)
-        height: Math.min(col.implicitHeight + 24, drawer.height - 16)
-        x: drawer.width - slide * width
-        y: Math.max(8, drawer.height - height - 8)   // bottom-right, by the "st" cell
+        anchors.centerIn: parent
+        width: Math.min(460, parent.width - 60)
+        height: col.implicitHeight + 24
         color: Theme.bgAlt
-        border.color: Theme.windowBorder
+        border.color: Theme.accent
         border.width: 1
+        radius: 2
 
         MouseArea { anchors.fill: parent }   // swallow clicks inside
 
         Column {
             id: col
-            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
+            anchors.centerIn: parent
+            width: parent.width - 24
             spacing: 8
 
-            Item {
-                width: parent.width
-                height: title.implicitHeight
-                PixelText {
-                    id: title
-                    anchors.left: parent.left
-                    text: "settings"
-                    color: root.fgAccent
-                }
-                TextButton {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    label: "x"
-                    tone: Theme.textDim
-                    winActive: root.winActive
-                    onClicked: drawer.closed()
-                }
-            }
-
+            PixelText { text: "SETTINGS"; color: Theme.accent }
             Rectangle { width: parent.width; height: 1; color: Theme.border }
 
-            PixelText {
-                text: "backend: " + App.status
-                color: Theme.textDim
-                width: parent.width
-                elide: Text.ElideRight
-            }
-            PixelText {
-                text: "unit: " + App.unitState
-                color: App.backendRunning ? Theme.ok : Theme.dim
-            }
+            PixelText { text: "backend: " + App.status; color: Theme.textDim }
             PixelText {
                 text: "logs: journalctl --user -u comfy-painter -f"
                 color: Theme.dim
@@ -88,45 +41,34 @@ Item {
             }
 
             Row {
-                spacing: 6
-                TextButton {
-                    label: "[ start ]"
-                    tone: Theme.ok
-                    enabled: !App.backendRunning
-                    winActive: root.winActive
-                    onClicked: App.startBackend()
+                spacing: 12
+                PixelText {
+                    text: "[ start ]"
+                    color: Theme.ok
+                    MouseArea { anchors.fill: parent; onClicked: App.startBackend() }
                 }
-                TextButton {
-                    label: "[ stop ]"
-                    tone: Theme.crit
-                    enabled: App.backendRunning
-                    winActive: root.winActive
-                    onClicked: App.stopBackend()
+                PixelText {
+                    text: "[ stop ]"
+                    color: Theme.crit
+                    MouseArea { anchors.fill: parent; onClicked: App.stopBackend() }
                 }
-                TextButton {
-                    label: "[ unload models ]"
-                    tone: Theme.warn
-                    // /free at a backend that is not there is a silent no-op.
-                    enabled: App.ready
-                    winActive: root.winActive
-                    onClicked: App.unloadModels()
+                PixelText {
+                    text: "[ unload models ]"
+                    color: Theme.warn
+                    MouseArea { anchors.fill: parent; onClicked: App.unloadModels() }
                 }
             }
 
             Rectangle { width: parent.width; height: 1; color: Theme.border }
 
             Row {
-                spacing: 6
-                TextButton {
-                    label: "[ rescan models ]"
-                    winActive: root.winActive
-                    onClicked: App.rescan()
-                }
+                spacing: 12
                 PixelText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: Models.count + " known"
-                    color: Theme.textDim
+                    text: "[ rescan models ]"
+                    color: Theme.accent
+                    MouseArea { anchors.fill: parent; onClicked: App.rescan() }
                 }
+                PixelText { text: Models.count + " known"; color: Theme.textDim }
             }
 
             PixelText {
@@ -138,6 +80,13 @@ Item {
                 color: Theme.dim
                 width: parent.width
                 elide: Text.ElideRight
+            }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.border }
+            PixelText {
+                text: "[ close ]"
+                color: Theme.text
+                MouseArea { anchors.fill: parent; onClicked: drawer.closed() }
             }
         }
     }

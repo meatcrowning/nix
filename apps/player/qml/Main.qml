@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "../../qmlcommon"
 
 // player's window: album gallery / playlists / now-playing views. There is no
 // separate album page — clicking a cover opens an AlbumPanel section inline,
@@ -63,29 +64,26 @@ Window {
     onClosing: Qt.quit()
 
     // View history for the mouse back/forward buttons (browser-style: going
-    // somewhere new clears the forward stack).
-    property var histBack: []
-    property var histForward: []
+    // somewhere new clears the forward stack). player's reading of the
+    // desktop-global rule in DESIGN.md §11: "back" is the view you came from,
+    // NOT the previous track — transport already owns prev/next, and stealing
+    // the side buttons for it would leave the app with no way back out of an
+    // album. The stack itself is qmlcommon/NavHistory.qml.
+    NavHistory {
+        id: navHist
+        here: function () { return win._here(); }
+        onNavigate: function (s) { win._apply(s); }
+    }
 
     function _here() { return { view: view, albumId: openAlbumId }; }
     function _apply(s) {
         openAlbumId = s.albumId;   // the AlbumPanel loads that album's tracks itself
         view = s.view;
     }
-    function goBack() {
-        if (histBack.length === 0) return;
-        histForward.push(_here());
-        _apply(histBack.pop());
-    }
-    function goForward() {
-        if (histForward.length === 0) return;
-        histBack.push(_here());
-        _apply(histForward.pop());
-    }
+    function goBack() { navHist.back(); }
+    function goForward() { navHist.forward(); }
     function _navigate(s) {
-        histBack.push(_here());
-        if (histBack.length > 50) histBack.shift();
-        histForward = [];
+        navHist.record();
         _apply(s);
     }
 
@@ -344,16 +342,10 @@ Window {
         onRgPreampRequested: function(db) { Player.setRgPreamp(db); }
     }
 
-    // Mouse back/forward buttons navigate the view history. Only these two
-    // buttons are accepted, so every other press passes to the views.
-    MouseArea {
-        anchors.fill: parent
-        z: 90
-        acceptedButtons: Qt.BackButton | Qt.ForwardButton
-        onClicked: function(mouse) {
-            if (mouse.button === Qt.BackButton) win.goBack();
-            else win.goForward();
-        }
+    // Mouse back/forward buttons navigate the view history (DESIGN.md §11).
+    NavButtons {
+        onBack:    win.goBack()
+        onForward: win.goForward()
     }
 
     // Click anywhere outside the search bar → unfocus it (Space becomes

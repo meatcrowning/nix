@@ -15,6 +15,7 @@ Rectangle {
     color: Theme.bgAlt
     border.color: Theme.border
     border.width: 1
+    radius: 2
     clip: true
 
     Item {
@@ -34,7 +35,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             x: panel.collapsible ? 20 : 8
             text: panel.title
-            color: root.fgAccent
+            color: Theme.accent
         }
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
@@ -46,8 +47,6 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             enabled: panel.collapsible
-            hoverEnabled: panel.collapsible
-            cursorShape: panel.collapsible ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: panel.collapsed = !panel.collapsed
         }
         Rectangle {

@@ -14,12 +14,13 @@ Item {
         spacing: 5
         width: parent.width
 
-        TextButton {
-            anchors.verticalCenter: parent.verticalCenter
-            label: row.on ? "[x]" : "[ ]"
-            tone: row.on ? Theme.accent : Theme.dim
-            winActive: root.winActive
-            onClicked: Loras.setEnabled(row.rowIndex, !row.on)
+        PixelText {
+            text: row.on ? "[x]" : "[ ]"
+            color: row.on ? Theme.accent : Theme.dim
+            MouseArea {
+                anchors.fill: parent
+                onClicked: Loras.setEnabled(row.rowIndex, !row.on)
+            }
         }
         PixelText {
             text: row.loraName
@@ -38,33 +39,30 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             onEdited: function (v) { Loras.setStrength(row.rowIndex, v) }
         }
-        // Order changes the result, so it is adjustable. At either end the
-        // control is DISABLED rather than drawn in Theme.highlight (which is
-        // near-invisible on the panel fill but still clickable, so the first
-        // row's "up" was a live button for a move that could never happen).
-        TextButton {
-            label: "v"                 // the same glyph, mirrored - see flipY
-            flipY: true
-            tone: Theme.dim
-            enabled: row.rowIndex > 0
-            winActive: root.winActive
+        // Order changes the result, so it is adjustable.
+        PixelText {
+            text: "^"
+            color: row.rowIndex > 0 ? Theme.dim : Theme.highlight
             anchors.verticalCenter: parent.verticalCenter
-            onClicked: Loras.move(row.rowIndex, row.rowIndex - 1)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: Loras.move(row.rowIndex, row.rowIndex - 1)
+            }
         }
-        TextButton {
-            label: "v"
-            tone: Theme.dim
-            enabled: row.rowIndex < Loras.count - 1
-            winActive: root.winActive
+        PixelText {
+            text: "v"
+            color: row.rowIndex < Loras.count - 1 ? Theme.dim : Theme.highlight
             anchors.verticalCenter: parent.verticalCenter
-            onClicked: Loras.move(row.rowIndex, row.rowIndex + 1)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: Loras.move(row.rowIndex, row.rowIndex + 1)
+            }
         }
-        TextButton {
-            label: "x"
-            tone: Theme.crit
-            winActive: root.winActive
+        PixelText {
+            text: "x"
+            color: Theme.crit
             anchors.verticalCenter: parent.verticalCenter
-            onClicked: Loras.remove(row.rowIndex)
+            MouseArea { anchors.fill: parent; onClicked: Loras.remove(row.rowIndex) }
         }
     }
 }

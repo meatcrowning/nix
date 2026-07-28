@@ -31,18 +31,11 @@ Rectangle {
         Row {
             spacing: 8
             width: parent.width
+            PixelText { text: "compatible with this model"; color: Theme.textDim }
             PixelText {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "compatible with this model"
-                color: Theme.textDim
-            }
-            TextButton {
-                anchors.verticalCenter: parent.verticalCenter
-                label: picker.showAll ? "[ hide others ]" : "[ show all ]"
-                tone: Theme.dim
-                lit: picker.showAll
-                winActive: root.winActive
-                onClicked: picker.showAll = !picker.showAll
+                text: picker.showAll ? "[ hide others ]" : "[ show all ]"
+                color: Theme.dim
+                MouseArea { anchors.fill: parent; onClicked: picker.showAll = !picker.showAll }
             }
         }
 
@@ -74,13 +67,14 @@ Rectangle {
                         elide: Text.ElideMiddle
                         width: Math.min(implicitWidth, parent.width - 90)
                     }
-                    TextButton {
-                        anchors.verticalCenter: parent.verticalCenter
+                    PixelText {
                         visible: !compatible
-                        label: "[force]"
-                        tone: Theme.warn
-                        winActive: root.winActive
-                        onClicked: App.forceLora(name)
+                        text: "[force]"
+                        color: Theme.warn
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: App.forceLora(name)
+                        }
                     }
                 }
 
@@ -89,9 +83,6 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     enabled: compatible
-                    // no hoverEnabled: the ToolTipArea underneath needs the
-                    // hover to reach it. cursorShape does not require it.
-                    cursorShape: compatible ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: { Loras.add(name, patchesClip); picker.chose() }
                 }
             }

@@ -49,7 +49,28 @@ FloatingWindow {
             return i > 0 ? q.substring(0, i) : "/";
         }
 
-        function go(p) { path = p; selected = ""; }
+        // ---- directory history ------------------------------------------
+        // The desktop-global back/forward rule (DESIGN.md §11) reaches the
+        // panel too: this is a real FloatingWindow the user browses in, so its
+        // side buttons must mean what they mean everywhere else. "Back" is the
+        // directory you were in — the `^` button already means parent.
+        // `go()` is the one choke point every navigation runs through.
+        NavHistory {
+            id: navHist
+            here: function () { return view.path; }
+            onNavigate: function (p) { view._goTo(p); }
+        }
+        NavButtons {
+            onBack:    navHist.back()
+            onForward: navHist.forward()
+        }
+
+        function _goTo(p) { path = p; selected = ""; }
+        function go(p) {
+            if (p === path) return;
+            navHist.record();
+            _goTo(p);
+        }
         function refresh() { folder.folder = ""; folder.folder = toUrl(path); }
 
         FolderListModel {

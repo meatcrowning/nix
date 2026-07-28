@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtWebEngine
+import "../../qmlcommon"
 
 // surfer — minimal wal-themed browser. The content engine is QtWebEngine
 // (open Chromium); ALL of the browser chrome lives in the hyprvtb titlebar:
@@ -1009,6 +1010,17 @@ Window {
         z: 2400
         visible: win.dmPanelOpen
         onClicked: win.dmPanelOpen = false
+    }
+
+    // The mouse's back/forward side buttons walk the FOCUSED pane's page
+    // history — the canonical reading of the desktop-global rule (DESIGN.md
+    // §11), and the same call the titlebar's `<`/`>` make. Sitting above the
+    // WebEngineView in z is what keeps it deterministic: Chromium maps buttons
+    // 8/9 to history itself, so without an overlay that accepts them first the
+    // behaviour would depend on which side saw the event.
+    NavButtons {
+        onBack:    if (win.current && win.current.canGoBack)    win.current.goBack()
+        onForward: if (win.current && win.current.canGoForward) win.current.goForward()
     }
     Rectangle {
         id: dmPanel
