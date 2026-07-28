@@ -217,6 +217,11 @@ QtObject {
         { name: "allfix", rows: [ {name:"fan1", rpm:3458, pct:100},
                                   {name:"fan2", rpm:3400, pct:100} ],
                           v: [] },
+        // A STOPPED fan, as SysInfo re-emits one: 0 rpm, no duty, stopped flag.
+        // It must never be caught by the hide rule and must be called out.
+        { name: "stop", rows: [ {name:"fan1", rpm:459, pct:11},
+                                {name:"fan2", rpm:0, pct:-1, stopped:true} ],
+                        v: ["fan1"] },
     ]
     property var probe: Fans { }
     Component.onCompleted: {
@@ -243,11 +248,12 @@ QtObject {
                 shades.push(String(win.probe.shade(i)));
             console.warn("CASE " + kase.name
                 + " n=" + win.probe.count
+                + " shown=" + win.probe.shown
                 + " lines=" + win.probe.series.length
                 + " headline=" + win.probe.headline
                 + " sub=[" + win.probe.subline + "]"
                 + " detail=" + win.probe.detail.split("\n").length
-                + " marked=" + (win.probe.detail.split("fixed").length - 1)
+                + " stopped=" + (win.probe.detail.split("STOPPED").length - 1)
                 + " shades=" + shades.join("/"));
         }
         Qt.exit(0);
@@ -301,34 +307,47 @@ MAINEOF
     check "n5: sub is ITS rpm" "[2400r]" "$(v sub "$C")"
     check "n5: tooltip rows" "5"      "$(v detail "$C")"
 
-    # --- THE PUMP. Pinned at max and never seen to move: out of the headline,
-    #     but still a line, still a tooltip row, and marked so the readout does
-    #     not look like it is lying about the 100% sitting above it.
+    # --- THE PUMP. [his] "i dont need to see it at all" - so pinned at max and
+    #     never seen to move means GONE: no line, no tooltip row, no headline.
     C=$(getcase pump)
+    check "pump: hidden from the card"     "2"       "$(v shown "$C")"
+    check "pump: no line for it"           "2"       "$(v lines "$C")"
+    check "pump: not in the tooltip"       "2"       "$(v detail "$C")"
     check "pump: headline is the real fan" "59%"     "$(v headline "$C")"
     check "pump: sub is that fan's rpm"    "[1846r]" "$(v sub "$C")"
-    check "pump: still drawn"              "3"       "$(v lines "$C")"
-    check "pump: still in tooltip"         "3"       "$(v detail "$C")"
-    check "pump: marked fixed"             "1"       "$(v marked "$C")"
 
     # --- THE THERMAL EVENT. A fan that has moved before and is now at 100% must
-    #     take the headline back. This is why "exclude anything at max" alone is
-    #     a bad rule: it would hide exactly the fan worth seeing.
+    #     stay VISIBLE and take the headline. This is why "hide anything at max"
+    #     alone is a bad rule - it would now delete the fan worth seeing, not
+    #     merely drop it from a summary.
     C=$(getcase therm)
-    check "thermal: maxed chassis fan IS the headline" "100%"    "$(v headline "$C")"
+    check "thermal: maxed chassis fan still SHOWN"     "2"       "$(v shown "$C")"
+    check "thermal: it has a line"                     "2"       "$(v lines "$C")"
+    check "thermal: it is the headline"                "100%"    "$(v headline "$C")"
     check "thermal: and it is the one that moved"      "[2400r]" "$(v sub "$C")"
-    check "thermal: only the pump marked"              "1"       "$(v marked "$C")"
 
     # --- TOO SOON. Under settleSamples nothing is judged constant, or a fresh
-    #     panel would exclude fans it has simply not watched yet.
+    #     panel would blank fans it has simply not watched yet. This guard is
+    #     more important now that the consequence is deletion.
     C=$(getcase young)
-    check "young: nothing excluded yet" "100%" "$(v headline "$C")"
-    check "young: nothing marked"       "0"    "$(v marked "$C")"
+    check "young: nothing hidden yet"   "2"    "$(v shown "$C")"
+    check "young: still the headline"   "100%" "$(v headline "$C")"
 
-    # --- ALL FIXED. The rule must never empty the headline; summarising a
-    #     constant beats summarising nothing.
+    # --- ALL FIXED. The rule must never empty the CARD; a card of constants
+    #     says more than a blank one.
     C=$(getcase allfix)
-    check "all fixed: falls back to all" "100%" "$(v headline "$C")"
+    check "all fixed: falls back to all" "2"    "$(v shown "$C")"
+    check "all fixed: still drawn"       "2"    "$(v lines "$C")"
+    check "all fixed: has a headline"    "100%" "$(v headline "$C")"
+
+    # --- A STOPPED FAN. The cost of hiding the pump is that a pump failure has
+    #     no indicator, so SysInfo re-emits a fan that stops reporting at 0 rpm.
+    #     At 0 it is nowhere near maximum, so the hide rule cannot catch it: it
+    #     must be visible and called out.
+    C=$(getcase stop)
+    check "stopped: shown"        "2" "$(v shown "$C")"
+    check "stopped: in tooltip"   "2" "$(v detail "$C")"
+    check "stopped: called out"   "1" "$(v stopped "$C")"
 
     # Five lines must come out as five DISTINCT shades. The palette is one hue
     # (DESIGN.md 3.1), so these are steps on a brightness ladder rather than

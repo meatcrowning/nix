@@ -295,10 +295,31 @@ Singleton {
         if (gpuFanPct >= 0)
             out.push({ name: "gpu", rpm: -1, pct: gpuFanPct });
 
+        // A fan that STOPS reporting is re-emitted at 0 rpm rather than simply
+        // vanishing. sysinfo.sh lists a fan only while it turns, so a fan that
+        // dies just disappears from the line — and since the widget now HIDES
+        // the pump outright (Fans.fixed), a pump failure would otherwise have no
+        // indicator anywhere on this desktop. At 0 rpm and no duty it is nowhere
+        // near maximum, so the hide rule cannot apply to it and it is always
+        // drawn, marked STOPPED.
+        //
+        // Only fans this session has actually seen are tracked (`fanPctHist`
+        // already keys them by name), so the set is bounded by the hardware. A
+        // fan deliberately unplugged therefore reads STOPPED until the name goes
+        // — which is the honest reading: it IS absent.
+        const live = {};
+        for (const fan of out) live[fan.name] = true;
+        for (const name in fanPctHist)
+            if (!live[name])
+                out.push({ name: name, rpm: 0, pct: -1, stopped: true });
+
         const h = {};
         const varied = {};
         for (const name in fanVaried) varied[name] = fanVaried[name];
         for (const fan of out) {
+            // A stopped fan keeps its history so it keeps its name, and with it
+            // its row; pushing 0 into it would rewrite what it did when alive.
+            if (fan.stopped) { h[fan.name] = fanPctHist[fan.name] || []; continue; }
             if (fan.pct < 0) continue;
             const prev = fanPctHist[fan.name] || [];
             // "Has this fan ever moved?" — the one question that separates a

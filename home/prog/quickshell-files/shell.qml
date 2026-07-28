@@ -590,9 +590,24 @@ Scope {
             for (let i = 0; i < f.length; i++)
                 out.push(f[i].name + " rpm=" + f[i].rpm + " pct=" + f[i].pct
                          + " hist=" + ((h[f[i].name] || []).length)
-                         + " moved=" + (vd[f[i].name] ? "yes" : "NEVER"));
+                         + " moved=" + (vd[f[i].name] ? "yes" : "NEVER")
+                         + (f[i].stopped ? " STOPPED" : "")
+                         + (fanProbe.fixed(i) ? "  <- HIDDEN" : ""));
+            out.push("shown " + fanProbe.shown + " of " + f.length
+                     + ", readout " + fanProbe.headline);
             return out.join("\n");
         }
+    }
+
+    // The same derivation the fan card draws through, so `live fans` can report
+    // what is actually on screen rather than only what SysInfo collected. It is
+    // pure (no polling, no drawing), so a second instance costs nothing.
+    Fans {
+        id: fanProbe
+        rows: SysInfo.fans
+        hist: SysInfo.fanPctHist
+        varied: SysInfo.fanVaried
+        showFixed: SettingsStore.d.fanShowFixed
     }
 
     // Let Hyprland lock the session: `qs ipc call lock activate` (Super+L).
