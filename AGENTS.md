@@ -15,7 +15,8 @@ not a red build. Work like a colleague who has to sit at this desk afterwards.
 - **Measure, don't reason, about anything on screen.** The user does all
   visual checks. Your evidence is IPC, logs and traces.
 - **These files are the source of truth for agent instructions here.**
-  `CLAUDE.md` is a symlink to this one. Per-area detail lives in nested
+  `CLAUDE.md` is a symlink to this one, and so is every nested `CLAUDE.md` —
+  edit the `AGENTS.md`. Per-area detail lives in nested
   `AGENTS.md` files — **the closest one to the file you are editing wins**, and
   an explicit instruction from the user overrides all of them.
 
@@ -28,7 +29,8 @@ no tty: **just run it, don't ask, don't hand it back to the user.**
 
 ```bash
 cd ~/nix
-./tools/preflight.sh        # THE pre-rebuild gate: untracked .nix/.qml, rootless eval, seed drift (~10s)
+./tools/preflight.sh        # THE pre-rebuild gate: untracked .nix/.qml/.lua/.sh, staged-index
+                            # warning, rootless eval, seed drift (~10s)
 sudo rebuild-top            # = nixos-rebuild switch --flake /home/lam/nix#top   (aliases: rbsys/rbhome)
 sudo rebuild-top --upgrade  # = `update`; bumps flake inputs first
 nixos-rebuild build --flake /home/lam/nix#top   # optional, no sudo at all, warms the store
@@ -190,7 +192,10 @@ Never run bare `qs` — it launches a second panel.
       tree moves as a unit or not at all.
 - `tools/` — the maintenance scripts the documented workflows depend on:
   `preflight.sh`, `seed-drift.sh`, `prune-worktrees.sh` (aliased `wtprune`),
-  `sandbox.sh`.
+  `sandbox.sh`. Per-area **test harnesses** live here too and are named by
+  whichever guide owns them (`claude-merge-test.sh`, `hotswap-test.sh`,
+  `fan-harness.sh`, `media-lyrics-probe.sh`, …) — `ls tools/` rather than
+  assume this list is complete.
 - `sounds/` — **git submodule** → `github.com/meatcrowning/vista-sounds`
   (PRIVATE). The Vista event `.wav`s are Microsoft's and must not live in this
   public tree. `home/srvs/vista-sounds.nix` exposes the checkout at the runtime
@@ -266,7 +271,7 @@ wallpaper-derived palette, spacing and corners, motion timing, titlebar button
 vocabulary, menus, tooltips, list rows, drag feedback, and the "never offer an
 action that can silently fail" rule.
 
-It is **not optional reading and not per-area**. The panel, the four apps you
+It is **not optional reading and not per-area**. The panel, the five apps you
 did not touch, the compositor plugin and the window config are four codebases
 and one desktop, and the user should not have to restate his preferences on
 every feature — that is the whole reason the file exists. **Any change that puts
