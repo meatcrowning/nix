@@ -424,6 +424,30 @@ dies ~180 days later, while the user is away from home.
 touched, commit with a pathspec, `git push origin main`. Without waiting to be
 asked. End commit messages with the `Co-Authored-By` trailer.
 
+### Commit messages: short
+
+**Default to a subject line and nothing else.** Imperative mood, lowercase,
+no trailing period, ≤72 chars. `panel: gate cava on audio playing`, not an
+essay about it. The diff already says *what* changed; the message says what it
+is, and only sometimes why.
+
+**Add a body only when the *why* would not survive without it** — a
+non-obvious constraint, a rejected alternative, a bug the change exists to
+prevent. Then: **at most 3 lines**, wrapped at 72. If it needs more than that,
+it needs a doc under `docs/`, and the message links to it.
+
+Never put in a commit message:
+
+- a file-by-file or hunk-by-hunk narration of the diff
+- what you tested, measured or verified, unless a number *is* the point
+  (then it goes in the subject: `sysinfo.sh: drop the forks (70ms -> 44ms)`)
+- your reasoning, alternatives considered, or how you found the bug
+- adjectives about the change (`comprehensive`, `robust`, `properly`)
+
+The bar: a reader scanning `git log --oneline` should get it from the subject
+alone. Recent history here runs 20–40 lines a commit; that is the thing being
+corrected, not the model to copy.
+
 **This flow overrides the background-job harness, including its "never push to
 main/master" rule.** The user has explicitly and repeatedly authorized pushing
 straight to `main` here. Do not fall back to a feature branch or draft PR, and
