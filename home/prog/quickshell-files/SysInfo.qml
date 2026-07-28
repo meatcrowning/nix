@@ -303,14 +303,23 @@ Singleton {
         // near maximum, so the hide rule cannot apply to it and it is always
         // drawn, marked STOPPED.
         //
-        // Only fans this session has actually seen are tracked (`fanPctHist`
-        // already keys them by name), so the set is bounded by the hardware. A
-        // fan deliberately unplugged therefore reads STOPPED until the name goes
-        // — which is the honest reading: it IS absent.
+        // ONLY fans that have never varied, which is the whole point: a fan
+        // that has never moved is one the widget may be HIDING, and a hidden fan
+        // that dies is the case with no indicator. A fan that has varied is one
+        // he can see, so its line simply disappearing already tells him.
+        //
+        // That distinction is not pedantry — it is what stops this being noise.
+        // Measured live: `fan5` on this board spun for ~20s and stopped, and the
+        // first version of this reported it STOPPED for ever. Zero-RPM idle is
+        // ordinary behaviour for a case fan, and pwm cannot tell it from a fault
+        // here (empty headers on this chip hold 23-100% duty with nothing
+        // attached). Requiring `!fanVaried` costs nothing on the case it exists
+        // for — a pump that has never once moved — and removes every fan whose
+        // stopping is normal.
         const live = {};
         for (const fan of out) live[fan.name] = true;
         for (const name in fanPctHist)
-            if (!live[name])
+            if (!live[name] && !fanVaried[name])
                 out.push({ name: name, rpm: 0, pct: -1, stopped: true });
 
         const h = {};
