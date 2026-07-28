@@ -509,12 +509,19 @@ class DirWatch(QObject):
     QML pushes the watch set on every rebuild via setDirs(). Kernel events are
     coalesced through a short single-shot timer so a burst (a big copy arriving
     file-by-file) triggers one rebuild, not hundreds. Content edits to existing
-    files don't fire directoryChanged — that's fine, the list shows names."""
+    files don't fire directoryChanged — that's fine, the list shows names.
+
+    The set is KEYED, one key per pane: split view has two panes browsing two
+    different trees, and an unkeyed setDirs() (which is what this was) would
+    have each pane's rebuild replace the other's watches — the second pane
+    would silently stop noticing external changes. The watcher holds the union
+    of the keys."""
 
     changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._sets = {}
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._on_dir_change)
         self._timer = QTimer(self)
@@ -522,14 +529,20 @@ class DirWatch(QObject):
         self._timer.setInterval(200)
         self._timer.timeout.connect(self.changed)
 
-    @Slot("QVariantList")
-    def setDirs(self, dirs):
-        old = self._watcher.directories()
+    @Slot(str, "QVariantList")
+    def setDirs(self, key, dirs):
+        """Replace one pane's watch set (an empty list retires the pane)."""
+        self._sets[str(key)] = [str(d) for d in dirs if os.path.isdir(str(d))]
+        want = set()
+        for paths in self._sets.values():
+            want.update(paths)
+        old = set(self._watcher.directories())
+        if old == want:
+            return
         if old:
-            self._watcher.removePaths(old)
-        add = [str(d) for d in dirs if os.path.isdir(str(d))]
-        if add:
-            self._watcher.addPaths(add)
+            self._watcher.removePaths(list(old))
+        if want:
+            self._watcher.addPaths(sorted(want))
 
     def _on_dir_change(self, _path):
         # If a watched dir was deleted+recreated the watch is gone; setDirs()
@@ -715,6 +728,17 @@ def main():
     ctx.setContextProperty("startShowHidden", bool(settings.value("showHidden", True)))
     # last preview-panel height (px), restored into view.gridPanelH on startup.
     ctx.setContextProperty("startGridPanelH", int(settings.value("gridPanelH", 200) or 200))
+    # split view, as it was left: whether it was open, what the RIGHT pane was
+    # showing (the left one is the ordinary "dir" above) and where the divider
+    # sat. A picker never restores it — Main.qml gates on `picking`.
+    split_dir = settings.value("splitDir", "") or ""
+    ctx.setContextProperty("startSplit", bool(settings.value("split", False)))
+    ctx.setContextProperty("startSplitDir", split_dir if os.path.isdir(split_dir) else "")
+    try:
+        ratio = float(settings.value("splitRatio", 0.5))
+    except (TypeError, ValueError):
+        ratio = 0.5
+    ctx.setContextProperty("startSplitRatio", min(0.85, max(0.15, ratio)))
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()

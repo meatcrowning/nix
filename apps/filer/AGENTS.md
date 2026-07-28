@@ -23,13 +23,60 @@ five apps.
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
 - **The preview grid and the tree list are `KineticGridView` / `KineticListView`** (`../qmlcommon/`), not bare views — the desktop's momentum is compositor-side and Qt's own flick fights it. Any new scrollable surface here must use those too; see [`../AGENTS.md`](../AGENTS.md).
 
+## Split view — two panes, one titlebar
+
+`qml/BrowserPane.qml` **is** the file browser — tree, preview grid, selection,
+context menu, drop target, dialogs. It used to be an inline
+`Rectangle { id: view }` filling the window; it is a component so `Main.qml` can
+put two of them side by side. The id stayed `view`, so every reference inside it
+reads as it always did. `Main.qml` is now only the window and its chrome.
+
+- **`sp` (or F3) toggles it; F6 moves the chrome to the other pane.** The right
+  pane is a `Loader`, so an unsplit window pays for no second listing, watch set
+  or thumbnail queue.
+- **`win.pane` is the FOCUSED pane, and the chrome reads nothing else** — the
+  title/address bar, the sort buttons, every file operation, the dir-size
+  footer. Clicking anywhere in a pane points the chrome at it
+  (`claimFocus()` → `focusClaimed` → `win.focusPane`); an accent frame says
+  which. That is the same shape as surfer's split view
+  (`../surfer/qml/Main.qml`) minus its hard part: surfer's panes hold *tabs*, so
+  one pane being handed the other's view had to swap them. Two filer panes can
+  show the same directory, and nothing has to be arbitrated.
+- **Dragging between the panes is the point of it** — and needs no code of its
+  own: they are two `DropArea`s in one process, so a drag from one to the other
+  is the ordinary cross-window drop above, `move / copy / link` menu included.
+- **Anything that acts on "the view" acts on EVERY pane** (`win.refreshAll`): a
+  finished file op or an external change may well be visible in both, and a move
+  between the panes *is* that case. `reselect` lands in whichever pane holds it.
+- **`DirWatch.setDirs` is KEYED, one key per pane** (`main.py`). It used to
+  replace the whole watch set, which with two panes meant the second pane's
+  rebuild silently unwatched the first pane's directories. The watcher holds the
+  union; a pane hands its key back on destruction.
+- **Only the left pane persists dir/sort/hidden** — one `state.json` cannot hold
+  two panes' sort orders. The right pane persists just `splitDir`, which with
+  `split` and `splitRatio` is enough to restore the split as it was. A restored
+  split points the chrome at the LEFT pane; opening one by hand focuses the new
+  (right) one, because that is the pane you just asked for.
+- **A picker is never split** (`filer --pick` is one transient errand): the `sp`
+  button is disabled and `toggleSplit()` refuses.
+- **The row's timestamp columns drop out, widest-first, below ~620/~470px** —
+  three fixed columns in a half-width pane left the filename elided to nothing.
+  They go to `width: 0`, not `visible: false`: the next column anchors to this
+  one's left edge and an invisible item keeps its geometry.
+
+Verify with `tools/split-test.py` (offscreen, 40 checks — geometry, which pane
+the chrome follows, the watch union, a real drop into the right-hand pane, and
+the restore). It redirects `Settings` into a temp dir, which any harness that
+navigates or sorts **must** do or it rewrites where the user's own filer reopens.
+
 ## Drag and drop — both halves
 
-**Drag out** is on the file rows (`qml/Main.qml`) and the preview tiles
-(`qml/PreviewTile.qml`); **drop in** is one `DropArea` over the whole view.
+**Drag out** is on the file rows (`qml/BrowserPane.qml`) and the preview tiles
+(`qml/PreviewTile.qml`); **drop in** is one `DropArea` over the whole pane.
 Two filer windows are two separate processes, so window-to-window dragging is
 ordinary cross-app Wayland DnD — nothing about it is special-cased, and the same
-gestures work against Dolphin, a browser upload field, etc.
+gestures work against Dolphin, a browser upload field, the other half of a split
+view, etc.
 
 - **The payload is built on PRESS, not bound.** It depends on the selection, and
   a binding would re-run `FileOps.uriList` for every realised row/tile on every
@@ -130,8 +177,9 @@ Four things to know before touching any of it:
 
 Picker mode reuses the whole browser — tree, expand, sort, preview grid,
 titlebar address bar — and adds `qml/PickerBar.qml` along the bottom. Every
-picker branch in `qml/Main.qml` is gated on `win.picking` (`Picker.active`), so
-an ordinary filer window is unchanged; notably `openFile()` returns the
+picker branch in `qml/BrowserPane.qml` is gated on the pane's `picking`
+(`Picker.active`, threaded in by `Main.qml`), so an ordinary filer window is
+unchanged; notably `openFile()` returns the
 selection instead of shelling out to `viewer`/`xdg-open` (which would be
 circular), and `persist()` no-ops so a dialog never moves where your real filer
 window reopens.
@@ -157,7 +205,7 @@ hang.
   missing tool surfaces as a failure toast, not a broken build).
   - `plan(path)` is pure and cheap (one ffprobe) and decides *everything* —
     resolution rung, fps, audio/video bitrate split, encoder, and an encode-time
-    estimate. `Main.qml` calls it before doing anything: `plan.ask` (a slow
+    estimate. `BrowserPane.qml` calls it before doing anything: `plan.ask` (a slow
     encode, or a budget too tight to look good) puts a confirm in front of the
     user; otherwise the job just starts. Read its module docstring before
     changing the sizing — the ladder and the CRF-with-a-VBV-cap rate control are
