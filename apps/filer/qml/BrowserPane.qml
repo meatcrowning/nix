@@ -72,17 +72,27 @@ Rectangle {
     // "link" (symlink). `overwrite` false adds the no-clobber flag so an
     // existing target is skipped rather than replaced (the safe default);
     // true lets it replace (after the user OK'd it).
+    //
+    // One item is one process, so ten pasted files are ten exit codes — and
+    // three of them failing must read as "3 of 10 failed", not as a flat
+    // success and not as a flat failure. `beginBatch`/`endBatch` (main.py) group
+    // them into ONE failure toast with that count. Both calls are mandatory:
+    // without `endBatch` a failure is collected and never reported.
     function runPaste(items, op, overwrite) {
+        if (!items.length) return;
+        const batch = FileOps.beginBatch(op === "cut" ? "move"
+                                       : op === "link" ? "link" : "copy");
         for (let i = 0; i < items.length; i++) {
             const reselect = i === items.length - 1 ? items[i].dst : "";
             const s = items[i].src, d = items[i].dst;
             if (op === "cut")       FileOps.run(overwrite ? ["mv", "--", s, d]
-                                                          : ["mv", "-n", "--", s, d], reselect);
+                                                          : ["mv", "-n", "--", s, d], reselect, batch);
             else if (op === "link") FileOps.run(overwrite ? ["ln", "-sfn", "--", s, d]
-                                                          : ["ln", "-s", "--", s, d], reselect);
+                                                          : ["ln", "-s", "--", s, d], reselect, batch);
             else                    FileOps.run(overwrite ? ["cp", "-a", "--", s, d]
-                                                          : ["cp", "-an", "--", s, d], reselect);
+                                                          : ["cp", "-an", "--", s, d], reselect, batch);
         }
+        FileOps.endBatch(batch);
     }
 
     // Move/copy/link an explicit list of sources into `dst`. Splits into
