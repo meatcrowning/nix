@@ -138,7 +138,86 @@ class Palette(QObject):
     def info(self): return self._c("info")
 
 
-def sanitize(text, limit=240):
+# sudo options that consume the NEXT argv token, so it must be skipped too when
+# hunting for where the actual command starts. `--opt=value` needs no entry.
+_SUDO_ARG_OPTS = {
+    "-C", "-D", "-g", "-h", "-p", "-R", "-T", "-U", "-u",
+    "--close-from", "--chdir", "--group", "--host", "--prompt", "--chroot",
+    "--command-timeout", "--other-user", "--user",
+}
+
+
+def _ppid(pid):
+    """Parent of `pid`, read from /proc/<pid>/stat.
+
+    Field 2 is the executable name in parentheses and MAY contain spaces, so the
+    split has to start after the last ')' rather than at the third whitespace.
+    """
+    with open(f"/proc/{pid}/stat", "r", encoding="utf-8", errors="replace") as fh:
+        rest = fh.read().rsplit(") ", 1)[1]
+    return int(rest.split()[1])
+
+
+def sudo_command(max_depth=8):
+    """The command the waiting sudo is about to run, from its own argv.
+
+    Read off /proc rather than the environment because it CANNOT be forgotten:
+    the dialog is a (grand)child of the sudo process that spawned it — askpass
+    helper <- the sudo-askpass wrapper <- sudo — so walking up the parent chain
+    to the first `sudo` and reading its cmdline yields the real command every
+    time, with no cooperation from the caller. That matters: $SUDO_ASKPASS_REASON
+    reaches this process perfectly well when set (verified), but in practice
+    almost nothing sets it, and a dialog that can only ever say NO REASON GIVEN
+    tells the user nothing about what they are approving.
+
+    Returns "" when there is no sudo ancestor (the headless selftest, a manual
+    launch) — an empty string means unknown, and the QML says so plainly.
+    """
+    try:
+        pid = os.getppid()
+        for _ in range(max_depth):
+            if pid <= 1:
+                return ""
+            with open(f"/proc/{pid}/comm", "r", encoding="utf-8", errors="replace") as fh:
+                if fh.read().strip() == "sudo":
+                    with open(f"/proc/{pid}/cmdline", "rb") as raw:
+                        argv = [a.decode("utf-8", "replace")
+                                for a in raw.read().split(b"\0") if a]
+                    return _strip_sudo_options(argv[1:])
+            pid = _ppid(pid)
+    except (OSError, ValueError, IndexError):
+        pass         # /proc raced us, or an unexpected format: unknown, not fatal
+    return ""
+
+
+def _join_argv(argv):
+    """Re-join argv for display, keeping word boundaries honest.
+
+    Only tokens that CONTAIN whitespace get quotes, so `sudo sh -c 'a && b'`
+    still reads as one argument instead of four words, while a flake ref like
+    /home/lam/nix#top is left alone (shlex.quote would wrap it, for nothing).
+    """
+    return " ".join(f"'{a}'" if (a == "" or any(c.isspace() for c in a)) else a
+                    for a in argv)
+
+
+def _strip_sudo_options(argv):
+    """Drop sudo's own flags, leaving the command it was asked to run."""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            i += 1
+            break
+        if not arg.startswith("-"):
+            break
+        i += 2 if arg in _SUDO_ARG_OPTS else 1
+    # Flags only (`sudo -v`, `sudo -i`): show them rather than claim to know
+    # nothing — with the `sudo` back on the front so the line reads as a command.
+    return _join_argv(argv[i:]) if i < len(argv) else ("sudo " + _join_argv(argv)).strip()
+
+
+def sanitize(text, limit=240, ascii_only=False):
     """Make caller-supplied text safe to render on a password prompt.
 
     Both strings this dialog displays are UNTRUSTED: sudo's prompt is argv[1],
@@ -166,6 +245,12 @@ def sanitize(text, limit=240):
             out.append(" ")
         elif o < 0x20 or 0x7F <= o <= 0x9F:
             continue     # control characters, including the C1 block
+        elif ascii_only and o > 0x7E:
+            # Only for machine-derived text (the command line): the pixel font
+            # has no glyph for most of these, and ONE missing glyph re-renders
+            # the whole line in a fallback face with a different ascent, which
+            # clips. Caller prose keeps its accents; a path does not need them.
+            out.append("?")
         else:
             out.append(ch)
     flat = " ".join("".join(out).split())
@@ -227,6 +312,13 @@ def main():
     # worse than one that admits it does not know.
     reason = sanitize(os.environ.get("SUDO_ASKPASS_REASON", ""))
 
+    # ...and WHAT is being run, taken from the waiting sudo's own argv (see
+    # sudo_command). Shown alongside the reason, not instead of it: the reason is
+    # the caller's words and can lie, the command is the fact being authorised.
+    # It is the only half that is always there, since callers rarely set a
+    # reason.
+    command = sanitize(sudo_command(), ascii_only=True)
+
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
@@ -236,6 +328,7 @@ def main():
     ctx.setContextProperty("Sudo", sudo)
     ctx.setContextProperty("startPrompt", prompt)
     ctx.setContextProperty("startReason", reason)
+    ctx.setContextProperty("startCommand", command)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()

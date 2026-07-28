@@ -54,6 +54,11 @@ never invented by the dialog; set it on every `sudo -A` you run:
 SUDO_ASKPASS_REASON="installing the new kernel module" sudo -A <cmd>
 ```
 
+The *command* is shown regardless — the dialog reads it from the waiting sudo's
+own argv via `/proc`, because in practice nobody ever set the variable and the
+prompt therefore only ever said `NO REASON GIVEN`. The reason still adds the one
+thing argv cannot say: **why**.
+
 Get an edit live:
 
 ```bash
