@@ -23,6 +23,18 @@
   # from hyprland.lua's autostart (needs the live HYPRLAND_INSTANCE_SIGNATURE).
   xdg.configFile."kitty/kitty-focus-dim.py".source = ./kitty-files/kitty-focus-dim.py;
 
+  # Desktop-notification filter: kitty runs this file's main() for every OSC
+  # 99 / OSC 777 notification a program inside it raises, and drops the ones it
+  # returns True for. It exists because Claude Code re-raises its "Claude is
+  # waiting for your input" notification every ~60s for as long as a session
+  # sits idle, with a fresh random id each time so kitty cannot coalesce them —
+  # the file's header has the full story and the two rules. Not watched by
+  # `kitten __watch_conf__` (that only follows `all_config_paths`, i.e.
+  # kitty.conf and its includes), so a plain store symlink is safe here.
+  # Loaded once per kitty PROCESS: already-running kitties keep the old
+  # behaviour until they are restarted.
+  xdg.configFile."kitty/notifications.py".source = ./kitty-files/notifications.py;
+
   # Startup session: a background launch of the hyprvtb titlebar-button client
   # (~/nix/apps/pylib/kitty-vtb.py, run from the live repo) plus the normal shell
   # window. See the startup_session note in kitty.conf.
