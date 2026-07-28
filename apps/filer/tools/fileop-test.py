@@ -309,6 +309,38 @@ def main():
     check("...and nothing was written behind it",
           open(os.path.join(dst, "c.txt")).read() == "OLD")
 
+    # ---- 14. both run() arities are reachable FROM QML ----
+    # `run` is two overloaded slots: the 2-arg form every single-process call
+    # site uses (mkdir, rename, trash, delete) and the 3-arg batch form
+    # runPaste uses. A Python-side call proves neither, since PySide resolves
+    # those differently — so drive both through a real QML expression.
+    del TOASTS[:]
+    probe = QQmlComponent(engine)
+    probe.setData((
+        'import QtQuick\nQtObject {\n'
+        '  function two()   { FileOps.run(["mkdir", "--", "%s/qml2"], "%s/qml2") }\n'
+        '  function three() { const b = FileOps.beginBatch("copy");\n'
+        '                     FileOps.run(["cp", "-an", "--", "%s", "%s/qml3"], "", b);\n'
+        '                     FileOps.endBatch(b) }\n'
+        '  function bad()   { FileOps.run(["mkdir", "--", "%s/nope"], "") }\n'
+        '}\n' % (dst, dst, os.path.join(src, "a.txt"), dst, ro)
+    ).encode(), QUrl("qrc:/probe.qml"))
+    obj = probe.create(engine.rootContext())
+    check("the QML probe builds", obj is not None, probe.errorString())
+    obj.two()
+    check("QML can call the 2-arg run() (mkdir/rename/trash/delete)",
+          wait_for(lambda: os.path.isdir(os.path.join(dst, "qml2"))))
+    obj.three()
+    check("QML can call the 3-arg batch run() (paste/drop)",
+          wait_for(lambda: os.path.exists(os.path.join(dst, "qml3"))))
+    settle()
+    check("...and neither said anything, because both worked", TOASTS == [], TOASTS)
+    del TOASTS[:]
+    obj.bad()
+    settle()
+    check("a 2-arg QML call that fails still reports",
+          len(TOASTS) == 1 and TOASTS[0][0] == "new folder failed", TOASTS)
+
     os.chmod(ro, stat.S_IRWXU)
     shutil.rmtree(tmp, ignore_errors=True)
     print()
