@@ -27,6 +27,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QProcess, QUrl,
@@ -360,6 +361,39 @@ class FileOps(QObject):
     def execDetached(self, argv):
         argv = [str(a) for a in argv]
         QProcess.startDetached(_resolve(argv[0]), argv[1:])
+
+    @Slot(list, result=str)
+    def writeOrder(self, paths):
+        """Hand `viewer` the exact order this window is showing.
+
+        viewer's ‹ / › normally walk its own name-sort of the opened file's
+        directory, which is not what the user sees once they have sorted filer by
+        size or date. So opening an image writes the displayed paths, in display
+        order, to a throwaway file and passes `viewer --order <file>`; viewer
+        keeps the media among them and flips through those. NUL-separated: a
+        filename may legally contain a newline.
+
+        viewer consumes (unlinks) the file, so it is a launch-time snapshot —
+        re-sorting filer afterwards does not disturb an already-open viewer.
+        Returns "" if the file can't be written; the caller then launches viewer
+        plainly and gets the old directory-scan behaviour."""
+        d = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / "filer-order"
+        try:
+            d.mkdir(parents=True, exist_ok=True, mode=0o700)
+            now = time.time()
+            for stale in d.iterdir():  # a viewer that never started leaves one behind
+                try:
+                    if now - stale.stat().st_mtime > 300:
+                        stale.unlink()
+                except OSError:
+                    pass
+            blob = "\0".join(os.path.abspath(str(p)) for p in paths)
+            fd, name = tempfile.mkstemp(dir=str(d), prefix="order-")
+            with os.fdopen(fd, "wb") as f:
+                f.write(blob.encode("utf-8", "surrogateescape"))
+            return name
+        except OSError:
+            return ""
 
     @Slot(str, result=str)
     def expandUser(self, path):
