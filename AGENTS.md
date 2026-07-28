@@ -151,6 +151,12 @@ Never run bare `qs` — it launches a second panel.
 
 - `DESIGN.md` — **the design language.** Read before any visual change; see
   below.
+- `HARDWARE.md` — **what these two machines physically are**, and the command
+  that measures each fact. CPU/thread count, RAM and swap, both GPUs (only one
+  drives the screen), the board and its `nct6683` sensor chip, the real fan/pwm
+  layout, the single 1080p display, the storage tiers, and how `top` and `book`
+  differ. **Read it before you go measuring** — every fact in it is one an agent
+  has already had to rediscover, once from a remembered fact that was wrong.
 - `flake.nix` — inputs, the `top` NixOS configuration, and a standalone
   `homeConfigurations.air` for the second machine. The rationale for both
   pinned inputs lives here; read it before touching either.
@@ -160,7 +166,9 @@ Never run bare `qs` — it launches a second panel.
   `book`. Not NixOS: it gets only `home-manager` layered on the Fedora install,
   reusing `./lam.nix` and `home/` unchanged. There is no `hosts/air/`, and
   `sys/*` does not apply. Activate with
-  `home-manager switch --flake /home/lam/nix#air`.
+  `home-manager switch --flake /home/lam/nix#air`. (Everything about its
+  *hardware* — and the full `top` vs `book` comparison — is in `HARDWARE.md`;
+  this bullet covers only what the repo does with it.)
 - `sys/` — system-wide NixOS modules, auto-imported (see `umport`).
   `sys/options.nix` defines custom options; `sys/dsk/` the desktop sessions;
   `sys/hw/nvidia.nix` the GPU; `sys/gme/steam.nix` gaming.
@@ -270,6 +278,7 @@ how something looks, update it in the same commit.
 | Editing | Read |
 |---|---|
 | **Anything visual, anywhere** | **`DESIGN.md`** (always), then the row below |
+| **Anything about the metal** — cores, RAM, GPU, sensors, fans, disks, the display, or which host you are on | **`HARDWARE.md`** (before you measure) |
 | The Quickshell panel (`home/prog/quickshell-files/*.qml`) | `home/prog/quickshell-files/AGENTS.md` |
 | Hyprland config, the `hyprvtb` plugin, the sandbox | `home/prog/AGENTS.md` |
 | Bumping the compositor pin / plugin ABI seam | `home/prog/hyprvtb/PORTING.md` |
