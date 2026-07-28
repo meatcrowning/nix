@@ -593,6 +593,43 @@ Item {
         }
     }
 
+    // ---- the lyrics column, inside the drawer -----------------------------
+    // When the playing track has words, the right-hand side of the queue
+    // becomes the same lyrics box the player app draws in its now-playing view:
+    // centred lines, the current one lit and the rest dimmed, clicking one seeks
+    // there. It takes the space the ARTIST column was using, and the durations
+    // move left to sit against its divider — so the queue keeps its two most
+    // useful columns (what is next, and how long) and gives up the one the
+    // header line above already names for the current track.
+    //
+    // It is a deliberate PARALLEL implementation of `apps/player/qml/
+    // LyricsView.qml`, not a shared component: that tree is plain Qt QML and
+    // this one is Quickshell's, and the panel cannot import `apps/qmlcommon`.
+    // Same rule as `PixelText` and the `Kinetic*` types — retune both or the
+    // desktop stops feeling like one thing. What is deliberately NOT copied is
+    // that pane's `lyrics · <source>` header (DESIGN.md 5.4 — the content
+    // identifies itself, and a header would cost a line out of five) and its
+    // "mark instrumental" control, which needs a library the panel does not
+    // have.
+    //
+    // NO height of any kind is involved: the column lives entirely inside the
+    // drawer the grid already handed over, so `naturalRest`, `implicitHeight`
+    // and the tile's reported `wants` are untouched and the weather tile below
+    // does not move.
+    readonly property bool showLyrics: Media.hasLyrics
+    // A FRACTION of the drawer, not a pixel budget standing in for a character
+    // count (DESIGN.md 2.7): the panel is 14-33% of the screen and the font size
+    // is a user setting, so the only honest split here is a proportional one.
+    // 0.42 is the artist column's old third plus the duration column that now
+    // sits inside the queue's own width.
+    readonly property int lyricsGap: 6       // either side of the divider
+    readonly property real lyricsW: showLyrics
+        ? Math.round(Math.max(0, queueBox.width - pad * 2) * 0.42) : 0
+    // A scroll of your own outranks the follow for 3s, exactly as in the
+    // player's pane: the follow jumps the view at every lyric boundary, which
+    // lands mid-gesture if you are reading ahead.
+    property real lyricScrollMs: 0
+
     Item {
         id: queueBox
         anchors { bottom: handle.top; left: parent.left; right: parent.right }
@@ -603,7 +640,9 @@ Item {
             id: queueList
             anchors {
                 fill: parent
-                leftMargin: root.pad; rightMargin: root.pad
+                leftMargin: root.pad
+                rightMargin: root.pad + (root.showLyrics
+                    ? root.lyricsW + root.lyricsGap * 2 + 1 : 0)
                 // Clamped, so a closed drawer (height 0) does not hand the
                 // list a NEGATIVE height on its way down.
                 bottomMargin: Math.min(root.drawerPad, queueBox.height)
@@ -648,8 +687,17 @@ Item {
                 }
                 PixelText {
                     id: qartist
-                    anchors { right: qdur.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                    width: Math.min(implicitWidth, parent.width / 3)
+                    anchors {
+                        right: qdur.left
+                        // Collapsed to nothing, margin included, when the lyrics
+                        // column has taken this space — otherwise the title
+                        // would stop 8px short of a column that is not there.
+                        rightMargin: root.showLyrics ? 0 : 8
+                        verticalCenter: parent.verticalCenter
+                    }
+                    visible: !root.showLyrics
+                    width: root.showLyrics ? 0
+                         : Math.min(implicitWidth, parent.width / 3)
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     text: qrow.modelData.artist || ""
@@ -678,11 +726,113 @@ Item {
             }
         }
 
+        // Centred on the LIST, not on the drawer: with the lyrics column out the
+        // drawer's centre is under it, and the label would read half-covered.
         PixelText {
-            anchors.centerIn: parent
+            anchors.centerIn: queueList
             visible: Media.queue.length === 0
             text: Media.queueAvailable ? "queue is empty" : "player not running"
             color: Theme.textDim
+        }
+
+        // The divider, and the column. Both collapse to nothing when the track
+        // has no words — the common case, in which the drawer is byte-for-byte
+        // what it was before this existed.
+        Rectangle {
+            id: lyricSep
+            anchors {
+                top: parent.top; bottom: parent.bottom
+                right: lyricsCol.left; rightMargin: root.lyricsGap
+            }
+            width: 1
+            visible: root.showLyrics
+            color: Theme.border
+        }
+
+        Item {
+            id: lyricsCol
+            anchors {
+                top: parent.top; bottom: parent.bottom
+                right: parent.right; rightMargin: root.pad
+            }
+            width: root.lyricsW
+            visible: root.showLyrics
+            clip: true
+
+            // ---- synced: one row per timed line, the current one lit --------
+            KineticListView {
+                id: lyricsList
+                anchors.fill: parent
+                visible: Media.lyricsSynced
+                clip: true
+                model: Media.lyricsSynced ? Media.lyrics.lines : []
+                // Any motion the FOLLOW did not cause is the user driving.
+                // `positionViewAtIndex` is an instant jump and never sets
+                // `moving`, so this cannot suppress itself the way binding to
+                // `contentY` would.
+                onMovingChanged: if (moving) root.lyricScrollMs = Date.now()
+
+                delegate: Item {
+                    id: lrow
+                    required property var modelData
+                    required property int index
+                    width: lyricsList.width
+                    // A wrapped line is N font cells tall and nothing more —
+                    // PixelText pins its line height to the cell (DESIGN.md
+                    // 2.1), so this is kitty-tight at any font size.
+                    height: Math.max(Theme.fontSize, lineText.implicitHeight)
+
+                    PixelText {
+                        id: lineText
+                        width: parent.width
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: lrow.modelData.line
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        color: lrow.index === Media.lyricIndex ? Theme.text
+                                                               : Theme.textDim
+                    }
+                    // Click a line to seek to it, like the player's pane. Drawn
+                    // only when it would actually do something (DESIGN.md 10) —
+                    // a source with no SetPosition gets plain text.
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: Media.hasPlayer && Media.player.canSeek
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Media.player.position = lrow.modelData.t
+                    }
+                }
+            }
+
+            // ---- plain: no timings, so nothing to follow -------------------
+            KineticFlickable {
+                id: plainLyrics
+                anchors.fill: parent
+                visible: !Media.lyricsSynced && Media.hasLyrics
+                clip: true
+                contentHeight: plainText.implicitHeight
+
+                PixelText {
+                    id: plainText
+                    // NOT parent.width — parent is the Flickable's contentItem,
+                    // whose width stays 0 when only contentHeight is set.
+                    width: plainLyrics.width
+                    text: Media.hasLyrics ? Media.lyrics.text : ""
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.textDim
+                }
+            }
+
+            Connections {
+                target: Media
+                function onLyricIndexChanged() {
+                    if (Media.lyricIndex >= 0
+                        && Date.now() - root.lyricScrollMs > 3000)
+                        lyricsList.positionViewAtIndex(Media.lyricIndex,
+                                                       ListView.Center);
+                }
+            }
         }
     }
 

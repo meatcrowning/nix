@@ -119,6 +119,98 @@ Singleton {
         try { const i = JSON.parse(queueJson).index; return i === undefined ? -1 : i; }
         catch (e) { return -1; }
     }
+    // ---- the current track's lyrics, down the same socket -----------------
+    // Lyrics live entirely inside the player process: `LyricsProvider` resolves
+    // them (DB cache -> embedded tag -> sidecar .lrc -> LRCLIB) on a worker
+    // thread and hands them to that app's own QML. MPRIS has no lyrics field of
+    // any kind, so there was no channel here at all — and rather than invent a
+    // second socket, the queue server now carries them: the same JSON line
+    // gained a `lyrics` object for whatever is playing.
+    //
+    // Whole lines with timestamps, once per track, and the FOLLOWING is done
+    // here against our own MPRIS position. The player deliberately does not push
+    // a current-line index: that would put the lit line at the mercy of socket
+    // latency, and we already know to the millisecond where playback is.
+    //
+    // An older player simply omits the field, which reads as "no lyrics" — the
+    // widget then looks exactly as it did before, which is the fallback that has
+    // to hold on `book` between a `git pull` and the next player relaunch.
+    readonly property var lyrics: {
+        if (queueJson === "") return null;
+        try {
+            const l = JSON.parse(queueJson).lyrics;
+            if (!l) return null;
+            // Lyrics are text from OUTSIDE (tags, LRCLIB), so they are mapped
+            // onto the pixel font's cmap HERE, once per push — not in the
+            // delegate, which re-runs per visible row on every scroll. A line
+            // holding one U+2019 loses ~5px of ascent to the fallback font and
+            // clips, and apostrophes are not rare in song lyrics.
+            const lines = [];
+            const src = l.lines || [];
+            for (let i = 0; i < src.length; i++)
+                lines.push({ t: src[i].t, line: Glyphs.px(src[i].line || "") });
+            return { source: l.source || "", synced: !!l.synced,
+                     lines: lines, text: Glyphs.px(l.text || "") };
+        } catch (e) { return null; }
+    }
+    readonly property bool lyricsSynced: lyrics !== null && lyrics.synced
+                                         && lyrics.lines.length > 0
+    // Words, and nothing else. "none" and "instrumental" arrive as a payload
+    // with an empty body precisely so this is false for them: a track that will
+    // never have lyrics COLLAPSES the column rather than showing an empty box
+    // (DESIGN.md 5.4). The player's own pane keeps a "mark instrumental" control
+    // in that state; the panel has nothing to offer there, so it shows nothing.
+    readonly property bool hasLyrics: lyricsSynced
+        || (lyrics !== null && lyrics.text.length > 0)
+
+    // Ask for lyrics only while a box is actually on screen to draw them in.
+    // Resolving is not free on the player's side — tag reads, an LRCLIB request,
+    // and a writeback into the file — so an unopened drawer must not turn every
+    // track the user plays into a fetch. `live` is "some copy of the widget is
+    // on screen", `queueOpen` is "the drawer is out"; together they are exactly
+    // the condition under which the box is drawn.
+    readonly property bool lyricsWanted: live && queueOpen
+    // The server answers every LYRICS line with a fresh snapshot, so this must
+    // be edge-triggered, not re-sent on the reconnect timer's 5s tick — that
+    // would re-parse the whole queue twelve times a minute for nothing. -1 is
+    // "the server has not been told", which is also what a dropped connection
+    // resets it to: the subscription is per-connection on the player's side.
+    property int _sentWant: -1
+    function _sendWant() {
+        const w = lyricsWanted ? 1 : 0;
+        if (!queueSock.connected) { _sentWant = -1; return; }
+        if (_sentWant === w) return;
+        _sentWant = w;
+        queueSock.write("LYRICS " + w + "\n");
+        queueSock.flush();
+    }
+    onLyricsWantedChanged: _sendWant()
+
+    // The lit line. A binary search per position sample rather than a scan, and
+    // -1 until playback reaches the first timestamp (a long intro must not light
+    // the first line for a minute).
+    property int lyricIndex: -1
+    function _lineAt(pos) {
+        const l = lyricsSynced ? lyrics.lines : null;
+        if (!l || l.length === 0) return -1;
+        let lo = 0, hi = l.length - 1, ans = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (l[mid].t <= pos) { ans = mid; lo = mid + 1; }
+            else hi = mid - 1;
+        }
+        return ans;
+    }
+    function _refollow() {
+        lyricIndex = (hasPlayer && lyricsSynced) ? _lineAt(player.position) : -1;
+    }
+    onQueueJsonChanged: _refollow()
+    Connections {
+        target: root.player
+        enabled: root.hasPlayer && root.lyricsSynced && root.lyricsWanted
+        function onPositionChanged() { root._refollow(); }
+    }
+
     // "the player is up and serving us a queue" — NOT "the queue has rows in it".
     // Its only consumer is MediaContent's empty-state label, which is drawn
     // exactly when `queue.length === 0`; with a `length > 0` term in here that
@@ -181,9 +273,16 @@ Singleton {
         onTriggered: {
             if (!queueSock.connected)
                 queueSock.connected = true;
+            // Re-assert the lyrics subscription after a reconnect. The server
+            // holds it per CONNECTION, so a player restart drops it silently and
+            // the box would stay empty until the drawer was closed and reopened.
+            // `_sendWant` is a no-op when the server already knows.
+            root._sendWant();
         }
     }
-    onPlayerUpChanged: if (!playerUp) { queueSock.connected = false; root.queueJson = ""; }
+    onPlayerUpChanged: if (!playerUp) {
+        queueSock.connected = false; root.queueJson = ""; root._sentWant = -1;
+    }
 
     function stateJson() {
         return JSON.stringify({
@@ -296,8 +395,15 @@ Singleton {
 
     // MPRIS position isn't pushed live — re-emit positionChanged on a timer while
     // playing so the seekbar binding re-reads the interpolated value.
+    //
+    // 200ms while a lyrics box is following, because that re-emit is also what
+    // moves the lit line: at 500ms a line can light up half a second after it is
+    // sung, which on a four-line chorus is visibly out of step. The value is
+    // interpolated between D-Bus polls either way, so a shorter tick costs a
+    // property read and no round trip — and it applies only while the drawer is
+    // open on a track that actually has synced words.
     Timer {
-        interval: 500
+        interval: root.lyricsSynced && root.lyricsWanted ? 200 : 500
         running: root.live && root.playing && root.hasPlayer
         repeat: true
         onTriggered: if (root.player) root.player.positionChanged()
