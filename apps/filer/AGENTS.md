@@ -31,9 +31,32 @@ context menu, drop target, dialogs. It used to be an inline
 put two of them side by side. The id stayed `view`, so every reference inside it
 reads as it always did. `Main.qml` is now only the window and its chrome.
 
-- **`sp` (or F3) toggles it; F6 moves the chrome to the other pane.** The right
-  pane is a `Loader`, so an unsplit window pays for no second listing, watch set
-  or thumbnail queue.
+- **Two titlebar buttons, kitty's own: `|` splits RIGHT and `_` splits DOWN.**
+  Same labels and meaning as `pylib/kitty-vtb.py`'s `vsplit`/`hsplit`, so the
+  gesture is one gesture across the desktop. `_` and not kitty's `-` because a
+  bare `-` is the **spacer token** in the vtb button-array protocol.
+  - Each stays a **toggle**: the button matching the current orientation closes
+    the split; the *other* one **re-orients in place**, keeping both panes and
+    their directories (only the rects change, the trailing pane's `Loader` is
+    never torn down). Off, either button opens in its own orientation.
+  - Lit (state 1) on the active orientation, and **both disabled (state 2)
+    while `picking`** — a picker is never split.
+  - **F3** toggles in the current/last orientation, **Shift+F3** is "split the
+    other way" (open stacked, or re-orient); **F6** moves the chrome to the
+    other pane, in either orientation.
+- **One geometry, projected on either axis.** `splitVertical` picks the axis;
+  `paneLeadSize`/`paneTrailPos`/`paneTrailSize` are measured along it and
+  `paneLeadW/H`, `paneTrailX/Y/W/H` are the rects that fall out. One
+  `splitRatio` is reused on whichever axis is active, so re-orienting keeps the
+  proportion. The minimums differ by axis — **`minPaneW` 220, `minPaneH` 150**:
+  220px is where the filename column stops eliding to nothing, while vertically
+  a pane only has to keep a few list rows under the preview panel, whose own
+  splitter already clamps itself to `view.height - 90`. `paneTrailSize` has a
+  hard `Math.max(1, …)` floor: a window too small for two minimums must still
+  not produce a zero-size rect, because filer feeds the vtb socket and
+  hyprvtb's `renderRect` aborts the compositor on one.
+- The trailing (right/bottom) pane is a `Loader`, so an unsplit window pays for
+  no second listing, watch set or thumbnail queue.
 - **`win.pane` is the FOCUSED pane, and the chrome reads nothing else** — the
   title/address bar, the sort buttons, every file operation, the dir-size
   footer. Clicking anywhere in a pane points the chrome at it
@@ -54,20 +77,30 @@ reads as it always did. `Main.qml` is now only the window and its chrome.
   union; a pane hands its key back on destruction.
 - **Only the left pane persists dir/sort/hidden** — one `state.json` cannot hold
   two panes' sort orders. The right pane persists just `splitDir`, which with
-  `split` and `splitRatio` is enough to restore the split as it was. A restored
-  split points the chrome at the LEFT pane; opening one by hand focuses the new
-  (right) one, because that is the pane you just asked for.
-- **A picker is never split** (`filer --pick` is one transient errand): the `sp`
-  button is disabled and `toggleSplit()` refuses.
+  `split`, `splitVertical` and `splitRatio` is enough to restore the split as it
+  was. A restored split points the chrome at the LEFT pane; opening one by hand
+  focuses the new (right) one, because that is the pane you just asked for.
+  `splitVertical` defaults to **true** in `main.py` — a `state.json` written
+  before the split had an axis has no such key, and must come back as the
+  side-by-side split that was then the only one.
+- **A picker is never split** (`filer --pick` is one transient errand): both
+  split buttons are disabled and `setSplit()` refuses.
 - **The row's timestamp columns drop out, widest-first, below ~620/~470px** —
   three fixed columns in a half-width pane left the filename elided to nothing.
   They go to `width: 0`, not `visible: false`: the next column anchors to this
   one's left edge and an invisible item keeps its geometry.
 
-Verify with `tools/split-test.py` (offscreen, 40 checks — geometry, which pane
-the chrome follows, the watch union, a real drop into the right-hand pane, and
-the restore). It redirects `Settings` into a temp dir, which any harness that
-navigates or sorts **must** do or it rewrites where the user's own filer reopens.
+Verify with `tools/split-test.py` (offscreen, ~70 checks — geometry on both
+axes, which pane the chrome follows, the watch union, a real drop into the
+right-hand pane, the re-orientation keeping both panes, the per-axis ratio
+clamps, the zero-size guard at absurd window sizes, and the restore of an old
+and a stacked `state.json`). Its stub `Titlebar` carries the real `clicked`
+signal, so the button ids are exercised, not just read. It redirects `Settings`
+into a temp dir, which any harness that navigates or sorts **must** do or it
+rewrites where the user's own filer reopens. Any harness that loads `Main.qml`
+must also set every `startSplit*` context property (`drop-test.py`,
+`pick-test.py` do) — an unqualified read of a missing one is a `ReferenceError`
+that takes the whole `Component.onCompleted` with it.
 
 ## Drag and drop — both halves
 

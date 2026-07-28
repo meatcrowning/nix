@@ -728,12 +728,19 @@ def main():
     ctx.setContextProperty("startShowHidden", bool(settings.value("showHidden", True)))
     # last preview-panel height (px), restored into view.gridPanelH on startup.
     ctx.setContextProperty("startGridPanelH", int(settings.value("gridPanelH", 200) or 200))
-    # split view, as it was left: whether it was open, what the RIGHT pane was
-    # showing (the left one is the ordinary "dir" above) and where the divider
-    # sat. A picker never restores it — Main.qml gates on `picking`.
+    # split view, as it was left: whether it was open, which way it was divided,
+    # what the TRAILING pane was showing (the leading one is the ordinary "dir"
+    # above) and where the divider sat. A picker never restores it — Main.qml
+    # gates on `picking`.
     split_dir = settings.value("splitDir", "") or ""
     ctx.setContextProperty("startSplit", bool(settings.value("split", False)))
     ctx.setContextProperty("startSplitDir", split_dir if os.path.isdir(split_dir) else "")
+    # orientation: true = side by side (the `|` button), false = stacked (`_`).
+    # A state.json written before the split grew an axis has no such key at all,
+    # and must restore as the side-by-side split that was then the only one —
+    # hence the True default rather than a falsy one.
+    ctx.setContextProperty("startSplitVertical",
+                           bool(settings.value("splitVertical", True)))
     try:
         ratio = float(settings.value("splitRatio", 0.5))
     except (TypeError, ValueError):
