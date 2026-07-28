@@ -14,6 +14,29 @@ per-family reason string rather than a silent failure). Chrome is hyprvtb
 titlebar buttons (generate/cancel/view switch + bottom-anchored settings
 drawer).
 
+## The look is the desktop's, and painter is where it was worst
+
+painter used to break eight of `~/nix/DESIGN.md`'s rules at once; §19.1 there
+records each one and what it became. What that leaves you with, mechanically:
+
+- **`TextButton.qml` is the only clickable label.** Every action in this app
+  goes through it — hover tint, `PointingHandCursor`, `enabled` (0.4 opacity,
+  click refused), `lit`, `winActive` greying to `Theme.inactive`, and `flipY`
+  for a mirrored paired glyph. Do not drop a bare `MouseArea` on a `PixelText`.
+- **No `radius:` anywhere, and no `QtQuick.Controls` `ToolTip`.** `ToolTipArea`
+  is ours now: it reparents its chip into the window `contentItem`, because the
+  left column is `clip: true` panels inside a Flickable.
+- **`Spin` is a DISCRETE STEPPER**, so its wheel goes through
+  `qmlcommon/WheelNotch.qml`, not `WheelScroll`. Content scrollers take
+  `WheelScroll`; anything that steps a value takes the notch accumulator.
+- **`NO lineHeight/lineHeightMode` on the prompt `TextEdit`.** They are
+  `Text`-only; assigning them is a component-creation error that made
+  `PromptBox` unavailable and stopped the whole app loading for a while. The
+  comment in `PromptBox.qml` is load-bearing.
+- **Backend controls report `systemctl`, not intent** — `App.backendRunning` /
+  `App.unitState` are polled, and `startBackend`/`stopBackend`/`unloadModels`
+  all check their result before they claim one.
+
 **Every scrollable surface here is a `Kinetic*` view from `../qmlcommon/`** — the gallery grid, the model/LoRA/dropdown lists, the left parameter column and the prompt boxes. painter used to carry its own copy of `WheelScroll.qml` that nothing imported, so every one of those was a bare Flickable adding Qt's flick on top of the compositor's momentum. Never write a bare `ListView`/`GridView`/`Flickable` here; see [`../AGENTS.md`](../AGENTS.md).
 
 ## The backend is NOT packaged

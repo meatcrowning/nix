@@ -538,9 +538,9 @@ setting. Nothing that reads as a *window or surface* is rounded.
 
 **The two exceptions, and they are the only ones:** the panel's menus and
 tooltips use `radius: 3` (`ProcMenu`, `TaskMenu`, `Tooltip`), and its text-entry
-boxes use `radius: 2` (`Launcher`, `Lock`). Five of the six apps have **zero**
-`radius:` anywhere; painter has six, which is a divergence, not a precedent
-(§19.1). **Do not introduce a third rounding value.**
+boxes use `radius: 2` (`Launcher`, `Lock`). **All six apps now have zero
+`radius:` anywhere** — painter carried six until they were removed (§19.1), and
+they were never a precedent. **Do not introduce a third rounding value.**
 
 **Borders: 1px resting, 2px active.** [code] The single most-repeated idiom in
 the panel, written out identically in six places and worth knowing by heart:
@@ -1658,14 +1658,14 @@ Firefox's chrome and GTK dialogs do not follow the wallpaper.
 | glyph mapping for foreign text | `quickshell-files/Glyphs.qml` — **panel only** |
 | scroll physics (panel) | `quickshell-files/Kinetic.qml` |
 | scroll physics (apps) | `apps/qmlcommon/` + `apps/pylib/kinetic.py` |
-| discrete wheel steppers | `quickshell-files/WheelNotch.qml` |
+| discrete wheel steppers (panel) | `quickshell-files/WheelNotch.qml` |
+| discrete wheel steppers (apps) | `apps/qmlcommon/WheelNotch.qml` — the twin, same algorithm |
 | titlebar buttons | `apps/pylib/vtbclient.py` → `hyprvtb` |
 | launching binaries | `quickshell-files/NixPath.qml` |
 | settings widget vocabulary | `quickshell-files/Set*.qml` |
 
 **`apps/qmlcommon/` is the place for QML every app needs**, reached with
-`import "../../qmlcommon"`. It currently holds only the kinetic scrollers. A
-component that exists in two apps belongs there.
+`import "../../qmlcommon"`. A component that exists in two apps belongs there.
 
 **The scroll feel is defined in THREE hand-synced places** and the repo says so
 itself: `hypr-files/hyprland.lua` (both seed-once copies, the
@@ -1696,24 +1696,39 @@ Where a divergence has a clear correct side it is: **the panel's value wins for
 anything the panel also draws**, and **anything duplicated byte-for-byte between
 two apps belongs in `apps/qmlcommon/`.**
 
-**painter is the outlier app**, and it breaks eight rules in this document at
-once. Listing them together because the pattern is the finding, not any one
-item: six `radius:` values where every other app has zero (§4); a
-`QtQuick.Controls.Basic` `ToolTip` in the **system font and system palette** —
-the only place a non-pixel font can appear on this desktop (§2.1, §8); no button
-component at all (clickable `PixelText` with no hover, no `cursorShape` on any
-of its 29 `MouseArea`s, no disabled state) (§4, §10); `PreferNoHinting` on its
-text inputs, directly contradicting `PixelText` (§2.2); zero use of
-`Theme.inactive`, so its content stays bright while the titlebar greys (§3.1);
-UPPERCASE titlebar labels and `*` for settings where everyone else uses
-lowercase and `st` (§12.1); its settings is a **centred modal with no
-animation** where player's and surfer's slide out from the button that owns them
-(§7.4, §6.2); wheel constants re-derived locally instead of imported from
-`pylib/kinetic.py` (§9.2); and three controls that never reflect state —
-`[ start ]` / `[ stop ]` are always live regardless of whether the backend is
-running, and `stopBackend()` reports "backend stopped" without checking the
-return code (§10). **player's settings panel is the correct pattern in the same
-tree**: it flips its own label to `scanning`, lights up, and guards the handler.
+**painter WAS the outlier app** — it broke eight rules in this document at once,
+and the whole set was closed in one pass. The list is kept because the *pattern*
+was the finding, and because each entry now names the shape the rest of the tree
+should be checked against:
+
+| it did | it now does |
+|---|---|
+| six `radius:` values, where every other app has zero (§4) | zero |
+| a `QtQuick.Controls.Basic` `ToolTip` in the **system font and system palette** — the only place a non-pixel font could appear on this desktop (§2.1, §8) | its own `ToolTipArea`: 350ms dwell, 220ms `OutCubic` clipped slide out of a fixed left edge, `bgAlt` + 1px `border`, `PixelText` |
+| no button component at all — clickable `PixelText`, no hover, no `cursorShape` on any of its 29 `MouseArea`s, no disabled state (§4, §10) | one `TextButton.qml`: player's `HeaderButton` idiom + filer's `BrowserButton` `enabled`/`winActive` semantics, and `cursorShape` on every remaining hit target |
+| `PreferNoHinting` on its text inputs, contradicting `PixelText` (§2.2) | `PreferFullHinting` |
+| zero use of `Theme.inactive`, so its content stayed bright while the titlebar greyed (§3.1) | `root.fgAccent` on its accented chrome, filer's idiom |
+| UPPERCASE titlebar labels and `*` for settings (§12.1) | `gen` `x` `p` `g` `st`, and lowercase section titles |
+| a **centred modal with no animation** for settings (§7.4, §6.2) | a bottom-right drawer sliding out of the `st` cell that owns it, built like player's `SettingsPanel` |
+| wheel constants re-derived locally (§9.2) | `qmlcommon/WheelNotch.qml` — and note the reclassification: a `Spin` is a **discrete stepper**, so it takes the notch accumulator, not `WheelScroll` |
+| three controls that never reflected state — `[ start ]`/`[ stop ]` always live, `stopBackend()` reporting "backend stopped" without checking the return code (§10) | `App.backendRunning` polls `systemctl --user is-active`; start/stop/unload light and refuse from it; `stopBackend()` toasts systemd's own failure; `unloadModels()` waits for the `/free` reply instead of claiming success on a POST |
+
+**player's settings panel remains the reference for a settings drawer** in this
+tree: it flips its own label to `scanning`, lights up, and guards the handler.
+
+Two things that pass came out of that pass and are worth carrying:
+
+- **`enabled` is `Item`'s own property — do not redeclare it** on a button
+  component. Shadowing it warns at load and leaves the base property still
+  disabling the subtree underneath, which is the behaviour you wanted anyway.
+- **`lineHeight`/`lineHeightMode` are `Text`-only.** `TextEdit` does not have
+  them, so assigning them is a component-creation *error*, not a no-op.
+  `21534ca`, the kitty-exact pass, added them to painter's `PromptBox` by
+  analogy with `PixelText`; that made `PromptBox` unavailable, which took
+  `PromptEditor` and then the whole of `Main.qml` with it. **painter could not
+  start at all between that commit and this one.** A multi-line editor therefore
+  leads at Qt's rounded 16px, not kitty's 15px cell — accepted, and the comment
+  in that file says so.
 
 **Two more honesty findings, outside painter:**
 
@@ -1878,6 +1893,8 @@ new candidates add rows here rather than editing the rules above.
 | §18 the dock shows the system's tiles | `[panel]` | the disk tile is classic-mode only | by choice (§18) | [his] |
 | §6.1 nothing on screen loads asynchronously | `[panel]` | `MediaContent`'s cover art (`asynchronous`+`cache`, over a placeholder) and `TaskCell`'s lazy `DesktopEntries` scan (over a letter fallback) still load async | **under review.** Both were inspected during `79e9dea` and deliberately left: neither can produce an empty frame, because each draws over something, and neither was changed without measuring first | candidate |
 | §8 one tooltip dwell | `[hyprvtb]` | 450ms, against the panel's 350ms | **unruled.** The titlebar is a place the cursor passes through more often, so a longer dwell *may* be deliberate — nothing records it as such (Open question 4) | candidate |
+| §2.1/§2.2 a text row is exactly one font cell, `lineHeight` pinned under `FixedHeight` | `[painter]` | the prompt `TextEdit` leads at Qt's rounded 16px | **impossible, not a choice:** `lineHeight`/`lineHeightMode` are `Text`-only properties. Assigning them to a `TextEdit` is a component-creation *error* — `21534ca` did, and painter could not load its QML at all until it was removed. The one multi-line editor in the tree | [code] |
+| §5.4 widget titles come off; the content identifies itself | `[painter]` | the left column's `Panel` boxes keep section titles (`model`, `prompt`, `sampling`, `resolution`, `patches`, `lora`) | **unruled.** They are *collapsible* boxes: collapsed to a header, a box with no title is unidentifiable, and the title is also the click target. §5.4's evidence is all about non-collapsible widgets (Open question 10) | candidate |
 
 ---
 
@@ -1921,10 +1938,16 @@ Agent *proposals*, listed separately on purpose. Nothing above depends on them.
    wire them, or remove the controls? §10 says a control that is drawn is a
    control that works, so leaving them visible is the one option that is
    definitely wrong.
-10. **Bring painter into line?** §19.1 lists eight rules it breaks. It is a
-    contained, mechanical change (borrow filer's `BrowserButton`, player's
-    settings-panel pattern, drop the six `radius:`, swap the system `ToolTip`).
-    Worth doing as one pass, or leave it?
+10. ~~**Bring painter into line?**~~ **Done** — all eight in one pass; §19.1
+    records what each became. Two things it left standing, deliberately, and
+    which want a ruling: painter's `Panel` boxes still carry **section titles**
+    (`model`, `prompt`, `sampling`, ...) where §5.4 says widget titles come off
+    and the content identifies itself — but a collapsed box with no title is
+    unidentifiable, so this may be a case §5.4 should exempt rather than a
+    divergence to fix. And a **`Spin` is a discrete stepper**, so it went to
+    `WheelNotch` rather than `WheelScroll`: one classic detent is still exactly
+    one step, but the touchpad now moves a value every ~10px of finger travel
+    (the panel's stepper unit) where painter's hand-rolled version wanted 40px.
 11. **Sweep the non-ASCII titlebar labels?** viewer's `‖ ▶ ‹ › − ×` and filer's
     `↑`/`↓` are drawn by the plugin in a font that lacks them. The panel was
     swept for this once (`48a6ff3`); the apps never were.

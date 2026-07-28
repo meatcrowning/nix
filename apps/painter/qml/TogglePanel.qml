@@ -5,7 +5,7 @@ import QtQuick
 // values from the workflow this was built from.
 Panel {
     id: panel
-    title: "PATCHES"
+    title: "patches"
     badge: (root.gen.negpip ? "negpip " : "") + (root.gen.modelSampling ? "shift" : "")
 
     Toggle {

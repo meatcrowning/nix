@@ -171,6 +171,15 @@ copy at all. `apps/pylib/kinetic.py` is the only Python one (`DETENT`,
 `ANGLE_PER_PIXEL`, `WHEEL_GAIN`, `is_wheel_detent()`); anything touching
 `QWheelEvent` in Python imports from there rather than re-deriving the numbers.
 
+**A control that STEPS a value is not a scroller.** `qmlcommon/WheelNotch.qml`
+is for those — painter's numeric `Spin` boxes today — and it is the apps-side
+twin of `home/prog/quickshell-files/WheelNotch.qml` (same algorithm, two roofs,
+retune both). One classic detent is exactly one step; a touchpad's sub-notch
+remainder is *carried*, never rounded up; `maxSteps` caps a single event, so a
+compositor momentum coast cannot walk a value across its whole range on one
+flick. painter had its own accumulator with the constants written out again and
+no ceiling, which is what this replaces.
+
 **The one exception, and why it is one:** `viewer/qml/ImageViewer.qml` keeps a
 bare `Flickable`. Its `interactive` buys DRAG-panning of a zoomed image, and its
 `WheelHandler` (delta-proportional, `exp(ln1.2/120 · d)`) consumes every wheel
