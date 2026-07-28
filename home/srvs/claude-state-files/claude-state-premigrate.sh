@@ -44,6 +44,24 @@ if [ -d "$REPO/projects/.git" ]; then
   fi
 fi
 
+# The old repo's seeded .gitignore/.gitattributes outlive its .git, and the
+# .gitignore is the ALLOWLIST — `*`, re-include only `*/memory/**`. A nested
+# .gitignore still applies to its own subtree in the OUTER repo, so leaving it
+# there quietly reproduced the exact bug this change exists to fix: everything
+# else synced and not one transcript did. Caught only because the first run was
+# checked file-by-file; `git add -A` reports nothing about what it skipped.
+for stale in .gitignore .gitattributes; do
+  [ -f "$REPO/projects/$stale" ] || continue
+  dest="$HOME/.cache/claude-memories-projects$stale-$(date +%Y%m%d-%H%M%S)"
+  # Seeded read-only, so mv needs to be allowed to clobber the destination.
+  if mv -f "$REPO/projects/$stale" "$dest" 2>/dev/null; then
+    log "retired the old allowlist projects/$stale -> $dest"
+  else
+    log "FAILED to move $REPO/projects/$stale aside — transcripts will NOT sync"
+    exit 1
+  fi
+done
+
 # ---- 2. repo + merge driver -------------------------------------------------
 # claude-memory-sync.sh bootstraps the repo itself, but the `ours` merge driver
 # has to exist BEFORE its first `git merge`, and the script has no hook for
