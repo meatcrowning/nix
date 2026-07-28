@@ -103,15 +103,22 @@ Window {
             wrapMode: Text.WordWrap
         }
 
-        // ---- why root is being asked for ----
+        // ---- why root is being asked for, and for what ----
         //
-        // Caller-supplied ($SUDO_ASKPASS_REASON), therefore UNTRUSTED, therefore
-        // walled off in its own inset box with a caption that says whose words
-        // these are. That framing is the point: the reason must never be able to
-        // read as the dialog's own voice, so it cannot be used to talk the user
-        // into approving something. main.py sanitizes it and PixelText renders
-        // PlainText, so the worst a hostile caller manages is clamped, inert
-        // prose inside this rectangle.
+        // Two rows, both walled off in this one inset box under captions that
+        // say where the text came from. That framing is the point: neither line
+        // may read as the dialog's own voice, so neither can be used to talk the
+        // user into approving something. main.py sanitizes both and PixelText
+        // renders PlainText, so the worst a hostile caller manages is clamped,
+        // inert prose inside this rectangle.
+        //
+        //   startReason  - $SUDO_ASKPASS_REASON, the caller's own words. UNTRUSTED,
+        //                  and usually absent, because callers forget to set it.
+        //   startCommand - the argv of the sudo process that is waiting on us,
+        //                  read from /proc. Also untrusted text, but it is the
+        //                  thing actually being authorised rather than a claim
+        //                  about it, and it cannot be forgotten. It is what makes
+        //                  a reason-less prompt still worth reading.
         Rectangle {
             width: parent.width
             height: reasonCol.implicitHeight + 16
@@ -131,7 +138,7 @@ Window {
                 PixelText {
                     width: parent.width
                     text: startReason ? "REASON GIVEN BY THE CALLER"
-                                      : "NO REASON GIVEN"
+                                      : "NO REASON GIVEN BY THE CALLER"
                     color: Theme.textDim
                 }
 
@@ -142,6 +149,23 @@ Window {
                     color: Theme.text
                     wrapMode: Text.WordWrap
                     maximumLineCount: 4
+                    elide: Text.ElideRight
+                }
+
+                PixelText {
+                    width: parent.width
+                    visible: startCommand !== ""
+                    text: "COMMAND SUDO IS ABOUT TO RUN"
+                    color: Theme.textDim
+                }
+
+                PixelText {
+                    width: parent.width
+                    visible: startCommand !== ""
+                    text: startCommand
+                    color: Theme.text
+                    wrapMode: Text.WrapAnywhere
+                    maximumLineCount: 3
                     elide: Text.ElideRight
                 }
             }

@@ -131,6 +131,26 @@ def main():
     check("sanitize: markup is NOT stripped (QML renders PlainText)",
           s("<b>hi</b>") == "<b>hi</b>", repr(s("<b>hi</b>")))
 
+    check("sanitize: ascii_only replaces non-ASCII (pixel font has no glyph)",
+          s("café — x", ascii_only=True) == "caf? ? x",
+          repr(s("café — x", ascii_only=True)))
+
+    # --- the derived command line: sudo's flags off, the command intact ---
+    # The /proc walk itself needs a real sudo parent and is verified live (a stub
+    # $SUDO_ASKPASS under `sudo -k -A <cmd>`, which prompts nobody and submits no
+    # password); what is testable here is the argv parsing it feeds.
+    strip = mod._strip_sudo_options
+    cases = [
+        (["-k", "-A", "nixos-rebuild", "switch", "--flake", "/home/lam/nix#top"],
+         "nixos-rebuild switch --flake /home/lam/nix#top"),
+        (["-A", "-u", "root", "--", "/bin/ls", "-la", "/root"], "/bin/ls -la /root"),
+        (["-A", "sh", "-c", "rm -rf /tmp/x && echo done"],
+         "sh -c 'rm -rf /tmp/x && echo done'"),
+        (["-k", "-A", "-v"], "sudo -k -A -v"),          # flags only: show the flags
+    ]
+    for argv, want in cases:
+        check(f"sudo_command: {' '.join(argv)!r}", strip(argv) == want, repr(strip(argv)))
+
     print("\n" + ("ALL PASS" if not fails else f"FAILED: {', '.join(fails)}"))
     sys.exit(1 if fails else 0)
 

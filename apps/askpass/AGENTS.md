@@ -50,28 +50,54 @@ this repo) would leave the machine with no way to authenticate at all. That is
 why ksshaskpass is still installed in `askpass.nix` — it is the parachute, not
 dead weight.
 
-## Telling the user WHY root is being asked for
+## Telling the user WHY root is being asked for — and FOR WHAT
 
-The caller states the reason; the dialog never invents one.
+Two lines in the inset box, from two different places, and the dialog invents
+neither.
+
+**The reason is the caller's words.** One short clause, in the user's terms:
 
 ```bash
 SUDO_ASKPASS_REASON="rebuilding the flake" sudo -A nixos-rebuild switch ...
 ```
 
-**Agents in this repo should set it on every `sudo -A` call.** One short clause
-describing the action, in the user's terms — they are being asked to approve
-something and deserve to know what. Unset is handled honestly: the panel reads
-`NO REASON GIVEN` rather than going blank or guessing.
+**The command is read out of `/proc`, and cannot be forgotten.** `sudo_command()`
+in `main.py` walks the parent chain from `getppid()` to the first process whose
+`comm` is `sudo` — the dialog is always its (grand)child: askpass helper ← the
+`sudo-askpass` wrapper ← sudo — reads that process's `cmdline`, strips sudo's own
+flags (`_SUDO_ARG_OPTS` covers the ones that eat the next token) and shows what
+is left.
 
-Both displayed strings — the reason and sudo's own argv[1] prompt — are
-**untrusted**, and a password dialog whose body text is caller-controlled is a
-phishing surface. Two defences, and **neither may be removed**:
+That second line exists because the first one was **theoretically fine and
+empirically useless**. `$SUDO_ASKPASS_REASON` does reach this process when it is
+set — verified end to end with a stub askpass under a real `sudo -k -A`, the var
+arrives intact — but a sweep of every `sudo -A` an agent has actually run in this
+repo found **not one** that set it. The instruction had been in three files for
+as long as the dialog has existed. So the prompt said `NO REASON GIVEN` every
+single time, and a privilege dialog that can never say what it is for is not
+worth reading. Anything derived from the caller's discipline was going to decay
+the same way; the process tree does not need cooperation.
+
+Keep setting the reason anyway — it says *why*, which argv cannot. But treat the
+command line as the load-bearing half.
+
+All three displayed strings — the reason, the derived command, and sudo's own
+argv[1] prompt — are **untrusted**, and a password dialog whose body text is
+caller-controlled is a phishing surface. (The command is untrusted text but
+*trustworthy evidence*: it is the thing being authorised rather than a claim
+about it, which is exactly why a lying reason cannot hide behind it.) Two
+defences, and **neither may be removed**:
 
 - `sanitize()` in `main.py` drops C0/C1 control characters, collapses
   newlines/tabs to spaces, and clamps length (240 chars, 120 for the prompt), so
   nothing can escape its line, forge a blank region, or grow the window enough to
-  push the password field off-screen. Measured: a 400-char hostile reason yields
-  a 520x293 window.
+  push the password field off-screen. `maximumLineCount` (4 for the reason, 3 for
+  the command) bounds it again in QML. Measured offscreen, settled: 520x259 with
+  neither line, 520x312 with a command, and 520x346 for a hostile 400-char reason
+  plus a 450-char command — the ceiling.
+  The derived command is additionally sanitized `ascii_only=True`: it is a path,
+  not prose, and one non-ASCII byte would drop the whole line onto a fallback
+  font (see the layout traps below).
 - `PixelText.qml` sets `textFormat: Text.PlainText`. QML's `Text` defaults to
   `AutoText`, which **sniffs for HTML and interprets it** — markup must be shown,
   never rendered.
