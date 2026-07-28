@@ -129,12 +129,22 @@ Item {
         }
     }
 
-    // Layout: the text block pinned to the top, the seekbar + transport pinned
-    // to the bottom, and the artwork/spectrum row taking EVERYTHING in between.
-    // That middle row is what absorbs a tall tile, so the widget has no dead
-    // space at the bottom whatever height the grid gives it — and a bigger tile
-    // buys a bigger cover and a taller spectrum rather than emptiness.
-    readonly property int naturalArt: 60
+    // Layout: the artwork/spectrum row starts at the widget's TOP edge, the
+    // seekbar + transport are pinned to the bottom, and that middle row takes
+    // EVERYTHING in between. So the widget has no dead space at either end
+    // whatever height the grid gives it — and a bigger tile buys a bigger cover
+    // and a taller spectrum rather than emptiness.
+    //
+    // The track line used to be a full-width row ABOVE all of this, which left
+    // the cover art and the volume column starting 22px down from the top edge
+    // for the sake of a label that only ever described the track. It now lives
+    // inside the spectrum's own column (`specCol`), where it labels the one
+    // thing it is next to, and the 22px it cost went to the artwork — which is
+    // why this constant is 82 (60 + the 16px line + its 6px gap) rather than 60.
+    // Keeping the sum identical is deliberate: `implicitHeight` and
+    // `naturalRest` are unchanged, so the popup's height, the tile's reported
+    // `wants` and the queue drawer's arithmetic all stay exactly where they were.
+    readonly property int naturalArt: 82
 
     // The drawer's own padding, above the first queue row AND below the last.
     // Before it there was 10px above the drawer and nothing below: the last
@@ -155,45 +165,14 @@ Item {
     // The open drawer's 90 is a CONSTANT, not `queueH`: queueH is derived from
     // the item's height, and feeding it back into implicitHeight — which is what
     // the popup takes its height FROM — is a binding loop.
-    implicitHeight: pad + drawerPad + top.height + 6 + naturalArt + 6 + bottom.height
+    implicitHeight: pad + drawerPad + naturalArt + 6 + bottom.height
                     + handle.height + (Media.queueOpen ? 90 : 0)
 
-    // ONE line: track on the left, artist on the right. It keeps its height when
-    // both are empty, so nothing below it moves when playback stops — which is
-    // the whole reason the strings are empty rather than a "nothing playing"
-    // placeholder (see Media.dispTitle).
-    Item {
-        id: top
-        anchors { top: parent.top; topMargin: root.pad; horizontalCenter: parent.horizontalCenter }
-        width: root.inner
-        height: 16
-
-        PixelText {
-            id: trackTitle
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-            // Give the artist at most a third, and only what it actually needs,
-            // so a long title uses the rest instead of eliding against a gap.
-            width: parent.width - artistText.width - (artistText.width > 0 ? 8 : 0)
-            elide: Text.ElideRight
-            text: Media.dispTitle
-            color: Theme.text
-        }
-        PixelText {
-            id: artistText
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-            width: Math.min(implicitWidth, parent.width / 3)
-            horizontalAlignment: Text.AlignRight
-            elide: Text.ElideRight
-            text: Media.dispArtist
-            color: Theme.textDim
-        }
-    }
-
-    // artwork + spectrum, filling the gap between the two blocks
+    // artwork + spectrum, from the widget's top edge down to the transport row
     Row {
         id: mid
         anchors {
-            top: top.bottom; topMargin: 6
+            top: parent.top; topMargin: root.pad
             bottom: bottom.top; bottomMargin: 6
             horizontalCenter: parent.horizontalCenter
         }
@@ -284,9 +263,60 @@ Item {
             }
         }
 
-        Spectrum {
+        // The spectrum, with the track line as its heading. The line is scoped
+        // to this column rather than spanning the widget so the cover and the
+        // volume bar reach the top edge; the spectrum is the one thing here with
+        // nothing of its own to say, so it is the one that gets the label.
+        Item {
+            id: specCol
             width: mid.width - artBox.width - vol.width - 16
             height: mid.height
+
+            // ONE line: track on the left, artist on the right. It keeps its
+            // height when both are empty, so the spectrum below it does not move
+            // when playback stops — which is the whole reason the strings are
+            // empty rather than a "nothing playing" placeholder (see
+            // Media.dispTitle).
+            Item {
+                id: trackLine
+                anchors { top: parent.top; left: parent.left; right: parent.right }
+                height: 16
+
+                // Both elide, and in this column they nearly always will —
+                // it is roughly half the width the line used to have. That is
+                // safe with the pixel font: Qt drops to three ASCII periods on
+                // its own when the family has no U+2026 (measured offscreen —
+                // `TextMetrics.elidedText` came back "…tr..." with 0x2e 0x2e
+                // 0x2e, pixel-identical to a hand-written "..."), so there is
+                // no fallback-font ascent drop and nothing to hand-roll here.
+                PixelText {
+                    id: trackTitle
+                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                    // Give the artist at most a third, and only what it actually
+                    // needs, so a long title uses the rest instead of eliding
+                    // against a gap.
+                    width: parent.width - artistText.width - (artistText.width > 0 ? 8 : 0)
+                    elide: Text.ElideRight
+                    text: Media.dispTitle
+                    color: Theme.text
+                }
+                PixelText {
+                    id: artistText
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                    width: Math.min(implicitWidth, parent.width / 3)
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    text: Media.dispArtist
+                    color: Theme.textDim
+                }
+            }
+
+            Spectrum {
+                anchors {
+                    top: trackLine.bottom; topMargin: 4
+                    left: parent.left; right: parent.right; bottom: parent.bottom
+                }
+            }
         }
     }
 
@@ -403,11 +433,11 @@ Item {
     // as tall as the rows it was given and the artwork above it goes back to its
     // natural size instead of being squeezed by a guess. A floor of 60 keeps it
     // usable in the popup copy, which has no extra rows to give.
-    // pad above the title line, drawerPad below the transport row — the two
+    // pad above the artwork row, drawerPad below the transport row — the two
     // vertical margins the layout below actually uses. It must stay EXACTLY the
     // non-drawer height or the artwork stops being size-invariant.
     readonly property real naturalRest:
-        pad + drawerPad + top.height + 6 + naturalArt + 6 + bottom.height + handle.height
+        pad + drawerPad + naturalArt + 6 + bottom.height + handle.height
     // EXACTLY the height past the widget's natural size, with NO floor and NO
     // animation of its own. Both were wrong, and together they are why the cover
     // art visibly ballooned before the queue arrived.

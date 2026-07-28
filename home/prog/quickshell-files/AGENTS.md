@@ -828,6 +828,16 @@ containing a missing glyph falls back to another font for it and loses ~5px of
 ascent, clipping the whole line — which is why the media widget's empty-title
 placeholder is `"-"` and every "reading..." is three dots.
 
+**`elide: Text.ElideRight` is the exception — do NOT hand-roll an ASCII
+elide.** Qt substitutes three ASCII periods by itself when the family has no
+U+2026, so an elided `PixelText` never takes the ascent hit above. Measured
+offscreen against the real font at 15px: `TextMetrics.elidedText` came back
+`"a very long tr..."` (`0x2e 0x2e 0x2e`), and the rendered pixels are identical
+to a hand-written `"..."` — same rows, same ink. A truncate-and-append helper
+would only re-implement it worse, and the font is monospace (advance exactly
+8px at 15px, so `implicitWidth == 8 * length`) if you ever need to do the
+arithmetic for something else.
+
 **A PAIR of ASCII glyphs is not a pair of arrows. Draw one glyph and mirror
 it.** There is no triangle either (`▲ ▼ ▴ ▾`, like `↑ ↓`, are all absent), so an
 up/down affordance has to come out of ASCII — and `^` is not `v` upside down
