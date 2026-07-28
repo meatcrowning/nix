@@ -87,7 +87,19 @@ Item {
     // not a bare line, it keeps a miniature of the graph, and asking for that
     // form is asking for the room it needs. Raising this is what buys the room;
     // on this panel it takes the drawer from four rows to three.
-    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 3 + 24
+    //
+    // PLUS `tileInset`, and that term is not a rounding allowance — leaving it
+    // out is what made the condensed forecast a bare header line for its whole
+    // life. What this number reserves is a TILE, but what has to fit inside it
+    // is `DockTile`'s Loader, which is anchored with `margins: 1` for the frame
+    // and is therefore 2px shorter than the tile. Measured on this panel: two
+    // grid rows = 62.6px of tile = 60.6px of content, against a 62px minimum —
+    // one and a half pixels short, so `miniGraph` went false, the graph was
+    // dropped ENTIRELY and the widget drew the bare-header tier that only
+    // exists for panels with no room at all. Any floor mirrored from a content
+    // component has to carry the frame it is drawn inside.
+    readonly property real tileInset: 2
+    readonly property real minWeatherPx: 2 * 10 + Theme.fontSize + 3 + 24 + tileInset
     readonly property int minWeatherRows: cellHeight > 0
         ? Math.max(1, Math.ceil((minWeatherPx + spacing) / (cellHeight + spacing))) : 2
     // 6 is the forecast's own `rs` below; it may not be reduced past its minimum.
