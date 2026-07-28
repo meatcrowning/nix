@@ -84,6 +84,12 @@
 #include <hyprland/src/protocols/types/DataDevice.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
 
+// Aquamarine, for the one question only the backend can answer: is this output
+// headless (see Hl::headlessMonitor below)? Hyprland's own Monitor.hpp already
+// pulls in <aquamarine/output/Output.hpp>; Backend.hpp is what carries the
+// eBackendType enum, and it is not transitively included.
+#include <aquamarine/backend/Backend.hpp>
+
 #include <algorithm>
 #include <cmath>
 
@@ -404,6 +410,35 @@ namespace Vtb::Hl {
         return g_pCompositor ? g_pCompositor->m_monitors : EMPTY;
 #endif
     }
+    // Is this an output NOBODY CAN LOOK AT? `tools/sandbox.sh` creates an
+    // off-screen monitor with `hyprctl output create headless` and launches
+    // agent test windows onto it, so anything that walks the window list has to
+    // be able to tell those apart from the user's own (see
+    // home/prog/AGENTS.md, "the promise is nothing of the agent's reaches his
+    // screen"). The panel has to infer it — no hardware identity, i.e. zero
+    // physical size and no make/model/serial/description — because all it has
+    // is `hyprctl -j monitors`. The compositor does not have to infer anything:
+    // Aquamarine knows which backend created the output, and a headless one
+    // says so. Available on BOTH pins (aquamarine 0.13.0 on top, 0.9.x on
+    // book — `IOutput::getBackend()` and `AQ_BACKEND_HEADLESS` are present and
+    // identically spelled in both).
+    //
+    // The hardware-identity test survives as the fallback for the one case the
+    // honest question cannot answer: a monitor with no `m_output` at all (a
+    // half-torn-down output), where there is no backend to ask.
+    inline bool headlessMonitor(PHLMONITOR m) {
+        if (!m)
+            return false; // no monitor is not the same claim as "invisible"
+        if (m->m_output) {
+            if (const auto BACKEND = m->m_output->getBackend())
+                return BACKEND->type() == Aquamarine::AQ_BACKEND_HEADLESS;
+            const auto& O = m->m_output;
+            return O->physicalSize == Vector2D{} && O->make.empty() && O->model.empty() && O->serial.empty() &&
+                O->description.empty();
+        }
+        return m->m_description.empty() && m->m_shortDescription.empty();
+    }
+
     inline PHLMONITOR monitorAt(const Vector2D& v) {
 #if VTB_HL_056
         return State::monitorState()->query().vec(v).run();

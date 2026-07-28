@@ -312,8 +312,36 @@ static std::string vtbRelaunchCmd(pid_t pid) {
     return "exec " + argv;
 }
 
-void vtbSaveSession() {
-    const auto PATH = vtbSessionPath();
+// NOT ONE OF HIS WINDOWS. An agent's test windows live on the off-screen
+// monitor `tools/sandbox.sh` creates (`hyprctl output create headless`) and are
+// tagged `sandbox`; the whole promise of that tool is that nothing of the
+// agent's reaches the user's screen. A session snapshot is the one thing on
+// this desktop that can break that promise ACROSS A REBOOT — a snapshot taken
+// while a sandbox is up would relaunch the agent's windows on his real desktop
+// at the next fresh login, long after the sandbox and its monitor are gone.
+//
+// Two independent tests, because they answer different questions (AGENTS.md:
+// "use the tag for whose window this is, the monitor for whether he can see
+// it") and each covers the other's blind spot: the monitor test still holds for
+// a window the sandbox never launched (something spawned by a test that
+// inherited its workspace, so carries no tag), and the tag still holds for a
+// sandbox window that has been MOVED onto a real monitor.
+static const char* vtbAgentWindowReason(PHLWINDOW w) {
+    if (!w)
+        return nullptr;
+    if (Hl::headlessMonitor(w->m_monitor.lock()))
+        return "headless output";
+    if (w->m_ruleApplicator && w->m_ruleApplicator->m_tagKeeper.getTags().contains("sandbox"))
+        return "sandbox tag";
+    return nullptr;
+}
+
+// Write the snapshot that save_session WOULD write, to an arbitrary path, and
+// return how many windows it holds. Split out from vtbSaveSession so the
+// window-SELECTION rules above can be exercised (luaSessionProbe, writing to a
+// scratch path) without arming a restore at the next login — calling
+// save_session to find out what it does is exactly the thing nobody may do.
+static int vtbWriteSession(const std::string& PATH, std::string* skipped = nullptr) {
     std::filesystem::create_directories(std::filesystem::path(PATH).parent_path());
     std::ofstream f(PATH, std::ios::trunc);
 
@@ -324,6 +352,13 @@ void vtbSaveSession() {
         const auto w = b->getOwner();
         if (!w || !w->m_isMapped || w->m_class.empty() || w->m_class == SCRATCH_CLASS)
             continue;
+
+        if (const char* WHY = vtbAgentWindowReason(w)) {
+            // an agent's sandbox window is never persisted
+            if (skipped)
+                *skipped += "# skipped " + w->m_class + " (" + WHY + ")\n";
+            continue;
+        }
 
         const std::string cmd = vtbRelaunchCmd(w->getPID());
         if (cmd.empty())
@@ -344,20 +379,26 @@ void vtbSaveSession() {
         n++;
     }
     f.close();
+    return n;
+}
+
+void vtbSaveSession() {
+    const int n = vtbWriteSession(vtbSessionPath());
 
     HyprlandAPI::addNotification(PHANDLE, "[hyprvtb] session saved (" + std::to_string(n) + " windows)",
                                  CHyprColor{0.4, 0.8, 1.0, 1.0}, 3000);
 }
 
-// Read the snapshot and, ONLY on a fresh (empty) session, relaunch every entry
-// and queue it for layout. onNewWindow consumes the queue as windows appear.
-void vtbRestoreSession() {
-    std::ifstream f(vtbSessionPath());
-    if (!f.good())
-        return;
-
+// Parse session.tsv into entries. No side effects: nothing is spawned, nothing
+// is placed, the file is not rewritten.
+static std::vector<SSessionEntry> vtbParseSession(const std::string& PATH) {
     std::vector<SSessionEntry> entries;
-    std::string                line;
+
+    std::ifstream f(PATH);
+    if (!f.good())
+        return entries;
+
+    std::string line;
     while (std::getline(f, line)) {
         std::istringstream ss(line);
         SSessionEntry      e;
@@ -379,6 +420,53 @@ void vtbRestoreSession() {
             continue;
         entries.push_back(std::move(e));
     }
+    return entries;
+}
+
+// SAVE is only half of the sandbox guarantee. A snapshot taken by an older
+// build (<=2.92, which recorded every decorated window regardless of output)
+// can still be sitting in session.tsv with an agent's test windows in it, and
+// restore would relaunch them at the next fresh login — the leak surviving a
+// reboot, which is the worst version of it.
+//
+// It cannot be answered by asking the entry what monitor it came from: the file
+// records geometry, not an output, and the sandbox monitor is long gone by
+// login. What CAN be asked is whether the saved box lands anywhere the user can
+// see. A sandbox monitor is created beside the real ones, so its windows carry
+// coordinates that fall on no monitor that exists at login — and such an entry
+// was never going to be restorable anyway: the restore path places a window at
+// its exact saved position with no clamp, so the user would get an invisible
+// window plus a process, which is strictly worse than not relaunching it.
+//
+// Returns the reason to drop the entry, or nullptr to keep it.
+static const char* vtbEntryUnplaceable(const SSessionEntry& e) {
+    if (e.box.w < 1 || e.box.h < 1)
+        return "degenerate geometry";
+
+    for (const auto& m : Hl::monitors()) {
+        if (!m || Hl::headlessMonitor(m))
+            continue;
+        const double MX = m->m_position.x, MY = m->m_position.y, MW = m->m_size.x, MH = m->m_size.y;
+        if (MW < 1 || MH < 1)
+            continue;
+        if (e.box.x < MX + MW && e.box.x + e.box.w > MX && e.box.y < MY + MH && e.box.y + e.box.h > MY)
+            return nullptr;
+    }
+    return "lands on no visible monitor";
+}
+
+// Read the snapshot and, ONLY on a fresh (empty) session, relaunch every entry
+// and queue it for layout. onNewWindow consumes the queue as windows appear.
+void vtbRestoreSession() {
+    std::vector<SSessionEntry> entries = vtbParseSession(vtbSessionPath());
+
+    std::erase_if(entries, [](const SSessionEntry& e) {
+        const char* WHY = vtbEntryUnplaceable(e);
+        if (WHY)
+            Hl::log(std::format("[hyprvtb] session restore: skipping {} ({})", e.cls, WHY));
+        return WHY != nullptr;
+    });
+
     if (entries.empty())
         return;
 
@@ -958,6 +1046,47 @@ static int luaSaveSession(lua_State* L) {
     return 0;
 }
 
+// ANSWER "what would a snapshot do?" WITHOUT DOING IT. save_session is a
+// manual act (Meta+Ctrl+S) precisely because it arms a window-spawning restore
+// at the next login, so it may never be called to find out what it selects —
+// which used to leave the selection rules untestable. This runs the exact same
+// selection (vtbWriteSession) against a SCRATCH path and evaluates the existing
+// session.tsv through the exact same restore filter (vtbEntryUnplaceable),
+// writing both answers to ~/.local/state/hyprvtb/session-probe.tsv. It never
+// reads or writes session.tsv and never spawns anything.
+//
+// Value-returning Lua is impossible here (`hyprctl eval` prints only "ok"), so
+// this follows the kinetic module's pattern: publish to a state file.
+static int luaSessionProbe(lua_State* L) {
+    if (!g_pGlobalState)
+        return 0;
+
+    // Optional argument: evaluate THIS file's restore verdicts instead of the
+    // real session.tsv, so a fabricated snapshot (an entry on a monitor that no
+    // longer exists, say) can be tested without writing the user's own.
+    const char*       RAW = luaL_optstring(L, 1, "");
+    const std::string IN  = (RAW && *RAW) ? std::string(RAW) : vtbSessionPath();
+
+    const auto  DIR   = std::filesystem::path(vtbStateDir());
+    const auto  WOULD = (DIR / "session-probe.tsv").string();
+    std::string skipped;
+    const int   N = vtbWriteSession(WOULD, &skipped);
+
+    std::ofstream f(DIR / "session-probe-restore.tsv", std::ios::trunc);
+    if (!f.good())
+        return 0;
+    f << "# would save " << N << " window(s) -> " << WOULD << "\n";
+    f << skipped;
+    f << "# restore verdicts for " << IN << "\n";
+    f << "# verdict\treason\tcls\tx\ty\tw\th\n";
+    for (const auto& e : vtbParseSession(IN)) {
+        const char* WHY = vtbEntryUnplaceable(e);
+        f << (WHY ? "drop" : "keep") << '\t' << (WHY ? WHY : "-") << '\t' << e.cls << '\t' << (int)e.box.x << '\t'
+          << (int)e.box.y << '\t' << (int)e.box.w << '\t' << (int)e.box.h << '\n';
+    }
+    return 0;
+}
+
 // PUBLISH THE DESKTOP'S MOTION so everything that is not this plugin can read
 // it. `plugin:hyprvtb:slide_duration_ms` is the one home for the number now
 // (DESIGN.md §6.2) — but the panel is QML in another process and the six apps
@@ -1379,6 +1508,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "session_probe", ::luaSessionProbe);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_all", ::luaCloseAll);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "push_rolled", ::luaPushRolled);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "ipc_dump", ::luaIpcDump);
@@ -1441,7 +1571,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.92"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.93"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
