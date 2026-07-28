@@ -17,6 +17,10 @@ The interesting assertions are the ones reasoning gets wrong:
     unwatched the left pane's dirs);
   * a drop in the right pane targets the RIGHT pane's directory, and claims the
     chrome — dragging between the panes being the point of the split;
+  * the two orientations (kitty's `|` and `_`) are ONE geometry projected on
+    either axis: re-orienting keeps both panes, their directories and the
+    ratio, each button toggles its own orientation, and no pane rect is ever
+    zero-sized (hyprvtb's renderRect aborts the compositor on one);
   * a picker is never split.
 
 Titlebar is stubbed (the real one talks to the hyprvtb socket) but it RECORDS,
@@ -40,7 +44,8 @@ FILER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FILER)
 sys.path.insert(0, os.path.join(os.path.dirname(FILER), "pylib"))
 
-from PySide6.QtCore import QUrl, QObject, Slot, QMimeData, QPoint, Qt, QTimer  # noqa: E402
+from PySide6.QtCore import (QUrl, QObject, Slot, Signal, QMimeData, QPoint, Qt,  # noqa: E402
+                            QTimer)
 from PySide6.QtGui import (QGuiApplication, QDragEnterEvent, QDragMoveEvent,  # noqa: E402
                            QDropEvent)
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QJSValue  # noqa: E402
@@ -58,7 +63,12 @@ def check(name, cond, detail=""):
 
 
 class RecTitlebar(QObject):
-    """Stub bridge that remembers what the window pushed at it."""
+    """Stub bridge that remembers what the window pushed at it — and can push
+    back: `clicked` is the same signal the real bridge raises when the
+    compositor reports a titlebar button press, so the button ids can be
+    exercised as the user would, not only read."""
+
+    clicked = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -113,6 +123,8 @@ def build(app, start_dir, picker=None, state=None):
     ctx.setContextProperty("startSplit", bool(state.get("split", False)))
     ctx.setContextProperty("startSplitDir", state.get("splitDir", ""))
     ctx.setContextProperty("startSplitRatio", float(state.get("splitRatio", 0.5)))
+    # main.py's default for a state.json written before the split had an axis
+    ctx.setContextProperty("startSplitVertical", bool(state.get("splitVertical", True)))
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(FILER, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
@@ -180,28 +192,41 @@ def main():
           focused is not None and focused.property("path") == left,
           focused.property("path") if focused else None)
     check("...spanning the whole window",
-          win.property("paneLeftW") == win.property("width"),
-          (win.property("paneLeftW"), win.property("width")))
-    check("the titlebar offers the split button", tb.button("split") is not None,
+          win.property("paneLeadW") == win.property("width")
+          and win.property("paneLeadH") == win.property("height"),
+          (win.property("paneLeadW"), win.property("paneLeadH")))
+    check("the titlebar offers kitty's two split buttons",
+          tb.button("vsplit") is not None and tb.button("hsplit") is not None,
           [b.get("id") for b in tb.buttons])
-    check("...unlit while the split is off", tb.button("split").get("state") == 0)
+    check("...labelled | and _ (not -, which is the vtb spacer token)",
+          (tb.button("vsplit").get("label"), tb.button("hsplit").get("label")) == ("|", "_"),
+          (tb.button("vsplit").get("label"), tb.button("hsplit").get("label")))
+    check("...both unlit while the split is off",
+          tb.button("vsplit").get("state") == 0 and tb.button("hsplit").get("state") == 0)
 
     # ---- 1. opening the split ----
     win.toggleSplit()
     spin(250)
-    check("sp opens the split", win.property("splitOn") is True)
+    check("| opens the split", win.property("splitOn") is True)
+    check("...side by side, which is what | means",
+          win.property("splitVertical") is True)
     check("...and hands the chrome to the new pane", win.property("focusPane") == 1)
     check("...which opens beside the left one (no saved split dir)",
           win.property("pane").property("path") == left,
           win.property("pane").property("path"))
     check("the two panes divide the window",
-          win.property("paneLeftW") + win.property("splitterW") + win.property("paneRightW")
+          win.property("paneLeadW") + win.property("splitterW") + win.property("paneTrailW")
           == win.property("width"),
-          (win.property("paneLeftW"), win.property("paneRightW"), win.property("width")))
+          (win.property("paneLeadW"), win.property("paneTrailW"), win.property("width")))
+    check("...full height each, the divider being vertical",
+          win.property("paneLeadH") == win.property("height")
+          and win.property("paneTrailH") == win.property("height")
+          and win.property("paneTrailY") == 0)
     check("...and neither is a sliver",
-          win.property("paneLeftW") >= win.property("minPaneW")
-          and win.property("paneRightW") >= win.property("minPaneW"))
-    check("the split button is lit while it is on", tb.button("split").get("state") == 1)
+          win.property("paneLeadW") >= win.property("minPaneW")
+          and win.property("paneTrailW") >= win.property("minPaneW"))
+    check("| is lit while the split is vertical, _ is not",
+          tb.button("vsplit").get("state") == 1 and tb.button("hsplit").get("state") == 0)
 
     paneR = win.property("rightPane")
     paneLeft = win.property("leftPane")
@@ -253,9 +278,9 @@ def main():
     spin(60)
     w = int(win.property("width"))
     h = int(win.property("height"))
-    rx = int(win.property("paneRightX"))
+    rx = int(win.property("paneTrailX"))
     ev = drag_to(win, [os.path.join(left, "a.txt")],
-                 QPoint(rx + int(win.property("paneRightW")) // 2, h - 30))
+                 QPoint(rx + int(win.property("paneTrailW")) // 2, h - 30))
     spin()
     menu = by_name(paneR, "ctxMenu")
     labels = [i.get("label") for i in (unwrap(menu.property("items")) or [])]
@@ -276,21 +301,100 @@ def main():
     win.setSplitRatio(0.9)
     spin(60)
     check("the divider cannot be dragged past the minimum pane width",
-          win.property("paneRightW") >= win.property("minPaneW"),
-          (win.property("splitRatio"), win.property("paneRightW")))
+          win.property("paneTrailW") >= win.property("minPaneW"),
+          (win.property("splitRatio"), win.property("paneTrailW")))
     win.setSplitRatio(0.0)
     spin(60)
     check("...at either end",
-          win.property("paneLeftW") >= win.property("minPaneW"), win.property("paneLeftW"))
+          win.property("paneLeadW") >= win.property("minPaneW"), win.property("paneLeadW"))
     win.setSplitRatio(0.5)
+    spin(60)
+
+    # ---- 6b. the OTHER orientation: kitty's `_` ----
+    # The re-orientation is the interesting one: the trailing pane is a Loader,
+    # and only its rect changes — so both panes and both directories survive.
+    ratio_before = win.property("splitRatio")
+    click(tb, "hsplit")
+    spin(200)
+    check("_ re-orients an open split instead of closing it",
+          win.property("splitOn") is True and win.property("splitVertical") is False,
+          (win.property("splitOn"), win.property("splitVertical")))
+    check("...keeping both panes and their directories",
+          win.property("rightPane") is paneR and paneR.property("path") == right
+          and win.property("leftPane").property("path") == left,
+          (paneR.property("path"), win.property("leftPane").property("path")))
+    check("...and the proportion, one ratio on either axis",
+          abs(win.property("splitRatio") - ratio_before) < 1e-9)
+    check("stacked means full width, divided in Y",
+          win.property("paneLeadW") == win.property("width")
+          and win.property("paneTrailW") == win.property("width")
+          and win.property("paneTrailX") == 0,
+          (win.property("paneLeadW"), win.property("paneTrailW")))
+    check("...the two heights plus the divider filling the window",
+          win.property("paneLeadH") + win.property("splitterW") + win.property("paneTrailH")
+          == win.property("height"),
+          (win.property("paneLeadH"), win.property("paneTrailH"), win.property("height")))
+    check("...and the trailing pane sitting below the divider",
+          win.property("paneTrailY") == win.property("paneLeadH") + win.property("splitterW"))
+    check("_ is lit while the split is horizontal, | is not",
+          tb.button("hsplit").get("state") == 1 and tb.button("vsplit").get("state") == 0)
+
+    # the clamp is per-axis: the minimum along Y is a different number
+    win.setSplitRatio(0.9)
+    spin(60)
+    check("the divider clamps on the Y axis too",
+          win.property("paneTrailH") >= win.property("minPaneH"),
+          (win.property("splitRatio"), win.property("paneTrailH"), win.property("minPaneH")))
+    win.setSplitRatio(0.0)
+    spin(60)
+    check("...at either end",
+          win.property("paneLeadH") >= win.property("minPaneH"), win.property("paneLeadH"))
+    win.setSplitRatio(0.5)
+    spin(60)
+
+    # no pane rect may ever be zero-sized: hyprvtb's renderRect aborts the
+    # compositor on one, and filer feeds the vtb socket. Squeeze the window well
+    # under two minimums and check every dimension is still positive.
+    for vertical in (True, False):
+        win.setProperty("splitVertical", vertical)
+        for wpx, hpx in ((200, 120), (1, 1), (720, 460)):
+            win.setProperty("width", wpx)
+            win.setProperty("height", hpx)
+            spin(40)
+            dims = [win.property(p) for p in ("paneLeadW", "paneLeadH",
+                                              "paneTrailW", "paneTrailH")]
+            check("no zero-size pane rect at %dx%d (%s)"
+                  % (wpx, hpx, "vertical" if vertical else "horizontal"),
+                  all(d >= 1 for d in dims), dims)
+    win.setProperty("splitVertical", True)
+    spin(60)
+
+    # each button is a toggle: the one matching the current orientation closes
+    click(tb, "vsplit")
+    spin(200)
+    check("| closes a vertical split (each button is its own toggle)",
+          win.property("splitOn") is False)
+    click(tb, "hsplit")
+    spin(200)
+    check("_ opens a stacked split from nothing",
+          win.property("splitOn") is True and win.property("splitVertical") is False)
+    click(tb, "hsplit")
+    spin(200)
+    check("...and closes it again", win.property("splitOn") is False)
+    win.setProperty("splitVertical", True)
+    click(tb, "vsplit")
+    spin(250)
+    paneR = win.property("rightPane")
+    check("back to a vertical split for the rest of the run",
+          win.property("splitOn") is True and win.property("splitVertical") is True)
 
     # ---- 7. folding it back ----
     win.toggleSplit()
     spin(200)
-    check("sp folds the split", win.property("splitOn") is False)
+    check("F3 folds the split", win.property("splitOn") is False)
     check("...hands the chrome back to the left pane", win.property("focusPane") == 0)
     check("...which is once again the whole window",
-          win.property("paneLeftW") == win.property("width"))
+          win.property("paneLeadW") == win.property("width"))
     check("...and the retired pane gave its watch slot back",
           right not in set(watch._watcher.directories()),
           sorted(watch._watcher.directories()))
@@ -319,6 +423,30 @@ def main():
           and win2.property("pane") is win2.property("leftPane"))
     check("...and the divider where it was",
           abs(win2.property("splitRatio") - 0.3) < 1e-6, win2.property("splitRatio"))
+    check("a state.json with no orientation key restores side by side",
+          win2.property("splitVertical") is True)
+    check("...meaning the panes really are side by side",
+          win2.property("paneLeadH") == win2.property("height")
+          and win2.property("paneLeadW") < win2.property("width"))
+
+    # ---- 8b. and one that WAS left stacked ----
+    engine4, win4, tb4, watch4, keep4 = build(app, left,
+                                              state={"split": True, "splitDir": right,
+                                                     "splitVertical": False})
+    win4.show()
+    spin(300)
+    check("a split left stacked comes back stacked",
+          win4.property("splitOn") is True and win4.property("splitVertical") is False)
+    check("...with _ lit rather than |",
+          tb4.button("hsplit").get("state") == 1 and tb4.button("vsplit").get("state") == 0)
+    check("...and the trailing pane below, not beside",
+          win4.property("paneTrailX") == 0 and win4.property("paneTrailY") > 0,
+          (win4.property("paneTrailX"), win4.property("paneTrailY")))
+    # what F6 does — the Shortcut itself needs a key event the offscreen
+    # platform will not deliver, so this drives the property it sets.
+    check("...the chrome still crosses to the trailing pane in this orientation",
+          (win4.setProperty("focusPane", 1) or True)
+          and win4.property("pane") is win4.property("rightPane"))
 
     # ---- 9. a picker is never split ----
     spec = {"result": os.path.join(tmp, "res.json"), "mode": "open"}
@@ -330,8 +458,12 @@ def main():
     win3.toggleSplit()
     spin(100)
     check("...and refuses to open one", win3.property("splitOn") is False)
-    check("...with the split button disabled", tb3.button("split").get("state") == 2,
-          tb3.button("split"))
+    win3.setSplit(False)
+    spin(100)
+    check("...in either orientation", win3.property("splitOn") is False)
+    check("...with BOTH split buttons disabled",
+          tb3.button("vsplit").get("state") == 2 and tb3.button("hsplit").get("state") == 2,
+          (tb3.button("vsplit"), tb3.button("hsplit")))
 
     print()
     if FAILS:

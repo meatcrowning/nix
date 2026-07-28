@@ -32,11 +32,11 @@ Window {
     readonly property bool picking: Picker.active
 
     // ---- split view ----
-    // Two independent browsing panes side by side, divided by a draggable
-    // splitter — the point being that you can drag files from one to the
-    // other (the drop half landed first; see AGENTS.md). Each pane is a whole
-    // BrowserPane: its own directory, selection, sort, expanded tree, context
-    // menu and drop target.
+    // Two independent browsing panes, side by side or stacked, divided by a
+    // draggable splitter — the point being that you can drag files from one to
+    // the other (the drop half landed first; see AGENTS.md). Each pane is a
+    // whole BrowserPane: its own directory, selection, sort, expanded tree,
+    // context menu and drop target.
     //
     // `focusPane` is which of the two the CHROME acts on. There is one
     // titlebar for two panes, so everything on it — the address bar, the sort
@@ -49,19 +49,49 @@ Window {
     // its hard part: surfer's panes show TABS, so one pane could be handed a
     // view the other was already showing and the two had to swap. Two filer
     // panes can happily show the same directory.
+    //
+    // ORIENTATION, kitty's two buttons: `|` splits RIGHT (a vertical divider,
+    // panes side by side — `splitVertical`, the original behaviour) and `_`
+    // splits DOWN (a horizontal divider, panes stacked). One geometry serves
+    // both: a LEADING pane (left/top), the splitter, a TRAILING pane
+    // (right/bottom), measured along whichever axis is active. `splitRatio` is
+    // the same number on either axis, so re-orienting keeps the proportion.
+    // (`_`, not `-`: a bare "-" is the SPACER token in the vtb button-array
+    // protocol — see pylib/vtbclient.py.)
     property bool splitOn: false
-    property int focusPane: 0     // 0 = left, 1 = right
+    property bool splitVertical: true   // true = left|right, false = top/bottom
+    property int focusPane: 0     // 0 = leading (left/top), 1 = trailing
     property real splitRatio: 0.5
     readonly property int splitterW: 4
+    // The minimum along Y is NOT the minimum along X: a pane needs 220px of
+    // width before the filename column elides to nothing, but vertically it
+    // only needs to keep a few list rows under the (collapsible) preview
+    // panel, whose own splitter already clamps itself to `view.height - 90`.
     readonly property int minPaneW: 220
-    readonly property int paneLeftW: splitOn
-        ? Math.max(minPaneW, Math.min(width - splitterW - minPaneW,
-                                      Math.round((width - splitterW) * splitRatio)))
-        : width
-    readonly property int paneRightX: paneLeftW + splitterW
-    readonly property int paneRightW: Math.max(0, width - paneRightX)
-    // where the right pane opens: where it was last time, else beside the left
-    // one. Read at Loader time, so folding the split and reopening it comes
+    readonly property int minPaneH: 150
+    // the split axis, as one set of numbers. Everything below is a projection.
+    readonly property int splitSpan: splitVertical ? width : height
+    readonly property int minPane: splitVertical ? minPaneW : minPaneH
+    readonly property int paneLeadSize: splitOn
+        ? Math.max(minPane, Math.min(splitSpan - splitterW - minPane,
+                                     Math.round((splitSpan - splitterW) * splitRatio)))
+        : splitSpan
+    readonly property int paneTrailPos: paneLeadSize + splitterW
+    // never zero: hyprvtb's renderRect aborts the compositor on a zero-size
+    // box and filer feeds the vtb socket, so no rect derived from these is
+    // allowed to collapse even in a window too small to hold two minimums.
+    readonly property int paneTrailSize: Math.max(1, splitSpan - paneTrailPos)
+    // the two panes as actual rects (x/y/w/h), so every binding below is a
+    // plain read rather than a repeat of the ternary.
+    readonly property int paneLeadW: splitVertical ? paneLeadSize : width
+    readonly property int paneLeadH: splitVertical ? height : paneLeadSize
+    readonly property int paneTrailX: splitVertical ? paneTrailPos : 0
+    readonly property int paneTrailY: splitVertical ? 0 : paneTrailPos
+    readonly property int paneTrailW: splitVertical ? paneTrailSize : width
+    readonly property int paneTrailH: splitVertical ? height : paneTrailSize
+    // where the trailing pane opens: where it was last time, else the same
+    // directory as the leading one. Read at Loader time, so folding the split
+    // and reopening it comes
     // back to the directory you left (persisted by the pane itself).
     property string splitStartPath: ""
 
@@ -77,25 +107,38 @@ Window {
     function setSplitRatio(r) {
         splitRatio = Math.max(0.15, Math.min(0.85, r));
     }
-    // "sp" titlebar button (and F3). Opening puts the right pane where it was
-    // last, or beside the left one, and hands it the chrome — the pane you
-    // just asked for is the one you meant to use. A picker is a single
-    // transient errand and is never split.
-    function toggleSplit() {
+    // The `|` and `_` titlebar buttons (and F3 / Shift+F3), both routed here.
+    // Each stays a TOGGLE, the way the old single button was: asking for the
+    // orientation you are already in closes the split. Asking for the OTHER
+    // one while split re-orients in place — the panes and their directories
+    // are untouched, only the axis the window is divided on changes, so the
+    // trailing pane is not reloaded and does not lose its listing.
+    //
+    // Opening puts the trailing pane where it was last, or beside the leading
+    // one, and hands it the chrome — the pane you just asked for is the one
+    // you meant to use. A picker is a single transient errand and is never
+    // split.
+    function setSplit(vertical) {
         if (win.picking) return;
-        if (splitOn) {
+        if (splitOn && splitVertical === vertical) {
             // remember where it was before the Loader takes the pane away
             if (paneRLoader.item) splitStartPath = paneRLoader.item.path;
             splitOn = false;
             focusPane = 0;
+        } else if (splitOn) {
+            splitVertical = vertical;       // re-orient, keeping both panes
         } else {
             if (splitStartPath === "" || !FileOps.isDir(splitStartPath))
                 splitStartPath = paneL.path;
+            splitVertical = vertical;
             splitOn = true;
             focusPane = 1;
         }
         Settings.set("split", splitOn);
+        Settings.set("splitVertical", splitVertical);
     }
+    // F3 and the harness: toggle the split in its current (or last) orientation.
+    function toggleSplit() { setSplit(splitVertical); }
 
     // The window title IS the address bar: the hyprvtb plugin renders it as an
     // editable path field (setTitleEdit below), same as surfer's URL bar. It
@@ -146,10 +189,20 @@ Window {
             { id: "paste",  label: "p",  state: view.clip !== null ? 0 : 2,    tip: "paste" },
             { id: "trash",  label: "t",  state: sel,                           tip: "move to trash" },
             { id: "hidden", label: "h",  state: view.showHidden ? 1 : 0,       tip: "toggle hidden files" },
-            // split view: two panes, one titlebar. Lit for as long as it is on;
-            // disabled while picking, where a second pane means nothing.
-            { id: "split",  label: "sp", state: win.picking ? 2 : (win.splitOn ? 1 : 0),
-              tip: win.splitOn ? "close split view" : "split view (F3)" },
+            // split view: two panes, one titlebar. Kitty's pair, same labels
+            // and same meaning — `|` divides vertically (panes side by side),
+            // `_` divides horizontally (panes stacked). The one matching the
+            // current orientation is lit and closes the split; the other
+            // re-orients it. Both are disabled while picking, where a second
+            // pane means nothing. `_` and not `-`, which is the spacer token.
+            { id: "vsplit", label: "|",
+              state: win.picking ? 2 : ((win.splitOn && win.splitVertical) ? 1 : 0),
+              tip: !win.splitOn ? "split right (F3)"
+                   : win.splitVertical ? "close split view (F3)" : "split right instead" },
+            { id: "hsplit", label: "_",
+              state: win.picking ? 2 : ((win.splitOn && !win.splitVertical) ? 1 : 0),
+              tip: !win.splitOn ? "split down (Shift+F3)"
+                   : !win.splitVertical ? "close split view (F3)" : "split down instead" },
         ];
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
@@ -161,8 +214,12 @@ Window {
         Titlebar.setTitleEdit(true);
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
-        // restore the split exactly as it was left (never in a picker).
+        // restore the split exactly as it was left (never in a picker) —
+        // including which way it was divided. An older state.json has no
+        // orientation key at all; main.py defaults that to true, i.e. the
+        // side-by-side split that was the only one there used to be.
         splitRatio = startSplitRatio;
+        splitVertical = startSplitVertical;
         if (!win.picking && startSplit && startSplitDir !== "" && FileOps.isDir(startSplitDir)) {
             splitStartPath = startSplitDir;
             splitOn = true;
@@ -203,7 +260,8 @@ Window {
             case "paste":  view.pasteInto(view.path); break;
             case "trash":  if (view.selection.length) { FileOps.run(["gio", "trash", "--"].concat(view.selection), ""); view.clearSelection(); } break;
             case "hidden": view.toggleHidden(); break;
-            case "split":  win.toggleSplit(); break;
+            case "vsplit": win.setSplit(true); break;
+            case "hsplit": win.setSplit(false); break;
             }
         }
         // the in-bar path editor was submitted: navigate if it's a directory
@@ -214,13 +272,22 @@ Window {
         }
     }
 
-    // F3 splits and unsplits (Dolphin's key for it); F6 moves the chrome to the
-    // other pane without reaching for the mouse. Both are dead in picker mode,
-    // where there is only ever one pane.
+    // F3 splits and unsplits (Dolphin's key for it) in the orientation you are
+    // in — or last used. Shift+F3 is "split the other way": it opens stacked
+    // when the split is off, and re-orients it when it is on. One key plus a
+    // modifier rather than two unrelated keys, because the second is the rarer
+    // errand and the pair reads as one gesture. F6 moves the chrome to the
+    // other pane without reaching for the mouse, in either orientation. All
+    // are dead in picker mode, where there is only ever one pane.
     Shortcut {
         enabled: !win.picking
         sequences: ["F3"]
         onActivated: win.toggleSplit()
+    }
+    Shortcut {
+        enabled: !win.picking
+        sequences: ["Shift+F3"]
+        onActivated: win.setSplit(!win.splitVertical)
     }
     Shortcut {
         enabled: !win.picking && win.splitOn
@@ -251,9 +318,12 @@ Window {
 
 
     // ---- the panes ----
-    // The left pane always exists and is the window when the split is off; the
-    // right one is a Loader, so an unsplit filer does not pay for a second
-    // directory listing, watch set and thumbnail queue it is not showing.
+    // The leading pane (left, or top when the split is horizontal) always
+    // exists and is the window when the split is off; the trailing one is a
+    // Loader, so an unsplit filer does not pay for a second directory listing,
+    // watch set and thumbnail queue it is not showing. The Loader survives a
+    // re-orientation — only the rects change — so `|` ⇄ `_` keeps both panes
+    // and their directories.
     // Dragging a file from one pane to the other is ordinary DnD — the panes
     // are two DropAreas in one process, and the move/copy/link menu the drop
     // raises is the same one a drop from Dolphin gets (see AGENTS.md).
@@ -261,8 +331,8 @@ Window {
         id: paneL
         x: 0
         y: 0
-        width: win.paneLeftW
-        height: win.height
+        width: win.paneLeadW
+        height: win.paneLeadH
         startPath: win.startPath
         winActive: win.active
         picking: win.picking
@@ -275,10 +345,10 @@ Window {
     Loader {
         id: paneRLoader
         active: win.splitOn
-        x: win.paneRightX
-        y: 0
-        width: win.paneRightW
-        height: win.height
+        x: win.paneTrailX
+        y: win.paneTrailY
+        width: win.paneTrailW
+        height: win.paneTrailH
         sourceComponent: BrowserPane {
             width: paneRLoader.width
             height: paneRLoader.height
@@ -299,38 +369,46 @@ Window {
     Rectangle {
         visible: win.splitOn
         z: 9
-        x: win.focusPane === 1 ? win.paneRightX : 0
-        y: 0
-        width: win.focusPane === 1 ? win.paneRightW : win.paneLeftW
-        height: win.height
+        x: win.focusPane === 1 ? win.paneTrailX : 0
+        y: win.focusPane === 1 ? win.paneTrailY : 0
+        width: win.focusPane === 1 ? win.paneTrailW : win.paneLeadW
+        height: win.focusPane === 1 ? win.paneTrailH : win.paneLeadH
         color: "transparent"
         border.width: 1
         border.color: Theme.accent
     }
 
-    // the divider: drag it to trade width between the panes. The ratio is
-    // persisted on release, not on every motion event.
+    // the divider: drag it to trade size between the panes, along whichever
+    // axis the split is on — sideways when vertical, up and down when
+    // horizontal, with the cursor shape and the 10px grab target following the
+    // axis too. The ratio is persisted on release, not on every motion event.
     Rectangle {
-        id: vsplit
+        id: splitBar
         visible: win.splitOn
         z: 10
-        x: win.paneLeftW
-        y: 0
-        width: win.splitterW
-        height: win.height
-        color: vsplitDrag.pressed || vsplitDrag.containsMouse ? Theme.accent : Theme.border
+        x: win.splitVertical ? win.paneLeadSize : 0
+        y: win.splitVertical ? 0 : win.paneLeadSize
+        width: win.splitVertical ? win.splitterW : win.width
+        height: win.splitVertical ? win.height : win.splitterW
+        color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
         MouseArea {
-            id: vsplitDrag
+            id: splitDrag
             anchors.fill: parent
-            anchors.leftMargin: -3      // a 4px divider is a 10px grab target
-            anchors.rightMargin: -3
+            // a 4px divider is a 10px grab target, across the divider
+            anchors.leftMargin: win.splitVertical ? -3 : 0
+            anchors.rightMargin: win.splitVertical ? -3 : 0
+            anchors.topMargin: win.splitVertical ? 0 : -3
+            anchors.bottomMargin: win.splitVertical ? 0 : -3
             hoverEnabled: true
-            cursorShape: Qt.SplitHCursor
+            cursorShape: win.splitVertical ? Qt.SplitHCursor : Qt.SplitVCursor
             preventStealing: true
             onPositionChanged: (m) => {
                 if (!pressed) return;
-                win.setSplitRatio(mapToItem(win.contentItem, m.x, m.y).x / Math.max(1, win.width));
+                const p = mapToItem(win.contentItem, m.x, m.y);
+                win.setSplitRatio(win.splitVertical
+                                  ? p.x / Math.max(1, win.width)
+                                  : p.y / Math.max(1, win.height));
             }
             onReleased: Settings.set("splitRatio", win.splitRatio)
         }

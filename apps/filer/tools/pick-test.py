@@ -81,6 +81,7 @@ def build(app, spec, start_dir):
     ctx.setContextProperty("startSplit", False)
     ctx.setContextProperty("startSplitDir", "")
     ctx.setContextProperty("startSplitRatio", 0.5)
+    ctx.setContextProperty("startSplitVertical", True)
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(FILER, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
