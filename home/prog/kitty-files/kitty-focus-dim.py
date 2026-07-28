@@ -14,10 +14,34 @@ leave sockets behind, so globbing would pick the wrong one)."""
 
 import json
 import os
+import select
 import socket
 import subprocess
+import time
 
 INACTIVE = "#595959"  # == filer Theme.inactive / hyprvtb col.inactive
+
+# How long "focus is on NOTHING" has to last before we believe it.
+#
+# On this desktop that state is almost always a 3 ms pothole, not a
+# destination: whenever a layer surface hands the keyboard back — the task
+# manager's filter box being the only thing that takes it — Hyprland's
+# `refocusLastWindow` clears the focus and *then* re-focuses the window, so the
+# socket carries `activewindowv2>>` (empty) immediately followed by the same
+# window it had before.
+#
+# Acting on the empty one turns those 3 ms into a visible flash, because our
+# reaction is not free: `kitty @ set-colors` is a subprocess, and resolving the
+# next event costs an `hyprctl -j clients` on top. Measured end to end in a
+# nested Hyprland — a 3.5 ms gap on the wire became **38 ms of grey text** in
+# kitty and back. That is the flash, and it is ours, not the compositor's:
+# hyprvtb's titlebar and Hyprland's border flip on the same 3.5 ms boundary and
+# cannot produce a frame.
+#
+# So wait this long before greying anything. If a real window turns up first
+# the pothole never happened; if it doesn't, focus genuinely has settled on
+# nothing and the dim lands a sixth of a second late, which nobody can see.
+NOTHING_GRACE = 0.15
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 THEME_CONF = os.path.expanduser("~/.config/kitty/theme.conf")  # written by wal-set.sh
 
@@ -87,8 +111,22 @@ def main():
     s.connect(path)
 
     prev = None  # pid of the kitty that currently holds focus (or None)
+    # Set when the socket says focus is on NOTHING; cleared by the next event
+    # that names a window. Only if it survives NOTHING_GRACE do we act on it.
+    pending_nothing = None
     buf = b""
     while True:
+        timeout = None
+        if pending_nothing is not None:
+            timeout = max(0.0, NOTHING_GRACE - (time.monotonic() - pending_nothing))
+        if not select.select([s], [], [], timeout)[0]:
+            # The grace ran out with no window turning up: focus really has
+            # settled on nothing, so do what the empty event asked for.
+            if prev is not None:
+                recolor(prev, focused=False)
+            prev = None
+            pending_nothing = None
+            continue
         chunk = s.recv(65536)
         if not chunk:
             break
@@ -99,7 +137,16 @@ def main():
             if not line.startswith("activewindowv2>>"):
                 continue
             addr = line.split(">>", 1)[1].strip()
-            if addr and not addr.startswith("0x"):
+            if not addr:
+                # Focus on nothing. Distinguished from "focused a window that
+                # isn't kitty" — which still resolves to a None pid below and
+                # must still grey immediately — because only this one is the
+                # transient. Start the clock and say nothing yet.
+                if pending_nothing is None:
+                    pending_nothing = time.monotonic()
+                continue
+            pending_nothing = None
+            if not addr.startswith("0x"):
                 addr = "0x" + addr
             new = kitty_pid_at(addr)
             if prev is not None and prev != new:
