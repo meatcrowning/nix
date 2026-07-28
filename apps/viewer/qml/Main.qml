@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "../../qmlcommon"
 
 // viewer's window: a GRID of image panes with their controls in the hyprvtb
 // titlebar. The flip-through set + start index come from main.py (startImages /
@@ -328,6 +329,15 @@ Window {
         }
         // scrub bar dragged/scrolled in the titlebar → seek the focused pane
         function onSeek(frac) { if (win.current) win.current.seekFraction(frac); }
+    }
+
+    // The mouse's back/forward side buttons step through the flip order — the
+    // same move as the titlebar's ‹/› and the arrow keys, and like them it acts
+    // on the FOCUSED pane (win.prev/next both go through setPaneIdx(focusPane)).
+    // Desktop-global rule, DESIGN.md §11.
+    NavButtons {
+        onBack:    win.prev()
+        onForward: win.next()
     }
 
     // The one item that holds the window's focus, so the keys have exactly one

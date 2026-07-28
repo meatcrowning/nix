@@ -7,7 +7,7 @@ import "../../qmlcommon"
 // the bottom with a family dropdown attached.
 Panel {
     id: panel
-    title: "model"
+    title: "MODEL"
     badge: Models.count + " found"
     collapsible: false
 
@@ -78,7 +78,6 @@ Panel {
                     id: hover
                     anchors.fill: parent
                     hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
                     onClicked: App.selectModel(index)
                 }
             }

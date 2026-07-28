@@ -2,7 +2,7 @@ import QtQuick
 
 Panel {
     id: panel
-    title: "prompt"
+    title: "PROMPT"
     // Anima wants a single line; the editor still keeps your line breaks, they
     // are only collapsed on the way out.
     badge: root.gen.promptTransform === "single_line" ? "sent as one line" : ""

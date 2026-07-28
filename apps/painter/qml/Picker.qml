@@ -20,6 +20,7 @@ Item {
         color: Theme.bg
         border.color: pop.visible ? Theme.accent : Theme.border
         border.width: 1
+        radius: 1
 
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
@@ -37,10 +38,7 @@ Item {
             color: Theme.dim
         }
         MouseArea {
-            id: boxMa
             anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
             onClicked: pop.visible = !pop.visible
         }
     }
@@ -81,7 +79,6 @@ Item {
                     id: hover
                     anchors.fill: parent
                     hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         picker.value = modelData
                         picker.picked(modelData)

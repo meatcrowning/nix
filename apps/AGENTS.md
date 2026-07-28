@@ -171,14 +171,34 @@ copy at all. `apps/pylib/kinetic.py` is the only Python one (`DETENT`,
 `ANGLE_PER_PIXEL`, `WHEEL_GAIN`, `is_wheel_detent()`); anything touching
 `QWheelEvent` in Python imports from there rather than re-deriving the numbers.
 
-**A control that STEPS a value is not a scroller.** `qmlcommon/WheelNotch.qml`
-is for those — painter's numeric `Spin` boxes today — and it is the apps-side
-twin of `home/prog/quickshell-files/WheelNotch.qml` (same algorithm, two roofs,
-retune both). One classic detent is exactly one step; a touchpad's sub-notch
-remainder is *carried*, never rounded up; `maxSteps` caps a single event, so a
-compositor momentum coast cannot walk a value across its whole range on one
-flick. painter had its own accumulator with the constants written out again and
-no ceiling, which is what this replaces.
+### The mouse's side buttons are `NavButtons`, never a hand-rolled MouseArea
+
+`qmlcommon/NavButtons.qml` + `qmlcommon/NavHistory.qml`. The desktop-global rule
+is `~/nix/DESIGN.md` §11.1 — *"back and forward mouse buttons should function in
+every program"* — so an app wires the shared handler to whatever its own history
+is and does not re-implement either half:
+
+```qml
+NavButtons {                      // a child of the root Window, nothing else needed
+    onBack:    win.pane.goBack()
+    onForward: win.pane.goForward()
+}
+```
+
+- It accepts **only** `Qt.BackButton | Qt.ForwardButton`, so every other press,
+  wheel notch and hover falls through — which is why `z: 9000` is safe over the
+  whole window, and why it must stay a sibling of the content rather than a
+  wrapper.
+- **In a multi-pane app it acts on the FOCUSED pane**, like every other control
+  (filer's `win.pane`, viewer's `win.prev/next`, surfer's `win.current`).
+- `NavHistory` reassigns its stacks instead of mutating them, so `canBack` /
+  `canForward` notify and a titlebar button can bind to them. player's
+  hand-rolled stack did the opposite and only got away with it because nothing
+  was bound.
+- **A program with no genuine history gets nothing** (painter, askpass). Do not
+  invent one; DESIGN.md §11.1 records the reading for each app and why.
+- Regression test: `filer/tools/nav-test.py` (offscreen, posts real
+  `QMouseEvent`s for buttons 275/276).
 
 **The one exception, and why it is one:** `viewer/qml/ImageViewer.qml` keeps a
 bare `Flickable`. Its `interactive` buys DRAG-panning of a zoomed image, and its

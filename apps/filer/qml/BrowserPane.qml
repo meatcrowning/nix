@@ -493,7 +493,29 @@ Rectangle {
         rebuildKeepScroll();
     }
 
-    function go(p) { path = p; clearSelection(); rebuild(); refreshDirSize(); persist(); }
+    // ---- directory history -------------------------------------------------
+    // filer's reading of the desktop-global back/forward rule (DESIGN.md §11):
+    // "back" is the directory you were in, not the parent — the titlebar's `^`
+    // already means parent, and the two are different journeys.
+    //
+    // The stack is PER PANE, because `path` is: going back in the pane you are
+    // using must not move the other one. `go()` is the single choke point every
+    // navigation already runs through (double-click, context-menu open, the `^`
+    // button, the path bar), so recording there covers all four for free.
+    NavHistory {
+        id: navHist
+        here: function () { return view.path; }
+        onNavigate: function (p) { view._goTo(p); }
+    }
+    function goBack() { return navHist.back(); }
+    function goForward() { return navHist.forward(); }
+
+    function _goTo(p) { path = p; clearSelection(); rebuild(); refreshDirSize(); persist(); }
+    function go(p) {
+        if (p === path) return;     // re-opening the current dir is not a move
+        navHist.record();
+        _goTo(p);
+    }
 
     Component.onCompleted: { rebuild(); refreshDirSize(); }
     // A closing pane (the split folding back to one) must hand its watch slot
