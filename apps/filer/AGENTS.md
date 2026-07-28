@@ -4,7 +4,7 @@ Vendored source of the standalone file browser: its own self-contained flake,
 plus `main.py` and `qml/`. Built and installed by `home/prog/filer.nix`, which
 wraps `python3` around the **live** source at `/home/lam/nix/apps/filer/main.py`
 — see [`../AGENTS.md`](../AGENTS.md) for the live-source rules that apply to all
-five apps.
+six apps.
 
 - A compat symlink `~/Projects/filer → ~/nix/apps/filer` preserves the old
   source path.

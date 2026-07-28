@@ -83,6 +83,12 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 - **`vtbclient.py`** — the hyprvtb titlebar-button socket bridge. Every app's
   chrome (transport buttons, close/zoom, view switchers) is drawn by the
   compositor plugin, not by QML, and goes through here.
+  **The wire protocol is the module docstring at the top of
+  `apps/pylib/vtbclient.py`** — every verb in both directions, the field order,
+  the `-` spacer token, and the percent-encoding. It is the authoritative
+  statement; nothing else in this tree should restate it, and a per-app guide
+  that needs one corner of it should quote the docstring rather than paraphrase
+  the rest. (Server side: `home/prog/hyprvtb/vtbIpc.hpp`.)
 - **`trackmatch.py`** — the one artist/title normaliser. Any new "are these two
   tag strings the same song?" code must use it rather than grow a second copy;
   see `player/AGENTS.md`.

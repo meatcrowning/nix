@@ -79,7 +79,7 @@ is: MPRIS has no lyrics field, and `LyricsProvider` lives in this process.
 ```bash
 tools/queue-lyrics-test.py     # headless; isolated XDG_RUNTIME_DIR, fake
                                # Player + LyricsProvider, so the LIVE player's
-                               # socket is never touched. 14 assertions.
+                               # socket is never touched.
 ```
 
 ## Lyrics + ReplayGain (2026-07-25)
@@ -140,9 +140,13 @@ NB when integrity-checking tag writes: `ffmpeg -i f -f md5 -` is
 exFAT has no `export_operations` for nfsd) plus avahi (`top.local`) and
 keys-only sshd, every port scoped to `enp12s0`; `sys/disks.nix` declares the SSD
 so it is up before a session is. Off-LAN, `sys/net/tailscale.nix` joins top to a
-tailnet (tailscale0 is a trusted interface, samba's hosts-allow includes
-100.64.0.0/10, `--operator=lam` so agents drive it without sudo); book's daemon
-is dnf-installed Fedora state, not managed here. `air-launch.sh` probes
+tailnet — samba's hosts-allow includes the CGNAT range and `--operator=lam` lets
+agents drive it without sudo. **`tailscale0` is deliberately NOT a trusted
+interface**: exactly two ports are opened on it, and the header comment in
+`sys/net/tailscale.nix` says which and why (an earlier `trustedInterfaces` entry
+published every listener on the box). Do not restate the port list here — read
+it there, and treat adding to it as a security decision. Book's daemon is
+dnf-installed Fedora state, not managed here. `air-launch.sh` probes
 `top.local` first, then the MagicDNS name `top`, so the player's metadata sync
 follows book onto any network.
 
@@ -161,8 +165,9 @@ snapshot with sqlite's `backup`, never `cp` (WAL); and `MIGRATIONS` entries are
 clears the mtime cache and forces an 11k-file re-read, which over SMB is brutal,
 so a column the APP writes (`meta_mtime`) must set it False.
 
-Full plan, runbook and STATUS: `docs/agents/air-library-share.md`. Part B (on `air`)
-has not been run.
+Full plan, runbook and STATUS: `docs/agents/air-library-share.md` — **both parts
+are done and verified** (Part B on `book`, 2026-07-26). That doc's STATUS block
+is authoritative; this paragraph is not.
 
 ## Spotify export → what's missing locally (2026-07-25)
 
