@@ -1,6 +1,8 @@
 
 https://github.com/user-attachments/assets/fecfa97c-5697-407a-9291-020ac69e7bf4
 
+<img width="2560" height="1600" alt="Screenshot_20260728_001720" src="https://github.com/user-attachments/assets/1c1b5dce-7156-4d66-b38f-ea85366a657e" />
+
 # `nixos/hyprland/qs/...`
 
 my adventures with agents. 
