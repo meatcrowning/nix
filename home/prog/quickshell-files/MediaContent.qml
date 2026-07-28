@@ -616,7 +616,14 @@ Item {
     // drawer the grid already handed over, so `naturalRest`, `implicitHeight`
     // and the tile's reported `wants` are untouched and the weather tile below
     // does not move.
-    readonly property bool showLyrics: Media.hasLyrics
+    // `=== true`, deliberately. `Media` coerces at the source (see its `!!`), so
+    // this is not defending against a malformed payload — it is defending
+    // against a Media.qml that does not have the property yet. A rebuild swaps
+    // the store symlinks file by file, so for one reload the panel can run this
+    // file against the PREVIOUS Media.qml; `undefined` assigned to a `bool` is a
+    // warning per evaluation, on three bindings, and the drawer would be the
+    // only thing in the log. Observed once, live.
+    readonly property bool showLyrics: Media.hasLyrics === true
     // A FRACTION of the drawer, not a pixel budget standing in for a character
     // count (DESIGN.md 2.7): the panel is 14-33% of the screen and the font size
     // is a user setting, so the only honest split here is a proportional one.
@@ -763,9 +770,17 @@ Item {
             KineticListView {
                 id: lyricsList
                 anchors.fill: parent
-                visible: Media.lyricsSynced
+                visible: Media.lyricsSynced === true
                 clip: true
-                model: Media.lyricsSynced ? Media.lyrics.lines : []
+                // Guarded on `Media.lyrics` ITSELF, not on `lyricsSynced`. The
+                // two are separate bindings over the same push and QML gives no
+                // ordering between them, so on the frame a track loses its
+                // lyrics this can be re-evaluated while `lyricsSynced` is still
+                // true and `lyrics` is already null — measured as
+                // "TypeError: Value is null and could not be converted to an
+                // object" on the transition back to a track with none.
+                model: (Media.lyricsSynced === true && Media.lyrics)
+                       ? Media.lyrics.lines : []
                 // Any motion the FOLLOW did not cause is the user driving.
                 // `positionViewAtIndex` is an instant jump and never sets
                 // `moving`, so this cannot suppress itself the way binding to
@@ -808,7 +823,7 @@ Item {
             KineticFlickable {
                 id: plainLyrics
                 anchors.fill: parent
-                visible: !Media.lyricsSynced && Media.hasLyrics
+                visible: Media.hasLyrics === true && Media.lyricsSynced !== true
                 clip: true
                 contentHeight: plainText.implicitHeight
 
@@ -817,7 +832,9 @@ Item {
                     // NOT parent.width — parent is the Flickable's contentItem,
                     // whose width stays 0 when only contentHeight is set.
                     width: plainLyrics.width
-                    text: Media.hasLyrics ? Media.lyrics.text : ""
+                    // `Media.lyrics`, not `Media.hasLyrics` — same ordering trap
+                    // as the model above.
+                    text: Media.lyrics ? Media.lyrics.text : ""
                     wrapMode: Text.Wrap
                     horizontalAlignment: Text.AlignHCenter
                     color: Theme.textDim

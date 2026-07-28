@@ -2250,14 +2250,20 @@ def start_queue_server(player, app, lyrics=None):
         t = player.currentTrackDict()
         return t.get("id") if t else None
 
-    def snapshot():
+    def snapshot(with_lyrics=False):
         # Only what the drawer draws. The panel has no library and no art cache,
         # so sending rows it cannot use would just be bytes per queue change.
+        #
+        # `with_lyrics` is PER CLIENT, because the subscription is. It read the
+        # `want` set as a global "is anybody listening" first, which meant one
+        # subscriber turned the lyrics on for every other connection — including
+        # a panel predating this protocol, which would then be handed a few KB
+        # of words it has no field for, on every push, forever.
         tracks = [{"title": t.get("title") or "",
                    "artist": t.get("artist") or "",
                    "dur": float(t.get("duration") or 0.0)}
                   for t in player.queue_dicts()]
-        lyr = state["payload"] if (want and state["tid"] == cur_id()) else None
+        lyr = state["payload"] if (with_lyrics and state["tid"] == cur_id()) else None
         return (json.dumps({"index": player.index, "tracks": tracks,
                             "lyrics": lyr},
                            separators=(",", ":")) + "\n").encode()
@@ -2291,13 +2297,20 @@ def start_queue_server(player, app, lyrics=None):
         push()
 
     def push():
-        line = snapshot()
+        # At most two distinct lines per push — with lyrics and without — built
+        # lazily, so a queue of hundreds is serialised once whatever the mix of
+        # subscribers is.
+        cache = {}
         for c in list(clients):
             if c.state() != QLocalSocket.LocalSocketState.ConnectedState:
                 clients.remove(c)
+                want.discard(c)
                 continue
+            k = c in want
+            if k not in cache:
+                cache[k] = snapshot(k)
             try:
-                c.write(line)
+                c.write(cache[k])
                 c.flush()
             except Exception:
                 pass
@@ -2319,7 +2332,7 @@ def start_queue_server(player, app, lyrics=None):
                 # Answer the subscription immediately: a client that has just
                 # opened its box must not wait for the next track change to be
                 # told there is nothing to draw.
-                c.write(snapshot())
+                c.write(snapshot(c in want))
                 c.flush()
 
     def on_gone(c):
@@ -2333,7 +2346,8 @@ def start_queue_server(player, app, lyrics=None):
             clients.append(c)
             c.readyRead.connect(lambda c=c: on_ready(c))
             c.disconnected.connect(lambda c=c: on_gone(c))
-            c.write(snapshot())
+            # A fresh connection has not subscribed yet, by definition.
+            c.write(snapshot(False))
             c.flush()
 
     def on_track():

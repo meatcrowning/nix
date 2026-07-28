@@ -153,15 +153,24 @@ Singleton {
                      lines: lines, text: Glyphs.px(l.text || "") };
         } catch (e) { return null; }
     }
-    readonly property bool lyricsSynced: lyrics !== null && lyrics.synced
-                                         && lyrics.lines.length > 0
+    // `!!`, and it is not decoration. `&&` yields the last VALUE, not a boolean,
+    // so `lyrics.synced` being absent made this whole expression `undefined` —
+    // and a `property bool` bound to undefined logs
+    // "Unable to assign [undefined] to bool" on every evaluation and leaves the
+    // three consumers in MediaContent reading undefined too. That happens for
+    // real, not just on a malformed payload: during a rebuild the panel can
+    // briefly run a NEW MediaContent.qml against the OLD Media.qml (the store
+    // symlinks are swapped file by file), and then `Media.hasLyrics` does not
+    // exist at all. Coerce ONCE, here, so no call site has to defend itself.
+    readonly property bool lyricsSynced: !!(lyrics && lyrics.synced
+                                            && lyrics.lines && lyrics.lines.length > 0)
     // Words, and nothing else. "none" and "instrumental" arrive as a payload
     // with an empty body precisely so this is false for them: a track that will
     // never have lyrics COLLAPSES the column rather than showing an empty box
     // (DESIGN.md 5.4). The player's own pane keeps a "mark instrumental" control
     // in that state; the panel has nothing to offer there, so it shows nothing.
-    readonly property bool hasLyrics: lyricsSynced
-        || (lyrics !== null && lyrics.text.length > 0)
+    readonly property bool hasLyrics: !!(lyricsSynced
+        || (lyrics && lyrics.text && lyrics.text.length > 0))
 
     // Ask for lyrics only while a box is actually on screen to draw them in.
     // Resolving is not free on the player's side — tag reads, an LRCLIB request,
@@ -189,7 +198,19 @@ Singleton {
     // The lit line. A binary search per position sample rather than a scan, and
     // -1 until playback reaches the first timestamp (a long intro must not light
     // the first line for a minute).
-    property int lyricIndex: -1
+    //
+    // A BINDING, not a value assigned from a handler. It was the latter, driven
+    // by `onQueueJsonChanged` plus a `Connections` on the player — and a signal
+    // handler runs BEFORE the bindings that depend on the same change have been
+    // re-evaluated, so on the push that swapped a synced track for an unsynced
+    // one it computed the new index against the OLD `lyricsSynced` and left the
+    // previous track's line number sitting there (measured offscreen:
+    // `lyricIndex=2` on a track with no timings at all). As a binding it cannot
+    // be stale by construction: reading `player.position` inside `_lineAt`
+    // captures it as a dependency, so the 200ms re-emit below invalidates this
+    // and nothing else has to remember to.
+    readonly property int lyricIndex:
+        (hasPlayer && lyricsSynced && lyricsWanted) ? _lineAt(player.position) : -1
     function _lineAt(pos) {
         const l = lyricsSynced ? lyrics.lines : null;
         if (!l || l.length === 0) return -1;
@@ -200,15 +221,6 @@ Singleton {
             else hi = mid - 1;
         }
         return ans;
-    }
-    function _refollow() {
-        lyricIndex = (hasPlayer && lyricsSynced) ? _lineAt(player.position) : -1;
-    }
-    onQueueJsonChanged: _refollow()
-    Connections {
-        target: root.player
-        enabled: root.hasPlayer && root.lyricsSynced && root.lyricsWanted
-        function onPositionChanged() { root._refollow(); }
     }
 
     // "the player is up and serving us a queue" — NOT "the queue has rows in it".

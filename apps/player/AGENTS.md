@@ -59,6 +59,11 @@ is: MPRIS has no lyrics field, and `LyricsProvider` lives in this process.
   turn a widget nobody has opened into a library-wide sweep, which is what
   `tools/lyrics-sync.py` is for. So nothing is resolved until a client says
   `LYRICS 1`, and the panel only says it while its drawer is actually open.
+- **The payload is per CONNECTION, because the subscription is.** `snapshot()`
+  takes a `with_lyrics` flag and `push()` builds at most two lines. It read the
+  `want` set as a global "is anybody listening" first, so one subscriber turned
+  lyrics on for every other client — including a panel predating this protocol,
+  handed a few KB of words it has no field for on every push.
 - **`lyr_tid` is a join key, not a cache tag.** A resolve is asynchronous, so by
   the time one lands the user may have skipped — and a payload sent under the
   wrong track is the panel confidently scrolling another song's words. Nothing

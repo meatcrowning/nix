@@ -19,6 +19,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import time
 
 RUN = tempfile.mkdtemp(prefix="qsrv-")
 os.environ["XDG_RUNTIME_DIR"] = RUN
@@ -157,6 +158,52 @@ def step():
     for _ in range(2):
         readline()
     check("no resolve while unsubscribed", len(lyr.asked) == n, str(lyr.asked))
+
+    # A client that NEVER says LYRICS is a pre-subscription panel — the shape
+    # the field was added under, and the one that has to keep working forever.
+    # It must see `"lyrics": null` on every push, including while ANOTHER client
+    # is subscribed and lyrics are cached, and it must trigger no resolve.
+    sock.write(b"LYRICS 1\n")
+    sock.flush()
+    readline()
+    old = QLocalSocket()
+    old.connectToServer(os.path.join(RUN, "player-queue.sock"))
+    end = time.monotonic() + 2
+    while old.state() != QLocalSocket.LocalSocketState.ConnectedState \
+            and time.monotonic() < end:
+        app.processEvents(); time.sleep(0.002)
+
+    def old_read(ms=2000):
+        e = time.monotonic() + ms / 1000.0
+        while time.monotonic() < e:
+            if old.canReadLine():
+                return json.loads(bytes(old.readLine()).decode())
+            app.processEvents(); time.sleep(0.002)
+        return None
+
+    d = old_read()
+    check("pre-LYRICS client: field present", d is not None and "lyrics" in d)
+    check("pre-LYRICS client: field null", d is not None and d["lyrics"] is None)
+    check("pre-LYRICS client: sees the queue", d is not None and len(d["tracks"]) == 2)
+    player.jumpTo(1)
+    seen_old, seen_new = [], []
+    for _ in range(4):
+        o = old_read(400)
+        if o is not None:
+            seen_old.append(o)
+        n2 = readline(400)
+        if n2 is not None:
+            seen_new.append(n2)
+    check("pre-LYRICS client never gets lyrics",
+          bool(seen_old) and all(s["lyrics"] is None for s in seen_old),
+          str([s["lyrics"] for s in seen_old]))
+    check("subscribed client still does",
+          any(s["lyrics"] is not None for s in seen_new))
+    old.disconnectFromServer()
+    app.processEvents()
+    sock.write(b"LYRICS 0\n")
+    sock.flush()
+    readline()
 
     # GOTO still works
     sock.write(b"GOTO 1\n")
