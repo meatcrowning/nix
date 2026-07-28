@@ -38,6 +38,21 @@ Image {
     sourceSize.width: mode === "tile" ? 0 : decodeW
     sourceSize.height: mode === "tile" ? 0 : decodeH
 
+    // Load THIS image synchronously, blocking until it has decoded, then go back
+    // to asynchronous for every later swap. `asynchronous` is read when the
+    // source is assigned, so restoring it on the next line only affects the next
+    // load — the assignment above has already finished decoding by then.
+    //
+    // Only the first paint of a tree uses this (WallpaperLayer._apply): a
+    // cross-fade must NOT block, both because the outgoing frame is still on
+    // screen and because the picker previews a new wallpaper on every arrow key.
+    function loadNow(u: string, m: string): void {
+        mode = m;
+        asynchronous = false;
+        source = u;
+        asynchronous = true;
+    }
+
     opacity: showing ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.InOutQuad } }
 
