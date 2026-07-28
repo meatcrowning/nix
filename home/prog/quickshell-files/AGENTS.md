@@ -1221,6 +1221,36 @@ would only re-implement it worse, and the font is monospace (advance exactly
 8px at 15px, so `implicitWidth == 8 * length`) if you ever need to do the
 arithmetic for something else.
 
+**But an ELIDING `Text` may never be asked for its own `implicitWidth` to
+decide its `width`.** `width: Math.min(implicitWidth, <cap>)` is the standard
+shape for "as wide as the text, capped" and it is a binding loop: a `Text` with
+`elide` lays out against the width it was given, and until something has asked
+it for its implicit width it publishes the ELIDED width as `implicitWidth`.
+Which of the two evaluates first at construction decides whether it converges
+or spins, which is why it fires in bursts and not every time — the queue
+drawer's artist column logged 27 `Binding loop detected for property "width"`
+inside one panel generation, one per realized row. **Nothing looks wrong when
+it happens**: the loop settles at a width that is merely a little short, so
+`qs log` is the only place it exists. Measure with a **`TextMetrics`** instead —
+it has no geometry of its own, so there is nothing to feed back, and
+`advanceWidth` is the unelided `implicitWidth` to the pixel with this font
+(measured: 67.5 and 286.875 for two sample strings, identical both ways).
+
+```qml
+TextMetrics { id: nat; font: label.font; text: label.text }
+PixelText { id: label; elide: Text.ElideRight
+            width: Math.min(nat.advanceWidth, parent.width / 3) }
+```
+
+It is the same rule as the zero-size popup above — an implicit size must be
+computed only from things that do not follow the item's own size — one level
+down, on a single `Text`. `MediaContent.qml` has both of its instances fixed;
+**`ProcMenu.qml`'s `MenuRow` label and `WeatherContent.qml`'s place label still
+carry the old shape** and neither has been observed to spin, so they are latent
+rather than broken. `ProcMenu`'s in particular is not a drive-by fix: that
+popup MEASURES its entries' `implicitWidth` in `openFor()` and refuses to open
+on a degenerate result, so the two have to be changed together or not at all.
+
 **A PAIR of ASCII glyphs is not a pair of arrows. Draw one glyph and mirror
 it.** There is no triangle either (`▲ ▼ ▴ ▾`, like `↑ ↓`, are all absent), so an
 up/down affordance has to come out of ASCII — and `^` is not `v` upside down
