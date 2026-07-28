@@ -32,10 +32,16 @@ Rectangle {
             font.pixelSize: Theme.fontSize
             font.hintingPreference: Font.PreferNoHinting
             renderType: Text.NativeRendering
-            // the one multi-line editor in any of these apps, so it needs the
-            // pin PixelText carries: FixedHeight at the font cell == kitty's row
-            lineHeight: Theme.fontSize
-            lineHeightMode: TextEdit.FixedHeight
+            // NO lineHeight/lineHeightMode HERE. They are Text-only properties;
+            // QQuickTextEdit does not have them, so assigning them is a
+            // component-creation error, not a no-op — it made PromptBox
+            // unavailable, which took PromptEditor with it and left Main.qml
+            // unable to load at all. painter could not start from 21534ca (the
+            // kitty-exact pass, which added them by analogy with PixelText)
+            // until this was removed. Qt offers no equivalent pin on an
+            // editable text item, so this one surface leads at Qt's rounded
+            // 16px rather than kitty's 15px cell; that is an accepted loss and
+            // NOT an invitation to re-add these two lines.
             selectByMouse: true
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
