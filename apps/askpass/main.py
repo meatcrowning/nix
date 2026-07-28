@@ -44,6 +44,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
+sys.path.insert(0, str(HERE.parent / "pylib"))
 
 # Anything that goes wrong before the dialog is on screen is exit 3 ("could not
 # display"), which the wrapper answers by falling back to ksshaskpass. Importing
@@ -53,6 +54,8 @@ try:
     from PySide6.QtCore import QObject, Slot, QUrl, QFileSystemWatcher, Signal, Property
     from PySide6.QtGui import QGuiApplication, QColor
     from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+    # pylib; imports PySide6 itself, so it can only fail where PySide6 does.
+    from deskstyle import DeskStyle
 except Exception as exc:  # noqa: BLE001 - any import failure at all
     print(f"askpass: cannot load PySide6: {exc}", file=sys.stderr)
     sys.exit(3)
@@ -323,8 +326,10 @@ def main():
     ctx = engine.rootContext()
 
     palette = Palette(PANEL_THEME)
+    style = DeskStyle()
     sudo = Sudo()
     ctx.setContextProperty("WalPalette", palette)
+    ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Sudo", sudo)
     ctx.setContextProperty("startPrompt", prompt)
     ctx.setContextProperty("startReason", reason)

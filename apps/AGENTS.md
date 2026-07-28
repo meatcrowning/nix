@@ -86,6 +86,18 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 - **`trackmatch.py`** — the one artist/title normaliser. Any new "are these two
   tag strings the same song?" code must use it rather than grow a second copy;
   see `player/AGENTS.md`.
+- **`deskstyle.py`** — the desktop-wide `fontFamily` / `fontSize`, read live
+  from the panel's own `~/.config/quickshell/settings.json` (the file
+  `SettingsStore` persists). Install it as the `DeskStyle` context property
+  BEFORE creating the app's `Theme.qml`, exactly like `WalPalette`, and keep a
+  Python reference — every app's `Theme.font`/`fontSize` binds to it, so an app
+  that forgets loads its theme with an empty font. Any offscreen harness that
+  builds a `Theme.qml` needs it too. It exists because those two used to be
+  hardcoded `15` per app, so the Settings font-size slider moved the panel and
+  the titlebars and left all six apps behind (DESIGN.md §2.7). Point
+  `$DESK_SETTINGS` at another JSON file to render at a non-default size without
+  touching the user's live settings — that is how the size is verified
+  offscreen.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
 

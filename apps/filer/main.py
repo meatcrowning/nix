@@ -43,6 +43,7 @@ QML = HERE / "qml"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
@@ -706,6 +707,7 @@ def main():
 
     ops = FileOps()
     palette = Palette(PANEL_THEME)
+    style = DeskStyle()
     winctl = WinCtl()
     titlebar = Titlebar()
     dirwatch = DirWatch()
@@ -716,6 +718,7 @@ def main():
     ctx.setContextProperty("FileOps", ops)
     ctx.setContextProperty("DirWatch", dirwatch)
     ctx.setContextProperty("WalPalette", palette)
+    ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("WinCtl", winctl)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)

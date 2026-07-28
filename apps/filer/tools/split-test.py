@@ -43,6 +43,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 FILER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FILER)
 sys.path.insert(0, os.path.join(os.path.dirname(FILER), "pylib"))
+from deskstyle import DeskStyle  # noqa: E402  (pylib; Theme.qml binds to it)
 
 from PySide6.QtCore import (QUrl, QObject, Slot, Signal, QMimeData, QPoint, Qt,  # noqa: E402
                             QTimer)
@@ -107,7 +108,11 @@ def build(app, start_dir, picker=None, state=None):
             filermain.Settings(), watch, filermain.WinCtl(), filermain.VideoConv(),
             tb, filermain.Picker(picker))
     ctx.setContextProperty("FileOps", keep[0])
+    _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[1])
+    # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the
+    # harness must install it too or the theme loads with an empty font.
+    ctx.setContextProperty("DeskStyle", _deskstyle)
     ctx.setContextProperty("Settings", keep[2])
     ctx.setContextProperty("DirWatch", keep[3])
     ctx.setContextProperty("WinCtl", keep[4])

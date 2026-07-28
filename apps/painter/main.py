@@ -42,6 +42,7 @@ try:
     from vtbclient import VtbClient  # noqa: E402
 except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
+from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
 sys.path.insert(0, str(HERE))
 import comfy as C  # noqa: E402
@@ -842,6 +843,7 @@ def main():
     app.setOrganizationName("painter")
 
     palette = Palette(PANEL_THEME)
+    style = DeskStyle()
     prefs = Prefs()
     ctl = Painter()
     bar = Titlebar()
@@ -850,6 +852,7 @@ def main():
     ctx = engine.rootContext()
     # Keep python-side references: context properties are not owned by QML.
     ctx.setContextProperty("WalPalette", palette)
+    ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("App", ctl)
     ctx.setContextProperty("Models", ctl.models)

@@ -250,6 +250,45 @@ is a read beacon. `Notifications.plain()` strips tags at ingest but then
 *unescapes entities*, so `&lt;img&gt;` survives the strip and would be reborn as
 markup at the draw site. **Both halves are required.**
 
+### 2.7 The size is ONE setting, and layout must survive it
+
+**Nothing draws text at a literal pixel size, and nothing sizes a box that
+holds text with a literal either.** [code] The Settings window's *font family*
+and *font size* controls are the whole desktop's, not the panel's: the panel's
+`Theme.qml` binds to `SettingsStore.d.fontFamily`/`.fontSize`, and each app's
+`Theme.qml` binds to `DeskStyle`, a context property whose Python side
+(`apps/pylib/deskstyle.py`) reads the very same
+`~/.config/quickshell/settings.json`. One slider moves panel, titlebars and all
+six apps.
+
+It is deliberately **not** parsed out of the panel's live `Theme.qml` the way
+the palette is. `wal-set.sh` writes colours there as literals, but the two font
+keys are QML *expressions* — parsing them yields the string
+"SettingsStore.d.fontSize". `settings.json` is what `SettingsStore` persists, so
+reading it is reading the same value, not inventing a second source of truth.
+
+The slider's range is **10-24px** (`SetPgAppearance.qml`), i.e. 0.67x to 1.6x of
+the default 15. The pixel font is monospace: **advance = `round(0.533 *
+fontSize)`** (8px at 15) and **glyph ink = `fontSize + 1`**. So:
+
+- a plain text row is `Theme.fontSize` tall (§2.1), a `clip: true` one
+  `Theme.fontSize + 2` (§2.2) — never a literal;
+- a column holding *N* known characters needs `N * Theme.fontSize * 8 / 15`, or
+  better, an `implicitWidth`-driven binding. A fixed width `W` first clips at
+  `fontSize = 1.875 * W / N`;
+- a **pixel budget standing in for a character count** — `parent.width - 130`,
+  `width > 620`, a `minimumWidth` chosen so N cells fit — is the same bug
+  written less obviously, and breaks at the same point.
+
+**What is still literal, audited at 10 / 15 / 24px:** painter derives *nothing*
+from `Theme.fontSize` and is the one app with real breakage above ~17px (its
+`Picker` rows, `Spin` widths and `ModelPicker` reserves); player, filer and
+surfer each keep a handful (player's `Stars`, its track-number column and the
+`height: 15` right-hand cluster; filer's 146px timestamp columns and the
+`620`/`470` thresholds; the `height: 22` buttons all three share). askpass,
+viewer and `qmlcommon/` are clean — askpass is the model to copy, computing its
+whole window height from `banner.height + body.implicitHeight`.
+
 ---
 
 ## 3. Colour
@@ -1502,6 +1541,7 @@ Firefox's chrome and GTK dialogs do not follow the wallpaper.
 |---|---|
 | the palette | live `~/.config/quickshell/Theme.qml`, written by `wal-set.sh` |
 | panel geometry + font size | `SettingsStore` → panel `Theme.qml` |
+| **app** font family + size | the same `settings.json`, read by `apps/pylib/deskstyle.py` → each app's `Theme.qml` |
 | app theme | `apps/<app>/qml/theme/Theme.qml` (six byte-identical copies) |
 | pixel text | `PixelText.qml` (panel + one per app) |
 | glyph mapping for foreign text | `quickshell-files/Glyphs.qml` — **panel only** |
@@ -1530,7 +1570,7 @@ Findings, not rules — every one of these is a real inconsistency today:
 | what | state |
 |---|---|
 | `apps/*/qml/theme/Theme.qml` | six **byte-identical** copies, kept in sync by hand |
-| App font size | hardcoded `15` in all six, while the panel reads `SettingsStore.d.fontSize`. **Changing the font size in Settings moves the panel and titlebar and leaves all six apps behind** — which breaks §2.1 |
+| App LAYOUT vs font size | fixed. The six apps now track the same setting the panel does (§2.1), but their *layouts* were sized against 15: painter derives nothing at all from `Theme.fontSize`, and player, filer and surfer each keep a handful of literal row heights and column widths. See §2.7 |
 | `Theme.inactive` | present in all six apps, absent from the panel's Theme |
 | `Glyphs.px()` | **panel only.** The six apps draw filenames, ID3 tags and page titles with no mapping, so §2.3's clipping applies to them unmitigated — and he explicitly asked for it to be wired "through the others" |
 | `PixelText.qml` | 7 copies; behaviour identical, comments differ |
@@ -1584,11 +1624,10 @@ tree**: it flips its own label to `scanning`, lights up, and guards the handler.
 
 Agent *proposals*, listed separately on purpose. Nothing above depends on them.
 
-1. **Should the apps read the panel's font size instead of hardcoding 15?**
-   Today the Settings font-size slider moves the panel and titlebar and leaves
-   all six apps at 15 — which contradicts §2.1. Fix: the apps' `main.py` parses
-   `fontSize` out of the panel `Theme.qml` alongside the palette it already
-   parses. Or: is 15 immovable, and the slider should have been panel-local?
+1. ~~Should the apps read the panel's font size instead of hardcoding 15?~~
+   **Done** — see §2.7. (Parsing the panel's `Theme.qml` for it, as this entry
+   proposed, would not have worked: the palette is written there as literals,
+   but `font`/`fontSize` are QML expressions only Quickshell can evaluate.)
 2. **Should `Glyphs.px()` be shared with the apps?** You asked for it to be
    wired "through the others" in the panel; the apps have the same problem and
    no mapping at all. Doing it means a `qmlcommon/` or `pylib/` copy of the

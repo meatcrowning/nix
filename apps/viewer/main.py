@@ -37,6 +37,7 @@ QML = HERE / "qml"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
 # Same set filer classifies as images, so anything filer shows a thumbnail for
 # opens here (keep the two in sync — filer/main.py IMAGE_EXTS).
@@ -380,10 +381,12 @@ def main():
     ctx = engine.rootContext()
 
     palette = Palette(PANEL_THEME)
+    style = DeskStyle()
     titlebar = Titlebar()
     files = Files()
     prefs = Prefs()
     ctx.setContextProperty("WalPalette", palette)
+    ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Files", files)
     ctx.setContextProperty("Prefs", prefs)
