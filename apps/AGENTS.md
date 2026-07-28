@@ -1,15 +1,15 @@
 # `apps/` — the vendored desktop apps
 
-Six standalone Qt/QML apps that ship with this config, plus the shared Python
+Seven standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
 **Read `~/nix/docs/DESIGN.md` before you draw anything in here.** These apps are not
-six programs that happen to share a repo — they are one desktop, alongside the
+seven programs that happen to share a repo — they are one desktop, alongside the
 panel and the compositor plugin, and the user's standing requirement is that a
 new app or a new feature *looks like the rest without him having to say so*.
 Type, palette, spacing, corners, motion timing, titlebar button glyphs, menus,
 tooltips, list rows, drop feedback and the honesty-of-controls rule all live in
-that one file. It also records where these six have already drifted apart from
+that one file. It also records where these apps have already drifted apart from
 each other. This guide owns the *mechanics*; that one owns the *look*.
 
 | dir | what it is | packaged by |
@@ -20,14 +20,16 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`painter/`](painter/AGENTS.md) | text-to-image front end for headless ComfyUI | `home/prog/painter.nix` |
 | [`surfer/`](surfer/AGENTS.md) | QtWebEngine browser | `home/prog/surfer.nix` |
 | [`askpass/`](askpass/AGENTS.md) | the `sudo -A` password dialog | `home/prog/askpass.nix` |
+| [`reader/`](reader/AGENTS.md) | markdown reader (browse + read `.md`) | `home/prog/reader.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
 ## They are the system defaults
 
-Three of them are what the rest of the desktop opens things with: **filer** for
+Four of them are what the rest of the desktop opens things with: **filer** for
 `inode/directory`, **viewer** for every image and video type in its
-`IMAGE_EXTS`/`VIDEO_EXTS`, **surfer** for `text/html` and `x-scheme-handler/
+`IMAGE_EXTS`/`VIDEO_EXTS`, **reader** for `text/markdown`, **surfer** for
+`text/html` and `x-scheme-handler/
 http(s)` (plus Plasma's separate `kdeglobals` `BrowserApplication` key and
 `$BROWSER`).
 
@@ -105,6 +107,16 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   `$DESK_SETTINGS` at another JSON file to render at a non-default size without
   touching the user's live settings — that is how the size is verified
   offscreen.
+- **`glyphs.py`** — `px()`, the apps' half of docs/DESIGN.md §2.3: the characters
+  More Perfect DOS VGA lacks, mapped onto ASCII, so text this desktop did not
+  author cannot clip the row it is drawn in. It is the twin of the panel's
+  `quickshell-files/Glyphs.qml` — same table, two roofs, **retune both** — and
+  it is deliberately Python rather than QML, because §2.3 says to map at the
+  INGEST point (where a file is parsed) and not once per delegate per scroll.
+  `reader` is its first caller; the other six still draw filenames, tags and
+  page titles unmapped (§19.1). `is_mappable()` records what is left alone on
+  purpose (CJK, Greek, the maths operators), so a harness can tell a known
+  limit from a regression.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
 
@@ -220,6 +232,16 @@ while `filer/qml/Main.qml` merely quoted its rationale in a comment and had no
 copy at all. `apps/pylib/kinetic.py` is the only Python one (`DETENT`,
 `ANGLE_PER_PIXEL`, `WHEEL_GAIN`, `is_wheel_detent()`); anything touching
 `QWheelEvent` in Python imports from there rather than re-deriving the numbers.
+
+### `VScroll.qml` — the one scrollbar
+
+`ScrollBar.vertical: VScroll {}` on every scrollable view. docs/DESIGN.md §9.2 is one
+idiom for the whole desktop (visible only on overflow, brighter on hover, accent
+while pressed, a 120 ms opacity fade), and it existed as four separate copies —
+player's, painter's, and an inline `component VScroll` in filer's pane and in
+reader's — before this file. §19.1 lists that as a real divergence. reader uses
+the shared one; **the three older copies are byte-identical to it and should
+come here as each of those files is next touched.**
 
 **A control that STEPS a value is not a scroller.** `qmlcommon/WheelNotch.qml`
 is for those — painter's numeric `Spin` boxes today — and it is the apps-side
