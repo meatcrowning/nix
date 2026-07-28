@@ -29,16 +29,18 @@
 # The CM_SYNC_* overrides exist so the script can be exercised against a
 # throwaway repo in a test — and, since the logic here is generic
 # "keep one private repo in sync across two machines", so a SECOND caller can
-# reuse it wholesale. home/srvs/nix-docs.nix does exactly that for ~/nix/docs;
-# see the note on CM_SYNC_SEED below before adding a third.
-REPO="${CM_SYNC_REPO:-$HOME/.claude/projects}"
-REMOTE="${CM_SYNC_REMOTE:-https://github.com/meatcrowning/claude-memories.git}"
+# reuse it wholesale. home/srvs/nix-docs.nix does exactly that for ~/nix/docs
+# and home/srvs/claude-state.nix for the whole of ~/.claude; read the notes on
+# CM_SYNC_SEED and CM_SYNC_LOCK below before adding a fourth.
+REPO="${CM_SYNC_REPO:-$HOME/.claude}"
+REMOTE="${CM_SYNC_REMOTE:-https://github.com/meatcrowning/claude-state.git}"
 BRANCH="${CM_SYNC_BRANCH:-main}"
-LOG="${CM_SYNC_LOG:-$HOME/.cache/claude-memory-sync.log}"
-# MUST be overridden by any other caller: this default seeds the ALLOWLIST
-# .gitignore, which ignores everything except */memory/**. Point a different
-# repo at it and every file in that repo silently stops being tracked.
-SEED="${CM_SYNC_SEED:-$HOME/.config/scripts/claude-memory-seed}"
+LOG="${CM_SYNC_LOG:-$HOME/.cache/claude-state-sync.log}"
+# MUST be overridden by any other caller: this default seeds ~/.claude's
+# DENYLIST .gitignore, which excludes that tree's secrets and runtime state by
+# name. Point a different repo at it and it inherits exclusions that mean
+# nothing there, while its own secrets go unguarded.
+SEED="${CM_SYNC_SEED:-$HOME/.config/scripts/claude-state-seed}"
 # Noun for commit messages, so a reused instance doesn't claim to be syncing
 # memories.
 LABEL="${CM_SYNC_LABEL:-memory file}"
@@ -52,7 +54,13 @@ fi
 exec >>"$LOG" 2>&1
 
 # Serialize: the timer and a manual run must not interleave git operations.
-LOCK="$HOME/.cache/claude-memory-sync.lock"
+#
+# PER-CALLER, and it must stay that way. This was one hardcoded path shared by
+# every instance, and `flock -n` SKIPS rather than waits — so with two callers
+# on 5-minute timers that happened to align, one of them silently did nothing
+# for that tick, forever, and looked healthy while doing it. Different repos
+# never need to exclude each other; only two runs of the SAME repo do.
+LOCK="${CM_SYNC_LOCK:-$HOME/.cache/$(basename "$LOG" .log).lock}"
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK"
   flock -n 9 || { echo "$(date -Is) another sync is running — skipping"; exit 0; }
@@ -97,6 +105,35 @@ git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
 
 # ---- 1. commit whatever this machine changed --------------------------------
 git add -A
+
+# Backstop for a DENYLIST caller (see ~/.claude): an allowlist cannot widen by
+# accident, a denylist can, and `git add -A` is indiscriminate. If a tick ever
+# stages far more than a tick should, that is a new exclusion this repo needs —
+# not something to push and find out about later. Unstage and shout instead.
+# Unset = off, which is right for an allowlist caller.
+if [ -n "$CM_SYNC_MAX_MB" ]; then
+  staged=0
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    n=$(wc -c <"$f" 2>/dev/null) || continue
+    staged=$((staged + n))
+  done <<EOF
+$(git diff --cached --name-only --diff-filter=ACM)
+EOF
+  if [ "$staged" -gt $((CM_SYNC_MAX_MB * 1048576)) ]; then
+    log "REFUSING TO COMMIT: $((staged / 1048576))MB staged, over CM_SYNC_MAX_MB=$CM_SYNC_MAX_MB"
+    log "  Something large landed in $REPO that .gitignore does not exclude."
+    log "  Look at what it is BEFORE raising the cap — this repo is private but"
+    log "  it is still a copy of everything, sent off this machine."
+    log "  Largest staged paths:"
+    git diff --cached --name-only --diff-filter=ACM | while IFS= read -r f; do
+      [ -f "$f" ] && echo "$(wc -c <"$f") $f"
+    done | sort -rn | head -5 | sed 's/^/    /'
+    git reset -q           # unstage only; the working tree is untouched
+    exit 1
+  fi
+fi
+
 if git diff --cached --quiet; then
   :
 else

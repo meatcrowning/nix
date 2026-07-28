@@ -195,27 +195,37 @@ Never run bare `qs` — it launches a second panel.
   force a run with `systemctl --user start nix-docs-sync.service`.
   Deliberately **not** a submodule: `git
   pull` does not update submodule contents, so the other machine would read a
-  stale runbook. If you add a third caller of that script you **must** override
-  `CM_SYNC_SEED` — its default installs the memory store's allowlist
-  `.gitignore`, which would silently untrack every file in your repo. Three docs
+  stale runbook. There are now three callers of that script; a fourth **must**
+  override `CM_SYNC_SEED` — its default installs `~/.claude`'s denylist
+  `.gitignore`, whose exclusions mean nothing in another tree while that tree's
+  own secrets go unguarded. Three docs
   stay put on purpose and `docs/README.md` says why.
-- `home/srvs/claude-memory.nix` + `claude-memory-files/` — two-way sync of
-  Claude Code's memory files between `top` and `book` via the PRIVATE repo
-  `github.com/meatcrowning/claude-memories`. `~/.claude/projects` *is* the
-  checkout — in place, no copying — driven by the `claude-memory-sync.timer`
-  user unit every 5 min (log: `~/.cache/claude-memory-sync.log`; force a run
-  with `systemctl --user start claude-memory-sync.service`). Being under
-  `home/` it deploys to book automatically; that machine needs only
+- `home/srvs/claude-state.nix` + `claude-state-files/` — two-way sync of **the
+  whole of `~/.claude`** between `top` and `book` via the PRIVATE repo
+  `github.com/meatcrowning/claude-state`: memories, `orchestrator-briefing.md`,
+  `plans/`, `file-history/`, and every session transcript. `~/.claude` *is* the
+  checkout — in place, no copying — driven by the `claude-state-sync.timer` user
+  unit every 5 min (log: `~/.cache/claude-state-sync.log`; force a run with
+  `systemctl --user start claude-state-sync.service`). Being under `home/` it
+  deploys to book automatically; that machine needs only
   `home-manager switch --flake ~/nix#air` plus a `gh auth login` (the git
-  credential helper is `!gh auth git-credential`). Two invariants: the
-  `.gitignore` is an
-  **allowlist** (ignore `*`, re-include only `*/memory/**`) because the same
-  tree holds every session transcript, which must never be pushed; and
-  `.gitattributes` sets `*.md merge=union` so a memory edited on both machines
-  keeps both sides instead of wedging the sync. Both are seeded from nix on
-  every run — edit them in `claude-memory-files/`, not in the live repo.
-  Practical consequence: **a memory is shared infrastructure**, so say which
-  host a fact is specific to.
+  credential helper is `!gh auth git-credential`). **Treat that remote as
+  internal documents** — it is a verbatim record of whatever was on screen.
+  Three invariants:
+  the `.gitignore` is a **denylist** (secrets and machine-local runtime state
+  by name) — the inverse of the allowlist it replaced, so it *can* widen by
+  accident and `CM_SYNC_MAX_MB` exists to catch that; `.gitattributes` sets
+  `merge=union` for `*.md`/`*.jsonl` and `merge=ours` for `*.json`, so an
+  unattended timer can never wedge on a conflict; and both are seeded from nix
+  on every run — edit them in `claude-state-files/`, not in the live repo.
+  Practical consequences: **a memory is shared infrastructure**, so say which
+  host a fact is specific to — and a file referenced by an absolute path from a
+  memory is now actually there on the other machine, which was the bug that
+  widened this scope (a briefing one directory above the old repo root never
+  synced, silently). It supersedes `claude-memory.nix`; the old
+  `claude-memories` remote survives as a read-only archive, and
+  `claude-state-premigrate.sh` retires the nested repo on each machine by
+  itself.
 
 ### Nested guides — read the one nearest what you are editing
 
