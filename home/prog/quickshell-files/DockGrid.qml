@@ -137,8 +137,38 @@ Item {
     // — that reads `lastGen` inside its own initialiser, which makes the binding
     // depend on the counter it increments.
     property int gen: 0
-    Component.onCompleted: gen = ViewMode.nextGen()
+    Component.onCompleted: {
+        gen = ViewMode.nextGen();
+        _auditFirstPaint();
+    }
+
+    // THE REGRESSION CHECK FOR THE RELOAD FLASH, and it is silent when correct.
+    //
+    // Whatever is not `ready` at this point is what the reload's first frame
+    // paints as an empty framed rectangle — the panel flashing black. There is
+    // no IPC call for it because the answer is only true for one instant, the
+    // one this runs in; a poll from outside always arrives after the tiles have
+    // caught up and reports a clean panel either way.
+    //
+    // So it warns into `qs log`, once per reload, ONLY on a regression:
+    //
+    //     qs log | grep "dock tiles"        # nothing = every tile was painted
+    //
+    // The way to put a tile back in this list is to make its Loader (or any
+    // Loader/Image inside its content) asynchronous again.
+    function _auditFirstPaint(): void {
+        let late = [];
+        for (let i = 0; i < tiles.count; i++) {
+            const t = tiles.itemAt(i);
+            if (t && !t.ready) late.push(t.tileKey);
+        }
+        if (late.length)
+            console.warn("dock tiles not painted at completion:",
+                         late.length + "/" + tiles.count, late.join(","));
+    }
+
     Repeater {
+        id: tiles
         model: root.placements
         delegate: DockTile {
             required property var modelData
