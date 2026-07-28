@@ -652,6 +652,15 @@ draws it.
   asking for that form is asking for the room it needs, and on this panel it is
   what takes the drawer from four rows to three. The cap is legal only because
   `q` is not in `placements`.
+  **A floor mirrored from a content component must add the TILE'S FRAME**
+  (`DockGrid.tileInset`, 2px): the number reserves a tile, but what has to fit
+  is `DockTile`'s Loader, anchored `margins: 1`. Without that term the forecast
+  spent its whole life one and a half pixels short — two grid rows = 62.6px of
+  tile = 60.6px of content against a 62px minimum — so `miniGraph` was false,
+  the graph was dropped entirely and the "condensed" forecast was the
+  bare-header tier that exists only for panels with no room at all. The comment
+  above claiming the drawer went four rows to three was describing what the
+  arithmetic was meant to do, not what it did.
 - **The drawer takes the rows the grid ADDED** — `height - naturalRest -
   restSlack`, with NO floor and NO animation of its own — so the artwork row,
   which is the leftover, is the same size at every frame of the slide AND at
