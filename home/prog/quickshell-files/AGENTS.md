@@ -619,14 +619,19 @@ you are looking at.
   Chromium/QtWebEngine helpers, which rewrite their entire command line into
   `argv[0]`, so a "name" containing spaces or over 24 characters falls back.
 - **The `[x]` is SIGTERM on left click; everything else a process can be asked
-  to do is on RIGHT-CLICK anywhere in the row** (`ProcMenu.qml`): End Task,
-  Force Quit, Suspend/Resume, Lower Priority, Filter by Name, Copy PID. SIGKILL
+  to do is on RIGHT-CLICK anywhere in the row** (`ProcMenu.qml`): filter by
+  name, copy pid — separator — suspend/resume, lower priority — separator — end
+  task, force quit. SIGKILL
   used to be the right-click on the `[x]` itself, so that an unrecoverable
   action was never one mis-timed left click away on a table that re-sorts under
   the cursor every 2s. The menu keeps that guarantee — it is still two
   deliberate acts — and removes the trap that appeared once right-click meant
   "menu" everywhere else: a right-click a few pixels off would have SIGKILLed
   whatever had just sorted under the pointer.
+  **That order is part of the guarantee, not a style choice** (DESIGN.md §7.2,
+  §10.3): the destructive pair is LAST and behind a separator, so the entry the
+  pointer lands on is read-only. It shipped the other way round — `End Task` and
+  `Force Quit` first — for the menu's first day.
 - **The menu is ONE instance at the table root, not one per row.** The list
   `reuseItems` and re-sorts every 2s, so a delegate-owned popup would be
   destroyed or silently re-pointed at another process while it was open. It

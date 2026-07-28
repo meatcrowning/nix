@@ -1132,11 +1132,35 @@ never going to make the two hosts agree".
 **The menu spec, identical in the panel and in filer/player/surfer** [code]:
 box `Theme.bgAlt` + 1px `Theme.border` + `radius: 3`; row height is the text's
 own line box; `implicitWidth: text + 24` with a 10-12px left margin; **hover
-fills `Theme.bg` — darker than the menu**, inverted from the usual
-hover-lightens; disabled text `Theme.inactive`; separator is a 1px
-`Theme.border` line centred in a 5-7px row; `PointingHandCursor`; dismissal on
-select, outside click, Escape, or a 400ms leave timer. Item shape is
-`{label, enabled?, separator?, trigger?}`.
+fills `Theme.highlight` — one step LIGHTER than the menu**, the same selection
+fill the task table's rows take, per §3.3's brightness ladder; disabled text
+`Theme.inactive`; separator is a 1px `Theme.border` line centred in a 5-7px row;
+`PointingHandCursor`; dismissal on select, outside click, Escape, or a 400ms
+leave timer. Item shape is `{label, enabled?, separator?, trigger?}`.
+
+**This paragraph said "hover fills `Theme.bg` — darker than the menu, inverted
+from the usual hover-lightens" until 2026-07-27, and it was wrong.** It had been
+promoted from `TaskMenu.qml` (`155f6b4`), the first menu written here, whose
+hover was never a decision — the same file also painted `Force Quit` in
+`Theme.accent` and Title-Cased its labels, and both of those were plainly
+accidents. Nothing anywhere states a reason for menus to invert; the rest of the
+desktop hovers *up* the ladder without exception (eight fills in the panel alone
+— `BrowserButton`, `SetSelect`, `SetPgWidgets`, `MediaContent`, and the task
+table's own rows), `highlight`'s own comment reads "selection bg", and the three
+apps' menus — the majority, and independently written from surfer's — already
+did that. So the rule moved to where the desktop already was and the panel's two
+menus came with it, rather than the document's accident being copied into a
+sixth surface.
+
+**Ordering is a safety property, and it is the same in every menu:** the primary
+or read-only actions first (filer opens with `open`; the process menu opens with
+`filter by name` / `copy pid`), state changes next, and **anything destructive
+LAST, behind a separator** (§10.3). The pointer's landing spot must never be an
+entry that cannot be undone — least of all over a list that re-sorts under it.
+
+**Menu labels are lowercase**, like every other string this desktop authors.
+(surfer's page menu is Sentence case because it mirrors Chromium's own wording;
+that one is unruled — §19.2 item 2.)
 
 **Modal dialog spec, identical in filer and surfer** [code]:
 `Qt.rgba(0,0,0,0.5)` scrim, click-outside cancels and an inner `MouseArea`
@@ -1917,23 +1941,31 @@ agent's.
    successful copy are indistinguishable on screen. This is §10's headline rule
    and §10.2's own worked example. Note `filer/videoconv.py` *does* toast
    success and failure — so the pattern exists in the same app.
-2. **The panel's own two menus are the desktop's only Title Case menus.**
-   `ProcMenu` (7/7) and `TaskMenu` (2/2) — `End Task`, `Force Quit`,
-   `Copy PID` — against filer's, player's and painter's all-lowercase. The
-   reference implementation is the deviant. (surfer's 20-item context menu is
-   Sentence case and is arguable — it mirrors Chromium's wording — but surfer's
-   own titlebar tooltips are lowercase, so the app disagrees with itself one
-   click apart.)
-3. **`ProcMenu` puts the two destructive entries FIRST**, where filer puts
-   `open`, on a table its own comment says re-sorts under the pointer every 2s,
-   with no confirm. Every other menu on the desktop puts its destructive item
-   last and behind a separator (§10.3). `TaskMenu` puts `Force Quit` directly
-   under `Close` with no separator at all — and paints the same label
-   `Theme.accent` where `ProcMenu` paints it `Theme.crit`.
-4. **The apps' context menus hover-LIGHTEN.** §7.2 says the spec is identical
-   in the panel and in filer/player/surfer and that hover fills `Theme.bg`,
-   *darker* than the menu. The panel does that; all three apps' `CtxMenu`
-   /`ContextMenu` use `Theme.highlight`, which is brighter than `bgAlt`.
+2. ~~**The panel's own two menus are the desktop's only Title Case menus.**~~
+   **Fixed.** `ProcMenu` and `TaskMenu` are lowercase (`end task`, `force quit`,
+   `copy pid`, `filter by name`, `close`), and §7.2 now states the rule.
+   (surfer's 20-item context menu stays Sentence case — it mirrors Chromium's
+   wording — but surfer's own titlebar tooltips are lowercase, so the app
+   disagrees with itself one click apart. Still **RULE?**.)
+3. ~~**`ProcMenu` puts the two destructive entries FIRST**~~ — **fixed.** The
+   order is now `filter by name` / `copy pid`, separator, `suspend`|`resume` /
+   `lower priority`, separator, `end task` / `force quit`, so the pointer's
+   landing spot is a read-only action and the two signals are last behind a
+   separator (§10.3, §7.2). `TaskMenu` likewise: `close`, separator,
+   `force quit` — repainted `Theme.crit`, since it is the same action `ProcMenu`
+   already painted `crit`. **No confirmation dialog was added**, deliberately:
+   §10.3's "two deliberate acts" is already satisfied by the right-click that
+   opens the menu (that is exactly why the `[x]`'s instant SIGKILL became a menu
+   entry in the first place), the popup has no focus grab to host a modal, and a
+   second popup in this file is the shape that took the panel down (`7ebd55d`).
+   Re-raise it if a mis-kill ever actually happens.
+4. ~~**The apps' context menus hover-LIGHTEN**, against §7.2.~~ **The document
+   was wrong, not the apps** — see §7.2's own note. §7.2's "hover fills
+   `Theme.bg`" had been promoted from `TaskMenu`'s incidental code; hover
+   lightens everywhere else on this desktop, `highlight` is the selection fill,
+   and the three apps were the majority. The rule was corrected and the panel's
+   two menus now take `Theme.highlight` too. (Precedent: §2.2's `Text.elide` ban,
+   also promoted from code and also measurably false.)
 5. **§7.1 gaps.** player's track list — its most-used list — has no context
    menu, nor do the queue or `PlaylistsView`; viewer *accepts* `RightButton` and
    then discards it, so nothing else can offer one; painter's gallery binds

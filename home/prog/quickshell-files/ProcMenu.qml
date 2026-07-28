@@ -192,7 +192,10 @@ PopupWindow {
             width: box.width
             implicitWidth: rowText.implicitWidth + 24
             implicitHeight: rowText.implicitHeight
-            color: rowMouse.containsMouse ? Theme.bg : "transparent"
+            // Hover LIGHTENS, one step up the brightness ladder (§3.3):
+            // `highlight` is the desktop's selection fill, and the row under the
+            // pointer is the pending selection. DESIGN.md §7.2.
+            color: rowMouse.containsMouse ? Theme.highlight : "transparent"
             PixelText {
                 id: rowText
                 anchors.left: parent.left
@@ -261,34 +264,60 @@ PopupWindow {
             }
             MenuSep {}
 
+            // ORDER IS A SAFETY PROPERTY HERE, not a style choice. The pointer
+            // opens this menu on a table that re-sorts under it every 2s, so the
+            // entries nearest the cursor must be the ones a mis-timed click can
+            // be forgiven: the read-only actions first, the recoverable state
+            // changes next, and the two signals that end a process LAST, behind
+            // a separator (§10.3 — the same reason the [x] stopped being an
+            // instant SIGKILL). filer's menu opens with `open` for the same
+            // reason.
             MenuRow {
-                shown: menu.mine && !menu.isSelf
-                label: "End Task"
-                onActivated: { Procs.kill(menu.pid, false); menu.close(); }
+                label: "filter by name"
+                onActivated: { Procs.setFilter(menu.pname); menu.close(); }
             }
             MenuRow {
-                shown: menu.mine && !menu.isSelf
-                label: "Force Quit"
-                labelColor: Theme.crit
-                onActivated: { Procs.kill(menu.pid, true); menu.close(); }
+                label: "copy pid"
+                onActivated: { Procs.copyText(menu.pid); menu.close(); }
             }
+
+            // Always shown: something always follows it — the state changes and
+            // the signals for our own processes, the "refused" note otherwise.
+            MenuSep {}
+
             MenuRow {
                 shown: menu.mine && !menu.isSelf && !menu.stopped
-                label: "Suspend"
+                label: "suspend"
                 onActivated: { Procs.signal(menu.pid, "STOP"); menu.close(); }
             }
             MenuRow {
                 shown: menu.mine && !menu.isSelf && menu.stopped
-                label: "Resume"
+                label: "resume"
                 onActivated: { Procs.signal(menu.pid, "CONT"); menu.close(); }
             }
             // Niceness is one-way without privilege, so this is offered only
             // while there is room to go up, and never as a way back down.
             MenuRow {
                 shown: menu.mine && !menu.isSelf && menu.pnice < 19
-                label: "Lower Priority"
+                label: "lower priority"
                 onActivated: { Procs.renice(menu.pid, Math.min(19, menu.pnice + 10)); menu.close(); }
             }
+
+            MenuSep { shown: menu.mine && !menu.isSelf }
+
+            MenuRow {
+                shown: menu.mine && !menu.isSelf
+                label: "end task"
+                onActivated: { Procs.kill(menu.pid, false); menu.close(); }
+            }
+            MenuRow {
+                shown: menu.mine && !menu.isSelf
+                label: "force quit"
+                labelColor: Theme.crit
+                onActivated: { Procs.kill(menu.pid, true); menu.close(); }
+            }
+            // Why the signalling entries above are missing. They sit where those
+            // entries would have been, so the answer is where the question was.
             MenuNote {
                 shown: !menu.mine
                 label: "not yours - signals refused"
@@ -301,17 +330,6 @@ PopupWindow {
                 shown: menu.isSelf
                 label: "this is the panel - signals refused"
                 labelColor: Theme.warn
-            }
-
-            MenuSep { shown: menu.mine && !menu.isSelf }
-
-            MenuRow {
-                label: "Filter by Name"
-                onActivated: { Procs.setFilter(menu.pname); menu.close(); }
-            }
-            MenuRow {
-                label: "Copy PID"
-                onActivated: { Procs.copyText(menu.pid); menu.close(); }
             }
         }
     }
