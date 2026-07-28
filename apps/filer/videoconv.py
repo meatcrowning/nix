@@ -343,8 +343,16 @@ class VideoConv(QObject):
         self._jobs = {}     # src path -> job dict (also the "already running" set)
 
     # ---- toasts ----
-    def _toast(self, job, title, body, value=None, urgency=None):
+    def _toast(self, job, title, body, value=None, urgency=None, persist=False):
+        # -t 0 (never expire) on the in-progress toast, for the same reason
+        # surfer's downloads send it: the server retires an ordinary toast after
+        # a few seconds, and once it is gone our -r names an id it no longer
+        # has, so every later update opens a BRAND NEW toast (with its own
+        # sound) instead of morphing the one on screen. The completion/failure
+        # toast has nothing left to update and keeps the default timeout.
         args = [_tool("notify-send"), "-a", "filer", "-p"]
+        if persist:
+            args += ["-t", "0"]
         if job.get("nid"):
             args += ["-r", str(job["nid"])]
         if value is not None:
@@ -395,7 +403,8 @@ class VideoConv(QObject):
                "attempt": 1, "nid": None, "err": ""}
         self._jobs[src] = job
         self._toast(job, "compressing " + os.path.basename(src),
-                    "%s\n%s ~%s" % (self._bar(0), p["summary"], p["estStr"]), 0)
+                    "%s\n%s ~%s" % (self._bar(0), p["summary"], p["estStr"]), 0,
+                    persist=True)
         self._spawn(job, build_argv(src, job["dst"], p))
 
     def _spawn(self, job, argv):
@@ -434,7 +443,8 @@ class VideoConv(QObject):
         pass_note = "" if job["attempt"] == 1 else "  (pass %d)" % job["attempt"]
         self._toast(job, "compressing " + os.path.basename(job["src"]),
                     "%s %d%%\n%s%s" % (self._bar(pct), pct,
-                                       job["plan"]["summary"], pass_note), pct)
+                                       job["plan"]["summary"], pass_note), pct,
+                    persist=True)
 
     def _on_stderr(self, job):
         try:
@@ -469,7 +479,8 @@ class VideoConv(QObject):
             except OSError:
                 pass
             self._toast(job, "compressing " + os.path.basename(job["src"]),
-                        "%s\n%s  (pass 2 - overshot)" % (self._bar(0), job["plan"]["summary"]), 0)
+                        "%s\n%s  (pass 2 - overshot)" % (self._bar(0), job["plan"]["summary"]), 0,
+                        persist=True)
             if job.get("proc") is not None:
                 job["proc"].deleteLater()   # deferred: we're inside its finished()
             self._spawn(job, build_argv(job["src"], dst, job["plan"],
