@@ -136,9 +136,23 @@ Item {
     // Taken at completion, NOT as a `readonly property int gen: ViewMode.nextGen()`
     // — that reads `lastGen` inside its own initialiser, which makes the binding
     // depend on the counter it increments.
+    // The Quickshell screen this grid is drawn on, handed down by the bar. Only
+    // used to decide whether this copy of the grid may MEASURE (below).
+    property var screenRef: null
+
     property int gen: 0
     Component.onCompleted: {
-        gen = ViewMode.nextGen();
+        // A grid on an output the user cannot see must not report its tiles.
+        // There is one grid PER MONITOR and `ViewMode.tileInfo` is a singleton,
+        // so whichever completes last wins the table — and while an agent's
+        // `tools/sandbox.sh` monitor is up, that is a panel on a screen nobody
+        // is looking at, at a different height. `qs ipc call live tiles` then
+        // answers about the wrong panel with no sign that it has: it read
+        // `tasks got=433` against a true 451 for the whole of 2026-07-27. A
+        // measuring instrument has to be harder to poison than the thing it
+        // measures; a virtual output has nothing true to say about layout, so
+        // it says nothing. gen -1 is refused by reportTile.
+        gen = WinState.screenIsVirtual(screenRef) ? -1 : ViewMode.nextGen();
         _auditFirstPaint();
     }
 

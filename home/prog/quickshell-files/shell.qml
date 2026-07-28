@@ -1178,6 +1178,10 @@ Scope {
                         // this. Both layouts are always instantiated, so without
                         // it every widget would have two live instances.
                         active: dockLayout.visible
+                        // Which monitor this copy is on, so a grid on an agent's
+                        // sandbox output declines to report its tile sizes into
+                        // the singleton every grid shares (see DockGrid.qml).
+                        screenRef: bar.modelData
                         anchors {
                             left: parent.left; right: parent.right
                             top: dockDivider.bottom; topMargin: Theme.gap
