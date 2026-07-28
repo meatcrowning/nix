@@ -21,6 +21,25 @@ import Quickshell
 // the sampler reports as somebody else's (`mine` false) get the read-only
 // entries only, plus a line saying why. Silently doing nothing is the failure
 // mode this menu exists to avoid, not one it may reintroduce.
+//
+// A POPUP THAT MAPS AT ZERO SIZE KILLS THE WHOLE PANEL — it is not a cosmetic
+// bug and there is no QML error to find afterwards. `xdg_positioner.set_size`
+// rejects a non-positive width or height with a PROTOCOL error, and a protocol
+// error disconnects the client: quickshell exits, the bar and the wallpaper go
+// with it, and the only trace anywhere is Hyprland's `error in client
+// communication (pid N)` in the journal. There is no coredump and `qs log`
+// stops mid-sentence. That is what the first version of this file did on the
+// very first right-click (2026-07-27 20:20): `box.implicitWidth` read
+// `col.implicitWidth`, a Column that `anchors.fill`ed `box` whose children were
+// `width: box.width` — so the width was defined in terms of itself, resolved to
+// 0 and stayed there. Reproduced and confirmed in the sandbox against this
+// exact file: `error 0: Invalid size` -> `fatal error: Protocol error`, EXIT=255.
+//
+// Hence the two rules below, which are why the size is measured rather than
+// bound: the implicit size must be computed ONLY from things that do not depend
+// on the popup's own size, and `implicitWidth`/`implicitHeight` carry a hard
+// floor so a future mistake degrades into an ugly menu rather than a dead
+// desktop.
 PopupWindow {
     id: menu
 
@@ -37,14 +56,50 @@ PopupWindow {
 
     readonly property bool stopped: pstate === "T"
     readonly property bool ready: host && host.QsWindow && host.QsWindow.window
+    // The panel's own row. Signalling it is what "his whole desktop vanished"
+    // looks like from the user's chair, so it is not offered — see Procs.qml,
+    // which refuses it a second time at the call site.
+    readonly property bool isSelf: pid !== "" && pid === Procs.selfPid
+
+    // Measured in openFor(), never bound. See the header: a binding from these
+    // to anything that follows the popup's width is the crash.
+    property real contentW: 0
+    property real contentH: 0
 
     visible: false
     color: "transparent"
-    implicitWidth: box.implicitWidth
-    implicitHeight: box.implicitHeight
+    // The floor is the last line of defence, not the mechanism — a popup that
+    // reaches the compositor with a 0 in it takes the panel down.
+    implicitWidth: Math.max(1, Math.ceil(menu.contentW))
+    implicitHeight: Math.max(1, Math.ceil(menu.contentH))
 
     property real anchorX: 0
     property real anchorY: 0
+
+    // Walk the Column's children for the size the popup should map at. Only
+    // `implicitWidth`/`implicitHeight` are read, and those come from the label
+    // text — nothing here reads a laid-out `width`, so there is no cycle back
+    // through the popup's own geometry. Called AFTER the captured values are
+    // assigned, so `visible` on each entry is already up to date.
+    function measure() {
+        let w = 0;
+        let h = 0;
+        for (let i = 0; i < col.children.length; ++i) {
+            const c = col.children[i];
+            // `shown`, NOT `visible`: an item's `visible` is its EFFECTIVE
+            // visibility, which is false for everything inside an unmapped
+            // window — and this popup is unmapped every time it is closed. A
+            // measure over `visible` therefore returns 0x0 on the second and
+            // every subsequent open, i.e. the menu opens once per panel life
+            // and then silently refuses forever. Measured, not reasoned.
+            if (!c || c.shown === false)
+                continue;
+            w = Math.max(w, c.implicitWidth);
+            h += c.implicitHeight + (i > 0 ? col.spacing : 0);
+        }
+        menu.contentW = w;
+        menu.contentH = h;
+    }
 
     // `row` is the delegate the click landed in; it is used ONCE, here, to
     // place the popup, and never held.
@@ -56,6 +111,15 @@ PopupWindow {
         menu.pstate = p.state || "?";
         menu.pnice = p.nice || 0;
         menu.mine = p.mine !== false;
+        measure();
+        // Refuse rather than map something degenerate. console.log is dropped
+        // by quickshell, so this has to be a warn to be findable in `qs log`.
+        if (menu.contentW < 1 || menu.contentH < 1) {
+            console.warn("ProcMenu: refusing to open at "
+                         + menu.contentW + "x" + menu.contentH
+                         + " — a zero-size popup is a fatal Wayland protocol error");
+            return;
+        }
         // Scene coordinates, like Tooltip/TaskMenu: mapToItem(null) maps to the
         // scene root, which is what anchor.rect is relative to. Recomputed on
         // every open — a delegate laid out later keeps its birth y in a plain
@@ -94,8 +158,9 @@ PopupWindow {
     Rectangle {
         id: box
         anchors.fill: parent
-        implicitWidth: col.implicitWidth
-        implicitHeight: col.implicitHeight
+        // NO implicit size here. It is the popup that sizes this, from
+        // menu.measure(); reading `col`'s implicit size back would close the
+        // loop the header describes.
         color: Theme.bgAlt
         border.color: Theme.border
         border.width: 1
@@ -111,10 +176,16 @@ PopupWindow {
             }
         }
 
-        // A clickable entry. Invisible rows are skipped by the Column and drop
-        // out of its implicit size, so the menu is exactly as tall as the
-        // actions this particular process actually has.
+        // A clickable entry. Invisible rows are skipped by menu.measure(), so
+        // the menu is exactly as tall as the actions this particular process
+        // actually has. `width: box.width` is the ROW following the menu, which
+        // is fine — what must never happen is the menu following the row.
         component MenuRow: Rectangle {
+            // See menu.measure(): `visible` is effective visibility and is
+            // false while the popup is unmapped, so what an entry is FOR is a
+            // property of its own and `visible` merely follows it.
+            property bool shown: true
+            visible: shown
             property string label: ""
             property color labelColor: Theme.text
             signal activated()
@@ -142,6 +213,8 @@ PopupWindow {
 
         // A non-interactive line: the header, and the "not yours" note.
         component MenuNote: Item {
+            property bool shown: true
+            visible: shown
             property string label: ""
             property color labelColor: Theme.textDim
             width: box.width
@@ -156,11 +229,15 @@ PopupWindow {
                 textFormat: Text.PlainText
                 color: parent.labelColor
                 elide: Text.ElideRight
-                width: Math.min(implicitWidth, box.width - 20)
+                // Math.max: box.width is 0 until the popup is sized, and a
+                // negative width on a Text is a warning per note per open.
+                width: Math.min(implicitWidth, Math.max(0, box.width - 20))
             }
         }
 
         component MenuSep: Item {
+            property bool shown: true
+            visible: shown
             width: box.width
             implicitWidth: 1
             implicitHeight: 5
@@ -185,40 +262,48 @@ PopupWindow {
             MenuSep {}
 
             MenuRow {
-                visible: menu.mine
+                shown: menu.mine && !menu.isSelf
                 label: "End Task"
                 onActivated: { Procs.kill(menu.pid, false); menu.close(); }
             }
             MenuRow {
-                visible: menu.mine
+                shown: menu.mine && !menu.isSelf
                 label: "Force Quit"
                 labelColor: Theme.crit
                 onActivated: { Procs.kill(menu.pid, true); menu.close(); }
             }
             MenuRow {
-                visible: menu.mine && !menu.stopped
+                shown: menu.mine && !menu.isSelf && !menu.stopped
                 label: "Suspend"
                 onActivated: { Procs.signal(menu.pid, "STOP"); menu.close(); }
             }
             MenuRow {
-                visible: menu.mine && menu.stopped
+                shown: menu.mine && !menu.isSelf && menu.stopped
                 label: "Resume"
                 onActivated: { Procs.signal(menu.pid, "CONT"); menu.close(); }
             }
             // Niceness is one-way without privilege, so this is offered only
             // while there is room to go up, and never as a way back down.
             MenuRow {
-                visible: menu.mine && menu.pnice < 19
+                shown: menu.mine && !menu.isSelf && menu.pnice < 19
                 label: "Lower Priority"
                 onActivated: { Procs.renice(menu.pid, Math.min(19, menu.pnice + 10)); menu.close(); }
             }
             MenuNote {
-                visible: !menu.mine
+                shown: !menu.mine
                 label: "not yours - signals refused"
                 labelColor: Theme.warn
             }
+            // The panel is in its own process table. Ending it takes the bar,
+            // the wallpaper and every popup with it, and there is no undo and
+            // nothing left on screen to explain what happened.
+            MenuNote {
+                shown: menu.isSelf
+                label: "this is the panel - signals refused"
+                labelColor: Theme.warn
+            }
 
-            MenuSep { visible: menu.mine }
+            MenuSep { shown: menu.mine && !menu.isSelf }
 
             MenuRow {
                 label: "Filter by Name"

@@ -647,18 +647,25 @@ Item {
                 // right-click that landed a few pixels off would have SIGKILLed
                 // whatever had just sorted under the pointer. Right-click here
                 // opens the same menu as the rest of the row.
+                //
+                // The panel's OWN row gets no [x] at all — it is in this table
+                // like everything else, and ending it takes the bar, the
+                // wallpaper and every popup with it. `Procs.signal` refuses it
+                // as well; this is the half that keeps it from being offered.
                 Item {
                     width: root.colKill
                     height: 15
+                    readonly property bool self: String(row.modelData.pid) === Procs.selfPid
                     PixelText {
                         anchors.centerIn: parent
-                        visible: rowMa.containsMouse || killMa.containsMouse
+                        visible: !parent.self && (rowMa.containsMouse || killMa.containsMouse)
                         text: "x"
                         color: killMa.containsMouse ? Theme.crit : Theme.textDim
                     }
                     MouseArea {
                         id: killMa
                         anchors { fill: parent; margins: -2 }
+                        enabled: !parent.self
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
