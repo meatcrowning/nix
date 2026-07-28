@@ -343,8 +343,16 @@ Item {
                  + "a fan that STOPS reappears, marked, since that is the\n"
                  + "one thing hiding it would cost you\n"
                  + "\nscroll: screen brightness"
+            // A STOPPED fixed-speed fan takes the card over. It has to: the
+            // fan it is about is the one the card deliberately does not draw,
+            // so there is no line to go crit and no row to dim. Said TWICE
+            // (DESIGN.md 3.5) — the readout goes `crit`, AND the secondary
+            // reading is replaced by the fan's name, because a colour alone is
+            // missable on a card that is four characters wide and the
+            // notification may have been dismissed hours ago.
             value: fans.headline
-            sub: fans.subline
+            sub: SysInfo.fanAlarm !== "" ? SysInfo.fanAlarm + "!" : fans.subline
+            valueColor: SysInfo.fanAlarm !== "" ? Theme.crit : Theme.text
             // Fixed 0-100 axis, for the same reason the battery card has one:
             // these are percentages, and autoscaling a set of fans that are all
             // idling at 20% against their own peak would draw them flat out.

@@ -594,7 +594,9 @@ Scope {
                          + (f[i].stopped ? " STOPPED" : "")
                          + (fanProbe.fixed(i) ? "  <- HIDDEN" : ""));
             out.push("shown " + fanProbe.shown + " of " + f.length
-                     + ", readout " + fanProbe.headline);
+                     + ", readout " + fanProbe.headline
+                     + ", alarm " + (SysInfo.fanAlarm === "" ? "none" : SysInfo.fanAlarm)
+                     + ", stoppedFor " + JSON.stringify(SysInfo.fanAlarmStoppedFor));
             return out.join("\n");
         }
     }

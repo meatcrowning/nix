@@ -1432,6 +1432,26 @@ hyprvtb. See [Open questions](#open-questions).
   could show, so a fan that stops reporting is re-emitted at 0 rpm and marked,
   where the hide rule can no longer reach it. If a thing is too boring to show
   while it works, it is exactly the thing nobody will notice has broken.
+
+  **And "surfaced" is measured against the consequence, not against the
+  widget.** [his] *"yes i absolutely want the pump failer notifaction louder
+  yes"*. A row in a tooltip he has to hover a hidden card to find is not an
+  indicator for a fault that can cook a CPU. Loud here means all of: a
+  **critical** notification — which on this desktop already buys the alarm
+  sound rather than the balloon, a Do Not Disturb bypass, exemption from
+  toast-stack eviction, and no auto-expiry — sent with an explicit **zero
+  timeout** so it waits however long he is away; **plus** the card itself going
+  `crit` and naming the fan, because the toast may have been dismissed hours
+  ago and the card is what he looks at next.
+
+  **The debounce is the price of being believed.** A false "your CPU is
+  cooking" at 3am costs more than a late true one: the alarm is never trusted
+  again. So it wants a *sustained* fault — 15 consecutive polls, 30 seconds —
+  and every transient cause of a zero reading dies inside that window. The
+  thermal margin pays for it: a CPU that loses its pump throttles long before
+  it is damaged, so the alarm does not have to win a race, it has to be right.
+  Alarms fire **once per episode** and reset when the fault clears, so a second
+  genuine failure still speaks.
 - **Alternate faces of one widget share their behavioural details** — both
   digital clock faces blink the colon on the same beat, in the same unlit
   colour, so cycling faces changes the look and never the semantics.

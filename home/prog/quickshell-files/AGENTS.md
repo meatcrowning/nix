@@ -821,13 +821,46 @@ you are looking at.
   less than a card full of constants. Override by hand with `fanShowFixed` in
   `settings.json`; there is no Settings-window control.
 - **Hiding the pump means a pump failure has no indicator — so a fan that STOPS
-  comes back.** `sysinfo.sh` lists a fan only while it turns, so a dead fan would
-  simply vanish from the line and, with the pump already invisible, from the
-  desktop entirely. `SysInfo._setFans` therefore re-emits any name in
-  `fanPctHist` that stops reporting as an `rpm: 0, stopped: true` row. At 0 rpm
-  it is nowhere near maximum duty, so the hide rule cannot catch it: it is always
-  drawn and the tooltip marks it `STOPPED`. A fan deliberately unplugged reads
-  STOPPED too, which is the honest reading — it IS absent.
+  comes back, and it is LOUD.** `sysinfo.sh` lists a fan only while it turns, so
+  a dead fan would simply vanish and, with the pump already invisible, leave the
+  desktop entirely. `SysInfo._setFans` re-emits any name that stops reporting as
+  an `rpm: 0, stopped: true` row; at 0 rpm the hide rule cannot catch it, so it
+  is always drawn and marked `STOPPED`.
+- **`FanAlarm.qml` is the alarm, and it is a PURE STATE MACHINE** — no Theme, no
+  Quickshell, no timers, driven one `update()` per poll by `SysInfo`. That is
+  what lets `tools/fan-harness.sh` replay whole failure episodes offscreen,
+  which is the only way this is ever exercised: a real pump stop cannot be
+  staged and must never be staged on the live machine. It lives in `SysInfo`
+  rather than in the widget **on purpose** — a pump failure must notify whether
+  or not the task manager is open.
+- **Three guards, each paid for by something real; four of the harness's six
+  alarm cases are things that must stay SILENT.**
+  - `!fanVaried` — only a fan that has never changed duty. A fan the machine
+    controls has a line on the card, so its stopping is already visible.
+  - `hist >= settleSamples` — it must have RUN for a minute first. `fan5` here
+    spins ~20s then reads 0 for ever; a header that twitches once is not a fan.
+  - `fanHadRpm` — it must have had a TACHOMETER. The GPU fan reports a percentage
+    and no RPM, so "0 rpm" is its normal reading; without this an `nvidia-smi`
+    hiccup would announce a dead graphics-card fan.
+- **30 seconds of sustained zero (`alarmPolls` 15) before it fires, once per
+  episode, reset on recovery.** A false alarm costs more than a late one — it is
+  never trusted again — and a CPU that loses its pump throttles long before it
+  is damaged, so the alarm need not win a race. `stoppedFor`/`alerted` are
+  carried across a reload, or a wallpaper change would restart the count and
+  re-fire a toast already shown.
+- **The toast is `notify-send -u critical -t 0`**, like every other toast this
+  repo raises. Urgency 2 is doing four jobs the panel already implements —
+  `soundCritical` instead of the balloon, DND bypass, exemption from eviction,
+  no auto-expiry — and `-t 0` states the last explicitly now the panel honours a
+  stated timeout. The harness asserts those flags are still in the argv, because
+  losing one would silently downgrade a pump failure to a 5-second balloon with
+  nothing failing. It does NOT send a live toast: an agent's test notifications
+  have already had to be cleared off his screen by hand once.
+- **The card says it too** (`SysInfo.fanAlarm`): the readout goes `Theme.crit`
+  and the secondary reading is replaced by the fan's name. Said twice per
+  DESIGN.md 3.5 — the toast may have been dismissed hours ago, and the fan it is
+  about is the one the card deliberately does not draw, so there is no line to
+  go crit and no row to dim.
 - **The lines are a BRIGHTNESS LADDER, not different colours** (`Fans.shade`).
   The wal palette is one hue by construction, so there are no distinguishable
   hues to hand out — see `DESIGN.md` 3.1/3.3. It stays legible to ~5-6 fans;

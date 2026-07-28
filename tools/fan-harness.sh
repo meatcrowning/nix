@@ -141,6 +141,35 @@ check "one entry only"     "1" "$(printf '%s' "$D" | awk -F, '{print NF}')"
 # --- the line still has the field count SysInfo.qml's guards expect.
 check "field count" "33" "$(printf '%s' "$L" | awk -F'|' '{print NF}')"
 
+# ------------------------------------------------------- the toast's shape
+# The alarm's LOUDNESS is four behaviours the panel already implements for
+# urgency 2 (soundCritical instead of the balloon, Do Not Disturb bypass,
+# exemption from toast-stack eviction, and never auto-expiring), plus an
+# explicit `-t 0` now that the panel honours a stated timeout. None of that is
+# re-tested here — Notifications.qml owns it. What IS tested is that the alarm
+# still ASKS for it, because losing `-u critical` or `-t 0` in an edit would
+# silently downgrade a pump failure to a 5-second balloon and nothing would
+# fail.
+#
+# Deliberately a source assertion and not a live send: a real notification here
+# reaches the user's screen, and an agent's test toasts have already had to be
+# cleared off it by hand once today. An isolated bus is no help either — with no
+# name owner on it, notify-send's call is never dispatched to be observed.
+echo "== the alarm's toast =="
+NOTIFY=$(sed -n '/_notifyFanStopped/,/^    }/p' "$QSDIR/SysInfo.qml")
+case "$NOTIFY" in
+    *'"notify-send"'*) ok ;;
+    *) bad "alarm: must route through notify-send like every other toast here" ;;
+esac
+case "$NOTIFY" in
+    *'"-u", "critical"'*) ok ;;
+    *) bad "alarm: must be urgency critical (sound, DND bypass, no eviction)" ;;
+esac
+case "$NOTIFY" in
+    *'"-t", "0"'*) ok ;;
+    *) bad "alarm: must set an explicit 0 timeout so it never expires" ;;
+esac
+
 # ---------------------------------------------------------------- the view
 echo "== derivation: Fans.qml offscreen =="
 
@@ -157,6 +186,7 @@ else
     # fans. This board has four; the 0, 1, 2 and 5 cases have no hardware here.
     ST=$WORK/qml; mkdir -p "$ST"
     cp "$QSDIR/Fans.qml" "$ST/" || { echo "FAIL  cannot copy Fans.qml"; fail=$((fail+1)); }
+    cp "$QSDIR/FanAlarm.qml" "$ST/" || { echo "FAIL  cannot copy FanAlarm.qml"; fail=$((fail+1)); }
     cat > "$ST/Theme.qml" <<'THEOF'
 pragma Singleton
 import QtQuick
@@ -168,6 +198,7 @@ THEOF
     cat > "$ST/qmldir" <<'DIREOF'
 singleton Theme 1.0 Theme.qml
 Fans 1.0 Fans.qml
+FanAlarm 1.0 FanAlarm.qml
 DIREOF
 
     cat > "$ST/Main.qml" <<'MAINEOF'
@@ -256,7 +287,76 @@ QtObject {
                 + " stopped=" + (win.probe.detail.split("STOPPED").length - 1)
                 + " shades=" + shades.join("/"));
         }
+        win.alarmCases();
         Qt.exit(0);
+    }
+
+    // ---- the pump-failure alarm ------------------------------------------
+    // Replays whole EPISODES poll by poll. A real pump stop cannot be staged
+    // and must never be staged on the live machine, so this is the only place
+    // the alarm is ever exercised. Nothing here can reach a notification
+    // server: FanAlarm returns a name and SysInfo is what would send the toast,
+    // and SysInfo is not loaded.
+    property var alarm: FanAlarm { }
+
+    // Drive `n` polls of one fan being stopped and count how many times the
+    // alarm fires. `hist` is how long it ran first, `varied` whether it was
+    // ever controlled, `hadRpm` whether it ever had a tachometer.
+    function runStopped(n, histLen, varied, hadRpm) {
+        var rows = [ {name: "fanX", rpm: 0, pct: -1, stopped: true} ];
+        var h = {}; var samples = [];
+        for (var i = 0; i < histLen; i++) samples.push(100);
+        h["fanX"] = samples;
+        var vd = {}; if (varied) vd["fanX"] = true;
+        var hr = {}; if (hadRpm) hr["fanX"] = true;
+        var fires = 0;
+        for (var p = 0; p < n; p++)
+            if (win.alarm.update(rows, h, vd, hr) !== "") fires++;
+        return fires;
+    }
+    function resetAlarm() { win.alarm.stoppedFor = ({}); win.alarm.alerted = ({}); }
+
+    function alarmCases() {
+        var polls = win.alarm.alarmPolls;
+        var settle = win.alarm.settleSamples;
+
+        // A real failure: ran for a minute, never controlled, had a tacho.
+        // Fires exactly ONCE however long it stays stopped.
+        resetAlarm();
+        console.warn("ALARM real fires=" + runStopped(polls * 4, settle + 10, false, true)
+                     + " active=[" + win.alarm.active + "]");
+
+        // Not yet. One poll short of the threshold must be silent - this is the
+        // debounce that keeps a tachometer glitch from crying wolf.
+        resetAlarm();
+        console.warn("ALARM early fires=" + runStopped(polls - 1, settle + 10, false, true)
+                     + " active=[" + win.alarm.active + "]");
+
+        // fan5 SHAPED: spun ~20s (10 samples), under settleSamples. An
+        // unpopulated header that twitches once is not a fan that failed.
+        resetAlarm();
+        console.warn("ALARM young fires=" + runStopped(polls * 4, 10, false, true));
+
+        // A fan the machine CONTROLS. It has a line on the card, so its
+        // stopping is already visible; this alarm is for the hidden one.
+        resetAlarm();
+        console.warn("ALARM varied fires=" + runStopped(polls * 4, settle + 10, true, true));
+
+        // NO TACHOMETER (the gpu). "0 rpm" is its normal reading, so an
+        // nvidia-smi hiccup must not announce a dead graphics card fan.
+        resetAlarm();
+        console.warn("ALARM notacho fires=" + runStopped(polls * 4, settle + 10, false, false));
+
+        // RECOVERY then a SECOND failure: the fan comes back, the episode is
+        // forgotten, and a genuine second failure notifies again.
+        resetAlarm();
+        var f1 = runStopped(polls, settle + 10, false, true);
+        var running = [ {name: "fanX", rpm: 1200, pct: 50} ];
+        var h2 = {}; var s2 = []; for (var i = 0; i < settle + 10; i++) s2.push(100);
+        h2["fanX"] = s2;
+        for (var r = 0; r < 3; r++) win.alarm.update(running, h2, {}, {fanX: true});
+        var f2 = runStopped(polls, settle + 10, false, true);
+        console.warn("ALARM recover first=" + f1 + " second=" + f2);
     }
 }
 MAINEOF
@@ -267,7 +367,7 @@ MAINEOF
     # family as the panel's own "qs drops console.log" trap, different cause.)
     OUT=$(QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
           "$QMLBIN" -I "$ST" "$ST/Main.qml" 2>&1 </dev/null)
-    printf '%s\n' "$OUT" | grep -vE '^qml: CASE ' | grep -E '.' | sed 's/^/  /'
+    printf '%s\n' "$OUT" | grep -vE '^qml: (CASE|ALARM) ' | grep -E '.' | sed 's/^/  /'
 
     getcase() { printf '%s\n' "$OUT" | grep "CASE $1 " ; }
     v() { printf '%s\n' "$2" | tr ' ' '\n' | grep "^$1=" | cut -d= -f2- ; }
@@ -348,6 +448,21 @@ MAINEOF
     check "stopped: shown"        "2" "$(v shown "$C")"
     check "stopped: in tooltip"   "2" "$(v detail "$C")"
     check "stopped: called out"   "1" "$(v stopped "$C")"
+
+    # ---- the pump-failure alarm ------------------------------------------
+    # A real pump stop cannot be staged, so these replay whole episodes poll by
+    # poll. False alarms are the entire risk: a wrong "your CPU is cooking" at
+    # 3am is worse than the tooltip-only status quo, so four of the six cases
+    # here are things that must stay SILENT.
+    ga() { printf '%s\n' "$OUT" | grep "ALARM $1 " ; }
+    check "alarm: real failure fires exactly once" "fires=1" "$(ga real | tr ' ' '\n' | grep '^fires=')"
+    check "alarm: and the card knows"              "active=[fanX]" "$(ga real | tr ' ' '\n' | grep '^active=')"
+    check "alarm: one poll short is silent"        "fires=0" "$(ga early | tr ' ' '\n' | grep '^fires=')"
+    check "alarm: fan5-shaped header is silent"    "fires=0" "$(ga young | tr ' ' '\n' | grep '^fires=')"
+    check "alarm: a controlled fan is silent"      "fires=0" "$(ga varied | tr ' ' '\n' | grep '^fires=')"
+    check "alarm: no tachometer is silent"         "fires=0" "$(ga notacho | tr ' ' '\n' | grep '^fires=')"
+    check "alarm: recovers and can re-fire"        "first=1" "$(ga recover | tr ' ' '\n' | grep '^first=')"
+    check "alarm: second failure notifies again"   "second=1" "$(ga recover | tr ' ' '\n' | grep '^second=')"
 
     # Five lines must come out as five DISTINCT shades. The palette is one hue
     # (DESIGN.md 3.1), so these are steps on a brightness ladder rather than
