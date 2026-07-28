@@ -20,7 +20,21 @@ and a process that just started spinning as idle. A task manager whose numbers
 only converge after an hour is not a task manager, so this pays 0.4s per refresh
 to read /proc twice and diff it.
 
-Values are per-core, like top: a process using two cores fully reads 200%.
+CPU% is SOLARIS MODE: the process's share of the WHOLE MACHINE, so the column
+runs 0-100 and a row can be read straight against the cpu gauge above it. It was
+IRIX mode (a share of ONE core, `top`'s default, `I` toggles the two) until
+2026-07-27, which on this 16-thread box meant a busy multithreaded process
+legitimately reported 1600% while the gauge next to it said 100 — two
+percentages, one screen, two different denominators. Nothing else about the
+sampling changed; the number is the same measurement divided by NCPU.
+
+The denominator is counted from /proc/stat's `cpu[0-9]` lines rather than taken
+from `os.cpu_count()`, because that is the exact set of CPUs summed into the
+aggregate `cpu` line the gauge's total-vs-idle delta is computed from
+(sysinfo.sh -> SysInfo.qml). Same file, same CPUs, so the two percentages are
+comparable by construction rather than by coincidence; `os.cpu_count()` is only
+the fallback for an unreadable /proc/stat. Never hardcode it — book has a
+different core count.
 """
 
 import os
@@ -30,6 +44,24 @@ import time
 INTERVAL = 0.4
 CLK_TCK = os.sysconf("SC_CLK_TCK")
 PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
+
+
+def cpu_count():
+    """Online CPUs, as /proc/stat accounts for them (see the header)."""
+    n = 0
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if not line.startswith("cpu"):
+                    break           # the cpu* lines are first and contiguous
+                if line[3:4].isdigit():
+                    n += 1
+    except OSError:
+        pass
+    return n or os.cpu_count() or 1
+
+
+NCPU = cpu_count()
 
 
 def pretty_name(pid, comm):
@@ -128,7 +160,8 @@ def main():
         prev = a.get(pid)
         # A process that appeared during the window has no baseline; report 0
         # rather than charging it for every tick since it was born.
-        cpu = 0.0 if prev is None else (ticks - prev[0]) / CLK_TCK / elapsed * 100.0
+        cpu = (0.0 if prev is None
+               else (ticks - prev[0]) / CLK_TCK / elapsed / NCPU * 100.0)
         rss_kb = rss * PAGE_KB
         mem = (rss_kb / mem_kb * 100.0) if mem_kb else 0.0
         # Kernel threads have no resident memory of their own and mostly just

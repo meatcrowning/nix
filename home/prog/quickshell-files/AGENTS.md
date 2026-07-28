@@ -666,6 +666,25 @@ you are looking at.
   idle daemon as busy forever and a process that just started spinning as idle. A
   task manager whose numbers converge after an hour isn't one. That 0.4s per
   refresh is why `Procs` is `watch`-gated like the others.
+- **CPU% is SOLARIS MODE — a share of the WHOLE MACHINE, 0-100.** It is divided
+  by the CPU count, so a row reads against the cpu card above it, which is
+  computed from whole-machine total-vs-idle deltas and has always been 0-100.
+  Until 2026-07-27 it was **Irix mode** — a share of ONE core, `top`'s default,
+  which the `I` key toggles there — so a multithreaded process legitimately
+  reported up to 1600% on this 16-thread box next to a gauge saying 100. Two
+  percentages on one screen with two denominators and nothing on screen saying
+  so; `DESIGN.md` §10.5 is the general rule. The count comes from
+  **/proc/stat's `cpu[0-9]` lines**, not `os.cpu_count()`: those are exactly the
+  CPUs summed into the aggregate `cpu` line `sysinfo.sh` feeds the gauge, so the
+  two are comparable by construction. Never hardcode it — book has a different
+  core count.
+- **The colour thresholds moved WITH the denominator**, and that is the half
+  that silently rots. 50/10 were half and a tenth of one core; left alone they
+  become 3.1 and 0.6 machine-percent here and paint an idle desktop amber. They
+  are now machine shares (crit 25, warn 5), chosen so a pegged single-threaded
+  process — `100/NCPU`, 6.2% on top, 12.5% on book — still colours. The column
+  keeps ONE decimal: at 44px it is 5.5 cells, so `100.0` fits and `100.00`
+  clips at full load.
 - **Don't trust `comm` for the name.** The kernel caps it at 15 characters and on
   NixOS everything runs through a wrapper, so it reads `.quickshell-wra` /
   `.claude-wrapped`. The script prefers `argv[0]`'s basename — except for
