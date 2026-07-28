@@ -778,6 +778,21 @@ you are looking at.
   the window. Contrast `filterLatch` above, which exists because the same
   transition with the pointer over the PANEL strands the keyboard on nothing.
 
+  **That 2 ms of `activewindow>>,` is a pothole, not a destination, and
+  anything on this machine that reacts to focus events has to treat it as
+  one.** It is the only path on this desktop that publishes "focus is on
+  nothing", and it is always immediately followed by the window that had it.
+  Reacting to it is not free: `kitty-focus-dim.py` greyed kitty's text on the
+  empty event and restored it on the next one, and because each step is a
+  subprocess (`kitty @ set-colors`, plus an `hyprctl -j clients` to resolve the
+  window) a 3.5 ms gap on the wire became **38 ms of visibly grey terminal** —
+  measured end to end in the nested harness. It now waits `NOTHING_GRACE`
+  (150 ms) before believing an empty payload. Note what this rules out: the
+  flash was NOT hyprvtb's titlebar and NOT Hyprland's border, which flip on the
+  same 3.5 ms boundary and cannot render a frame inside it. If a new consumer
+  of `activewindow` ever flashes, debounce the empty payload before you go
+  looking at the compositor.
+
   The widget clears both flags when it goes inactive or is destroyed: a stale
   `filterFocus` would leave the panel holding the keyboard with nothing on screen
   to type into. The filter text is deliberately NOT in `SettingsStore` (it is a
