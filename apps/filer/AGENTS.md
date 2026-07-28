@@ -23,6 +23,43 @@ five apps.
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
 - **The preview grid and the tree list are `KineticGridView` / `KineticListView`** (`../qmlcommon/`), not bare views — the desktop's momentum is compositor-side and Qt's own flick fights it. Any new scrollable surface here must use those too; see [`../AGENTS.md`](../AGENTS.md).
 
+## Drag and drop — both halves
+
+**Drag out** is on the file rows (`qml/Main.qml`) and the preview tiles
+(`qml/PreviewTile.qml`); **drop in** is one `DropArea` over the whole view.
+Two filer windows are two separate processes, so window-to-window dragging is
+ordinary cross-app Wayland DnD — nothing about it is special-cased, and the same
+gestures work against Dolphin, a browser upload field, etc.
+
+- **The payload is built on PRESS, not bound.** It depends on the selection, and
+  a binding would re-run `FileOps.uriList` for every realised row/tile on every
+  selection change.
+- **A drag carries the whole selection** when it starts on an item that is part
+  of a multi-selection. That needs the press *not* to collapse the selection, so
+  a plain press inside an existing multi-selection defers its click to the
+  release and applies it only if no drag happened (`deferSelect`/`dragged` in
+  both `MouseArea`s). `dragged` latches on the way in because `drag.active` is
+  already false again by the time `onReleased` runs.
+- **`FileOps.uriList` / `urlsToPaths` (main.py) own the encoding.** `encodeURI`
+  does *not* escape `#` or `?`, so a filename containing either used to drag out
+  as a truncated path; `QUrl` does it properly. Don't hand-roll a `file://` URI
+  here again.
+- **A drop asks what it meant** — a `move / copy / link here` menu, the way
+  Dolphin does. It is not a stylistic choice: the modifier keys never reach the
+  destination process (Wayland keeps keyboard focus on the drag *source*, which
+  is a different process, and the compositor does not vary the proposed action
+  by modifier), so there is no signal to tell a move from a copy. Guessing would
+  mean silently moving files on a hunch.
+- **Three sources are dropped silently** by `dropCandidates`: one already in the
+  target dir, a directory dropped onto itself, and a directory dropped into its
+  own subtree. The last one is a `cp -a` that eats the disk.
+- Transfers reuse the paste machinery — `transferInto` → `runPaste` — so a drop
+  gets the same no-clobber default and overwrite confirm a paste does.
+
+Verify with `tools/drop-test.py` (offscreen; posts real `QDragEnter`/`QDrop`
+events at the window, so the DropArea, the target hit-test and the transfer are
+all exercised without a window on anyone's screen).
+
 ## filer as the desktop's FILE PICKER (`portal.py` + `pick.py`) — ships DORMANT
 
 `filer` can be the dialog that appears when an app says "Upload File". That is

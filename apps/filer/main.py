@@ -402,6 +402,29 @@ class FileOps(QObject):
                           "hidden": e.name.startswith(".")})
         return items
 
+    @Slot(list, result=str)
+    def uriList(self, paths):
+        """The `text/uri-list` payload for dragging `paths` out (CRLF-terminated,
+        per RFC 2483). QUrl does the percent-encoding, which matters: encodeURI()
+        leaves `#` and `?` alone, so a filename containing either used to drag out
+        as a truncated path."""
+        out = ""
+        for p in paths:
+            out += QUrl.fromLocalFile(os.path.abspath(str(p))).toString() + "\r\n"
+        return out
+
+    @Slot(list, result="QVariantList")
+    def urlsToPaths(self, urls):
+        """The inverse, for a drop: local absolute paths out of a drag's URLs.
+        Anything that isn't a local file (an http:// drag from a browser, say)
+        yields no path, so the drop is simply not accepted."""
+        out = []
+        for u in urls:
+            p = (u if isinstance(u, QUrl) else QUrl(str(u))).toLocalFile()
+            if p:
+                out.append(os.path.normpath(p))
+        return out
+
     @Slot(str, result=bool)
     def isDir(self, path):
         return os.path.isdir(path)

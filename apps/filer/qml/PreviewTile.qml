@@ -15,6 +15,12 @@ Rectangle {
     property bool winActive: true
     property int tileSize: 96
 
+    // What a drag from this tile carries (the view's whole selection when this
+    // tile is part of a multi-selection, else just this file) and whether that
+    // multi-selection exists — the view owns both, the tile only reports them.
+    property var dragPaths: [entry.path]
+    property bool inMultiSelection: false
+
     signal clicked(int mods)   // mods: the keyboard modifiers at press (shift/ctrl)
     signal opened()
 
@@ -29,11 +35,12 @@ Rectangle {
     // manager, etc. Drag.active is bound to the MouseArea dragging an INVISIBLE
     // proxy (so the tile itself stays put) — that's what starts the real QDrag
     // under dragType Automatic (a bare startDrag() doesn't fire one on Wayland).
-    // encodeURI matches PreviewTile's Image source and the row drag code.
+    // mimeData is filled on PRESS, not bound: the payload depends on the
+    // selection, and a binding would re-run FileOps.uriList for every realised
+    // tile on every selection change.
     Drag.active: tileMa.drag.active
     Drag.dragType: Drag.Automatic
-    Drag.supportedActions: Qt.CopyAction | Qt.LinkAction
-    Drag.mimeData: ({ "text/uri-list": "file://" + encodeURI(tile.entry.path) + "\r\n" })
+    Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
     Drag.hotSpot.x: 6
     Drag.hotSpot.y: 6
 
@@ -96,11 +103,27 @@ Rectangle {
         // and scroll instead of starting the file drag.
         preventStealing: true
         drag.target: dragProxy
+        // A press inside an EXISTING multi-selection must not collapse it — the
+        // drag that may follow has to carry the whole set — so that click is
+        // deferred to the release and applied only if no drag happened.
+        // `dragged` latches on the way in because drag.active is already back to
+        // false by the time onReleased runs. (Same rule as the file rows.)
+        property bool deferSelect: false
+        property bool dragged: false
+        drag.onActiveChanged: if (tileMa.drag.active) tileMa.dragged = true;
         onPressed: (mouse) => {
-            tile.clicked(mouse.modifiers);
+            tileMa.dragged = false;
+            tileMa.deferSelect = !(mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
+                                 && tile.inMultiSelection;
+            if (!tileMa.deferSelect) tile.clicked(mouse.modifiers);
+            tile.Drag.mimeData = { "text/uri-list": FileOps.uriList(tile.dragPaths) };
             // stage the drag image from the tile itself (thumbnail + name), so
             // it's ready by the time the drag passes the threshold.
             tile.grabToImage(function(res) { tile.Drag.imageSource = res.url; });
+        }
+        onReleased: {
+            if (tileMa.deferSelect && !tileMa.dragged) tile.clicked(0);   // plain click: collapse to this one
+            tileMa.deferSelect = false;
         }
         onDoubleClicked: tile.opened()
     }

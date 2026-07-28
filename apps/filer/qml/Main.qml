@@ -155,42 +155,116 @@ Window {
         property var pendingPaste: null     // conflicting {src,dst} items awaiting overwrite confirm
         property var pendingRename: null     // {src,dst} awaiting overwrite confirm
 
-        // Run a batch of {src,dst} moves/copies. `overwrite` false adds the
-        // no-clobber flag so an existing target is skipped rather than replaced
-        // (the safe default); true lets mv/cp replace it (after the user OK'd it).
-        function runPaste(items, cut, overwrite) {
+        // Run a batch of {src,dst} transfers. `op` is "cut" (move), "copy" or
+        // "link" (symlink). `overwrite` false adds the no-clobber flag so an
+        // existing target is skipped rather than replaced (the safe default);
+        // true lets it replace (after the user OK'd it).
+        function runPaste(items, op, overwrite) {
             for (let i = 0; i < items.length; i++) {
                 const reselect = i === items.length - 1 ? items[i].dst : "";
-                if (cut) FileOps.run(overwrite ? ["mv", "--", items[i].src, items[i].dst]
-                                               : ["mv", "-n", "--", items[i].src, items[i].dst], reselect);
-                else     FileOps.run(overwrite ? ["cp", "-a", "--", items[i].src, items[i].dst]
-                                               : ["cp", "-an", "--", items[i].src, items[i].dst], reselect);
+                const s = items[i].src, d = items[i].dst;
+                if (op === "cut")       FileOps.run(overwrite ? ["mv", "--", s, d]
+                                                              : ["mv", "-n", "--", s, d], reselect);
+                else if (op === "link") FileOps.run(overwrite ? ["ln", "-sfn", "--", s, d]
+                                                              : ["ln", "-s", "--", s, d], reselect);
+                else                    FileOps.run(overwrite ? ["cp", "-a", "--", s, d]
+                                                              : ["cp", "-an", "--", s, d], reselect);
             }
         }
 
-        // Paste the clipboard into `dst`. Splits into names that are free vs.
-        // already-taken at the target: free ones go immediately; conflicts wait
-        // for an overwrite OK so a paste can never silently clobber a file.
-        // (Shared by the titlebar "p" button and the context menu.)
-        function pasteInto(dst) {
-            if (clip === null) return;
-            const paths = clip.paths, cut = clip.op === "cut";
+        // Move/copy/link an explicit list of sources into `dst`. Splits into
+        // names that are free vs. already-taken at the target: free ones go
+        // immediately; conflicts wait for an overwrite OK so a transfer can
+        // never silently clobber a file. Returns whether it raised that confirm
+        // (the caller may have cleanup to defer until the dialog answers).
+        // Shared by paste (clipboard) and drop (drag-and-drop).
+        function transferInto(paths, dst, op, clearClip) {
             const clear = [], conflicts = [];
             for (let i = 0; i < paths.length; i++) {
                 const src = paths[i];
                 const d = join(dst, dirNameOf(src));
                 (FileOps.pathExists(d) ? conflicts : clear).push({ src: src, dst: d });
             }
-            runPaste(clear, cut, true);
-            if (conflicts.length) {
-                pendingPaste = { items: conflicts, cut: cut };
-                overwriteDlg.text = conflicts.length + " item(s) already exist here — overwrite?";
-                overwriteDlg.open();
-            } else if (cut) clip = null;
+            runPaste(clear, op, true);
+            if (!conflicts.length) return false;
+            pendingPaste = { items: conflicts, op: op, clearClip: clearClip };
+            overwriteDlg.text = conflicts.length + " item(s) already exist here — overwrite?";
+            overwriteDlg.open();
+            return true;
+        }
+
+        // Paste the clipboard into `dst`. A cut's clipboard is spent once the
+        // move actually happens — which is on the dialog's answer when anything
+        // conflicted, hence the `clearClip` hand-off rather than clearing here.
+        // (Shared by the titlebar "p" button and the context menu.)
+        function pasteInto(dst) {
+            if (clip === null) return;
+            const cut = clip.op === "cut";
+            if (!transferInto(clip.paths, dst, clip.op, cut) && cut) clip = null;
         }
 
         function clearSelection() { selection = []; selected = ""; anchor = ""; }
         function isSelected(p) { return selection.indexOf(p) >= 0; }
+
+        // ---- drag-out ----
+        // What a drag starting on `p` carries: the WHOLE selection when `p` is
+        // part of a multi-selection, otherwise just `p` — the ordinary file
+        // manager rule. (The press handlers cooperate: pressing inside an
+        // existing multi-selection defers collapsing it to the release, so the
+        // drag that may follow still has the whole set to hand.)
+        function dragPaths(p) {
+            return (selection.length > 1 && isSelected(p)) ? selection.slice() : [p];
+        }
+
+        // ---- drop target ----
+        // The directory a drop lands in: the directory under the cursor, the
+        // parent of a file under the cursor, or the current dir over empty
+        // space. Set while a drag hovers, "" otherwise (the rows and the frame
+        // below highlight off it).
+        property string dropTarget: ""
+
+        function dropDirAt(x, y) {
+            const e = entryAt(x, y);
+            if (!e) return path;
+            return e.isDir ? e.path : parentOf(e.path);
+        }
+
+        // The sources a drop of `paths` into `dst` may actually act on. Three
+        // things are dropped silently rather than run as a no-op or a
+        // filesystem-eating recursion: a source already sitting in `dst`, a
+        // directory dropped onto itself, and a directory dropped into its own
+        // subtree.
+        function dropCandidates(paths, dst) {
+            const d = dst.replace(/\/+$/, "") || "/";
+            const out = [];
+            for (let i = 0; i < paths.length; i++) {
+                const src = paths[i].replace(/\/+$/, "");
+                if (src === "" || src[0] !== "/") continue;
+                if (parentOf(src) === d) continue;              // already here
+                if (d === src || d.indexOf(src + "/") === 0) continue;  // into itself
+                out.push(src);
+            }
+            return out;
+        }
+
+        // Ask what the drop meant. A drag carries no reliable move-vs-copy
+        // signal between two windows here — the modifier keys never reach the
+        // DESTINATION process (Wayland keeps keyboard focus on the drag source,
+        // a different process entirely), and the compositor does not vary the
+        // proposed action by modifier — so guessing would mean silently moving
+        // files on a hunch. Dolphin asks with exactly this menu; so do we.
+        function askDrop(srcs, dst, x, y) {
+            const n = srcs.length > 1 ? " " + srcs.length + " items" : " \"" + dirNameOf(srcs[0]) + "\"";
+            ctxMenu.open(x, y, [
+                { label: "to " + (dirNameOf(dst) || "/") + "/", enabled: false },
+                { separator: true },
+                { label: "move" + n + " here", trigger: () => transferInto(srcs, dst, "cut",  false) },
+                { label: "copy" + n + " here", trigger: () => transferInto(srcs, dst, "copy", false) },
+                { label: "link" + n + " here", trigger: () => transferInto(srcs, dst, "link", false) },
+                { separator: true },
+                { label: "cancel" },
+            ]);
+        }
 
         // The flat top-to-bottom order of every selectable item: the preview
         // grid's images (Flow order == array order) followed by the tree rows.
@@ -554,6 +628,8 @@ Window {
                     entry: cell.modelData
                     winActive: win.active
                     selected: view.selection.indexOf(cell.modelData.path) >= 0
+                    dragPaths: view.dragPaths(cell.modelData.path)
+                    inMultiSelection: view.selection.length > 1 && selected
                     onClicked: (mods) => view.clickSelect(cell.modelData.path, false, mods)
                     onOpened: view.openFile(cell.modelData.path, cell.modelData.kind)
                 }
@@ -610,19 +686,26 @@ Window {
                 height: Theme.fontSize
                 readonly property string abs: modelData.path
                 readonly property int indent: modelData.depth * 14
-                color: view.selection.indexOf(abs) >= 0 ? Theme.highlight : "transparent"
+                // a directory row the cursor is over during a drag: it, not the
+                // current dir, is where a drop would land.
+                readonly property bool isDropTarget: view.dropTarget === abs && modelData.isDir
+                color: isDropTarget ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.35)
+                     : view.selection.indexOf(abs) >= 0 ? Theme.highlight : "transparent"
 
                 // Drag-out: hand this file to other apps as a text/uri-list, so
                 // it can be dropped onto a browser upload field, another file
-                // manager, etc. — the standard desktop "drag a file out" gesture.
+                // manager, or another filer window (the DropArea below) — the
+                // standard desktop "drag a file out" gesture.
                 // Binding Drag.active to the MouseArea's drag (which drags an
                 // INVISIBLE proxy, so the row itself stays put) is what actually
                 // starts the real cross-app QDrag under dragType Automatic — a
                 // bare Drag.startDrag() didn't initiate one on Wayland.
+                // mimeData is filled on PRESS, not bound: the payload depends on
+                // the selection, and a binding would re-run FileOps.uriList for
+                // every realised row on every selection change.
                 Drag.active: rowMa.drag.active
                 Drag.dragType: Drag.Automatic
-                Drag.supportedActions: Qt.CopyAction | Qt.LinkAction
-                Drag.mimeData: ({ "text/uri-list": "file://" + encodeURI(row.abs) + "\r\n" })
+                Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
                 Drag.hotSpot.x: 6
                 Drag.hotSpot.y: 6
 
@@ -648,7 +731,8 @@ Window {
                         id: badgeText
                         anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
                         elide: Text.ElideMiddle
-                        text: row.modelData.name
+                        text: view.selection.length > 1 && view.isSelected(row.abs)
+                              ? view.selection.length + " items" : row.modelData.name
                         color: Theme.text
                     }
                 }
@@ -664,11 +748,31 @@ Window {
                     // wheel/trackpad scrolls it.)
                     preventStealing: true
                     drag.target: dragProxy
+                    // A press inside an EXISTING multi-selection must not
+                    // collapse it — the drag that may follow has to carry the
+                    // whole set. So that click is deferred to the release, and
+                    // only applied if no drag happened. `dragged` latches on the
+                    // way in because drag.active is already back to false by the
+                    // time onReleased runs.
+                    property bool deferSelect: false
+                    property bool dragged: false
+                    drag.onActiveChanged: if (rowMa.drag.active) rowMa.dragged = true;
                     onPressed: (m) => {
-                        view.clickSelect(row.abs, row.modelData.isDir, m.modifiers);
+                        rowMa.dragged = false;
+                        rowMa.deferSelect = !(m.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
+                                            && view.selection.length > 1 && view.isSelected(row.abs);
+                        if (!rowMa.deferSelect)
+                            view.clickSelect(row.abs, row.modelData.isDir, m.modifiers);
+                        // the payload is the selection now that it has settled
+                        row.Drag.mimeData = { "text/uri-list": FileOps.uriList(view.dragPaths(row.abs)) };
                         // stage the drag image; ready by the time the drag passes
                         // the threshold and Drag.active turns on
                         dragBadge.grabToImage(function(res) { row.Drag.imageSource = res.url; });
+                    }
+                    onReleased: {
+                        if (rowMa.deferSelect && !rowMa.dragged)
+                            view.selectSingle(row.abs, row.modelData.isDir);
+                        rowMa.deferSelect = false;
                     }
                     onDoubleClicked: {
                         if (row.modelData.isDir) view.go(row.abs);
@@ -799,7 +903,51 @@ Window {
                 }
             }
         }
-        CtxMenu { id: ctxMenu; anchors.fill: parent }
+        // ---- drop layer ----
+        // The receiving half of the drag-out the rows and tiles already do:
+        // anything offering local file URLs — another filer window, Dolphin, a
+        // browser's "drag this download out" — can be dropped here. One
+        // DropArea over the whole view, hit-tested with the same entryAt() the
+        // right-click overlay uses, so a drop can target a directory row, a
+        // directory in an expanded subtree, or the current dir (empty space).
+        //
+        // It is an Item with no input handling of its own, so it does not
+        // shadow the views, the right-click overlay or the splitter — a
+        // DropArea only ever sees drag events.
+        DropArea {
+            id: dropArea
+            anchors.fill: parent
+            onEntered: (drag) => view.dropTarget = view.dropDirAt(drag.x, drag.y)
+            onPositionChanged: (drag) => view.dropTarget = view.dropDirAt(drag.x, drag.y)
+            onExited: view.dropTarget = ""
+            onDropped: (drop) => {
+                const dst = view.dropDirAt(drop.x, drop.y);
+                view.dropTarget = "";
+                const srcs = view.dropCandidates(FileOps.urlsToPaths(drop.urls), dst);
+                // Nothing local, or nothing that isn't already where it landed:
+                // decline, so the source shows a refused drop rather than us
+                // popping a menu with nothing behind it.
+                if (!srcs.length) { drop.accepted = false; return; }
+                drop.acceptProposedAction();
+                view.askDrop(srcs, dst, drop.x, drop.y);
+            }
+        }
+
+        // Drop feedback for the CURRENT dir (empty space / no row under the
+        // cursor): a frame around the whole view. A drop onto a directory row
+        // highlights that row instead — see the list delegate.
+        Rectangle {
+            anchors.fill: parent
+            visible: dropArea.containsDrag && view.dropTarget === view.path
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.accent
+            z: 2000
+        }
+
+        // objectName so tools/drop-test.py can find it offscreen (the drop menu
+        // is the only visible outcome of a drop it can assert on).
+        CtxMenu { id: ctxMenu; objectName: "ctxMenu"; anchors.fill: parent }
 
         // ---- modal dialogs (simple centered prompts) ----
         BrowserPrompt {
@@ -831,12 +979,12 @@ Window {
             confirmLabel: "overwrite"
             onConfirmed: {
                 if (view.pendingPaste) {
-                    view.runPaste(view.pendingPaste.items, view.pendingPaste.cut, true);
-                    if (view.pendingPaste.cut) view.clip = null;
+                    view.runPaste(view.pendingPaste.items, view.pendingPaste.op, true);
+                    if (view.pendingPaste.clearClip) view.clip = null;
                     view.pendingPaste = null;
                 }
             }
-            onDismissed: { if (view.pendingPaste && view.pendingPaste.cut) view.clip = null; view.pendingPaste = null; }
+            onDismissed: { if (view.pendingPaste && view.pendingPaste.clearClip) view.clip = null; view.pendingPaste = null; }
         }
         BrowserConfirm {
             id: renameOverwriteDlg
