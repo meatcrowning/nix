@@ -1224,6 +1224,41 @@ qs ipc call wallpaper status   # ... firstPaint=ready
 completion, so it stays readable long after the reload. Anything but `ready`
 means the flash is back.
 
+### The same rule, for the dock: NOTHING ON SCREEN MAY LOAD ASYNCHRONOUSLY
+
+The wallpaper was not a special case, it was the first instance. Anything the
+panel draws that is fetched by a `Loader` or an `Image` has exactly the same
+problem, because the reload's first frame is painted from whatever is in the
+tree *at completion* and an asynchronous load is by definition not.
+
+`DockTile`'s Loader was `asynchronous: true`, so on every reload all five dock
+tiles came up as their 1px frame over `Theme.bg` — a dock of empty outlines,
+which is what "the panel flashes black" was. Measured with a `Date.now()` warn
+on `Loader.onStatusChanged` across one forced reload, dock mode at 378px:
+
+```
+t+0  ms   status = Loading   x5
+t+0  ms   Configuration Loaded                          <- the tree is up, it will paint
+t+82..95  status = Ready     tasks, clock, calendar, weather, media
+```
+
+`asynchronous: false` spends that time inside the load pass instead, where the
+old frame is still on screen. **The laziness was notional anyway** — the grid is
+ONE PAGE with no scrolling, so every tile in `placements` is on screen at all
+times and gets built either way; async only meant *later*, never *not at all*.
+The `active` `Binding` in that file is unrelated and must stay: it is about the
+property arriving late, not the item.
+
+```bash
+qs log | grep "dock tiles"    # nothing = every tile was painted in the first frame
+```
+
+`DockGrid._auditFirstPaint()` runs at the grid's own completion and warns **only
+on a regression**, naming the tiles that were not `ready`. There is deliberately
+no IPC call for it: the answer is only true for the instant it runs, and a poll
+from outside always arrives after the tiles have caught up, so it would report a
+clean panel whether or not the bug was there.
+
 ---
 
 ## Scrolling: use the `Kinetic*` types, never a bare `Flickable`

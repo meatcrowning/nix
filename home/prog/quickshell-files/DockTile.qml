@@ -69,12 +69,41 @@ Item {
         radius: Theme.windowRounding
     }
 
+    // Whether this tile has its widget in it. DockGrid reads it at completion:
+    // a tile that is not ready when the tree completes is a tile the reload's
+    // first frame paints as an empty frame.
+    readonly property bool ready: loader.status === Loader.Ready
+
+    // SYNCHRONOUS, and that is the whole reason the panel no longer flashes
+    // black on a reload.
+    //
+    // A reload hands the bar's layer surface over still mapped, so the
+    // compositor keeps showing the OLD buffer until the new tree paints — and
+    // an asynchronous Loader cannot have its widget in that first frame. Every
+    // tile came up as this Rectangle's 1px border over Theme.bg, i.e. the whole
+    // dock as empty outlines, on every theme, wallpaper or agent hot reload.
+    // Measured with a `Date.now()` warn on Loader.onStatusChanged across one
+    // forced reload, in dock mode at 378px:
+    //
+    //     t+0  ms   status = Loading  for all five tiles
+    //     t+0  ms   Configuration Loaded            <- the tree is up and will paint
+    //     t+82..95  status = Ready    tasks, clock, calendar, weather, media
+    //
+    // Blocking here spends that time INSIDE the load pass, where the old frame
+    // is still on screen and nothing is animating, which is the same trade the
+    // wallpaper's first paint makes (WallpaperImage.loadNow, efccc34).
+    //
+    // The laziness this gives up was already notional: DockGrid is ONE PAGE
+    // with no scrolling, so every tile in `placements` is on screen at all
+    // times and gets built either way — asynchronously only meant "later", not
+    // "only if needed". The `active` Binding below is unaffected and must stay:
+    // it is about the property arriving late, not the item.
     Loader {
         id: loader
         anchors.fill: parent
         anchors.margins: 1
         clip: true
-        asynchronous: true
+        asynchronous: false
         source: root.source
     }
 
