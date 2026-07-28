@@ -3,6 +3,15 @@
 Six standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
+**Read `~/nix/DESIGN.md` before you draw anything in here.** These apps are not
+six programs that happen to share a repo — they are one desktop, alongside the
+panel and the compositor plugin, and the user's standing requirement is that a
+new app or a new feature *looks like the rest without him having to say so*.
+Type, palette, spacing, corners, motion timing, titlebar button glyphs, menus,
+tooltips, list rows, drop feedback and the honesty-of-controls rule all live in
+that one file. It also records where these six have already drifted apart from
+each other. This guide owns the *mechanics*; that one owns the *look*.
+
 | dir | what it is | packaged by |
 | --- | --- | --- |
 | [`filer/`](filer/AGENTS.md) | Qt/QML file browser | `home/prog/filer.nix` |
