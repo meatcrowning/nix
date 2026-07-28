@@ -1,4 +1,5 @@
 import QtQuick
+import QtQml.Models
 
 // One paragraph's worth of inline RUNS, wrapped and drawn as terminal rows.
 //
@@ -39,7 +40,12 @@ Item {
     // token came from. A token longer than the whole line (a URL, a long path)
     // is hard-split rather than allowed to overflow: nothing here may draw
     // outside its own width, because the pane is clipped.
-    function _tokens() {
+    //
+    // The token stream depends on `runs` ALONE — not on the width — so it is
+    // its own property rather than a call inside the wrap. As a call it re-ran
+    // the regex and re-allocated every token on each re-evaluation of `lines`,
+    // and `lines` re-evaluates several times per delegate (measured: 4.1).
+    readonly property var toks: {
         var out = [];
         for (var i = 0; i < runs.length; i++) {
             var r = runs[i];
@@ -54,7 +60,14 @@ Item {
     }
 
     readonly property var lines: {
-        var n = cols, toks = _tokens();
+        // A delegate is built before layout has given it a width, and `cols`
+        // floors to its minimum of 8 until it does. Wrapping at that width is
+        // not merely a wasted pass: it produces ~10x the rows the delegate will
+        // keep, and the Repeater below builds every one of them, only to throw
+        // them away when the real width lands a moment later. Half of all wrap
+        // evaluations during a scroll were this (98 of 201, measured).
+        if (width <= 0) return [];
+        var n = cols;
         var out = [], cur = [], used = 0;
         function push() {
             while (cur.length && cur[cur.length - 1].sp) cur.pop();
@@ -116,61 +129,86 @@ Item {
                     color: Theme.highlight
                 }
 
+                // ONE ITEM PER SEGMENT OF PROSE, and the chrome only where
+                // there is chrome. Every segment used to be an Item wrapping
+                // two Rectangles, a PixelText and a MouseArea — five items to
+                // draw a word, on a line that is almost always nothing but
+                // words. That was ~40% of the GUI thread during a scroll
+                // (docs/perf-cpu-hotspots.md H2).
+                //
+                // The chooser is what makes it conditional: the background and
+                // the hit target exist only for the kinds that use them, and
+                // the Row still lays every segment out, so their geometry is
+                // exact by construction. Positioning a separate chrome layer by
+                // character arithmetic instead is WRONG and was tried: the font
+                // advances 8.9px but Qt rounds each Text's width up to 9, so a
+                // background drifts a pixel further off its text with every
+                // segment in the row.
                 Row {
                     spacing: 0
                     Repeater {
                         model: lineItem.modelData
-                        delegate: Item {
-                            id: seg
-                            required property var modelData
-                            width: label.implicitWidth
-                            height: Theme.fontSize
-
-                            readonly property bool isLink: modelData.k === "link"
-                            readonly property bool isCode: modelData.k === "code"
+                        delegate: DelegateChooser {
+                            role: "k"
 
                             // Inline code takes the inset background every
                             // other inset surface on this desktop takes
                             // (Theme.bgAlt, §3.1) — no new colour, and it reads
                             // against the body text without a second hue.
-                            Rectangle {
-                                anchors.fill: parent
-                                visible: seg.isCode
-                                color: Theme.bgAlt
-                            }
-                            // A link's hover fill is the same selection fill a
-                            // menu row takes (§7.2 — hover lightens, one step up
-                            // the ladder).
-                            Rectangle {
-                                anchors.fill: parent
-                                visible: seg.isLink && ma.containsMouse
-                                color: Theme.highlight
-                            }
-
-                            PixelText {
-                                id: label
-                                text: seg.modelData.t
-                                // The palette is ONE HUE and body text IS the
-                                // accent (§3.1), so there is no brighter colour
-                                // to promote a link to. It is underlined
-                                // instead — a property of the type, not a new
-                                // colour — and says so on hover with the fill
-                                // above.
-                                font.underline: seg.isLink
-                                color: seg.isCode ? root.codeColor : root.color
+                            DelegateChoice {
+                                roleValue: "code"
+                                Rectangle {
+                                    width: codeLabel.implicitWidth
+                                    height: Theme.fontSize
+                                    color: Theme.bgAlt
+                                    PixelText {
+                                        id: codeLabel
+                                        text: modelData.t
+                                        color: root.codeColor
+                                    }
+                                }
                             }
 
-                            MouseArea {
-                                id: ma
-                                anchors.fill: parent
-                                enabled: seg.isLink
-                                hoverEnabled: seg.isLink
-                                acceptedButtons: Qt.LeftButton
-                                cursorShape: Qt.PointingHandCursor
-                                onEntered: root.linkHovered(seg.modelData.href)
-                                onExited: root.linkHovered("")
-                                onClicked: root.linkActivated(seg.modelData.href,
-                                                              seg.modelData.lt)
+                            // The palette is ONE HUE and body text IS the accent
+                            // (§3.1), so there is no brighter colour to promote
+                            // a link to. It is underlined instead — a property
+                            // of the type, not a new colour — and says so on
+                            // hover with the same selection fill a menu row
+                            // takes (§7.2 — hover lightens, one step up the
+                            // ladder).
+                            DelegateChoice {
+                                roleValue: "link"
+                                Rectangle {
+                                    width: linkLabel.implicitWidth
+                                    height: Theme.fontSize
+                                    color: ma.containsMouse ? Theme.highlight
+                                                            : "transparent"
+                                    PixelText {
+                                        id: linkLabel
+                                        text: modelData.t
+                                        font.underline: true
+                                        color: root.color
+                                    }
+                                    MouseArea {
+                                        id: ma
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.PointingHandCursor
+                                        onEntered: root.linkHovered(modelData.href)
+                                        onExited: root.linkHovered("")
+                                        onClicked: root.linkActivated(modelData.href,
+                                                                      modelData.lt)
+                                    }
+                                }
+                            }
+
+                            // Everything else: a word, and nothing around it.
+                            DelegateChoice {
+                                PixelText {
+                                    text: modelData.t
+                                    color: root.color
+                                }
                             }
                         }
                     }

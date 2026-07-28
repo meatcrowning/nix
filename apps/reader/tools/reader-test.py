@@ -309,6 +309,108 @@ def test_wrap(engine, cellw):
     lines2 = lines2.toVariant() if hasattr(lines2, "toVariant") else lines2
     check("narrowing the pane reflows it", len(lines2) > len(lines),
           (len(lines), len(lines2)))
+
+    # A delegate is built before layout gives it a width, and `cols` floors to 8
+    # until it does. Wrapping there is not just a wasted pass — it builds ~10x
+    # the rows the delegate keeps, and half of all wrap evaluations during a
+    # scroll were this. The guard must hold, and must not be one-way.
+    item.setProperty("width", 0)
+    empty = prop(item, "lines")
+    check("a delegate with no width yet wraps NOTHING", empty == [], empty)
+    item.setProperty("width", 40 * cellw)
+    back = prop(item, "lines")
+    check("...and wraps again the moment a width arrives", len(back) > 4, len(back))
+    item.deleteLater()
+
+    test_chrome(engine, cellw)
+
+
+def descendants(item):
+    out = []
+    stack = list(item.childItems())
+    while stack:
+        it = stack.pop()
+        out.append(it)
+        stack.extend(it.childItems())
+    return out
+
+
+def test_chrome(engine, cellw):
+    """A segment of prose is ONE item; only code and links get chrome.
+
+    That is worth ~40% of the GUI thread during a scroll (docs/perf-cpu-hotspots.md
+    H2). Both halves are asserted here because both can regress silently: a
+    background that stops sitting exactly on its text, and a plain word that
+    quietly starts costing five items again.
+
+    The geometry check is not ceremony. The first version of this positioned a
+    separate chrome layer at `N * cellW`, which is what the wrap itself assumes
+    — and it was visibly wrong: the font advances 8.9px but Qt rounds each
+    Text's width up to 9, so each background sat a pixel further left than the
+    last (0.7px by the second segment, 2.3px by the fourth)."""
+    from PySide6.QtCore import QUrl, QPointF
+    from PySide6.QtQml import QQmlComponent
+
+    comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(READER, "qml/RichText.qml")))
+    item = comp.create()
+    if item is None:
+        check("RichText builds for the chrome check", False, comp.errorString())
+        return
+    item.setProperty("cellW", cellw)
+    item.setProperty("width", 400 * cellw)      # one row, so indices are simple
+    item.setProperty("runs", [
+        {"t": "before ", "k": "", "href": "", "lt": ""},
+        {"t": "codespan", "k": "code", "href": "", "lt": ""},
+        {"t": " middle ", "k": "", "href": "", "lt": ""},
+        {"t": "alink", "k": "link", "href": "/tmp/x.md", "lt": "file"},
+        {"t": " after", "k": "", "href": "", "lt": ""},
+    ])
+    kids = descendants(item)
+    texts = [k for k in kids if k.property("text") is not None and k.property("text") != ""]
+    rects = [k for k in kids if k.property("text") is None and k.property("color") is not None]
+    by_text = {k.property("text"): k for k in texts}
+
+    def left(it):
+        return it.mapToItem(item, QPointF(0, 0)).x()
+
+    ok = "codespan" in by_text and "alink" in by_text
+    check("every segment is still drawn", ok, sorted(by_text))
+    if not ok:
+        item.deleteLater()
+        return
+
+    # Each chrome segment's background is its text's PARENT, so it covers it
+    # exactly. Anything else means a fill drifting off the word it belongs to.
+    for name in ("codespan", "alink"):
+        txt = by_text[name]
+        box = txt.parentItem()
+        check("the %s chrome sits exactly on its text" % name,
+              box in rects
+              and abs(left(box) - left(txt)) < 0.01
+              and abs(box.width() - txt.width()) < 0.01,
+              (left(box), box.width(), left(txt), txt.width()))
+
+    # A link is a control, so it must have a live hit target — and it may not be
+    # `visible: false` when unhovered, because an invisible item's children get
+    # no input and the hover could then never begin.
+    live = [k for k in kids if k.property("hoverEnabled")]
+    check("the link keeps a live hit target", len(live) == 1, len(live))
+    if live:
+        check("...and it is reachable, not inside a hidden item",
+              all(p.isVisible() for p in (live[0], live[0].parentItem())))
+
+    # The whole point: a word costs ONE item, not five.
+    item.setProperty("runs", [{"t": "just prose, no code and no links at all",
+                               "k": "", "href": "", "lt": ""}])
+    kids = descendants(item)
+    check("a line of plain prose builds NO chrome and NO hit target",
+          not [k for k in kids if k.property("hoverEnabled") is not None],
+          len([k for k in kids if k.property("hoverEnabled") is not None]))
+    words = [k for k in kids if k.property("text")]
+    check("...and one item per word, with nothing wrapped around it",
+          words and all(w.parentItem().property("text") is None
+                        and w.parentItem() not in words for w in words),
+          len(words))
     item.deleteLater()
 
 
