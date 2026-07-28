@@ -7,7 +7,7 @@ import QtQuick
 // It is a DRAWER, not a centred modal. The hyprvtb titlebar runs down the
 // window's right edge and the "st" cell is bottom-anchored in it, so this docks
 // bottom-right and slides in from that edge — secondary UI slides out from the
-// button that owns it (DESIGN.md §7.4), and nothing on this desktop appears
+// button that owns it (docs/DESIGN.md §7.4), and nothing on this desktop appears
 // centred without moving (§6.2). Same construction as player's SettingsPanel.
 //
 // The backend controls report the UNIT'S state, not the last click's intent:

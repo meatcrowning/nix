@@ -167,7 +167,7 @@ Singleton {
     // Words, and nothing else. "none" and "instrumental" arrive as a payload
     // with an empty body precisely so this is false for them: a track that will
     // never have lyrics COLLAPSES the column rather than showing an empty box
-    // (DESIGN.md 5.4). The player's own pane keeps a "mark instrumental" control
+    // (docs/DESIGN.md 5.4). The player's own pane keeps a "mark instrumental" control
     // in that state; the panel has nothing to offer there, so it shows nothing.
     readonly property bool hasLyrics: !!(lyricsSynced
         || (lyrics && lyrics.text && lyrics.text.length > 0))
@@ -227,7 +227,7 @@ Singleton {
     // Its only consumer is MediaContent's empty-state label, which is drawn
     // exactly when `queue.length === 0`; with a `length > 0` term in here that
     // label could never take its "queue is empty" branch and a running player
-    // with nothing queued always read "player not running" (DESIGN.md §10 —
+    // with nothing queued always read "player not running" (docs/DESIGN.md §10 —
     // feedback must reflect reality).
     readonly property bool queueAvailable: queueSock.connected
 

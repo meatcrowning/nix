@@ -16,7 +16,7 @@ drawer).
 
 ## The look is the desktop's, and painter is where it was worst
 
-painter used to break eight of `~/nix/DESIGN.md`'s rules at once; §19.1 there
+painter used to break eight of `~/nix/docs/DESIGN.md`'s rules at once; §19.1 there
 records each one and what it became. What that leaves you with, mechanically:
 
 - **`TextButton.qml` is the only clickable label.** Every action in this app

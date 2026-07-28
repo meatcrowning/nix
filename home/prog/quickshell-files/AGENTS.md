@@ -8,7 +8,7 @@ rules are `~/nix/AGENTS.md`.
 **Read `../AGENTS.md` too if your change touches window management, titlebars,
 logout, or anything the compositor owns.**
 
-**Read `~/nix/DESIGN.md` before you draw anything.** It is the desktop's design
+**Read `~/nix/docs/DESIGN.md` before you draw anything.** It is the desktop's design
 language — type, palette, spacing, motion timing, menus, tooltips, rows,
 affordance honesty — and it is shared with the compositor plugin and the six
 apps so that all four trees come out looking like one desktop. This file owns
@@ -276,7 +276,7 @@ positions runs for `ViewMode.slideMs` (260 ms) on `ViewMode.slideEasing`
 (`Easing.OutCubic`). Take those two properties; never write a duration literal
 into a widget.** That includes anything you add: a new drawer, popup, tile,
 reveal or panel. It is a design-language rule, not a per-widget choice — the
-repo-wide statement of it is `~/nix/DESIGN.md`.
+repo-wide statement of it is `~/nix/docs/DESIGN.md`.
 
 **The numbers are hyprvtb's window roll**, because that is the largest and
 most-used motion here and the one the user judges everything else against:
@@ -673,7 +673,7 @@ you are looking at.
   which the `I` key toggles there — so a multithreaded process legitimately
   reported up to 1600% on this 16-thread box next to a gauge saying 100. Two
   percentages on one screen with two denominators and nothing on screen saying
-  so; `DESIGN.md` §10.5 is the general rule. The count comes from
+  so; `docs/DESIGN.md` §10.5 is the general rule. The count comes from
   **/proc/stat's `cpu[0-9]` lines**, not `os.cpu_count()`: those are exactly the
   CPUs summed into the aggregate `cpu` line `sysinfo.sh` feeds the gauge, so the
   two are comparable by construction. Never hardcode it — book has a different
@@ -700,7 +700,7 @@ you are looking at.
   deliberate acts — and removes the trap that appeared once right-click meant
   "menu" everywhere else: a right-click a few pixels off would have SIGKILLed
   whatever had just sorted under the pointer.
-  **That order is part of the guarantee, not a style choice** (DESIGN.md §7.2,
+  **That order is part of the guarantee, not a style choice** (docs/DESIGN.md §7.2,
   §10.3): the destructive pair is LAST and behind a separator, so the entry the
   pointer lands on is read-only. It shipped the other way round — `End Task` and
   `Force Quit` first — for the menu's first day.
@@ -858,12 +858,12 @@ you are looking at.
   have already had to be cleared off his screen by hand once.
 - **The card says it too** (`SysInfo.fanAlarm`): the readout goes `Theme.crit`
   and the secondary reading is replaced by the fan's name. Said twice per
-  DESIGN.md 3.5 — the toast may have been dismissed hours ago, and the fan it is
+  docs/DESIGN.md 3.5 — the toast may have been dismissed hours ago, and the fan it is
   about is the one the card deliberately does not draw, so there is no line to
   go crit and no row to dim.
 - **The lines are a BRIGHTNESS LADDER, not different colours** (`Fans.shade`).
   The wal palette is one hue by construction, so there are no distinguishable
-  hues to hand out — see `DESIGN.md` 3.1/3.3. It stays legible to ~5-6 fans;
+  hues to hand out — see `docs/DESIGN.md` 3.1/3.3. It stays legible to ~5-6 fans;
   past that it degrades to "two lines look alike" rather than to an unreadable
   widget, because the tooltip names every fan with its exact speed in the same
   order.
@@ -1016,7 +1016,7 @@ draws it.
   Regression test (no GUI, isolated `XDG_RUNTIME_DIR`, so the live player's
   socket is untouched): `apps/player/tools/queue-lyrics-test.py`.
 - **The lyrics BOX is a parallel copy of `apps/player/qml/LyricsView.qml`** —
-  `DESIGN.md` §5.4 owns the look and the §20 row records what the panel's copy
+  `docs/DESIGN.md` §5.4 owns the look and the §20 row records what the panel's copy
   drops. It lives inside `queueBox`, takes 42% of the drawer's inner width as a
   FRACTION (never a pixel budget standing in for a character count, §2.7), and
   hides the artist column while pushing the durations left against its 1px

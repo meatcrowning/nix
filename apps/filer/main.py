@@ -370,7 +370,7 @@ class FileOps(QObject):
     **Every operation reports its outcome.** `run()` used to wire `finished` and
     `errorOccurred` to one handler that read neither the exit code nor stderr,
     so a denied `rm -rf`, a cross-device `mv`, a full disk and a successful copy
-    were indistinguishable on screen — DESIGN.md 10's headline rule, inverted.
+    were indistinguishable on screen — docs/DESIGN.md 10's headline rule, inverted.
     Now a non-zero exit raises a failure toast carrying the helper's own stderr
     (which already names the file and the reason), through the same
     `notify.toast` path videoconv's conversions use. Three distinctions the old
@@ -516,7 +516,7 @@ class FileOps(QObject):
         """Launch something and forget it (a viewer, a terminal, "open with").
         There is no exit code to wait for, but "the binary does not exist" is
         knowable immediately — and a launcher that silently does nothing is
-        exactly what DESIGN.md 10 forbids — so a failed start is toasted."""
+        exactly what docs/DESIGN.md 10 forbids — so a failed start is toasted."""
         argv = [str(a) for a in argv]
         # PySide returns the `qint64 *pid` out-parameter alongside the bool.
         ok = QProcess.startDetached(_resolve(argv[0]), argv[1:])

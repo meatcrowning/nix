@@ -23,7 +23,7 @@ Column {
         SetRow {
             // The picked colour supplies the HUE; the palette is still built
             // by wal-extract.py's value ladder, so the accent comes back
-            // pastel-capped exactly like a wallpaper-derived one (DESIGN.md
+            // pastel-capped exactly like a wallpaper-derived one (docs/DESIGN.md
             // 3.1). Saying so here, because "I picked #ff0000 and got a pale
             // red" otherwise reads as the control not working.
             label: "accent colour"

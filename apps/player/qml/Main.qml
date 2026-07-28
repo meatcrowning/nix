@@ -65,7 +65,7 @@ Window {
 
     // View history for the mouse back/forward buttons (browser-style: going
     // somewhere new clears the forward stack). player's reading of the
-    // desktop-global rule in DESIGN.md §11: "back" is the view you came from,
+    // desktop-global rule in docs/DESIGN.md §11: "back" is the view you came from,
     // NOT the previous track — transport already owns prev/next, and stealing
     // the side buttons for it would leave the app with no way back out of an
     // album. The stack itself is qmlcommon/NavHistory.qml.
@@ -289,7 +289,7 @@ Window {
         anchors.right: parent.right
         anchors.rightMargin: win.searchOpen ? 8 : -(width + 4)
         // A reveal sliding out of the edge it belongs to, so it takes the
-        // desktop's slide (DESIGN.md §6.2). It was 120ms with NO easing at
+        // desktop's slide (docs/DESIGN.md §6.2). It was 120ms with NO easing at
         // all, i.e. Linear — nothing chose that, it was just the default.
         Behavior on anchors.rightMargin { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
         width: 260
@@ -348,7 +348,7 @@ Window {
         onRgPreampRequested: function(db) { Player.setRgPreamp(db); }
     }
 
-    // Mouse back/forward buttons navigate the view history (DESIGN.md §11).
+    // Mouse back/forward buttons navigate the view history (docs/DESIGN.md §11).
     NavButtons {
         onBack:    win.goBack()
         onForward: win.goForward()

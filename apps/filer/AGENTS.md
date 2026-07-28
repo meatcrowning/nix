@@ -238,7 +238,7 @@ Every `cp`/`mv`/`ln`/`rm`/`mkdir`/`gio trash` goes through `FileOps.run`
 visible**. It used to wire `finished` *and* `errorOccurred` to one handler that
 read neither the exit code nor stderr, so a denied `rm -rf`, a cross-device
 `mv`, a full disk and a successful copy were the same event on screen —
-DESIGN.md §10's headline rule, inverted, in the one app whose mistakes are other
+docs/DESIGN.md §10's headline rule, inverted, in the one app whose mistakes are other
 people's files. Four distinctions the fix keeps apart, and none of them may be
 collapsed again:
 

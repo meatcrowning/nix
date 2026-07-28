@@ -7,7 +7,7 @@ import QtQuick
 //     Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs)
 //                                           easing.type: motion.slideEasing } }
 //
-// DESIGN.md §6.2 is a single rule for the whole desktop: everything that slides,
+// docs/DESIGN.md §6.2 is a single rule for the whole desktop: everything that slides,
 // grows or glides between two resting positions runs at the same duration and
 // the same curve, and the reference is hyprvtb's window roll in/out. The user
 // stated it as a design-language rule, not a per-widget choice:

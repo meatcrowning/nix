@@ -465,7 +465,7 @@ MAINEOF
     check "alarm: second failure notifies again"   "second=1" "$(ga recover | tr ' ' '\n' | grep '^second=')"
 
     # Five lines must come out as five DISTINCT shades. The palette is one hue
-    # (DESIGN.md 3.1), so these are steps on a brightness ladder rather than
+    # (docs/DESIGN.md 3.1), so these are steps on a brightness ladder rather than
     # different colours — the check is that no two steps collapse together.
     SH=$(v shades "$C")
     N=$(printf '%s' "$SH" | awk -F/ '{print NF}')

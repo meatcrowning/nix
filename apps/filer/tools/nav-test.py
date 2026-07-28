@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offscreen harness for the mouse back/forward buttons (DESIGN.md §11).
+"""Offscreen harness for the mouse back/forward buttons (docs/DESIGN.md §11).
 
 Loads the REAL qml/Main.qml under QT_QPA_PLATFORM=offscreen and posts real
 QMouseEvent press/release pairs carrying Qt.BackButton / Qt.ForwardButton at the

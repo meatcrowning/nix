@@ -1,6 +1,6 @@
 // NavButtons — the mouse's back/forward side buttons, in one place.
 //
-// DESKTOP-GLOBAL rule (DESIGN.md §11): *"back and forward mouse buttons should
+// DESKTOP-GLOBAL rule (docs/DESIGN.md §11): *"back and forward mouse buttons should
 // function in every program. takes the user back and foreward"* — so this is
 // not a per-app feature to be re-implemented six times. Drop one of these in as
 // a child of a window's root item and wire `onBack` / `onForward`:

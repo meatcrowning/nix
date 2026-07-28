@@ -1,6 +1,6 @@
 """The desktop's typography and motion settings, read from the panel's store.
 
-DESIGN.md §2.1 is a single rule for the whole desktop: one font, at kitty's
+docs/DESIGN.md §2.1 is a single rule for the whole desktop: one font, at kitty's
 size, in the panel, the titlebar and all six apps. The panel already obeys the
 Settings window's "font family" / "font size" controls — its `Theme.qml` binds
 straight to `SettingsStore.d.fontFamily` / `.fontSize` — but each app carried its
@@ -30,7 +30,7 @@ Set `DESK_SETTINGS` in the environment to point at another JSON file; that is
 how the offscreen layout tests render at a non-default size without touching
 the user's live settings.
 
-It carries the two MOTION settings for the same reason (DESIGN.md §6.2):
+It carries the two MOTION settings for the same reason (docs/DESIGN.md §6.2):
 `reduceMotion` and `animSpeed` are Settings > Appearance controls that the panel
 applies in `ViewMode.ms()`, and `qmlcommon/Motion.qml` is the apps' half of the
 same function — it reads both off `DeskStyle` behind a `typeof` guard. Until

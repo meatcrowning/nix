@@ -108,7 +108,7 @@ PopupWindow {
                 implicitHeight: rowText.implicitHeight
                 // Hover LIGHTENS, one step up the brightness ladder (§3.3):
                 // `highlight` is the desktop's selection fill, and the row under
-                // the pointer is the pending selection. DESIGN.md §7.2.
+                // the pointer is the pending selection. docs/DESIGN.md §7.2.
                 color: rowMouse.containsMouse ? Theme.highlight : "transparent"
                 PixelText {
                     id: rowText

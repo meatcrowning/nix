@@ -346,7 +346,7 @@ Item {
             // A STOPPED fixed-speed fan takes the card over. It has to: the
             // fan it is about is the one the card deliberately does not draw,
             // so there is no line to go crit and no row to dim. Said TWICE
-            // (DESIGN.md 3.5) — the readout goes `crit`, AND the secondary
+            // (docs/DESIGN.md 3.5) — the readout goes `crit`, AND the secondary
             // reading is replaced by the fan's name, because a colour alone is
             // missable on a card that is four characters wide and the
             // notification may have been dismissed hours ago.

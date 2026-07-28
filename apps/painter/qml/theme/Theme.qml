@@ -17,7 +17,7 @@ QtObject {
     // window sets for the WHOLE desktop: DeskStyle (pylib/deskstyle.py, a
     // context property installed by main.py) reads the panel's own
     // settings.json, so one slider moves the panel, the titlebars and all six
-    // apps together — DESIGN.md 2.1. These two are deliberately NOT parsed out
+    // apps together — docs/DESIGN.md 2.1. These two are deliberately NOT parsed out
     // of the panel's Theme.qml the way the palette below is: there they are QML
     // expressions (SettingsStore.d.*) that only Quickshell can evaluate.
     readonly property string font: DeskStyle.fontFamily

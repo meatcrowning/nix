@@ -482,7 +482,7 @@ class Painter(QObject):
     busy = Property(bool, lambda self: self._busy, notify=busyChanged)
     ready = Property(bool, lambda self: self._object_info is not None, notify=statusChanged)
     # What systemd says about comfy-painter.service, so start/stop can be lit
-    # from the world instead of from intent (DESIGN.md §10).
+    # from the world instead of from intent (docs/DESIGN.md §10).
     unitState = Property(str, lambda self: self._unit_state, notify=statusChanged)
     backendRunning = Property(bool, lambda self: self._unit_state in ("active", "activating"),
                               notify=statusChanged)
@@ -546,7 +546,7 @@ class Painter(QObject):
         self._refresh_unit()
         # Report what happened, not what was asked for: a non-zero exit (or a
         # unit still active afterwards) with a "backend stopped" label is the
-        # exact "reports a change that did not happen" failure DESIGN.md §10
+        # exact "reports a change that did not happen" failure docs/DESIGN.md §10
         # forbids.
         if r.returncode != 0 or self._unit_state == "active":
             detail = (r.stderr or r.stdout or "").strip().splitlines()

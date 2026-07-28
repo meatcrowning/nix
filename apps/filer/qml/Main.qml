@@ -298,7 +298,7 @@ Window {
     // The mouse's back/forward side buttons walk the FOCUSED pane's directory
     // history — `win.pane` is the same pane every other control acts on, so the
     // buttons follow the chrome rather than the pointer. Desktop-global rule,
-    // DESIGN.md §11; the handler itself is qmlcommon/NavButtons.qml.
+    // docs/DESIGN.md §11; the handler itself is qmlcommon/NavButtons.qml.
     NavButtons {
         onBack:    if (win.pane) win.pane.goBack()
         onForward: if (win.pane) win.pane.goForward()

@@ -1,6 +1,6 @@
 // NavButtons — the mouse's back/forward side buttons, panel-side.
 //
-// DESKTOP-GLOBAL rule (DESIGN.md §11): *"back and forward mouse buttons should
+// DESKTOP-GLOBAL rule (docs/DESIGN.md §11): *"back and forward mouse buttons should
 // function in every program. takes the user back and foreward"*. The panel is
 // the fourth codebase on this desktop and cannot import `apps/qmlcommon/` — its
 // QML is Quickshell's and is deployed to `~/.config/quickshell` — so this is a

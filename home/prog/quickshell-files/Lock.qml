@@ -153,7 +153,7 @@ Scope {
 
                 x: panel.entered ? 0 : width
                 // The lock panel slides in off the screen edge — an ordinary
-                // reveal, so it takes the desktop's slide (DESIGN.md §6.2).
+                // reveal, so it takes the desktop's slide (docs/DESIGN.md §6.2).
                 Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
                 opacity: root.unlocking ? 0 : 1

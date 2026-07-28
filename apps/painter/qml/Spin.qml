@@ -52,7 +52,7 @@ Rectangle {
 
     // A Spin is a DISCRETE STEPPER, not a scroll surface, so the wheel goes
     // through the desktop's notch accumulator rather than a locally re-derived
-    // set of constants (DESIGN.md §9.2, §19). One classic detent is exactly one
+    // set of constants (docs/DESIGN.md §9.2, §19). One classic detent is exactly one
     // `step` as it always was; a touchpad's sub-notch remainder is carried, and
     // maxSteps caps a burst — the old hand-rolled `while` loop had no ceiling,
     // so a compositor momentum coast over a Spin could walk it across its whole
