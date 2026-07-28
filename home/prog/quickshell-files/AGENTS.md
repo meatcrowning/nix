@@ -485,9 +485,31 @@ you are looking at.
   `.claude-wrapped`. The script prefers `argv[0]`'s basename — except for
   Chromium/QtWebEngine helpers, which rewrite their entire command line into
   `argv[0]`, so a "name" containing spaces or over 24 characters falls back.
-- **Kill is SIGTERM on left click, SIGKILL on RIGHT.** The rows re-sort under the
-  cursor every 2s; an unrecoverable action must not be one mis-timed left click
-  away.
+- **The `[x]` is SIGTERM on left click; everything else a process can be asked
+  to do is on RIGHT-CLICK anywhere in the row** (`ProcMenu.qml`): End Task,
+  Force Quit, Suspend/Resume, Lower Priority, Filter by Name, Copy PID. SIGKILL
+  used to be the right-click on the `[x]` itself, so that an unrecoverable
+  action was never one mis-timed left click away on a table that re-sorts under
+  the cursor every 2s. The menu keeps that guarantee — it is still two
+  deliberate acts — and removes the trap that appeared once right-click meant
+  "menu" everywhere else: a right-click a few pixels off would have SIGKILLed
+  whatever had just sorted under the pointer.
+- **The menu is ONE instance at the table root, not one per row.** The list
+  `reuseItems` and re-sorts every 2s, so a delegate-owned popup would be
+  destroyed or silently re-pointed at another process while it was open. It
+  captures pid/name/state/nice on open and binds to nothing live; the row is
+  used once, to place it. It anchors LEFT like `TaskMenu.qml`, dismisses on
+  hover-out (this config never imports `Quickshell.Hyprland`, so there is no
+  focus grab), and `TaskManagerContent` closes it explicitly when the widget
+  goes inactive or is destroyed — nothing else unmaps a popup surface.
+- **An action `execDetached` cannot report on must not be OFFERED.** There is no
+  exit code and no stderr, so signalling or renicing another user's process is a
+  perfect silent no-op. `proc-list.py` therefore reports `mine` (owner uid ==
+  ours) alongside `state` (`T` = suspended, which picks Suspend vs Resume) and
+  `nice` (Lower Priority disappears at 19, since niceness is one-way without
+  privilege); a row that is not ours gets the read-only entries and a line
+  saying why. Those three fields are **appended** — the parse indexes
+  positionally and tolerates the older five-field shape carried across a reload.
 - The charts are a 4x2 block of SQUARE cards — cpu, gpu, mem, net, load, vram,
   swap, fan — sharing `ChartCanvas.qml` with the popups. Square means the card
   height follows the panel WIDTH, so a taller tile turns into more visible
