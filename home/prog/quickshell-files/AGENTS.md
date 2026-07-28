@@ -1024,6 +1024,30 @@ draws it.
   the tile's reported `wants` are untouched, which is what keeps the weather tile
   below from moving.
 
+- **A derived `bool` is coerced with `!!` AT THE SOURCE, and read with
+  `=== true`.** JS `&&`/`||` yield the last VALUE, not a boolean, so
+  `lyrics !== null && lyrics.synced` was `undefined` whenever the payload had no
+  `synced` — and a `property bool` bound to undefined logs "Unable to assign
+  [undefined] to bool" on every evaluation. The consumers additionally test
+  `=== true` for a reason that is not paranoia: **a rebuild swaps the store
+  symlinks file by file, so for one reload the panel can run a NEW
+  MediaContent.qml against the OLD Media.qml**, where the property does not
+  exist at all. Observed live, three bindings, once. Same rule for guarding a
+  dereference — `Media.lyrics ? Media.lyrics.text : ""`, never
+  `Media.hasLyrics ? …`: they are separate bindings over the same push and QML
+  gives no ordering between them, which threw a real TypeError on the frame a
+  track lost its lyrics.
+
+  ```bash
+  ./tools/media-lyrics-probe.sh    # 26 assertions, ~15s, nothing on screen
+  ```
+
+  That is the regression test for all of it, and for the fallback: it drives the
+  REAL `Media.qml`/`MediaContent.qml` with socket-shaped queue lines — including
+  an OLD player's, with no `lyrics` key at all — and asserts the column
+  collapses, the artist stays at `w=75`, the duration stays at `x=299`,
+  `implicitHeight` is 230 either way, and no binding ever takes undefined.
+
   **How that was verified, because it generalises to any widget here.** Copy
   this directory to a throwaway config, replace the data singletons it names
   with stubs (here `Media` and `SysInfo` — a dozen properties each), give it a
