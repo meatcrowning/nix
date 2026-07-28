@@ -1,0 +1,25 @@
+# Managed by home/srvs/claude-state.nix; edits here are overwritten.
+#
+# Merge policy, per file shape. The sync runs unattended every 5 minutes, so a
+# conflict does not merely annoy someone — it WEDGES the sync for every other
+# file until a human notices. Each rule below buys immunity from that for one
+# class of file.
+
+# One fact per file, plus MEMORY.md which gains a line per new memory. When both
+# machines edit it, keeping BOTH sides' lines is right: duplicated text is
+# trivial to clean up, a memory silently lost to a botched resolution is not.
+*.md merge=union
+
+# Transcripts and history.jsonl are append-only streams of independent JSON
+# objects, one per line. Union keeps every line from both machines; interleaved
+# order is cosmetically odd and semantically fine. Without this, history.jsonl —
+# which BOTH machines append to constantly — would conflict on essentially every
+# merge and stop the whole sync.
+*.jsonl merge=union
+
+# Settings and manifests are structured JSON, where a union merge produces a
+# syntactically INVALID file. `ours` keeps this machine's copy when both sides
+# changed the same file; when only one side changed it git still takes that
+# change normally, so the file does still sync. Requires merge.ours.driver=true
+# in the repo config — claude-state-premigrate.sh sets it on every run.
+*.json merge=ours

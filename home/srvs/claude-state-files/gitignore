@@ -1,0 +1,66 @@
+# ~/.claude — DENYLIST. Managed by home/srvs/claude-state.nix; edits here are
+# overwritten on the next sync. Change the nix source instead.
+#
+# This repo deliberately carries the WHOLE ~/.claude tree, session transcripts
+# included: the user wants a session started on `top` to be readable on `book`.
+# That is the opposite of the allowlist this file used to be, so the rule that
+# keeps it safe is different. An allowlist could not widen by accident; a
+# denylist can. What follows is therefore organised around two questions —
+# is it a SECRET, and is it MACHINE-LOCAL — and nothing else is excluded.
+#
+# The remote is PRIVATE. Treat everything in it as internal documents: it holds
+# verbatim transcripts of whatever was on screen during every session.
+
+# ---- secrets: never, under any circumstances --------------------------------
+# .credentials.json is a live OAuth token; daemon/control.key authenticates to
+# the local daemon. The wildcards exist because a future Claude Code release can
+# add a secret file we have not heard of, and a denylist only protects what it
+# names. Keep them broad.
+.credentials.json
+*credential*
+*.key
+*.pem
+.env
+.env.*
+*token*
+
+# .claude.json backups — rotated every few minutes AND copies of a file that has
+# held auth material. Either reason alone disqualifies them.
+backups/
+
+# ---- machine-local runtime state --------------------------------------------
+# Live process state, not documents. Syncing these is not merely wasteful: the
+# daemon keeps a warm pool of pre-spawned background sessions, and job dirs are
+# LIVE PROCESSES on the machine that owns them. Landing `top`'s job dirs on
+# `book` invites its daemon to adopt sessions whose processes do not exist.
+jobs/
+daemon/
+sessions/
+session-env/
+tasks/
+.trash-claude-sessions/
+
+# Shell snapshots capture this machine's PATH and functions — NixOS store paths
+# are meaningless on Fedora Asahi, and vice versa.
+shell-snapshots/
+
+# Caches: re-fetched or regenerated on demand, and churning on every invocation.
+cache/
+paste-cache/
+downloads/
+telemetry/
+plugins/cache/
+plugins/marketplaces/
+plugins/plugin-catalog-cache.json
+*-cache.json
+.last-*
+*.log
+*.lock
+
+# ---- kept on purpose (do not "clean up") ------------------------------------
+# projects/**        session transcripts + memory files — the point of this repo
+# file-history/      per-session edit history
+# plans/             written plans
+# orchestrator-briefing.md, and any other top-level doc
+# history.jsonl      prompt history (merge=union, see .gitattributes)
+# settings.json, plugins/installed_plugins.json, plugins/known_marketplaces.json
