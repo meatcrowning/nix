@@ -13,9 +13,15 @@ Item {
     signal confirmed()
     signal dismissed()
 
-    function open() { visible = true; }
+    function open() { visible = true; forceActiveFocus(); }
     function close() { visible = false; }
     function cancel() { root.dismissed(); close(); }
+
+    // Escape cancels, exactly as it does in BrowserPrompt next door. A modal is
+    // a desktop-wide vocabulary (DESIGN.md §0, §11), not a per-dialog choice —
+    // and the destructive variant is the last one that should need the mouse.
+    // Enter is deliberately NOT bound: the default action here can be "delete".
+    Keys.onEscapePressed: root.cancel()
 
     MouseArea { anchors.fill: parent; onClicked: root.cancel() }
     Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.5) }

@@ -8,8 +8,14 @@ Item {
     property string text: ""
     signal confirmed()
 
-    function open() { visible = true; }
+    function open() { visible = true; forceActiveFocus(); }
     function close() { visible = false; }
+
+    // Escape cancels, exactly as it does in BrowserPrompt next door. A modal is
+    // a desktop-wide vocabulary (DESIGN.md §0, §11), not a per-dialog choice.
+    // Enter is deliberately NOT bound: the default action here is "delete".
+    // FileBrowser is a real FloatingWindow, so this Item does get the keyboard.
+    Keys.onEscapePressed: root.close()
 
     MouseArea { anchors.fill: parent; onClicked: root.close() }
     Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.5) }

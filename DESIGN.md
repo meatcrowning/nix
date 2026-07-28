@@ -12,7 +12,10 @@ the screen:
 | the six apps — filer, viewer, player, painter, surfer, askpass | `apps/` |
 
 They are four codebases and one desktop. **A user cannot tell which one drew a
-tooltip, so they must all draw the same tooltip.**
+tooltip, so they must all draw the same tooltip.** Those four trees — and the six
+apps named individually — are the *scope tokens* this file uses to say how far a
+rule reaches. **Read [§0](#0-scope--here-or-everywhere) before you decide that
+something applies to only one of them.**
 
 ## Why this file exists — in his words
 
@@ -42,6 +45,85 @@ area; nothing here contradicts one.
   and promoted to a rule so it stops being re-decided per file.
 - Agent *proposals* are not in the body of this document. They are in
   [Open questions](#open-questions) at the end. **Do not promote one yourself.**
+
+---
+
+## 0. Scope — "here" or "everywhere?"
+
+Every rule in this file has a blast radius, and guessing it wrong is the single
+failure this document exists to end. So scope is notated, in three marks.
+
+**Unmarked means DESKTOP-GLOBAL.** A rule with no scope tag binds the panel,
+`hyprvtb`, `hyprland.lua` and all six apps. There is no `[global]` tag — that is
+the default, and marking it would only add noise to 95% of the file. The
+notation is bookkeeping; **the default itself is [his]**, and it is the brief
+quoted above: *"every new feature implimented or every new program created to
+all look the same without me having to specify it every or nearly every time."*
+
+**`[panel]` `[hyprvtb]` `[hyprland]` `[filer]` `[viewer]` `[player]`
+`[painter]` `[surfer]` `[askpass]` `[apps]` `[top]` `[air]`** — on a heading or
+a bullet, that rule is scoped to that surface, because that surface is the only
+one that *has* the thing it describes. **A scope tag says where the subject
+exists; it is not permission for that surface to look different.**
+
+**`[except <surface>: reason]`** — a surface that legitimately breaks a global
+rule. Every one of these is also a row in
+[§20 Recorded exceptions](#20-recorded-exceptions).
+
+### 0.1 The default is global, and here is the tie-break
+
+His standing requirement is that a new feature or a new program **looks like the
+rest without him having to specify it again**. Therefore:
+
+**Assume every preference he states is desktop-global.** When he names one
+program he is describing the desktop and using that program as the example. He
+has had to widen an agent's too-narrow fix himself at least three times — the
+split-button glyphs (§12.1), the queue slide timing (*"this is another thing
+that should always happen when we do a new feature or program etc design
+language"*, §6.2) and the glyph map (*"yes id like px() wired through the others
+as well"*, §2.3). **Scoping a fix to where he happened to be pointing is the
+most common way work here has to be done twice.**
+
+When he does not say which he means, decide in this order and stop at the first
+answer:
+
+1. **Does the same thing already exist on another surface?** If yes it is
+   global — change them all. This is the first question of any visual change,
+   not the last.
+2. **Is his stated reason about that program's own subject matter?** Reason
+   about the *subject*, not the app he named: "the cover art should bleed to the
+   window edge" is about album art and is `[player]`; "tooltips should slide out"
+   is about tooltips and is global.
+3. **Could the two surfaces sit side by side on one screen?** They all can. If
+   the disagreement would be visible in one glance, it is global.
+4. **Still unsure: apply it globally, and say so in your report.**
+   Over-applying is cheap — it converges the desktop, and he can name the one
+   exception in a sentence. Under-applying costs him a second ask about the same
+   thing.
+
+**One asymmetry, and it is the only one: ADDING a convention defaults to global,
+REMOVING a capability does not.** *"remove the close button in the inner
+titlebar"* (§7.4) is not a licence to strip close buttons desktop-wide. A
+subtraction stays where he pointed unless he widens it.
+
+**Cross-host scope is settled and needs no tie-break:** *"i basically want both
+computers to look and operate the same"* [his]. `[top]`/`[air]` mark hardware
+facts only — screen scale, battery vs GPU sensors. Nothing else.
+
+### 0.2 A divergence must be RECORDED to exist
+
+**A program may differ, but only on the record.** If you write code that breaks a
+rule in this file — or you find code that already does and conclude it is right — add a
+row to [§20](#20-recorded-exceptions) **in the same commit**, with its scope and
+its reason. An unrecorded difference is indistinguishable from a bug: the next
+agent either "fixes" it back out, or copies it into a seventh surface as
+precedent. Both have happened.
+
+**Do not record your own taste as his decision.** If you think a surface *should*
+differ and he has not said so, it is a `candidate`: add the §20 row marked
+`candidate` and raise it in [Open questions](#open-questions). Only he promotes a
+candidate. This is the same discipline §"Maintaining this file" already applies
+to rules — §20 is where it applies to exceptions.
 
 ---
 
@@ -886,7 +968,7 @@ Related [code — `f3c6040`]: a QML `Behavior` over already-smoothed 60fps data 
 "a second low-pass … re-adding the lag cava had just been told to drop". It went
 60ms → 25ms.
 
-### 6.10 The slow-motion knob
+### 6.10 The slow-motion knob `[panel]`
 
 [code — `52a7989`] Every duration a view-mode change touches goes through
 `ViewMode.ms()`, scaled by a runtime `slowmo`, because "there is a glitch in the
@@ -998,7 +1080,8 @@ button dropped — the outer titlebar's [x] does that"* (`1eb7ede`).
   half-applied"*. The bar paints its own scrim at Hyprland's own
   `decoration:dim_strength`, because `dim_around` is drawn in the window pass
   and the bar is a layer surface above it.
-- **A privilege prompt states the caller's reason and never invents one.** [his]
+- **A privilege prompt states the caller's reason and never invents one.**
+  [his] `[askpass]`
   Unset reads "NO REASON GIVEN", because "a prompt that fabricates a
   justification for its own privilege request is worse than one that admits
   ignorance". Untrusted strings are sanitized (C0/C1 stripped, newlines
@@ -1037,7 +1120,7 @@ creation.
 **Known divergence:** the dwell is **350ms** in the panel and **450ms** in
 hyprvtb. See [Open questions](#open-questions).
 
-### 8.1 Toasts, OSD and status text — the exact specs
+### 8.1 Toasts, OSD and status text — the exact specs `[panel]`
 
 - **Notification card**: width 300, `implicitHeight: max(Theme.cell, content +
   20)`, `radius: 0`, `Theme.bgAlt` fill, **2px border in the urgency tint plus a
@@ -1450,7 +1533,7 @@ another view is its own explicit action.
 
 ---
 
-## 15. The wallpaper and the desktop surface
+## 15. The wallpaper and the desktop surface `[panel]`
 
 - **The wallpaper is composed against the VISIBLE desktop area, not the raw
   screen** [his] — *"the middle of the wallpaper matches up with the middle of
@@ -1472,7 +1555,7 @@ another view is its own explicit action.
 
 ---
 
-## 16. Web pages as a design surface (surfer)
+## 16. Web pages as a design surface `[surfer]`
 
 **The desktop's font may be imposed on a page; the desktop's sizes and colours
 may not — and the choice is per-site.** [code — a clean escalate-then-retract
@@ -1620,6 +1703,39 @@ tree**: it flips its own label to `scanning`, lights up, and guards the handler.
 
 ---
 
+## 20. Recorded exceptions
+
+**Every deliberate divergence from a rule above lives here. A difference that is
+not in this table is a bug** — either bring the code back into line, or add the
+row. Adding a row is part of the commit that creates the divergence, not a
+follow-up (§0.2).
+
+`status` is the same provenance vocabulary as the rest of the file, plus one
+more: **`candidate`** means an agent proposed it and he has not ruled. A
+`candidate` row is **not** a licence to keep the divergence, and it must have a
+matching entry in [Open questions](#open-questions). Concurrent agents finding
+new candidates add rows here rather than editing the rules above.
+
+| rule | scope | what it does instead | why | status |
+|---|---|---|---|---|
+| §4 square corners | `[panel]` | menus/tooltips `radius: 3`, text entries `radius: 2` | a menu chip and an entry box do not read as *windows*; the rule is about window-like surfaces. **The only two rounding values on the desktop** | [code] |
+| §3.1 the wallpaper owns the palette | `[panel]` | `BG` is hardcoded `000000` and never derived; `windowBorderInactive` is a static `595959aa` | pure black is the shared floor across Qt/kitty/panel (§3.1); a border that must read against *any* wallpaper cannot be a near-neighbour of accent (§3.2) | [code] |
+| §3.1 nothing picks a colour | global | an indicator required to read against any wallpaper may take a static colour | measured: every wal slot is within 1.5:1 of accent, so a themed indicator has no contrast left (§3.2, `7628fed`) | [code] |
+| §6.2 one motion vocabulary | global | physics-driven indicators use a gravity model and the peak marker carries **no** `Behavior` at all | "the velocity term is what makes a peak read as falling rather than fading"; easing over 60fps data is a second low-pass (§6.9) | [code] |
+| §6.8 every window uses the desktop's open/close animation | `[hyprland]` | `monitorAdded` entrance animation is disabled | "the desktop should just BE there" — no login animation (§6.8) | [code] |
+| §9.2 momentum belongs to the compositor | global | discrete steppers (volume, brightness, tray) stay notch-based via `WheelNotch` | they are steppers, not scroll surfaces; "a coast that walks brightness to 0 is a bug" (§9.2) | [his] |
+| §12.1 a pressed cell inverts for 220ms | `[hyprvtb]` | close and minimize show no flash | their result is instantly visible, so the confirmation is redundant (§12.1) | [code] |
+| §8 every button gets a tooltip | `[hyprvtb]` | tooltips are suppressed on unfocused windows | "the cursor is usually just passing over it to click-focus" (`737dce7`) | [code] |
+| §2.3 foreign text is mapped at ingest | global | identifying strings — paths, pids, argv, task titles — and **prefill sites** (rename dialog, drive-label editor) are never mapped | mapping them renames the user's file or relabels their volume (§2.3) | [code] |
+| §2.2 no bold, ever | global | emphasis is carried by colour and position instead | the font ships Regular only; synthetic bold "reads as a different typeface" (`7da096d`) | [code] |
+| §6.1 reload must be undetectable | `[panel]` | `ViewMode.slowmo` is deliberately **not** persisted and **not** a settings key | so a reload always restores 1x and it cannot be left on by accident (§6.10) | [code] |
+| §16 the desktop's idiom applies to everything drawn | `[surfer]` | the desktop's *font family* is imposed on a page; its sizes and palette are not, and the choice is per-site | forcing size and palette is reader-mode territory and breaks real sites — a full reskin was built and explicitly retracted (`ad868e4`) | [his] |
+| §5.1 zero-gap, edge-to-edge | global | an interactive target never touches its neighbour, and its hit band may exceed its ink | he reported the queue's collapse handle as unclickable at `gap = 0` (§5.3) | [his] |
+| §18 the dock shows the system's tiles | `[panel]` | the disk tile is classic-mode only | by choice (§18) | [his] |
+| §8 one tooltip dwell | `[hyprvtb]` | 450ms, against the panel's 350ms | **unruled.** The titlebar is a place the cursor passes through more often, so a longer dwell *may* be deliberate — nothing records it as such (Open question 4) | candidate |
+
+---
+
 ## Open questions
 
 Agent *proposals*, listed separately on purpose. Nothing above depends on them.
@@ -1687,3 +1803,7 @@ Agent *proposals*, listed separately on purpose. Nothing above depends on them.
    otherwise the next agent restores the old look from here.
 5. **When he states a preference in a session, it belongs here** — that is the
    entire point. A rule he has had to say twice is a bug in this document.
+6. **Write the scope down at the same time (§0).** A new rule is global unless
+   you tag it; a new *divergence* is a row in §20 in the same commit, or it is
+   a bug. A rule he has had to widen from one program to the desktop is the
+   same bug as one he has had to say twice.
