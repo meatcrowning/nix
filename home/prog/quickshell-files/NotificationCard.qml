@@ -12,6 +12,18 @@ Rectangle {
 
     readonly property int urgency: notif ? notif.urgency : 1
     readonly property bool critical: urgency === 2
+
+    // Per-notification expiry, straight off the spec's expire_timeout: 0 means
+    // NEVER expire, >0 is an explicit ms lifetime, -1 (the default) means "use
+    // the server's". Ignoring it was a real bug, not a stylistic choice: a
+    // progress toast that morphs in place (surfer's downloads, filer's video
+    // compress — notify-send -r) got retired by our 5s timer between updates,
+    // so the next --replace-id named an id the server no longer had and it
+    // opened a BRAND NEW toast, with its own sound, on every whole percent.
+    // "Longer downloads just trigger the toast over and over" was that.
+    readonly property bool persistent: critical || (notif && notif.expireTimeout === 0)
+    readonly property int expiryMs: (notif && notif.expireTimeout > 0)
+                                    ? notif.expireTimeout : Notifications.timeoutMs
     readonly property color tint: critical ? Theme.crit
                                 : urgency === 0 ? Theme.info
                                 : Theme.accent
@@ -81,12 +93,22 @@ Rectangle {
         }
     }
 
-    // auto-expiry: runs for non-critical toasts while not hovered. Leaving the
+    // auto-expiry: runs for non-persistent toasts while not hovered. Leaving the
     // toast restarts the countdown (running false->true resets the Timer).
     Timer {
-        interval: Notifications.timeoutMs
-        running: !card.critical && !hover.containsMouse
+        id: expiry
+        interval: card.expiryMs
+        running: !card.persistent && !hover.containsMouse
         onTriggered: if (card.notif) card.notif.expire()
+    }
+
+    // A --replace-id update reuses the SAME Notification object, so no new card
+    // is built and the countdown would otherwise keep running from the original
+    // arrival. Fresh content means a fresh lifetime.
+    Connections {
+        target: card.notif
+        function onSummaryChanged() { if (expiry.running) expiry.restart(); }
+        function onBodyChanged() { if (expiry.running) expiry.restart(); }
     }
 
     MouseArea {

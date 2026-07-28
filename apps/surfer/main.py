@@ -275,7 +275,9 @@ class Downloads(QObject):
     A large download gets a live progress toast that updates IN PLACE (notify-send
     --replace-id) with a CP437 block bar in the body — which the pixel DOS font
     renders as a real bar; every download gets a completion (or failure) toast.
-    Keyed by an opaque per-download string from QML."""
+    The progress toast is sent expire-never (-t 0) so it survives the gaps
+    between updates — see _send. Keyed by an opaque per-download string from
+    QML."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -295,10 +297,19 @@ class Downloads(QObject):
         fill = int(round(pct / 100.0 * width))
         return "█" * fill + "░" * (width - fill)  # █ filled / ░ empty
 
-    def _send(self, key, title, body, value):
+    def _send(self, key, title, body, value, persist=False):
         # -p prints the notification id so we can --replace-id (-r) it next time,
         # morphing one toast in place instead of stacking a new one per update.
+        #
+        # -t 0 (never expire) on the PROGRESS toast is what makes that work for a
+        # long download. The server retires an ordinary toast after a few seconds,
+        # and once it is gone our -r names an id it no longer has — so it opens a
+        # brand new toast, with its own sound, on every whole percent. The
+        # completion/failure toast deliberately keeps the default timeout: it has
+        # nothing left to update and should behave like any other toast.
         args = ["notify-send", "-a", "surfer", "-p"]
+        if persist:
+            args += ["-t", "0"]
         rid = self._ids.get(key)
         if rid is not None:
             args += ["-r", str(rid)]
@@ -323,7 +334,7 @@ class Downloads(QObject):
         self._pct[key] = pct
         body = "%s %d%%\n%s / %s" % (self._bar(pct), pct,
                                      self._human(received), self._human(total))
-        self._send(key, "downloading " + name, body, pct)
+        self._send(key, "downloading " + name, body, pct, persist=True)
 
     @Slot(str, str)
     def done(self, key, name):

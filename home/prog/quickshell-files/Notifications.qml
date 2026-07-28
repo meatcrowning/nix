@@ -72,15 +72,19 @@ Singleton {
             // Vista sounds: critical vs. normal, both user-configurable.
             Sounds.playThrottled(n.urgency === 2 ? SettingsStore.d.soundCritical : SettingsStore.d.soundNotify, 300);
 
-            // Enforce maxVisible: retire the oldest non-critical toast (lowest
-            // id == earliest). If everything on screen is critical, drop the
-            // oldest regardless so we never grow without bound.
+            // Enforce maxVisible: retire the oldest expendable toast (lowest
+            // id == earliest). Critical toasts and ones that asked never to
+            // expire (expire_timeout 0 — a live progress bar being morphed in
+            // place) are spared, since evicting one puts its sender straight
+            // back into the "every update opens a new toast" loop. If
+            // everything on screen is spared, drop the oldest regardless so we
+            // never grow without bound.
             const vals = server.trackedNotifications.values;
             if (vals.length > root.maxVisible) {
                 let victim = null;
                 for (let i = 0; i < vals.length; i++) {
                     const v = vals[i];
-                    if (v === n || v.urgency === 2)
+                    if (v === n || v.urgency === 2 || v.expireTimeout === 0)
                         continue;
                     if (!victim || v.id < victim.id)
                         victim = v;
