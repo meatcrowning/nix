@@ -78,55 +78,62 @@ Item {
         id: spec
         readonly property int nbars: SettingsStore.d.mediaSpectrumBars
         readonly property real gamma: 0.55
-        // Graduation lines. A bar chart with no rules is just motion; these give
-        // the eye something fixed to read a level against. No labels, by
-        // request — so they carry no numbers, but they are still placed where
-        // the DATA falls rather than at even pixel divisions: the bars are drawn
-        // through `gamma`, so a rule marks a real fraction of cava's 0-100
-        // scale. A peak marker resting on one therefore means exactly that
-        // fraction of full scale; even pixel steps would be rules that measure
-        // nothing.
+        // The measuring grid: `gridRows` equal bands from the top of the
+        // spectrum to the bottom, each with a hairline along its top edge and
+        // every other one filled, so the rows can be counted at a glance. No
+        // labels, by request — this is a scale to read a level against, not a
+        // table.
         //
-        // The series is quarters of full scale down to 25, then HALVING — which
-        // is the same thing said twice, since halving amplitude is -6 dB, so the
-        // six rules are 0, -2.5, -6, -12, -18 and -24 dB. Linear quarters cannot
-        // continue below 25 (the next step is the floor) and a fifth of the
-        // scale is not a number anything here thinks in; the octave ladder is,
-        // and it keeps the drawn spacing even where the gamma curve is steepest.
+        // EVENLY SPACED IN PIXELS, top to bottom, [his] — and that is a
+        // deliberate reversal worth recording so it does not get "fixed" back.
+        // It was briefly a gamma-mapped ladder (100/75/50/25/12.5/6.25 of cava's
+        // scale, i.e. -0 to -24 dB, each rule landing where that amplitude
+        // actually draws) on the reasoning that an evenly-spaced rule measures
+        // nothing in particular once `gamma` has bent the axis. True, but it
+        // bought a numeric honesty nothing labelled and cost the thing a grid is
+        // FOR: rules bunched into the top half, uncountable, most of them dark.
+        // He asked for even spacing over the full height, twice. Even spacing it
+        // is; the dB reading is not coming back without labels to carry it.
         //
-        //   scale  100    75    50    25   12.5  6.25
-        //   height 100%  85.5% 68.3% 47.2% 31.9% 21.8%
+        // Eight rows because it halves cleanly — the midpoint, the quarters and
+        // the eighths are all rules, so the eye can bisect its way to a level
+        // without counting from the bottom — and because it is comfortably more
+        // than the "3 or 4" that read as too few.
         //
-        // 100 lands on y=0: the ceiling of the plot area, and exactly where a
-        // full-scale peak marker is clamped to sit.
+        // The BANDS are `Theme.bgAlt` on the panel's pure-black `bg`, which is
+        // the desktop's existing banding treatment reused, not a new pattern:
+        // `WeatherContent.qml` shades every second forecast slot in exactly that
+        // colour to make its two-per-day structure legible. Same problem, same
+        // answer. The RULES are `Theme.border`, the hairline the volume column
+        // and the tile frames already use, so the grid arrives without a new
+        // colour in it.
         //
-        // Honest limitation of the bottom two: the bars' measured working range
-        // is ~35-68% of the height (median level 15, p90 49), so 12.5 and 6.25
-        // sit BELOW where a bar usually tops out and are occluded whenever that
-        // bucket is loud. They are not decoration — a bucket quiet enough to
-        // show them is a bucket below -18 dB, which is the reading — but they
-        // are read per-column and intermittently, not as continuous rules.
-        //
-        // BEHIND the bars (declared first, so the bars paint over them), in
-        // Theme.border — the hairline the volume column and the tile frames are
-        // already drawn with, so the widget gains a grid without gaining a
-        // colour.
-        readonly property var gridLevels: [6.25, 12.5, 25, 50, 75, 100]
-        // Minimum legible separation between two rules. The threshold is
-        // derived from the level COUNT rather than written as a literal, so
-        // adding or removing a rule moves it by itself.
+        // Bands are gapless for the same reason the bars are: round each edge
+        // once and let one band's bottom BE the next one's top, or a fractional
+        // row height leaves seams.
+        readonly property int gridRows: 8
+        // Minimum legible band height. Derived from the row COUNT rather than
+        // written as a height literal, so changing `gridRows` moves the
+        // threshold by itself — below it the grid is a smear rather than
+        // something countable, and it also keeps these out of the degenerate
+        // layout passes construction and teardown produce.
         readonly property int minGridPx: 6
         Repeater {
-            model: spec.gridLevels
+            model: spec.gridRows
             Rectangle {
-                required property real modelData
+                required property int index
+                readonly property int y0: Math.round(spec.height * index / spec.gridRows)
                 anchors { left: parent.left; right: parent.right }
-                height: 1
-                y: Math.round(spec.height * (1 - Math.pow(modelData / 100, spec.gamma)))
-                color: Theme.border
-                // Six rules in a spectrum with no room are a smear, not a grid;
-                // this also keeps them out of a degenerate layout pass.
-                visible: spec.height >= spec.gridLevels.length * spec.minGridPx
+                y: y0
+                height: Math.max(1,
+                    Math.round(spec.height * (index + 1) / spec.gridRows) - y0)
+                color: index % 2 ? "transparent" : Theme.bgAlt
+                visible: spec.height >= spec.gridRows * spec.minGridPx
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    height: 1
+                    color: Theme.border
+                }
             }
         }
 
@@ -150,20 +157,11 @@ Item {
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                     height: Math.max(1, spec.height
                         * Math.pow(Math.max(0, Media.spectrumLevels[index] || 0) / 100, spec.gamma))
-                    // Every other bucket one rung down the same ladder. The bars
-                    // are gapless by construction, so a loud passage is a solid
-                    // wall of one colour with no bucket structure left in it —
-                    // the comb is what keeps them countable, and it reads as
-                    // structure rather than state because it never moves.
-                    //
-                    // `dim` is the NEAREST named step below `textDim` (the
-                    // ladder continues border -> highlight -> bgAlt), so this is
-                    // the smallest alternation the palette can express — a
-                    // shade, not a second colour, per the two-tier rule that
-                    // keeps every fill dim and leaves bright to the indicator.
-                    // The peak markers stay `accent` on both, since they are
-                    // that indicator and must read across the whole row.
-                    color: index % 2 ? Theme.dim : Theme.textDim
+                    // UNIFORM. Every other BAR was briefly shaded a rung down to
+                    // Theme.dim; that was a misreading of "every other" — the
+                    // alternation belongs to the grid ROWS above, and the bars
+                    // are one series drawn in one colour.
+                    color: Theme.textDim
                     // cava already smooths (noise_reduction) and feeds 60fps, so
                     // this is a second low-pass on top. Keep it just long enough
                     // to absorb a dropped frame, not to re-add lag.
@@ -177,8 +175,7 @@ Item {
                 // supposed to be pinning.
                 //
                 // The bar/marker pair is a light-on-dark split of the same hue:
-                // the bars take Theme.textDim/Theme.dim (the former is the
-                // elapsed/remaining time colour)
+                // the bars take Theme.textDim (the elapsed/remaining time colour)
                 // and the markers the brighter Theme.accent, so a marker reads
                 // both against the background it usually floats over and against
                 // its own bar on the frames it rides the top. 2px tall — at 1px a
