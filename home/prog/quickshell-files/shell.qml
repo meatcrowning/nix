@@ -585,10 +585,12 @@ Scope {
             const f = SysInfo.fans || [];
             if (f.length === 0) return "no fan reports a tachometer";
             const h = SysInfo.fanPctHist || {};
+            const vd = SysInfo.fanVaried || {};
             let out = [];
             for (let i = 0; i < f.length; i++)
                 out.push(f[i].name + " rpm=" + f[i].rpm + " pct=" + f[i].pct
-                         + " hist=" + ((h[f[i].name] || []).length));
+                         + " hist=" + ((h[f[i].name] || []).length)
+                         + " moved=" + (vd[f[i].name] ? "yes" : "NEVER"));
             return out.join("\n");
         }
     }

@@ -22,11 +22,73 @@ QtObject {
 
     property var rows: []
     property var hist: ({})
+    // name -> true for every fan ever seen to change its duty. See fixed().
+    property var varied: ({})
+    // Escape hatch: put the fixed-duty fans back in the headline.
+    property bool includeFixed: false
 
     // How far down the brightness ladder the last fan sits. See shade().
     property real shadeSpread: 0.75
 
     readonly property int count: rows ? rows.length : 0
+
+    // ---- which fans the HEADLINE is allowed to be about -------------------
+    //
+    // [his] *"exclude the pump that one i cannot change even via the mobo
+    // settings and im pretty sure i cant even hear it anyway"*. The pump sits at
+    // 255/255 duty permanently, is not adjustable in the BIOS, and is inaudible
+    // — so as a "how hard is this machine working" reading it is a constant, and
+    // a constant is not a reading. It pinned the headline at 100% for ever.
+    //
+    // TWO CONDITIONS, AND BOTH ARE LOad-BEARING. A fan is excluded only when it
+    // is pinned at maximum duty AND has never once been seen to move.
+    //
+    //   * "Pinned at max" ALONE would hide a chassis fan that has ramped to 100%
+    //     in a thermal event — which is the exact moment the headline matters
+    //     most. That rule is worse than no rule.
+    //   * "Never moved" ALONE would hide almost everything. Measured on this
+    //     box: at idle all four chassis duties sit rock steady (14/255/124/118)
+    //     across a 20s sample, so over any short window every fan looks constant
+    //     and the headline would fall through to nothing.
+    //
+    // Together they are safe, because `varied` is STICKY (SysInfo sets it once
+    // and never clears it, and carries it across a panel reload). A fan that has
+    // ever answered the machine keeps its place in the headline for good,
+    // including while it sits at 100% under load. Only a fan that has been at
+    // full tilt for its whole observed life — which is what a pump IS — drops
+    // out.
+    //
+    // A fan is never judged before there is something to judge: under
+    // settleSamples observations it counts as ordinary. And if the rule would
+    // exclude EVERY fan (a fresh boot with the whole set pinned, or a board with
+    // one fan and it a pump) the headline falls back to all of them, because a
+    // summary of nothing is worse than a summary of a constant.
+    //
+    // NOTHING IS HIDDEN BY THIS. An excluded fan keeps its coloured line and its
+    // tooltip row with its exact RPM, and the row says `fixed` so the headline
+    // does not look like it is lying about the fan sitting above it.
+    property int settleSamples: 30      // 60s at the 2s poll
+    property int fixedPctFloor: 99
+
+    function fixed(i) {
+        if (includeFixed) return false;
+        const r = rows[i];
+        if (!r || r.pct < fixedPctFloor) return false;
+        const h = (hist || {})[r.name] || [];
+        if (h.length < settleSamples) return false;
+        return !((varied || {})[r.name]);
+    }
+
+    // The rows the headline may summarise, with the all-excluded fallback.
+    readonly property var headlineIdx: {
+        const keep = [];
+        for (let i = 0; i < count; i++)
+            if (!fixed(i)) keep.push(i);
+        if (keep.length > 0) return keep;
+        const all = [];
+        for (let i = 0; i < count; i++) all.push(i);
+        return all;
+    }
 
     // ---- what the percentage MEANS, and why it is the only shared axis ----
     //
@@ -55,19 +117,19 @@ QtObject {
     }
 
     // The fastest fan going — the headline, as asked for. It is the highest
-    // PERCENTAGE, i.e. the fan closest to flat out, which is the one that
-    // decides how loud the box is about to get. Where nothing reports a
+    // PERCENTAGE among the rows the rule above admits, i.e. the fan closest to
+    // flat out that can still tell you something. Where nothing reports a
     // percentage at all it falls back to the highest RPM and says "rpm", rather
     // than printing a percent sign over a number that is not one.
     readonly property int topPct: {
         let m = -1;
-        for (let i = 0; i < count; i++)
+        for (const i of headlineIdx)
             if (rows[i] && rows[i].pct > m) m = rows[i].pct;
         return m;
     }
     readonly property int topRpm: {
         let m = -1;
-        for (let i = 0; i < count; i++)
+        for (const i of headlineIdx)
             if (rows[i] && rows[i].rpm > m) m = rows[i].rpm;
         return m;
     }
@@ -76,13 +138,13 @@ QtObject {
     // first one and quietly disagreeing with it.
     readonly property int topPctRpm: {
         let m = -1, r = -1;
-        for (let i = 0; i < count; i++)
+        for (const i of headlineIdx)
             if (rows[i] && rows[i].pct > m) { m = rows[i].pct; r = rows[i].rpm; }
         return r;
     }
     readonly property string topName: {
         let m = -1, n = "";
-        for (let i = 0; i < count; i++)
+        for (const i of headlineIdx)
             if (rows[i] && rows[i].pct > m) { m = rows[i].pct; n = rows[i].name; }
         return n;
     }
@@ -146,6 +208,13 @@ QtObject {
             line += r.rpm >= 0 ? (r.rpm + "rpm") : "   --  ";
             while (line.length < 19) line += " ";
             line += r.pct >= 0 ? (r.pct + "%") : "--";
+            // Say WHY this fan is not the headline, on the row itself. Without
+            // it the card reads as wrong: a tooltip listing a fan at 100% next
+            // to a readout saying 59% looks like the readout is lying.
+            if (fixed(i)) {
+                while (line.length < 25) line += " ";
+                line += "fixed";
+            }
             s += (s === "" ? "" : "\n") + line;
         }
         return s;

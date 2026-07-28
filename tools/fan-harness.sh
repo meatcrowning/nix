@@ -175,6 +175,8 @@ import QtQuick
 
 QtObject {
     id: win
+    // `h` overrides the default history length, `v` is the set of fans ever
+    // seen to move.
     property var cases: [
         { name: "n0", rows: [] },
         { name: "n1", rows: [ {name:"fan1", rpm:1180, pct:50} ] },
@@ -189,17 +191,53 @@ QtObject {
         // five, including a gpu-shaped row (a percentage and no tachometer).
         { name: "n5", rows: [ {name:"fan1", rpm:1180, pct:50}, {name:"fan2", rpm:820, pct:25},
                               {name:"fan3", rpm:2400, pct:100},{name:"fan4", rpm:1500, pct:78},
-                              {name:"gpu",  rpm:-1,   pct:37} ] },
+                              {name:"gpu",  rpm:-1,   pct:37} ],
+                     v: ["fan1","fan2","fan3","fan4","gpu"] },
+        // THE PUMP. Pinned at 100%, never once observed to move, long history.
+        // It must not be the headline (that is fan3 at 59%), must keep its line
+        // and its tooltip row, and must be marked.
+        { name: "pump", rows: [ {name:"fan1", rpm:459,  pct:11},
+                                {name:"fan2", rpm:3458, pct:100},
+                                {name:"fan3", rpm:1846, pct:59} ],
+                        v: ["fan1","fan3"] },
+        // THE THERMAL EVENT - the case that makes "exclude anything at 100%" a
+        // bad rule. fan3 has ramped to 100% and HAS moved before, so it must
+        // take the headline back off the pump.
+        { name: "therm", rows: [ {name:"fan1", rpm:459,  pct:11},
+                                 {name:"fan2", rpm:3458, pct:100},
+                                 {name:"fan3", rpm:2400, pct:100} ],
+                         v: ["fan1","fan3"] },
+        // TOO SOON. Same pump, only 5 samples in - under settleSamples nothing
+        // is judged, so it is still the headline.
+        { name: "young", rows: [ {name:"fan1", rpm:459,  pct:11},
+                                 {name:"fan2", rpm:3458, pct:100} ],
+                         v: ["fan1"], h: 5 },
+        // EVERY fan fixed. The rule would empty the headline, so it falls back
+        // to all of them rather than summarising nothing.
+        { name: "allfix", rows: [ {name:"fan1", rpm:3458, pct:100},
+                                  {name:"fan2", rpm:3400, pct:100} ],
+                          v: [] },
     ]
     property var probe: Fans { }
     Component.onCompleted: {
         for (var c = 0; c < win.cases.length; c++) {
             var kase = win.cases[c];
-            var h = {};
+            var n = kase.h === undefined ? win.probe.settleSamples + 5 : kase.h;
+            var samples = [];
+            for (var k = 0; k < n; k++) samples.push(50);
+            var h = {}, vd = {};
             for (var j = 0; j < kase.rows.length; j++)
-                h[kase.rows[j].name] = [1, 2, 3];
+                h[kase.rows[j].name] = samples;
+            // No `v` at all means "everything has moved" - the pre-pump cases,
+            // which must be unaffected by the rule.
+            if (kase.v === undefined) {
+                for (var j2 = 0; j2 < kase.rows.length; j2++) vd[kase.rows[j2].name] = true;
+            } else {
+                for (var j3 = 0; j3 < kase.v.length; j3++) vd[kase.v[j3]] = true;
+            }
             win.probe.rows = kase.rows;
             win.probe.hist = h;
+            win.probe.varied = vd;
             var shades = [];
             for (var i = 0; i < kase.rows.length; i++)
                 shades.push(String(win.probe.shade(i)));
@@ -209,6 +247,7 @@ QtObject {
                 + " headline=" + win.probe.headline
                 + " sub=[" + win.probe.subline + "]"
                 + " detail=" + win.probe.detail.split("\n").length
+                + " marked=" + (win.probe.detail.split("fixed").length - 1)
                 + " shades=" + shades.join("/"));
         }
         Qt.exit(0);
@@ -261,6 +300,35 @@ MAINEOF
     check "n5: headline"     "100%"   "$(v headline "$C")"
     check "n5: sub is ITS rpm" "[2400r]" "$(v sub "$C")"
     check "n5: tooltip rows" "5"      "$(v detail "$C")"
+
+    # --- THE PUMP. Pinned at max and never seen to move: out of the headline,
+    #     but still a line, still a tooltip row, and marked so the readout does
+    #     not look like it is lying about the 100% sitting above it.
+    C=$(getcase pump)
+    check "pump: headline is the real fan" "59%"     "$(v headline "$C")"
+    check "pump: sub is that fan's rpm"    "[1846r]" "$(v sub "$C")"
+    check "pump: still drawn"              "3"       "$(v lines "$C")"
+    check "pump: still in tooltip"         "3"       "$(v detail "$C")"
+    check "pump: marked fixed"             "1"       "$(v marked "$C")"
+
+    # --- THE THERMAL EVENT. A fan that has moved before and is now at 100% must
+    #     take the headline back. This is why "exclude anything at max" alone is
+    #     a bad rule: it would hide exactly the fan worth seeing.
+    C=$(getcase therm)
+    check "thermal: maxed chassis fan IS the headline" "100%"    "$(v headline "$C")"
+    check "thermal: and it is the one that moved"      "[2400r]" "$(v sub "$C")"
+    check "thermal: only the pump marked"              "1"       "$(v marked "$C")"
+
+    # --- TOO SOON. Under settleSamples nothing is judged constant, or a fresh
+    #     panel would exclude fans it has simply not watched yet.
+    C=$(getcase young)
+    check "young: nothing excluded yet" "100%" "$(v headline "$C")"
+    check "young: nothing marked"       "0"    "$(v marked "$C")"
+
+    # --- ALL FIXED. The rule must never empty the headline; summarising a
+    #     constant beats summarising nothing.
+    C=$(getcase allfix)
+    check "all fixed: falls back to all" "100%" "$(v headline "$C")"
 
     # Five lines must come out as five DISTINCT shades. The palette is one hue
     # (DESIGN.md 3.1), so these are steps on a brightness ladder rather than
