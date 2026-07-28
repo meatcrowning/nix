@@ -50,7 +50,7 @@ FloatingWindow {
         }
 
         // ---- directory history ------------------------------------------
-        // The desktop-global back/forward rule (DESIGN.md §11) reaches the
+        // The desktop-global back/forward rule (docs/DESIGN.md §11) reaches the
         // panel too: this is a real FloatingWindow the user browses in, so its
         // side buttons must mean what they mean everywhere else. "Back" is the
         // directory you were in — the `^` button already means parent.

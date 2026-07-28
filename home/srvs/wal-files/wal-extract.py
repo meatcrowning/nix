@@ -16,7 +16,7 @@ palette, which is what makes the settings apply.
 Every colour still comes off ONE hue through the same value ladder — the
 manual accent replaces where the hue comes FROM, never how the ramp is built,
 and `--bg tone` puts BG on a rung below BGALT rather than inventing a colour.
-See ~/nix/DESIGN.md §3.1."""
+See ~/nix/docs/DESIGN.md §3.1."""
 import sys, os, json, colorsys, warnings
 from collections import Counter
 from PIL import Image
@@ -167,7 +167,7 @@ def main():
         "BGALT":     hsv_hex(h, min(s, 0.55), 0.07),
         "HIGHLIGHT": hsv_hex(h, min(s, 0.60), 0.13),
         # Backgrounds are pure black by default and that is a settled decision
-        # (DESIGN.md §3.1) — kitty, the Qt/KDE apps and the panel are then all
+        # (docs/DESIGN.md §3.1) — kitty, the Qt/KDE apps and the panel are then all
         # the same black. `pureBlackBg = false` is the opt-out the Settings
         # toggle promises: BG drops to the rung BELOW bgAlt on the same value
         # ladder, so the surface is the wallpaper's darkest tone rather than a

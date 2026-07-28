@@ -504,7 +504,7 @@ Rectangle {
     }
 
     // ---- directory history -------------------------------------------------
-    // filer's reading of the desktop-global back/forward rule (DESIGN.md §11):
+    // filer's reading of the desktop-global back/forward rule (docs/DESIGN.md §11):
     // "back" is the directory you were in, not the parent — the titlebar's `^`
     // already means parent, and the two are different journeys.
     //

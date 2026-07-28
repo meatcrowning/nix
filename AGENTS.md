@@ -111,6 +111,15 @@ Never run bare `qs` — it launches a second panel.
   `origin/main`.
 - Update these `AGENTS.md` files when you change the architecture they
   describe.
+- **Write a new reference/spec/inventory document under `docs/`, not at this
+  repo root.** `~/nix` is a **public** repo; `docs/` is a private one. The test
+  is *"would he mind a stranger reading this?"* — a document describing his
+  desktop, his machine or his data fails it, credential or no credential.
+  `DESIGN.md` and `HARDWARE.md` were both born here and both had to be moved
+  (2026-07-27), which meant repathing ~120 citations across QML, Python, C++
+  and every `AGENTS.md`. `AGENTS.md`, `README.md` and
+  `home/prog/hyprvtb/PORTING.md` stay public on purpose — see
+  `docs/README.md`.
 
 **Ask first**
 
@@ -151,9 +160,11 @@ Never run bare `qs` — it launches a second panel.
 
 ## Where things live
 
-- `DESIGN.md` — **the design language.** Read before any visual change; see
-  below.
-- `HARDWARE.md` — **what these two machines physically are**, and the command
+- `docs/DESIGN.md` — **the design language.** Read before any visual change; see
+  below. It lives in the **private** `docs/` repo (see `docs/` below), so a
+  fresh clone of *this* repo does not contain it — the source comments across
+  the panel, the apps and the plugin still cite it by that path.
+- `docs/HARDWARE.md` — **what these two machines physically are**, and the command
   that measures each fact. CPU/thread count, RAM and swap, both GPUs (only one
   drives the screen), the board and its `nct6683` sensor chip, the real fan/pwm
   layout, the single 1080p display, the storage tiers, and how `top` and `book`
@@ -169,7 +180,7 @@ Never run bare `qs` — it launches a second panel.
   reusing `./lam.nix` and `home/` unchanged. There is no `hosts/air/`, and
   `sys/*` does not apply. Activate with
   `home-manager switch --flake /home/lam/nix#air`. (Everything about its
-  *hardware* — and the full `top` vs `book` comparison — is in `HARDWARE.md`;
+  *hardware* — and the full `top` vs `book` comparison — is in `docs/HARDWARE.md`;
   this bullet covers only what the repo does with it.)
 - `sys/` — system-wide NixOS modules, auto-imported (see `umport`).
   `sys/options.nix` defines custom options; `sys/dsk/` the desktop sessions;
@@ -224,8 +235,8 @@ Never run bare `qs` — it launches a second panel.
   stale runbook. There are now three callers of that script; a fourth **must**
   override `CM_SYNC_SEED` — its default installs `~/.claude`'s denylist
   `.gitignore`, whose exclusions mean nothing in another tree while that tree's
-  own secrets go unguarded. Three docs
-  stay put on purpose and `docs/README.md` says why.
+  own secrets go unguarded. `DESIGN.md` and `HARDWARE.md` live in here;
+  a few docs stay outside on purpose and `docs/README.md` says which and why.
 - `home/srvs/claude-state.nix` + `claude-state-files/` — two-way sync of **the
   whole of `~/.claude`** between `top` and `book` via the PRIVATE repo
   `github.com/meatcrowning/claude-state`: memories, `orchestrator-briefing.md`,
@@ -263,9 +274,9 @@ Never run bare `qs` — it launches a second panel.
   `claude-state-premigrate.sh` retires the nested repo on each machine by
   itself.
 
-### `DESIGN.md` — read it before you draw ANYTHING
+### `docs/DESIGN.md` — read it before you draw ANYTHING
 
-**`DESIGN.md` at this repo root is the design language: how everything on this
+**`docs/DESIGN.md` is the design language: how everything on this
 desktop looks and behaves.** Typography and the pixel font's traps, the
 wallpaper-derived palette, spacing and corners, motion timing, titlebar button
 vocabulary, menus, tooltips, list rows, drag feedback, and the "never offer an
@@ -282,8 +293,8 @@ how something looks, update it in the same commit.
 
 | Editing | Read |
 |---|---|
-| **Anything visual, anywhere** | **`DESIGN.md`** (always), then the row below |
-| **Anything about the metal** — cores, RAM, GPU, sensors, fans, disks, the display, or which host you are on | **`HARDWARE.md`** (before you measure) |
+| **Anything visual, anywhere** | **`docs/DESIGN.md`** (always), then the row below |
+| **Anything about the metal** — cores, RAM, GPU, sensors, fans, disks, the display, or which host you are on | **`docs/HARDWARE.md`** (before you measure) |
 | The Quickshell panel (`home/prog/quickshell-files/*.qml`) | `home/prog/quickshell-files/AGENTS.md` |
 | Hyprland config, the `hyprvtb` plugin, the sandbox | `home/prog/AGENTS.md` |
 | Bumping the compositor pin / plugin ABI seam | `home/prog/hyprvtb/PORTING.md` |
@@ -292,6 +303,14 @@ how something looks, update it in the same commit.
 `PORTING.md` is cited by ten referrers including `checkPhase` failure messages
 and lives inside the plugin's derivation source — moving it forces a plugin
 rebuild and a live hot-swap. Leave it where it is.
+
+Same reason, one live exception: the six `DESIGN.md` citations inside
+`home/prog/hyprvtb/*.cpp`/`*.hpp` still say the bare name rather than
+`docs/DESIGN.md`. Every file there is part of the derivation's `src`, so
+rewriting a *comment* changes the source hash and forces a plugin rebuild, a
+`main.cpp` version bump and a live compositor hot-swap. They mean the same
+file; read `docs/DESIGN.md`. Fold the repath into the next hyprvtb change that
+bumps the version anyway.
 
 ---
 

@@ -3,7 +3,7 @@
 Six standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
-**Read `~/nix/DESIGN.md` before you draw anything in here.** These apps are not
+**Read `~/nix/docs/DESIGN.md` before you draw anything in here.** These apps are not
 six programs that happen to share a repo — they are one desktop, alongside the
 panel and the compositor plugin, and the user's standing requirement is that a
 new app or a new feature *looks like the rest without him having to say so*.
@@ -101,7 +101,7 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   that forgets loads its theme with an empty font. Any offscreen harness that
   builds a `Theme.qml` needs it too. It exists because those two used to be
   hardcoded `15` per app, so the Settings font-size slider moved the panel and
-  the titlebars and left all six apps behind (DESIGN.md §2.7). Point
+  the titlebars and left all six apps behind (docs/DESIGN.md §2.7). Point
   `$DESK_SETTINGS` at another JSON file to render at a non-default size without
   touching the user's live settings — that is how the size is verified
   offscreen.
@@ -126,7 +126,7 @@ lives in.
 ### Motion: one duration, one curve, and it is the compositor's
 
 **Never write a duration literal into an animation here.** `Motion.qml` from
-`qmlcommon/` is the apps' half of `DESIGN.md` §6.2 — the rule that everything on
+`qmlcommon/` is the apps' half of `docs/DESIGN.md` §6.2 — the rule that everything on
 this desktop which slides, grows or glides between two resting positions moves
 at the same speed as a window rolling out next to it, because the user stated it
 as a design-language rule and not a per-widget choice.
@@ -233,7 +233,7 @@ no ceiling, which is what this replaces.
 ### The mouse's side buttons are `NavButtons`, never a hand-rolled MouseArea
 
 `qmlcommon/NavButtons.qml` + `qmlcommon/NavHistory.qml`. The desktop-global rule
-is `~/nix/DESIGN.md` §11.1 — *"back and forward mouse buttons should function in
+is `~/nix/docs/DESIGN.md` §11.1 — *"back and forward mouse buttons should function in
 every program"* — so an app wires the shared handler to whatever its own history
 is and does not re-implement either half:
 
@@ -255,7 +255,7 @@ NavButtons {                      // a child of the root Window, nothing else ne
   hand-rolled stack did the opposite and only got away with it because nothing
   was bound.
 - **A program with no genuine history gets nothing** (painter, askpass). Do not
-  invent one; DESIGN.md §11.1 records the reading for each app and why.
+  invent one; docs/DESIGN.md §11.1 records the reading for each app and why.
 - Regression test: `filer/tools/nav-test.py` (offscreen, posts real
   `QMouseEvent`s for buttons 275/276).
 

@@ -3,7 +3,7 @@ import QtQuick
 // USE THIS in the `onWheel` of every DISCRETE control in apps/ — anything whose
 // wheel handler STEPS a value rather than scrolling content (painter's numeric
 // Spin boxes). Content scrollers take WheelScroll.qml instead; the two are
-// different jobs and DESIGN.md §9.2 keeps them apart on purpose: "Discrete
+// different jobs and docs/DESIGN.md §9.2 keeps them apart on purpose: "Discrete
 // steppers stay notch-based ... a coast that walks brightness to 0 is a bug."
 //
 //     MouseArea {

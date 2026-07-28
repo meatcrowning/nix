@@ -22,7 +22,7 @@ Window {
     // Chrome greys to the SAME tone the hyprvtb titlebar fades to when the
     // window loses focus, so painter reads as inactive in lock-step with its
     // own titlebar instead of staying brighter than the bar beside it — the
-    // idiom filer uses (DESIGN.md §3.1). Body text and values keep their own
+    // idiom filer uses (docs/DESIGN.md §3.1). Body text and values keep their own
     // colours; only the accented chrome follows.
     readonly property bool winActive: root.active
     readonly property color fgAccent: root.active ? Theme.accent : Theme.inactive
@@ -148,7 +148,7 @@ Window {
     }
 
     // Not a centred modal: it slides out from the "st" titlebar cell that owns
-    // it, the way player's and surfer's do (DESIGN.md §7.4). It owns its own
+    // it, the way player's and surfer's do (docs/DESIGN.md §7.4). It owns its own
     // visibility off `open` — assigning `visible` from here would override the
     // slide's binding.
     SettingsDrawer {
@@ -197,7 +197,7 @@ Window {
 
     // Labels are lowercase ASCII, one or two characters, and the settings cell
     // is "st" — the same label player and surfer use for the same button
-    // (DESIGN.md §12.1: a function that already has a glyph keeps it in every
+    // (docs/DESIGN.md §12.1: a function that already has a glyph keeps it in every
     // app). They were UPPERCASE, with "*" for settings, which was painter's
     // alone on this desktop.
     function pushButtons() {

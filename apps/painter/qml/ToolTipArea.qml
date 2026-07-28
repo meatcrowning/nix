@@ -5,7 +5,7 @@ import QtQuick
 //
 // This used to be QtQuick.Controls.Basic's attached `ToolTip`, which draws in
 // the SYSTEM font and the SYSTEM palette — the only place on this desktop a
-// non-pixel-font surface could appear (DESIGN.md §2.1, §8). It is now the
+// non-pixel-font surface could appear (docs/DESIGN.md §2.1, §8). It is now the
 // desktop's own tooltip: a dwell, then a clipped slide out of a FIXED edge, in
 // theme colours and PixelText, matching surfer's in-window tooltip and
 // hyprvtb's titlebar one. Retraction is immediate, per §8.

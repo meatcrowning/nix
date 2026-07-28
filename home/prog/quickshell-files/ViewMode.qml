@@ -122,7 +122,7 @@ Singleton {
     // two USER-FACING motion settings real. They were in SettingsStore and in
     // the Settings UI (Appearance > Motion) from the day they shipped and drove
     // nothing at all, because every Behavior carried its own literal — the debt
-    // DESIGN.md §6.2 describes. Three factors, in this order:
+    // docs/DESIGN.md §6.2 describes. Three factors, in this order:
     //
     //   reduceMotion  — a hard off switch. Returns 0, which a NumberAnimation
     //                   treats as "assign immediately": the desktop still

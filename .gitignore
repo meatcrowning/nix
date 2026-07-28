@@ -4,4 +4,11 @@ __pycache__/
 
 # docs/ is its own PRIVATE repo (meatcrowning/nix-docs), synced top<->book by
 # home/srvs/nix-docs.nix. Never track it here — this repo is public.
+#
+# Since 2026-07-27 that includes DESIGN.md and HARDWARE.md, which used to live at
+# this root. So the source comments across the panel, the apps, hyprland.lua and
+# the AGENTS.md files now cite `docs/DESIGN.md` — a path a fresh clone of THIS
+# repo does not contain. That is deliberate and the user's explicit call
+# (privacy over self-describing-ness); see docs/README.md. Do not "fix" it by
+# moving either file back.
 /docs/

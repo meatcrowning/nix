@@ -50,7 +50,7 @@ client -> server   GOTO <index>        -> player.jumpTo(index)
 ### `LYRICS` is a subscription, and that is the whole design
 
 The panel's queue drawer now grows a lyrics box on the right when the playing
-track has words (`DESIGN.md` §5.4), and this socket is the only channel there
+track has words (`docs/DESIGN.md` §5.4), and this socket is the only channel there
 is: MPRIS has no lyrics field, and `LyricsProvider` lives in this process.
 
 - **Opt-in, per connection.** Resolving is not free — tag reads, an LRCLIB

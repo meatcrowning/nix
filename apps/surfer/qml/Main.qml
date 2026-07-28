@@ -1020,7 +1020,7 @@ Window {
     }
 
     // The mouse's back/forward side buttons walk the FOCUSED pane's page
-    // history — the canonical reading of the desktop-global rule (DESIGN.md
+    // history — the canonical reading of the desktop-global rule (docs/DESIGN.md
     // §11), and the same call the titlebar's `<`/`>` make. Sitting above the
     // WebEngineView in z is what keeps it deterministic: Chromium maps buttons
     // 8/9 to history itself, so without an overlay that accepts them first the

@@ -15,8 +15,8 @@ nix profile dirs, so a bare `notify-send` (or `gio`, or `ffmpeg`) can be "not
 found" in a session where it is plainly installed. Resolve against the profile
 dirs explicitly rather than trusting PATH.
 
-Wording is DESIGN.md's: lowercase, and ASCII only — the pixel font has no
-ellipsis or arrow glyphs, and a line containing one clips (DESIGN.md 2.3).
+Wording is docs/DESIGN.md's: lowercase, and ASCII only — the pixel font has no
+ellipsis or arrow glyphs, and a line containing one clips (docs/DESIGN.md 2.3).
 """
 import os
 import shutil
@@ -54,7 +54,7 @@ def toast(title, body, urgency=None, replace_id=None, value=None, persist=False)
     must use: the server retires an ordinary toast after a few seconds, and once
     it is gone a later `-r` names an id it no longer has, so every update opens
     a brand-new toast with its own sound. The final toast has nothing left to
-    update and keeps the default timeout (DESIGN.md 10.4).
+    update and keeps the default timeout (docs/DESIGN.md 10.4).
     """
     args = [tool("notify-send"), "-a", "filer", "-p"]
     if persist:

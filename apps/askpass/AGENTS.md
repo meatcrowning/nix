@@ -211,7 +211,7 @@ land where its window rule puts it, every time.
 ## It has NO titlebar — and that is why Cancel/Esc are load-bearing
 
 hyprvtb draws no vertical bar on this window at all (`vtbNeverDecorates()` in
-`hyprvtb/main.cpp`, ≥2.94; DESIGN.md §7.5). Every button a bar offers is one a
+`hyprvtb/main.cpp`, ≥2.94; docs/DESIGN.md §7.5). Every button a bar offers is one a
 fixed-size, centred, pinned, never-remembered modal must not have, and the only
 one that did anything — [x] — is what `Cancel` and `Esc` already do. **So the
 QML's Cancel button and `Keys.onEscapePressed` are now the ONLY ways to

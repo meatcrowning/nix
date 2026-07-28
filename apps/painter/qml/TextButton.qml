@@ -3,7 +3,7 @@ import QtQuick
 // THE clickable label for painter. Every action in this app used to be a bare
 // PixelText with a MouseArea dropped on it: no hover feedback, no cursor
 // change, no disabled state, and nothing stopping a click on a control whose
-// action could not happen. That is the shape DESIGN.md §10 rules out, so the
+// action could not happen. That is the shape docs/DESIGN.md §10 rules out, so the
 // affordances live here once instead of being re-decided (or forgotten) at
 // twenty-odd call sites.
 //
@@ -24,7 +24,7 @@ Item {
     // disabled too and Qt refuses the click for us.
     property bool winActive: true
     // A paired up/down affordance is ONE glyph mirrored, never two characters
-    // (DESIGN.md §2.4): "^" is not "v" upside down in this font — from the glyf
+    // (docs/DESIGN.md §2.4): "^" is not "v" upside down in this font — from the glyf
     // table "v" sits on the baseline while "^" is hard against the ascender, so
     // the two read as sitting at different heights inside the same button. Set
     // `flipY` on the "up" one and give it the "v" label.

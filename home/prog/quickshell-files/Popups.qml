@@ -39,7 +39,7 @@ Singleton {
             current.dismiss();
             current = who;
             // Let the outgoing card finish sliding out before the new one comes
-            // in — DESIGN.md §7.3, one popup at a time, sequentially. It is one
+            // in — docs/DESIGN.md §7.3, one popup at a time, sequentially. It is one
             // slide's worth of wait, so it is the desktop's slide duration and
             // tracks the slowmo knob / animSpeed with everything else.
             return ViewMode.ms(ViewMode.slideMs);

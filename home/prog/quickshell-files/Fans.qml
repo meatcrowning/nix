@@ -171,7 +171,7 @@ QtObject {
     // ---- the colours -----------------------------------------------------
     // A brightness ladder on the accent hue, brightest first — NOT a set of
     // different colours, because there are none to hand out. The palette is
-    // derived from the wallpaper and is ONE HUE by construction (DESIGN.md 3.1:
+    // derived from the wallpaper and is ONE HUE by construction (docs/DESIGN.md 3.1:
     // every slot including ok/warn/crit/info is a near-neighbour of accent), and
     // inventing hues outside it is the single thing that file forbids outright.
     // Monotonic steps of accent brightness is the established answer for

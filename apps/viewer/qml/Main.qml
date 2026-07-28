@@ -334,7 +334,7 @@ Window {
     // The mouse's back/forward side buttons step through the flip order — the
     // same move as the titlebar's ‹/› and the arrow keys, and like them it acts
     // on the FOCUSED pane (win.prev/next both go through setPaneIdx(focusPane)).
-    // Desktop-global rule, DESIGN.md §11.
+    // Desktop-global rule, docs/DESIGN.md §11.
     NavButtons {
         onBack:    win.prev()
         onForward: win.next()

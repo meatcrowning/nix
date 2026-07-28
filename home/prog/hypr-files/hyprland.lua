@@ -211,7 +211,7 @@ hl.config({
             ["col.crit"]          = "rgba(fab424ff)",
             -- THE DESKTOP'S MOTION. This is not just the window roll: the roll
             -- is the REFERENCE every sliding animation on this machine is
-            -- matched to (DESIGN.md 6.2), so this one number is also the
+            -- matched to (docs/DESIGN.md 6.2), so this one number is also the
             -- quickshell panel's popups and drawers, the titlebar tooltip, and
             -- the drawers in the six apps under ~/nix/apps. The plugin writes
             -- the resolved value to ~/.local/state/hyprvtb/motion.json and the

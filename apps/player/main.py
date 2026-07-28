@@ -2287,7 +2287,7 @@ def start_queue_server(player, app, lyrics=None):
         # Mirror exactly what LyricsView draws, and nothing else: the verdicts
         # ("none", "instrumental") reach the panel as a payload with no words in
         # it, which is how it knows to collapse the column rather than draw an
-        # empty box (DESIGN.md 5.4 — permanent absence COLLAPSES).
+        # empty box (docs/DESIGN.md 5.4 — permanent absence COLLAPSES).
         lines = [{"t": float(l.get("t") or 0.0), "line": l.get("line") or ""}
                  for l in (result.get("lines") or [])]
         state["payload"] = {"source": result.get("source") or "",

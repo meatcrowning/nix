@@ -71,7 +71,7 @@ Rectangle {
     // (a filled block), an image still decoding (...), or one that failed to
     // decode — e.g. a truncated/misnamed download (x).
     //
-    // ALL THREE MUST BE DRAWABLE BY THE PIXEL FONT (DESIGN.md §2.3). This drew
+    // ALL THREE MUST BE DRAWABLE BY THE PIXEL FONT (docs/DESIGN.md §2.3). This drew
     // U+25A2 / U+2715 / U+2026, none of which More Perfect DOS VGA has — checked
     // with QRawFont.glyphIndexesForString, all three return glyph 0 — so every
     // not-ready and every failed tile in the grid took a fallback font's taller

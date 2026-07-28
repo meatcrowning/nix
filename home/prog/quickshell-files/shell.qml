@@ -913,7 +913,7 @@ Scope {
                 // wallpaper change: a re-entry, not a state change in place.
                 // DELIBERATELY NOT the desktop's 260ms slide. This is the tail
                 // of a GESTURE — the snap that finishes a drag the pointer was
-                // driving — not a reveal between two rest states, so DESIGN.md
+                // driving — not a reveal between two rest states, so docs/DESIGN.md
                 // §6.4 governs it, not §6.2. It animates at all only under
                 // protest (see the `enabled:` gate) and a longer one would make
                 // the release feel like the panel was catching up with a hand
