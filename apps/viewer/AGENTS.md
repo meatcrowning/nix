@@ -21,7 +21,72 @@ rebuild. See [`../AGENTS.md`](../AGENTS.md) for the shared rules.
   scan if the file is unreadable or doesn't contain the opened path.
 - Its prev/next/zoom/fit/close controls live in the **hyprvtb titlebar** (the
   same `pylib/vtbclient.py` bridge filer/surfer use), not in QML.
-- **The wheel ZOOMS, and it is the one sanctioned bare `Flickable` in `apps/`.**
+
+## Split view — a GRID of panes, each its own drop target
+
+`sp` adds a pane, `xp` closes the focused one, up to `MAX_PANES` (9). Modelled
+on surfer's two-pane split and sharing its vocabulary (`focusPane`, a 1px accent
+frame on the focused pane, a draggable divider whose position is persisted on
+RELEASE of the drag) — but generalised, because "view a bunch of images at the
+same time" is not two.
+
+- **The layout is `cols = ceil(sqrt(n))`, `rows = ceil(n/cols)`.** 2 panes are
+  side by side, 4 are a 2x2, 9 are a 3x3. A short last row has its final pane
+  **span the leftover columns**, so 3 panes are one wide over two, never a hole.
+- **One shared `images` list, one position per pane.** ‹ / › move the focused
+  pane only. A new pane opens on the image after the last one already shown, so
+  splitting twice walks forward instead of showing one picture three times.
+- **Every pane is its own `DropArea`.** Drag images out of filer (or anything
+  offering local file URLs) onto the pane that should show them. Unknown paths
+  are **appended** to `images` rather than replacing it, so ‹ / › can still walk
+  back to what was open; a path already in the list reuses its slot. A drop of
+  several files fills the pane it landed on and **opens new panes for the rest**
+  — never overwriting panes the user has arranged. `Files.mediaEntries`
+  (main.py) decodes the uri-list with `QUrl`, the same rule as filer's
+  `FileOps.uriList`/`urlsToPaths`: **never decode a uri-list in QML**, because
+  `encodeURI`/`decodeURI` leave `#` and `?` mangled — that was a real filer bug.
+  Non-media and non-local drops are declined, so the source shows a refused drop
+  instead of a silent no-op.
+- **No pane ever takes Qt's active focus.** The keys live on `stage`, the single
+  item that holds the window's focus, and every one of them acts on `focusPane`.
+  That is deliberate: surfer's split had to add a `retargeting` flag because Qt
+  hands a hidden view's focus to the other pane, indistinguishable from a click
+  there. With N panes that fight would be worse, so there is nothing to fight
+  over — a pane is focused by clicking it, zooming over it, dropping on it, or
+  Tab / Ctrl+1..9.
+- **Divider weights, not pixels**, persisted per grid **shape** (`Prefs`
+  `paneWeights: {"2x1": {col, row}}` in `$XDG_CONFIG_HOME/viewer/prefs.json`) —
+  a 2x2's dividers say nothing about a 3x1's, and viewer reshapes on every
+  add/close. `reshape()` hangs off `shapeKey`, **not** off `cols`/`rows`: those
+  settle one at a time, so a handler on either runs only for shapes that never
+  exist (1 pane → 2 fired for "1x2" and "2x2", never "2x1") and the saved
+  divider was silently never restored.
+- `viewer --split a.png b.png c.png` opens one pane per path. It is a flag, not
+  the default, because several paths have always meant "flip through exactly
+  these" and filer relies on that. `--order` is unaffected — it is still a
+  single-pane, launch-time snapshot.
+- Only the **focused** pane's video is audible (`AudioOutput.muted`); four clips
+  at once would otherwise be four soundtracks, and the titlebar can pause one.
+
+**Keys**: ‹ / › flip · Space play/next · `+` `-` `0` zoom/fit (with or without
+Ctrl) · Ctrl+wheel or plain wheel zooms the pane under the cursor · `\` add pane
+· Ctrl+W close pane (quits on the last one) · Tab / Shift+Tab · Ctrl+1..9.
+
+Verified by **[`tools/split-test.py`](tools/split-test.py)** — offscreen, scratch
+`XDG_CONFIG_HOME`, real `QDragEnter`/`QDrop` and key events posted at the real
+`qml/Main.qml`; 41 checks covering pane layout, the spanning last pane, drop
+routing to the pane under the cursor, the multi-file fan-out, the pane cap, the
+divider clamp and the persisted weights. Re-run it after touching the split
+block; the *appearance* is the user's visual check. Run it with viewer's own Qt
+env, not the bare system python:
+
+```bash
+W=$(readlink -f "$(which viewer)"); sed '$d' "$W" > /tmp/vwrenv.sh
+( . /tmp/vwrenv.sh; "$(tail -1 "$W" | grep -o '/nix/store/[^"]*/bin/python3')" \
+    apps/viewer/tools/split-test.py )
+```
+- **The wheel ZOOMS, and it is the one sanctioned bare `Flickable` in `apps/`**
+  (now one per pane).
   `ImageViewer.qml`'s `WheelHandler` is delta-proportional — `exp(ln1.2/120·d)`,
   so one classic detent is still exactly x1.2 while a trackpad burst no longer
   slams the 1..8 range shut in a dozen events — and it consumes EVERY wheel

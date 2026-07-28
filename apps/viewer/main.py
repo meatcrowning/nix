@@ -12,10 +12,16 @@ Given one image path it scans that file's directory for the rest (the sibling
 images, name-sorted) so ‹ / › flip through the folder; given several paths it
 uses exactly those. `--order FILE` overrides the scan with a caller-supplied
 order — that is how filer makes ‹ / › follow the sort the user is actually
-looking at. Theme/palette wiring mirrors filer: the live wallpaper
+looking at. `--split` opens one PANE per path instead of a flip list.
+
+The window is a GRID of panes (one is the ordinary case): each pane holds its
+own position in the shared list, its own zoom, and is its own drop target — drag
+images out of filer into whichever pane should show them. Theme/palette wiring
+mirrors filer: the live wallpaper
 palette is parsed from the panel's Theme.qml and watched, so viewer recolours in
 lock-step with the bar. See filer/main.py for the shared design notes.
 """
+import json
 import os
 import re
 import sys
@@ -106,32 +112,45 @@ def order_from(order_file, target):
     return (entries, idx) if idx >= 0 else None
 
 
+# Most panes the split view will lay out. 3x3 of a 900x620 window is already
+# ~290x200 per pane; past that a pane is a thumbnail, not a view.
+MAX_PANES = 9
+
+
 def split_args(argv):
-    """(--order file or None, the remaining positional paths)."""
-    order, rest, it = None, [], iter(argv)
+    """(--order file or None, --split seen?, the remaining positional paths)."""
+    order, split, rest, it = None, False, [], iter(argv)
     for a in it:
         if a == "--order":
             order = next(it, None)
         elif a.startswith("--order="):
             order = a[len("--order="):]
+        elif a == "--split":
+            split = True
         else:
             rest.append(a)
-    return order, rest
+    return order, split, rest
 
 
 def images_for(argv):
-    """(list of {name, path}, start index) for the given argv.
+    """(list of {name, path}, start index, pane count) for the given argv.
 
     One existing media file → the name-sorted media of its directory, positioned
     on it (or the caller's `--order`, if it gave one containing that file).
     Several paths → exactly those, in the order given. Anything else that
-    exists → just itself."""
-    order_file, argv = split_args(argv)
+    exists → just itself.
+
+    The pane count is 1 unless `--split` was passed with several paths, in which
+    case each path opens in its own pane (capped at MAX_PANES). It is a flag and
+    not the default because several paths have always meant "flip through
+    exactly these", and filer relies on that."""
+    order_file, split, argv = split_args(argv)
     paths = [os.path.abspath(a) for a in argv if os.path.exists(a)]
+    panes = min(len(paths), MAX_PANES) if (split and len(paths) > 1) else 1
     if order_file and len(paths) == 1 and os.path.isfile(paths[0]):
         got = order_from(order_file, paths[0])
         if got is not None:
-            return got
+            return got[0], got[1], 1
     elif order_file:
         _consume(order_file)
     if len(paths) == 1 and os.path.isfile(paths[0]):
@@ -146,9 +165,9 @@ def images_for(argv):
         if idx < 0:  # target isn't a recognised media ext — show it anyway
             entries.insert(0, {"name": os.path.basename(target), "path": target})
             idx = 0
-        return entries, idx
+        return entries, idx, 1
     entries = [{"name": os.path.basename(p), "path": p} for p in paths]
-    return entries, 0
+    return entries, 0, panes
 
 
 # The panel's palette file, rewritten by wal-set.sh between the wal markers.
@@ -268,22 +287,110 @@ class Titlebar(QObject):
         self._client.set_playbar(shown, pos)
 
 
+class Files(QObject):
+    """The receiving end of a drag: local media paths out of a drop's URLs.
+
+    Mirrors filer's `FileOps.urlsToPaths` (see filer/main.py) and for the same
+    reason — **QUrl owns the encoding**. The hand-rolled `encodeURI()` version
+    filer used to drag OUT leaves `#` and `?` unescaped, so a file called
+    `a#b.png` arrived truncated; decoding a uri-list in QML would repeat that
+    bug from the other side. Anything that isn't a local file (an http:// drag
+    out of a browser) yields nothing, so the drop is simply declined.
+
+    Non-media files are dropped here rather than by the caller, exactly as
+    `--order` does: a pane can only show what viewer can decode."""
+
+    @Slot("QVariantList", result="QVariantList")
+    def mediaEntries(self, urls):
+        out, seen = [], set()
+        for u in urls:
+            p = (u if isinstance(u, QUrl) else QUrl(str(u))).toLocalFile()
+            if not p:
+                continue
+            p = os.path.normpath(p)
+            if p in seen or not is_media(p) or not os.path.isfile(p):
+                continue
+            seen.add(p)
+            out.append({"name": os.path.basename(p), "path": p})
+        return out
+
+
+class Prefs(QObject):
+    """viewer's own settings file, `$XDG_CONFIG_HOME/viewer/prefs.json`.
+
+    Today it holds one thing: the split view's divider positions, as column and
+    row weights keyed by grid shape (`"2x1"`, `"2x2"`, …) — a 2x2 split's
+    dividers have nothing to say about where a 3x1's should sit, and viewer
+    reshapes its grid every time a pane is added or closed. Weights, not pixels,
+    so a resized window keeps the proportions.
+
+    Written on RELEASE of a divider drag, never per motion event (surfer's
+    `splitRatio` established that rule)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        cfg = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        self._path = cfg / "viewer" / "prefs.json"
+
+    def _read(self):
+        try:
+            d = json.loads(self._path.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    @Slot(str, result="QVariantMap")
+    def loadWeights(self, shape):
+        """{"col": [...], "row": [...]} for this grid shape, or {} — the QML
+        falls back to an even split. Malformed entries read as absent."""
+        w = self._read().get("paneWeights", {})
+        got = w.get(str(shape)) if isinstance(w, dict) else None
+        if not isinstance(got, dict):
+            return {}
+        out = {}
+        for k in ("col", "row"):
+            v = got.get(k)
+            if isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v):
+                out[k] = [float(x) for x in v]
+        return out
+
+    @Slot(str, "QVariantList", "QVariantList")
+    def saveWeights(self, shape, col, row):
+        d = self._read()
+        w = d.get("paneWeights")
+        if not isinstance(w, dict):
+            w = {}
+        w[str(shape)] = {"col": [float(x) for x in col], "row": [float(x) for x in row]}
+        d["paneWeights"] = w
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
+
 def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("viewer")
     app.setDesktopFileName("viewer")
 
-    entries, index = images_for(sys.argv[1:])
+    entries, index, panes = images_for(sys.argv[1:])
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
 
     palette = Palette(PANEL_THEME)
     titlebar = Titlebar()
+    files = Files()
+    prefs = Prefs()
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("Titlebar", titlebar)
+    ctx.setContextProperty("Files", files)
+    ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("startImages", entries)
     ctx.setContextProperty("startIndex", index)
+    ctx.setContextProperty("startPanes", panes)
+    ctx.setContextProperty("maxPanes", MAX_PANES)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
