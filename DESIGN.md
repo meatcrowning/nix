@@ -48,6 +48,38 @@ area; nothing here contradicts one.
 
 ---
 
+## Contents
+
+| § | what it settles |
+|---|---|
+| [0. Scope](#0-scope--here-or-everywhere) | "here" or "everywhere?" — the three scope marks, and why unmarked means desktop-global |
+| [1. First principles](#1-first-principles) | the handful of ideas every other section is a consequence of |
+| [2. Typography](#2-typography) | the pixel font, its missing glyphs, sizes, weights, casing |
+| [3. Colour](#3-colour) | the wallpaper-derived palette, what may hard-code a colour, and what may not |
+| [4. Geometry](#4-geometry--corners-borders-shadows) | corners, borders, shadows |
+| [5. Density and layout](#5-density-and-layout) | spacing scale, padding, alignment, how tight is tight |
+| [6. Motion](#6-motion) | durations, easings, what animates and what must not |
+| [7. Menus, popups and dialogs](#7-menus-popups-and-dialogs) | one menu look across four codebases |
+| [8. Tooltips](#8-tooltips) | one tooltip look across four codebases |
+| [9. Lists, rows, columns and graphs](#9-lists-rows-columns-and-graphs) | row height, selection, headers, sparklines and meters |
+| [10. Honest affordances](#10-honest-affordances) | a control that is drawn is a control that works |
+| [11. Focus, pointer and input](#11-focus-pointer-and-input) | hover, press, focus rings, cursors, scroll feel |
+| [12. Window chrome and the titlebar](#12-window-chrome-and-the-titlebar) | the vertical titlebar, its button glyphs, stacked title |
+| [13. Drag and drop](#13-drag-and-drop) | what a drag looks like while it is happening |
+| [14. Cross-app continuity and persistence](#14-cross-app-continuity-and-persistence) | what an app must remember, and what it must not |
+| [15. The wallpaper and the desktop surface](#15-the-wallpaper-and-the-desktop-surface-panel) | `[panel]` |
+| [16. Web pages as a design surface](#16-web-pages-as-a-design-surface-surfer) | `[surfer]` |
+| [17. Sound](#17-sound) | the Vista event set, and when a sound is allowed |
+| [18. Desktop-wide laws](#18-desktop-wide-laws-and-things-this-desktop-deliberately-does-not-have) | the short list of absolutes, and the things this desktop deliberately does NOT have |
+| [19. Where the shared pieces live](#19-where-the-shared-pieces-live) | the actual files — reuse before you write |
+| [20. Recorded exceptions](#20-recorded-exceptions) | places that break a rule on purpose, with the reason |
+| [Open questions](#open-questions) | agent proposals awaiting his verdict. **Not rules yet.** |
+| [Maintaining this file](#maintaining-this-file) | how to add to it without breaking it |
+
+Also: [Why this file exists — in his words](#why-this-file-exists--in-his-words) (above).
+
+---
+
 ## 0. Scope — "here" or "everywhere?"
 
 Every rule in this file has a blast radius, and guessing it wrong is the single
