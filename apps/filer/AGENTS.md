@@ -231,11 +231,68 @@ spawning the real `filer --pick`. Most of it is failure paths — cancel, crash,
 missing binary, `Close()` mid-flight — because each of those is a candidate
 hang.
 
+## File operations REPORT — every one of them
+
+Every `cp`/`mv`/`ln`/`rm`/`mkdir`/`gio trash` goes through `FileOps.run`
+(`main.py`), and that function's contract is now **the outcome is always
+visible**. It used to wire `finished` *and* `errorOccurred` to one handler that
+read neither the exit code nor stderr, so a denied `rm -rf`, a cross-device
+`mv`, a full disk and a successful copy were the same event on screen —
+DESIGN.md §10's headline rule, inverted, in the one app whose mistakes are other
+people's files. Four distinctions the fix keeps apart, and none of them may be
+collapsed again:
+
+- **failed vs succeeded** — non-zero exit raises a critical toast carrying the
+  helper's *own* stderr, which already names the file and the reason
+  (`cp: cannot create regular file 'x': Permission denied`). Never paraphrase
+  it; coreutils says it better and says it about the right file.
+- **failed vs could not be started** — `errorOccurred(FailedToStart)` means the
+  binary is missing from filer's PATH. Different sentence (`cannot run gio`),
+  different fix — a `filer.nix` change, not a permissions problem.
+- **partial vs total** — one pasted item is one process, so a ten-item paste is
+  ten exit codes. `runPaste` wraps the loop in `FileOps.beginBatch(label)` /
+  `endBatch(tok)` and passes the token as `run`'s third argument; three failures
+  then read `copy: 3 of 10 failed`, once, with the first three reasons.
+  **`endBatch` is mandatory** — without it the failures are collected and never
+  reported. Anything that adds a new multi-process loop must do the same.
+- **failed vs declined** — the no-clobber flags (`cp -an`, `mv -n`) exit **0**
+  when they skip, so the overwrite-confirm flow above them is untouched: a
+  conflict is still a dialog, never a toast.
+
+`finished(reselect)` fires either way, because a partly-failed batch still
+changed the disk and the view must show what is actually there. The label in a
+message is *derived* from the argv (`_op_label`) rather than passed in, so a
+call site cannot forget it — including `mv` within one directory, which is
+called `rename`, not `move`. `execDetached` has no exit code to read, but a
+launch that could not start is knowable and is toasted too (§10's "an action
+`execDetached` cannot report on must not be OFFERED").
+
+**The toast is `notify.py`, filer's one toast path** — `tool()` (profile-dir
+binary resolution) plus `toast()` (`notify-send`, `--replace-id`, `-t 0` for an
+ongoing job). It was extracted from `videoconv.py`, which now calls it, so there
+is one implementation of how a filer toast is spelled rather than two.
+
+Verify with `tools/fileop-test.py` (offscreen, ~44 checks). It injects *real*
+failures — a chmod 500 directory, a root-owned destination, a source that does
+not exist, a genuine ENOSPC by writing to `/dev/full`, a binary that is not
+installed — and asserts the exact title and body of each toast, that a batch
+reports once with an honest count, that a no-clobber skip is silent, and that
+the real `Main.qml`'s `transferInto` reports through the same path. **The toast
+is stubbed** (`main.toast` is swapped for a collector): a test must never put
+notifications on the user's screen, and the assertions need the exact strings.
+
+> The bug this fixed had hidden a second one for filer's whole life: **`gio` was
+> on no PATH the app could see**, so *trash* — the safe default delete, on the
+> titlebar and in the context menu — did nothing at all, silently, while the
+> selection cleared and the list refreshed. `home/prog/filer.nix` now prefixes
+> `glib`'s bin dir onto the wrapper's PATH. Silence is what let it rot.
+
 - **`videoconv.py`** — the context menu's "compress to <10MB" (an upload-limit
   squeeze). Exposed as the `VideoConv` context property; the only part of filer
-  that shells out to `ffmpeg`/`ffprobe`/`notify-send` (all PATH-resolved from the
-  user profile, like `gio`/`kitty` — nothing was added to `filer.nix`, so a
-  missing tool surfaces as a failure toast, not a broken build).
+  that shells out to `ffmpeg`/`ffprobe` (PATH-resolved through `notify.tool`,
+  like `kitty` — nothing was added to `filer.nix` for those, so a missing tool
+  surfaces as a failure toast, not a broken build; `gio` is the one exception,
+  see above).
   - `plan(path)` is pure and cheap (one ffprobe) and decides *everything* —
     resolution rung, fps, audio/video bitrate split, encoder, and an encode-time
     estimate. `BrowserPane.qml` calls it before doing anything: `plan.ask` (a slow

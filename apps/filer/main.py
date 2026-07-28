@@ -24,7 +24,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import sys
 import tempfile
 import time
@@ -45,6 +44,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
+from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
 
@@ -328,40 +328,203 @@ def _resolve(prog):
     the launcher's PATH, which — when filer is started from the Quickshell runner
     / a .desktop entry — need not include ~/.nix-profile/bin, so a nix-profile
     binary like `viewer` would be "not found" even though it's installed. Resolve
-    it ourselves, falling back to the nix profile, so opening an image works
-    regardless of how filer itself was launched."""
-    if os.path.isabs(prog):
-        return prog
-    found = shutil.which(prog)
-    if found:
-        return found
-    cand = os.path.expanduser("~/.nix-profile/bin/" + prog)
-    return cand if os.path.exists(cand) else prog
+    it ourselves, falling back to the profile dirs, so opening an image works
+    regardless of how filer itself was launched. (`notify.tool` is the same
+    lookup videoconv has always used for ffmpeg — one implementation.)"""
+    return prog if os.path.isabs(prog) else tool(prog)
+
+
+def _op_label(argv):
+    """What to call this argv in a message the user reads. Derived rather than
+    passed in from QML, so a call site cannot forget it and every operation gets
+    an honest noun even when a new one is added."""
+    prog = os.path.basename(argv[0])
+    rest = [a for a in argv[1:] if a != "--" and not a.startswith("-")]
+    if prog == "gio":
+        return rest[0] if rest else "gio"
+    if prog == "mv" and len(rest) == 2 and \
+            os.path.dirname(rest[0]) == os.path.dirname(rest[1]):
+        return "rename"          # same directory: that is a rename, not a move
+    return {"cp": "copy", "mv": "move", "rm": "delete", "ln": "link",
+            "mkdir": "new folder"}.get(prog, prog)
+
+
+def _stderr_lines(text, keep=3):
+    """The useful part of a failed helper's stderr. coreutils puts the reason on
+    the FIRST line ("cp: cannot create regular file 'x': Permission denied"),
+    and a multi-path `rm`/`gio trash` prints one such line per failed file — so
+    keep the first few and count the rest rather than the last one."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    out = lines[:keep]
+    if len(lines) > keep:
+        out.append("+%d more" % (len(lines) - keep))
+    return "\n".join(out)
 
 
 class FileOps(QObject):
     """Backend for shell-outs. argv arrays only — never string interpolation —
-    so paths containing spaces or shell metacharacters are safe."""
+    so paths containing spaces or shell metacharacters are safe.
+
+    **Every operation reports its outcome.** `run()` used to wire `finished` and
+    `errorOccurred` to one handler that read neither the exit code nor stderr,
+    so a denied `rm -rf`, a cross-device `mv`, a full disk and a successful copy
+    were indistinguishable on screen — DESIGN.md 10's headline rule, inverted.
+    Now a non-zero exit raises a failure toast carrying the helper's own stderr
+    (which already names the file and the reason), through the same
+    `notify.toast` path videoconv's conversions use. Three distinctions the old
+    code collapsed and this one keeps:
+
+      * **failed** vs **could not be started** — `errorOccurred(FailedToStart)`
+        means the binary is missing, which is a different sentence ("cannot run
+        gio") and a different fix from "trash failed: Permission denied".
+      * **partial** vs **total** — a paste of ten items is ten processes, so
+        three failures must not read as a flat success *or* as a flat failure.
+        QML wraps such a loop in `beginBatch`/`endBatch` and gets one toast
+        naming the count: "copy: 3 of 10 failed".
+      * **failed** vs **declined** — the no-clobber flags (`cp -an`, `mv -n`)
+        exit 0 when they skip, so the overwrite-confirm flow above them is
+        untouched: a held-back conflict is still a dialog, never a failure.
+
+    `finished(reselect)` still fires either way, because a failed batch may have
+    changed the disk anyway and the view must show what is actually there.
+    """
 
     finished = Signal(str)  # emits the path to reselect after the op ("" = none)
+    failed = Signal(str, str)  # (label, message) — same content as the toast
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._batches = {}
+        self._seq = 0
+
+    # ---- failure reporting ----
+    def _report(self, title, message):
+        """One failure toast, and the same content on `failed` for anything in
+        QML that wants to react to it."""
+        self.failed.emit(title, message)
+        toast(title, message[:400], urgency="critical")
+
+    @Slot(str, result=str)
+    def beginBatch(self, label):
+        """Open a group of related `run()`s (a multi-item paste/drop). Returns
+        the token to pass as `run`'s third argument. Failures inside a batch are
+        collected instead of toasted one by one, and reported once by
+        `endBatch` — which must be called, or nothing is ever reported."""
+        self._seq += 1
+        tok = "b%d" % self._seq
+        self._batches[tok] = {"label": str(label) or "file operation",
+                              "total": 0, "done": 0, "fails": [], "sealed": False}
+        return tok
+
+    @Slot(str)
+    def endBatch(self, tok):
+        """No more `run()`s will join this batch. Reports now if every process
+        has already settled, else the last one to settle reports."""
+        b = self._batches.get(str(tok))
+        if b is None:
+            return
+        b["sealed"] = True
+        self._settle_batch(str(tok))
+
+    def _settle_batch(self, tok):
+        b = self._batches.get(tok)
+        if b is None or not b["sealed"] or b["done"] < b["total"]:
+            return
+        del self._batches[tok]
+        if not b["fails"]:
+            return
+        n, total = len(b["fails"]), b["total"]
+        # An honest count, because "3 of 10 failed" and "all 10 failed" are
+        # different facts and the seven that landed are on disk either way.
+        head = b["label"] + (" failed" if n == total and total == 1 else
+                             ": %d of %d failed" % (n, total))
+        body = "\n".join(m for _, m in b["fails"][:3])
+        if n > 3:
+            body += "\n+%d more" % (n - 3)
+        self.failed.emit(b["label"], body)
+        toast(head, body[:400], urgency="critical")
 
     @Slot(list, str)
-    def run(self, argv, reselect):
+    @Slot(list, str, str)
+    def run(self, argv, reselect, batch=""):
+        """Run one file operation. `batch` is a `beginBatch` token when this is
+        one item of a multi-item transfer, "" for a standalone op."""
         argv = [str(a) for a in argv]
+        label = _op_label(argv)
+        tok = str(batch)
+        b = self._batches.get(tok)
+        if b is not None:
+            b["total"] += 1
         proc = QProcess(self)
+        proc.setProcessChannelMode(QProcess.SeparateChannels)
+        state = {"settled": False, "err": ""}
 
-        def done(*_):
+        def drain():
+            try:
+                state["err"] += bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+            except (RuntimeError, UnicodeError):
+                pass
+
+        def settle(message, title=""):
+            # errorOccurred(Crashed) and finished() both fire for one crash;
+            # latch so a single failure is reported once.
+            if state["settled"]:
+                return
+            state["settled"] = True
+            if message:
+                if b is not None:
+                    b["fails"].append((label, message))
+                else:
+                    self._report(title or (label + " failed"), message)
+            if b is not None:
+                b["done"] += 1
+                self._settle_batch(tok)
+            # Always refresh: a partly-failed batch still moved files.
             self.finished.emit(reselect)
             proc.deleteLater()
 
-        proc.finished.connect(done)
-        proc.errorOccurred.connect(done)
+        def on_finished(code, status):
+            drain()
+            err = _stderr_lines(state["err"])
+            if status == QProcess.CrashExit:
+                settle(err or ("%s crashed" % os.path.basename(argv[0])))
+            elif code != 0:
+                settle(err or ("%s exited %d" % (os.path.basename(argv[0]), code)))
+            else:
+                settle("")
+
+        def on_error(err):
+            # FailedToStart is the one that is NOT "the operation failed": the
+            # helper is missing from filer's PATH, so nothing was attempted.
+            prog = os.path.basename(argv[0])
+            if err == QProcess.FailedToStart:
+                settle("%s: %s" % (prog, proc.errorString()),
+                       title="cannot run " + prog)
+            elif err != QProcess.Crashed:   # Crashed is reported by on_finished
+                drain()
+                settle(_stderr_lines(state["err"]) or proc.errorString())
+
+        proc.readyReadStandardError.connect(drain)
+        proc.finished.connect(on_finished)
+        proc.errorOccurred.connect(on_error)
         proc.start(_resolve(argv[0]), argv[1:])
 
-    @Slot(list)
+    @Slot(list, result=bool)
     def execDetached(self, argv):
+        """Launch something and forget it (a viewer, a terminal, "open with").
+        There is no exit code to wait for, but "the binary does not exist" is
+        knowable immediately — and a launcher that silently does nothing is
+        exactly what DESIGN.md 10 forbids — so a failed start is toasted."""
         argv = [str(a) for a in argv]
-        QProcess.startDetached(_resolve(argv[0]), argv[1:])
+        # PySide returns the `qint64 *pid` out-parameter alongside the bool.
+        ok = QProcess.startDetached(_resolve(argv[0]), argv[1:])
+        ok = bool(ok[0] if isinstance(ok, tuple) else ok)
+        if not ok:
+            prog = os.path.basename(argv[0])
+            self._report("cannot run " + prog, prog + " is not installed, or not on filer's PATH")
+        return ok
 
     @Slot(list, result=str)
     def writeOrder(self, paths):

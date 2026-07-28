@@ -43,10 +43,14 @@ magnitude quicker on long/large sources.
 import json
 import os
 import re
-import shutil
 import subprocess
 
 from PySide6.QtCore import QObject, QProcess, Signal, Slot
+
+# The toast and the binary resolver used to live in this file; they moved to
+# notify.py when FileOps grew failure toasts of its own, so filer has one
+# implementation of "how a filer toast is spelled" rather than two.
+from notify import tool as _tool, toast as _toast_send
 
 # "Under 10MB" in the sense every uploader means it: 10 million bytes is below
 # both the 10MB and the 10MiB reading, so a file that fits this fits either.
@@ -78,23 +82,6 @@ DECODE_MPPS_PER_CORE = 75.0
 ENCODE_FIXED = 0.8          # process start, probe, mux, faststart shuffle
 # Above this the menu stops and asks first (see plan()["slow"]).
 SLOW_SECONDS = 20.0
-
-
-def _tool(name):
-    """Absolute path to an ffmpeg-family binary. filer can be launched from a
-    .desktop entry or the Quickshell runner, whose PATH need not carry the nix
-    profile dirs — resolve against them explicitly rather than trusting PATH."""
-    found = shutil.which(name)
-    if found:
-        return found
-    user = os.environ.get("USER", "")
-    for d in (os.path.expanduser("~/.nix-profile/bin"),
-              "/etc/profiles/per-user/%s/bin" % user,
-              "/run/current-system/sw/bin", "/usr/bin"):
-        cand = os.path.join(d, name)
-        if os.path.exists(cand):
-            return cand
-    return name
 
 
 def is_video(path):
@@ -344,29 +331,13 @@ class VideoConv(QObject):
 
     # ---- toasts ----
     def _toast(self, job, title, body, value=None, urgency=None, persist=False):
-        # -t 0 (never expire) on the in-progress toast, for the same reason
-        # surfer's downloads send it: the server retires an ordinary toast after
-        # a few seconds, and once it is gone our -r names an id it no longer
-        # has, so every later update opens a BRAND NEW toast (with its own
-        # sound) instead of morphing the one on screen. The completion/failure
-        # toast has nothing left to update and keeps the default timeout.
-        args = [_tool("notify-send"), "-a", "filer", "-p"]
-        if persist:
-            args += ["-t", "0"]
-        if job.get("nid"):
-            args += ["-r", str(job["nid"])]
-        if value is not None:
-            args += ["-h", "int:value:%d" % int(value)]
-        if urgency:
-            args += ["-u", urgency]
-        args += [title, body]
-        try:
-            out = subprocess.run(args, capture_output=True, text=True, timeout=2)
-            nid = out.stdout.strip()
-            if nid.isdigit():
-                job["nid"] = int(nid)
-        except (OSError, subprocess.SubprocessError):
-            pass
+        # notify.toast does the sending (see its docstring for why an ongoing
+        # job's toast is -t 0); this only keeps the job's notification id, so
+        # every update of one encode morphs the toast already on screen.
+        nid = _toast_send(title, body, urgency=urgency, replace_id=job.get("nid"),
+                          value=value, persist=persist)
+        if nid is not None:
+            job["nid"] = nid
 
     @staticmethod
     def _bar(pct, width=16):
