@@ -488,7 +488,8 @@ Item {
     // a constant 90 for the open state, so there is always something to show.
     // …and it tracks `drawerOut`, not `Media.queueOpen`, which is the same flag
     // held true for one animation on the way DOWN. The flag flips in one frame
-    // while the tile takes 200ms to shed its rows, so keying the drawer straight
+    // while the tile takes a full slide (`ViewMode.slideMs`) to shed its rows,
+    // so keying the drawer straight
     // off it collapsed the drawer instantly and handed the artwork the whole
     // 124px the tile had not given back yet — measured 60 -> 162px, then
     // shrinking. Holding it lets the drawer ride the tile down, and all that is
@@ -542,9 +543,15 @@ Item {
     readonly property real queueH: drawerOut
         ? Math.max(0, root.height - naturalRest - restSlack) : 0
 
+    // The hold must OUTLAST the tile's glide, which is the drawer's only actual
+    // animation — so it is derived from `ViewMode.slideMs` plus a frame's margin,
+    // never a literal. It was 220 against a 200ms glide; when the glide moved to
+    // the desktop's canonical 260 a literal here would have released the drawer
+    // 40ms early and handed the artwork the rows the tile had not given back yet
+    // — the exact ballooning this hold exists to prevent.
     Timer {
         id: closeHold
-        interval: ViewMode.ms(220)
+        interval: ViewMode.ms(ViewMode.slideMs + 20)
         onTriggered: root.drawerOut = false
     }
     Connections {
