@@ -140,10 +140,17 @@ happened: `sudo[1791493]: lam : 3 incorrect password attempts ; COMMAND=/usr/sbi
 with the user meta-dragging the window away mid-task. **Verify without sudo:**
 
 ```bash
-/usr/bin/python3 apps/askpass/tools/askpass-selftest.py   # the contracts
-/usr/bin/zsh -c 'echo $SUDO_ASKPASS'                      # what a new shell resolves
-readlink -f /home/lam/.local/bin/sudo-askpass             # which wrapper that is
+python3 apps/askpass/tools/askpass-selftest.py   # the contracts
+zsh -c 'echo $SUDO_ASKPASS'                      # what a new shell resolves
+readlink -f /home/lam/.local/bin/sudo-askpass    # which wrapper that is
 ```
+
+(The selftest re-execs itself under the interpreter baked into the
+`vista-askpass` wrapper when the one it was started with has no PySide6 — which
+is every plain `python3` on `top`. It used to be documented as
+`/usr/bin/python3`, a path that only exists on book: on `top` that reported two
+spurious FAILs and three PASSes that only "passed" because a missing PySide6 is
+what the `broken` case tests for.)
 
 That covers the whole chain except sudo's own `read`, which is sudo's contract,
 not ours, and does not need re-proving at the user's expense.
@@ -171,7 +178,7 @@ can do is leave the bar undimmed.
 ## Verifying — never on the user's screen
 
 ```bash
-/usr/bin/python3 apps/askpass/tools/askpass-selftest.py   # the three contracts, headless
+python3 apps/askpass/tools/askpass-selftest.py   # the three contracts, headless
 ```
 
 It runs the real `main.py` under `QT_QPA_PLATFORM=offscreen`, drives the QML
