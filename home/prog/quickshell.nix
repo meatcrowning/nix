@@ -95,6 +95,14 @@ in
       source = ./quickshell-files/scripts/proc-list.py;
       executable = true;
     };
+    # Gate for both cava instances (SysInfo.qml VU, Media.qml spectrum): is any
+    # application actually playing? Unconditional, that pair cost ~19.5% of a
+    # core with nothing playing — see the script's header and
+    # docs/perf-cpu-hotspots.md.
+    "quickshell/scripts/audio-active.py" = {
+      source = ./quickshell-files/scripts/audio-active.py;
+      executable = true;
+    };
     # Power-menu graceful exit (PowerMenu.qml): snapshot the session + "click the
     # [x]" on every window (hyprvtb dispatcher) and wait for them to close, so
     # logout/reboot/poweroff let apps save and the next login restores positions.
