@@ -195,7 +195,13 @@ Never run bare `qs` — it launches a second panel.
   repo against the PRIVATE remote `github.com/meatcrowning/nix-docs`, living
   inside this public checkout and listed in `.gitignore`** — so `git` run from
   `~/nix` does not see these files at all. Commit from inside `docs/`, or let
-  the timer do it. Syncs both ways with book every 5 min via
+  the timer do it. **Two shelves inside it**: `docs/` root is what *he* might
+  read — the state of a feature, findings about his machine or his data,
+  backlogs waiting on his verdict; `docs/agents/` is what only an agent reads —
+  runbooks, procedures, one-off impact analyses, raw research. Would he open it
+  to learn something, or would an agent open it to execute something?
+  `docs/README.md` states the rule and indexes both. Syncs both ways with book
+  every 5 min via
   `home/srvs/nix-docs.nix`, which reuses `claude-memory-sync.sh` verbatim — that
   script is parametrized by `CM_SYNC_REPO`/`REMOTE`/`LOG`/`SEED`/`LABEL`, so a
   second systemd user unit was all it took. Log `~/.cache/nix-docs-sync.log`;
