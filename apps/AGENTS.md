@@ -86,7 +86,8 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 - **`trackmatch.py`** — the one artist/title normaliser. Any new "are these two
   tag strings the same song?" code must use it rather than grow a second copy;
   see `player/AGENTS.md`.
-- **`deskstyle.py`** — the desktop-wide `fontFamily` / `fontSize`, read live
+- **`deskstyle.py`** — the desktop-wide `fontFamily` / `fontSize` plus the two
+  motion settings `reduceMotion` / `animSpeed` (see Motion, below), read live
   from the panel's own `~/.config/quickshell/settings.json` (the file
   `SettingsStore` persists). Install it as the `DeskStyle` context property
   BEFORE creating the app's `Theme.qml`, exactly like `WalPalette`, and keep a
@@ -145,11 +146,15 @@ in `hyprvtb/main.cpp`.
 It resolves once, at construction — consistent with these apps having no hot
 reload of any kind, so "relaunch to pick it up" is already the rule here.
 
-`motion.ms()` also applies the panel's `reduceMotion` / `animSpeed`, via the
-`DeskStyle` context property. **Those two keys are not on `DeskStyle` yet**;
-`Motion` guards with a `typeof` and falls back to 1.0/false, so adding
-`reduceMotion` and `animSpeed` beside `fontFamily`/`fontSize` in
-`pylib/deskstyle.py` is all that is left to light them up in all six apps.
+`motion.ms()` also applies the panel's `reduceMotion` / `animSpeed`, which
+`pylib/deskstyle.py` publishes on the `DeskStyle` context property beside
+`fontFamily`/`fontSize` — so an app that forgets to install `DeskStyle` gets
+1.0/false through `Motion`'s `typeof` guard rather than a `ReferenceError`, and
+an offscreen harness that builds a component without it still animates sanely.
+**`animSpeed` is validated the way the PANEL validates it, not the way the
+slider is bounded**: any finite value > 0, falling back to 1.0. Clamping it to
+the slider's 0.5-2.0 here would mean a hand-edited `settings.json` scaled the
+panel and the apps by different amounts.
 
 A duration that is deliberately *not* the slide keeps its number and gets a
 comment saying why — scrollbar and hover fades stay at 120ms, take the house

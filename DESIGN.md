@@ -857,6 +857,18 @@ Settings window since the day they shipped and drove **nothing**, because every
 a `NumberAnimation` treats as an immediate assignment — the desktop still
 changes state, it just stops travelling to get there.
 
+> **Both settings reach the apps through `DeskStyle`** (`apps/pylib/deskstyle.py`),
+> the same context property that already carries `fontFamily`/`fontSize` from the
+> panel's own `settings.json`, watching the file *and* its directory because
+> `SettingsStore` writes atomically. The validation is deliberately the panel's
+> and not the slider's — any finite `animSpeed > 0`, falling back to 1.0 — since
+> a value outside the slider's 0.5-2.0 that the panel honoured and the apps
+> clamped would be two speeds on one desktop, which is the thing this section
+> exists to prevent. Measured offscreen against the real `Motion.qml`:
+> `animSpeed` 2.0 turns the 260 ms slide into 520 and the 120 ms fade into 240,
+> 0.5 into 130 and 60, `reduceMotion` collapses both to 0 — and a junk or
+> deleted `settings.json` holds the last good values rather than blanking them.
+
 **So: never write a duration literal into a widget.** `ViewMode.ms(ViewMode.slideMs)`
 / `motion.ms(motion.slideMs)`, and `ViewMode.slideEasing` / `motion.slideEasing`.
 A literal is not merely untidy now; it is a widget that opts out of the user's
@@ -2101,10 +2113,12 @@ Agent *proposals*, listed separately on purpose. Nothing above depends on them.
    `plugin:hyprvtb:slide_duration_ms`, because the roll is the reference and the
    reference should not be a copy of itself. The panel takes it through
    `ViewMode.slideMs`/`ms()` and the apps through `qmlcommon/Motion.qml`; both
-   settings are live. §6.2. One loose end: `reduceMotion`/`animSpeed` reach the
-   apps only once `pylib/deskstyle.py` exposes them alongside
-   `fontFamily`/`fontSize` — `Motion.qml` already reads them from `DeskStyle`
-   and falls back cleanly until it does.
+   settings are live. §6.2. The last loose end is closed too:
+   `pylib/deskstyle.py` now publishes `reduceMotion`/`animSpeed` alongside
+   `fontFamily`/`fontSize`, so the two Settings > Appearance controls that had
+   moved only the panel now scale every animation in all six apps as well —
+   verified offscreen at 0.5x/1.5x/2.0x and at `reduceMotion`, through the real
+   `Motion.qml`.
 9. **The five other dead settings** (`themeMode`, `accentOverride`,
    `paletteColorCount`, `pureBlackBg`, and whichever of the above survives):
    wire them, or remove the controls? §10 says a control that is drawn is a
