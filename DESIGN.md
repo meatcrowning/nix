@@ -1551,6 +1551,29 @@ progress update, the default timeout on the final one).
 A toast is **sized to its label plus padding** — a fixed slab was rejected
 because "'recording…' never needed that much room".
 
+### 10.5 Two percentages on one screen share one denominator
+
+[code — `proc-list.py`, 2026-07-27] The task manager's `cpu%` column sits under a
+cpu card reading 0-100 and reported 0-**1600**: it was `top`'s **Irix mode** (a
+share of ONE core) against a gauge computed from whole-machine total-vs-idle
+deltas. Both numbers were correct and together they were a lie, because nothing
+on screen said the two `%` signs had different denominators — the user's
+question was simply why a process said 400. It is now **Solaris mode**, divided
+by the CPU count taken from the same `/proc/stat` CPUs the gauge sums. (`top`
+ships both and toggles them on `I`; a desktop widget has no `I` key and no room
+to caption itself, so it picks the one that agrees with its neighbour.)
+
+**A denominator is part of a number's meaning, and a widget cannot state it in
+the space it has** — so two readouts of one quantity that can be seen at once
+take the same one. Where a surface genuinely cannot (the fan card's percentage
+is commanded duty against its own full scale; sysfs publishes no maximum RPM, so
+there is no honest denominator and one is not invented) it says so in the
+tooltip and keeps the exact figure there.
+
+**Rescaling a column means retuning everything read against it in the same
+commit** — colour thresholds, bar scales, precision. A threshold left at its old
+scale does not break visibly; it just stops meaning anything, which is worse.
+
 ---
 
 ## 11. Focus, pointer and input

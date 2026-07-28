@@ -637,10 +637,20 @@ Item {
                 PixelText {
                     width: root.colCpu
                     horizontalAlignment: Text.AlignRight
+                    // Solaris mode: a share of the WHOLE machine, 0-100, on the
+                    // same denominator as the cpu card above (proc-list.py).
+                    // One decimal, and it cannot take a second: the column is
+                    // 44px = 5.5 cells, so "100.0" fits and "100.00" clips at
+                    // full load. 0.1 point here is 1.6% of one core on this box.
                     text: row.modelData.cpu.toFixed(1)
-                    // anything holding a core is worth spotting in a glance
-                    color: row.modelData.cpu >= 50 ? Theme.crit
-                         : row.modelData.cpu >= 10 ? Theme.warn : Theme.textDim
+                    // Retuned with the denominator, NOT carried over: 50/10 were
+                    // half and a tenth of ONE core, i.e. 3.1 and 0.6 here, which
+                    // would paint an idle desktop amber. These are machine
+                    // shares — a pegged single-threaded process is 100/NCPU
+                    // (6.2% on 16 threads, 12.5% on book) and must still colour,
+                    // so warn sits below that and crit at a few cores' worth.
+                    color: row.modelData.cpu >= 25 ? Theme.crit
+                         : row.modelData.cpu >= 5 ? Theme.warn : Theme.textDim
                 }
                 PixelText {
                     width: root.colMem
