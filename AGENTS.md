@@ -96,6 +96,40 @@ Never run bare `qs` — it launches a second panel.
 
 ---
 
+## Which machine you are on
+
+**You are told, at session start. Do not guess, and do not re-derive it.** A
+`SessionStart`/`SubagentStart` hook in `~/.claude/settings.json` runs
+`~/.config/scripts/claude-host-id.sh` and prints the host, the flake attribute
+and the correct rebuild command into your context before your first turn. The
+script is generated per machine by `home/prog/claude-host-id.nix`. If you
+somehow do not have that line, run `hostname` — never infer.
+
+Why the hook exists: nothing else tells you. Your environment block carries the
+working directory and a kernel version string and **no hostname**, so the only
+tell that you are on the laptop is `…asahi…aarch64…` buried in that string.
+Everything above this section is written from `top`'s point of view —
+`sudo rebuild-top` presented as *the* rebuild command — so the default guess is
+`top`, and on `book` that guess is wrong in a way that wastes a session.
+
+**Never write the answer into a file.** Not into `docs/`, not into an
+`AGENTS.md`, not into a memory:
+
+- `~/.claude` syncs both ways between the machines (`home/srvs/claude-state.nix`)
+  and so does `docs/` (`home/srvs/nix-docs.nix`). A note saying "you are on
+  book" is read on `top`, where it is false. `top`'s agent then corrects it, the
+  correction syncs back, and the two machines take turns being wrong.
+- So **name the host** (`top` / `book`) in anything you write, or state the fact
+  host-neutrally. `this machine`, `here`, `this box`, `you are on X` are all
+  deixis: correct as you type them, false on arrival.
+
+**Dispatching workers:** the hook covers subagents too, but a worker started
+before a rebuild lands, or one you brief in a long prompt, still inherits your
+framing. State the host in the dispatch prompt when the task touches rebuilds,
+`sys/`, the compositor pin, or anything in `docs/HARDWARE.md`.
+
+---
+
 ## Boundaries
 
 **Always**
