@@ -78,6 +78,38 @@ Item {
         id: spec
         readonly property int nbars: SettingsStore.d.mediaSpectrumBars
         readonly property real gamma: 0.55
+        // Graduation lines. A bar chart with no rules is just motion; these give
+        // the eye something fixed to read a level against. No labels, by
+        // request — so they carry no numbers, but they are still placed where
+        // the DATA falls rather than at even pixel divisions: the bars are drawn
+        // through `gamma`, so 25/50/75 of cava's 0-100 scale lands at 47/68/86%
+        // of the height. A peak marker resting on a rule therefore means exactly
+        // that fraction of full scale; even pixel thirds would be rules that
+        // measure nothing.
+        //
+        // Those three are also where the bars actually live — measured medians
+        // 15 (-> 35% of height) and p90 49 (-> 68%) — so the grid brackets the
+        // working range instead of hiding beneath it. A rule below ~40% would
+        // spend almost all its time buried under a bar.
+        //
+        // BEHIND the bars (declared first, so the bars paint over them), in
+        // Theme.border — the hairline the volume column and the tile frames are
+        // already drawn with, so the widget gains a grid without gaining a
+        // colour.
+        Repeater {
+            model: [25, 50, 75]
+            Rectangle {
+                required property int modelData
+                anchors { left: parent.left; right: parent.right }
+                height: 1
+                y: Math.round(spec.height * (1 - Math.pow(modelData / 100, spec.gamma)))
+                color: Theme.border
+                // Nothing true to draw in a spectrum with no room; also keeps
+                // the rules out of a degenerate layout pass.
+                visible: spec.height > 8
+            }
+        }
+
         // Bars are gapless, so they can't be laid out by a Row with spacing 0: at
         // 32 buckets the per-bar width is fractional, and rounding each one
         // independently leaves subpixel seams between them. Position from the
