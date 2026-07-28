@@ -7,13 +7,15 @@ whole button set, with per-tab tooltips that name each pane) and send CLICK
 lines back. No screen, no network, no second panel — tabs are about:blank and
 nothing touches the user's own session.
 
-The tooltips are the assertion surface: they say which pane a tab is in and
-whether that pane has the chrome, so pane assignment, focus, the close-fold and
-the toggle are all checkable without a screen. Appearance (divider, focus frame,
-page layout) is the user's visual check, not this script's.
+The tooltips are the assertion surface: they say which pane a tab is in (by
+orientation — left/right when vertical, top/bottom when stacked) and whether
+that pane has the chrome, so pane assignment, focus, the close-fold, both
+toggles and re-orienting are all checkable without a screen. Appearance
+(divider, focus frame, page layout) is the user's visual check, not this
+script's; the RECTS are `split-geom-test.py`'s.
 
-Run it after touching the split-view block in qml/Main.qml. It launches the
-PACKAGED wrapper, so QtWebEngine gets its Qt env; needs no rebuild.
+Run both after touching the split-view block in qml/Main.qml. This one launches
+the PACKAGED wrapper, so QtWebEngine gets its Qt env; needs no rebuild.
 """
 import json
 import os
@@ -43,6 +45,9 @@ rt.chmod(0o700)
     "tabs": ["about:blank#a", "about:blank#b", "about:blank#c"],
     "current": 0,
 }))
+# A prefs.json from BEFORE the split had an orientation: no "splitVertical"
+# key at all. It must restore side by side, which the first open below checks.
+(state / "surfer" / "prefs.json").write_text(json.dumps({"zoom": 1.0}))
 
 sockpath = rt / "hyprvtb-buttons.sock"
 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -147,6 +152,11 @@ def tabs(bs):
     return [b for b in bs if b["id"].startswith("tab:")]
 
 
+def bstate(bs, bid):
+    m = [b for b in bs if b["id"] == bid]
+    return m[0]["state"] if m else None
+
+
 fails = []
 
 
@@ -160,8 +170,10 @@ try:
     bs, _ = buttons()
     ids = [b["id"] for b in bs]
     print("buttons:", ids)
-    check("split button exists, unlit", ("split" in ids) and
-          [b for b in bs if b["id"] == "split"][0]["state"] == 0)
+    check("both split buttons exist, unlit",
+          ("vsplit" in ids) and ("hsplit" in ids) and
+          [b for b in bs if b["id"] == "vsplit"][0]["state"] == 0 and
+          [b for b in bs if b["id"] == "hsplit"][0]["state"] == 0, str(ids))
     t = tabs(bs)
     check("3 tabs restored", len(t) == 3, str(len(t)))
     check("only tab0 lit before split",
@@ -170,9 +182,11 @@ try:
     tid = [b["id"] for b in t]
 
     # --- open the split ---
-    bs = click("split")
+    bs = click("vsplit")
     t = tabs(bs)
-    check("split lit", [b for b in bs if b["id"] == "split"][0]["state"] == 1)
+    check("| lit, _ not", bstate(bs, "vsplit") == 1 and bstate(bs, "hsplit") == 0)
+    check("a prefs.json with no orientation key opens side by side",
+          "left \u00b7 " in t[0]["tip"] or "left \u00b7 " in t[1]["tip"], t[0]["tip"])
     check("two tabs on screen", [b["state"] for b in t] == [1, 1, 0], str([b["state"] for b in t]))
     check("tab0 is the left pane, unfocused", t[0]["tip"].startswith("focus · left · "), t[0]["tip"])
     check("tab1 is the right pane, focused", t[1]["tip"].startswith("close · right · "), t[1]["tip"])
@@ -209,7 +223,7 @@ try:
     lit = [b for b in t if b["state"] == 1]
     check("closing a pane's tab keeps the split", len(t) == 3 and len(lit) == 2,
           str([(b["id"], b["state"], b["tip"][:22]) for b in t]))
-    check("split still lit", [b for b in bs if b["id"] == "split"][0]["state"] == 1)
+    check("split still lit", bstate(bs, "vsplit") == 1)
 
     # --- close down to one tab: the split folds by itself ---
     tid = [b["id"] for b in t]
@@ -222,25 +236,53 @@ try:
     bs = click(right["id"])       # close it -> 1 tab left, nothing to split with
     t = tabs(bs)
     check("split folds when only one tab is left",
-          len(t) == 1 and [b for b in bs if b["id"] == "split"][0]["state"] == 0,
-          str([(b["id"], b["tip"]) for b in t]) + " split=" +
-          str([b for b in bs if b["id"] == "split"][0]["state"]))
+          len(t) == 1 and bstate(bs, "vsplit") == 0,
+          str([(b["id"], b["tip"]) for b in t]) + " split=" + str(bstate(bs, "vsplit")))
 
     # --- re-open with a single tab: it must make one to split with ---
-    bs = click("split")
+    bs = click("vsplit")
     t = tabs(bs)
     check("split with one tab creates the second", len(t) == 2 and
           [b["state"] for b in t] == [1, 1], str([(b["state"], b["tip"][:22]) for b in t]))
 
-    # --- toggle off ---
-    bs = click("split")
+    # --- toggle off: the lit button closes the split it is showing ---
+    bs = click("vsplit")
     t = tabs(bs)
     check("split off leaves one pane",
-          [b for b in bs if b["id"] == "split"][0]["state"] == 0 and
-          sum(1 for b in t if b["state"] == 1) == 1,
+          bstate(bs, "vsplit") == 0 and sum(1 for b in t if b["state"] == 1) == 1,
           str([(b["state"], b["tip"][:22]) for b in t]))
     check("tips lose the pane names", all("left · " not in b["tip"] and "right · " not in b["tip"]
                                           for b in t), str([b["tip"] for b in t]))
+
+    # --- orientation: the kitty pair. `_` opens stacked, `|` re-orients in
+    #     place, and each button closes the split it is showing. ---
+    bs = click("hsplit")
+    t = tabs(bs)
+    lit = [b for b in t if b["state"] == 1]
+    check("_ opens the split stacked",
+          bstate(bs, "hsplit") == 1 and bstate(bs, "vsplit") == 0 and len(lit) == 2 and
+          any("top · " in b["tip"] for b in lit) and
+          any("bottom · " in b["tip"] for b in lit),
+          str([(b["state"], b["tip"][:24]) for b in t]))
+    pj = json.loads((state / "surfer" / "prefs.json").read_text())
+    check("the orientation is persisted", pj.get("splitVertical") is False, str(pj))
+
+    bs = click("vsplit")
+    t = tabs(bs)
+    lit2 = [b for b in t if b["state"] == 1]
+    check("| re-orients in place, keeping both panes",
+          bstate(bs, "vsplit") == 1 and bstate(bs, "hsplit") == 0 and
+          [b["id"] for b in lit2] == [b["id"] for b in lit] and
+          any("left · " in b["tip"] for b in lit2) and
+          any("right · " in b["tip"] for b in lit2),
+          str([(b["state"], b["tip"][:24]) for b in t]))
+
+    bs = click("vsplit")
+    t = tabs(bs)
+    check("| closes the split it is showing",
+          bstate(bs, "vsplit") == 0 and bstate(bs, "hsplit") == 0 and
+          sum(1 for b in t if b["state"] == 1) == 1,
+          str([(b["state"], b["tip"][:22]) for b in t]))
 
     # (the session/prefs round trip is checked separately — saveSession only
     #  runs from Window.onClosing, which a SIGTERM never reaches)

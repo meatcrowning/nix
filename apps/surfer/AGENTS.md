@@ -10,14 +10,45 @@ chrome via hyprvtb like the others.
 
 **Wheel events in this window are rescaled, and QML must undo it.** `ZoomFilter` divides every touchpad wheel event by `pylib/kinetic.py`'s `WHEEL_GAIN` (1/6) so QtWebEngine pages track the finger at the same rate the QML apps do; that is window-wide, so any scrollable QML surface here takes `wheelGain: WheelGain` (the reciprocal, published by `main.py` from the same constant) — the file picker does. Real mouse detents are passed through untouched (`is_wheel_detent`); applying the gain to them made top's wheel scroll pages at 1/6 speed twice already. The page itself is Chromium's own scroller and cannot use `WheelScroll`: parity there is the gain plus the compositor's >=300 ms withheld stop, which zeroes Chromium's 200 ms fling estimator so it adds no fling of its own. See [`../AGENTS.md`](../AGENTS.md).
 
-## Split view — two tabs side by side in one window
+## Split view — two tabs in one window, kitty's two buttons
 
-The `sp` titlebar button. The **left** pane always shows `currentTab`, the right
-one shows `splitTab` while `splitOn`, and `focusPane` says which of the two the
-CHROME acts on. Everything pane-agnostic keeps working because `current` now
-means *the focused pane's view* (`focusTab`), not *the current tab's view* — the
-address bar, back/fwd/reload, dark mode, the JS dialogs and the file picker all
-read it and needed no change.
+**`|` splits right (side by side) and `_` splits down (stacked)** — kitty's own
+titlebar pair (`pylib/kitty-vtb.py`'s `ACTIONS`), same labels, same wording.
+`_` and not kitty's `-` because **a bare `-` is the SPACER token** in the vtb
+button-array protocol and would be ambiguous there.
+
+`splitVertical` is the orientation and the only thing that differs between the
+two: **pane A** (always `currentTab`) takes the LEADING slice of the active axis,
+**pane B** (`splitTab`, while `splitOn`) the trailing one, with the draggable
+splitter between them. `focusPane` says which of the two the CHROME acts on.
+Everything pane-agnostic keeps working because `current` now means *the focused
+pane's view* (`focusTab`), not *the current tab's view* — the address bar,
+back/fwd/reload, dark mode, the JS dialogs and the file picker all read it and
+needed no change.
+
+- **Each button is a toggle, and the pair adds re-orienting.** Split off → the
+  button opens it in *its* orientation; split on and you click the **lit** one →
+  it closes; click the **other** one → the split *re-orients in place*, keeping
+  both panes and the divider's proportion. State 1 is on whichever orientation
+  is live, and the tip says what a click will do from here (`split right` /
+  `split down` / `close split`). All of it goes through one
+  `toggleSplit(vertical)`, so opening still adopts the tab to the right of the
+  current one (or the one to its left) and still makes a home tab when that is
+  the only tab there is.
+- **One `splitRatio`, reused on whichever axis is active**, so re-orienting keeps
+  the proportion rather than resetting to even. The geometry is expressed once
+  along the axis (`splitAxisLen`/`paneALen`/`paneBOff`/`paneBLen`) and resolved
+  into `paneA{X,Y,W,H}` / `paneB{X,Y,W,H}`; nothing downstream — the view
+  delegate, the focus frame, the splitter — knows about the axis. The splitter
+  drags in X or Y accordingly, with `Qt.SplitHCursor`/`Qt.SplitVCursor`.
+- **Every one of those rects is clamped away from zero**, including the
+  minimum-pane length, which shrinks with the window: a window narrower (or
+  shorter) than two minimum panes is otherwise exactly how you hand the
+  compositor a degenerate box, and `renderRect` aborts the session on one.
+- The per-tab tooltips name the panes by orientation — `left`/`right` when
+  vertical, `top`/`bottom` when stacked.
+- **No keyboard shortcut**, deliberately: the page has the keyboard and a QML
+  `Shortcut` here would race Chromium for it. The chrome is the titlebar.
 
 - **The two panes always hold different tabs.** One `WebEngineView` can only be
   in one place, so `showInPane()` swaps rather than duplicates, and closing a
@@ -41,23 +72,38 @@ read it and needed no change.
 - **A view no longer spans the window, so view-relative coordinates are not
   window coordinates.** The context menu and the page tooltip both add the
   view's own `x`/`y`; anything else reading a `request.position` must too.
-- Persisted: the divider position in `prefs.json` (`splitRatio`, written on
-  release of the drag, clamped 0.08–0.92) and the right pane's tab in
-  `session.json` (`split`, `-1` for none — read with a default, so a session
-  written before split view existed restores as one pane).
+- Persisted: the divider position and the orientation in `prefs.json`
+  (`splitRatio`, written on release of the drag, clamped 0.08–0.92;
+  `splitVertical`, written only when it changes) and pane B's tab in
+  `session.json` (`split`, `-1` for none). **Every one of them is read with a
+  default**, so a session written before split view existed restores as one
+  pane and a `prefs.json` written before the split had an orientation restores
+  side by side.
 - Known limitation: a JS dialog or file picker raised by the **unfocused** pane
   waits until you focus that pane. It is queued per view, and the tab's `asks ·`
   tooltip already says so — the same behaviour a background tab has always had.
 
-Verified headlessly the same way the single-instance work was, and the harness is
-kept: **[`tools/split-test.py`](tools/split-test.py)** plays the hyprvtb button
-server (scratch `HOME` + `XDG_RUNTIME_DIR`, `QT_QPA_PLATFORM=offscreen`,
-about:blank tabs), reads the REGISTER lines and sends CLICKs. The per-tab
-tooltips name each pane, which is what makes pane assignment, focus, the
-close-fold and the toggle assertable without a screen — 18 checks, all passing;
-it is what caught the focus bug above. Re-run it after touching the split-view
-block. The *appearance* (divider, focus frame, page layout) is the user's visual
-check.
+Verified headlessly the same way the single-instance work was, by **two** kept
+harnesses — run both after touching the split-view block:
+
+- **[`tools/split-test.py`](tools/split-test.py)** — behaviour. It plays the
+  hyprvtb button server (scratch `HOME` + `XDG_RUNTIME_DIR`,
+  `QT_QPA_PLATFORM=offscreen`, about:blank tabs), reads the REGISTER lines and
+  sends CLICKs. The per-tab tooltips name each pane, which is what makes pane
+  assignment, focus, the close-fold, both toggles, re-orienting and the
+  orientation's persistence assertable without a screen — 24 checks, all
+  passing; it is what caught the focus bug above. Its scratch `prefs.json`
+  deliberately has **no** `splitVertical` key, so the backward-compatible
+  default is checked on every run.
+- **[`tools/split-geom-test.py`](tools/split-geom-test.py)** — the rects, which
+  the button socket cannot see. It **lifts the split-view property block
+  straight out of `Main.qml`** and instantiates just that in a bare `Item`
+  offscreen, so it cannot drift into testing a copy: pane A full-size when off,
+  side by side under `|`, stacked under `_`, no overlap, the axis exactly
+  filled, the ratio clamped at both ends on each axis, and **no zero-size rect
+  at any window size down to 0×0**.
+
+The *appearance* (divider, focus frame, page layout) is the user's visual check.
 
 ## Single instance — `surfer <url>` opens a TAB in the running browser
 

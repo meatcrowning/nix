@@ -894,8 +894,10 @@ class Session(QObject):
 
 
 class Prefs(QObject):
-    """Small persisted preferences (currently just the page zoom level, shared
-    across all tabs) in $XDG_STATE_HOME/surfer/prefs.json."""
+    """Small persisted preferences in $XDG_STATE_HOME/surfer/prefs.json: the
+    page zoom level (shared across all tabs), the split view's divider position
+    and orientation, and the file picker's last-used folder. Every getter reads
+    with a default, so an older prefs.json is always valid."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -909,6 +911,13 @@ class Prefs(QObject):
         except (OSError, ValueError, TypeError):
             return {}
 
+    def _write(self, d):
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
     @Slot(result=float)
     def loadZoom(self):
         try:
@@ -920,14 +929,12 @@ class Prefs(QObject):
     def saveZoom(self, z):
         d = self._read()
         d["zoom"] = float(z)
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(d), encoding="utf-8")
-        except OSError:
-            pass
+        self._write(d)
 
-    # split view's divider position, as the left pane's fraction of the window
-    # (0.5 = even). Written on release of the drag, not on every motion event.
+    # split view's divider position, as the LEADING pane's fraction of the
+    # window along whichever axis the split runs (0.5 = even) — one value for
+    # both orientations, so re-orienting keeps the proportion. Written on
+    # release of the drag, not on every motion event.
     @Slot(result=float)
     def loadSplitRatio(self):
         try:
@@ -940,11 +947,22 @@ class Prefs(QObject):
     def saveSplitRatio(self, r):
         d = self._read()
         d["splitRatio"] = float(r)
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(d), encoding="utf-8")
-        except OSError:
-            pass
+        self._write(d)
+
+    # …and which axis that is: True = a VERTICAL divider, panes side by side
+    # (kitty's `|`, "split right"); False = a horizontal one, panes stacked
+    # (`_`, "split down"). Read with a default, so a prefs.json written before
+    # the split had an orientation restores side by side, exactly as it was.
+    @Slot(result=bool)
+    def loadSplitVertical(self):
+        v = self._read().get("splitVertical", True)
+        return bool(v) if isinstance(v, bool) else True
+
+    @Slot(bool)
+    def saveSplitVertical(self, v):
+        d = self._read()
+        d["splitVertical"] = bool(v)
+        self._write(d)
 
     # the in-window file picker's last-used folder ("pickerDir"), so a page's
     # <input type=file> reopens where the last pick came from (see Files).
