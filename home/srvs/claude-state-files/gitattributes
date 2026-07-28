@@ -5,10 +5,29 @@
 # file until a human notices. Each rule below buys immunity from that for one
 # class of file.
 
-# One fact per file, plus MEMORY.md which gains a line per new memory. When both
-# machines edit it, keeping BOTH sides' lines is right: duplicated text is
-# trivial to clean up, a memory silently lost to a botched resolution is not.
+# Prose and notes: keeping BOTH sides' lines beats dropping one, and duplicated
+# text is trivial to clean up. This is the right default for a *.md file whose
+# shape git can safely treat as a bag of lines.
 *.md merge=union
+
+# ...which a MEMORY FILE is not, and the argument the *.json rule below makes
+# applies here verbatim: a memory is a YAML frontmatter block plus prose, so a
+# union merge can produce a structurally INVALID file. It did. Top's first merge
+# fused two revisions of one memory into a document with two `description:` keys
+# and a second `---` mid-body — no conflict, no log line, reads fine if you skim
+# the prose, and silently malformed for every future reader.
+#
+# The driver resolves a memory as what it is — a statement of current truth —
+# by last-writer-wins on the `modified:` timestamp Claude Code maintains itself,
+# and treats MEMORY.md as the line-oriented index it is (union, then collapse
+# what union duplicated). Both outcomes need no cleanup by anyone, which is the
+# point: this repo is synced by an unattended timer every 5 minutes.
+#
+# Later rules win in gitattributes, so this must stay BELOW the *.md line.
+# Requires merge.claudemd.driver, which claude-state-premigrate.sh sets on every
+# run — without it this rule is inert and union silently applies again.
+# Verified end-to-end by tools/claude-merge-test.sh (42 assertions).
+**/memory/*.md merge=claudemd
 
 # Transcripts and history.jsonl are append-only streams of independent JSON
 # objects, one per line. Union keeps every line from both machines; interleaved

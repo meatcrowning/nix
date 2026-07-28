@@ -56,6 +56,15 @@ in
       source = ./claude-state-files/claude-state-premigrate.sh;
       executable = true;
     };
+    # Frontmatter-aware merge driver for the memory store. Named by
+    # .gitattributes (`**/memory/*.md merge=claudemd`) and registered against
+    # this deployed path by premigrate on every run — a memory is frontmatter
+    # plus prose, and the repo-wide `*.md merge=union` merged its STRUCTURE,
+    # producing a file with two `description:` keys and no conflict to notice.
+    "scripts/claude-memory-merge.sh" = {
+      source = ./claude-state-files/claude-memory-merge.sh;
+      executable = true;
+    };
     # Seeds copied into the repo on every run, so the denylist and the merge
     # policy stay nix-authoritative rather than drifting as hand-edits in an
     # untracked dotfile.

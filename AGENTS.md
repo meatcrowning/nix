@@ -214,9 +214,19 @@ Never run bare `qs` — it launches a second panel.
   Three invariants:
   the `.gitignore` is a **denylist** (secrets and machine-local runtime state
   by name) — the inverse of the allowlist it replaced, so it *can* widen by
-  accident and `CM_SYNC_MAX_MB` exists to catch that; `.gitattributes` sets
-  `merge=union` for `*.md`/`*.jsonl` and `merge=ours` for `*.json`, so an
-  unattended timer can never wedge on a conflict; and both are seeded from nix
+  accident and `CM_SYNC_MAX_MB` exists to catch that; `.gitattributes` gives
+  every file shape a merge that cannot wedge an unattended timer *or* resolve
+  wrong — `merge=union` for prose `*.md` and append-only `*.jsonl`,
+  `merge=ours` for `*.json` (union would emit invalid JSON), and
+  `merge=claudemd` for `**/memory/*.md`, a memory being frontmatter plus prose
+  that union merged *structurally* into a document with two `description:` keys,
+  silently. That driver
+  (`claude-state-files/claude-memory-merge.sh`, registered by premigrate,
+  tested by `tools/claude-merge-test.sh`) resolves a memory by last-writer-wins
+  on Claude Code's own `modified:` stamp and dedupes `MEMORY.md`'s index lines,
+  so **no merge here needs a human afterwards** — re-run that test after
+  touching the driver, the rule, or the registration, since a missing
+  registration falls back to union with no error. All seeded from nix
   on every run — edit them in `claude-state-files/`, not in the live repo.
   Practical consequences: **a memory is shared infrastructure**, so say which
   host a fact is specific to — and a file referenced by an absolute path from a
