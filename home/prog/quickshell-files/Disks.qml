@@ -123,7 +123,10 @@ Singleton {
     }
     Process {
         id: smartProc
-        command: ["sh", root._scripts + "disk-smart.sh"]
+        // `smartSsdOnly` (Widgets > monitoring), as a binding so flipping it in
+        // Settings takes effect on the next poll rather than at the next reload.
+        command: ["sh", root._scripts + "disk-smart.sh",
+                  SettingsStore.d.smartSsdOnly ? "ssd" : "all"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let m = {};

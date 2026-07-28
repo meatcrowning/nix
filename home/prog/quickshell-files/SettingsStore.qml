@@ -181,8 +181,11 @@ Singleton {
             // ---- Audio & Media ----
             property int    volumeStep: 5
             property string audioSink: "@DEFAULT_AUDIO_SINK@"
-            property int    vuBars: 2
-            property int    vuSmoothing: 20            // cava noise_reduction
+            // The VU meter's cava. No bar count: the meter is stereo, one
+            // bucket per channel, and any other value is a frequency split
+            // (VuMeter.qml). 10 is the measured tuning that has always been in
+            // cava-vu.conf — the default was 20 while it was inert.
+            property int    vuSmoothing: 10            // cava noise_reduction
             property int    vuFramerate: 60
             property int    mediaSpectrumBars: 16
             property bool   mediaPreferPlaying: true
@@ -207,7 +210,6 @@ Singleton {
             property int    launcherMaxResults: 0      // 0 = unlimited
             property string launcherPlaceholder: "search programs"
             property bool   launcherProviderApps: true
-            property bool   launcherProviderCalc: false
             property string fileBrowserStart: "/home/lam"
             property bool   fileBrowserHidden: false
             property bool   fileBrowserDirsFirst: true
@@ -227,8 +229,7 @@ Singleton {
             property string cmdSleep: "systemctl suspend"
             property string cmdReboot: "systemctl reboot"
             property string cmdPoweroff: "systemctl poweroff"
-            property string lidCloseAction: "suspend"  // suspend | lock | nothing
-
+        
             // ---- Input & System ----
             property int    keyRepeatDelay: 300
             property int    keyRepeatRate: 40
@@ -283,20 +284,20 @@ Singleton {
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],
         monPollSec: 2, cpuWarn: 75, cpuCrit: 90, tempWarn: 65, tempCrit: 80, diskWarn: 75,
         diskCrit: 90, batteryWarn: 30, batteryCrit: 15, netInterface: "auto", rootMount: "/",
-        smartSsdOnly: true, volumeStep: 5, audioSink: "@DEFAULT_AUDIO_SINK@", vuBars: 2,
-        vuSmoothing: 20, vuFramerate: 60, mediaSpectrumBars: 16, mediaPreferPlaying: true,
+        smartSsdOnly: true, volumeStep: 5, audioSink: "@DEFAULT_AUDIO_SINK@",
+        vuSmoothing: 10, vuFramerate: 60, mediaSpectrumBars: 16, mediaPreferPlaying: true,
         notifTimeoutMs: 5000, notifMaxVisible: 4, notifWidth: 300, notifCorner: "bottom-right",
         notifImages: false, notifActions: false, doNotDisturb: false, soundsEnabled: true,
         soundTheme: "vista", soundLogin: "Windows Logon Sound.wav", soundVolume: "Windows Ding.wav",
         soundNotify: "Windows Balloon.wav", soundCritical: "Windows Exclamation.wav",
         launcherTerminal: "kitty", launcherMaxResults: 0, launcherPlaceholder: "search programs",
-        launcherProviderApps: true, launcherProviderCalc: false, fileBrowserStart: "/home/lam",
+        launcherProviderApps: true, fileBrowserStart: "/home/lam",
         fileBrowserHidden: false, fileBrowserDirsFirst: true, fileBrowserConfirmDelete: true,
         screenshotDir: "~/Pictures/Screenshots", screenshotCopy: true,
         recordingDir: "~/Videos/Screen Recordings", recordingAudio: false, recordingFps: 60,
         lockClock24h: false, lockPamService: "quickshell-lock", autoLockMin: 5, lockOnSuspend: true,
         cmdLogout: "pkill Hyprland", cmdSleep: "systemctl suspend",
-        cmdReboot: "systemctl reboot", cmdPoweroff: "systemctl poweroff", lidCloseAction: "suspend",
+        cmdReboot: "systemctl reboot", cmdPoweroff: "systemctl poweroff",
         keyRepeatDelay: 300, keyRepeatRate: 40, pointerSpeed: 0.0, naturalScroll: false,
         tapToClick: true, clock24h: false, weekStartsMonday: false, clockFace: "analog",
         weatherLat: 58.3019,

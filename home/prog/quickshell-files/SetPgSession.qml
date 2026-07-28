@@ -80,15 +80,12 @@ Column {
         }
     }
 
-    SetSection {
-        title: "power behaviour"
-        SetRow {
-            label: "lid close"
-            SetSelect {
-                options: ["suspend", "lock", "nothing"]
-                value: page.d.lidCloseAction
-                onChanged: (v) => { page.d.lidCloseAction = v; SettingsStore.save(); }
-            }
-        }
-    }
+    // NO "power behaviour / lid close" section. Nothing in this desktop can
+    // honour it: lid handling belongs to logind, top has no lid at all, and the
+    // one machine that does (book) gets home-manager only from this repo — its
+    // logind config is Fedora system state we cannot write. hypridle, which
+    // owns the idle side above, has no lid event either. Implementing it would
+    // mean the panel taking a systemd-inhibit lock and watching
+    // /proc/acpi/button/lid — a feature, and one that cannot be tested from
+    // here. Removed rather than left drawn; ask and it can be built on book.
 }

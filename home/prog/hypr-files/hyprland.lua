@@ -92,8 +92,14 @@ hl.on("hyprland.start", function()
     -- (`cliphist list` / `cliphist decode`; picker UI is future work).
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
-    -- Vista logon sound (sound map: quickshell/Sounds.qml)
-    hl.exec_cmd("pw-play \"$HOME/.local/share/sounds/vista/Windows Logon Sound.wav\"")
+    -- Vista logon sound (sound map: quickshell/Sounds.qml). Read from the
+    -- Settings program's model rather than hardcoded, so `soundsEnabled`,
+    -- `soundTheme` and `soundLogin` mean the same thing here as they do for
+    -- every other event on that page -- soundLogin was drawn in Settings and
+    -- read by nothing, because this line is the only thing that plays it and it
+    -- named the file itself. Defaults on a missing key, missing file or missing
+    -- jq, so the sound can never be lost to a bad read.
+    hl.exec_cmd([[sh -c 'S="$HOME/.config/quickshell/settings.json"; [ "$(jq -r .soundsEnabled "$S" 2>/dev/null)" = false ] && exit 0; t=$(jq -r .soundTheme "$S" 2>/dev/null); case "$t" in ""|null) t=vista;; esac; f=$(jq -r .soundLogin "$S" 2>/dev/null); case "$f" in ""|null) f="Windows Logon Sound.wav";; esac; exec pw-play "$HOME/.local/share/sounds/$t/$f"']])
     -- NOTE: deliberately do NOT switch to a "main" workspace here. This desktop
     -- is locked to a SINGLE workspace, and the hyprvtb plugin relaunches the
     -- saved session during config load (hl.plugin.load below) — those windows

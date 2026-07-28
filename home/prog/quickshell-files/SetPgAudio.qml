@@ -31,16 +31,12 @@ Column {
         }
     }
 
+    // NO "bars" row. It was drawn, and it could never have worked: the meter is
+    // a STEREO one (one bucket per channel) and cava's stereo mode is mirrored,
+    // so 4 bars comes back [L-low, L-high, R-high, R-low] — a frequency split,
+    // not the channel levels this widget is. VuMeter.qml has the measurement.
     SetSection {
         title: "VU meter (bar)"
-        SetRow {
-            label: "bars"
-            SetSlider {
-                from: 1; to: 4; step: 1
-                value: page.d.vuBars
-                onMoved: (v) => { page.d.vuBars = v; SettingsStore.save(); }
-            }
-        }
         SetRow {
             label: "smoothing"
             desc: "cava noise reduction; higher = smoother, slower"

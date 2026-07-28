@@ -119,7 +119,7 @@ Column {
         }
         SetRow {
             label: "network interface"
-            desc: "auto picks the default route"
+            desc: "auto sums every interface except lo"
             SetTextField {
                 fieldWidth: 120
                 value: page.d.netInterface
