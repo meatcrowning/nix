@@ -728,6 +728,18 @@ containing a missing glyph falls back to another font for it and loses ~5px of
 ascent, clipping the whole line — which is why the media widget's empty-title
 placeholder is `"-"` and every "reading..." is three dots.
 
+**A PAIR of ASCII glyphs is not a pair of arrows. Draw one glyph and mirror
+it.** There is no triangle either (`▲ ▼ ▴ ▾`, like `↑ ↓`, are all absent), so an
+up/down affordance has to come out of ASCII — and `^` is not `v` upside down
+here: from the glyf table `v` is 1792 units tall sitting on the baseline while
+`^` is 1024 units hard against the ascender. In the media widget's 14px roll
+handle that put the caret's ink on rows 0-2, on top of the hover hairline and
+reading as *outside* the button, against rows 4-10 for the `v`. Both states are
+now the same `v` with a `Scale { yScale: -1 }` about its own centre. **Round the
+item's `y` when you do this** — an integer origin maps pixel centres onto pixel
+centres, so `Text.NativeRendering` stays crisp under the flip; a half-pixel
+origin antialiases it back into the mush `PixelText` exists to avoid.
+
 **That rule covers hardcoded UI strings. Text that comes from OUTSIDE — track
 tags, window titles, filenames, notification bodies, process names — cannot be
 written to suit the font, so it has to be mapped on the way in instead.**
