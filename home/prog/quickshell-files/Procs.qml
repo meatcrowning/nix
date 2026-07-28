@@ -14,7 +14,8 @@ import Quickshell.Io
 Singleton {
     id: root
 
-    // [{pid, name, cpu, mem, rss}] as produced, i.e. already busiest-first.
+    // [{pid, name, cpu, mem, rss, state, nice, mine}] as produced, i.e. already
+    // busiest-first. The last three feed the row's context menu, not the table.
     property var rows: []
     // Which column the user last clicked. Persisted rather than local, so it
     // survives both a panel reload and a logout — a heading the user chose is a
@@ -150,10 +151,16 @@ Singleton {
                     // Glyphs.px on the NAME only. It is display + filter text;
                     // the pid beside it is what kill() signals, and that stays
                     // exactly as the sampler reported it.
+                    // Fields past rss are APPENDED and optional: a table
+                    // restored from an older reload's stateJson has only five,
+                    // and the menu must degrade rather than throw on it.
                     out.push({ pid: f[0], name: Glyphs.px(f[1]),
                                cpu: parseFloat(f[2]) || 0,
                                mem: parseFloat(f[3]) || 0,
-                               rss: parseInt(f[4], 10) || 0 });
+                               rss: parseInt(f[4], 10) || 0,
+                               state: f.length > 5 ? f[5] : "?",
+                               nice: f.length > 6 ? (parseInt(f[6], 10) || 0) : 0,
+                               mine: f.length > 7 ? f[7] === "1" : true });
                 }
                 root.rows = out;
                 root.stateRev++;
@@ -169,14 +176,42 @@ Singleton {
         onTriggered: root.refresh()
     }
 
-    // SIGTERM by default: "click the [x]", not "shoot it". force=true is SIGKILL
-    // and is the right-click, so it can't be reached by a mis-click on a row
-    // whose position just shifted under the cursor.
-    function kill(pid, force) {
-        Quickshell.execDetached(["kill", force ? "-KILL" : "-TERM", String(pid)]);
+    // ---- what a row can be asked to do -----------------------------------
+    //
+    // Everything here is a fire-and-forget `execDetached`: there is no exit
+    // code and no stderr, so a signal the kernel refuses (EPERM on somebody
+    // else's process) is a perfect silent no-op. That is why the sampler
+    // reports `mine` and the menu refuses to offer these on a row we do not
+    // own — the check has to happen BEFORE the call, because nothing after it
+    // can tell success from failure.
+
+    // SIGTERM by default: "click the [x]", not "shoot it". force=true is
+    // SIGKILL, which the row offers only through the context menu — an
+    // unrecoverable action must not be one mis-timed click away on a table
+    // that re-sorts under the cursor every 2s.
+    function kill(pid, force) { signal(pid, force ? "KILL" : "TERM"); }
+
+    // SIGSTOP/SIGCONT are the interesting pair beyond ending a process: a
+    // runaway can be frozen and inspected rather than lost.
+    function signal(pid, sig) {
+        Quickshell.execDetached(["kill", "-" + sig, String(pid)]);
         // reflect it immediately rather than at the next poll
         refreshSoon.restart();
     }
+
+    // Niceness only ever goes UP without privilege, so this is one-way and the
+    // menu says so ("Lower Priority", never "restore"). renice is util-linux
+    // on both hosts, i.e. on the bare Fedora PATH book's panel has.
+    function renice(pid, n) {
+        Quickshell.execDetached(["renice", "-n", String(n), "-p", String(pid)]);
+        refreshSoon.restart();
+    }
+
+    // -n: wl-copy appends a newline to argv content otherwise, and a pid pasted
+    // into a shell should not carry one. `--` so a process name that begins
+    // with a dash is text, not options.
+    function copyText(s) { Quickshell.execDetached(["wl-copy", "-n", "--", String(s)]); }
+
     Timer { id: refreshSoon; interval: 300; onTriggered: root.refresh() }
 
     function fmtMem(kb) {

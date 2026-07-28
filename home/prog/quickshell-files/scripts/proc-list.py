@@ -3,7 +3,15 @@
 
 One line per running process, busiest first:
 
-    pid|name|cpu%|mem%|rss_kb
+    pid|name|cpu%|mem%|rss_kb|state|nice|mine
+
+`state` is /proc/pid/stat's single-letter state ('T' is stopped, i.e. suspended),
+`nice` its nice value, and `mine` 1 when the process is owned by the user running
+this script. All three exist for the row's context menu, which must not offer an
+action that would silently do nothing: signalling or renicing somebody else's
+process fails with EPERM and `execDetached` has no exit code to notice it with.
+Fields are APPENDED, never reordered — Procs.qml indexes them positionally and
+tolerates the older five-field shape carried across a panel reload.
 
 CPU% is INSTANTANEOUS — the share of one core's time used between two samples
 taken `INTERVAL` apart — not `ps`'s %cpu, which is the average over the whole
@@ -54,7 +62,7 @@ def pretty_name(pid, comm):
 
 
 def sample():
-    """{pid: (ticks, comm, rss_pages)} for every process we can read."""
+    """{pid: (ticks, comm, rss_pages, state, nice)} for every process we can read."""
     out = {}
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
@@ -80,9 +88,11 @@ def sample():
             # after the state field, rest[0] is field 3, so field N is rest[N-3]
             utime, stime = int(rest[11]), int(rest[12])
             rss = int(rest[21])
+            nice = int(rest[16])
         except ValueError:
             continue
-        out[pid] = (utime + stime, comm, rss)
+        state = rest[0].decode("ascii", "replace")[:1] or "?"
+        out[pid] = (utime + stime, comm, rss, state, nice)
     return out
 
 
@@ -112,8 +122,9 @@ def main():
     elapsed = max(1e-3, time.monotonic() - t0)
 
     mem_kb = total_mem_kb()
+    uid = os.getuid()
     rows = []
-    for pid, (ticks, comm, rss) in b.items():
+    for pid, (ticks, comm, rss, state, nice) in b.items():
         prev = a.get(pid)
         # A process that appeared during the window has no baseline; report 0
         # rather than charging it for every tick since it was born.
@@ -124,13 +135,19 @@ def main():
         # add noise to the list.
         if rss_kb == 0:
             continue
-        rows.append((cpu, pid, comm, mem, rss_kb))
+        rows.append((cpu, pid, comm, mem, rss_kb, state, nice))
 
     rows.sort(key=lambda r: (-r[0], -r[3]))
-    # Resolve names only for the rows we are actually going to print — that is
-    # one extra open() each for 40 processes instead of ~400.
-    for cpu, pid, comm, mem, rss_kb in rows[:count]:
-        print("%s|%s|%.1f|%.1f|%d" % (pid, pretty_name(pid, comm), cpu, mem, rss_kb))
+    # Resolve names and ownership only for the rows we are actually going to
+    # print — that is one extra open() and one stat() each for 40 processes
+    # instead of ~400.
+    for cpu, pid, comm, mem, rss_kb, state, nice in rows[:count]:
+        try:
+            mine = 1 if os.stat("/proc/" + pid).st_uid == uid else 0
+        except OSError:
+            continue    # it exited; a row we cannot own is not worth a menu
+        print("%s|%s|%.1f|%.1f|%d|%s|%d|%d"
+              % (pid, pretty_name(pid, comm), cpu, mem, rss_kb, state, nice, mine))
 
 
 if __name__ == "__main__":

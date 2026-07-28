@@ -7,7 +7,9 @@ import Quickshell
 // Three sections, top to bottom: a 4x2 block of square chart cards (cpu, gpu,
 // mem, net, load, vram, swap, fan — see `noGpu` for the psi/io/batt set book
 // puts in the gpu/vram/fan slots instead), a chassis-fan bar, and the process table
-// taking everything that is left. The table is the point of the widget, so it
+// taking everything that is left. A row's [x] ends it politely; right-clicking
+// anywhere in a row opens ProcMenu.qml, which is where everything else a
+// process can be asked to do lives. The table is the point of the widget, so it
 // gets the slack — the cards are SQUARE, i.e. their height follows the panel
 // width, and a taller tile turns into more visible processes rather than
 // letterboxed charts.
@@ -46,6 +48,10 @@ Item {
     onActiveChanged: {
         Procs.watch(root, active);
         if (!active) {
+            // The menu is a separate popup surface: nothing unmaps it when the
+            // dock closes, so it would be left floating over the wallpaper
+            // pointing at a table that is no longer on screen.
+            procMenu.close();
             filterInput.focus = false;
             Procs.filterFocus = false;
             Procs.filterHover = false;
@@ -54,6 +60,7 @@ Item {
     }
     Component.onCompleted: Procs.watch(root, active)
     Component.onDestruction: {
+        procMenu.close();
         Procs.watch(root, false);
         Procs.filterFocus = false;
         Procs.filterLatch = false;
@@ -575,11 +582,16 @@ Item {
                 anchors.fill: parent
                 color: rowMa.containsMouse ? Theme.highlight : "transparent"
             }
+            // Hover highlight, and the row's context menu. Only the RIGHT
+            // button is accepted: a left press must still fall through to
+            // whatever is under it (the [x] cell sits above this in the
+            // stacking order and keeps its own clicks either way).
             MouseArea {
                 id: rowMa
                 anchors.fill: parent
                 hoverEnabled: true
-                acceptedButtons: Qt.NoButton
+                acceptedButtons: Qt.RightButton
+                onClicked: procMenu.openFor(row, row.modelData)
             }
 
             Row {
@@ -624,9 +636,17 @@ Item {
 
                 // End it. Left click is SIGTERM — the same "click the [x]"
                 // courtesy hyprvtb's close button extends, so the process gets to
-                // save. SIGKILL is deliberately on the RIGHT button: rows re-sort
-                // under the cursor every 2s, and an unrecoverable action must not
-                // be one mis-timed left click away.
+                // save.
+                //
+                // SIGKILL used to be the RIGHT button here, so that an
+                // unrecoverable action was never one mis-timed left click away
+                // on a table that re-sorts under the cursor every 2s. It now
+                // lives in the row's context menu, which keeps that guarantee
+                // (it is still two deliberate acts) and removes a worse trap:
+                // once right-click means "menu" everywhere else in the row, a
+                // right-click that landed a few pixels off would have SIGKILLed
+                // whatever had just sorted under the pointer. Right-click here
+                // opens the same menu as the rest of the row.
                 Item {
                     width: root.colKill
                     height: 15
@@ -642,8 +662,12 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onClicked: (mouse) => Procs.kill(row.modelData.pid,
-                                                        mouse.button === Qt.RightButton)
+                        onClicked: (mouse) => {
+                            if (mouse.button === Qt.RightButton)
+                                procMenu.openFor(row, row.modelData);
+                            else
+                                Procs.kill(row.modelData.pid, false);
+                        }
                     }
                 }
             }
@@ -655,5 +679,14 @@ Item {
             text: "reading..."
             color: Theme.textDim
         }
+    }
+
+    // ONE menu for the whole table, anchored against this root rather than a
+    // row — the list recycles delegates and re-sorts every 2s, so a per-row
+    // instance would be destroyed or silently re-pointed while it was open.
+    // See ProcMenu.qml.
+    ProcMenu {
+        id: procMenu
+        host: root
     }
 }
