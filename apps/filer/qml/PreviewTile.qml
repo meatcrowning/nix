@@ -67,14 +67,22 @@ Rectangle {
         smooth: false
     }
 
-    // placeholder glyph: a previewable kind whose real preview isn't wired yet
-    // (▢), an image still decoding (…), or one that failed to decode — e.g. a
-    // truncated/misnamed download (✕).
+    // Placeholder glyph: a previewable kind whose real preview isn't wired yet
+    // (a filled block), an image still decoding (...), or one that failed to
+    // decode — e.g. a truncated/misnamed download (x).
+    //
+    // ALL THREE MUST BE DRAWABLE BY THE PIXEL FONT (DESIGN.md §2.3). This drew
+    // U+25A2 / U+2715 / U+2026, none of which More Perfect DOS VGA has — checked
+    // with QRawFont.glyphIndexesForString, all three return glyph 0 — so every
+    // not-ready and every failed tile in the grid took a fallback font's taller
+    // ascent and clipped. U+25A0 IS in the font (it is what the dot-matrix clock
+    // is built from, §3.4); the other two use the same ASCII forms Glyphs.px()
+    // maps them to.
     PixelText {
         anchors.centerIn: parent
         visible: tile.entry.kind !== "image" || thumb.status !== Image.Ready
-        text: tile.entry.kind !== "image" ? "▢"
-            : thumb.status === Image.Error ? "✕" : "…"
+        text: tile.entry.kind !== "image" ? "■"
+            : thumb.status === Image.Error ? "x" : "..."
         color: (tile.entry.kind === "image" && thumb.status === Image.Error)
                ? Theme.crit : (tile.winActive ? Theme.textDim : Theme.inactive)
     }
