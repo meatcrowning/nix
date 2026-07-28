@@ -78,6 +78,9 @@ def build(app, spec, start_dir):
     ctx.setContextProperty("startSortAsc", True)
     ctx.setContextProperty("startShowHidden", True)
     ctx.setContextProperty("startGridPanelH", 200)
+    ctx.setContextProperty("startSplit", False)
+    ctx.setContextProperty("startSplitDir", "")
+    ctx.setContextProperty("startSplitRatio", 0.5)
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(FILER, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
