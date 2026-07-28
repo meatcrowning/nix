@@ -610,10 +610,35 @@ Item {
             }
         }
         PixelText {
-            anchors.centerIn: parent
-            // "v" opens (it comes down), "^" closes. Dim until hovered, so the
-            // strip is a hint rather than a permanent chevron.
-            text: Media.queueOpen ? "^" : "v"
+            id: chevron
+            // ONE glyph, flipped — never "^" for the open state. More Perfect
+            // DOS VGA has no arrow or triangle at all (checked against the
+            // cmap: U+2191/2193, U+25B2/25BC/25B4/25BE are all absent), so the
+            // pair has to come out of ASCII, and "^" is not "v" upside down in
+            // this font: measured from the glyf table, "v" is 1792 units tall
+            // sitting on the baseline while "^" is 1024 units hard against the
+            // ascender. Rendered into this 14px strip that put the caret's ink
+            // on rows 0-2 — on top of the hover hairline and effectively
+            // outside the button — against rows 4-10 for the "v". So the open
+            // state is the SAME "v", mirrored about its own centre: identical
+            // shape, identical band, and it reads as one control.
+            //
+            // The flip is vertical only and the item's y is ROUNDED, which is
+            // what keeps NativeRendering crisp: an integer origin maps pixel
+            // centres onto pixel centres, so the mirrored glyph rasterises to
+            // pure Theme colour with no antialiased edge (verified offscreen —
+            // rows 4-10, one shade). The rounding also drops a stray pixel the
+            // old `anchors.centerIn` produced from its half-pixel y (15px of
+            // line in a 14px strip).
+            text: "v"
+            x: Math.round((parent.width - implicitWidth) / 2)
+            y: Math.round((parent.height - implicitHeight) / 2)
+            transform: Scale {
+                yScale: Media.queueOpen ? -1 : 1
+                origin.y: chevron.implicitHeight / 2
+            }
+            // Dim until hovered, so the strip is a hint rather than a permanent
+            // chevron.
             color: hma.containsMouse ? Theme.accent : Theme.textDim
             opacity: hma.containsMouse || Media.queueOpen ? 1 : 0.55
         }
