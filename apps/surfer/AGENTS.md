@@ -184,4 +184,6 @@ Three things this rests on:
 
 It never deletes — clearing cookies for real means clearing on both. Use `top`,
 never `top.local`, in anything nix-built — nix binaries on book can't resolve
-mDNS, while plain DNS gives `top` → 192.168.40.202.
+mDNS, while plain DNS resolves `top` to its LAN address. (The address itself
+is not written down here on purpose — this repo is public; run `getent hosts
+top` if you need it.)

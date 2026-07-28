@@ -69,7 +69,8 @@ import tempfile
 DEFAULT_HOST = os.environ.get("SURFER_SYNC_HOST", "top")
 
 # NB `top`, not `top.local`: nix-built binaries on book cannot resolve mDNS
-# (.local) at all, while plain DNS gives top.lan -> 192.168.40.202.
+# (.local) at all, while plain DNS resolves top.lan fine. (No address written
+# down: public repo. `getent hosts top` if you need the number.)
 
 # ControlMaster: a `pull` is three separate ssh invocations (is-running, schema,
 # dump) and a `push` is five, each otherwise paying its own TCP + key-exchange +
