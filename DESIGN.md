@@ -1388,29 +1388,31 @@ hyprvtb. See [Open questions](#open-questions).
   numbers converge after an hour isn't one". Memory is `MemAvailable`, not
   `MemFree`. A battery graph has a **fixed 0-100 axis** — one resting at 96%
   autoscaled against its own peak reads as full-to-empty.
-- **A summary must exclude readings that CANNOT VARY — and the test is
-  history, not level.** [his] *"exclude the pump that one i cannot change even
-  via the mobo settings and im pretty sure i cant even hear it anyway"*. The fan
-  card's readout is "the fastest fan going"; the pump sits at 255/255 duty
-  permanently, is not adjustable in the BIOS and is inaudible, so it pinned that
-  number at 100% for ever and answered nothing. A constant is not a reading.
+- **A readout must exclude values that CANNOT VARY — and the test is history,
+  not level.** [his] *"exclude the pump that one i cannot change even via the
+  mobo settings and im pretty sure i cant even hear it anyway"*, then *"i also
+  meant just completely remove the pump fan from the widget. i dont need to see
+  it at all"*. A constant is not a reading, and a reading he cannot act on is
+  not worth the pixels — so the fan card does not draw that fan at all.
 
   **The obvious rule is the wrong one.** "Exclude whatever is at maximum" would
-  hide a chassis fan that has ramped to 100% in a thermal event — the exact
-  moment the number matters most. And "exclude whatever is not moving" hides
-  almost everything: measured at idle, all four chassis duties here sit rock
-  steady across a 20s sample. So it takes **both** conditions — at maximum AND
-  never once observed to move — with the "has moved" flag STICKY and carried
-  across a reload. A fan that has ever answered the machine keeps its place for
-  good, including while pinned under load. Only a fan that has been flat out for
-  its whole observed life drops out.
+  delete a chassis fan that has ramped to 100% in a thermal event — the exact
+  moment it matters most. And "exclude whatever is not moving" hides almost
+  everything: measured at idle, all four chassis duties here sit rock steady
+  across a 20s sample. So it takes **both** conditions — at maximum AND never
+  once observed to move — with the "has moved" flag STICKY and carried across a
+  reload. Anything that has ever answered the machine is drawn for good,
+  including while pinned under load.
 
-  Three corollaries. **Nothing is hidden** — the excluded fan keeps its line and
-  its exact number, and its row says `fixed`, or the readout looks like it is
-  lying about the 100% listed above it (§3.5, say it twice). **Nothing is judged
-  before it has been watched**, so a fresh panel excludes nothing. And **the
-  rule may never empty the summary**: if it would exclude everything, it falls
-  back to everything, because summarising a constant beats summarising nothing.
+  Three corollaries, and they get *stronger* as the consequence grows from "a
+  different summary" to "not on screen at all". **Nothing is judged before it
+  has been watched**, so a fresh widget hides nothing. **The rule may never
+  empty the widget**: if it would hide everything, it hides nothing, because a
+  display full of constants says more than a blank one. And **whatever you hide,
+  surface its FAILURE** — hiding the pump removed the only place a pump failure
+  could show, so a fan that stops reporting is re-emitted at 0 rpm and marked,
+  where the hide rule can no longer reach it. If a thing is too boring to show
+  while it works, it is exactly the thing nobody will notice has broken.
 - **Alternate faces of one widget share their behavioural details** — both
   digital clock faces blink the colon on the same beat, in the same unlit
   colour, so cycling faces changes the look and never the semantics.

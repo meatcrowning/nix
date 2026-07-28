@@ -161,15 +161,15 @@ Singleton {
             // because the dock GRID reads it too — the drawer's rows come off
             // the forecast tile (see DockGrid).
             property bool   mediaQueueOpen: false
-            // Put the FIXED-DUTY fans back in the fan card's readout. Off by
-            // default: this machine's pump sits at 255/255 for ever, is not
-            // adjustable in the BIOS and is inaudible, so it pinned the readout
-            // at 100% and told you nothing. See Fans.qml for the rule — it
-            // excludes only fans that are at full AND have never once moved, so
-            // a chassis fan ramping up under load is never hidden by it. There
-            // is no Settings-window control for this; it is a hand-editable
-            // escape hatch for a board where the rule guesses wrong.
-            property bool   fanHeadlineFixed: false
+            // Draw the FIXED-DUTY fans in the fan card anyway. Off by default:
+            // this machine's pump sits at 255/255 for ever, is not adjustable in
+            // the BIOS and is inaudible, so [his] "i dont need to see it at
+            // all". See Fans.qml for the rule — it hides only fans that are at
+            // full AND have never once moved, so a chassis fan ramping up under
+            // load is never hidden by it. There is no Settings-window control;
+            // it is a hand-editable escape hatch for a board where the rule
+            // guesses wrong.
+            property bool   fanShowFixed: false
             property int    fanStepMs: 300
             // which widgets are pinned at login (subset of the known set)
             property var    defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"]
@@ -290,7 +290,7 @@ Singleton {
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false,
-        fanHeadlineFixed: false,
+        fanShowFixed: false,
         fanStepMs: 300, defaultWidgets: ["clock", "weather", "disk", "media", "cpu", "gpu"],
         monPollSec: 2, cpuWarn: 75, cpuCrit: 90, tempWarn: 65, tempCrit: 80, diskWarn: 75,
         diskCrit: 90, batteryWarn: 30, batteryCrit: 15, netInterface: "auto", rootMount: "/",

@@ -785,20 +785,30 @@ you are looking at.
   So a nonzero pwm over a dead tachometer is an *empty header* here, not a
   fault, and the first rule showed eight fans on a machine with four. sysfs
   offers nothing that tells the two apart.
-- **The PUMP is excluded from the readout, and the test is history, not level.**
+- **The PUMP is not drawn AT ALL, and the test is history, not level.**
   [his] *"exclude the pump that one i cannot change even via the mobo settings
-  and im pretty sure i cant even hear it anyway"* — it sits at 255/255 for ever,
-  so it pinned the readout at 100% and said nothing. `Fans.fixed()` excludes a
-  fan only when it is at maximum duty **AND** has never once been seen to move
-  (`SysInfo.fanVaried`, sticky and carried across a reload). **Both halves are
-  load-bearing**: "at maximum" alone would hide a chassis fan ramped to 100% in
-  a thermal event, which is the moment the readout matters most; "not moving"
-  alone hides everything, since at idle all four duties here are rock steady
-  across a 20s sample. The excluded fan keeps its line, its tooltip row and its
-  exact RPM, and the row is marked `fixed`. Nothing is judged under
-  `settleSamples` (30 = 60s), and if the rule would exclude every fan it falls
-  back to all of them. Override by hand with `fanHeadlineFixed` in
+  and im pretty sure i cant even hear it anyway"*, then *"i also meant just
+  completely remove the pump fan from the widget. i dont need to see it at
+  all"*. So `Fans.fixed()` governs VISIBILITY: an excluded fan has no line, no
+  tooltip row and no part in the readout. It hides a fan only when it is at
+  maximum duty **AND** has never once been seen to move (`SysInfo.fanVaried`,
+  sticky and carried across a reload). **Both halves are load-bearing**: "at
+  maximum" alone would delete a chassis fan ramped to 100% in a thermal event,
+  which is the moment it matters most; "not moving" alone hides everything,
+  since at idle all four duties here are rock steady across a 20s sample.
+- **The two guards matter MORE now the consequence is a blank card.** Nothing is
+  judged under `settleSamples` (30 = 60s), so a fresh panel hides nothing; and
+  if the rule would hide every fan it draws them all, because an empty card says
+  less than a card full of constants. Override by hand with `fanShowFixed` in
   `settings.json`; there is no Settings-window control.
+- **Hiding the pump means a pump failure has no indicator — so a fan that STOPS
+  comes back.** `sysinfo.sh` lists a fan only while it turns, so a dead fan would
+  simply vanish from the line and, with the pump already invisible, from the
+  desktop entirely. `SysInfo._setFans` therefore re-emits any name in
+  `fanPctHist` that stops reporting as an `rpm: 0, stopped: true` row. At 0 rpm
+  it is nowhere near maximum duty, so the hide rule cannot catch it: it is always
+  drawn and the tooltip marks it `STOPPED`. A fan deliberately unplugged reads
+  STOPPED too, which is the honest reading — it IS absent.
 - **The lines are a BRIGHTNESS LADDER, not different colours** (`Fans.shade`).
   The wal palette is one hue by construction, so there are no distinguishable
   hues to hand out — see `DESIGN.md` 3.1/3.3. It stays legible to ~5-6 fans;

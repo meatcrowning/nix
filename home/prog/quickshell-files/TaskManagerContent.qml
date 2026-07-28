@@ -76,7 +76,7 @@ Item {
         rows: SysInfo.fans
         hist: SysInfo.fanPctHist
         varied: SysInfo.fanVaried
-        includeFixed: SettingsStore.d.fanHeadlineFixed
+        showFixed: SettingsStore.d.fanShowFixed
     }
 
     function fmtUptime(s) {
@@ -338,9 +338,10 @@ Item {
                  + "(commanded pwm duty for the chassis fans), not of a\n"
                  + "maximum rpm, which sysfs does not publish\n\n"
                  + fans.detail
-                 + "\n\n\"fixed\" = pinned at full and never once seen to move,\n"
-                 + "so it says nothing about load and is left out of the\n"
-                 + "readout. still drawn, still counted, still exact above\n"
+                 + "\n\na fan pinned at full that has never once been seen to\n"
+                 + "move is not shown at all - it says nothing about load.\n"
+                 + "a fan that STOPS reappears, marked, since that is the\n"
+                 + "one thing hiding it would cost you\n"
                  + "\nscroll: screen brightness"
             value: fans.headline
             sub: fans.subline
