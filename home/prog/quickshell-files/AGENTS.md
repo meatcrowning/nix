@@ -886,6 +886,56 @@ minimized ones, parked off-screen deliberately.
 
 ---
 
+## A toast's OWN `expireTimeout` outranks the panel's default
+
+`notifTimeoutMs` (5 s) is the *server default*, i.e. what a notification gets
+when it sends `expire_timeout -1`. `NotificationCard.qml` must honour the two
+cases where the sender said otherwise, per the freedesktop spec: **`0` means
+never expire** and **`>0` is an explicit lifetime in ms**. It did not, and that
+is a bug with a compounding failure mode rather than a cosmetic one.
+
+**A progress toast is ONE notification morphed in place** — `notify-send -p` to
+learn its id, then `-r <id>` on every update (surfer's downloads,
+`filer/videoconv.py`'s compress). Quickshell's server reuses the object for a
+known `replaces_id` and, per `server.cpp`, does **not** re-emit `notification`
+— so no new card, no second sound. But the moment our timer expires it, that id
+leaves `idMap`, and the next `-r` names nothing: `Notify` falls through to the
+`new Notification` branch and opens a **brand new toast, with its own sound**.
+Every whole percent. The user's report was "longer downloads just trigger the
+toast over and over instead of staying on the screen until they are finished."
+
+Three halves, all of which have to hold:
+
+- **The card honours `expireTimeout`** — `persistent` (critical *or*
+  `expireTimeout === 0`) suppresses the timer; otherwise the interval is the
+  notification's own value, falling back to `Notifications.timeoutMs`.
+- **A replacement RESTARTS the countdown.** The card is not rebuilt, so an
+  ordinary toast updated in place would otherwise still die on the original
+  arrival's clock. `Connections` on `summaryChanged`/`bodyChanged` restarts it.
+- **`maxVisible` eviction spares `expireTimeout === 0`**, exactly as it spares
+  critical. Evicting a live progress toast puts its sender straight back in the
+  loop above. The `victim || vals[0]` fallback still bounds the stack.
+
+**Senders: a toast you intend to keep updating must ask for it** — `-t 0` on
+every progress update, and the *default* timeout on the completion/failure one,
+which has nothing left to update. Both app-side callers do this now.
+
+Measured, not reasoned — two `notify-send -p` lanes 8 s apart (past the 5 s
+default), reading the returned id:
+
+```
+control (default timeout):  first=36  after 8s=37   <- NEW TOAST, the bug
+persist (-t 0):             first=38  after 8s=38   <- same toast, replaced
+```
+
+That is the regression test: same id across a gap longer than `notifTimeoutMs`.
+Close the persistent one afterwards (`busctl --user call
+org.freedesktop.Notifications /org/freedesktop/Notifications
+org.freedesktop.Notifications CloseNotification u <id>`) — by construction it
+will not go away on its own. `gdbus` is not installed here; `busctl` is.
+
+---
+
 ## The bar dims itself for the sudo modal (`Askpass.qml`)
 
 Hyprland's `dim_around` — the `askpass-dim` window rule that gives the `sudo -A`
