@@ -5,7 +5,7 @@
 
 Snapshots the live database into a temp dir (read-only, safe while the player
 is running), diverges the two copies the way two machines would, merges A into
-B, and asserts every rule in the merge table of docs/air-library-share.md.
+B, and asserts every rule in the merge table of docs/agents/air-library-share.md.
 Touches nothing outside the temp dir. This is A5.1 of that plan.
 """
 import shutil, sqlite3, sys, tempfile, time

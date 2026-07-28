@@ -69,7 +69,7 @@ from mutagen.id3 import ID3, TXXX  # noqa: E402
 from mutagen.mp4 import MP4, MP4FreeForm  # noqa: E402
 
 # The library root. Overridable ONLY so the share can be tested against a
-# second mount of itself without a second machine (docs/air-library-share.md,
+# second mount of itself without a second machine (docs/agents/air-library-share.md,
 # A5.2) — air deliberately mounts the SMB share at this same absolute path, so
 # that every tracks.path row from top's database is valid there verbatim.
 LIBRARY_ROOT = Path(os.environ.get("PLAYER_LIBRARY_ROOT", "/run/media/lam/SSD/aud"))
@@ -576,7 +576,7 @@ CREATE INDEX IF NOT EXISTS i_t_added  ON tracks(added_at);
 # cache and let the next scan re-parse the whole library. A column the APP
 # writes must NOT set it: this used to be implicit ("any tracks column"), and
 # left that way, adding meta_mtime would have made air's very first launch
-# re-read 11k files across a 208 GB SMB share (docs/air-library-share.md, A3).
+# re-read 11k files across a 208 GB SMB share (docs/agents/air-library-share.md, A3).
 MIGRATIONS = [
     ("tracks", "rg_track_gain", "REAL", True),
     ("tracks", "rg_track_peak", "REAL", True),

@@ -6,7 +6,7 @@
 #
 #   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon
 #     (no Honeykrisp GBM/EGL driver — same root cause as filer/hyprvtb, see
-#     docs/air-port-nextsteps.md), so exec the SYSTEM python3 with Fedora's dnf-installed
+#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with Fedora's dnf-installed
 #     python3-pyside6 (which ships QtWebEngine and runs on Asahi's Mesa).
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the
 #     Qt env so QtWebEngine finds its resources.

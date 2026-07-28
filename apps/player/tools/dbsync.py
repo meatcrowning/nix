@@ -9,7 +9,7 @@
 `pull` is a no-op when top's database is exactly where it was at the last pull
 (see `stamp` below) — add --force to transfer anyway.
 
-Why this exists: air plays top's library over SMB (docs/air-library-share.md)
+Why this exists: air plays top's library over SMB (docs/agents/air-library-share.md)
 and the two machines each keep their own copy of the database. The audio and
 the tags are shared; the *metadata the app writes* — play counts, ratings,
 favourites, cached lyrics — is not, so it has to be reconciled.

@@ -161,7 +161,7 @@ snapshot with sqlite's `backup`, never `cp` (WAL); and `MIGRATIONS` entries are
 clears the mtime cache and forces an 11k-file re-read, which over SMB is brutal,
 so a column the APP writes (`meta_mtime`) must set it False.
 
-Full plan, runbook and STATUS: `docs/air-library-share.md`. Part B (on `air`)
+Full plan, runbook and STATUS: `docs/agents/air-library-share.md`. Part B (on `air`)
 has not been run.
 
 ## Spotify export → what's missing locally (2026-07-25)

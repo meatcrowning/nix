@@ -26,7 +26,7 @@ let
       # push back. That lives in the repo as live source (player/tools/
       # air-launch.sh) like everything else here, so it can be fixed on air
       # without a home-manager rebuild — and it degrades to a plain offline
-      # launch when top is unreachable. See docs/air-library-share.md.
+      # launch when top is unreachable. See docs/agents/air-library-share.md.
       pkgs.writeShellScriptBin "player" ''
         exec /home/lam/nix/apps/player/tools/air-launch.sh "$@"
       ''
