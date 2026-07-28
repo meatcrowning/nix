@@ -430,9 +430,31 @@ Singleton {
     }
 
     // ---- spectrum feed (cava, only while the widget is on screen) --------
+    //
+    // ...and only while something is actually PLAYING. `live` alone left cava
+    // running at 60fps over silence whenever the widget was on screen, which is
+    // most of the time; see SysInfo.audioActive and docs/perf-cpu-hotspots.md
+    // for what that cost. Both conditions in one place so the three lifecycle
+    // sites below cannot drift apart.
+    readonly property bool cavaWanted: root.live && SysInfo.audioActive
+
+    Connections {
+        target: SysInfo
+        function onAudioActiveChanged() {
+            if (SysInfo.audioActive) return;
+            // Flatten rather than freeze: the last frame before cava stopped
+            // would otherwise sit on screen looking like live signal.
+            const n = SettingsStore.d.mediaSpectrumBars;
+            root.spectrumLevels   = new Array(n).fill(0);
+            root.spectrumPeaks    = new Array(n).fill(0);
+            root.spectrumPeakVel  = new Array(n).fill(0);
+            root.spectrumPeakHold = new Array(n).fill(0);
+        }
+    }
+
     Process {
         id: cavaProc
-        running: root.live
+        running: root.cavaWanted
         // see VuMeter.qml: prepend ~/.nix-profile/bin so the session's bare PATH
         // can find the nix-installed cava, else the spectrum never spawns (and
         // /run/current-system/sw/bin for pw-dump, used below). cava has no CLI
@@ -493,7 +515,7 @@ Singleton {
                 // re-arm the live-bound lifecycle: evaluates true (someone is
                 // watching), so cava restarts now with the patched conf, and a
                 // later close still stops it (a plain `= true` would break that).
-                cavaProc.running = Qt.binding(() => root.live);
+                cavaProc.running = Qt.binding(() => root.cavaWanted);
             } else {
                 cavaRestart.restart();
             }
@@ -502,7 +524,7 @@ Singleton {
     Timer {
         id: cavaRestart
         interval: 2000
-        onTriggered: if (root.live) cavaProc.running = Qt.binding(() => root.live)
+        onTriggered: if (root.cavaWanted) cavaProc.running = Qt.binding(() => root.cavaWanted)
     }
 
     // cava's bucket count is fixed at spawn, so restart it when

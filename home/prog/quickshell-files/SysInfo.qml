@@ -192,9 +192,64 @@ Singleton {
     // there was one cava process per screen — two of the three running on this
     // machine were the same VU meter, the second belonging to a leftover sandbox
     // monitor. One reader, one process, however many bars draw it.
+    // ---- is anything actually playing? ----
+    // Both cava instances are gated on this. Unconditional, they cost ~19.5% of
+    // a core with NOTHING PLAYING (cava 11.4%, plus double the panel's own CPU
+    // animating bars at 60fps and triple wireplumber's serving two monitor
+    // captures) — measured on book, see docs/perf-cpu-hotspots.md. That is a
+    // laptop's battery spent drawing silence.
+    //
+    // Event-driven, not polled: `pactl subscribe` sits idle until PipeWire says
+    // something changed. The 15s re-check below is only a backstop for a missed
+    // event, and costs one script run.
+    //
+    // DEFAULTS TRUE and the script fails open, so any breakage here restores
+    // exactly the old behaviour rather than leaving the meters dead.
+    property bool audioActive: true
+
+    Process {
+        id: audioSub
+        running: true
+        command: ["sh", "-c", NixPath.sh + "exec pactl subscribe"]
+        stdout: SplitParser {
+            // "Event 'new' on sink-input #93" etc. Only playback matters.
+            onRead: data => { if (data.indexOf("sink-input") >= 0) audioDebounce.restart(); }
+        }
+        onExited: audioSubRestart.restart()
+    }
+    // pactl emits a burst per stream change; one check after it settles.
+    Timer { id: audioDebounce; interval: 120; onTriggered: audioCheck.running = true }
+    Timer { id: audioSubRestart; interval: 2000; onTriggered: audioSub.running = true }
+    Timer {
+        interval: 15000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: audioCheck.running = true
+    }
+
+    Process {
+        id: audioCheck
+        command: ["sh", "-c",
+            NixPath.sh
+            + "exec python3 \"$HOME/.config/quickshell/scripts/audio-active.py\""]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const on = this.text.trim() === "1";
+                if (on === root.audioActive) return;
+                root.audioActive = on;
+                // Zero the meter rather than leaving the last reading frozen on
+                // screen: a stale bar is indistinguishable from a live one, and
+                // nothing here may show a value it isn't measuring
+                // (docs/DESIGN.md — a drawn control tells the truth).
+                if (!on) { root.vuL = 0; root.vuR = 0; }
+            }
+        }
+    }
+
     Process {
         id: cavaVu
-        running: true
+        running: root.audioActive
         // quickshell is launched from the Fedora session with a bare PATH that
         // omits ~/.nix-profile/bin, where cava (a nix pkg) lives — so widen it
         // or every spawn dies with "cava: not found" and the bars go dead.
@@ -228,7 +283,12 @@ Singleton {
     Timer {
         id: cavaVuRestart
         interval: 2000
-        onTriggered: cavaVu.running = true
+        // Restore the BINDING, not a bare `true`: assigning true would break
+        // `running: root.audioActive` for good, and cava would then never stop
+        // again when playback ends — the gate would silently undo itself after
+        // the first respawn. Harmless when audio has since stopped: the binding
+        // re-evaluates to false and it stays down.
+        onTriggered: cavaVu.running = Qt.binding(function () { return root.audioActive; })
     }
 
     // throughput history for the sparkline (bytes/s totals)

@@ -518,8 +518,28 @@ Three rules, all of which exist because there are two live copies:
   screen — two of the three running on this machine were the same meter, the
   second belonging to a leftover sandbox monitor. The levels were already in the
   singleton for reload continuity; the reader belongs there with them. Check with
-  `pgrep -a cava`: exactly two, ever — the VU and the media spectrum — however
-  many monitors are attached.
+  `pgrep -a cava`: **two while audio is playing and ZERO while it is not**, ever
+  — the VU and the media spectrum — however many monitors are attached.
+- **Both cavas are gated on audio actually playing** (`SysInfo.audioActive`,
+  `scripts/audio-active.py`). Unconditional they cost **~19.5% of a core
+  continuously with nothing playing** — 11.4% themselves, plus they doubled the
+  panel's own CPU animating bars at 60fps and multiplied wireplumber's by ~40x
+  serving two monitor captures. Measured before and after on book: 36.2% -> 15.5%
+  (`docs/perf-cpu-hotspots.md`). On a laptop that is battery spent drawing
+  silence.
+  - **The obvious test is always true here — do not "simplify" it back.** Any
+    un-corked sink-input exists permanently, because EasyEffects holds one for
+    its convolver output (`effect_output.*`). Apps play into `easyeffects_sink`,
+    so the effect chain's own nodes must be excluded before counting. A gate
+    written the naive way never fires and looks correct.
+  - **It is event-driven** (`pactl subscribe`), not polled; the 15s re-check is
+    only a backstop for a missed event.
+  - **The lifecycle sites use `Qt.binding`, never a bare `= true`.** Assigning
+    true from the crash-retry timer would break `running: audioActive` for good
+    and cava would never stop again — the gate silently undoing itself after the
+    first respawn.
+  - **Stopping zeroes the levels** rather than leaving the last frame frozen: a
+    stale bar is indistinguishable from a live one.
 - **Consumers register with `watch(obj, on)`, which is a SET, not a counter.**
   Re-registering is a no-op, so a re-evaluated binding or a reload restore cannot
   leak a reference and leave the scripts running against nobody.
