@@ -33,6 +33,15 @@
 # An interface that doesn't exist yields 0|0 rather than an error, which the
 # panel already draws as an idle link; a mount that doesn't exist falls back to
 # / rather than emitting a short line the parser would drop wholesale.
+# Read the first line of a file into $_v WITHOUT FORKING. `$(cat f)` costs a
+# fork plus an exec -- measured on book, 25 of them are 21ms against 2.5ms for
+# `read`, and this script runs every 2s (monPollSec), so its 23 single-file
+# sysfs reads were ~19ms of a 67ms run, forever. Command substitution is what
+# forks, not `cat`, so the value has to come back in a variable rather than on
+# stdout. Always defines $_v (empty when the file is missing or unreadable),
+# which is what `$(cat ... 2>/dev/null)` did.
+rd() { _v=''; [ -r "$1" ] && IFS= read -r _v < "$1" 2>/dev/null; :; }
+
 MOUNT="${1:-/}"
 IFACE="${2:-auto}"
 [ -d "$MOUNT" ] || MOUNT=/
@@ -62,12 +71,12 @@ cpu=$(awk '/^cpu /{idle=$5+$6; total=0; for (i=2;i<=8;i++) total+=$i; printf "%d
 # across boots (driver load order dependent).
 cputemp=-1
 for dir in /sys/class/hwmon/hwmon*/; do
-    [ "$(cat "$dir/name" 2>/dev/null)" = "k10temp" ] || continue
+    rd "$dir/name"; [ "$_v" = "k10temp" ] || continue
     for lbl in "$dir"temp*_label; do
         [ -f "$lbl" ] || continue
-        if [ "$(cat "$lbl" 2>/dev/null)" = "Tctl" ]; then
+        rd "$lbl"; if [ "$_v" = "Tctl" ]; then
             input="${lbl%_label}_input"
-            raw=$(cat "$input" 2>/dev/null)
+            rd "$input"; raw=$_v
             [ -n "$raw" ] && cputemp=$raw
             break
         fi
@@ -81,12 +90,12 @@ done
 # tracks load heat closely enough to serve as a "cpu temp" reading there.
 if [ "$cputemp" = "-1" ]; then
     for dir in /sys/class/hwmon/hwmon*/; do
-        [ "$(cat "$dir/name" 2>/dev/null)" = "macsmc_hwmon" ] || continue
+        rd "$dir/name"; [ "$_v" = "macsmc_hwmon" ] || continue
         for lbl in "$dir"temp*_label; do
             [ -f "$lbl" ] || continue
-            if [ "$(cat "$lbl" 2>/dev/null)" = "Battery Hotspot" ]; then
+            rd "$lbl"; if [ "$_v" = "Battery Hotspot" ]; then
                 input="${lbl%_label}_input"
-                raw=$(cat "$input" 2>/dev/null)
+                rd "$input"; raw=$_v
                 [ -n "$raw" ] && cputemp=$raw
                 break
             fi
@@ -156,16 +165,16 @@ for _c in "$HWMON_ROOT"/hwmon*; do
 done
 for _c in "$HWMON_ROOT"/hwmon*; do
     [ -d "$_c" ] || continue
-    _cn=$(cat "$_c/name" 2>/dev/null) || _cn=""
+    rd "$_c/name"; _cn=$_v
     [ -z "$_cn" ] && _cn="hwmon"
     for _f in "$_c"/fan*_input; do
         [ -r "$_f" ] || continue
         _i=${_f##*/}; _i=${_i%_input}; _i=${_i#fan}
-        _rpm=$(cat "$_f" 2>/dev/null)
+        rd "$_f"; _rpm=$_v
         case "$_rpm" in ''|*[!0-9]*) _rpm=0 ;; esac
         _pct=-1
         if [ -r "$_c/pwm$_i" ]; then
-            _pwm=$(cat "$_c/pwm$_i" 2>/dev/null)
+            rd "$_c/pwm$_i"; _pwm=$_v
             case "$_pwm" in
                 ''|*[!0-9]*) ;;
                 *) [ "$_pwm" -gt 255 ] && _pwm=255
@@ -179,7 +188,7 @@ for _c in "$HWMON_ROOT"/hwmon*; do
         # case stays short — these are drawn in an 8px-per-character pixel font
         # in a panel that can be 270px wide.
         _lbl=""
-        [ -r "$_c/fan${_i}_label" ] && _lbl=$(cat "$_c/fan${_i}_label" 2>/dev/null)
+        rd "$_c/fan${_i}_label"; [ -n "$_v" ] && _lbl=$_v
         [ -z "$_lbl" ] && _lbl="fan$_i"
         [ "$_nchips" -gt 1 ] && _lbl="$_cn.$_lbl"
         # ':' and ',' are this field's own delimiters and '|' is the line's, so
@@ -243,15 +252,15 @@ batstat=0
 batdir=""
 for dir in /sys/class/power_supply/BAT*/ /sys/class/power_supply/macsmc-battery/; do
     [ -f "$dir/capacity" ] || continue
-    [ "$(cat "$dir/scope" 2>/dev/null)" = "Device" ] && continue
+    rd "$dir/scope"; [ "$_v" = "Device" ] && continue
     batdir="$dir"
     break
 done
 if [ -z "$batdir" ]; then
     for dir in /sys/class/power_supply/*/; do
         [ -f "$dir/capacity" ] || continue
-        [ "$(cat "$dir/type" 2>/dev/null)" = "Battery" ] || continue
-        [ "$(cat "$dir/scope" 2>/dev/null)" = "System" ] || continue
+        rd "$dir/type"; [ "$_v" = "Battery" ] || continue
+        rd "$dir/scope"; [ "$_v" = "System" ] || continue
         batdir="$dir"
         break
     done
@@ -259,7 +268,7 @@ fi
 
 if [ -n "$batdir" ]; then
     chg=0
-    case "$(cat "$batdir/status" 2>/dev/null)" in
+    rd "$batdir/status"; case "$_v" in
         Charging)      chg=1; batstat=2 ;;
         Discharging)   batstat=1 ;;
         Full)          batstat=3 ;;
@@ -280,23 +289,23 @@ if [ -n "$batdir" ]; then
     if [ "$batstat" = "5" ]; then
         batstat=1
         for dir in /sys/class/power_supply/*/; do
-            [ "$(cat "$dir/type" 2>/dev/null)" = "Mains" ] || continue
-            [ "$(cat "$dir/online" 2>/dev/null)" = "1" ] && { batstat=4; break; }
+            rd "$dir/type"; [ "$_v" = "Mains" ] || continue
+            rd "$dir/online"; [ "$_v" = "1" ] && { batstat=4; break; }
         done
     fi
 
     now=""; full=""
     if [ -r "$batdir/energy_now" ] && [ -r "$batdir/energy_full" ]; then
-        now=$(cat "$batdir/energy_now" 2>/dev/null); full=$(cat "$batdir/energy_full" 2>/dev/null)
+        rd "$batdir/energy_now"; now=$_v; rd "$batdir/energy_full"; full=$_v
     elif [ -r "$batdir/charge_now" ] && [ -r "$batdir/charge_full" ]; then
-        now=$(cat "$batdir/charge_now" 2>/dev/null); full=$(cat "$batdir/charge_full" 2>/dev/null)
+        rd "$batdir/charge_now"; now=$_v; rd "$batdir/charge_full"; full=$_v
     fi
     # energy_full can legitimately be 0 or missing on a freshly-reset gauge, so
     # the ratio is only taken when the denominator is genuinely positive.
     if [ -n "$now" ] && [ -n "$full" ] && [ "$full" -gt 0 ] 2>/dev/null; then
         cap=$(awk -v n="$now" -v f="$full" 'BEGIN{ printf "%d", n*100/f + 0.5 }')  # rounded, float-safe
     else
-        cap=$(cat "$batdir/capacity" 2>/dev/null)
+        rd "$batdir/capacity"; cap=$_v
     fi
     if [ -n "$cap" ]; then
         bat="$cap|$chg"
@@ -344,11 +353,11 @@ psi="$(psi_of cpu)|$(psi_of io)|$(psi_of memory)"
 # where this card is not drawn anyway.
 powerw=-1
 for dir in /sys/class/hwmon/hwmon*/; do
-    [ "$(cat "$dir/name" 2>/dev/null)" = "macsmc_hwmon" ] || continue
+    rd "$dir/name"; [ "$_v" = "macsmc_hwmon" ] || continue
     for lbl in "$dir"power*_label; do
         [ -f "$lbl" ] || continue
-        [ "$(cat "$lbl" 2>/dev/null)" = "Total System Power" ] || continue
-        raw=$(cat "${lbl%_label}_input" 2>/dev/null)
+        rd "$lbl"; [ "$_v" = "Total System Power" ] || continue
+        rd "${lbl%_label}_input"; raw=$_v
         [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ printf "%.2f", u / 1000000 }')
         break
     done
@@ -358,7 +367,7 @@ done
 # above) rather than re-globbing BAT*, so a machine whose node is named
 # something else still gets a wattage.
 if [ "$powerw" = "-1" ] && [ -n "$batdir" ] && [ -r "$batdir/power_now" ]; then
-    raw=$(cat "$batdir/power_now" 2>/dev/null)
+    rd "$batdir/power_now"; raw=$_v
     # sign convention varies by driver; the magnitude is the draw either way
     [ -n "$raw" ] && powerw=$(awk -v u="$raw" 'BEGIN{ if (u < 0) u = -u; printf "%.2f", u / 1000000 }')
 fi
