@@ -43,12 +43,22 @@ let
         # which already ships these, so this only matters for `top`.)
         buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
 
+        # glib gives filer `gio`, which is what BOTH "trash" actions shell out
+        # to — and it was on no PATH the app could ever see (not the session's,
+        # not the nix profile's, not /run/current-system/sw/bin). Trash was
+        # therefore a perfect silent no-op for its whole life: the selection
+        # cleared, the list refreshed, the files stayed. It went unnoticed
+        # because FileOps.run reported success unconditionally; it is visible
+        # now (a "cannot run gio" toast), and this makes it work instead.
+        # book gets /usr/bin/gio from Fedora's glib2 and needs nothing.
+
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
             --add-flags /home/lam/nix/apps/filer/main.py \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.glib ]} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
