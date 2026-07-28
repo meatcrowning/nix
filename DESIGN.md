@@ -176,6 +176,17 @@ case, reason from these.
    *"established by rendering the glyph data out to a PNG rather than by making
    the user click through the modes"* (`52eda63`).
 
+   **The instruments have traps of their own, and they are written down where
+   each instrument lives — read that before you trust a surprising number.**
+   Three have now cost an agent real time more than once: `hyprctl activewindow`
+   never clears, so it cannot mean "focused on nothing"; `hyprctl eval` returns
+   no values, only `ok`; and **a leftover `tools/sandbox.sh` headless monitor
+   gives the panel a second `DockGrid`, which wins the shared table and makes
+   `qs ipc call live tiles` report another monitor's panel height** — check
+   `hyprctl monitors` first (`quickshell-files/AGENTS.md`, "a measuring
+   instrument has to be harder to poison than the thing it measures";
+   `home/prog/AGENTS.md` for the compositor ones). Measuring is only better than
+   reasoning if you know what your instrument is actually reading.
 **And one more, about scope:** *"i basically want both computers to look and
 operate the same"* [his]. Per-host divergence is limited to hardware facts —
 screen scaling, battery vs GPU sensors. Appearance and behaviour are identical
