@@ -44,14 +44,12 @@ Column {
                 onToggled: (v) => { page.d.launcherProviderApps = v; SettingsStore.save(); }
             }
         }
-        SetRow {
-            label: "calculator results"
-            desc: "evaluate arithmetic in the search box"
-            SetToggle {
-                checked: page.d.launcherProviderCalc
-                onToggled: (v) => { page.d.launcherProviderCalc = v; SettingsStore.save(); }
-            }
-        }
+        // NO "calculator results" row. There is no calculator provider in
+        // Launcher.qml — the toggle was drawn over a feature that does not
+        // exist, so it could only ever lie. Building one is a feature, not a
+        // wiring (what counts as an expression, what Enter does with the
+        // result), so it is removed rather than left switchable; ask for it and
+        // it comes back with something behind it.
     }
 
     SetSection {

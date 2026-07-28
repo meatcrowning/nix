@@ -169,7 +169,20 @@ Singleton {
         // omits ~/.nix-profile/bin, where cava (a nix pkg) lives — so widen it
         // or every spawn dies with "cava: not found" and the bars go dead.
         // NixPath.sh is the one definition of that fix; see NixPath.qml.
-        command: ["sh", "-c", NixPath.sh + "exec cava -p \"$HOME/.config/quickshell/scripts/cava-vu.conf\""]
+        // `vuSmoothing` / `vuFramerate` (Settings > Audio) are patched into a
+        // runtime copy of the conf, the same shape Media.qml uses for the
+        // spectrum's bar count — cava has no CLI for either. They were declared
+        // and drawn but read by nobody, so the two sliders moved and the meter
+        // did not. `bars` is deliberately NOT settable: this is a stereo meter
+        // and cava's stereo mode is mirrored, so anything but 2 yields
+        // frequency bands rather than channel levels (see VuMeter.qml).
+        command: ["sh", "-c",
+            NixPath.sh
+            + "src=\"$HOME/.config/quickshell/scripts/cava-vu.conf\"; "
+            + "cfg=\"${XDG_RUNTIME_DIR:-/tmp}/qs-cava-vu.conf\"; "
+            + "sed -e \"s/^framerate *=.*/framerate = " + SettingsStore.d.vuFramerate + "/\" "
+            + "-e \"s/^noise_reduction *=.*/noise_reduction = " + SettingsStore.d.vuSmoothing + "/\" "
+            + "\"$src\" > \"$cfg\" && exec cava -p \"$cfg\""]
         stdout: SplitParser {
             onRead: data => {
                 const parts = data.split(";");
@@ -636,7 +649,12 @@ Singleton {
 
     Process {
         id: proc
-        command: ["sh", root.scriptPath]
+        // The two settings sysinfo.sh takes (Widgets > monitoring). As a
+        // binding rather than a one-shot read, so editing either in Settings
+        // moves the readout on the next poll instead of at the next reload.
+        command: ["sh", root.scriptPath,
+                  SettingsStore.d.rootMount || "/",
+                  SettingsStore.d.netInterface || "auto"]
         stdout: StdioCollector {
             onStreamFinished: root.parse(this.text)
         }

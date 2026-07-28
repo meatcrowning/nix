@@ -164,14 +164,21 @@ Scope {
         : [[diskPanel, mediaPanel], [analogClock, gpuPanel], [weatherPanel, cpuPanel], [calendar, ethPanel]]
 
     // The desktop widgets fanned out at login when nothing has been saved yet
-    // (first boot / cleared state). persistKeys, NOT widget refs — declarative
-    // so this stays a trivial one-line edit, and a saved set (Meta+Ctrl+S writes
-    // the live pins) always overrides it. Branched per host via the generated
-    // Host.qml singleton (see quickshell.nix): top keeps the disk-anchored set;
-    // air is the corner stack (cpu/eth/clock) plus media+weather tiled to its left.
-    readonly property var _defaultWidgets: Host.name === "air"
+    // (first boot / cleared state). persistKeys, NOT widget refs, and the set is
+    // the Settings program's `defaultWidgets` — the "shown at login" chips on
+    // the Widgets page, which were drawn and read by nothing while this list was
+    // hardcoded. A saved set (Meta+Ctrl+S writes the live pins) still overrides
+    // it. The per-host list below is the FALLBACK for an empty/absent value,
+    // from the generated Host.qml singleton (see quickshell.nix): top keeps the
+    // disk-anchored set; air is the corner stack (cpu/eth/clock) plus
+    // media+weather tiled to its left.
+    readonly property var _hostWidgets: Host.name === "air"
         ? ["media", "weather", "cpu", "eth", "clock"]
         : ["clock", "weather", "disk", "media", "cpu", "gpu"]
+    readonly property var _defaultWidgets: {
+        const w = SettingsStore.d.defaultWidgets;
+        return (Array.isArray(w) && w.length) ? w : shell._hostWidgets;
+    }
 
     // one stage every _fanStepMs — set to just past a single widget's full
     // reveal (stacked = ~32ms remap + 260ms rise ≈ 292ms; tiled = 220ms) so a

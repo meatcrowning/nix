@@ -20,8 +20,25 @@
 # this 2s poll loop, so SysInfo.qml polls it separately on its own longer
 # timer instead.
 
-net=$(awk 'NR>2{gsub(/:/," "); if($1!="lo"){rx+=$2; tx+=$10}} END{printf "%d|%d", rx, tx}' /proc/net/dev)
-disk=$(df -kP / | awk 'NR==2{gsub(/%/,"",$5); printf "%d|%d", $4, $5}')
+# Two arguments, both from the Settings program (Widgets > monitoring), both
+# optional so a hand-run still behaves the way it always did:
+#   $1  the filesystem behind the bar's free/used readout   (`rootMount`, "/")
+#   $2  the interface behind the rx/tx readout              (`netInterface`,
+#       "auto" = every interface but lo, summed, which is what this has always
+#       reported — NOT the default route, whatever the old label claimed)
+# An interface that doesn't exist yields 0|0 rather than an error, which the
+# panel already draws as an idle link; a mount that doesn't exist falls back to
+# / rather than emitting a short line the parser would drop wholesale.
+MOUNT="${1:-/}"
+IFACE="${2:-auto}"
+[ -d "$MOUNT" ] || MOUNT=/
+
+net=$(awk -v want="$IFACE" 'NR>2{gsub(/:/," ");
+        if($1=="lo") next;
+        if(want!="auto" && want!="" && $1!=want) next;
+        rx+=$2; tx+=$10}
+    END{printf "%d|%d", rx, tx}' /proc/net/dev)
+disk=$(df -kP "$MOUNT" | awk 'NR==2{gsub(/%/,"",$5); printf "%d|%d", $4, $5}')
 
 # Default sink volume (percent) + mute flag via wireplumber.
 vraw=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
