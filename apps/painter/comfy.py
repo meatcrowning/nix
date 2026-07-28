@@ -255,8 +255,26 @@ class ComfyClient(QtCore.QObject):
         self._jobs.clear()
         self._active = None
 
-    def free(self, unload_models: bool = True):
-        self._post("/free", {"unload_models": unload_models, "free_memory": True})
+    def free(self, unload_models: bool = True, callback=None):
+        """Ask ComfyUI to drop its loaded weights.
+
+        `callback(ok, detail)` fires on the reply, because "unloaded" is not
+        something the caller may claim on the strength of having POSTed: with
+        the backend down this is a connection refusal and the only visible
+        result would otherwise be a toast saying it worked.
+        """
+        def done(reply):
+            try:
+                err = reply.error()
+                ok = err == QtNetwork.QNetworkReply.NetworkError.NoError
+                detail = "" if ok else (reply.errorString() or "request failed")
+                if callback:
+                    callback(ok, detail)
+            finally:
+                reply.deleteLater()
+
+        self._post("/free", {"unload_models": unload_models, "free_memory": True},
+                   done if callback else None)
 
     # -- websocket events ---------------------------------------------------
 

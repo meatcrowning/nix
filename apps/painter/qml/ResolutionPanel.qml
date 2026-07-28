@@ -4,7 +4,7 @@ import QtQuick
 // (Flux 2 downscales by 16, Krea 2 by 8).  Width and height stay editable for
 // the times a specific size is wanted.
 Panel {
-    title: "RESOLUTION"
+    title: "resolution"
     badge: root.gen.width + "x" + root.gen.height
 
     Field {

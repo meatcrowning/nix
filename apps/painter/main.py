@@ -434,6 +434,7 @@ class Painter(QObject):
         self._windows = []
         self._object_info = None
         self._jobs = 0
+        self._unit_state = "unknown"
 
         self.reg = None
         self.client = C.ComfyClient()
@@ -453,6 +454,17 @@ class Painter(QObject):
         self._probe.setInterval(2000)
         self._probe.timeout.connect(self._poll_backend)
 
+        # The unit can also be started or stopped from outside painter, so the
+        # start/stop controls track it on a timer rather than only after a
+        # click. It runs for the app's whole life: a control that is right only
+        # while its drawer happens to be open is not a control that reflects
+        # state.
+        self._unit_poll = QTimer(self)
+        self._unit_poll.setInterval(3000)
+        self._unit_poll.timeout.connect(self._refresh_unit)
+        self._unit_poll.start()
+        self._refresh_unit()
+
     # -- properties --------------------------------------------------------
 
     def _get_status(self):
@@ -469,6 +481,11 @@ class Painter(QObject):
     currentNode = Property(str, lambda self: self._current, notify=statusChanged)
     busy = Property(bool, lambda self: self._busy, notify=busyChanged)
     ready = Property(bool, lambda self: self._object_info is not None, notify=statusChanged)
+    # What systemd says about comfy-painter.service, so start/stop can be lit
+    # from the world instead of from intent (DESIGN.md §10).
+    unitState = Property(str, lambda self: self._unit_state, notify=statusChanged)
+    backendRunning = Property(bool, lambda self: self._unit_state in ("active", "activating"),
+                              notify=statusChanged)
     samplers = Property("QStringList", lambda self: self._samplers, notify=optionsChanged)
     schedulers = Property("QStringList", lambda self: self._schedulers, notify=optionsChanged)
     curves = Property("QStringList", lambda self: self._curves, notify=optionsChanged)
@@ -481,21 +498,62 @@ class Painter(QObject):
 
     # -- backend -----------------------------------------------------------
 
+    # The unit's real state, refreshed on a timer and after every action, so
+    # the start/stop controls can be lit from what systemd says rather than
+    # from what the last click intended. "activating" counts as running: the
+    # unit is up, ComfyUI just has not finished loading.
+    def _refresh_unit(self):
+        state = "unknown"
+        try:
+            r = subprocess.run(["systemctl", "--user", "is-active", UNIT],
+                               check=False, capture_output=True, text=True, timeout=5)
+            state = (r.stdout or r.stderr or "").strip() or "unknown"
+        except Exception:  # noqa: BLE001 - an unknown unit is still a state we can draw
+            pass
+        if state != self._unit_state:
+            self._unit_state = state
+            self.statusChanged.emit()
+
     @Slot()
     def startBackend(self):
         try:
-            subprocess.run(["systemctl", "--user", "start", UNIT],
-                           check=False, capture_output=True, timeout=10)
-        except Exception:  # noqa: BLE001 - fall through to probing
-            pass
+            r = subprocess.run(["systemctl", "--user", "start", UNIT],
+                               check=False, capture_output=True, text=True, timeout=20)
+        except Exception as exc:  # noqa: BLE001
+            self._refresh_unit()
+            self.toast.emit(f"could not start the backend: {exc}", True)
+            return
+        self._refresh_unit()
+        if r.returncode != 0:
+            detail = (r.stderr or r.stdout or "").strip().splitlines()
+            self._set_status("backend failed to start")
+            self.toast.emit("systemctl start failed: "
+                            + (detail[-1] if detail else f"exit {r.returncode}"), True)
+            return
         self._set_status("waiting for ComfyUI...")
         self._probe.start()
         self._poll_backend()
 
     @Slot()
     def stopBackend(self):
-        subprocess.run(["systemctl", "--user", "stop", UNIT], check=False,
-                       capture_output=True)
+        try:
+            r = subprocess.run(["systemctl", "--user", "stop", UNIT], check=False,
+                               capture_output=True, text=True, timeout=20)
+        except Exception as exc:  # noqa: BLE001
+            self._refresh_unit()
+            self.toast.emit(f"could not stop the backend: {exc}", True)
+            return
+        self._refresh_unit()
+        # Report what happened, not what was asked for: a non-zero exit (or a
+        # unit still active afterwards) with a "backend stopped" label is the
+        # exact "reports a change that did not happen" failure DESIGN.md §10
+        # forbids.
+        if r.returncode != 0 or self._unit_state == "active":
+            detail = (r.stderr or r.stdout or "").strip().splitlines()
+            self.toast.emit("systemctl stop failed: "
+                            + (detail[-1] if detail else f"exit {r.returncode}"), True)
+            return
+        self._probe.stop()
         self._object_info = None
         self._set_status("backend stopped")
 
@@ -701,8 +759,15 @@ class Painter(QObject):
 
     @Slot()
     def unloadModels(self):
-        self.client.free(True)
-        self.toast.emit("asked ComfyUI to unload models", False)
+        # Wait for the reply. POSTing /free at a backend that is not there is a
+        # perfect silent no-op, and the old code toasted success either way.
+        def done(ok, detail):
+            if ok:
+                self.toast.emit("ComfyUI unloaded its models", False)
+            else:
+                self.toast.emit(f"unload failed: {detail}", True)
+
+        self.client.free(True, done)
 
     def _on_queue(self, remaining):
         self._queue = remaining
