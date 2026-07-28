@@ -429,7 +429,7 @@ same poll. Three consumers today, and a fourth is a bug waiting to happen:
 
 - **The discriminator is HARDWARE IDENTITY, not the name.** A monitor is physical
   if it has a non-zero physical size or any of make/model/serial/description;
-  a headless output has none (measured: DP-5 "Dell Inc. DELL P2422HE 5XP45L3",
+  a headless output has none (measured: DP-5 reports a make, model and serial,
   530x300mm — HEADLESS-6 "" and 0x0). The user may attach a **second real
   monitor** one day and its windows must still appear, which is exactly what
   keying on `HEADLESS-` alone would get wrong the first time it mattered. That

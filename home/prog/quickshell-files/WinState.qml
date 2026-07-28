@@ -48,7 +48,7 @@ import Quickshell.Wayland
 // A monitor is PHYSICAL if the compositor has any hardware identity for it: a
 // non-zero physical size, or a make, model, serial or description. A headless
 // output has none of those — every one of those fields is empty (verified live:
-// DP-5 carries "Dell Inc. DELL P2422HE 5XP45L3" and 530x300mm, HEADLESS-6
+// DP-5 carries a make, a model and a serial, and 530x300mm, HEADLESS-6
 // carries "" and 0x0). That test, not the name, is the discriminator, because
 // the user may legitimately attach a SECOND REAL MONITOR one day and its windows
 // must still appear. Hyprland's `HEADLESS-n` naming is ORed in as corroboration
