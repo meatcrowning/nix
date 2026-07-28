@@ -245,7 +245,10 @@ Singleton {
     function reportTile(key, allotted, wanted, gen) {
         if (!key) return;
         if (!(allotted > 0) || !(wanted >= 0)) return;
+        // A negative generation is a grid that has declared itself unfit to
+        // measure — today, one on an output the user cannot see (DockGrid.qml).
         const g = gen || 0;
+        if (g < 0) return;
         if (g < tileGen) return;
         if (g > tileGen) { tileGen = g; tileInfo = ({}); }
         tileInfo[key] = { a: Math.round(allotted), w: Math.round(wanted) };
