@@ -29,7 +29,17 @@ Singleton {
     // decision wal-prepare.sh makes from the image's own dimensions (a small,
     // roughly-square image is a repeating texture; anything else is a photo).
     readonly property string path: _path
-    readonly property string mode: _mode === "tile" ? "tile" : "scale"
+    // `wallpaperFit` (Settings > Appearance) overrides that decision: "auto"
+    // takes wal-prepare.sh's, "tile"/"scale" force one. Applied HERE rather than
+    // by passing WAL_MODE into wal-prepare.sh, because the mode is cached PER
+    // IMAGE — forcing it there would need every image's cache invalidated and
+    // would still leave the published file disagreeing with the setting. As a
+    // binding it also applies the instant the toggle moves, with no re-apply.
+    readonly property string mode: {
+        const f = SettingsStore.d.wallpaperFit;
+        if (f === "tile" || f === "scale") return f;
+        return _mode === "tile" ? "tile" : "scale";
+    }
 
     property string _path: ""
     property string _mode: "scale"

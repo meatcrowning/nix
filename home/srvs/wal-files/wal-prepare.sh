@@ -70,11 +70,24 @@ fi
 # ImageMagick pass per wallpaper per monitor size.
 
 # ---- colour palette -------------------------------------------------------
-# Regenerate when the cache is missing, the wallpaper changed, OR the extractor
-# itself changed — otherwise a palette cached by an older wal-extract.py (e.g.
-# before the pastel-saturation pass) sticks forever and the desktop keeps the
-# old, harsher colours for that wallpaper.
-if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ] || [ "$SCRIPTS/wal-extract.py" -nt "$THEMEFILE" ]; then
+# Regenerate when the cache is missing, the wallpaper changed, the extractor
+# itself changed, OR the Settings program's model changed — otherwise a palette
+# cached by an older wal-extract.py (e.g. before the pastel-saturation pass)
+# sticks forever and the desktop keeps the old, harsher colours for that
+# wallpaper.
+#
+# settings.json is in that list because four Appearance keys are INPUTS to
+# wal-extract.py (themeMode, accentOverride, paletteColorCount, pureBlackBg —
+# it reads them itself). Keying on the file's mtime rather than on the four
+# values costs a re-extract (~0.2s, for one image, lazily) after any unrelated
+# settings edit, and buys not having to parse JSON in two languages and keep
+# the two parsers agreeing. The panel re-runs wal-set.sh when one of the four
+# changes (SettingsApply.qml), which is what turns this into "the toggle
+# applies immediately".
+SETTINGS="$CONFIG/quickshell/settings.json"
+if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ] \
+   || [ "$SCRIPTS/wal-extract.py" -nt "$THEMEFILE" ] \
+   || { [ -f "$SETTINGS" ] && [ "$SETTINGS" -nt "$THEMEFILE" ]; }; then
     "$SCRIPTS/wal-extract.py" "$WALL" > "$THEMEFILE"
 fi
 
