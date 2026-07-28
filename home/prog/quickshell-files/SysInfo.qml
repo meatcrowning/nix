@@ -105,7 +105,18 @@ Singleton {
     // this run. Losing it on every wallpaper change would put the pump back in
     // the headline for a minute each time. See Fans.qml for what it decides.
     property var fanVaried: ({})
+    // name -> true for every fan ever seen turning with a real tachometer.
+    // Only these can be judged to have STOPPED: the GPU fan reports a percentage
+    // and no RPM, so "0 rpm" is its normal reading, and without this an
+    // nvidia-smi hiccup would announce that the card's fan had failed.
+    property var fanHadRpm: ({})
     readonly property int fanCount: fans ? fans.length : 0
+    // The fan currently judged to have failed, or "". See FanAlarm.qml.
+    readonly property string fanAlarm: fanAlarmState.active
+    // Exposed for `qs ipc call live fans`: how far into the 30s confirmation
+    // each stopped fan is, which is the only way to watch this arm without
+    // waiting for it.
+    readonly property var fanAlarmStoppedFor: fanAlarmState.stoppedFor
 
     // ---- what book shows in place of gpu/vram/fan ------------------------
     // See sysinfo.sh: that machine has no source for any of the three, so the
@@ -319,7 +330,7 @@ Singleton {
         const live = {};
         for (const fan of out) live[fan.name] = true;
         for (const name in fanPctHist)
-            if (!live[name] && !fanVaried[name])
+            if (!live[name] && !fanVaried[name] && fanHadRpm[name])
                 out.push({ name: name, rpm: 0, pct: -1, stopped: true });
 
         const h = {};
@@ -340,9 +351,44 @@ Singleton {
                 varied[fan.name] = true;
             h[fan.name] = _pushHist(prev, fan.pct);
         }
+        const hadRpm = {};
+        for (const name in fanHadRpm) hadRpm[name] = fanHadRpm[name];
+        for (const fan of out)
+            if (!fan.stopped && fan.rpm > 0) hadRpm[fan.name] = true;
+
         fans = out;
         fanPctHist = h;
         fanVaried = varied;
+        fanHadRpm = hadRpm;
+
+        // One call per poll; returns a name only on the poll the episode is
+        // confirmed, so one failure is one notification.
+        const failed = fanAlarmState.update(out, h, varied, hadRpm);
+        if (failed !== "") _notifyFanStopped(failed);
+    }
+
+    FanAlarm { id: fanAlarmState }
+
+    // The loud half of the pump alarm. Critical urgency is doing four separate
+    // jobs here, all of them already built: it plays soundCritical rather than
+    // the balloon, it bypasses Do Not Disturb, it is exempt from the toast
+    // stack's eviction, and it never auto-expires. `-t 0` says the last of those
+    // explicitly as well, because the panel now honours an explicit timeout and
+    // an alarm you can miss by looking away is not an alarm.
+    //
+    // Routed through notify-send like every other toast this repo raises
+    // (shell.qml's reload failure, resize-mode-notify.sh) rather than poked into
+    // the server directly, so it renders as an identical wal-themed card.
+    //
+    // The wording claims only what is measured — a fixed-speed fan has stopped —
+    // and names the fan. It says "if this is the pump" rather than "your pump
+    // has failed", because nothing here knows which header the pump is on.
+    function _notifyFanStopped(name) {
+        Quickshell.execDetached([
+            "notify-send", "-a", "quickshell", "-u", "critical", "-t", "0",
+            name + " has STOPPED",
+            "a fan that ran at a fixed speed since boot now reads 0 rpm.\n"
+            + "if this is the pump, the CPU is no longer being cooled."]);
     }
 
     // ---- reload continuity (see shell.qml's `persist` block) --------------
@@ -369,7 +415,8 @@ Singleton {
             mtk: memTotalKb, mak: memAvailKb, stk: swapTotalKb, sfk: swapFreeKb,
             l1: load1, up: uptimeSec, gf: gpuFanPct, gp: gpuPowerW,
             gmu: gpuMemUsedMb, gmt: gpuMemTotalMb, mh: memHist,
-            fns: fans, fph: fanPctHist, fvd: fanVaried,
+            fns: fans, fph: fanPctHist, fvd: fanVaried, fhr: fanHadRpm,
+            fsf: fanAlarmState.stoppedFor, fal: fanAlarmState.alerted,
             lh: loadHist, swh: swapHist, vh: vramHist,
             pc: psiCpu, pio: psiIo, pm: psiMem, pw: powerW,
             dr: dskRead, dw: dskWrite,
@@ -405,6 +452,11 @@ Singleton {
         gpuMemTotalMb = d.gmt === undefined ? -1 : d.gmt;
         fans = d.fns || []; fanPctHist = d.fph || ({});
         fanVaried = d.fvd || ({});
+        fanHadRpm = d.fhr || ({});
+        // Carried too, or a wallpaper change would restart the 30s count and,
+        // worse, re-fire a notification that has already been shown.
+        fanAlarmState.stoppedFor = d.fsf || ({});
+        fanAlarmState.alerted = d.fal || ({});
         loadHist = d.lh || []; swapHist = d.swh || [];
         vramHist = d.vh || [];
         psiCpu = d.pc === undefined ? -1 : d.pc;
