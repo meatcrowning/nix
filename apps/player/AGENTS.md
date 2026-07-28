@@ -30,9 +30,11 @@ client for it. So the app serves its own queue on
 `$XDG_RUNTIME_DIR/player-queue.sock`, one line at a time:
 
 ```
-server -> client   {"index": n, "tracks":[{"title","artist","dur"}, ...]}
+server -> client   {"index": n, "tracks":[{"title","artist","dur"}, ...],
+                    "lyrics": {"source","synced","lines":[{t,line}],"text"} | null}
                    on connect, and on queueChanged / indexChanged / currentChanged
 client -> server   GOTO <index>        -> player.jumpTo(index)
+                   LYRICS <0|1>        -> subscribe this connection to lyrics
 ```
 
 - **Push, not poll**: the panel is animating this, and a file it had to re-read
@@ -44,6 +46,36 @@ client -> server   GOTO <index>        -> player.jumpTo(index)
 - **Every failure is caught and printed.** A queue drawer is a convenience and
   must never be able to take the music player down; the same rule `start_mpris`
   already follows.
+
+### `LYRICS` is a subscription, and that is the whole design
+
+The panel's queue drawer now grows a lyrics box on the right when the playing
+track has words (`DESIGN.md` §5.4), and this socket is the only channel there
+is: MPRIS has no lyrics field, and `LyricsProvider` lives in this process.
+
+- **Opt-in, per connection.** Resolving is not free — tag reads, an LRCLIB
+  request, and (with `lyricsEmbed` on, the default) a writeback into the file.
+  Doing it for every track the user plays merely because the panel exists would
+  turn a widget nobody has opened into a library-wide sweep, which is what
+  `tools/lyrics-sync.py` is for. So nothing is resolved until a client says
+  `LYRICS 1`, and the panel only says it while its drawer is actually open.
+- **`lyr_tid` is a join key, not a cache tag.** A resolve is asynchronous, so by
+  the time one lands the user may have skipped — and a payload sent under the
+  wrong track is the panel confidently scrolling another song's words. Nothing
+  is ever emitted unless the cached id still equals what is playing, and a
+  track change clears the payload *before* the push that announces it.
+- **Whole lines, once per track; the panel does the following.** It has the
+  MPRIS position already, so pushing a current-line index would only add socket
+  latency to something the other side can compute exactly.
+- **`none` / `instrumental` are sent as a payload with no words in it**, which
+  is how the panel knows to collapse the column rather than draw an empty box.
+  It has no "mark instrumental" control — that needs the library.
+
+```bash
+tools/queue-lyrics-test.py     # headless; isolated XDG_RUNTIME_DIR, fake
+                               # Player + LyricsProvider, so the LIVE player's
+                               # socket is never touched. 14 assertions.
+```
 
 ## Lyrics + ReplayGain (2026-07-25)
 

@@ -938,6 +938,60 @@ draws it.
 
 - **Push, not poll.** The drawer is on screen behind a slide animation; a file
   re-read on a timer would be both later and more work.
+- **Lyrics come down the SAME socket, and only when asked for.** MPRIS has no
+  lyrics field of any kind and `LyricsProvider` lives inside the player process,
+  so the queue line gained a `lyrics` object for whatever is playing:
+  `{source, synced, lines:[{t,line}], text}`. Two halves matter.
+  **It is a subscription** — the panel writes `LYRICS 1` while
+  `Media.live && Media.queueOpen` and `LYRICS 0` otherwise, because resolving is
+  not free on the player's side (tag reads, an LRCLIB request, and a writeback
+  into the file), and an unopened drawer must not turn every track the user
+  plays into a fetch. It is **edge-triggered**: the server answers every
+  `LYRICS` line with a fresh snapshot, so re-sending it on the 5s reconnect tick
+  would re-parse the whole queue twelve times a minute. `Media._sentWant` is
+  what makes it edge-triggered, and it resets to -1 on a disconnect because the
+  server holds the subscription per CONNECTION — a player restart drops it.
+  **The FOLLOWING is ours**, not the player's: whole timed lines arrive once per
+  track and `Media.lyricIndex` binary-searches them against our own MPRIS
+  position, so the lit line owes nothing to socket latency. That is also why the
+  position re-emit `Timer` runs at 200ms instead of 500 while a box is on screen
+  — that tick is what moves the line, and at 500ms it lands visibly late.
+  An older player omits the field entirely, which reads as "no lyrics" and
+  leaves the drawer exactly as it was — the fallback that has to hold on `book`
+  between a `git pull` and the next player relaunch. Lyrics are `Glyphs.px()`-ed
+  at INGEST like the queue rows, once per push: apostrophes are not rare in song
+  lyrics and one U+2019 clips the line it is in.
+  Regression test (no GUI, isolated `XDG_RUNTIME_DIR`, so the live player's
+  socket is untouched): `apps/player/tools/queue-lyrics-test.py`.
+- **The lyrics BOX is a parallel copy of `apps/player/qml/LyricsView.qml`** —
+  `DESIGN.md` §5.4 owns the look and the §20 row records what the panel's copy
+  drops. It lives inside `queueBox`, takes 42% of the drawer's inner width as a
+  FRACTION (never a pixel budget standing in for a character count, §2.7), and
+  hides the artist column while pushing the durations left against its 1px
+  divider. **It adds no height anywhere**: `naturalRest`, `implicitHeight` and
+  the tile's reported `wants` are untouched, which is what keeps the weather tile
+  below from moving.
+
+  **How that was verified, because it generalises to any widget here.** Copy
+  this directory to a throwaway config, replace the data singletons it names
+  with stubs (here `Media` and `SysInfo` — a dozen properties each), give it a
+  `shell.qml` that is one `FloatingWindow` around the content component, and run
+  it under an isolated `HOME` with `QT_QPA_PLATFORM=offscreen`:
+
+  ```bash
+  HOME=$P XDG_CONFIG_HOME=$P/.config XDG_RUNTIME_DIR=$P/run \
+    QT_QPA_PLATFORM=offscreen qs -p $P/.config/quickshell/shell.qml --no-duplicate
+  ```
+
+  No sandbox monitor is needed and nothing reaches a screen. The isolated `HOME`
+  is not optional: `SettingsStore` would otherwise write the user's live
+  `settings.json`. Walk the tree from the root and `console.warn` real geometry
+  — that is how the row layout above is a measurement rather than a claim
+  (durations `x=299 → x=147` at 350px wide, artist `w=0 vis=false`, and
+  `implicitHeight`/`naturalRest` identical with and without lyrics). One caveat:
+  an isolated `HOME` loses the user font, so absolute line heights in the probe
+  are a fallback font's, not More Perfect DOS VGA's — read the ratios, not the
+  pixels.
 - **Only connect while the player has a WINDOW open** (`Media.playerUp`, from
   the toplevel list). Quickshell logs a warning on every failed connect and
   `qs log` is cumulative, so a blind retry timer fills it with

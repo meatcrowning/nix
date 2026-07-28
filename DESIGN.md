@@ -738,6 +738,25 @@ transient absence RESERVES; permanent absence COLLAPSES.** Nothing playing →
 the media line keeps its height and goes blank. No lyrics for this track ever →
 *"if no lyrics are shown, then just hide its column"*.
 
+**The lyrics box is one presentation, drawn in two trees.** [his] *"when a track
+has lyrics, the right side of the player widget queue becomes like the lyrics box
+of the player program"* — so the panel's media queue drawer carries a parallel
+implementation of `apps/player/qml/LyricsView.qml`: same right-hand column, same
+1px `Theme.border` divider, centred lines, the current one in `Theme.text` and
+the rest in `Theme.textDim`, click a line to seek, and the whole column
+collapsing to zero width on a track with no words. It is a copy because the two
+trees cannot share a component (Quickshell QML vs plain Qt, and the panel cannot
+import `apps/qmlcommon/`) — the same standing arrangement as `PixelText` and the
+`Kinetic*` types. **Retune one and retune the other.**
+
+It costs the ARTIST column, which the box sits on top of, and the durations move
+left to sit against the divider — the queue keeps "what is next" and "how long",
+and gives up the one field the line above already states for the track playing.
+Note the shape of that trade: a column is surrendered to a column, not squeezed
+beside it, and **nothing about the widget's height changes** — the box lives
+inside the drawer the dock grid has already handed over (§18), so the weather
+tile below it does not move.
+
 ### 5.5 Position is a property of the element, not of the view
 
 [his] *"the cover section with the text underneith should be on the right side
@@ -2149,6 +2168,7 @@ new candidates add rows here rather than editing the rules above.
 | §6.1 nothing on screen loads asynchronously | `[panel]` | `MediaContent`'s cover art (`asynchronous`+`cache`, over a placeholder) and `TaskCell`'s lazy `DesktopEntries` scan (over a letter fallback) still load async | **under review.** Both were inspected during `79e9dea` and deliberately left: neither can produce an empty frame, because each draws over something, and neither was changed without measuring first | candidate |
 | §8 one tooltip dwell | `[hyprvtb]` | 450ms, against the panel's 350ms | **unruled.** The titlebar is a place the cursor passes through more often, so a longer dwell *may* be deliberate — nothing records it as such (Open question 4) | candidate |
 | §2.1/§2.2 a text row is exactly one font cell, `lineHeight` pinned under `FixedHeight` | `[painter]` | the prompt `TextEdit` leads at Qt's rounded 16px | **impossible, not a choice:** `lineHeight`/`lineHeightMode` are `Text`-only properties. Assigning them to a `TextEdit` is a component-creation *error* — `21534ca` did, and painter could not load its QML at all until it was removed. The one multi-line editor in the tree | [code] |
+| §5.4 the lyrics box is one presentation in two trees | `[panel]` | the panel's copy drops the pane's `lyrics · <source>` header and its "mark instrumental" control | §5.4's own rule: in a five-row drawer the header costs a fifth of the box to name what it obviously is, and marking a track instrumental needs the library the panel does not have | [code] |
 | §5.4 widget titles come off; the content identifies itself | `[painter]` | the left column's `Panel` boxes keep section titles (`model`, `prompt`, `sampling`, `resolution`, `patches`, `lora`) | **unruled.** They are *collapsible* boxes: collapsed to a header, a box with no title is unidentifiable, and the title is also the click target. §5.4's evidence is all about non-collapsible widgets (Open question 10) | candidate |
 
 ---

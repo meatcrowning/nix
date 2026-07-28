@@ -2187,7 +2187,7 @@ class Bridge(QObject):
 # MPRIS
 # ---------------------------------------------------------------------------
 
-def start_queue_server(player, app):
+def start_queue_server(player, app, lyrics=None):
     """Serve the play queue to the desktop panel's media widget.
 
     MPRIS carries the CURRENT track and nothing else — its TrackList interface
@@ -2195,9 +2195,25 @@ def start_queue_server(player, app):
     queue drawer needs its own channel. This is a line-based unix socket at
     $XDG_RUNTIME_DIR/player-queue.sock:
 
-        server -> client   one JSON line, {"index": n, "tracks": [...]}, on
-                           connect and again on every queue/index change
+        server -> client   one JSON line, {"index": n, "tracks": [...],
+                           "lyrics": {...}|null}, on connect and again on every
+                           queue/index change
         client -> server   GOTO <index>
+                           LYRICS <0|1>     — "I am showing a lyrics box"
+
+    LYRICS is a SUBSCRIPTION, not a query, and it is opt-in for a reason.
+    Resolving lyrics is not free: `LyricsProvider` reads tags, may hit
+    lrclib.net, and (with the `lyricsEmbed` pref on, the default) writes what it
+    finds back into the file. Doing that for every track the user plays merely
+    because the panel exists would turn a widget nobody has opened into a
+    library-wide sweep — `tools/lyrics-sync.py` is where that belongs. So the
+    panel asks only while its drawer is actually showing the box, and the server
+    resolves nothing until somebody has asked.
+
+    Lyrics are pushed WHOLE, once per track — every timestamped line — and the
+    panel follows them against its own MPRIS position. A per-line push would
+    need a clock here and would put the panel's current line at the mercy of
+    socket latency; the panel already knows where playback is.
 
     PUSH, not poll: the panel is drawing this at 60fps behind a slide animation
     and a file it had to re-read on a timer would be both later and more work.
@@ -2222,6 +2238,17 @@ def start_queue_server(player, app):
         return
 
     clients = []
+    # Which clients want lyrics, the track the cached answer belongs to, and the
+    # answer itself. `lyr_tid` is the join key: a resolve is asynchronous, so by
+    # the time one lands the user may already have skipped, and a payload sent
+    # under the wrong track is the panel confidently scrolling another song's
+    # words. Nothing is ever sent unless `lyr_tid` still equals what is playing.
+    want = set()
+    state = {"tid": None, "payload": None}
+
+    def cur_id():
+        t = player.currentTrackDict()
+        return t.get("id") if t else None
 
     def snapshot():
         # Only what the drawer draws. The panel has no library and no art cache,
@@ -2230,8 +2257,38 @@ def start_queue_server(player, app):
                    "artist": t.get("artist") or "",
                    "dur": float(t.get("duration") or 0.0)}
                   for t in player.queue_dicts()]
-        return (json.dumps({"index": player.index, "tracks": tracks},
+        lyr = state["payload"] if (want and state["tid"] == cur_id()) else None
+        return (json.dumps({"index": player.index, "tracks": tracks,
+                            "lyrics": lyr},
                            separators=(",", ":")) + "\n").encode()
+
+    def resolve():
+        """Ask for the current track's lyrics, if anyone is listening and we do
+        not already hold them. Idempotent — the provider dedupes nothing, so the
+        guard on `tid` is what keeps a burst of currentChanged to one job."""
+        tid = cur_id()
+        if not want or lyrics is None or tid is None:
+            return
+        if state["tid"] == tid:
+            return
+        state["tid"] = tid
+        state["payload"] = None
+        lyrics.request(tid)
+
+    def on_lyrics(tid, result):
+        if tid != state["tid"] or tid != cur_id():
+            return
+        # Mirror exactly what LyricsView draws, and nothing else: the verdicts
+        # ("none", "instrumental") reach the panel as a payload with no words in
+        # it, which is how it knows to collapse the column rather than draw an
+        # empty box (DESIGN.md 5.4 — permanent absence COLLAPSES).
+        lines = [{"t": float(l.get("t") or 0.0), "line": l.get("line") or ""}
+                 for l in (result.get("lines") or [])]
+        state["payload"] = {"source": result.get("source") or "",
+                            "synced": bool(result.get("synced")),
+                            "lines": lines,
+                            "text": result.get("text") or ""}
+        push()
 
     def push():
         line = snapshot()
@@ -2253,22 +2310,44 @@ def start_queue_server(player, app):
                     player.jumpTo(int(parts[1]))
                 except Exception as e:
                     print("queue server: bad GOTO:", e, flush=True)
+            elif len(parts) == 2 and parts[0] == "LYRICS":
+                on = parts[1] not in ("0", "false", "off")
+                was = bool(want)
+                want.add(c) if on else want.discard(c)
+                if want and not was:
+                    resolve()
+                # Answer the subscription immediately: a client that has just
+                # opened its box must not wait for the next track change to be
+                # told there is nothing to draw.
+                c.write(snapshot())
+                c.flush()
+
+    def on_gone(c):
+        if c in clients:
+            clients.remove(c)
+        want.discard(c)
 
     def on_connection():
         while server.hasPendingConnections():
             c = server.nextPendingConnection()
             clients.append(c)
             c.readyRead.connect(lambda c=c: on_ready(c))
-            c.disconnected.connect(lambda c=c: c in clients and clients.remove(c))
+            c.disconnected.connect(lambda c=c: on_gone(c))
             c.write(snapshot())
             c.flush()
+
+    def on_track():
+        resolve()
+        push()
 
     server.newConnection.connect(on_connection)
     # currentChanged as well as indexChanged: a track's own row can change under
     # a stationary index (a rating write patches the cached dict).
     player.queueChanged.connect(push)
     player.indexChanged.connect(push)
-    player.currentChanged.connect(push)
+    player.currentChanged.connect(on_track)
+    if lyrics is not None:
+        lyrics.ready.connect(on_lyrics)
     print("queue server: listening on", path, flush=True)
 
 
@@ -2433,7 +2512,7 @@ def main():
     bridge.refreshAlbums()
     player.restore_state()
     start_mpris(player, app)
-    start_queue_server(player, app)
+    start_queue_server(player, app, lyrics)
     QTimer.singleShot(400, library.rescan)  # incremental; UI is already up
 
     app.aboutToQuit.connect(player.save_state)
