@@ -31,13 +31,20 @@ Item {
     // ViewMode.settling covers the reload: the grid is laid out before the panel
     // knows its real width, so without it every tile glides into place from
     // wherever the default-classic geometry put it, on every theme change.
+    //
+    // `ViewMode.slideMs`/`slideEasing` are the DESKTOP'S CANONICAL SLIDE (260ms,
+    // OutCubic — hyprvtb's window roll), not a number picked for this file. The
+    // wallpaper glide and SlidePopup's fan already ran at 260; these tiles were
+    // the outlier at 200, which is what made the player's queue drawer visibly
+    // quicker than a window rolling out beside it — and the queue drawer has no
+    // animation of its own, so THIS Behavior is the drawer's slide.
     Behavior on y {
         enabled: !ViewMode.dragging && !ViewMode.settling
-        NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
     }
     Behavior on height {
         enabled: !ViewMode.dragging && !ViewMode.settling
-        NumberAnimation { duration: ViewMode.ms(200); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing }
     }
 
     // The grid's generation, so ViewMode can tell this panel's numbers from

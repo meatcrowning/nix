@@ -117,6 +117,26 @@ Singleton {
     property real animScale: 1.0
     function ms(base) { return Math.round(base * animScale); }
 
+    // ---- the desktop's canonical slide ------------------------------------
+    // ONE duration and ONE curve for everything on this desktop that slides,
+    // grows or glides between two resting positions. Take these; do not write a
+    // duration literal into a widget.
+    //
+    // The numbers are not a preference, they are hyprvtb's window roll-up /
+    // roll-out, which is the largest and most-used motion here and therefore the
+    // one everything else is judged against: `home/prog/hyprvtb/vtbDeco.cpp`,
+    // `VTB_ROLL_DURATION = 0.26f`, whose leading beat (the drawer slide, 55% of
+    // it) is an ease-out cubic. Full derivation and the residual difference
+    // between the two animation systems: AGENTS.md, "One slide, one duration".
+    //
+    // It is a hand-copy — the plugin's constant is compiled in, not a config key
+    // — so if `VTB_ROLL_DURATION` ever changes, change this with it. That is the
+    // same standing duplication `Kinetic.friction` carries against
+    // `plugin:hyprvtb:kinetic_friction`, for the same reason: two languages, no
+    // shared file.
+    readonly property int slideMs: 260
+    readonly property int slideEasing: Easing.OutCubic
+
     // Diagnostic trace of the last drag, read with `qs ipc call view trace`:
     // one "dragWidth,surfaceWidth,liveWidth" sample per pointer event. The
     // surface width is what the compositor actually gave us, so comparing the
