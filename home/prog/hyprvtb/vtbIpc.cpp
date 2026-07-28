@@ -44,6 +44,12 @@ namespace {
     // name. The listener survives headless — `ss -xl` still shows it LISTENing —
     // but no client can ever connect(), so nothing registers and every window
     // comes up without its inner column. Empirically observed at 2.84.
+    //
+    // That guard fixed the OUTGOING half only. The incoming half — start()
+    // unlinking the real path before it knows it can bind — reproduced the same
+    // state at 2.90 and is fixed there by binding to a temp name and renaming
+    // it into place. Read both together: the name must only ever change hands
+    // atomically, in either direction.
     dev_t                                          g_sockDev = 0;
     ino_t                                          g_sockIno = 0;
 
@@ -264,19 +270,88 @@ namespace {
         c.fd = -1;
     }
 
+    // Bind a fresh listen socket and rename() it onto g_sockPath, atomically.
+    // Returns the new fd, or -1 with the existing name left untouched. Shared by
+    // start() and the name watchdog below — the name only ever changes hands via
+    // a rename, never via an unlink-then-bind.
+    int bindNamed() {
+        const std::string TMPPATH = g_sockPath + "." + std::to_string(getpid()) + ".tmp";
+        if (TMPPATH.size() >= sizeof(sockaddr_un::sun_path))
+            return -1;
+        unlink(TMPPATH.c_str());
+
+        const int FD = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        if (FD < 0)
+            return -1;
+
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, TMPPATH.c_str(), sizeof(addr.sun_path) - 1);
+        if (bind(FD, (sockaddr*)&addr, sizeof(addr)) < 0 || listen(FD, 8) < 0
+            || rename(TMPPATH.c_str(), g_sockPath.c_str()) < 0) {
+            unlink(TMPPATH.c_str());
+            close(FD);
+            return -1;
+        }
+        return FD;
+    }
+
+    // THE NAME WATCHDOG. A listening socket whose filesystem name is gone is
+    // invisible: every already-connected client keeps working, so the desktop
+    // looks fine, while every app launched afterwards gets ENOENT from connect()
+    // and comes up with no inner titlebar column. It is the failure `ipc_dump()`'s
+    // "named" field was added to detect (2.86) — and nothing acted on it.
+    //
+    // Binding atomically (bindNamed) closes the window where WE drop the name,
+    // but it cannot close every one: `hyprctl reload` can run a plugin's stop()
+    // AFTER the incoming instance decided it had nothing to do, and the reload
+    // path is Hyprland's, not ours. Measured: with the atomic bind alone, the
+    // name still went missing across the two back-to-back swaps in
+    // tools/hotswap-test.sh.
+    //
+    // So the invariant is enforced rather than argued: once a second, check that
+    // the path still names OUR inode, and re-take it if it does not. Existing
+    // client connections are untouched (they are their own fds); only the
+    // listener is replaced. Cheap — one stat() per second on a thread that is
+    // otherwise asleep — and it is the difference between a self-correcting
+    // desktop and one the user has to report.
+    void checkName() {
+        if (g_listenFd < 0 || g_sockPath.empty())
+            return;
+        struct stat st{};
+        const bool OURS = g_sockIno && stat(g_sockPath.c_str(), &st) == 0 && st.st_dev == g_sockDev && st.st_ino == g_sockIno;
+        if (OURS)
+            return;
+
+        const int FD = bindNamed();
+        if (FD < 0)
+            return; // try again next tick; the old listener stays as it was
+
+        close(g_listenFd);
+        g_listenFd = FD;
+        struct stat ns{};
+        if (stat(g_sockPath.c_str(), &ns) == 0) {
+            g_sockDev = ns.st_dev;
+            g_sockIno = ns.st_ino;
+        }
+    }
+
     // Dedicated I/O thread: poll on the listen socket, the wake pipe, and every
     // client. Compositor state is NEVER touched from here.
     void ioLoop() {
         std::vector<SClient> clients;
 
         while (g_running.load(std::memory_order_relaxed)) {
+            checkName(); // before fds is built — it may replace g_listenFd
+
             std::vector<pollfd> fds;
             fds.push_back({g_listenFd, POLLIN, 0});
             fds.push_back({g_wakePipe[0], POLLIN, 0});
             for (const auto& c : clients)
                 fds.push_back({c.fd, POLLIN, 0});
 
-            if (poll(fds.data(), fds.size(), -1) < 0) {
+            // Bounded wait, so the watchdog above runs on an idle socket too.
+            if (poll(fds.data(), fds.size(), 1000) < 0) {
                 if (errno == EINTR)
                     continue;
                 break;
@@ -344,22 +419,43 @@ void VtbIpc::start() {
         return;
 
     g_sockPath = socketPath();
-    unlink(g_sockPath.c_str());
 
-    g_listenFd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    // BIND TO A TEMP NAME, THEN rename() IT INTO PLACE. Never unlink() the real
+    // path first.
+    //
+    // `unlink(); bind();` looks harmless — the incumbent is going away anyway —
+    // but it opens a window in which the desktop has NO named socket, and it
+    // hands that window to the one code path that can fail. If bind(), listen()
+    // or pipe2() below errors, this function returns having deleted a name it
+    // never managed to take over: the OUTGOING instance is still alive, still
+    // holding its listen fd, still serving every client that had already
+    // connected — and unreachable to every client that has not. `ss -xl` shows
+    // it LISTENing on a path that `ls` says does not exist, existing apps keep
+    // their inner column, and every app launched from then on comes up without
+    // one. Observed live at 2.90 after a rebuild's hot-swap: four registrations
+    // held, four inner columns drawn, and `connect()` returning ENOENT for
+    // everything new. `ipc_dump()`'s "named" field is the detector for it (2.86)
+    // and this is the cause it was added to find.
+    //
+    // rename() over an existing path is atomic: a client either connects to the
+    // old socket or the new one, never to nothing. On any failure the incumbent
+    // keeps its name and the desktop keeps working — a failed swap costs the new
+    // features, not the button column. stop()'s inode guard is unaffected:
+    // rename preserves the inode, and g_sockDev/g_sockIno are recorded from the
+    // FINAL path below.
+    g_listenFd = bindNamed();
     if (g_listenFd < 0)
-        return;
-
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, g_sockPath.c_str(), sizeof(addr.sun_path) - 1);
-    if (bind(g_listenFd, (sockaddr*)&addr, sizeof(addr)) < 0 || listen(g_listenFd, 8) < 0) {
-        close(g_listenFd);
-        g_listenFd = -1;
-        return;
-    }
+        return; // the incumbent, if any, keeps its name and keeps working
 
     if (pipe2(g_wakePipe, O_CLOEXEC | O_NONBLOCK) < 0) {
+        // The name is ours now, and we are about to drop the fd that answers
+        // it. Leaving it behind would be worse than the pre-rename failure
+        // above: a client would connect() successfully and then get
+        // ECONNREFUSED forever, with `ls` showing a socket that looks fine.
+        // Take the name down with the listener.
+        struct stat st{};
+        if (stat(g_sockPath.c_str(), &st) == 0)
+            unlink(g_sockPath.c_str());
         close(g_listenFd);
         g_listenFd = -1;
         return;
