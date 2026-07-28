@@ -19,7 +19,7 @@
 #
 # Escape hatch: PLAYER_OFFLINE=1 restores the old degrade-and-launch behaviour,
 # for looking at metadata (ratings, lyrics, play counts) with no library
-# present. Nothing on the happy path changes. See docs/air-library-share.md.
+# present. Nothing on the happy path changes. See docs/agents/air-library-share.md.
 #
 # Only ever invoked on air (home/prog/player.nix picks it for host == "air").
 # On top the library is local and none of this exists — player.nix runs main.py

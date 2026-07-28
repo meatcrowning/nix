@@ -19,7 +19,7 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   # On air, nixpkgs' Qt/Mesa can't get a GPU context: same root cause already
-  # diagnosed for hyprvtb/Hyprland in docs/air-port-nextsteps.md — nixpkgs' Mesa has no
+  # diagnosed for hyprvtb/Hyprland in docs/agents/air-port-nextsteps.md — nixpkgs' Mesa has no
   # working Apple Silicon (Honeykrisp) GBM/EGL driver, so QRhiGles2 fails to
   # create a context and the app aborts. Fedora's own Mesa (system) does have
   # it — it's what quickshell/Hyprland already run against here — so on air,

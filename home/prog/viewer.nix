@@ -5,7 +5,7 @@
 #
 #   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
 #     Honeykrisp GBM/EGL driver — same root cause as filer/hyprvtb, see
-#     docs/air-port-nextsteps.md), so exec the SYSTEM python3 with Fedora's python3-pyside6.
+#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with Fedora's python3-pyside6.
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env (qtimageformats/qtsvg add the webp/tiff/svg image plugins beyond
 #     qtbase's png/jpg/gif).

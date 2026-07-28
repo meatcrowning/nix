@@ -2,7 +2,7 @@
 
 # Serve the music library to `air` over SMB, LAN-only.
 #
-# The whole design of docs/air-library-share.md rests on ONE invariant: air
+# The whole design of docs/agents/air-library-share.md rests on ONE invariant: air
 # mounts this share at the SAME absolute path it has here,
 # /run/media/lam/SSD/aud. That makes top's library database valid on air
 # verbatim — every tracks.path row resolves, so there is no path rewriting and
@@ -95,7 +95,7 @@ in
   # Samba keeps its OWN password database, seeded once by hand:
   #     sudo smbpasswd -a lam
   # NixOS cannot declare that (it is a secret), so it is a documented one-time
-  # step — see the STATUS block in docs/air-library-share.md.
+  # step — see the STATUS block in docs/agents/air-library-share.md.
 
   # mDNS: air reaches this host as `top.local` with no DHCP reservation, and
   # keeps working if the address changes.

@@ -291,7 +291,7 @@ stop, keeps emitting decaying axis events **at the seat** (`Hl::sendAxis` →
 listeners, decos or keybinds. **Do not "fix" that by routing through
 `CInputManager::onMouseWheel`** (it re-enters the bus and defers a frame the
 timer cannot supply). Full spec and provenance: `docs/kinetic-scroll.md` and
-`docs/kinetic-scroll-research/`.
+`docs/agents/kinetic-scroll-research/`.
 
 - **A 0-value `sendPointerAxis` IS the protocol `axis_stop`** — never emit a
   literal 0 mid-flight (the wire cousin of the degenerate-rect abort). The seam
