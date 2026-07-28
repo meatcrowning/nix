@@ -16,6 +16,8 @@ test.
 """
 import importlib.util
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,42 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent / "main.py"
 SECRET = "correct horse battery staple"
+
+
+def reexec_with_pyside():
+    """Re-exec under an interpreter that HAS PySide6, if this one doesn't.
+
+    On `top` a bare `python3` is the nix interpreter with no PySide6 at all, so
+    the invocation this file's docstring and askpass/AGENTS.md both prescribe
+    reported two spurious FAILs (accept) and three misleading PASSes — `cancel`
+    and `broken` "passed" only because a missing PySide6 is what `broken` is
+    testing for. A verification command that fails on the machine agents run it
+    on is worse than none: the whole point of this file is that the askpass path
+    can be checked WITHOUT firing a real `sudo -A` at the user's screen.
+
+    The interpreter that has PySide6 is the one baked into the `vista-askpass`
+    wrapper by home/prog/askpass.nix — the same one the dialog really runs
+    under, which is the right one to test with anyway. book never reaches here:
+    Fedora's /usr/bin/python3 imports PySide6 directly.
+    """
+    if importlib.util.find_spec("PySide6") or os.environ.get("ASKPASS_SELFTEST_REEXEC"):
+        return
+    wrapper = shutil.which("vista-askpass")
+    interp = None
+    if wrapper:
+        try:
+            m = re.search(r'^exec "([^"]+/bin/python3[^"]*)"',
+                          Path(os.path.realpath(wrapper)).read_text(), re.M)
+            interp = m.group(1) if m else None
+        except OSError:
+            interp = None
+    if not interp or not os.access(interp, os.X_OK) or interp == sys.executable:
+        print("askpass-selftest: no PySide6 here and no vista-askpass wrapper to "
+              "borrow an interpreter from; results below are not meaningful.",
+              file=sys.stderr)
+        return
+    env = dict(os.environ, ASKPASS_SELFTEST_REEXEC="1")
+    os.execve(interp, [interp, os.path.abspath(__file__)] + sys.argv[1:], env)
 
 
 def run_case(case):
@@ -79,6 +117,12 @@ def main():
     if "--case" in sys.argv:
         run_case(sys.argv[sys.argv.index("--case") + 1])
         return
+
+    # Before anything is spawned: the children inherit sys.executable, so this
+    # has to happen in the parent and only in the parent (a `--case` child must
+    # keep whatever interpreter it was handed, and the `broken` child's whole
+    # job is to run without PySide6).
+    reexec_with_pyside()
 
     # A tempdir, not a directory in the repo: this tree is a live checkout with
     # a shared git index and nothing here should leave droppings in it.
