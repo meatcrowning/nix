@@ -128,9 +128,19 @@ PanelWindow {
         if (_front.source == url && _front.mode === mode) return;
         // First paint: no fade, just show it. Fading up from an empty layer at
         // login would read as the desktop loading in.
+        //
+        // It is also SYNCHRONOUS, and that is what makes a reload look like a
+        // state change in place rather than a re-entry. A reload rebuilds this
+        // window's QML tree while the compositor keeps showing the OLD surface's
+        // last buffer, so the only thing that can go wrong is the new tree
+        // committing a frame it has not painted the wallpaper into yet — which
+        // is a full-screen flash of Theme.bg. Measured on a forced reload before
+        // this: the Image reached Image.Ready 103 ms after the tree completed
+        // (status Loading at both Qt.callLater and a 0 ms Timer). A blocking
+        // decode costs ~25-35 ms of one reload pass, on a screen nothing is
+        // animating on, and puts the picture in the FIRST frame.
         if (!_front.source.toString().length) {
-            _front.mode = mode;
-            _front.source = url;
+            _front.loadNow(url, mode);
             return;
         }
         _back.mode = mode;
@@ -142,7 +152,15 @@ PanelWindow {
         function onUrlChanged() { root._apply(Wall.url, Wall.mode); }
         function onModeChanged() { root._apply(Wall.url, Wall.mode); }
     }
-    Component.onCompleted: _apply(Wall.url, Wall.mode)
+    // Wall.loadNow() FIRST: a singleton completes at the end of the load pass, so
+    // Wall.url is still empty here on every reload unless it is forced. Without
+    // it the source was assigned ~20 ms after this pass — too late for the first
+    // frame no matter how fast the decode is.
+    Component.onCompleted: {
+        Wall.loadNow();
+        _apply(Wall.url, Wall.mode);
+        if (_reports) Wall.firstPaint = _statusName(_front.status);
+    }
 
     Connections {
         target: imgA
@@ -157,9 +175,10 @@ PanelWindow {
     // Only the first screen reports, so the value means one thing on a
     // multi-monitor setup rather than whichever window updated last.
     readonly property bool _reports: screen === Quickshell.screens[0]
+    function _statusName(s: int): string { return ["null", "ready", "loading", "error"][s] || "?"; }
     function _report() {
         if (!_reports) return;
-        Wall.frontStatus = ["null", "ready", "loading", "error"][_front.status] || "?";
+        Wall.frontStatus = _statusName(_front.status);
         Wall.frontUrl = String(_front.source);
     }
     Connections {

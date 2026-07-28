@@ -1101,6 +1101,45 @@ qs ipc call wallpaper status   # path, mode, and whether the visible frame actua
 That is the check that made switching hyprpaper off safe rather than a gamble on
 a blank desktop.
 
+### The first paint of a reload must be SYNCHRONOUS, or the wallpaper flashes
+
+The reload is a handoff of the layer surface, so the compositor keeps showing the
+old buffer until the new tree paints — which means the only way the wallpaper can
+flash is the new tree committing a frame it has not put the picture in yet. It
+did, on every theme and wallpaper change, and the screen went flat `Theme.bg` for
+about a tenth of a second. Traced with `Date.now()` warns across one forced
+reload:
+
+```
+t+0    ms  WallpaperLayer onCompleted   Wall.url.length = 0     <- singleton not loaded yet
+t+20   ms  _apply                       len = 79, status = Null <- source assigned AFTER the pass
+t+20   ms  Qt.callLater / 0 ms Timer    status = Loading
+t+103  ms  status = Ready                                       <- first frame was long gone
+```
+
+Two independent causes, and fixing either alone leaves the flash:
+
+- **A singleton completes at the END of the load pass**, so `Wall.url` is empty
+  in a consumer's `Component.onCompleted` — the same trap as
+  `SettingsStore.loadNow()`, and the same fix: **`Wall.loadNow()` first**, which
+  `reload()`s the three `FileView`s and reads `text()` (the `text()` is what
+  forces the read to complete).
+- **`asynchronous: true` cannot make the first frame.** A 1920x1080 webp decodes
+  in 23-37 ms measured with `QImageReader`, and that is a worker thread landing
+  after the pass either way. So the first paint of a tree — and ONLY the first
+  paint — goes through `WallpaperImage.loadNow()`, which drops `asynchronous`
+  for one assignment and restores it on the next line. A cross-fade must stay
+  asynchronous: the outgoing frame is still on screen, and the picker previews a
+  new wallpaper on every arrow key.
+
+```bash
+qs ipc call wallpaper status   # ... firstPaint=ready
+```
+
+`firstPaint` is the regression check and it is what the tree recorded at its own
+completion, so it stays readable long after the reload. Anything but `ready`
+means the flash is back.
+
 ---
 
 ## Scrolling: use the `Kinetic*` types, never a bare `Flickable`

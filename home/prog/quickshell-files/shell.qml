@@ -601,7 +601,8 @@ Scope {
         // decoded: `qs ipc call wallpaper status`.
         function status(): string {
             return "path=" + Wall.path + " mode=" + Wall.mode
-                + " front=" + Wall.frontStatus + " url=" + Wall.frontUrl;
+                + " front=" + Wall.frontStatus + " firstPaint=" + Wall.firstPaint
+                + " url=" + Wall.frontUrl;
         }
     }
 

@@ -48,6 +48,14 @@ Singleton {
     property string frontStatus: "none"
     property string frontUrl: ""
 
+    // The visible frame's load state at the END of the tree's own completion —
+    // i.e. what the FIRST frame of a reload will be painted with. This is the
+    // regression check for the reload flash: anything but "ready" means the
+    // panel commits a frame with no wallpaper in it and the screen flashes
+    // Theme.bg. It stays whatever the last completed tree recorded, so it is
+    // readable long after the reload.
+    property string firstPaint: "?"
+
     // A file:// URL for Image.source. Empty stays empty so the Image simply
     // doesn't load rather than erroring on a malformed URL.
     readonly property string url: _path.length ? "file://" + _path : ""
@@ -94,5 +102,25 @@ Singleton {
         running: true
         repeat: true
         onTriggered: { curFile.reload(); modeFile.reload(); blurFile.reload(); }
+    }
+
+    // Read all three files RIGHT NOW, synchronously, and return the path.
+    //
+    // A SINGLETON'S OWN COMPONENT COMPLETION IS AT THE END OF THE LOAD PASS, so
+    // a consumer's Component.onCompleted reads `url` before these FileViews have
+    // ever loaded — `blockLoading` does not help, because the blocking load is
+    // what completion triggers. Measured on a forced reload: WallpaperLayer's
+    // onCompleted saw `Wall.url.length === 0`, and the real value only arrived
+    // 20 ms later, i.e. after the pass. So the wallpaper was assigned its source
+    // too late to be on the reload's first frame.
+    //
+    // Same shape, and the same reason, as SettingsStore.loadNow(): the reload()
+    // is not enough on its own, reading text() is what forces the read to
+    // complete. Call this first in any one-shot handler that needs the wallpaper.
+    function loadNow(): string {
+        curFile.reload();  root._path = curFile.text().trim();
+        modeFile.reload(); root._mode = modeFile.text().trim();
+        blurFile.reload(); root._blur = blurFile.text().trim();
+        return root._path;
     }
 }
