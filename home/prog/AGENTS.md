@@ -9,6 +9,14 @@ Repo-wide rules (rebuild, git, boundaries): `~/nix/AGENTS.md`.
 Bumping the compositor pin or the ABI seam: `hyprvtb/PORTING.md` — read that
 one **before** touching the plugin or the pin.
 
+**Anything the plugin DRAWS — titlebar cells, labels, tooltips, shadows, the
+roll/open/close animations — is governed by `~/nix/DESIGN.md`**, the desktop's
+design language. The plugin is one of four codebases that put pixels on this
+screen and the user cannot tell them apart, so its glyph vocabulary, its
+timings and its colours are shared with the panel and the apps, not local
+choices. The window roll in/out is the **reference** every other sliding
+animation on the desktop is matched to.
+
 ---
 
 ## `hyprland.lua` is seed-once — edit BOTH copies

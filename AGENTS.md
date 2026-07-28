@@ -149,6 +149,8 @@ Never run bare `qs` — it launches a second panel.
 
 ## Where things live
 
+- `DESIGN.md` — **the design language.** Read before any visual change; see
+  below.
 - `flake.nix` — inputs, the `top` NixOS configuration, and a standalone
   `homeConfigurations.air` for the second machine. The rationale for both
   pinned inputs lives here; read it before touching either.
@@ -242,14 +244,30 @@ Never run bare `qs` — it launches a second panel.
   `claude-state-premigrate.sh` retires the nested repo on each machine by
   itself.
 
+### `DESIGN.md` — read it before you draw ANYTHING
+
+**`DESIGN.md` at this repo root is the design language: how everything on this
+desktop looks and behaves.** Typography and the pixel font's traps, the
+wallpaper-derived palette, spacing and corners, motion timing, titlebar button
+vocabulary, menus, tooltips, list rows, drag feedback, and the "never offer an
+action that can silently fail" rule.
+
+It is **not optional reading and not per-area**. The panel, the four apps you
+did not touch, the compositor plugin and the window config are four codebases
+and one desktop, and the user should not have to restate his preferences on
+every feature — that is the whole reason the file exists. **Any change that puts
+pixels on the screen reads it first, whichever tree it lands in.** If you change
+how something looks, update it in the same commit.
+
 ### Nested guides — read the one nearest what you are editing
 
 | Editing | Read |
 |---|---|
+| **Anything visual, anywhere** | **`DESIGN.md`** (always), then the row below |
 | The Quickshell panel (`home/prog/quickshell-files/*.qml`) | `home/prog/quickshell-files/AGENTS.md` |
 | Hyprland config, the `hyprvtb` plugin, the sandbox | `home/prog/AGENTS.md` |
 | Bumping the compositor pin / plugin ABI seam | `home/prog/hyprvtb/PORTING.md` |
-| Any of the five Qt apps | `apps/AGENTS.md`, then `apps/<name>/AGENTS.md` |
+| Any of the six Qt apps | `apps/AGENTS.md`, then `apps/<name>/AGENTS.md` |
 
 `PORTING.md` is cited by ten referrers including `checkPhase` failure messages
 and lives inside the plugin's derivation source — moving it forces a plugin

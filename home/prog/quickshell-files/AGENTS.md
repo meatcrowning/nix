@@ -8,6 +8,12 @@ rules are `~/nix/AGENTS.md`.
 **Read `../AGENTS.md` too if your change touches window management, titlebars,
 logout, or anything the compositor owns.**
 
+**Read `~/nix/DESIGN.md` before you draw anything.** It is the desktop's design
+language — type, palette, spacing, motion timing, menus, tooltips, rows,
+affordance honesty — and it is shared with the compositor plugin and the six
+apps so that all four trees come out looking like one desktop. This file owns
+the panel's *mechanics*; that one owns the *look*, for every surface at once.
+
 ---
 
 ## Getting an edit live
@@ -260,6 +266,61 @@ in a throwaway config, `tools/sandbox.sh exec` it, and open the popup from a
 `The Wayland connection experienced a fatal error: Protocol error` and exits
 255; a good one prints its size and lives. Cycle close→open at least twice —
 that second open is the case above.
+
+---
+
+## One slide, one duration
+
+**Everything on this desktop that slides, grows or glides between two resting
+positions runs for `ViewMode.slideMs` (260 ms) on `ViewMode.slideEasing`
+(`Easing.OutCubic`). Take those two properties; never write a duration literal
+into a widget.** That includes anything you add: a new drawer, popup, tile,
+reveal or panel. It is a design-language rule, not a per-widget choice — the
+repo-wide statement of it is `~/nix/DESIGN.md`.
+
+**The numbers are hyprvtb's window roll**, because that is the largest and
+most-used motion here and the one the user judges everything else against:
+`../hyprvtb/vtbDeco.cpp`, `VTB_ROLL_DURATION = 0.26f`, `VTB_ROLL_SLIDE_FRAC =
+0.55f`, `rollEaseOutCubic` / `rollEaseInOut`. The roll is two beats inside those
+260 ms — the drawer slide over the first 55 % (ease-out cubic), the set-down over
+the remaining 45 % (ease-in-out cubic), reversed for roll-out — so:
+
+- **`slideMs` matches the roll's total duration exactly**, 260 ms either way.
+- **`slideEasing` matches the roll's LEADING beat**, which is the one that
+  carries the visible travel and the one an ease-out cubic describes. The
+  residual difference is the last ~45 % of the curve: the roll eases *in* again
+  as the bar sets down, a QML `NumberAnimation` does not. Reproducing it exactly
+  would need a `SequentialAnimation` of two animations over one property (or an
+  `easing.bezier`), which is not worth it for a drawer with only one moving edge
+  — the roll's second beat exists because the bar changes DIRECTION, and nothing
+  in the panel does.
+- **`VTB_ROLL_DURATION` is a compiled-in `static constexpr`, not a
+  `plugin:hyprvtb:*` config key**, so QML cannot track it at runtime — there is
+  nothing to read. `ViewMode.slideMs` is therefore a hand-copy, and if that
+  constant ever moves this one moves with it. Same standing duplication as
+  `Kinetic.friction` against `plugin:hyprvtb:kinetic_friction`, for the same
+  reason: two languages, no shared file. (Making it a config key is the only way
+  to remove the copy; it would also let the user retune the whole desktop's
+  motion from `hyprland.lua`.)
+
+**The queue drawer has no animation of its own** (see below — both attempts were
+bugs), so `DockTile`'s `Behavior on y`/`height` **is** the drawer's slide. That
+is why those two Behaviors were the ones that had to move: at 200 ms the player's
+queue opened visibly quicker than a window rolling out next to it, which is the
+report that produced this section. Anything derived from that glide is derived
+from `slideMs` too — `MediaContent`'s `closeHold` is `slideMs + 20`, never a
+literal, or the drawer is released before the tile has finished handing its rows
+back and the artwork balloons for the last frames of the close.
+
+**Deliberate non-participants** — do not "fix" these to 260:
+
+- **Anything tracking the pointer animates at all only under protest.** The
+  bar's width settle (`shell.qml`, 200 ms) is the tail of a *gesture*, gated on
+  `!dragging || snapping`; it is the drag's own snap, not a slide between rest
+  states. See "Never animate, quantize, or re-zone a live drag".
+- **Crossfades and hover feedback are not slides.** The layout crossfade and the
+  askpass scrim (140 ms), the grip highlight (120 ms), the VU bars' 25 ms
+  follow: an opacity or a level, with no travel to read.
 
 ---
 
@@ -775,7 +836,8 @@ draws it.
     trails. Measured: the tile went 217→270px while the drawer was still at
     25px and the artwork absorbed all of it — 111, 126, 139, 148, 154, 159,
     162, 164 — then snapped back to 60.
-  - On the close the flag flips in one frame while the tile takes 200ms to shed
+  - On the close the flag flips in one frame while the tile takes a full slide
+    (`ViewMode.slideMs`, 260ms) to shed
     its rows, so the drawer tracks `drawerOut`, which is `Media.queueOpen` held
     true for one animation on the way down. `drawerOut` must be a plain property
     seeded in `Component.onCompleted`, not `property bool drawerOut:
@@ -787,7 +849,10 @@ draws it.
 - `DockTile` glides `y` and `height` so the two tiles trade rows visibly. **Only
   those two** — `x`/`width` follow the panel edge during a resize drag, and
   animating anything that tracks the pointer is the law this panel does not
-  break.
+  break. **That glide IS the drawer's slide** — the drawer has no animation of
+  its own — so it runs at `ViewMode.slideMs`/`slideEasing`, the desktop's
+  canonical 260ms OutCubic taken from the window roll. See "One slide, one
+  duration"; `closeHold` is derived from the same constant.
 
 ### The clock's three faces
 
