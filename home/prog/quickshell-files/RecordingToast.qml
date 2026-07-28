@@ -30,7 +30,9 @@ PanelWindow {
     }
     Timer {
         id: hideTimer
-        interval: 260               // the slide-out, plus a frame
+        // The slide-out plus a fixed frame. Must outlast the card's Behavior at
+        // any animScale/animSpeed, so it is derived from it, never a literal.
+        interval: ViewMode.ms(ViewMode.slideMs) + 20
         onTriggered: if (!root.recording) root._vis = false
     }
     color: "transparent"
@@ -67,7 +69,7 @@ PanelWindow {
         readonly property real shown: 0
         readonly property real hidden: root.implicitWidth + Theme.gap
         x: root.recording ? shown : hidden
-        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
         color: Theme.bg
         border.color: Theme.windowBorder

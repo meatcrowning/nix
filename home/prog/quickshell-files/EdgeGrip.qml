@@ -108,6 +108,9 @@ PanelWindow {
         height: root.height
         color: Theme.accent
         opacity: (ma.containsMouse || ViewMode.dragging) ? 0.25 : 0
-        Behavior on opacity { NumberAnimation { duration: ViewMode.ms(120) } }
+        // Hover feedback, not a slide: 120ms is the desktop's hover/scrollbar
+        // fade. It had no easing at all, i.e. Linear by default, against a house
+        // style that is OutCubic almost everywhere — nothing chose that.
+        Behavior on opacity { NumberAnimation { duration: ViewMode.ms(120); easing.type: ViewMode.slideEasing } }
     }
 }

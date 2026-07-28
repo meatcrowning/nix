@@ -17,6 +17,23 @@ timings and its colours are shared with the panel and the apps, not local
 choices. The window roll in/out is the **reference** every other sliding
 animation on the desktop is matched to.
 
+**That reference is a config key, and this plugin OWNS it** (≥2.90).
+`plugin:hyprvtb:slide_duration_ms` (260) and `plugin:hyprvtb:roll_slide_frac`
+(0.55) are the roll's two beats — and therefore also the panel's popups, the
+titlebar tooltip and the six apps' drawers. They were `static constexpr` until
+2.89, which meant the other codebases hand-copied 260 out of a C++ comment, and
+the panel spent its life at 220 as a result. `vtbPublishMotion()` (main.cpp)
+writes the resolved values to `~/.local/state/hyprvtb/motion.json` (the panel
+reads it with a watching `FileView`) and to a generated
+`~/.local/state/hyprvtb/DeskMotion.qml` (the apps read it with a `Loader` —
+plain Qt QML has no file reader and `XMLHttpRequest` refuses `file://` without
+a blanket permission flag). It runs on every `config.reloaded`, so **retuning
+the whole desktop's motion is one number here plus `hyprctl reload`**, with
+nothing restarted. Read them through `Cfg::slideDurationMs()` /
+`Cfg::rollSlideFrac()`, never cached in a member: those accessors clamp, and a
+0ms duration is a division by zero in the roll's progress step whose NaN lands
+in an animated `CBox` — the degenerate rect `renderRect` aborts on.
+
 ---
 
 ## `hyprland.lua` is seed-once — edit BOTH copies

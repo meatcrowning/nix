@@ -209,6 +209,21 @@ hl.config({
             ["col.accent"]        = "rgba(d99c1fff)",
             ["col.bg_alt"]        = "rgba(120f08ff)",
             ["col.crit"]          = "rgba(fab424ff)",
+            -- THE DESKTOP'S MOTION. This is not just the window roll: the roll
+            -- is the REFERENCE every sliding animation on this machine is
+            -- matched to (DESIGN.md 6.2), so this one number is also the
+            -- quickshell panel's popups and drawers, the titlebar tooltip, and
+            -- the drawers in the six apps under ~/nix/apps. The plugin writes
+            -- the resolved value to ~/.local/state/hyprvtb/motion.json and the
+            -- panel (ViewMode.qml) and the apps (pylib/deskstyle.py) both watch
+            -- that file, so `hyprctl reload` after changing this retunes the
+            -- whole desktop at once with nothing restarted.
+            --
+            -- Commented out because the C++ default IS 260/0.55 and this file
+            -- is seed-once on both machines: a value written here would apply
+            -- only to whichever copy is not stale. Uncomment to retune.
+            -- slide_duration_ms  = 260,   -- 20..4000
+            -- roll_slide_frac    = 0.55,  -- slide beat vs set-down beat
             -- macOS-style momentum scrolling: content keeps gliding after the
             -- fingers leave the pad, decelerating exponentially. Synthesized by
             -- the plugin at the seat, so it reaches every toolkit at once —

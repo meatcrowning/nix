@@ -44,7 +44,7 @@ PanelWindow {
         readonly property real shown: 0
         readonly property real hidden: width
         x: Osd.active ? shown : hidden
-        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
         radius: 0
         // Pure black card, like the runner / power menu / cheatsheet (they all
@@ -106,7 +106,7 @@ PanelWindow {
                 height: Math.max(0, (track.height - 4) * card.level)
                 radius: 0
                 color: card.tint
-                Behavior on height { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                Behavior on height { NumberAnimation { duration: ViewMode.ms(140); easing.type: ViewMode.slideEasing } }
             }
         }
     }

@@ -8,6 +8,7 @@
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 
+#include <algorithm> // std::clamp — the motion keys are clamped in Vtb::Cfg
 #include <chrono>
 #include <map>
 #include <string>
@@ -145,6 +146,15 @@ struct SGlobalState {
         SP<Config::Values::CColorValue>  critColor;
         SP<Config::Values::CColorValue>  inactiveColor;
 
+        // ---- THE DESKTOP'S MOTION (see vtbPublishMotion below) ----
+        // Not "the roll's timing" — the desktop's. The window roll is the
+        // reference every sliding animation on this machine is matched to
+        // (DESIGN.md §6.2), so these two keys are where the panel's popups, the
+        // titlebar tooltip and the six apps' drawers all get their numbers.
+        // Retune here (hyprland.lua) and the whole desktop retunes with you.
+        SP<Config::Values::CIntValue>    slideDurationMs;
+        SP<Config::Values::CFloatValue>  rollSlideFrac;
+
         // ---- kinetic scrolling (see vtbKinetic.hpp) ----
         // Flat underscore names, matching bar_width / font_size. The dotted
         // `col.*` group exists only because wal-set.sh writes those keys.
@@ -222,6 +232,28 @@ namespace Vtb::Cfg {
     }
     inline auto inactiveColor() {
         return g_pGlobalState->config.inactiveColor->value();
+    }
+
+    // ---- the desktop's motion ----
+    // CLAMPED HERE, not at the call sites. The duration is a DIVISOR in the
+    // roll's per-frame progress step (`m_rollProgress += dt / duration`), so a
+    // hand-edited `slide_duration_ms = 0` would make that step infinite — the
+    // roll would complete inside one frame, and worse, an inf/NaN progress
+    // propagates straight into the animated rect, which is exactly the
+    // degenerate box Hyprland's renderRect ABORTS the compositor on. hyprlang's
+    // own min/max is declared as well; this is the second belt, because a
+    // config value can also arrive from a `hyprctl keyword`-shaped path.
+    inline int slideDurationMs() {
+        const int MS = g_pGlobalState->config.slideDurationMs->value();
+        return std::clamp(MS, 20, 4000);
+    }
+    inline float slideDurationSec() {
+        return static_cast<float>(slideDurationMs()) / 1000.f;
+    }
+    // Never 0 and never 1: the roll remaps [0,frac] and [frac,1] onto two
+    // easing curves, and an endpoint would divide by a zero-width interval.
+    inline float rollSlideFrac() {
+        return std::clamp(g_pGlobalState->config.rollSlideFrac->value(), 0.05f, 0.95f);
     }
 
     // ---- kinetic scrolling ----

@@ -278,6 +278,9 @@ Window {
         onClosed: win.closeSearch()
     }
 
+    // The desktop's motion, from the plugin's published key (qmlcommon/Motion.qml).
+    Motion { id: motion }
+
     // ---- search bar: slides in from the right (titlebar) edge ----
     Rectangle {
         id: searchBar
@@ -285,7 +288,10 @@ Window {
         anchors.topMargin: 8
         anchors.right: parent.right
         anchors.rightMargin: win.searchOpen ? 8 : -(width + 4)
-        Behavior on anchors.rightMargin { NumberAnimation { duration: 120 } }
+        // A reveal sliding out of the edge it belongs to, so it takes the
+        // desktop's slide (DESIGN.md §6.2). It was 120ms with NO easing at
+        // all, i.e. Linear — nothing chose that, it was just the default.
+        Behavior on anchors.rightMargin { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
         width: 260
         height: 22
         z: 50

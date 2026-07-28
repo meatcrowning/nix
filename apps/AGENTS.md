@@ -116,6 +116,45 @@ every app installs it as a root **context property** in `main.py`, and context
 properties are visible to every file-based component whatever directory it
 lives in.
 
+### Motion: one duration, one curve, and it is the compositor's
+
+**Never write a duration literal into an animation here.** `Motion.qml` from
+`qmlcommon/` is the apps' half of `DESIGN.md` §6.2 — the rule that everything on
+this desktop which slides, grows or glides between two resting positions moves
+at the same speed as a window rolling out next to it, because the user stated it
+as a design-language rule and not a per-widget choice.
+
+```qml
+import "../../qmlcommon"
+Motion { id: motion }
+Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs)
+                                      easing.type: motion.slideEasing } }
+```
+
+It is **not** a fourth hand-copy of 260. hyprvtb owns the number as
+`plugin:hyprvtb:slide_duration_ms` and publishes it to a generated
+`~/.local/state/hyprvtb/DeskMotion.qml`, which `Motion` reads with a `Loader` —
+plain Qt QML has no file reader at all, and `XMLHttpRequest` refuses a `file://`
+URL unless `QML_XHR_ALLOW_FILE_READ` is exported into the app, which is a
+blanket local-file-read permission and one of these apps is a **web browser**.
+Both were measured offscreen; the `Loader` is the one that degrades correctly,
+reporting `Loader.Error` for a missing file. The 260 in that file is the
+fallback for a machine with no plugin, and must stay equal to the key's default
+in `hyprvtb/main.cpp`.
+
+It resolves once, at construction — consistent with these apps having no hot
+reload of any kind, so "relaunch to pick it up" is already the rule here.
+
+`motion.ms()` also applies the panel's `reduceMotion` / `animSpeed`, via the
+`DeskStyle` context property. **Those two keys are not on `DeskStyle` yet**;
+`Motion` guards with a `typeof` and falls back to 1.0/false, so adding
+`reduceMotion` and `animSpeed` beside `fontFamily`/`fontSize` in
+`pylib/deskstyle.py` is all that is left to light them up in all six apps.
+
+A duration that is deliberately *not* the slide keeps its number and gets a
+comment saying why — scrollbar and hover fades stay at 120ms, take the house
+curve, and still go through `ms()`. See §6.2.1's non-participants table.
+
 ### Scrolling: every scrollable view is kinetic BY CONSTRUCTION
 
 **Never write a bare `ListView`, `GridView`, `Flickable` or `ScrollView` in

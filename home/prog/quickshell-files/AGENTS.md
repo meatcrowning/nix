@@ -294,14 +294,32 @@ the remaining 45 % (ease-in-out cubic), reversed for roll-out — so:
   `easing.bezier`), which is not worth it for a drawer with only one moving edge
   — the roll's second beat exists because the bar changes DIRECTION, and nothing
   in the panel does.
-- **`VTB_ROLL_DURATION` is a compiled-in `static constexpr`, not a
-  `plugin:hyprvtb:*` config key**, so QML cannot track it at runtime — there is
-  nothing to read. `ViewMode.slideMs` is therefore a hand-copy, and if that
-  constant ever moves this one moves with it. Same standing duplication as
-  `Kinetic.friction` against `plugin:hyprvtb:kinetic_friction`, for the same
-  reason: two languages, no shared file. (Making it a config key is the only way
-  to remove the copy; it would also let the user retune the whole desktop's
-  motion from `hyprland.lua`.)
+- **`ViewMode.slideMs` is no longer a hand-copy** (hyprvtb 2.89). The roll's
+  timing used to be a compiled-in `static constexpr` with nothing to read, so
+  this was a literal with a comment asking whoever changed the C++ to remember
+  this file — and it had already gone stale once. It is now the config key
+  **`plugin:hyprvtb:slide_duration_ms`**, set in `hyprland.lua`, and the plugin
+  publishes the resolved value to `~/.local/state/hyprvtb/motion.json` on every
+  config reload. `ViewMode` holds a `FileView` on it with `watchChanges`, so
+  `hyprctl reload` retunes a *running* panel — no restart, no polling, no
+  process spawn. The `260` literal survives as the FALLBACK, for a session with
+  the plugin disabled or quarantined after a crash, and must stay equal to the
+  key's default in `hyprvtb/main.cpp`. (Unlike `Kinetic.friction`, which is
+  still a genuine hand-copy of `plugin:hyprvtb:kinetic_friction` — the physics
+  is re-derived Qt-side, so there is no single value to publish.)
+- **Every duration goes through `ViewMode.ms()`, including the ones that are not
+  the slide.** That function applies `SettingsStore.d.reduceMotion` (returns 0 —
+  a `NumberAnimation` assigns immediately), then `animSpeed`, then the debug
+  `animScale`. Those two settings had been in the Settings window driving
+  nothing at all for their whole life, because every `Behavior` carried a
+  literal. A literal duration now opts that widget out of the user's own
+  settings, not just out of the house style.
+- **A `Timer` that guards an animation is derived from it.** Five of them exist
+  only to outlast a slide (unmapping a layer surface after the card is off it,
+  holding a `_closing` flag through the animation it gates). The form is
+  `ViewMode.ms(ViewMode.slideMs) + 20`: a fixed frame of margin that must NOT
+  scale, or `reduceMotion` leaves no margin. They were 260ms literals against a
+  220ms slide — right by accident, and wrong at every `animScale` but 1.
 
 **The queue drawer has no animation of its own** (see below — both attempts were
 bugs), so `DockTile`'s `Behavior on y`/`height` **is** the drawer's slide. That

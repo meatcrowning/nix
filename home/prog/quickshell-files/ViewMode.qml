@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 // The desktop's VIEW MODE and the bar's live width.
 //
@@ -115,27 +116,83 @@ Singleton {
     // and it resets to 1 on the next panel reload so it can't be left on by
     // accident. (SettingsStore.d.animSpeed is a different, user-facing thing.)
     property real animScale: 1.0
-    function ms(base) { return Math.round(base * animScale); }
+
+    // ---- ms(): THE one place a duration becomes a number ------------------
+    // Every duration in the panel goes through here, and that is what makes the
+    // two USER-FACING motion settings real. They were in SettingsStore and in
+    // the Settings UI (Appearance > Motion) from the day they shipped and drove
+    // nothing at all, because every Behavior carried its own literal — the debt
+    // DESIGN.md §6.2 describes. Three factors, in this order:
+    //
+    //   reduceMotion  — a hard off switch. Returns 0, which a NumberAnimation
+    //                   treats as "assign immediately": the desktop still
+    //                   changes state, it just stops travelling to get there.
+    //   animSpeed     — the user's own multiplier (Settings > Appearance).
+    //                   1.0 is the canon; <1 is faster, >1 slower.
+    //   animScale     — the debug `slowmo` knob above, NOT persisted.
+    //
+    // Both settings are validated here rather than at the call site: a
+    // settings.json hand-edited to `"animSpeed": 0` or to a string would
+    // otherwise freeze or NaN every animation on the desktop at once.
+    function ms(base) {
+        if (SettingsStore.d.reduceMotion) return 0;
+        const s = Number(SettingsStore.d.animSpeed);
+        const f = (isFinite(s) && s > 0) ? s : 1.0;
+        return Math.max(0, Math.round(base * f * animScale));
+    }
 
     // ---- the desktop's canonical slide ------------------------------------
     // ONE duration and ONE curve for everything on this desktop that slides,
-    // grows or glides between two resting positions. Take these; do not write a
-    // duration literal into a widget.
+    // grows or glides between two resting positions. Take these — always
+    // through ms() — and never write a duration literal into a widget.
     //
     // The numbers are not a preference, they are hyprvtb's window roll-up /
-    // roll-out, which is the largest and most-used motion here and therefore the
-    // one everything else is judged against: `home/prog/hyprvtb/vtbDeco.cpp`,
-    // `VTB_ROLL_DURATION = 0.26f`, whose leading beat (the drawer slide, 55% of
-    // it) is an ease-out cubic. Full derivation and the residual difference
-    // between the two animation systems: AGENTS.md, "One slide, one duration".
+    // roll-out: the largest and most-used motion here and therefore the one
+    // everything else is judged against. Its leading beat (the drawer slide,
+    // the first 55%) is an ease-out cubic, which is what slideEasing matches;
+    // the residual difference between the two animation systems is written out
+    // in AGENTS.md, "One slide, one duration".
     //
-    // It is a hand-copy — the plugin's constant is compiled in, not a config key
-    // — so if `VTB_ROLL_DURATION` ever changes, change this with it. That is the
-    // same standing duplication `Kinetic.friction` carries against
-    // `plugin:hyprvtb:kinetic_friction`, for the same reason: two languages, no
-    // shared file.
-    readonly property int slideMs: 260
+    // IT IS NO LONGER A HAND-COPY. Until hyprvtb 2.89 the roll's timing was a
+    // compiled-in `static constexpr` with nothing to read, so this was a literal
+    // 260 with a comment asking whoever changed the C++ to remember this file —
+    // a duplication that had already gone stale once. The plugin now owns the
+    // number as `plugin:hyprvtb:slide_duration_ms` and publishes the resolved
+    // value to the state file below on every config reload, so editing
+    // hyprland.lua and running `hyprctl reload` retunes the compositor, this
+    // panel and the six apps together, with nothing restarted.
+    //
+    // The literal survives as the FALLBACK, and it has to: the panel outlives
+    // any single plugin instance, starts independently of it, and must still
+    // draw a correct desktop if the plugin is disabled, quarantined after a
+    // crash, or simply has not published yet. It must stay equal to the key's
+    // default in main.cpp.
     readonly property int slideEasing: Easing.OutCubic
+    property int slideMs: 260
+
+    // Published by hyprvtb (main.cpp, vtbPublishMotion) — atomically, so this
+    // reader sees a whole blob or the previous one. watchChanges is what makes
+    // a `hyprctl reload` reach the panel with no polling and no process spawn;
+    // a missing file is the normal state on a machine with no plugin and is not
+    // an error, hence the silent onLoadFailed.
+    FileView {
+        id: motionFile
+        path: (Quickshell.env("HOME") || "") + "/.local/state/hyprvtb/motion.json"
+        watchChanges: true
+        onFileChanged: reload()
+        onLoadFailed: () => {}
+        onLoaded: {
+            try {
+                const m = JSON.parse(text());
+                // Guard the same range the plugin clamps to. A 0 here would
+                // make every Behavior instant and look exactly like the panel
+                // being broken, and this file is on disk where anything can
+                // edit it.
+                if (m && m.slideMs >= 20 && m.slideMs <= 4000)
+                    root.slideMs = Math.round(m.slideMs);
+            } catch (e) { /* half-written or hand-mangled: keep the last good */ }
+        }
+    }
 
     // Diagnostic trace of the last drag, read with `qs ipc call view trace`:
     // one "dragWidth,surfaceWidth,liveWidth" sample per pointer event. The

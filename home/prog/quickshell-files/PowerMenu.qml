@@ -124,7 +124,7 @@ PanelWindow {
         readonly property real shown: 0
         readonly property real hidden: width
         x: root.open ? shown : hidden
-        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
         color: Theme.bg
         border.color: Theme.windowBorder

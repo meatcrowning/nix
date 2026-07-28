@@ -85,6 +85,13 @@ static constexpr long   VTB_PLAYBAR_ECHO_MS  = 1500;
 static constexpr double VTB_PLAYBAR_ECHO_EPS = 0.004;
 
 // How long a clicked cell stays inverted as activation feedback.
+//
+// DELIBERATELY NOT the desktop's slide, and deliberately still a literal. This
+// is not travel between two rest states — it is the acknowledgement of a press,
+// the compositor-side sibling of the panel's 90ms SetToggle knob (DESIGN.md
+// §6.4: feedback belongs with the pointer). Stretching it to the slide's 260
+// would leave the button lit well after the thing it triggered had happened.
+// It shares 220 with nothing any more, which is the point of it being here.
 static constexpr float VTB_FLASH_MS = 220.f;
 
 // Hard (sharp, un-blurred) drop shadow cast to the bottom-left of a normal
@@ -93,10 +100,24 @@ static constexpr float VTB_FLASH_MS = 220.f;
 static constexpr int VTB_SHADOW_SIZE = 24;
 
 // roll-up / roll-out animation timing: the whole two-beat animation runs over
-// VTB_ROLL_DURATION seconds, of which the drawer slide takes the first
-// VTB_ROLL_SLIDE_FRAC and the "set down" the rest (reversed for roll-out).
-static constexpr float VTB_ROLL_DURATION   = 0.26f;
-static constexpr float VTB_ROLL_SLIDE_FRAC = 0.55f;
+// Cfg::slideDurationSec(), of which the drawer slide takes the first
+// Cfg::rollSlideFrac() and the "set down" the rest (reversed for roll-out).
+//
+// THESE WERE `static constexpr` 0.26f / 0.55f UNTIL 2.89. They are now the
+// config keys `plugin:hyprvtb:slide_duration_ms` and
+// `plugin:hyprvtb:roll_slide_frac`, with those exact values as their defaults,
+// because this animation is not just the roll: it is the REFERENCE every
+// sliding animation on this desktop is matched to (DESIGN.md §6.2), and the
+// panel and the six apps were hand-copying 260 out of this file. main.cpp
+// publishes the resolved numbers to ~/.local/state/hyprvtb/motion.json so those
+// runtimes track the key instead of a comment. Retune in hyprland.lua,
+// `hyprctl reload`, and the whole desktop moves together.
+//
+// Read them through Cfg:: — never cache one in a member. The accessors clamp
+// (a 0ms duration is a division by zero in the progress step below, and the
+// inf/NaN that follows lands in an animated CBox, which is the degenerate rect
+// Hyprland's renderRect ABORTS on), and a reload must be able to change the
+// feel of an animation that is already on screen.
 
 // After a roll-out's slide lands, the window is un-hidden but kept covered by
 // its (still-drawn) snapshot for this long, so the client — QtWebEngine (surfer)
@@ -1302,13 +1323,20 @@ double CVtbDeco::cellCenterY(int cell) {
 
 // The pop-out label itself: 1px accent outline, bar-background fill, pixel
 // font — the same look filer's old in-window tooltips had. Animated: slides
-// OUT of the bar's left edge (OutCubic, ~220ms) like the quickshell hover
+// OUT of the bar's left edge (OutCubic, the desktop's slide) like the quickshell hover
 // widgets slide out of the screen edge, and retracts back into it. The label
 // starts fully tucked behind the bar and is clipped to the bar's left edge, so
 // the un-emerged part stays hidden behind the bar as it travels. Called each
 // rendered frame from drawTooltipPass while m_bTooltipShown; advances the slide
 // phase itself and re-damages until it settles, so it animates on a still cursor.
-static constexpr float VTB_TT_SLIDE_MS = 220.f; // matches SlidePopup's 220ms card slide
+// The tooltip slide IS the desktop's slide — same key, no second number. It was
+// a `static constexpr 220.f` whose comment said it existed "to match
+// SlidePopup's 220ms card slide"; the panel's card has since moved to the
+// canonical 260 (the roll's own duration), so matching it now means reading the
+// same key the roll does rather than re-copying whatever it changed to.
+static inline float vtbTooltipSlideMs() {
+    return static_cast<float>(Cfg::slideDurationMs());
+}
 
 static float easeOutCubic(float t) {
     const float u = 1.f - std::clamp(t, 0.f, 1.f);
@@ -1325,7 +1353,7 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     float       dt     = std::chrono::duration<float, std::milli>(NOW - m_ttPhaseAt).count();
     m_ttPhaseAt        = NOW;
     dt                 = std::clamp(dt, 0.f, 64.f); // cap so a stale timestamp can't jump the slide
-    const float step   = dt / VTB_TT_SLIDE_MS;
+    const float step   = dt / vtbTooltipSlideMs();
     if (m_ttPhase < TARGET)
         m_ttPhase = std::min(TARGET, m_ttPhase + step);
     else if (m_ttPhase > TARGET)
@@ -3276,11 +3304,11 @@ bool CVtbDeco::rollAnimSubProgress(float& slideT, float& downT) {
         return false;
     const float g = std::clamp(m_rollProgress, 0.f, 1.f);
     if (m_rollAnim == ROLL_UP) {
-        slideT = rollEaseOutCubic(rollRemap(g, 0.f, VTB_ROLL_SLIDE_FRAC));
-        downT  = rollEaseInOut(rollRemap(g, VTB_ROLL_SLIDE_FRAC, 1.f));
+        slideT = rollEaseOutCubic(rollRemap(g, 0.f, Cfg::rollSlideFrac()));
+        downT  = rollEaseInOut(rollRemap(g, Cfg::rollSlideFrac(), 1.f));
     } else {
-        downT  = 1.f - rollEaseInOut(rollRemap(g, 0.f, 1.f - VTB_ROLL_SLIDE_FRAC));
-        slideT = 1.f - rollEaseOutCubic(rollRemap(g, 1.f - VTB_ROLL_SLIDE_FRAC, 1.f));
+        downT  = 1.f - rollEaseInOut(rollRemap(g, 0.f, 1.f - Cfg::rollSlideFrac()));
+        slideT = 1.f - rollEaseOutCubic(rollRemap(g, 1.f - Cfg::rollSlideFrac(), 1.f));
     }
     return true;
 }
@@ -3293,7 +3321,7 @@ bool CVtbDeco::rollAnimSubProgress(float& slideT, float& downT) {
 // first frame — hideRolledWindow hands focus away immediately, which raises
 // another window over the one still visibly sliding.
 bool CVtbDeco::isRollingUpSlide() const {
-    return m_rollAnim == ROLL_UP && m_rollProgress < VTB_ROLL_SLIDE_FRAC;
+    return m_rollAnim == ROLL_UP && m_rollProgress < Cfg::rollSlideFrac();
 }
 
 // Current set-down fraction: the live animation value, else 1 for a window that
@@ -3371,7 +3399,7 @@ void CVtbDeco::stepRollAnim() {
     const auto  now = Time::steadyNow();
     const float dt  = std::chrono::duration<float>(now - m_rollAnimAt).count();
     m_rollAnimAt    = now;
-    m_rollProgress += dt / VTB_ROLL_DURATION;
+    m_rollProgress += dt / Cfg::slideDurationSec();
     if (m_rollProgress >= 1.f) {
         m_rollProgress = 1.f;
 

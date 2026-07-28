@@ -937,14 +937,21 @@ Window {
         }
     }
 
+    // The desktop's motion, read from the plugin's published key — see
+    // qmlcommon/Motion.qml. Both tooltip slides below take it; they used to
+    // carry a 220ms literal each, which stopped matching the titlebar tooltip
+    // they exist to feel like the moment the desktop converged on the roll.
+    Motion { id: motion }
+
     // webpage tooltip: slides OUT to the left of the cursor point the page
-    // reported (a clipped reveal growing leftward, OutCubic ~220ms — the same
-    // feel as the hyprvtb titlebar tooltips), and slides back in on hide.
+    // reported (a clipped reveal growing leftward, OutCubic at the desktop's
+    // slide — the same feel as the hyprvtb titlebar tooltips), and slides back
+    // in on hide.
     Item {
         id: tip
         z: 2000
         property real slide: (win.tipShown && win.tipText.length > 0) ? 1 : 0
-        Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
         readonly property real gap: 14
         readonly property real fullW: Math.min(tipLabel.implicitWidth + 14, win.width - 40)
         readonly property real fullH: tipLabel.implicitHeight + 8
@@ -1027,7 +1034,7 @@ Window {
         z: 2500
         // slide 0 (hidden, fully off the right edge) -> 1 (docked at the edge)
         property real slide: win.dmPanelOpen ? 1 : 0
-        Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
         visible: slide > 0.001
         width: 248
         height: dmCol.implicitHeight + 24

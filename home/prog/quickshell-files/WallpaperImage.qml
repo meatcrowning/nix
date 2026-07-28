@@ -54,7 +54,12 @@ Image {
     }
 
     opacity: showing ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(260); easing.type: Easing.InOutQuad } }
+    // The desktop's duration, but deliberately NOT its curve. This is a
+    // CROSS-FADE between two full-screen pictures, not a slide: an ease-out
+    // dumps most of the opacity change into the first third, which reads as the
+    // old wallpaper being snatched away. InOutQuad is symmetric, so the two
+    // frames trade evenly. Curve is local; the duration is the desktop's.
+    Behavior on opacity { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: Easing.InOutQuad } }
 
     onStatusChanged: if (status === Image.Ready) root.ready()
 }
