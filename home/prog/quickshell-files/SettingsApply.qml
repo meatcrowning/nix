@@ -42,7 +42,15 @@ Item {
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
-    Component.onCompleted: { applyInput(); sunsetProbe.running = true; }
+    // loadNow() first: this handler branches on persisted values (the palette
+    // signature below), and a one-shot handler cannot be gated — at completion
+    // the adapter still holds the shipped defaults unless the read is forced.
+    Component.onCompleted: {
+        SettingsStore.loadNow();
+        root._paletteSig = root._sig();
+        applyInput();
+        sunsetProbe.running = true;
+    }
 
     Connections {
         target: SettingsStore.d
@@ -51,6 +59,52 @@ Item {
         function onPointerSpeedChanged() { root.applyInput(); }
         function onNaturalScrollChanged() { root.applyInput(); }
         function onTapToClickChanged() { root.applyInput(); }
+
+        // ---- palette generation ----
+        // The four Appearance keys that are INPUTS to wal-extract.py. Nothing
+        // in QML can apply them: the palette is derived by that script and
+        // spliced into Theme.qml by wal-set.sh, so "apply" means re-running the
+        // theme. wal-prepare.sh already invalidates its per-image palette cache
+        // when settings.json is newer than it, so a plain re-run picks the new
+        // values up. Without this the four controls only took effect at the
+        // NEXT wallpaper change, which is indistinguishable from doing nothing.
+        function onThemeModeChanged()         { root.reapplyTheme(); }
+        function onAccentOverrideChanged()    { root.reapplyTheme(); }
+        function onPaletteColorCountChanged() { root.reapplyTheme(); }
+        function onPureBlackBgChanged()       { root.reapplyTheme(); }
+    }
+
+    // Re-run the full wallpaper/theme apply. DEBOUNCED, because its last step
+    // rewrites Theme.qml — which hot-reloads the whole QML tree, this object
+    // included — so a slider dragged across ten values must not queue ten of
+    // them. Same launch shape WallpaperPicker.qml uses (a shell, so $HOME
+    // expands; Qt.resolvedUrl is unusable from a non-Singleton here).
+    //
+    // `_paletteSig` is what stops that reload from becoming a LOOP. A fresh
+    // tree evaluates its bindings against the shipped defaults and only then
+    // reads settings.json (see SettingsStore), so every non-default value
+    // "changes" once per reload — and a re-apply on that would rewrite
+    // Theme.qml, reload again, and never stop. So the signature of the four
+    // keys is recorded at completion (after loadNow(), which is what makes the
+    // real values readable there) and the timer applies only a genuine change.
+    readonly property var _paletteKeys: ["themeMode", "accentOverride",
+                                         "paletteColorCount", "pureBlackBg"]
+    property string _paletteSig: ""
+    function _sig() {
+        const d = SettingsStore.d;
+        return root._paletteKeys.map(k => String(d[k])).join("|");
+    }
+    function reapplyTheme() { themeApply.restart(); }
+    Timer {
+        id: themeApply
+        interval: 400
+        onTriggered: {
+            const s = root._sig();
+            if (s === root._paletteSig) return;
+            root._paletteSig = s;
+            Quickshell.execDetached(["sh", "-c",
+                'exec "$HOME/.config/scripts/wal-set.sh"']);
+        }
     }
 
     // ---- hyprsunset: night light + negative brightness ----

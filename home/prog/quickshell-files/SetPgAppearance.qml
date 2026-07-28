@@ -21,8 +21,13 @@ Column {
             }
         }
         SetRow {
+            // The picked colour supplies the HUE; the palette is still built
+            // by wal-extract.py's value ladder, so the accent comes back
+            // pastel-capped exactly like a wallpaper-derived one (DESIGN.md
+            // 3.1). Saying so here, because "I picked #ff0000 and got a pale
+            // red" otherwise reads as the control not working.
             label: "accent colour"
-            desc: "used when colour source is manual"
+            desc: "hue used when colour source is manual; still pastel-capped like a wallpaper accent"
             SetColor {
                 value: page.d.accentOverride
                 onChanged: (h) => { page.d.accentOverride = h; SettingsStore.save(); }
@@ -60,7 +65,7 @@ Column {
         }
         SetRow {
             label: "pure black background"
-            desc: "force bg to #000000 instead of the darkest wallpaper tone"
+            desc: "off = bg drops to the darkest tone of the theme hue instead"
             SetToggle {
                 checked: page.d.pureBlackBg
                 onToggled: (v) => { page.d.pureBlackBg = v; SettingsStore.save(); }
@@ -121,6 +126,7 @@ Column {
         title: "wallpaper"
         SetRow {
             label: "wallpaper folder"
+            desc: "browsed by the picker; ~/Pictures/wall stays the auto-versioned drop folder"
             SetTextField {
                 fieldWidth: 220
                 value: page.d.wallpaperDir

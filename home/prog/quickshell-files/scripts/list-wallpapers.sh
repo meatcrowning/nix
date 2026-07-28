@@ -19,15 +19,56 @@
 # newly-dropped-in image — and a just-generated thumbnail — show up without
 # restarting anything. NOTE: consumers that only want the source path must read
 # the first TAB field (see wal-prepare-all.sh).
+#
+# The folder and the order are the Settings program's `wallpaperDir` /
+# `wallpaperSort` (Appearance page). They are read HERE rather than passed in as
+# arguments so that both callers honour them with no further wiring — the picker
+# and wal-prepare-all.sh's bulk pre-warm — and so the pre-warm covers whatever
+# folder is actually being browsed. jq is present on both machines; if it ever
+# isn't, the shipped defaults stand rather than the listing failing.
 
-DIR="$HOME/Pictures/wall"
+SETTINGS="$HOME/.config/quickshell/settings.json"
+get() {   # get KEY DEFAULT
+    v=""
+    [ -f "$SETTINGS" ] && command -v jq >/dev/null 2>&1 \
+        && v="$(jq -r --arg k "$1" '.[$k] // empty' "$SETTINGS" 2>/dev/null)"
+    [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
+}
+
+DIR="$(get wallpaperDir '~/Pictures/wall')"
+case "$DIR" in
+    "~") DIR="$HOME" ;;
+    "~/"*) DIR="$HOME/${DIR#\~/}" ;;
+esac
+SORT="$(get wallpaperSort name)"
 THUMBS="$HOME/.cache/wal/thumbs"
 [ -d "$DIR" ] || exit 0
+
+# `random` must be STABLE for as long as the picker is open, not re-rolled per
+# call: the picker re-runs this on a 3s poll and reassigns its GridView model
+# whenever the order changes, which would reshuffle the grid under the cursor
+# and throw the selection away. So it is a DECORATE-SORT on a hash of the
+# session's boot_id plus the path — one fixed shuffle per session, random
+# between logins, motionless within one. (`shuf` was the obvious tool and is the
+# wrong one: seeding it repeatably needs `--random-source`, i.e. a real file.)
+SEED="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo seed)"
+order() {
+    case "$SORT" in
+        mtime)  while IFS= read -r f; do
+                    printf '%s\t%s\n' "$(stat -c %Y "$f" 2>/dev/null || echo 0)" "$f"
+                done | sort -rn | cut -f2- ;;
+        random) while IFS= read -r f; do
+                    printf '%s\t%s\n' \
+                        "$(printf '%s%s' "$SEED" "$f" | md5sum | cut -c1-8)" "$f"
+                done | sort | cut -f2- ;;
+        *)      sort ;;
+    esac
+}
 
 find "$DIR" -maxdepth 1 -type f \( \
     -iname '*.png'  -o -iname '*.jpg' -o -iname '*.jpeg' \
     -o -iname '*.webp' -o -iname '*.bmp' \
-    \) | sort | while IFS= read -r img; do
+    \) | order | while IFS= read -r img; do
     real="$(realpath "$img")"
     key="$(printf '%s' "$real" | md5sum | cut -d' ' -f1)"
     thumb="$THUMBS/$key.jpg"
