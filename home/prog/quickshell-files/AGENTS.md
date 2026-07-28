@@ -718,9 +718,12 @@ draws it.
   **Condensing is not the same as dropping the graph** — there are THREE tiers,
   and each one is a derived threshold rather than a literal. Full (`chromeH` +
   `minGraph`, 40px). Condensed-with-miniature (`miniChromeH` + `minMiniGraph`,
-  24px): the same twenty points and night bands drawn thinner, because at that
+  20px): the same twenty points and night bands drawn thinner, because at that
   size it is the labels and markers that stop being readable, not the line, and
-  the line is what the forecast is for. Bare header only, below that — the graph
+  the line is what the forecast is for — **and no hover cursor**: a full-height
+  rule over a ~22px canvas is a third of the widget, and the legend it would be
+  pointing at is not drawn in this tier either, so the MouseArea stops tracking
+  while `condensed` and the cursor block is gated on `!mini`. Bare header only, below that — the graph
   is dropped ENTIRELY rather than drawn illegibly, since a canvas handed less
   than `minMiniGraph` is the same overlapping-temperatures sliver the derived
   threshold exists to prevent, and it must not come back in through the
@@ -731,8 +734,14 @@ draws it.
   form the widget is being asked to draw, and a widget squeezed below its own
   minimum draws nothing at all. `DockGrid.minWeatherPx` mirrors
   `WeatherContent.minCondensed` and therefore INCLUDES the miniature graph:
-  asking for that form is asking for the room it needs, and on this panel it is
-  what takes the drawer from four rows to three. The cap is legal only because
+  asking for that form is asking for the room it needs. **It buys that room in
+  whole ROWS** (35.3px on this panel) — there is no smaller unit, so a few
+  pixels either side of a row boundary decide whether the forecast takes two
+  rows or three, and "shrink the condensed forecast a little" has exactly one
+  available step. `minMiniGraph` 24 demanded three rows (97.9px of tile) and
+  left the drawer three; 20 fits in two (62.6px of tile = 60.6px of content
+  against a 58px minimum, the miniature still drawn at 22.6px) and gives the
+  drawer its fourth row back. The cap is legal only because
   `q` is not in `placements`.
   **A floor mirrored from a content component must add the TILE'S FRAME**
   (`DockGrid.tileInset`, 2px): the number reserves a tile, but what has to fit
