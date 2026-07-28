@@ -744,13 +744,15 @@ Rectangle {
 
             PixelText {
                 id: nameText
-                anchors { left: parent.left; leftMargin: 6 + row.indent + 20; right: szText.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                anchors { left: parent.left; leftMargin: 6 + row.indent + 20; right: szText.left; rightMargin: 4; verticalCenter: parent.verticalCenter }
                 elide: Text.ElideRight
                 text: row.modelData.name
                 color: !view.winActive ? Theme.inactive : (row.modelData.isDir ? Theme.accent : Theme.text)
             }
-            // columns: size | modified | created (fixed widths, so they line up
-            // across rows). Dirs show no size but keep their timestamps.
+            // columns: size | modified | created. The timestamps are fixed
+            // widths so they line up across rows; the SIZE is intrinsic, and
+            // that is deliberate — see below. Dirs show no size but keep their
+            // timestamps.
             //
             // A pane is half a window wide in split view, and three fixed
             // columns left the NAME — the one thing you are reading — elided to
@@ -760,9 +762,18 @@ Rectangle {
             // invisible item still occupies its geometry.
             readonly property bool wideCols: row.width > 620
             readonly property bool midCols: row.width > 470
+            // The size is the ONE column whose width is its text's, not a fixed
+            // slot: it is right-anchored, so every size still ends on the same
+            // pixel — a fixed 52px slot bought nothing but dead space to the
+            // LEFT of a short size, and the name (the thing you are reading)
+            // elided into it. A directory has no size at all, so a listing of
+            // directories reserved a whole empty column and truncated every
+            // name by 60px for it. Intrinsic width hands that slack back to the
+            // name, per row, and also stops the widest size ("1023.9G", 7 cells)
+            // clipping against the 52.
             PixelText {
                 id: szText
-                width: 52
+                width: implicitWidth
                 horizontalAlignment: Text.AlignRight
                 anchors { right: modifiedText.left; rightMargin: row.midCols ? 12 : 8; verticalCenter: parent.verticalCenter }
                 text: row.modelData.isDir ? "" : view.sizeStr(row.modelData.size)
