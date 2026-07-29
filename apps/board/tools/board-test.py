@@ -2028,6 +2028,37 @@ def test_phase(tmp):
           bph.says_line(r, "Marbas"))
     check("...while the card is still FILED by what it is OBSERVED doing",
           r["phase"] in bph.CLAIMABLE and r["phase"] != "bisecting", r["phase"])
+    # THE MENU. [his, 2026-07-29] *"create a larger list of words that could
+    # describe what an agent is doing ... and allow agents to select from this
+    # new larger list"*. It is offered, not enforced — so the thing to assert is
+    # that every word on it is one the code would actually accept, and that the
+    # block the prompt shows is generated FROM it rather than typed out beside
+    # it, which is the only way the two can disagree.
+    import boardwork as bw
+    bad = [w for w in bph.PHASE_WORDS if bph.clean_phase_word(w) != w]
+    check("every word on the offered menu survives clean_phase_word", not bad,
+          str(bad))
+    check("...and none is listed twice",
+          len(set(bph.PHASE_WORDS)) == len(bph.PHASE_WORDS))
+    check("...and the classic five are still on it, first",
+          bph.PHASE_WORDS[:5] == bph.CLAIMABLE, str(bph.PHASE_WORDS[:5]))
+    check("...and each reads as English after \"is\"",
+          all(bph.says_line({"claimPhase": w}, "Marbas") == "Marbas is " + w
+              for w in bph.PHASE_WORDS))
+    menu = bw.phase_word_menu()
+    check("the prompt's menu block is generated from the list, not retyped",
+          all(("`%s`" % w) in menu for w in bph.PHASE_WORDS))
+    check("...and the worker prompt actually carries it",
+          menu in bw.WORKER_PROMPT.format(
+              repo="R", host="H", task="T", rules="X", name="N", aid="a",
+              context="", phase_words=menu))
+    # ...and a word NOT on it is still accepted, because it is a menu.
+    bph.claim("ph-a", "yakshaving", "the third yak")
+    check("a word that is not on the menu is still a legal claim",
+          bph.observe("ph-a").get("claimPhase") == "yakshaving",
+          bph.observe("ph-a").get("claimPhase"))
+    bph.claim("ph-a", "bisecting", "which commit broke the harness")
+
     refused = False
     try:
         bph.claim("ph-a", "code review", "")
@@ -2207,6 +2238,21 @@ def test_work(tmp):
           and ba.describe(idle).startswith("ready - "), ba.describe(idle))
     check("...offered no inbox, there being nobody there to read one",
           idle.get("id") == "", idle)
+    # ...and the card of a LIVE Solomon leads with his name, which is the one
+    # that did not. [his, 2026-07-29] the orchestrator's card should read
+    # "Solomon is ..." like everybody else's. It never did, for one reason: with
+    # no claim, `says_line` is "" and the top line becomes the OBSERVED one,
+    # which names nobody by design. The fix is not to manufacture a claim for
+    # him — it is to tell him to make one, the way every worker is told.
+    check("the orchestrator is told to claim a phase, or his card names nobody",
+          "boardctl.py phase " in bw.ORCHESTRATOR_PROMPT
+          and "SAY WHAT YOU ARE DOING" in bw.ORCHESTRATOR_PROMPT)
+    import boardphase as _bph
+    check("...and once he has, his card's FIRST line is his name",
+          _bph.says_line({"claimPhase": "dispatching",
+                         "claimDoing": "three pieces of what you typed"},
+                        ba.ORCHESTRATOR_NAME)
+          == "Solomon is dispatching - three pieces of what you typed")
     check("...and drawn exactly once, and in the same place on the next poll",
           [c.get("name") for c in bw.cards()].count(ba.ORCHESTRATOR_NAME) == 1
           and [c["id"] for c in bw.cards()] == [c["id"] for c in bw.cards()],
