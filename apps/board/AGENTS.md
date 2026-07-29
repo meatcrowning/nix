@@ -142,6 +142,51 @@ Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 - **READING is untouched.** The store is his and is full of bullets written
   before this existed: they parse, they draw, they can still be removed and
   restored byte-for-byte. Only writing is constrained.
+
+### ONE BOARD ITEM PER ASK
+
+[his, 2026-07-29] **Messages are SEPARATED**: an agent reporting on several
+things writes several bullets, never one message covering them all. It is not
+style, it is how the board CLEARS — replying to a bullet removes that bullet
+(`reply`), so an ask folded into another one is cleared by a reply that was
+never about it and survives nowhere he can see. Worker Purson was handed four
+asks and left one bullet whose headline named the first; his reply to it took
+2-4 with it, unseen.
+
+The write path already made separation cheap — `note` prefixes `- ` per line, so
+several unindented lines are several bullets, each with its own `placed` stamp,
+each removable, replyable and foldable on its own. What was missing was anything
+that stopped a writer bundling instead. `boardparse.check_one_ask` is that, at
+the same choke point as the tag check, and it refuses the SHAPES a second ask
+arrives in — a machine cannot read intent, but each of these is one wearing a
+disguise:
+
+| refused | because |
+| --- | --- |
+| a second `TAG:` further along a bullet's line | two messages written as one |
+| a `TAG:` on an INDENTED line | an ask hidden where the tag check does not look |
+| more than one `**headline**` on a line | the shape is `TAG: **the one ask** - what you did` |
+| a `-` list under a bullet | the elaboration is a sentence or two about THIS ask |
+| prose counting other work in ("plus two more items") | that work gets its own headline he can reply to |
+
+- **`boardctl note 'A: x' 'B: y'` is two items, not one.** The argv is split at
+  each tagged argument (`_note_text`) instead of joined with a space, which used
+  to land one bullet claiming to be both.
+- **What it deliberately does not do is guess at prose.** Two asks written as
+  two plain sentences pass. The prompts carry the rest — `boardwork.RULES` /
+  `WORKER_PROMPT` rule 9 and board-watch's rule 6 state it in the same words the
+  refusal does, and `board-test.py` asserts both still say it.
+- **His own words are DATA, not prose these checks read.** The mechanical
+  failure templates interpolate what he typed into the box, and a note saying a
+  worker DIED must never be refused for how he phrased the thing it died on. So
+  they pass it through `boardparse.oneline(..., code=True)`, which collapses it
+  to one line and hands it over as a code span; the checks skip a span, so his
+  `**` and his tag words reach the board unedited. The plain form (no span)
+  strips both and is for text that has to sit inside a `**headline**` — a glob
+  like `apps/**/qml` is why that is a flag and not a blanket strip.
+- The newline collapse also closes a latent one: a multi-line `{task}` used to
+  make the template's second line an untagged bullet, and the whole
+  worker-died note was refused. Nothing then said the worker had died.
 - **Nothing in `qml/` draws the tag specially** — it is plain text at the front
   of the line, in the row's own tone. A colour would have to come from the
   palette's one hue, and the only ramp that says *severity* is warn/crit, which
@@ -1227,6 +1272,13 @@ new and are the ones to read first if the fan-out misbehaves:
   file is deployed by home-manager, so the copy that runs on a machine is the
   last one a rebuild put there); and an old untagged bullet still parses, draws,
   removes and restores.
+
+  **And one board item per ask**: each of the five bundled shapes is refused and
+  writes nothing, a headline that merely names one ("the third item") is not,
+  several tagged lines land as several bullets with a stamp each, `boardctl`
+  splits its argv at each tag, a bullet quoting a hostile line of his survives
+  every check with his words intact inside the code span, and both prompts still
+  carry the rule in the words the refusal uses.
 
 - **LANDED** (`test_landed`) — a commit records with NO IN FLIGHT row (the bug
   that made the section look frozen), the time comes from git rather than from

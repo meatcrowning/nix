@@ -511,8 +511,16 @@ def stall(sel, path=bp.BOARD_PATH):
                                   "- INFORMATION: **%s** - was sitting in IN FLIGHT with "
                                   "nothing working on it%s, so it is here "
                                   "instead of claiming to be handled.%s"
-                                  % (what, (" (%s)" % where) if where else "",
-                                     (" " + notes) if notes else ""))
+                                  # the row's own cells are interpolated, so
+                                  # they go through `oneline`: `**`, a tag word
+                                  # or a newline in one of them would be read as
+                                  # structure by the checks in `add_todo_bullet`
+                                  # and this move would be refused outright.
+                                  % (bp.oneline(what, 120),
+                                     (" (%s)" % bp.oneline(where, 80, code=True))
+                                     if where else "",
+                                     (" " + bp.oneline(notes, 120))
+                                     if notes else ""))
 
     if not bp.edit(path, go):
         raise BoardError("nothing was written")
@@ -668,6 +676,11 @@ def note(text, path=bp.BOARD_PATH):
     *"**default handlers for every app we wrote** - handed to Sam"* came to be
     drawn as part of somebody else's message on 2026-07-29. An INDENTED line is
     a wrapped continuation and is left alone.
+
+    **That per-line split is also how you post SEVERAL asks: one line each.**
+    One bullet is one ask, and `add_todo_bullet` refuses a message that bundles
+    (`boardparse.check_one_ask`) — because replying to a bullet clears it, so an
+    ask folded into another one is cleared by a reply that was never about it.
     """
     if not text.strip():
         return False
@@ -713,10 +726,11 @@ def reconcile(path=bp.BOARD_PATH):
             continue
         try:
             give_back(rec["key"], why=(
-                "- FAILED: **the agent working \"%s\" is gone** - it exited without "
+                "- FAILED: **the agent working %s is gone** - it exited without "
                 "finishing or saying so, so the decision is back above with "
                 "your answer intact. Nothing was committed on its behalf. "
-                "Log: `~/.cache/board-watch.log`" % rec.get("title", rec["key"])),
+                "Log: `~/.cache/board-watch.log`"
+                % bp.oneline(rec.get("title", rec["key"]), 120, code=True)),
                 path=path)
             moved.append(rec)
         except BoardError:

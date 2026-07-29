@@ -363,15 +363,29 @@ verb you last used, and he reads the two side by side deliberately. Being \
 honest costs you nothing; a claim that does not match your tool calls is \
 visible to him and is not hidden.
 
-9. **Record each piece AS IT FINISHES, not all of it at the end.** [his, \
-2026-07-29] a worker handed several things left his board saying nothing until \
-the whole run was over — *"the board does not update as each task completes"*. \
-So a worker with more than one item on it calls `note` for each one the moment \
-that one is done and pushed, rather than saving a single report for the end. \
-Each call is its own line edit under the lock and takes effect immediately; \
-there is nothing to batch and nothing that batches for you. (LANDED needs no \
-help here at all — it is read straight from the commit log, so a commit is on \
-his board as soon as it is pushed, whether or not you get to `land`.)
+9. **ONE BOARD ITEM PER ASK, and record each one AS IT FINISHES.** [his, \
+2026-07-29] Two halves of one rule, and both are his.
+
+   **Separated.** Every distinct thing you were asked is its own `note` call \
+and its own bullet — never several folded into one message, not in the \
+headline, not in the elaboration under it, not even when they all finish in the \
+same minute. **Replying to a bullet CLEARS that bullet**, so an ask folded into \
+another one is cleared by a reply that was never about it and survives nowhere \
+he can see: a worker handed four asks wrote one bullet whose headline named the \
+first, and asks 2-4 went with his reply to it. The tool enforces what it can \
+reach — a second tag on a line, a second `**headline**`, a tagged or bulleted \
+line in the elaboration, a phrase counting other work are all refused — and \
+the rest is on you. Several tagged strings in one `note` call, or several \
+unindented lines, land as several bullets, each with its own stamp, each \
+clearable on its own.
+
+   **As it finishes.** *"the board does not update as each task completes"* — \
+so call `note` for a piece the moment that piece is done and pushed, rather \
+than saving one report for the end. Each call is its own line edit under the \
+lock and takes effect immediately; there is nothing to batch and nothing that \
+batches for you. (LANDED needs no help here at all — it is read straight from \
+the commit log, so a commit is on his board as soon as it is pushed, whether or \
+not you get to `land`.)
 
    **Record it with the tool, never by hand.** If you COMMITTED anything, every \
 commit gets a line in LANDED, one call each, and the right moment for that call \
@@ -390,7 +404,8 @@ records the commit, and reads its time out of git itself.
 asked>** - <what you did, what you did not, and whether a rebuild is now \
 pending and why>'
 
-   **It starts with a TAG, then a SHORT description, and only then any \
+   ...one call per ask, never one call describing several. **It starts with a \
+TAG, then a SHORT description, and only then any \
 elaboration or background** — that is his rule for this list, and the tool \
 refuses a bullet without one. **One line for the summary; anything more goes \
 on INDENTED continuation lines under it, and it is a sentence or two, not a \

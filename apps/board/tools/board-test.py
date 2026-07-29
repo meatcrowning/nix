@@ -1089,6 +1089,85 @@ def test_todo_tags(tmp):
           bm.note("PARTIAL: **a wrapped one** - the first line,\n"
                   "  and the background wrapped onto a second.", path=path))
 
+    # ---- ONE BOARD ITEM PER ASK ----
+    # His, 2026-07-29: a message reports ONE thing. Replying to a bullet CLEARS
+    # that bullet (bc1454d), so an ask folded into another one is cleared by a
+    # reply that was never about it: worker Purson was handed four and wrote one
+    # bullet whose headline named the first, and 2-4 went with his reply to it.
+    # `check_one_ask` cannot read intent, so it refuses the SHAPES a second ask
+    # arrives in — each of these landed silently before it existed.
+    before = B.read(path)
+    for bad, why in (
+            ("COMPLETION: **a** - landed. PARTIAL: **b** - not yet.",
+             "a second tag further along the line"),
+            ("COMPLETION: **a** - landed, and also **b** - landed",
+             "a second **headline** on one line"),
+            ("PARTIAL: **a** - landed.\n  COMPLETION: **b** - this one too",
+             "an ask tagged but INDENTED, hiding in the elaboration"),
+            ("PARTIAL: **a** - two of them.\n  - one\n  - two",
+             "a list under a bullet"),
+            ("PARTIAL: **times on needs you** - landed, plus two more items "
+             "you sent while I was in there.",
+             "prose counting other work into this item - Purson's own bullet")):
+        try:
+            bm.note(bad, path=path)
+            check("a bundled message is refused: %s" % why, False,
+                  "it was written")
+        except B.BoardError as e:
+            check("a bundled message is refused: %s" % why,
+                  B.read(path) == before, str(e)[:70])
+
+    check("...while a headline that merely NAMES one is fine",
+          bm.note("INFORMATION: **the third item** - the other two are Zepar's.",
+                  path=path))
+    n = len(B.parse(B.read(path))["todo"])
+    stamps = B.read(path).count("<!-- placed:")
+    check("...and the sanctioned way to report several is several bullets",
+          bm.note("COMPLETION: **the fade** - landed.\n"
+                  "PARTIAL: **the tooltip** - a rebuild is pending.",
+                  path=path)
+          and len(B.parse(B.read(path))["todo"]) == n + 2,
+          [t["text"][:40] for t in B.parse(B.read(path))["todo"]])
+    check("...each with its OWN stamp, so each is his to clear on its own",
+          B.read(path).count("<!-- placed:") == stamps + 2,
+          (stamps, B.read(path).count("<!-- placed:")))
+
+    # `boardctl note 'A: x' 'B: y'` is TWO messages: joining its argv with a
+    # space used to land one bullet claiming to be both.
+    import subprocess
+    n = len(B.parse(B.read(path))["todo"])
+    p = subprocess.run([sys.executable, os.path.join(BOARD, "tools",
+                                                     "boardctl.py"),
+                        "--board", path, "note",
+                        "COMPLETION: **argv one**", "-", "landed",
+                        "PARTIAL: **argv two** - pending"],
+                       capture_output=True, text=True)
+    texts = [t["text"] for t in B.parse(B.read(path))["todo"]]
+    check("boardctl splits its argv at each tag, and only there",
+          p.returncode == 0 and len(texts) == n + 2
+          and texts[-2].startswith("COMPLETION: argv one - landed")
+          and texts[-1].startswith("PARTIAL: argv two - pending"),
+          (p.stderr.strip()[:120], texts[-2:]))
+
+    # ---- HIS WORDS ARE DATA, NOT PROSE THE CHECKS READ ----
+    # The mechanical templates interpolate what he typed into the box. A note
+    # that says a worker DIED must never be refused for how he phrased the thing
+    # it died on — and before `oneline`, a newline in it made the template's
+    # second line an untagged bullet and the whole failure note was refused.
+    hostile = ("do the **thing**\nand COMPLETION: the other,\nplus two more "
+               "items while you are there")
+    check("a bullet quoting his words survives every one of those",
+          bm.note("FAILED: **a worker stopped without finishing** - it was "
+                  "working on %s, and recorded nothing."
+                  % B.oneline(hostile, 200, code=True), path=path))
+    check("...with what he typed intact inside the code span, on one line",
+          "`do the **thing** and COMPLETION: the other, plus two more items "
+          "while you are there`" in B.read(path),
+          B.parse(B.read(path))["todo"][-1]["text"][:120])
+    check("...and a glob keeps its `**`, which a blanket strip ate",
+          B.oneline("apps/**/qml", code=True) == "`apps/**/qml`",
+          B.oneline("apps/**/qml", code=True))
+
     # ---- READING an old bullet is untouched ----
     d = B.parse(FIXTURE)
     old = d["todo"]
@@ -1143,6 +1222,20 @@ def test_todo_tags(tmp):
         + open(os.path.join(BOARD, "boardmove.py")).read()
     missing = [t for t in B.TODO_TAGS if ("%s:" % t) not in prompts]
     check("no tag exists that no writer can emit", not missing, missing)
+
+    # ...and every prompt that tells an agent to report SAYS the separation rule
+    # in the same words the refusal does. The checks above cannot read intent —
+    # two asks written as two plain sentences pass — so the prompt is the other
+    # half of the rule, not a restatement of it.
+    import boardwork as bwk
+    for name, text in (("the worker prompt", bwk.WORKER_PROMPT),
+                       # board-watch is read as SOURCE (it is deployed, so the
+                       # copy that runs may be older); its prompt is one string
+                       # split over lines with `\`, so join it back first.
+                       ("the decision-agent prompt", src.replace("\\\n", ""))):
+        check("%s carries ONE BOARD ITEM PER ASK" % name,
+              "ONE BOARD ITEM PER ASK" in text and "CLEARS that bullet" in text,
+              text[:0])
 
     # ---- ...and the READ side groups by that same word, for the view ----
     # *"the information, completion, partial etc of a message should be used to
