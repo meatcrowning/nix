@@ -610,7 +610,7 @@ class Agents(QObject):
         if msg is None:
             return ""
         self.refresh()
-        # ...and it says WHO, when the agent has a name. `left in Rosa's inbox`
+        # ...and it says WHO, when the agent has a name. `left in Marbas's inbox`
         # is the same promise as before — in its inbox, not read by it — made
         # about somebody he can point at.
         who = boardagents.name_of(agent_id) if agent_id else ""

@@ -441,10 +441,10 @@ without one. Yours are `INFORMATION:` for a task you handed out or a knob you \
 turned, and `QUESTION:` for one you asked him. A task line is then the subject, \
 the worker's NAME, and that it was handed out with nothing landed yet — like:
 
-    INFORMATION: **landed section + commit times** - handed to Rosa \
+    INFORMATION: **landed section + commit times** - handed to Marbas \
 (`wd690a4`), nothing landed yet.
 
-Every worker has an ordinary first name and `dispatch` prints it; use it. **One \
+Every worker has a name and `dispatch` prints it; use it. **One \
 identifier per line**: the name, and the coded id in parentheses after it only \
 because that is what its log under `~/.cache/board-work/` is called.
 

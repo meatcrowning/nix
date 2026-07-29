@@ -53,7 +53,7 @@ Item {
     signal contextRequested(real mx, real my)
 
     readonly property bool running: agent && agent.running === true
-    // WHO IT IS, in one ordinary first name — his call: *"i think itd be
+    // WHO IT IS, in one short name — his call: *"i think itd be
     // interesting to have them referred to by regular names"*. The coded id is
     // still the key underneath (the inbox this card's box writes to is named by
     // it, and so are the unit and the log), and it is deliberately NOT drawn:

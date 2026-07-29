@@ -781,7 +781,7 @@ TODO_TAGS = (
     #: agent leaves behind on its way out.
     "QUESTION",
     #: a fact he may want and nothing is being asked of him. The orchestrator's
-    #: "handed to Rosa, nothing landed yet" and `stall`'s moved row.
+    #: "handed to Marbas, nothing landed yet" and `stall`'s moved row.
     "INFORMATION",
     #: the work is finished and on his machine.
     "COMPLETION",

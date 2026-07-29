@@ -674,8 +674,8 @@ def test_todo_tags(tmp):
         check("a multi-line note with an untagged second line is refused",
               B.read(path) == before)
     check("...while every line tagged is fine, and lands as separate bullets",
-          bm.note("INFORMATION: **one** - handed to Rosa, nothing landed yet.\n"
-                  "INFORMATION: **two** - handed to Sam, nothing landed yet.",
+          bm.note("INFORMATION: **one** - handed to Marbas, nothing landed yet.\n"
+                  "INFORMATION: **two** - handed to Zepar, nothing landed yet.",
                   path=path)
           and len(B.parse(B.read(path))["todo"]) == 4,
           [t["text"] for t in B.parse(B.read(path))["todo"]])
@@ -1223,7 +1223,7 @@ def test_work(tmp):
     # here is that the name is STABLE and UNIQUE among the living, not that
     # anything on disk moved to it.
     live = bw.live_workers()
-    check("every worker gets an ordinary first name beside its coded id",
+    check("every worker gets a name beside its coded id",
           live and all(a.get("name") in ba.NAMES for a in live),
           [(a["id"], a.get("name")) for a in live])
     check("...no two LIVE workers answer to the same name",
@@ -1242,6 +1242,13 @@ def test_work(tmp):
           ba.pick_name("wcollide", taken=set(ba.NAMES[:-1])) == ba.NAMES[-1])
     check("...and every drawn name is ASCII, which the font can draw (2.3)",
           all(n.isascii() and n.isalpha() for n in ba.NAMES), ba.NAMES)
+    check("...and fits the card's 7-cell label column, so it cannot run under "
+          "the title",
+          all(len(n) <= 6 for n in ba.NAMES), [n for n in ba.NAMES if len(n) > 6])
+    check("...and no two collide, since `inbox send --to` matches on the name",
+          len({n.lower() for n in ba.NAMES}) == len(ba.NAMES))
+    check("...with room in the pool to walk past every live agent",
+          len(ba.NAMES) >= 24, len(ba.NAMES))
     check("a task queued above the cap is given no name, having nobody on it",
           all(r["name"] == "" for x in bw.groups() if x["phase"] == "queued"
               for r in x["rows"]))

@@ -16,7 +16,7 @@ happen. This is the third way, and it is the one an agent should use:
 
     boardctl.py agents                             # who is running, by phase
     boardctl.py inbox take                         # HIS notes to you, mid-flight
-    boardctl.py inbox send 'also fix the tooltip' --to Rosa   # or --to <agent id>
+    boardctl.py inbox send 'also fix the tooltip' --to Marbas # or --to <agent id>
 
 The orchestrator's verbs — how one sentence he typed becomes several agents
 (`../boardwork.py` is the mechanism and the authority):
@@ -33,7 +33,7 @@ card is filed under.** That is derived from your own tool calls
 it is the only line that carries WHAT you are working on rather than which verb
 you last used.
 
-**A worker has a first name.** It is minted beside the coded id when the worker
+**A worker has a name.** It is minted beside the coded id when the worker
 is spawned and it is what every line here identifies it by — his call: *"i think
 itd be interesting to have them referred to by regular names"*. The id is still
 the only key: the systemd unit, `~/.cache/board-work/<id>.log` and the inbox
