@@ -194,6 +194,13 @@ class Rig:
     def env(self, gate="open", spawn=None, **extra):
         e = dict(os.environ)
         e.update({k: str(v) for k, v in extra.items()})
+        # HOST AFFINITY, which every step of this file that is NOT about host
+        # affinity has to opt out of: an answer with no host stamp belongs to
+        # `top` (a hand edit), so a watcher that believes it is `book` fires on
+        # none of them and two thirds of this harness reported FAIL on the
+        # laptop while passing on the desktop. Pretend to be `top` by default;
+        # the affinity section passes its own value and keeps it.
+        e.setdefault("BOARD_WATCH_HOST", "top")
         e.update(BOARD_WATCH_BOARD=self.board, BOARD_WATCH_STATE=self.state,
                  BOARD_WATCH_LOG=self.log, BOARD_WATCH_GATE=gate,
                  BOARD_WATCH_REPO=REPO,
