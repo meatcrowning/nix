@@ -137,6 +137,9 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
 
 - Run `tools/preflight.sh`, then `sudo rebuild-top`, as the last step of any
   change here. Don't ask; don't leave it for the user.
+- **Make the change on both `top` and `book`** unless he says it is
+  machine-specific. If it genuinely cannot be host-neutral, land it and *say*
+  which host misses out — never silently. See Conventions.
 - `git commit` with an explicit pathspec: `git commit -m msg -- <paths>`.
 - Commit **and push to `main`** after a working change. No branch, no PR.
 - Run `tools/seed-drift.sh` before *and* after touching a seed-once file
@@ -408,6 +411,30 @@ of the split. Packages missing on aarch64 (x86_64-only binaries: `vcv-rack`,
 `dwarf-fortress-packages`) are gated with
 `lib.optionals pkgs.stdenv.hostPlatform.isx86_64 [...]`, since the real
 constraint is architecture, not the machine.
+
+**Both machines by default.** The two paragraphs above are the *mechanism*;
+this is the rule. A change here is for `top` **and** `book` unless he says it
+is machine-specific — he should not have to say "and on the laptop too".
+
+- `sys/` and `hosts/top/` are NixOS-only, so anything expressible only there
+  is machine-specific by construction. Do it, and tell him book does not get
+  it — with the host named.
+- When something must differ per host, use the `host` module arg or a platform
+  predicate. Not a new per-host file; there is no `hosts/air/` and there should
+  not be one.
+- Missing on aarch64 is an **architecture** constraint, not a preference:
+  gate on `pkgs.stdenv.hostPlatform.isx86_64` and say so in those words.
+- **Never write host deixis into a file.** `~/nix` and `docs/` both sync to the
+  other host, where `this machine` is false — name `top` / `book`. (See "Which
+  machine you are on".)
+
+The failure mode to check for: `home/` is evaluated by *both* hosts, so a
+change that ends up top-only by accident — a package dropped into an existing
+`isx86_64` list that is not actually x86-only, or a path, unit or binary that
+exists only on `top` — is **silent** on book. Nothing warns; the config just
+does nothing there. (Adding an x86-only package *ungated* is the loud version:
+book's `home-manager switch` fails, but only when he next runs it.) Whenever
+you touch a conditional, look at the branch you are not on.
 
 **Two pins; everything else rolls.** `nixpkgs` tracks `nixos-unstable`, but the
 compositor (`hyprland`, an exact upstream tag) and the shell
