@@ -29,7 +29,12 @@ import "../../qmlcommon"
 //   <name> is ...      the agent's own words (`boardctl.py phase`). Carries the
 //                      OBJECT — "the vtbclient parser" — which watching tool
 //                      calls can never give. Absent until it says something;
-//                      absence is drawn as absence.
+//                      absence is drawn as absence. The right end of this row
+//                      — the card's top row — carries `62k/200k`, how much
+//                      context the agent is standing in against what it holds
+//                      (`boardphase.context_line`, measured out of the
+//                      transcript's own `usage` stamps, absent when nothing
+//                      could be measured).
 //   <the description>  derived from the tool calls in its live transcript
 //                      (`boardphase.py`). Carries the VERB — "editing
 //                      Main.qml" — and cannot be faked, forgotten or left
@@ -118,6 +123,13 @@ Item {
     // Only `ok` is something actually happening right now, which is what the
     // ticking dots below are allowed to claim.
     readonly property string observed: agent && agent.observed ? agent.observed : ""
+    // HOW FULL IT IS — `62k/200k`, at the right end of the card's TOP row, his
+    // call: *"on the very right of the top row of the agent's information box
+    // it should keep a running tally of how much context that agent has vs how
+    // much it can handle"*. Already formatted by `boardphase.context_line`;
+    // empty means nothing could be measured, and empty is drawn as nothing.
+    readonly property string contextLine: agent && agent.contextLine
+                                          ? agent.contextLine : ""
     // A card with no id is not an agent — it is a task waiting for a slot, or
     // the section's own box. It gets no inbox, because there is nothing running
     // to put a message in front of.
@@ -226,6 +238,29 @@ Item {
         }
     }
 
+    // ---- HOW FULL IT IS, at the right end of the TOP row ----
+    // His call, and it is standing metadata rather than an alert: one dim
+    // string that carries its own denominator, so it needs no legend (§10.5)
+    // and no ramp — a full context is not a machine fault, which is the only
+    // thing warn/crit may mean here (§8.1, §9.3). It clusters at the trailing
+    // edge with the other trailing metadata (§9.1), and the line it shares
+    // reserves the width, so nothing reflows when the number changes.
+    //
+    // It rides whichever line is the card's OWN top row, and a card with no
+    // line above the title row gets none at all: that row's right edge already
+    // belongs to `where`, and two things in one corner is worse than a tally
+    // that waits.
+    PixelText {
+        id: tallyT
+        readonly property bool onDoing: row.saysLine === ""
+        visible: row.contextLine !== ""
+                 && (row.saysLine !== "" || row.doingLine !== "")
+        anchors.right: col.right
+        y: 0
+        color: Theme.dim
+        text: row.contextLine
+    }
+
     Column {
         id: col
         x: 10
@@ -243,7 +278,8 @@ Item {
         // the line under it.
         Para {
             id: saysT
-            width: col.width
+            width: col.width - (tallyT.visible && !tallyT.onDoing
+                                ? tallyT.width + 8 : 0)
             visible: row.saysLine !== ""
             height: visible ? implicitHeight : 0
             color: row.leadTone
@@ -261,7 +297,8 @@ Item {
         // and hands this an empty string to say so.
         Para {
             id: doingT
-            width: col.width
+            width: col.width - (tallyT.visible && tallyT.onDoing
+                                ? tallyT.width + 8 : 0)
             visible: row.doingLine !== ""
             height: visible ? implicitHeight : 0
             color: row.saysLine === "" ? row.leadTone : row.fgDim

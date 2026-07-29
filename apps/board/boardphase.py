@@ -105,6 +105,14 @@ WINDOW = 12
 #: it never reaches the screen as a number (see the docstring).
 QUIET_AFTER_S = int(os.environ.get("BOARD_QUIET_AFTER", "180"))
 
+#: The context window an agent is assumed to have, in tokens, when nothing in
+#: its transcript says otherwise. 200k is Claude Code's standing window for the
+#: Claude models this desktop runs; an agent on the long-context variant says so
+#: in the model id it stamps on every assistant message (`...[1m]`), which
+#: `_window_for` reads rather than guessing. Nothing here asks the network.
+CONTEXT_WINDOW = 200_000
+CONTEXT_WINDOW_1M = 1_000_000
+
 def projects_dir():
     """Where Claude Code keeps transcripts. `BOARD_TRANSCRIPTS` redirects it, so
     a harness can hand this module a synthetic one instead of writing into his
@@ -218,30 +226,39 @@ def transcript(session):
 
 
 def _tool_calls(path, offset):
-    """(new calls, new offset). Reads only the bytes since `offset`.
+    """(new calls, new offset, last usage seen). Reads only the bytes since
+    `offset`.
 
     Advances past complete lines ONLY: a transcript is appended to while this
     runs, so the final fragment is left for the next poll rather than parsed as
     a truncated object.
+
+    The third value is the `{"model": ..., "usage": {...}}` of the LAST
+    assistant entry in what was read, which is where the context tally comes
+    from — it rides along here because this is already the one place the
+    transcript is parsed, and re-reading the file for it would double the cost
+    of every poll. `None` when the new bytes carried no assistant entry, which
+    the caller reads as "keep whatever you knew".
     """
     calls = []
     try:
         size = os.path.getsize(path)
     except OSError:
-        return calls, offset
+        return calls, offset, None
     if size < offset:
         offset = 0                # rotated or replaced: start again
     if size == offset:
-        return calls, offset
+        return calls, offset, None
     try:
         with open(path, "rb") as f:
             f.seek(offset)
             buf = f.read()
     except OSError:
-        return calls, offset
+        return calls, offset, None
     cut = buf.rfind(b"\n")
     if cut < 0:
-        return calls, offset      # not one complete line yet
+        return calls, offset, None    # not one complete line yet
+    last = None
     for raw in buf[:cut].split(b"\n"):
         if not raw.strip():
             continue
@@ -252,13 +269,16 @@ def _tool_calls(path, offset):
         if d.get("type") != "assistant":
             continue
         msg = d.get("message") or {}
+        if isinstance(msg.get("usage"), dict):
+            last = {"model": str(msg.get("model") or ""),
+                    "usage": msg.get("usage")}
         for c in msg.get("content") or []:
             if isinstance(c, dict) and c.get("type") == "tool_use":
                 name = str(c.get("name") or "")
                 calls.append({"name": name, "phase": classify(name, c.get("input")),
                               "doing": describe_call(name, c.get("input")),
                               "at": d.get("timestamp") or ""})
-    return calls, offset + cut + 1
+    return calls, offset + cut + 1, last
 
 
 # --------------------------------------------------------------- the sidecar
@@ -440,6 +460,82 @@ def doing_line(rec, who="", running=True):
         % subj
 
 
+# ------------------------------------------------- HOW FULL IT IS, on one line
+# His: *"on the very right of the top row of the agent's information box it
+# should keep a running tally of how much context that agent has vs how much it
+# can handle"*. So a card's top row ends in `62k/200k`, and that is the whole
+# feature — standing metadata about the process, drawn quietly at the trailing
+# edge like every other badge (§9.1).
+#
+# **It is MEASURED, never estimated.** Claude Code stamps a `usage` object on
+# every assistant entry of the transcript, and the standing context is
+# `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` of the
+# LAST one — the cached parts are the bulk of it, so leaving them out would draw
+# a number an order of magnitude too small.
+#
+# **It degrades to ABSENCE.** No session, no transcript, no assistant turn yet,
+# or a usage object with nothing readable in it: the card draws nothing there,
+# the way it draws every other thing it cannot see. A zero would be a claim that
+# the agent is empty, and an assumed window would be a claim about a model
+# nothing established.
+#
+# **No ramp, no colour.** A nearly-full context is not a machine fault, and
+# warn/crit on this desktop means exactly that (§8.1, §9.3). It is one dim
+# string, and it says its own denominator so it needs no legend (§10.5).
+def _window_for(model):
+    """The context window for a model id, from the id itself.
+
+    Claude Code writes the id it is running on every assistant entry, and the
+    long-context variants carry it in the name (`claude-opus-5[1m]`). That is
+    the only statement of the window anywhere in the transcript, so it is what
+    is read; everything else falls to `CONTEXT_WINDOW`.
+    """
+    m = str(model or "").lower()
+    return CONTEXT_WINDOW_1M if "[1m]" in m or "-1m" in m else CONTEXT_WINDOW
+
+
+def _context_of(last):
+    """(tokens standing in the window, window) from one transcript entry, or
+    (0, 0) if it does not say."""
+    if not isinstance(last, dict):
+        return 0, 0
+    u = last.get("usage")
+    if not isinstance(u, dict):
+        return 0, 0
+    total = 0
+    for k in ("input_tokens", "cache_read_input_tokens",
+              "cache_creation_input_tokens"):
+        try:
+            total += int(u.get(k) or 0)
+        except (TypeError, ValueError):
+            continue
+    if total <= 0:
+        return 0, 0
+    return total, _window_for(last.get("model"))
+
+
+def _k(n):
+    """A token count in the shortest honest form: `812`, `62k`, `1.2m`."""
+    if n >= 1_000_000:
+        s = "%.1fm" % (n / 1_000_000.0)
+        return s.replace(".0m", "m")
+    if n >= 1000:
+        return "%dk" % round(n / 1000.0)
+    return str(int(n))
+
+
+def context_line(rec):
+    """`62k/200k`, or "" when nothing was measured. Both halves or neither."""
+    rec = rec or {}
+    try:
+        used, window = int(rec.get("ctxUsed") or 0), int(rec.get("ctxWindow") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if used <= 0 or window <= 0:
+        return ""
+    return "%s/%s" % (_k(used), _k(window))
+
+
 def forget(agent_id):
     try:
         os.unlink(sidecar(agent_id))
@@ -480,8 +576,14 @@ def observe(agent_id, session=None):
             rec.setdefault("recent", [])
             ba._write_json(sidecar(aid), rec)
             return rec
-        calls, offset = _tool_calls(path, int(rec.get("offset") or 0))
+        calls, offset, last = _tool_calls(path, int(rec.get("offset") or 0))
         rec["offset"] = offset
+        # The tally is carried in the record like everything else here, so a
+        # poll that reads no new assistant entry keeps the last MEASURED
+        # figure rather than dropping the line off the card and back on.
+        used, window = _context_of(last)
+        if used:
+            rec["ctxUsed"], rec["ctxWindow"] = used, window
         if calls:
             rec["recent"] = (list(rec.get("recent") or []) + calls)[-WINDOW:]
             rec["seen"] = time.time()
