@@ -8,7 +8,9 @@ import QtQuick
 //     Regular only (§2.2) and the size is one desktop-wide setting (§2.1/§2.7),
 //     so a heading is told apart by a RULE and by spacing — position and
 //     colour, which is exactly what §20 says emphasis is carried by here.
-//   * There are no invented colours. Body text is `Theme.text` (which IS the
+//   * There are no invented colours, and no colour is read off `Theme` where
+//     the window's focus can change it — the pane hands `fg`/`fgDim`/`fgAccent`
+//     in already faded (§3.1.1). Body text is `Theme.text` (which IS the
 //     accent, §3.1); a quotation is the secondary label `Theme.textDim` behind
 //     the 2px accent gutter §9.1 already uses for "this row"; a code block is
 //     the inset `Theme.bgAlt` inside the 1px `Theme.border` hairline §4 uses
@@ -23,7 +25,13 @@ Item {
     property real cellW: 8
     property string query: ""
     property bool current: false      // the search match the user is ON
+    // The three foreground tones, passed in already faded by the pane
+    // (docs/DESIGN.md §3.1.1) rather than read off Theme here: a block must not
+    // know whether the window is focused, and one ternary per pane beats one
+    // per block per focus change.
     property color fg: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
 
     readonly property string btype: block.type || "p"
     readonly property int level: block.level || 1
@@ -45,7 +53,7 @@ Item {
         width: 2
         height: body.implicitHeight
         visible: root.current
-        color: Theme.accent
+        color: root.fgAccent
     }
 
     Item {
@@ -82,7 +90,7 @@ Item {
                 width: parent.width
                 height: 1
                 y: Math.floor(Theme.fontSize / 2)
-                color: root.level === 1 ? Theme.accent : Theme.border
+                color: root.level === 1 ? root.fgAccent : Theme.border
             }
 
             // A quotation's gutter — 2px accent, the width every accent edge on
@@ -93,7 +101,7 @@ Item {
                 y: headRule.visible ? Theme.fontSize : 0
                 width: 2
                 height: rich.implicitHeight
-                color: Theme.accent
+                color: root.fgAccent
             }
 
             // The list marker sits in its own column so the text of a wrapped
@@ -105,7 +113,7 @@ Item {
                 x: (root.block.depth || 0) * 2 * root.cellW
                 y: headRule.visible ? Theme.fontSize : 0
                 text: root.block.marker || "-"
-                color: Theme.textDim
+                color: root.fgDim
             }
 
             RichText {
@@ -121,7 +129,7 @@ Item {
                 cellW: root.cellW
                 runs: root.block.runs || []
                 query: root.query
-                color: root.btype === "quote" ? Theme.textDim : root.fg
+                color: root.btype === "quote" ? root.fgDim : root.fg
                 codeColor: root.fg
                 onLinkActivated: (href, lt) => root.linkActivated(href, lt)
                 onLinkHovered: (href) => root.linkHovered(href)
@@ -263,7 +271,7 @@ Item {
                                     text: tbl.cellText(modelData)
                                     // The header row is the label; the body is
                                     // the reading. Two tiers on one hue (§3.2).
-                                    color: trow.index === 0 ? root.fg : Theme.textDim
+                                    color: trow.index === 0 ? root.fg : root.fgDim
                                 }
                             }
                         }

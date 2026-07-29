@@ -17,8 +17,13 @@ Window {
 
     property string startDoc: startPath
 
-    // Focus-aware foreground, in lock-step with the titlebar (filer's idiom).
-    readonly property color fgAccent: win.active ? Theme.accent : Theme.inactive
+    // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,
+    // docs/DESIGN.md §3.1.1). Every foreground in this window goes through one
+    // of these three; the document panes derive their own from `winActive` for
+    // the same reason.
+    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
+    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
 
     // The pixel font is monospace, so ONE measurement gives every layout in the
     // app its column: the advance. Measured against the real font rather than
@@ -440,7 +445,7 @@ Window {
                     height: parent.height
                     color: Theme.bgAlt
                     border.width: 1
-                    border.color: Theme.accent
+                    border.color: win.fgAccent
 
                     TextInput {
                         id: searchField
@@ -453,7 +458,7 @@ Window {
                         font.pixelSize: Theme.fontSize
                         font.hintingPreference: Font.PreferFullHinting
                         renderType: Text.NativeRendering
-                        color: Theme.text
+                        color: win.fgText
                         selectionColor: Theme.highlight
                         selectedTextColor: Theme.accent
                         clip: true
@@ -479,7 +484,7 @@ Window {
                             right: parent.right; rightMargin: 6
                             verticalCenter: parent.verticalCenter
                         }
-                        color: Theme.textDim
+                        color: win.fgDim
                         text: win.query.length < 2 ? ""
                             : (win.pane.matches.length
                                ? (win.pane.matchAt + 1) + "/" + win.pane.matches.length
