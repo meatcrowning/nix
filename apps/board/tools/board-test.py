@@ -423,6 +423,149 @@ def test_moves(tmp):
           p.returncode == 1 and "no decision" in p.stderr, p.stderr.strip()[:200])
 
 
+# ------------------------------------- 1b2. clearing a chore off the TO DO list
+TODO_FIXTURE = """# Board
+
+Preamble prose that must survive every write, byte for byte.
+
+---
+
+## NEEDS YOU
+
+### 1. A question?
+
+- [ ] one
+
+>
+
+*If unanswered:* nothing happens.
+
+---
+
+## WAITING ON YOU TO DO (not decide)
+
+- **Relaunch `reader`** - live source, no hot reload.
+- **Relaunch `player`** - picks up the track menu, the working stars and the
+  uncropped maximized art.
+- **Rebuild to make the merged font live** - `sudo rebuild-top`.
+
+---
+
+## IN FLIGHT
+
+| What | Where | Notes |
+|---|---|---|
+| A thing being built | `apps/thing/**` | with a note |
+
+## LANDED
+
+Newest first. Append-only.
+
+### 2026-07-28
+
+| Commit | What |
+|---|---|
+| `abc1234` | did a thing |
+"""
+
+
+def test_todo_remove(tmp):
+    """*"i should be able to remove items from the 'to do, when you feel like
+    it' section"*.
+
+    Byte-level, like the round trip above, because this is the first thing in
+    the app that DELETES his prose. Three claims: what goes is exactly the
+    bullet (continuation lines included, nothing else on any line), the undo
+    puts it back byte-for-byte wherever it sat, and a section that empties
+    completely is still a section.
+    """
+    import boardparse as B
+
+    src = TODO_FIXTURE
+    doc = B.parse(src)
+    todo = doc["todo"]
+    check("the three chores parse", len(todo) == 3, [t["text"] for t in todo])
+    check("a wrapped bullet knows where it ENDS, not just where it starts",
+          todo[1]["endLine"] == todo[1]["line"] + 1
+          and todo[0]["endLine"] == todo[0]["line"],
+          [(t["line"], t["endLine"]) for t in todo])
+
+    def removed(i, d=None):
+        d = d or B.parse(src)
+        return "".join(B.remove_todo(d["lines"], d["todo"][i]))
+
+    # ---- the wrapped one in the middle ----
+    out = removed(1)
+    gone = [ln for ln in src.splitlines(True) if ln not in out.splitlines(True)]
+    check("removing a wrapped bullet takes BOTH of its lines", len(gone) == 2, gone)
+    check("...and every other line is byte-identical",
+          [ln for ln in src.splitlines(True) if ln not in gone]
+          == out.splitlines(True))
+    d2 = B.parse(out)
+    check("...and the other two chores are still there, unchanged",
+          [t["text"] for t in d2["todo"]]
+          == [todo[0]["text"], todo[2]["text"]], [t["text"] for t in d2["todo"]])
+    check("...and nothing outside the section moved",
+          all(s in out for s in ("Preamble prose that must survive",
+                                 "| A thing being built | `apps/thing/**` | with a note |",
+                                 "*If unanswered:* nothing happens.")))
+
+    # ---- the undo, for each position, byte-for-byte ----
+    for i, where in ((0, "the first"), (1, "a middle"), (2, "the last")):
+        d = B.parse(src)
+        t = d["todo"][i]
+        a, b = B.todo_span(d["lines"], t)
+        block, after = d["lines"][a:b], (d["lines"][b] if b < len(d["lines"]) else "")
+        out = B.remove_todo(d["lines"], t)
+        back = B.parse("".join(out))
+        put = "".join(B.add_todo_block(back["lines"], back, block, after))
+        check("putting %s chore back restores the file exactly" % where,
+              put == src, "%d vs %d chars" % (len(put), len(src)))
+
+    # ---- it empties out completely, and that is a resting state ----
+    cur = src
+    for _ in range(3):
+        d = B.parse(cur)
+        cur = "".join(B.remove_todo(d["lines"], d["todo"][0]))
+    empty = B.parse(cur)
+    check("the section can empty completely", empty["todo"] == [],
+          [t["text"] for t in empty["todo"]])
+    check("...with its heading and everything around it untouched",
+          "## WAITING ON YOU TO DO (not decide)\n" in cur
+          and "## IN FLIGHT\n" in cur and "| `abc1234` | did a thing |\n" in cur)
+    check("...and only the three bullets' four lines are gone",
+          len(src.splitlines()) - len(cur.splitlines()) == 4,
+          len(src.splitlines()) - len(cur.splitlines()))
+    # ...and an agent can still add one afterwards, into a section with no
+    # bullets left to append after.
+    d = B.parse(cur)
+    again = "".join(B.add_todo_bullet(d["lines"], d, "- something new\n"))
+    check("...and a new chore still lands inside the section",
+          B.parse(again)["todo"][0]["text"] == "something new"
+          and again.index("- something new")
+          > again.index("## WAITING ON YOU TO DO"),
+          [t["text"] for t in B.parse(again)["todo"]])
+
+    # ---- a stale index REFUSES rather than deleting somebody's line ----
+    d = B.parse(src)
+    stale = dict(d["todo"][0])
+    stale["line"] = stale["endLine"] = 0        # the `# Board` heading
+    try:
+        B.remove_todo(d["lines"], stale)
+        check("a stale line index is refused, not obeyed", False, "it deleted line 0")
+    except B.BoardError:
+        check("a stale line index is refused, not obeyed", True)
+
+    # ---- and it goes through the ONE write path, under the lock ----
+    path = os.path.join(tmp, "todo.md")
+    open(path, "w").write(src)
+    B.edit(path, lambda d: B.remove_todo(d["lines"], d["todo"][2]))
+    check("removal lands through boardparse.edit(), atomically",
+          len(B.parse(B.read(path))["todo"]) == 2
+          and not [n for n in os.listdir(tmp) if n.startswith(".board-")],
+          os.listdir(tmp))
+
+
 # ------------------------------------------------- 1c. who is running, and the box
 def _stash(bm, key, title, pid, pid_start=None, where="apps/x/**"):
     """A stash exactly as `boardmove.start()` writes one. The harness fakes the
@@ -1307,6 +1450,32 @@ def test_window(app, tmp):
     finally:
         ba._procs = real_procs
 
+    # ---- clearing a chore, and putting it back (§10.3) ----
+    # Through the same slots the menu entries call, in the real window, against
+    # a real store: he asked for this because the section only ever grew.
+    line = prop(win, "todo")[0]["line"]
+    text = prop(win, "todo")[0]["text"]
+    check("nothing is offered as an undo before anything is removed",
+          board.property("undoText") == "", board.property("undoText"))
+    check("removing a chore is written back", board.removeTodo(line) is True)
+    spin(200)
+    check("...and it leaves the drawn list, which is now empty",
+          len(prop(win, "todo")) == 0, prop(win, "todo"))
+    check("...and it is out of the file, with the section still there",
+          "- **Relaunch `reader`**" not in B.read(path)
+          and "## WAITING ON YOU TO DO" in B.read(path))
+    check("...and the undo now names what it would put back",
+          board.property("undoText") == text, board.property("undoText"))
+    check("putting it back works", board.undoRemove() is True)
+    spin(200)
+    check("...restoring the drawn row",
+          len(prop(win, "todo")) == 1 and prop(win, "todo")[0]["text"] == text,
+          prop(win, "todo"))
+    check("...and taking the undo away with it, so it is not offered twice",
+          board.property("undoText") == "", board.property("undoText"))
+    check("a line that is no longer there is refused, not obeyed",
+          board.removeTodo(9999) is False)
+
     # ---- it survives the small screen (§5.6) ----
     win2.setWidth(420)
     win2.setHeight(600)
@@ -1337,6 +1506,8 @@ def main():
         os.makedirs(os.path.join(tmp, "win"))
         test_roundtrip(os.path.join(tmp, "rt"))
         test_moves(os.path.join(tmp, "mv"))
+        os.makedirs(os.path.join(tmp, "td"))
+        test_todo_remove(os.path.join(tmp, "td"))
         test_agents(tmp)
         test_phase(tmp)
         os.makedirs(os.path.join(tmp, "work"))

@@ -75,11 +75,27 @@ config = lib.mkIf (host == "top") {
   systemd.user.services.board-watch = {
     Unit = {
       Description = "Work one newly-answered decision from ~/nix/docs/board.md";
-      # The path unit can retrigger in bursts (his edit, then the sync's pull of
-      # it, then the agent's own commit); the default 5-starts-in-10s limit
-      # would wedge the unit for the rest of the session. Every run is cheap and
-      # idempotent when there is nothing new — a parse and a dict compare.
-      StartLimitIntervalSec = 0;
+      # THE OUTER NET, and it is set this high on purpose. The path units
+      # retrigger in bursts (his edit, then the sync's pull of it, then the
+      # agent's own commit, then the timer) and every run is cheap when there is
+      # nothing new, so the default 5-starts-in-10s would wedge the unit for the
+      # rest of the session over normal traffic — which is why this used to be
+      # 0, i.e. off entirely.
+      #
+      # Off entirely turned out to be worse. On 2026-07-28 a bug in the script
+      # made every run return before draining the app's inbox queue, and
+      # `board-inbox.path` below is level-triggered: 3,151 starts in a few
+      # minutes on the machine he was sitting at. The script now backs itself
+      # off (`spin_guard`), and that is the guard that matters because it cannot
+      # wedge anything; this exists for the runaway the script cannot see — a
+      # crash on import, a broken PATH — where nothing in Python ever runs.
+      #
+      # 30 a minute is far above any legitimate burst and far below a loop. If
+      # it ever does trip, the unit goes `failed` and SAYS SO on his own board
+      # (boardagents.watcher_state reads exactly this unit); recovery is
+      # `systemctl --user reset-failed board-watch.service`.
+      StartLimitIntervalSec = 60;
+      StartLimitBurst = 30;
     };
     Service = {
       Type = "oneshot";
@@ -127,9 +143,13 @@ config = lib.mkIf (host == "top") {
   # than edge-triggered, which is the property that matters here — a message
   # written while the service is already running (the case the docstring records
   # the path unit LOSING for board.md) still fires the moment the run ends,
-  # because the file is still sitting there. The queue is drained before a spawn,
-  # so this cannot loop: once `orchestrate()` has taken the messages the glob
-  # matches nothing.
+  # because the file is still sitting there.
+  #
+  # THE COST OF THAT PROPERTY IS THAT IT LOOPS IF A RUN EVER FAILS TO DRAIN, and
+  # "the queue is always drained before the spawn" is exactly the assumption this
+  # comment used to make and the script then broke (3,151 starts, above). It is
+  # not an assumption any more: there are two guards, `spin_guard()` in the
+  # script and the start limit above, and both are documented as being for this.
   systemd.user.paths.board-inbox = {
     Unit.Description = "Watch the board app's inbox for something he typed";
     Path.PathExistsGlob = "%h/.local/state/board/inbox/queue/*.json";

@@ -406,6 +406,7 @@ the gutter is reserved from its own `barW`, never a literal.
   than only in an editor (§10.2).
 - **The WAITING TO DO bullets get no checkbox**, because the store gives them
   none to write to — §10's rule that a control which cannot work is not drawn.
+  **They can be REMOVED, though** — see below.
 - **LANDED is drawn entirely in the secondary tone**, commits in `dim`. It is
   the answer to "what did that session actually do to my machine", not something
   that wants attention.
@@ -416,6 +417,42 @@ the gutter is reserved from its own `barW`, never a literal.
 - **Motion** is `qmlcommon/Motion.qml`'s and there is no duration literal in the
   tree. **Focus** is filer's idiom (§3.1.1): the root `Window` derives
   `fgAccent`/`fgText`/`fgDim` and hands them down; no leaf reads `Window.active`.
+
+### Clearing a chore: the one thing in this app that DELETES his prose
+
+*"i should be able to clear the 'to do, when you feel like it' stuff if i wish.
+currently i cannot remove it via board program"*. Agents add bullets to WAITING
+ON YOU TO DO (`boardmove.note`, the watcher's failure paths) and until now
+nothing ever took one away, so the section only ever grew.
+
+`Board.removeTodo(line)` / `Board.undoRemove()`, drawn as the todo row's
+right-click menu. Every point of it is a rule:
+
+- **ONE verb, `remove`. There is no "done".** A chore he has finished and a
+  chore he no longer wants both end the same way — the line goes — and the
+  record of *why* it existed is already in LANDED, where an agent writes what it
+  did. A second "done" state would make this list a checklist with a completion
+  to account for, which is exactly the debt the no-pressure requirement refuses.
+- **A confirm was NOT added, an UNDO was.** §10.3's two deliberate acts are
+  already the right-click and the entry — the reading `ProcMenu`'s `force quit`
+  settled — and unlike a signal to a process a deleted line can be put back
+  byte-for-byte. `put back "..."` appears in **every** menu, because he may have
+  removed the only row there was to right-click, and is **absent rather than
+  greyed** when there is nothing behind it (§10). One level, this session only:
+  older removals are in `docs/`'s git history, which a timer commits every five
+  minutes, and the risk this guards is the misclick he notices immediately.
+- **`remove this from the list` is LAST, behind a separator** (§7.2), so the
+  pointer never lands on it.
+- **A bullet is removed as a UNIT.** `boardparse.remove_todo` deletes
+  `line`..`endLine` — a chore routinely wraps onto indented continuation lines,
+  and `remove_row` above it is for a *table* row, which is one line by
+  definition. `endLine` is recorded by the parser for every paragraph.
+- **Nothing is tidied.** The blank lines around it are left exactly as they
+  were, even when the section empties out completely: squashing them would be a
+  write touching lines it was not asked about, and this file syncs to book.
+- It goes through the app's one write path (`Board._commit`: re-read, digest
+  compare, refuse on a race), and `boardctl`/`board-watch` still reach the same
+  edits through `boardparse.edit()`. There is no second writer.
 
 ### Chrome: the hyprvtb titlebar (§12, §7.4)
 
@@ -451,7 +488,7 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 ```
 
-`tools/board-test.py`, offscreen, seven layers (156 checks). Two of them are
+`tools/board-test.py`, offscreen, eight layers (180 checks). Two of them are
 new and are the ones to read first if the fan-out misbehaves:
 
 - **what an agent says vs what it does** (`test_phase`) — the classifier per
@@ -469,9 +506,14 @@ new and are the ones to read first if the fan-out misbehaves:
   `--if-unanswered` and writes nothing, then lands as an ordinary numbered
   decision with all four parts and no robot flag; and the board-watch seed.
 
-The other five: **the round trip** (pure Python
+The other six: **the round trip** (pure Python
 — byte-identity, one-line edits, the radio, the `> ` marker preserved on a
-clear, the atomic write), **the moves** (start/land/back/note/reconcile: every
+clear, the atomic write), **removing a chore** (`test_todo_remove`: a wrapped
+bullet loses both its lines and no other line changes at all, the undo restores
+the file byte-for-byte from the first, a middle and the LAST position, the
+section empties completely and an agent can still add to it afterwards, and a
+stale line index is refused rather than obeyed), **the moves**
+(start/land/back/note/reconcile: every
 decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
 table and not the `Queued` one below it, an unanswered decision is refused, a
 dead owner is reclaimed, and an edit computed from stale bytes is retried rather

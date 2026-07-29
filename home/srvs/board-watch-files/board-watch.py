@@ -84,7 +84,20 @@ THE THREE HAZARDS, and how each is defended:
      index. flock() below, plus systemd's own refusal to run a oneshot twice.
 
 FIRST RUN records the whole board and fires nothing: three of his decisions are
-already answered, and waking up to three agents is not the feature.
+already answered, and waking up to three agents is not the feature. Two things
+that cost a live hot loop on 2026-07-28 and are now rules:
+
+  * **"First" is an explicit marker in the state file, never an inference from
+    the board being empty.** An empty NEEDS YOU is the resting state now.
+  * **A first run still DRAINS THE QUEUE.** Seeding is about not acting on
+    answers that predate this script; a sentence he typed into the box is not
+    one of those, and the queue's trigger is level-triggered, so a run that
+    leaves it full is a run that gets started again immediately.
+
+AND IT WILL NOT SPIN. `spin_guard()` backs the whole tick off to one run a
+minute once several in a row have ended with the queue no emptier than they
+found it, whatever the cause; `board-watch.nix` sets a systemd start limit above
+that as the net for a runaway that never reaches this code at all.
 
 TESTING. Every side effect is overridable by environment, so the trigger, the
 filter, the queue and the dedupe can be exercised without spawning anything:
@@ -99,6 +112,9 @@ filter, the queue and the dedupe can be exercised without spawning anything:
     BOARD_ORCH_TIMEOUT      seconds an orchestrator run may take (default 900)
     BOARD_WORK_SPAWN        command run INSTEAD of `claude` for a WORKER
     BOARD_MAX_WORKERS       the concurrency cap, overriding the file
+    BOARD_WATCH_SPIN_LIMIT  undrained runs in a row before the backoff (8)
+    BOARD_WATCH_SPIN_WINDOW seconds the streak has to have started within (60)
+    BOARD_WATCH_SPIN_BACKOFF  seconds a backed-off run sleeps for (60)
 
 `tools/board-watch-test.py` drives all of them against a throwaway copy.
 """
@@ -314,14 +330,34 @@ def gate():
 
 # ------------------------------------------------------------------ the state
 def load_state():
+    """The record. `seeded` is EXPLICIT, and that is the whole point of it.
+
+    It used to be inferred — `first_run = not state["answers"]` — which is the
+    same thing only for as long as NEEDS YOU is never empty. An empty NEEDS YOU
+    is now the RESTING state (`apps/board/AGENTS.md`), and on 2026-07-28 it
+    became the actual one: everything moved to IN FLIGHT/LANDED, `answers` saved
+    as `{}`, and from then on every single run decided it was the first. 3,151 of
+    them logged `first run: recorded 0 decisions, fired nothing` in a few
+    minutes, each returning before the queue was drained and each re-arming the
+    level-triggered `board-inbox.path` the instant it exited. Two of his
+    sentences sat in the queue through all of it.
+
+    Emptiness is not evidence of anything. Only the marker is.
+    """
     try:
         with open(os.path.join(STATE, "state.json")) as f:
             d = json.load(f)
     except (OSError, ValueError):
-        return {"version": 1, "answers": {}, "queued": [], "runs": []}
+        return {"version": 1, "answers": {}, "queued": [], "runs": [],
+                "seeded": False, "spin": {}}
     d.setdefault("answers", {})
     d.setdefault("queued", [])
     d.setdefault("runs", [])
+    d.setdefault("spin", {})
+    # UPGRADE, for a state file written before the marker existed: the file's
+    # EXISTENCE is the evidence, because only a completed run writes one. So it
+    # has been seeded, whatever `answers` happens to hold today.
+    d.setdefault("seeded", True)
     return d
 
 
@@ -564,6 +600,128 @@ def work_the_queue():
     return True
 
 
+#: Set by drain_queue() when there IS something queued and the gate said no. A
+#: run that ends that way leaves the queue full on purpose and will be
+#: re-triggered at once — see spin_guard(), which needs to tell that apart from
+#: a defect.
+_held_by_gate = False
+
+
+def mark_gate_hold():
+    """A path that could not drain because the gate is shut, and says so here so
+    the spin guard does not read a locked screen as a bug."""
+    global _held_by_gate
+    _held_by_gate = True
+
+
+def drain_queue():
+    """Work whatever he typed into the box, if the gate lets us.
+
+    Called from EVERY path that reaches the end of a tick, first run included.
+    That last part is the fix for the second half of the 3,151-run loop: seeding
+    is about not acting on answers that were already in the file before this
+    existed, and it has nothing whatever to do with typed input. A sentence he
+    types is his, now, and the run that notices it is the run that must work it
+    — otherwise `board-inbox.path` is level-triggered at a queue nobody drains,
+    which is exactly the loop.
+    """
+    global _held_by_gate
+    _held_by_gate = False
+    try:
+        waiting = ba.pending()
+    except OSError as e:
+        log("could not look at the queue: %s" % e)
+        return False
+    if not waiting:
+        return False
+    may, why = gate()
+    if not may:
+        _held_by_gate = True
+        log("%d note(s) waiting for the gate - %s" % (len(waiting), why))
+        return False
+    return work_the_queue()
+
+
+# ------------------------------------------------------------- the spin guard
+#: A run that ends with the queue no emptier than it found it WILL be started
+#: again the moment it exits: `board-inbox.path` is `PathExistsGlob`, which is
+#: level-triggered on purpose (that is what stops a sentence typed during a run
+#: being lost). The whole design rests on the queue being drained before the run
+#: ends, and on 2026-07-28 a bug meant it never was: 3,151 starts in a few
+#: minutes, on the machine he was sitting at.
+#:
+#: So the script refuses to be part of a loop, whatever the reason. After this
+#: many consecutive undrained runs inside the window, every further run sleeps
+#: first — holding the flock, so triggers arriving meanwhile are already no-ops.
+#: An unbounded loop becomes one run a minute, and it self-heals: the moment a
+#: run does drain the queue the streak resets to nothing.
+SPIN_LIMIT = int(os.environ.get("BOARD_WATCH_SPIN_LIMIT", "8"))
+SPIN_WINDOW_S = float(os.environ.get("BOARD_WATCH_SPIN_WINDOW", "60"))
+SPIN_BACKOFF_S = float(os.environ.get("BOARD_WATCH_SPIN_BACKOFF", "60"))
+
+SPIN_NOTE = (
+    "- **board-watch caught itself looping and slowed down** - something he "
+    "typed into the board's box could not be worked, so the inbox queue never "
+    "emptied and the watcher was re-triggered over and over. It is now backing "
+    "off to one run a minute and will pick the work up by itself once the cause "
+    "is fixed. Nothing was lost: it is still in `~/.local/state/board/inbox/"
+    "queue/`. Log: `~/.cache/board-watch.log`\n")
+
+
+def spin_guard(state):
+    """Sleep if the last several runs all ended with the queue still full.
+
+    NOT `StartLimitBurst` on its own, deliberately. A start limit puts the unit
+    in `failed` and keeps it there, which takes the timer and board.md's own
+    path unit down with it — the feature silently off is a worse failure than a
+    slow loop, and this exact case (a locked screen with something queued) is
+    a legitimate one that must not wedge anything. The limit IS still set, in
+    `board-watch.nix`, as the outer net for a runaway this code cannot see: a
+    crash before this line runs would loop just as hard and reach none of it.
+
+    Visible, not silent, and the two causes are told apart because only one is a
+    bug: the gate being shut is normal and gets a log line, while a queue that
+    stayed full with the gate OPEN gets one bullet on his board, once per streak.
+    """
+    sp = state.get("spin") or {}
+    n = int(sp.get("count", 0))
+    if n < SPIN_LIMIT or (time.time() - float(sp.get("first", 0))) > SPIN_WINDOW_S * 8:
+        return
+    log("backing off %ds: %d runs in a row left the queue undrained"
+        % (SPIN_BACKOFF_S, n))
+    if sp.get("defect") and not sp.get("noted"):
+        note_on_board(SPIN_NOTE)
+        sp["noted"] = True
+        state["spin"] = sp
+        save_state(state)
+    time.sleep(SPIN_BACKOFF_S)
+
+
+def spin_record():
+    """Update the streak from what this run actually left behind.
+
+    Re-reads the state file rather than reusing the caller's copy: the tick has
+    saved it several times by now, and clobbering that with a stale dict would
+    lose the very fingerprints that stop a re-fire.
+    """
+    try:
+        empty = not ba.pending()
+    except OSError:
+        empty = True
+    st = load_state()
+    sp = st.get("spin") or {}
+    if empty:
+        sp = {}
+    else:
+        if not sp.get("count"):
+            sp = {"count": 0, "first": time.time(), "noted": False, "defect": False}
+        sp["count"] = int(sp.get("count", 0)) + 1
+        if not _held_by_gate:
+            sp["defect"] = True          # nothing stopped us, and it is still there
+    st["spin"] = sp
+    save_state(st)
+
+
 # ------------------------------------------------------------------------ run
 def main():
     os.makedirs(STATE, exist_ok=True)
@@ -583,6 +741,16 @@ def main():
         log("skipped: another board-watch run holds the lock")
         return 0
 
+    # NEVER SPIN. Inside the lock, so the sleep it may do turns every trigger
+    # that arrives meanwhile into a no-op rather than a second sleeping process.
+    spin_guard(load_state())
+    try:
+        return tick()
+    finally:
+        spin_record()
+
+
+def tick():
     # NOTHING STAYS STRANDED. If a previous run was killed outright — OOM,
     # reboot, systemd's TimeoutStartSec — its decision is sitting in IN FLIGHT
     # with nothing working on it. Hand back every item whose owning process is
@@ -627,7 +795,7 @@ def main():
     doc = bp.parse(src)
     state = load_state()
     seen = state["answers"]
-    first_run = not seen
+    first_run = not state.get("seeded")
 
     fresh = {}
     fired_candidates = []
@@ -645,8 +813,13 @@ def main():
 
     if first_run:
         state["answers"] = fresh
+        state["seeded"] = True
         save_state(state)
         log("first run: recorded %d decisions, fired nothing" % len(fresh))
+        # ...but a sentence he typed is not an answer that predates us, and it
+        # is not seeded past. It is worked on the very first tick after he types
+        # it, exactly as on any other tick.
+        drain_queue()
         return 0
 
     if not fired_candidates:
@@ -659,13 +832,7 @@ def main():
         log("no new answer")
         # A tick with no new answer is when his notes get worked: one agent per
         # invocation still holds, and a decision always outranks a note.
-        if ba.pending():
-            may, why = gate()
-            if may:
-                work_the_queue()
-            else:
-                log("%d note(s) waiting for the gate - %s"
-                    % (len(ba.pending()), why))
+        drain_queue()
         return 0
 
     keys = [i["key"] for i in fired_candidates]
@@ -682,6 +849,7 @@ def main():
             log("queued %d answer(s) - %s: %s" % (len(keys), why, ", ".join(keys)))
         state["queued"] = keys
         save_state(state)
+        mark_gate_hold()          # his notes cannot be worked either, same reason
         return 0
 
     # ONE decision per invocation, in file order. The rest stay queued at their

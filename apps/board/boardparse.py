@@ -262,13 +262,18 @@ def parse(src):
         if prose is not None and prose["kind"] == "ifunans" and item is not None:
             item["ifRaw"] = (item["ifRaw"] + " " + ln.strip()).strip()
             continue
+        # `endLine` is the LAST raw line of this paragraph, and it exists so a
+        # bullet can be removed as a unit: a WAITING ON YOU TO DO item routinely
+        # wraps onto indented continuation lines, and deleting only `line` would
+        # leave his half-sentence behind as an orphan paragraph.
         if mb:
             close_prose()
-            prose = {"kind": "bullet", "raw": mb.group(2), "line": i}
+            prose = {"kind": "bullet", "raw": mb.group(2), "line": i, "endLine": i}
         elif prose is not None:
             prose["raw"] = (prose["raw"] + " " + ln.strip()).strip()
+            prose["endLine"] = i
         else:
-            prose = {"kind": "para", "raw": ln.strip(), "line": i}
+            prose = {"kind": "para", "raw": ln.strip(), "line": i, "endLine": i}
 
     close_prose()
     close_item()
@@ -517,6 +522,87 @@ def remove_row(lines, line_index):
     if line_index < 0 or line_index >= len(lines):
         raise BoardError("that row is no longer where it was")
     return lines[:line_index] + lines[line_index + 1:]
+
+
+# --------------------------------------------- clearing a chore off the TO DO list
+# His words: *"i should be able to clear the 'to do, when you feel like it' stuff
+# if i wish. currently i cannot remove it via board program"*. Agents add bullets
+# there (`add_todo_bullet`, `boardmove.note`) and nothing ever took one away, so
+# the section only grew.
+#
+# ONE verb, `remove`, and no "done". A chore he has finished and a chore he no
+# longer wants both end the same way — the line goes — and the record of why it
+# existed is already in LANDED, which is where an agent writes what it did. A
+# second "done" state would make this list a checklist with a completion to
+# account for, which is the debt the no-pressure requirement exists to refuse.
+#
+# `remove_row` above is not enough for this and cannot be made to be: a table row
+# is exactly one line by definition, and a bullet is one line plus however many
+# it wrapped onto.
+
+
+def todo_span(lines, todo):
+    """(start, end) of one WAITING ON YOU TO DO bullet, continuations included.
+
+    Refuses rather than guesses if the line it was told about is no longer a
+    bullet: the app computes this from a parse and the file has three other
+    writers, so a stale index must cost a refusal and not somebody else's line.
+    """
+    a = todo.get("line", -1)
+    b = todo.get("endLine", a)
+    if a < 0 or b < a or b >= len(lines):
+        raise BoardError("that line is no longer where it was")
+    if not _BULLET.match(lines[a].rstrip("\n")):
+        raise BoardError("that line is no longer where it was")
+    return a, b + 1
+
+
+def remove_todo(lines, todo):
+    """Drop one bullet, and touch nothing else.
+
+    Deliberately NOT tidy: the blank lines around it are left exactly as they
+    are, even when the section empties out completely. Squashing them would be
+    this module rewriting lines it was not asked about — the one thing its
+    docstring forbids — and a stray blank line reads as nothing at all, while a
+    reflowed section is a diff he has to understand in a file that syncs to the
+    other machine.
+    """
+    a, b = todo_span(lines, todo)
+    return lines[:a] + lines[b:]
+
+
+def add_todo_block(lines, doc, block, before=None):
+    """Put a removed bullet's raw lines back — where they were, if that is still
+    there. The undo half of `remove_todo`.
+
+    `before` is the raw line the bullet used to sit above, recorded at the
+    removal; the same anchor `add_needs_item` uses and for the same reason. Only
+    BULLET lines are matched against it: the line after the last bullet in the
+    section is a blank or a `---`, neither of which identifies a position (the
+    first blank in the section is the one under the heading), so those fall
+    through to "after the last bullet" — which for the last bullet is exactly
+    where it came from.
+    """
+    s, e = section_bounds(lines, "todo")
+    if s < 0:
+        raise BoardError("there is no `## WAITING ON YOU TO DO` section left")
+    at = -1
+    if before:
+        want = before.rstrip("\n")
+        if _BULLET.match(want):
+            for i in range(s + 1, e):
+                if lines[i].rstrip("\n") == want:
+                    at = i
+                    break
+    if at < 0:
+        inside = [t for t in doc["todo"] if s < t["line"] < e]
+        if inside:
+            at = max(t.get("endLine", t["line"]) for t in inside) + 1
+        else:
+            at = s + 1
+            while at < e and not lines[at].strip():
+                at += 1
+    return lines[:at] + list(block) + lines[at:]
 
 
 def add_landed_row(lines, commit, what, date=None):

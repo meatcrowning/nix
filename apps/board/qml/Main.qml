@@ -385,7 +385,7 @@ Window {
                                 acceptedButtons: Qt.RightButton
                                 onClicked: (m) => {
                                     var p = mapToItem(null, m.x, m.y);
-                                    win.rowMenu(modelData.text, p.x, p.y);
+                                    win.todoMenu(modelData, p.x, p.y);
                                 }
                             }
                         }
@@ -826,10 +826,37 @@ Window {
         menu.open(x, y, items.concat(fileItems()));
     }
 
+    // The undo for a removed `to do` bullet. Absent, not greyed, when there is
+    // nothing to put back (§10: a control that cannot work is not drawn), and
+    // offered from EVERY menu — he may have removed the only bullet there was,
+    // in which case there is no row left to right-click.
+    function undoItems() {
+        if (Board.undoText === "")
+            return [];
+        var t = Board.undoText;
+        if (t.length > 44) t = t.substring(0, 44) + "...";
+        return [{ separator: true },
+                { label: "put back \"" + t + "\"", trigger: () => Board.undoRemove() }];
+    }
+
     function rowMenu(text, x, y) {
         var items = [];
         if (text !== "")
             items.push({ label: "copy line", trigger: () => Board.copy(text) });
-        menu.open(x, y, items.concat(fileItems()));
+        menu.open(x, y, items.concat(fileItems()).concat(undoItems()));
+    }
+
+    // A `to do` bullet. §7.2's ordering is a safety property: read-only first,
+    // then the undo, and the one destructive entry LAST behind its own separator
+    // so the pointer never lands on it. No confirm — §10.3's two deliberate acts
+    // are the right-click and this entry, exactly as `ProcMenu`'s `force quit`
+    // settled it; the undo above is what covers the misclick.
+    function todoMenu(t, x, y) {
+        var items = [{ label: "copy line", trigger: () => Board.copy(t.text) }];
+        items = items.concat(fileItems()).concat(undoItems());
+        items.push({ separator: true });
+        items.push({ label: "remove this from the list",
+                     trigger: () => Board.removeTodo(t.line) });
+        menu.open(x, y, items);
     }
 }

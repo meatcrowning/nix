@@ -36,6 +36,12 @@ What it asserts, in order:
               running: queued, held while the screen is locked, worked by ONE
               agent when the gate opens, drained so it cannot run twice, and —
               if that run fails — quoted verbatim onto the board
+  the loop    the three defects behind 2026-07-28's 3,151 starts, kept apart
+              because they are three: an EMPTY NEEDS YOU seeds once rather than
+              forever (and an old state file is upgraded, not re-seeded); a
+              first run still WORKS what he typed; and a run that leaves the
+              queue full backs the next ones off — quietly for a shut gate,
+              with one bullet on his board when the gate was open
 
 TWO THINGS THIS HARNESS DOES ON HIS BEHALF, both of them the difference between
 a green run and a lie:
@@ -130,18 +136,52 @@ def check(name, cond, detail=""):
         fails.append(name)
 
 
+#: NEEDS YOU with nothing in it. The RESTING state since everything moved to IN
+#: FLIGHT and LANDED, and the shape that made the watcher re-seed forever.
+EMPTY_NEEDS = """# Board
+
+Test fixture whose NEEDS YOU is empty - which is a resting state, not a fault.
+
+---
+
+## NEEDS YOU
+
+---
+
+## WAITING ON YOU TO DO
+
+- **Relaunch `player`** - live source.
+
+---
+
+## IN FLIGHT
+
+| What | Where | Notes |
+|---|---|---|
+
+## LANDED
+
+### 2026-07-28
+
+| Commit | What |
+|---|---|
+| `abc1234` | did a thing |
+"""
+
+
 class Rig:
-    def __init__(self, d):
+    def __init__(self, d, fixture=FIXTURE):
         self.d = d
         self.board = os.path.join(d, "board.md")
         self.state = os.path.join(d, "state")
         self.log = os.path.join(d, "watch.log")
         self.fired = os.path.join(d, "fired")
         with open(self.board, "w") as f:
-            f.write(FIXTURE)
+            f.write(fixture)
 
-    def env(self, gate="open", spawn=None):
+    def env(self, gate="open", spawn=None, **extra):
         e = dict(os.environ)
+        e.update({k: str(v) for k, v in extra.items()})
         e.update(BOARD_WATCH_BOARD=self.board, BOARD_WATCH_STATE=self.state,
                  BOARD_WATCH_LOG=self.log, BOARD_WATCH_GATE=gate,
                  BOARD_WATCH_REPO=REPO,
@@ -154,9 +194,10 @@ class Rig:
                  else 'echo "$BOARD_WATCH_KEY" >> ' + self.fired)
         return e
 
-    def run(self, gate="open", spawn=None):
+    def run(self, gate="open", spawn=None, **extra):
         before = self.text()
-        p = subprocess.run([sys.executable, WATCHER], env=self.env(gate, spawn),
+        p = subprocess.run([sys.executable, WATCHER],
+                           env=self.env(gate, spawn, **extra),
                            capture_output=True, text=True, timeout=120)
         if VERBOSE:
             print("    rc=%d %s" % (p.returncode, p.stderr.strip()[:200]))
@@ -296,6 +337,151 @@ def check_session_id_is_passed(r):
     cmd = seen.get("cmd") or []
     ok = "--session-id" in cmd and cmd[cmd.index("--session-id") + 1] == "fixed-uuid-here"
     check("the spawn hands claude the session id its card is read from", ok, str(cmd[:8]))
+
+
+def _load_watcher(env):
+    """Import board-watch.py as a module under `env`, for the checks that have
+    to reach inside it. Its paths are module constants read at import."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bw_under_test", WATCHER)
+    mod = importlib.util.module_from_spec(spec)
+    old = dict(os.environ)
+    os.environ.update({k: v for k, v in env.items() if isinstance(v, str)})
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        os.environ.clear()
+        os.environ.update(old)
+    return mod
+
+
+def test_the_loop():
+    """The 2026-07-28 hot loop, as three separate defects.
+
+    He typed two sentences into the board's box; neither ran, both were still in
+    `inbox/queue/`, and `board-watch.service` had started 3,151 times. One chain,
+    three independent things wrong with it, so three regressions:
+
+      1. `first_run` was inferred from `state["answers"]` being empty. His NEEDS
+         YOU had just emptied out — the resting state — so every run was a first
+         run, forever.
+      2. the first-run branch returned BEFORE the queue was drained, so typed
+         input was never worked under that condition.
+      3. `board-inbox.path` is level-triggered, so an undrained queue restarts
+         the service the instant it exits. Nothing bounded that.
+    """
+    print("the hot loop - three defects")
+
+    # ---- 1. an empty NEEDS YOU is a resting state, not "never seeded" --------
+    d = tempfile.mkdtemp(prefix="board-watch-seed-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        r.run()
+        r.run()
+        r.run()
+        firsts = [l for l in open(r.log) if "first run:" in l]
+        check("an empty NEEDS YOU seeds ONCE, not on every run", len(firsts) == 1,
+              "%d first-run lines" % len(firsts))
+        st = json.load(open(os.path.join(r.state, "state.json")))
+        check("...because the marker is explicit, not inferred from emptiness",
+              st.get("seeded") is True and st["answers"] == {}, str(st.get("seeded")))
+        check("...and the later runs say so plainly",
+              any("no new answer" in l for l in open(r.log)))
+        # and the marker did not cost the real behaviour it guards
+        r.edit("## NEEDS YOU\n",
+               "## NEEDS YOU\n\n### 1. A late question?\n\n- [ ] one\n- [ ] two\n"
+               "\n>\n\n*If unanswered:* nothing.\n")
+        r.run()
+        check("a decision added after the seed still does not fire on arrival",
+              r.fires() == [], str(r.fires()))
+        r.edit("- [ ] one", "- [x] one")
+        r.run()
+        check("...and answering it afterwards fires exactly once",
+              r.fires() == ["a-late-question"], str(r.fires()))
+
+        # an OLD state file, from before the marker existed, must not re-seed
+        p = os.path.join(r.state, "state.json")
+        st = json.load(open(p))
+        st.pop("seeded")
+        json.dump(st, open(p, "w"))
+        r.clear()
+        r.run()
+        check("a state file written before the marker is treated as seeded",
+              not any("first run:" in l for l in r.tail(3)), str(r.tail(3)))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    # ---- 2. a first run still works what he typed ---------------------------
+    d = tempfile.mkdtemp(prefix="board-watch-first-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        m = r.note("clear the to-do list, i cannot remove anything")
+        check("(setup) the box queued it", m["state"] == "queued", m)
+        r.run(spawn="cat > " + os.path.join(d, "orch.txt")
+              + '; echo "$BOARD_WATCH_KEY" >> ' + r.fired)
+        check("a note typed BEFORE the first run is worked ON the first run",
+              len(r.fires()) == 1 and r.fires()[0].startswith("orch-"), str(r.fires()))
+        check("...carrying his sentence, not a seeded-past version of it",
+              "cannot remove anything" in open(os.path.join(d, "orch.txt")).read())
+        check("...and the queue is empty afterwards, so nothing re-triggers",
+              r.queued() == [], r.queued())
+        check("...and it was still a first run for the ANSWERS",
+              any("first run:" in l for l in open(r.log)))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    # ---- 3. it cannot spin ---------------------------------------------------
+    d = tempfile.mkdtemp(prefix="board-watch-spin-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        r.note("something to leave sitting in the queue")
+        # A shut gate is the one LEGITIMATE way a run ends with the queue full,
+        # so it is what the end-to-end check uses: same level trigger, same
+        # loop, and it must be bounded without anything being called a fault.
+        spin = dict(BOARD_WATCH_SPIN_LIMIT=2, BOARD_WATCH_SPIN_WINDOW=600,
+                    BOARD_WATCH_SPIN_BACKOFF=1)
+        for _ in range(3):
+            r.run(gate="closed", **spin)
+        check("runs that leave the queue full are counted",
+              json.load(open(os.path.join(r.state, "state.json")))["spin"]
+              .get("count", 0) >= 3)
+        check("...and past the limit the run backs off instead of returning at once",
+              any("backing off" in l for l in open(r.log)))
+        check("...quietly: a locked screen is not a fault and gets no bullet",
+              "caught itself looping" not in r.text())
+        check("...and his sentence is still queued, not dropped",
+              r.queued() == ["something to leave sitting in the queue"], r.queued())
+        # self-healing: the moment a run drains, the streak is gone
+        r.run(**spin)
+        check("a run that drains the queue clears the streak",
+              json.load(open(os.path.join(r.state, "state.json")))["spin"] == {},
+              json.load(open(os.path.join(r.state, "state.json")))["spin"])
+
+        # ...and when the queue stayed full with the GATE OPEN, that is a bug,
+        # and he is told on the board rather than only in a log.
+        mod = _load_watcher(r.env())
+        before = r.text()
+        st = mod.load_state()
+        st["spin"] = {"count": 9, "first": __import__("time").time(),
+                      "defect": True, "noted": False}
+        mod.save_state(st)
+        mod.SPIN_BACKOFF_S = 0
+        mod.spin_guard(mod.load_state())
+        bullet = [l for l in r.text().splitlines() if "caught itself looping" in l]
+        check("a queue left full with the gate OPEN leaves one bullet on the board",
+              len(bullet) == 1, str(bullet))
+        check("...in WAITING ON YOU TO DO",
+              bool(bullet) and r.text().index(bullet[0])
+              > r.text().index("## WAITING ON YOU TO DO"))
+        mod.spin_guard(mod.load_state())
+        again = [l for l in r.text().splitlines() if "caught itself looping" in l]
+        check("...once per streak, never once per run", len(again) == 1, str(again))
+        check("...and nothing else in the file moved",
+              "\n".join(l for l in r.text().splitlines()
+                        if "caught itself looping" not in l).rstrip("\n")
+              == before.rstrip("\n"))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def main():
@@ -557,6 +743,8 @@ def main():
             os.environ.pop("BOARD_MAX_WORKERS", None)
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+    test_the_loop()
 
     print()
     if fails:
