@@ -5,7 +5,9 @@ press enter, and have them sent to an inbox. then an agent figures out what
 agents to assign to what (like how you used to orchestrate) and as agents
 spawned, theyd show up as a little visual box that indicated what they were
 doing, and each agent would be placed in sections based on what they were doing;
-planning, researching, coding, testing, finishing touches"*.
+planning, researching, coding, testing, finishing touches"*. (Those five are
+still what the CLASSIFIER reads out of a transcript; what an agent may SAY of
+itself is any single word — `boardphase.clean_phase_word`.)
 
 `boardagents.py` already owned the INBOX half of that — the box, the three
 directories, and the argument that nothing he types can be lost. This module
@@ -340,7 +342,10 @@ the start and whenever you move on:
        python3 apps/board/tools/boardctl.py phase researching --doing '<one \
 short line, present tense, naming the THING>'
 
-   The phases are `planning`, `researching`, `coding`, `testing`, `finishing`. \
+   **Pick the single word that best names what you are doing.** The classic \
+five — `planning`, `researching`, `coding`, `testing`, `finishing` — are fine, \
+and so is a freer one (`bisecting`, `measuring`, `waiting`): one word, letters \
+only, and TRUE of what you are actually doing. \
 **Your words do not set the phase the card is filed under** — that is derived \
 from what you actually do, and you cannot change it from here. Say it anyway: \
 it is the only channel that carries WHAT you are working on rather than which \

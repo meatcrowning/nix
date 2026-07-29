@@ -250,7 +250,12 @@ def cmd_phase(a):
     """What the agent SAYS. It does not set the phase its card is filed under —
     that is read from the agent's own transcript and cannot be written from
     here. Say so on every call, so no agent is left believing it drove the UI."""
-    rec = bph.claim(a.id, phase=a.phase, doing=a.doing)
+    try:
+        rec = bph.claim(a.id, phase=a.phase, doing=a.doing)
+    except ValueError as e:
+        # Refused, not swallowed: the caller can fix it in one more call.
+        print("boardctl: %s (got %r)" % (e, a.phase), file=sys.stderr)
+        return 1
     if rec is None:
         print("boardctl: no agent id (set BOARD_AGENT_ID, or pass --id)",
               file=sys.stderr)
@@ -376,7 +381,13 @@ def main(argv=None):
 
     s = sub.add_parser("phase", help="say what YOU are doing (the card also "
                                      "shows what you are observed doing)")
-    s.add_argument("phase", nargs="?", default="", choices=[""] + bph.CLAIMABLE)
+    # ANY single word, not a fixed list — his call: *"allow agents more freedom
+    # to indicate what they are doing, but it should still only be a single
+    # word"*. `bph.clean_phase_word` is what "a word" means, and the classic
+    # five are still the ones a transcript can produce on its own.
+    s.add_argument("phase", nargs="?", default="",
+                   help="one word for what you are doing (%s, or your own)"
+                        % ", ".join(bph.CLAIMABLE))
     s.add_argument("--doing", default="", help="one short line, present tense")
     s.add_argument("--id", default=None, help="default: $BOARD_AGENT_ID")
     s.set_defaults(fn=cmd_phase)

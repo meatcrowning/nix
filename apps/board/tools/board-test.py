@@ -1674,6 +1674,53 @@ def test_phase(tmp):
     check("...and the tally carries no time, no age and no percentage",
           not re.search(r"%|ago|\bs\b", bph.context_line(r)), bph.context_line(r))
 
+    # ---- ANY ONE WORD, not the classic five ----
+    # *"allow agents more freedom to indicate what they are doing, but it should
+    # still only be a single word - and still actually related to what they say
+    # they are doing"*. What is still enforced is only what protects the card:
+    # one word, letters, short. The honesty check is the OBSERVED line under it,
+    # which the agent cannot write — that is why a free word is safe.
+    check("a claim may be any single word now, not one of five",
+          (bph.clean_phase_word("Bisecting"), bph.clean_phase_word("  waiting "),
+           bph.clean_phase_word("code-review"), bph.clean_phase_word("coding"))
+          == ("bisecting", "waiting", "code-review", "coding"))
+    check("...but it is ONE word, refused rather than truncated to its first",
+          (bph.clean_phase_word("code review"), bph.clean_phase_word("!!"),
+           bph.clean_phase_word("v2"), bph.clean_phase_word("x" * 40),
+           bph.clean_phase_word(""), bph.clean_phase_word(None)) == ("",) * 6)
+    bph.claim("ph-a", "bisecting", "which commit broke the harness")
+    r = bph.observe("ph-a")
+    check("...and a free word is drawn as the card's own first line",
+          bph.says_line(r, "Marbas")
+          == "Marbas is bisecting - which commit broke the harness",
+          bph.says_line(r, "Marbas"))
+    check("...while the card is still FILED by what it is OBSERVED doing",
+          r["phase"] in bph.CLAIMABLE and r["phase"] != "bisecting", r["phase"])
+    refused = False
+    try:
+        bph.claim("ph-a", "code review", "")
+    except ValueError:
+        refused = True
+    check("a claim that cannot be drawn is REFUSED, never silently dropped",
+          refused)
+    check("...leaving the last good claim standing rather than blanking the line",
+          bph.observe("ph-a").get("claimPhase") == "bisecting",
+          bph.observe("ph-a").get("claimPhase"))
+    import subprocess
+    cli = os.path.join(BOARD, "tools", "boardctl.py")
+    env = dict(os.environ, BOARD_AGENT_ID="ph-a")
+    ok = subprocess.run([sys.executable, cli, "phase", "measuring",
+                         "--doing", "the fan curve"],
+                        capture_output=True, text=True, env=env)
+    bad = subprocess.run([sys.executable, cli, "phase", "code review"],
+                         capture_output=True, text=True, env=env)
+    check("the CLI takes a free word instead of rejecting it out of a fixed list",
+          ok.returncode == 0 and "measuring" in ok.stdout,
+          (ok.returncode, ok.stdout.strip()[:90], ok.stderr.strip()[:90]))
+    check("...and says why when it will not take one, on stderr, nonzero",
+          bad.returncode != 0 and "ONE word" in bad.stderr,
+          (bad.returncode, bad.stderr.strip()[:120]))
+
 
 # ------------------------------------------ 1e. the fan-out: the cap and asking
 def test_work(tmp):
