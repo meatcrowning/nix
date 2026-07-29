@@ -291,7 +291,13 @@ So, as binding as the parse:
   of open questions is a debt; there is not one anywhere in this app. The
   `placed` time above is not an exception to this and must not be turned into
   one: an absolute time is a fact about the past, an elapsed one is a clock
-  running against him.
+  running against him. **The ONE exception is the working duration on a live
+  agent card** (`working for 4 minutes`, `boardphase.worked_line`) — his own
+  explicit ask, 2026-07-29, replacing the absolute spawn stamp he had asked
+  for that morning. It is granted by the person this rule protects, and the
+  reading that keeps it coherent: a running agent's clock counts against the
+  AGENT, not against him. Scoped to exactly that line; nothing else may count,
+  and nothing may cite it as precedent.
 - **Nothing is drawn in the `warn`/`crit` ramp.** Those colours mean a machine
   fault on this desktop (§8.1, §9.3); a question is not one.
 - **Every decision draws its own `if unanswered` line, always** — never behind a
@@ -922,6 +928,13 @@ The short version, and every line of it is a rule:
   is never manufactured for an agent (above), so he is TOLD to make one. The
   IDLE row is a different thing and is unchanged — it is not a process, it has
   no claim and no observation, and its name comes from the 7-cell column.
+  **And before anything is observed at all, the LIVE card reads `Solomon is
+  getting ready`** rather than the bare `nothing yet` — [his, 2026-07-29,
+  relayed through Vual's inbox and lost to an API outage before it was built].
+  Scoped in `boardagents.agents()` to `kind == orchestrator`, running, observed
+  `none`, so worker cards keep the honest bare placeholder; same sentence shape
+  and same §10.6 argument as the idle row — a placeholder for the absence of
+  observation, promoted from nothing, never a claim derived from one.
 - **`doing` is derived from the agent's live transcript**,
   `~/.claude/projects/*/<session-uuid>.jsonl`, which Claude Code appends to as
   the agent works. It carries the VERB — *"editing vtbclient.py"* — and cannot
@@ -996,14 +1009,16 @@ all of it.
 - **It writes nothing to the store.** Everything it persists is under
   `~/.local/state/board/` (`inbox/`, `agents/`). `board.md`'s writers are still
   exactly three, all through `boardparse.edit()`.
-- **The no-pressure rule applies here too**: no ages, no elapsed times, no
+- **The no-pressure rule applies here too**, with the one exception recorded
+  above: the card's `working for ...` line is the only thing that counts, and
+  it counts against the agent. Otherwise no ages, no
   counts, no urgency ordering, nothing from the warn/crit ramp. A running agent
   is just running. The order is BIRTH, oldest first (`boardwork.cards()`),
   which is stable — a row must not move under his cursor between two polls —
   and is not urgency: a new agent appends at the bottom and nothing above it
-  moves for the rest of its life. The stamps that decide it never reach the
-  screen (`boardagents.born`), which is what keeps an ordering from becoming an
-  age.
+  moves for the rest of its life. The raw `born` epoch still never reaches
+  QML (`boardagents.born`) — the duration is formatted in Python, so the
+  ordering key cannot quietly become a second counter.
 - **A finished agent leaves the list at once** — board-watch drops the stash on
   success and on failure alike — and **a failed one is told apart in WORDS**
   (`exited without finishing`), with §9.1's accent gutter present only on a
