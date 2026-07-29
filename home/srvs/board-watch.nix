@@ -99,6 +99,29 @@ config = lib.mkIf (host == "top") {
     };
     Service = {
       Type = "oneshot";
+      # BELT AND BRACES FOR THE WORKERS, and it is worth stating why it is only
+      # the braces. A oneshot's default KillMode is `control-group`: when the
+      # main process exits, systemd kills everything LEFT IN ITS CGROUP — and a
+      # child detached with `start_new_session` is still in that cgroup, because
+      # that call detaches the process GROUP (a terminal-signal concept) and says
+      # nothing about cgroups. So every worker an orchestrator dispatched was
+      # killed seconds later, while the board honestly reported the work as
+      # dispatched and in hand. Measured on top 2026-07-29: worker `we9f99c`
+      # registered at 22:49:16, the orchestrator exited at 22:49:29, and the
+      # worker's transcript ends three tool calls in.
+      #
+      # The real fix is in `apps/board/boardwork.py`, which now asks the user
+      # manager for one transient unit per worker (`systemd-run --user
+      # --unit=board-worker-<id>`) — its own cgroup, a real lifecycle, the
+      # 45-minute cap actually enforced, and a genuine systemd unit, which is
+      # the shape he asked for the agents section in. That path needs no
+      # rebuild, which is why it is the primary one.
+      #
+      # This line covers the fallback: on a machine with no user manager (or
+      # with `BOARD_WORK_NO_UNIT=1`) `boardwork` still spawns a plain detached
+      # child, and without this that child dies with the tick. Both were
+      # measured to survive; this one only takes effect after a rebuild.
+      KillMode = "process";
       # Pinned, because the ambient systemd-user PATH cannot be relied on for
       # any of these: claude is the agent; git/gh are what it commits and pushes
       # with (the credential helper is `!gh auth git-credential`); hyprctl and

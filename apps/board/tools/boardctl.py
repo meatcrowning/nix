@@ -84,6 +84,7 @@ def cmd_start(a):
 
 def cmd_land(a):
     row = bm.land(a.selector, a.commit, what=a.what, date=a.date, path=a.board)
+    bw.mark_reported(what=a.what or row["what"])
     print("landed: %s (%s)" % (a.what or row["what"], a.commit))
     return 0
 
@@ -96,6 +97,11 @@ def cmd_back(a):
 
 def cmd_note(a):
     if bm.note(" ".join(a.text), path=a.board):
+        # ...and, if a worker wrote it, that it reported AT ALL. `reap()` reads
+        # exactly this: a worker whose process goes without one of `note`,
+        # `land` or `ask` behind it is reported to him as having stopped without
+        # finishing, rather than being silently indistinguishable from success.
+        bw.mark_reported(what=" ".join(a.text))
         print("added to WAITING ON YOU TO DO")
         return 0
     print("nothing written", file=sys.stderr)
@@ -160,7 +166,11 @@ def cmd_dispatch(a):
         print("boardctl: could not start a worker - " + rec.get("why", "?"),
               file=sys.stderr)
         return 1
-    print("running as %s: %s" % (rec["id"], rec["task"][:70]))
+    # STARTED, and that is all this can honestly say. The worker records its own
+    # result on the board when it finishes; if it stops without one, the next
+    # board-watch tick says so. See `boardwork.reap()`.
+    print("started as %s (unit %s%s) - nothing has landed yet: %s"
+          % (rec["id"], bw.UNIT_PREFIX, rec["id"], rec["task"][:70]))
     return 0
 
 
@@ -182,6 +192,7 @@ def cmd_ask(a):
     key = bm.ask(" ".join(a.question), context=a.context, options=a.option,
                  if_unanswered=a.if_unanswered, asked_by=a.asked_by, path=a.board)
     bw.seed_watch_state(key)
+    bw.mark_reported(what="asked: " + " ".join(a.question))
     print("asked, in NEEDS YOU: " + " ".join(a.question)[:90])
     print("he answers it whenever he likes; nothing waits on it")
     return 0

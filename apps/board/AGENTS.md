@@ -172,7 +172,7 @@ whole pipeline, and what each piece is allowed to claim:
 | he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
 | board-watch's next run | drains the queue and spawns ONE **orchestrator**, and WAITS for it | `board-watch.py:work_the_queue` |
 | the orchestrator | splits the input up; `dispatch`es workers or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
-| each worker | detached, capped, works/tests/commits/pushes, **never rebuilds** | `boardwork._spawn_worker` |
+| each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **never rebuilds** | `boardwork._spawn_worker` |
 | a card per worker | grouped by phase, saying what it claims AND what it is observed doing | `boardwork.groups()` + `qml/AgentRow.qml` |
 | a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
 
@@ -209,6 +209,15 @@ Rules that fall out of it, all load-bearing:
 **Four workers at once by default,** and it is a FILE
 (`~/.local/state/board/cap`, `boardctl.py cap 6`), not a nix option — same
 reasoning as board-watch's kill switch: he can change it at 2am with no rebuild.
+(It is set to **5** on `top`, by his own request through the box.)
+
+**A settings-shaped sentence is not a task.** *"change the number of allowed
+agents to 5"* went through the box and an orchestrator has no business handing
+it to a worker — a model session, a commit and a wait, for a one-second write.
+So `cap` is in the orchestrator's own verb list and its prompt says to apply a
+knob it owns itself and say so in the note. That list is deliberately short:
+today the cap is the only knob on it, and anything settings-shaped without a
+tool here is dispatched like any other work, with the note saying it needed one.
 Every worker is a full model session with a shell in a **shared** git checkout,
 so an unbounded fan-out is a real cost and a real risk.
 
@@ -224,15 +233,61 @@ exactly like `reconcile()` and `sweep()`.
 board-watch is a `oneshot` holding a flock, so **anything it waits for blocks
 every other trigger**. Hence the split: the orchestrator run is *waited on* (it
 is short — capped at 15 min — and a failure has to be reported onto the board in
-his own words, and there is nobody else left to do that), while **workers are
-spawned detached** and reparented to init. Four 45-minute workers therefore do
-not stop a decision he answers five minutes later from firing on time.
+his own words, and there is nobody else left to do that), while **a worker runs
+in its OWN transient systemd unit** and is not waited on. Four 45-minute workers
+therefore do not stop a decision he answers five minutes later from firing.
 
-Consequence, and it was a real bug: a detached child is a **zombie** until its
-spawner exits, and `/proc/<pid>` still exists for one. `boardmove._alive` now
-treats state `Z` as dead — measured, two stub workers that ran for one second
-were still counted as running two and a half seconds later, holding slots
-against the cap and keeping cards on his board.
+**It has to be a unit, and "detached" was never enough.** A `oneshot`'s default
+`KillMode` is `control-group`: when its main process exits, systemd kills
+everything left in that cgroup — and `start_new_session=True` detaches the
+process *group*, a terminal-signal concept, and moves nothing out of the cgroup.
+So for a day **every worker was killed seconds after it started**, while the
+orchestrator honestly reported the work as dispatched and the board said nothing
+was wrong. Worker `we9f99c` registered at 22:49:16, the orchestrator exited at
+22:49:29, and that worker's transcript ends three tool calls in with
+`[Request interrupted by user]`; nobody interrupted it. **The failure mode is
+silent success**, which is why `tools/board-watch-test.py` now runs a whole tick
+*inside a real transient oneshot unit* and asserts a worker dispatched from it is
+still running afterwards and goes on to finish its job. Run outside a unit, the
+broken version passes.
+
+`systemd-run --user --unit=board-worker-<id> --service-type=exec` is the whole
+mechanism. Three things come free with it and are now relied on: `RuntimeMaxSec`
+finally enforces the 45 minutes `WORKER_TIMEOUT_S` always claimed (a detached
+`Popen` has no timeout at all); the user manager reaps the worker, so the zombie
+window cannot open for one; and it is a **genuine systemd unit**, which is the
+shape he asked for the agents section in. `KillMode=process` on the parent was
+measured and also works — it is set in `board-watch.nix` as the net under the
+no-user-manager fallback, but it is a `.nix` change and needs a rebuild, which
+is why it is not the primary fix.
+
+**Liveness did not change.** The unit's `MainPID` is read once, at spawn, to
+fill in the registration; `boardmove._alive` (pid + kernel start time + not a
+zombie) goes on being the ONE rule, and nothing asks systemd whether an agent is
+running. The zombie clause stays: it was a real bug for the old path (two stub
+workers that ran for one second still counted as running two and a half seconds
+later, holding slots against the cap and keeping cards on his board).
+
+### A DISPATCH IS A START, NOT A RESULT
+
+The same bug cost him the work twice: it also produced a board that read as
+though the work was done. So a worker's *ending* is accounted for rather than
+assumed.
+
+- **The orchestrator may say what it HANDED OUT and nothing more.** Its prompt
+  forbids "done", "fixed", "wired", "implemented", "working" — it did not do the
+  work and cannot see whether it happened.
+- **`boardctl note|land|ask` stamp `boardwork.mark_reported()`** whenever
+  `BOARD_AGENT_ID` names a worker. Those three are the only ways an agent is
+  allowed to say anything, so they are the only evidence needed.
+- **`boardwork.reap()` runs at the top of every tick**, beside `reconcile()`,
+  `sweep()` and `promote()`. A worker whose process is gone with a stamp behind
+  it is filed under `work/done/`; one without is filed under `work/failed/` and
+  **gets a bullet in WAITING ON YOU TO DO quoting its task**. That bullet is the
+  only trace such a worker leaves — its registration is dropped by `sweep()` and
+  its card leaves the list the moment it dies.
+- A worker's prompt therefore says to run `note` **even when it finished
+  nothing**, and says why.
 
 ## The `agents` section: the only part of this window that is NOT the store
 
@@ -425,17 +480,33 @@ currently i cannot remove it via board program"*. Agents add bullets to WAITING
 ON YOU TO DO (`boardmove.note`, the watcher's failure paths) and until now
 nothing ever took one away, so the section only ever grew.
 
-`Board.removeTodo(line)` / `Board.undoRemove()`, drawn as the todo row's
-right-click menu. Every point of it is a rule:
+`Board.removeTodo(line)` / `Board.undoRemove()`, reached two ways — a **double
+click** on the row and the row's right-click menu. Every point of it is a rule:
+
+- **A DOUBLE CLICK removes it**, because that is how he asked: *"i should be
+  able to just double click on stuff in the to do when you feel like it section
+  to remove them"*. It did nothing for a day and the reason is worth keeping:
+  the row's `MouseArea` was `acceptedButtons: Qt.RightButton`, so the left
+  button never reached it at all and the double click landed on nothing. **A
+  single left click stays inert** — the store gives these bullets no checkbox,
+  so there is nothing for one click to do, and a row that acted on one pass of
+  the pointer would make the removal an accident waiting to happen.
+- Its regression lives in `tools/board-test.py` and must use **`QTest`**, not a
+  hand-built `QMouseEvent` sequence: Qt Quick derives a double click from its
+  own press bookkeeping, so a `MouseButtonDblClick` posted straight at the
+  window is silently dropped and the test passes against the broken code.
+  Measured — the hand-built sequence reached `onClicked` and never
+  `onDoubleClicked`.
 
 - **ONE verb, `remove`. There is no "done".** A chore he has finished and a
   chore he no longer wants both end the same way — the line goes — and the
   record of *why* it existed is already in LANDED, where an agent writes what it
   did. A second "done" state would make this list a checklist with a completion
   to account for, which is exactly the debt the no-pressure requirement refuses.
-- **A confirm was NOT added, an UNDO was.** §10.3's two deliberate acts are
-  already the right-click and the entry — the reading `ProcMenu`'s `force quit`
-  settled — and unlike a signal to a process a deleted line can be put back
+- **A confirm was NOT added, an UNDO was.** The deliberateness §10.3 asks for is
+  in the second click (or in the right-click plus the entry — the reading
+  `ProcMenu`'s `force quit` settled), and unlike a signal to a process a deleted
+  line can be put back
   byte-for-byte. `put back "..."` appears in **every** menu, because he may have
   removed the only row there was to right-click, and is **absent rather than
   greyed** when there is nothing behind it (§10). One level, this session only:
@@ -443,6 +514,16 @@ right-click menu. Every point of it is a rule:
   minutes, and the risk this guards is the misclick he notices immediately.
 - **`remove this from the list` is LAST, behind a separator** (§7.2), so the
   pointer never lands on it.
+- **`reply` is FIRST**, and it is his: *"the top item on the right click menu
+  for to do items should be `reply` that lets me reply directly to it instead of
+  typing in the top box like i am doing now"*. It opens an `InputBox` **on that
+  row**, and it is **not a second write path** — `boardagents.send()` with
+  nothing named, exactly what the box at the top does, so the conservation
+  property still holds. The one thing it adds is the QUOTE: the chore's own text
+  travels with his sentence (`about the `to do` bullet "...": ...`), because
+  "yes, do that one" means nothing to the orchestrator that reads it half an
+  hour later. §7.2's ordering still holds — the thing he does most is first,
+  read-only next, the undo, then the one destructive entry behind its separator.
 - **A bullet is removed as a UNIT.** `boardparse.remove_todo` deletes
   `line`..`endLine` — a chore routinely wraps onto indented continuation lines,
   and `remove_row` above it is for a *table* row, which is one line by
@@ -488,7 +569,7 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 ```
 
-`tools/board-test.py`, offscreen, eight layers (180 checks). Two of them are
+`tools/board-test.py`, offscreen, eight layers (193 checks). Two of them are
 new and are the ones to read first if the fan-out misbehaves:
 
 - **what an agent says vs what it does** (`test_phase`) — the classifier per
@@ -512,7 +593,10 @@ clear, the atomic write), **removing a chore** (`test_todo_remove`: a wrapped
 bullet loses both its lines and no other line changes at all, the undo restores
 the file byte-for-byte from the first, a middle and the LAST position, the
 section empties completely and an agent can still add to it afterwards, and a
-stale line index is refused rather than obeyed), **the moves**
+stale line index is refused rather than obeyed; a DOUBLE click on the real
+delegate removes one and a single left click does not, driven with `QTest`; and
+`reply` is the top entry on that row's menu, opening the row's own box and
+sending down the queue with the chore quoted), **the moves**
 (start/land/back/note/reconcile: every
 decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
 table and not the `Queued` one below it, an unanswered decision is refused, a

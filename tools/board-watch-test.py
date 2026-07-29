@@ -36,6 +36,12 @@ What it asserts, in order:
               running: queued, held while the screen is locked, worked by ONE
               agent when the gate opens, drained so it cannot run twice, and —
               if that run fails — quoted verbatim onto the board
+  outlive     THE one that fails silently: a worker dispatched inside a tick is
+              still running after that tick exits, after a SUBSEQUENT tick, and
+              lives long enough to do its job — run inside a real transient
+              oneshot unit, because that is the only place the bug exists. And
+              a worker that ends without recording anything is reported to him
+              as a failure rather than passing for success
   the loop    the three defects behind 2026-07-28's 3,151 starts, kept apart
               because they are three: an EMPTY NEEDS YOU seeds once rather than
               forever (and an old state file is upgraded, not re-seeded); a
@@ -64,6 +70,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -353,6 +360,112 @@ def _load_watcher(env):
         os.environ.clear()
         os.environ.update(old)
     return mod
+
+
+def test_worker_outlives_the_tick():
+    """THE most important assertion in this system, because it fails SILENTLY.
+
+    `board-watch.service` is a `Type=oneshot`, and a oneshot's default
+    `KillMode=control-group` kills everything left in its cgroup when the main
+    process exits. A child spawned with `start_new_session=True` is STILL IN
+    THAT CGROUP — that call detaches the process *group*, a terminal-signal
+    concept, and says nothing about cgroups. So for a day, every worker an
+    orchestrator dispatched was killed seconds after it started, while the board
+    reported the work as dispatched and in hand and nothing was ever built:
+    worker `we9f99c` registered at 22:49:16, the orchestrator exited at 22:49:29
+    and the worker's transcript ends three tool calls in.
+
+    Nothing about that is visible from a test that runs the watcher as an
+    ordinary child of this process — there is no oneshot, so there is no cgroup
+    to be killed by, and the broken version passes. **So this test runs the
+    watcher inside a real transient oneshot unit**, exactly as systemd runs it,
+    and asserts that a worker dispatched from inside that run is still alive
+    after the run has exited AND after a second tick, and that it goes on to do
+    the thing it was dispatched to do.
+    """
+    print("a worker OUTLIVES the tick that spawned it")
+    if not shutil.which("systemd-run"):
+        check("systemd-run is available to spawn workers into their own unit",
+              False, "not on PATH - the fix cannot be verified or used")
+        return
+    d = tempfile.mkdtemp(prefix="board-watch-live-")
+    unit = "board-watch-test-%d" % os.getpid()
+    survivor = os.path.join(d, "survivor")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        r.note("please do the long thing")
+
+        env = r.env(gate="open")
+        # The orchestrator's whole job here is to dispatch ONE worker; the
+        # worker's whole job is to outlive everything and then write a file.
+        env["BOARD_WATCH_SPAWN"] = (
+            "%s %s/apps/board/tools/boardctl.py dispatch 'outlive the tick'"
+            " --where 'nowhere'" % (sys.executable, REPO))
+        env["BOARD_WORK_SPAWN"] = "sleep 12; echo alive > %s" % survivor
+
+        run = ["systemd-run", "--user", "--quiet", "--collect", "--wait",
+               "--unit", unit, "--service-type=oneshot",
+               "--working-directory", REPO]
+        for k in sorted(env):
+            v = env[k]
+            if isinstance(v, str) and "\n" not in v and "\0" not in v:
+                run.append("--setenv=%s=%s" % (k, v))
+        run += [sys.executable, WATCHER]
+
+        t0 = time.time()
+        p = subprocess.run(run, capture_output=True, text=True, timeout=180)
+        check("the tick itself succeeds inside a real oneshot unit",
+              p.returncode == 0, p.stderr.strip()[-300:])
+        check("...and it returns long before the worker could have finished",
+              time.time() - t0 < 10, "%.1fs" % (time.time() - t0))
+
+        def live():
+            return r.state_home(lambda: [a["id"] for a in _bw().live_workers()])
+
+        alive_after_tick = live()
+        check("a worker dispatched inside the tick is STILL RUNNING after it exits",
+              len(alive_after_tick) == 1, str(alive_after_tick))
+
+        # ...and a LATER tick does not take it out either: `promote()`,
+        # `sweep()` and `reap()` all run over a worker that is still going.
+        subprocess.run(run, capture_output=True, text=True, timeout=180)
+        check("...and after a SUBSEQUENT tick as well", live() == alive_after_tick,
+              str(live()))
+
+        for _ in range(300):
+            if os.path.exists(survivor):
+                break
+            time.sleep(0.1)
+        check("...and it lives long enough to actually do the work",
+              os.path.exists(survivor), "never wrote %s" % survivor)
+
+        # A worker that ends without recording anything on the board is a
+        # FAILURE he can see, not a silence. This is the other half of the same
+        # bug: the orchestrator claimed completion for work that never happened.
+        for _ in range(100):
+            if not live():
+                break
+            time.sleep(0.1)
+        subprocess.run(run, capture_output=True, text=True, timeout=180)
+        bullets = [l for l in r.text().splitlines()
+                   if "a worker stopped without finishing" in l]
+        check("a worker that records nothing is reported as a FAILURE, in words",
+              len(bullets) == 1, str(bullets))
+        check("...quoting the task, since its card has already left the board",
+              bool(bullets) and "outlive the tick" in bullets[0], str(bullets))
+        left = r.state_home(lambda: [t["task"] for t in
+                                     ba._list(_bw().work_dir("failed"))])
+        check("...and the task is filed under `failed`, not left looking taken",
+              left == ["outlive the tick"], str(left))
+    finally:
+        subprocess.run(["systemctl", "--user", "reset-failed", unit + ".service"],
+                       capture_output=True)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _bw():
+    import boardwork
+    return boardwork
 
 
 def test_the_loop():
@@ -744,6 +857,7 @@ def main():
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
+    test_worker_outlives_the_tick()
     test_the_loop()
 
     print()
