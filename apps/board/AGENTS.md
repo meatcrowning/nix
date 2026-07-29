@@ -349,14 +349,34 @@ Rules that fall out of it, all of them load-bearing:
     - **`docs/` is deliberately NOT swept.** Its history is mostly the 5-minute
       sync timer's own commits and they would bury the section. A docs commit
       worth recording is recorded by hand, as it always was.
+    - **IT FETCHES, or it only ever sees the commits this host pushed itself.**
+      `git log origin/main` reads a remote-tracking ref and nothing moves one
+      but a fetch; a push moves it as a side effect, which is why the sweep
+      looked like it worked at all. Every commit the OTHER host pushed was
+      invisible until somebody happened to pull — on a freshly booted machine,
+      never, and he said so: *"you say that but landed still didnt update even
+      after i rebooted"*. So `_fetch_origin()` runs first, throttled to
+      `LANDED_FETCH_EVERY`, **detached and unwaited** because `_catch_up` is on
+      the GUI thread and a fetch off-LAN blocks until DNS gives up — the ref it
+      lands is read by the next sweep two minutes later, well inside the delays
+      below. A repo with no `origin` is never dialled.
     - **The two hosts are staggered, because `board.md` syncs and there is no
-      lock across it.** `top` fills a hole after 10 minutes, any other host
-      after 45, so book sees top's row with ~30 minutes of headroom and still
-      catches up by itself if top is off. Nothing here reorders or rewrites, so
-      the worst case of a lost race is one duplicate row, not a damaged file.
+      lock across it.** `top` fills a hole after 10 minutes, any other host once
+      the row `top` would have written could have REACHED it: the lead's 10,
+      plus 5 minutes for the docs sync to push and 5 to pull. That is 20, and it
+      was 45 — a guess, and one that made the sweep useless on `book`, which is
+      where he actually sits. Nothing here reorders or rewrites, so the worst
+      case of a lost race is one duplicate row, not a damaged file.
+    - **What is missing is decided twice, the second time inside the lock.**
+      `bp.edit` re-runs the edit on a fresh read whenever the file moved under
+      it, and that is exactly when a worker's own `land` arrives; the retry used
+      to re-append a row that had just appeared. `go()` now drops any hash the
+      doc it is writing into already names.
     - `tools/board-test.py` → `test_landed_sweep` builds a throwaway repo with
       committer dates it chose and asserts all of it, including that a second
-      run leaves the file byte-identical.
+      run leaves the file byte-identical; `test_landed_fetch` clones one repo
+      from another to prove the stale-ref blindness, that the fetch clears it,
+      and that a racing hash is skipped rather than duplicated.
 - **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
   Only a decision agent has a row (`start()` made it); a WORKER dispatched out
   of the box never did, so every commit the fan-out produced was unrecordable —

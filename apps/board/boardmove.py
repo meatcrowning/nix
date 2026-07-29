@@ -717,13 +717,26 @@ LANDED_MIN_AGE = 600                # 10 minutes
 
 #: ...and `board.md` SYNCS between the machines, so both hosts can be looking at
 #: the same hole with no lock between them. The stagger is the whole answer:
-#: `top` fills a hole after 10 minutes, any other host waits 45. The docs sync
-#: runs every 5 minutes each way, so book sees top's row with ~30 minutes to
-#: spare, and if top is off book still catches up — just later. Nothing here
+#: `top` fills a hole after 10 minutes, any other host waits until the row `top`
+#: would have written could have REACHED it — the lead's own 10, plus the docs
+#: sync's 5 minutes to push and 5 to pull. That is 20, and it was 45: a guess,
+#: and one that made the sweep useless on `book`, which is where he actually
+#: sits and where every commit in this stretch was made. He reboots, looks, and
+#: a hole he can see stays a hole for three quarters of an hour. Nothing here
 #: reorders or rewrites, so the worst case of a lost race is one duplicate row,
 #: not a damaged file.
 LANDED_LEAD_HOST = "top"
-LANDED_OTHER_MIN_AGE = 2700         # 45 minutes
+LANDED_OTHER_MIN_AGE = 1200         # 20 minutes
+
+#: `git log origin/main` reads a REMOTE-TRACKING ref, and nothing moves that ref
+#: but a fetch. Pushing from this machine moves it as a side effect, so the
+#: sweep saw this host's own commits and was blind to the other host's for as
+#: long as nobody happened to pull — which on a freshly booted machine is
+#: forever. So the sweep fetches. DETACHED and unwaited, because `_catch_up`
+#: runs on the GUI thread and a fetch off-LAN blocks until DNS gives up; the ref
+#: it lands is read by the NEXT sweep, two minutes later, which is well inside
+#: the delays above.
+LANDED_FETCH_EVERY = 600            # 10 minutes
 
 #: Don't shell out to git on every repaint. The board app refreshes on every
 #: inotify event on the file, and agents write to it constantly.
@@ -736,28 +749,70 @@ LANDED_LOG_LIMIT = 500
 _LOG_FMT = "%H\x1f%ct\x1f%s"
 
 
-def _sweep_stamp():
-    # `state_dir()`, NOT `stash_dir()`: this is a throttle, not an item that is
-    # in flight, and `_stashes()` reads every `.json` under the stash dir as
-    # one. Parked there it was drawn on his board as an unowned agent titled
-    # "a decision" — a card for a timestamp — on any machine where the sweep
-    # had ever run.
-    return os.path.join(state_dir(), "landed-sweep.json")
+def _stamp_due(name, now, every):
+    """True at most once every `every` seconds, and stamps that it said so.
 
-
-def _sweep_due(now, every=LANDED_SWEEP_EVERY):
+    `state_dir()`, NOT `stash_dir()`: these are throttles, not items that are in
+    flight, and `_stashes()` reads every `.json` under the stash dir as one.
+    Parked there the sweep's stamp was drawn on his board as an unowned agent
+    titled "a decision" — a card for a timestamp — on any machine where the
+    sweep had ever run.
+    """
+    p = os.path.join(state_dir(), name)
     try:
-        with open(_sweep_stamp()) as f:
+        with open(p) as f:
             last = float(json.load(f).get("at") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
         last = 0
     if now - last < every:
         return False
     try:
-        with open(_sweep_stamp(), "w") as f:
+        with open(p, "w") as f:
             json.dump({"at": now}, f)
     except OSError:
         pass
+    return True
+
+
+def _sweep_stamp():
+    return os.path.join(state_dir(), "landed-sweep.json")
+
+
+def _sweep_due(now, every=LANDED_SWEEP_EVERY):
+    return _stamp_due("landed-sweep.json", now, every)
+
+
+def _fetch_origin(repo=LANDED_REPO, now=None, every=LANDED_FETCH_EVERY):
+    """Ask git to move `origin/main`, and DO NOT WAIT for it. True if asked.
+
+    The sweep reads a remote-tracking ref, and nothing moves one but a fetch.
+    A push from this machine moves it as a side effect, so the sweep could see
+    this host's own commits and was blind to the other host's until somebody
+    happened to pull — on a freshly booted machine, never.
+
+    Unwaited because `Board._catch_up` calls this on the GUI thread and a fetch
+    off-LAN blocks until DNS gives up; `book` is off-LAN often. The ref it lands
+    is read by the NEXT sweep two minutes later, which is well inside the delays
+    the sweep already waits out. A repo with no `origin` is left alone entirely,
+    so a test repo never reaches the network.
+    """
+    now = time.time() if now is None else now
+    try:
+        p = subprocess.run(["git", "-C", repo, "config", "--get",
+                            "remote.origin.url"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if p.returncode != 0 or not p.stdout.strip():
+        return False
+    if not _stamp_due("landed-fetch.json", now, every):
+        return False
+    try:
+        subprocess.Popen(["git", "-C", repo, "fetch", "--quiet", "origin", "main"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
     return True
 
 
@@ -864,31 +919,46 @@ def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None)
 
 
 def reconcile_landed(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None,
-                     now=None, force=False):
+                     now=None, force=False, fetch=True):
     """Append every missing commit to LANDED. Returns the rows it wrote.
 
     Idempotent by construction: the second run finds those hashes in the file
     and has nothing to do. One `bp.edit`, so the whole catch-up is one atomic
     write under the same lock every other writer takes, and a run with nothing
     to append does not write at all.
+
+    Which hashes are missing is decided TWICE — once out here, to know whether
+    there is anything to do at all, and again inside `go`, against the very doc
+    the rows are being written into. `bp.edit` re-runs `go` on a fresh read
+    whenever the file moved under it, and that is exactly the moment a worker's
+    own `land` lands: without the second check the retry appended a row that had
+    just appeared, which is the one duplicate this must never create.
     """
     now = time.time() if now is None else now
     if not force and not _sweep_due(now):
         return []
+    if fetch:
+        _fetch_origin(repo, now=now)
     rows = landed_missing(path=path, repo=repo, min_age=min_age, now=now)
     if not rows:
         return []
+    wrote = []
 
     def go(doc):
+        del wrote[:]
+        have = landed_commits(doc)
         lines = doc["lines"]
         for r in rows:
-            lines = bp.add_landed_row(lines, r["commit"], r["what"],
-                                      r["date"], r["when"])
-        return lines
+            c = r["commit"]
+            if any(c.startswith(h) or h.startswith(c) for h in have):
+                continue
+            lines = bp.add_landed_row(lines, c, r["what"], r["date"], r["when"])
+            wrote.append(r)
+        return lines if wrote else None
 
     if not bp.edit(path, go):
         return []
-    return rows
+    return list(wrote)
 
 
 def status(path=bp.BOARD_PATH):
