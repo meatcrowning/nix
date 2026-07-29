@@ -1472,6 +1472,7 @@ def test_agents(tmp):
           [m["text"] for m in drained] == before and ba.pending() == [], before)
     check("...and every message is still on disk, exactly once",
           total() == 5 and all(where_is(t) == ["taken"] for t in before), total())
+
     # ---- ...and he can change his mind while it is still queued ----
     # *"allow the user to remove queued waiting for next agent items or edit
     # them in place"*. Both act on a message board-watch may be draining at
@@ -1542,7 +1543,6 @@ def test_agents(tmp):
           and os.listdir(ba.inbox_dir("editing")) == [],
           ([m["text"] for m in ba.pending()], os.listdir(ba.inbox_dir("editing"))))
     ba.drain()
-
 
     # ---- a dead registration does not sit there claiming to work ----
     ba.register("note-x", "a note you sent", dead, kind="note")
@@ -1935,8 +1935,8 @@ def test_work(tmp):
           ba.pick_name("wcollide", taken=set(ba.NAMES[:-1])) == ba.NAMES[-1])
     check("...and every drawn name is ASCII, which the font can draw (2.3)",
           all(n.isascii() and n.isalpha() for n in ba.NAMES), ba.NAMES)
-    check("...and fits the card's 7-cell label column, so it cannot run under "
-          "the title",
+    check("...and fits the card's historic 7-cell label column, so the titles "
+          "down the list stay in one place",
           all(len(n) <= 6 for n in ba.NAMES), [n for n in ba.NAMES if len(n) > 6])
     check("...and no two collide, since `inbox send --to` matches on the name",
           len({n.lower() for n in ba.NAMES}) == len(ba.NAMES))
@@ -1945,6 +1945,74 @@ def test_work(tmp):
     check("a task queued above the cap is given no name, having nobody on it",
           all(r["name"] == "" for x in bw.groups() if x["phase"] == "queued"
               for r in x["rows"]))
+
+    # ---- SOLOMON: one fixed name, pinned to the top, and always there ----
+    # *"make the main orchestrators name Solomon. he should always be kept on
+    # the top of the agent list and should basically indicate like he's there
+    # and ready to go at all times when hes not doing something."* Three claims,
+    # and they are separable: the NAME (fixed, out of the pool), the PLACE
+    # (first, whatever was born when), and the PRESENCE (a row even with no
+    # orchestrator on the machine at all).
+    check("Solomon is not in the worker pool, so no worker can be him",
+          ba.ORCHESTRATOR_NAME not in ba.NAMES
+          and ba.ORCHESTRATOR_NAME.lower() not in {n.lower() for n in ba.NAMES},
+          ba.ORCHESTRATOR_NAME)
+    check("...and the collision shuffle never reaches him, pool exhausted or not",
+          ba.pick_name("wanything", taken=set(ba.NAMES)) != ba.ORCHESTRATOR_NAME
+          and ba.name_for("worch") != ba.ORCHESTRATOR_NAME)
+    check("...and he is ASCII, which the font can draw (2.3)",
+          ba.ORCHESTRATOR_NAME.isascii() and ba.ORCHESTRATOR_NAME.isalpha())
+    orec = ba.register("orch-1", "what he typed", os.getpid(),
+                       kind="orchestrator", where="board-watch")
+    check("an orchestrator is named Solomon, whatever its id would have hashed to",
+          orec["name"] == ba.ORCHESTRATOR_NAME
+          and ba.name_of("orch-1") == ba.ORCHESTRATOR_NAME, orec)
+    orec2 = ba.register("orch-2", "and the next thing", os.getpid(),
+                        kind="orchestrator", name="Marbas")
+    check("...and a caller cannot name one anything else",
+          orec2["name"] == ba.ORCHESTRATOR_NAME, orec2)
+    ocards = bw.cards()
+    check("two overlapping orchestrators are both Solomon, and both on top",
+          [c["kind"] for c in ocards[:2]] == ["orchestrator"] * 2
+          and [c["name"] for c in ocards[:2]] == [ba.ORCHESTRATOR_NAME] * 2
+          and not any(c.get("kind") == "orchestrator" for c in ocards[2:]),
+          [(c["id"], c.get("kind"), c.get("name")) for c in ocards])
+    check("...and the standing row gives way to them, so he is never doubled",
+          not any(c.get("state") == "idle" for c in ocards),
+          [c.get("state") for c in ocards])
+    # The pin is what is under test here, so the births are hand-built: an
+    # orchestrator started LAST would sort to the bottom on birth alone, which
+    # is the case the pin exists for and the one a real spawn cannot produce
+    # (board-watch registers the orchestrator against its own long-lived tick).
+    younger = bw.cards(
+        agents=[{"id": "w-old", "kind": "worker", "name": "Marbas",
+                 "born": 1.0, "state": "running"},
+                {"id": "orch-late", "kind": "orchestrator",
+                 "name": ba.ORCHESTRATOR_NAME, "born": 9.0, "state": "running"}],
+        pend=[])
+    check("...even when the orchestrator is the youngest thing on the list",
+          [c["id"] for c in younger] == ["orch-late", "w-old"],
+          [c["id"] for c in younger])
+    ba.unregister("orch-1")
+    ba.unregister("orch-2")
+    idle = bw.cards()[0]
+    check("with NO orchestrator running, Solomon still holds the top row",
+          idle.get("name") == ba.ORCHESTRATOR_NAME
+          and idle.get("state") == "idle", idle)
+    check("...reading as ready, and never as work in flight",
+          idle.get("saysLine") == "" and idle.get("doingLine") == ""
+          and idle.get("running") is False
+          and ba.describe(idle).startswith("ready - "), ba.describe(idle))
+    check("...offered no inbox, there being nobody there to read one",
+          idle.get("id") == "", idle)
+    check("...and drawn exactly once, and in the same place on the next poll",
+          [c.get("name") for c in bw.cards()].count(ba.ORCHESTRATOR_NAME) == 1
+          and [c["id"] for c in bw.cards()] == [c["id"] for c in bw.cards()],
+          [c.get("name") for c in bw.cards()])
+    check("...and nothing under him moved to make room",
+          [c["id"] for c in bw.cards()[1:]]
+          == [c["id"] for c in ocards[2:]],
+          ([c["id"] for c in bw.cards()], [c["id"] for c in ocards]))
 
     for a in bw.live_workers():
         os.kill(a["pid"], 9)
@@ -2555,6 +2623,7 @@ def test_window(app, tmp):
           len(where) == 1 and where[0][0] == "queue", where)
     check("...and appears on the board as waiting, so it is never invisible",
           typed in queued_texts(), prop(win, "queuedNotes"))
+
     # ---- ...and he can change his mind about one that is still queued ----
     # *"allow the user to remove queued waiting for next agent items or edit
     # them in place"*. Both go through the same `Agents` bridge his messages do,
@@ -2595,7 +2664,6 @@ def test_window(app, tmp):
     said = keep[5].editQueued(qid, "too late for this")
     check("...as does an edit of one an agent has already been handed",
           "already gone" in said and "old wording" in said, said)
-
 
     # ---- the cards: two sentences each, one flat list, oldest first ----
     import boardphase as bph
@@ -2639,6 +2707,22 @@ def test_window(app, tmp):
           (card.get("saysLine"), card.get("doingLine")))
     check("...and it is drawn as a PERSON: the card carries a first name",
           card.get("name") in ba.NAMES, card.get("name"))
+    # ---- SOLOMON, first on the list and there whether or not he is working ----
+    # *"he should always be kept on the top of the agent list and should
+    # basically indicate like he's there and ready to go at all times when hes
+    # not doing something."* Nothing here registers an orchestrator, so this is
+    # the standing row: it is the whole point that it exists anyway.
+    check("Solomon holds the top row, above every worker on the list",
+          bool(cards) and cards[0].get("name") == ba.ORCHESTRATOR_NAME
+          and cards[0].get("state") == "idle"
+          and all(c.get("name") != ba.ORCHESTRATOR_NAME for c in cards[1:]),
+          [(c.get("name"), c.get("state")) for c in cards])
+    check("...saying he is ready, with no claim and no observation on him",
+          cards[0].get("saysLine") == "" and cards[0].get("doingLine") == ""
+          and cards[0].get("detail", "").startswith("ready - ")
+          and cards[0].get("running") is False, cards[0])
+    check("...and no box under it, there being nobody there to send to",
+          cards[0].get("id") == "" and cards[0].get("waiting") == [], cards[0])
     check("an agent that has said nothing shows no claim at all",
           rows.get("Find where focus is decided", {}).get("says") == ""
           and rows.get("Find where focus is decided", {}).get("saysLine") == "",
@@ -2790,6 +2874,40 @@ def test_window(app, tmp):
           bool(muteLines) and {s: t.property("color") for _, s, t in muteLines}
           .get("Fold VScroll into qmlcommon") == keep[-1].property("textDim"),
           [(s, t.property("color").name()) for _, s, t in muteLines])
+
+    # ---- ...and the name column MEASURES, because Solomon is seven long ----
+    # The pool is capped at six so the titles line up down the list; the one
+    # name that is not from the pool is `Solomon`, and the row he was asked to
+    # be pinned to is the worst possible place to elide. So the column widens
+    # for him and for nobody else.
+    solItem = None
+    for it in descendants(win.contentItem()):
+        if it.property("nameNeeded") is None:
+            continue
+        a = prop(it, "agent")
+        if isinstance(a, dict) and a.get("name") == ba.ORCHESTRATOR_NAME:
+            solItem = it
+    solLines = _texts(solItem) if solItem is not None else []
+    cols = [c for c in (descendants(solItem) if solItem is not None else [])
+            if c.property("nameW") is not None]
+    cellW = solItem.property("cellW") if solItem is not None else 0
+    check("Solomon's own row draws the whole name, not six characters of it",
+          bool(solLines)
+          and ba.ORCHESTRATOR_NAME in [s for _, s, _ in solLines],
+          [(y, s) for y, s, _ in solLines])
+    check("...in a column wide enough that the title cannot run under it",
+          bool(cols) and cellW
+          and cols[0].property("nameW")
+          >= (len(ba.ORCHESTRATOR_NAME) + 1) * cellW,
+          [(c.property("nameW"), cellW) for c in cols])
+    check("...and the standing row reads as quiet, not as an agent at work",
+          solItem is not None and solItem.property("running") is False
+          and solItem.property("titleFirst") is True
+          and {s: t.property("color") for _, s, t in solLines}
+          .get(ba.ORCHESTRATOR_NAME) == keep[-1].property("textDim"),
+          [(s, t.property("color").name()) for _, s, t in solLines])
+    check("...and 'nothing is running' is about the WORKERS, not about him",
+          prop(win, "nothingRunning") is False, prop(win, "nothingRunning"))
 
     # ---- HOW FULL IT IS, at the right end of the TOP row ----
     # *"on the very right of the top row of the agent's information box it

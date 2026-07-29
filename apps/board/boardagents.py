@@ -176,12 +176,14 @@ def clean_id(s):
 #:
 #: TWO RULES ON WHAT MAY GO IN, and both are about the row it is drawn in.
 #: **Six characters at most**: the card draws the name in the same label column
-#: as `says` and `doing`, 7 font cells wide, and `AgentRow` starts the title at
-#: `7 * cellW` with no elide — a seventh character runs under the title. That is
-#: what rules out `Focalor`, `Gremory`, `Bifrons` and the rest of the long
-#: spellings. **ASCII only**: §2.3, a glyph the font lacks clips the whole row,
-#: so `Belial` and never a diacritical spelling of it. Distinct
-#: case-insensitively, because `boardctl inbox send --to` matches on the name.
+#: as `says` and `doing`, and it is the WIDEST name on the list that sets that
+#: column (`AgentRow`'s `nameW`, at least 7 font cells). Keeping the pool at six
+#: keeps every worker in the historic 7-cell column, so the titles down the list
+#: stay in one place — which is what rules out `Focalor`, `Gremory`, `Bifrons`
+#: and the rest of the long spellings. **ASCII only**: §2.3, a glyph the font
+#: lacks clips the whole row, so `Belial` and never a diacritical spelling of
+#: it. Distinct case-insensitively, because `boardctl inbox send --to` matches
+#: on the name.
 NAMES = ["Agares", "Aim", "Amon", "Amy", "Anael", "Andras", "Bael", "Balam",
          "Bariel", "Bathin", "Beleth", "Belial", "Berith", "Bidiel", "Botis",
          "Buer", "Bune", "Caim", "Eligos", "Foras", "Furcas", "Furfur", "Gaap",
@@ -190,6 +192,29 @@ NAMES = ["Agares", "Aim", "Amon", "Amy", "Anael", "Andras", "Bael", "Balam",
          "Phenex", "Purson", "Raum", "Ronove", "Sallos", "Samael", "Seere",
          "Shax", "Sitri", "Stolas", "Symiel", "Usiel", "Valac", "Vapula",
          "Vepar", "Vine", "Vual", "Zagan", "Zepar"]
+
+#: **The orchestrator is Solomon, always, and he is not in the pool.** [his,
+#: 2026-07-29] *"make the main orchestrators name Solomon. he should always be
+#: kept on the top of the agent list and should basically indicate like he's
+#: there and ready to go at all times when hes not doing something."* The pool
+#: above is the Lemegeton's demons; Solomon is the king who binds them, so the
+#: one role that hands out the work is the one name that is never drawn from
+#: the bag and never shuffled by `pick_name` — the orchestrator is a ROLE, and
+#: a role that renamed itself per run would be a stranger every time.
+#:
+#: Seven characters, and that is the exception that widened the column (see the
+#: pool's width rule above and `AgentRow.nameW`). He is not truncated: the
+#: whole point is that he is recognisable.
+#:
+#: If two orchestrators ever overlap — successive things typed close together —
+#: they are BOTH Solomon. That is the honest reading (one role, briefly doing
+#: two things) and it costs nothing: `boardctl inbox send --to Solomon` resolves
+#: to a live one, `boardwork.cards()` pins them together at the top, and every
+#: id underneath is still distinct.
+ORCHESTRATOR_NAME = "Solomon"
+
+#: The `kind` the orchestrator is registered under (`board-watch.py`).
+ORCHESTRATOR_KIND = "orchestrator"
 
 
 def name_for(agent_id):
@@ -335,9 +360,14 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     on every read, so it cannot change under him when another agent takes the
     name this one would have been moved off; the spawner picks it beside the id
     (`boardwork._spawn_worker`), and a caller that does not is given one here.
+
+    The one name that is NOT picked is the orchestrator's: `kind` decides it,
+    here, so every path that registers one — board-watch, a test, a hand call —
+    gets `Solomon` without having to know to ask for it.
     """
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
-           "name": name or pick_name(agent_id),
+           "name": (ORCHESTRATOR_NAME if kind == ORCHESTRATOR_KIND
+                    else name or pick_name(agent_id)),
            "pidStart": bm._proc_start(pid) if pid else None, "kind": kind,
            "where": where, "session": session or "",
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
@@ -783,6 +813,12 @@ def describe(a):
     """
     if a["state"] == "queued":
         return "not started yet - a worker starts when a slot frees"
+    # The one row on this list that is not a process: Solomon standing by. His
+    # words — *"should basically indicate like he's there and ready to go at all
+    # times when hes not doing something"* — and the sentence has to be true, so
+    # it says what actually happens next rather than claiming anyone is working.
+    if a["state"] == "idle":
+        return "ready - what you type at the top of this window goes to him"
     if a["state"] == "running":
         if a["kind"] == "session":
             return "running - board sees the process, not what it is doing"

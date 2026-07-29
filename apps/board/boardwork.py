@@ -419,8 +419,11 @@ There is nobody to ask. Finish, or write down why you did not.
 ORCHESTRATOR_PROMPT = """You are running headless, with no human watching, on \
 the machine {host}. Work in `{repo}`.
 
-**You are the orchestrator, and you do not do the work.** He typed the \
-following into the one box on his board. Your job is to work out what it \
+**You are Solomon, the orchestrator, and you do not do the work.** That is \
+the name on the card pinned to the top of his board and the name he will use \
+if he types something at you; the workers you hand things to are named after \
+the demons of the Lesser Key, and you are the king who binds them. He typed \
+the following into the one box on his board. Your job is to work out what it \
 implies, split it into pieces, and hand each piece to a worker agent — or, if \
 what it implies is genuinely his to decide, to ask him instead.
 
@@ -651,7 +654,6 @@ def role_flags(role):
     if effort:
         argv += ["--effort", effort]
     return argv
-
 
 
 def _task_name():
@@ -979,8 +981,48 @@ def _queued_row(t):
         "detail": "not started - a worker starts when a slot frees"}
 
 
+def _idle_orchestrator_row():
+    """Solomon, standing by. The one row on this list that is not a process.
+
+    [his, 2026-07-29] *"make the main orchestrators name Solomon. he should
+    always be kept on the top of the agent list and should basically indicate
+    like he's there and ready to go at all times when hes not doing
+    something."* So the row is PERSISTENT: it is drawn whenever no orchestrator
+    is registered, and the moment board-watch spawns one the real card takes
+    the same place at the top with the same name on it.
+
+    It says `ready` and NOTHING ELSE, because that is all that is true. No
+    claim, no observed line, no inbox of its own — a message left for an
+    orchestrator that does not exist would have nobody to read it, and the
+    queue (the box at the top of the window) is where such a message already
+    goes. `id` is empty for exactly that reason: `AgentRow.addressable` is
+    what draws the box, and an unaddressable row does not offer one.
+    """
+    return {
+        "id": "", "name": ba.ORCHESTRATOR_NAME, "kind": ba.ORCHESTRATOR_KIND,
+        "title": "hands out what you type, and does none of the work himself",
+        "where": "", "state": "idle", "running": False,
+        "phase": "ready", "says": "", "saysLine": "",
+        "actually": "", "doingLine": "", "observed": "unlinked",
+        "contextLine": "", "unread": 0, "waiting": [], "born": 0.0,
+        "detail": "ready - what you type at the top of this window goes to him"}
+
+
+def _is_orchestrator(a):
+    return (a.get("kind") or "") == ba.ORCHESTRATOR_KIND
+
+
 def cards(agents=None, pend=None):
     """Every card the window draws, ONE FLAT LIST, oldest first.
+
+    **Solomon is pinned to the top, always** — [his, 2026-07-29] *"he should
+    always be kept on the top of the agent list"*. The orchestrator is not one
+    more worker: it is the thing that read what he typed and decided who got
+    what, so it is the row he looks at first and it may not slide down the list
+    as workers are born. Birth-order governs everything BELOW it, unchanged.
+    And when no orchestrator is running at all, `_idle_orchestrator_row()`
+    holds that place rather than leaving a gap — so the top of this list says
+    the same thing whether or not anything is happening.
 
     His call, and the reason is the moving: *"maybe for now take out the
     'coding' 'Testing' 'finishing touches' text and just keep agents ordered by
@@ -1002,7 +1044,13 @@ def cards(agents=None, pend=None):
     rows = ba.agents() if agents is None else agents
     pend = pending() if pend is None else pend
     out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
-    return out + [_queued_row(t) for t in pend]
+    orch = [a for a in out if _is_orchestrator(a)]
+    rest = [a for a in out if not _is_orchestrator(a)]
+    # Two overlapping orchestrators are both Solomon and both pinned, in birth
+    # order — one role, briefly doing two things, and saying so beats hiding
+    # the second one (`boardagents.ORCHESTRATOR_NAME`).
+    return (orch or [_idle_orchestrator_row()]) + rest \
+        + [_queued_row(t) for t in pend]
 
 
 def groups(agents=None, pend=None):
