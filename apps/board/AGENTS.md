@@ -293,6 +293,16 @@ assumed.
 - **The orchestrator may say what it HANDED OUT and nothing more.** Its prompt
   forbids "done", "fixed", "wired", "implemented", "working" — it did not do the
   work and cannot see whether it happened.
+- **And it says it in one line per task.** The bullet an orchestrator leaves in
+  WAITING ON YOU TO DO is the subject, the worker id, and that nothing has
+  landed yet; one more line for anything it asked. The prompt states that as a
+  budget — *one line each, 25 words at the most, no second paragraph* — because "concise"
+  bought a 150-word paragraph that restated his own sentence back at him
+  (2026-07-29: *"it really doesnt need to elaborate that much. im not even sure
+  it needed to tell me any of that"*). Four things are named there as things to
+  leave out: his own words or facts restated, the orchestrator's theory of the
+  cause, why the work was split or grouped that way, and **negative status** —
+  no "no question for you", no "nothing needed a rebuild". Silence says both.
 - **`boardctl note|land|ask` stamp `boardwork.mark_reported()`** whenever
   `BOARD_AGENT_ID` names a worker. Those three are the only ways an agent is
   allowed to say anything, so they are the only evidence needed.

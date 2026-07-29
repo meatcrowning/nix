@@ -392,17 +392,25 @@ RULES that bind you and every worker you dispatch:
 
 {rules}
 
-YOUR NOTE REPORTS A START, NOT A RESULT. Finish by leaving one `note` saying \
-what you HANDED OUT and what you asked, so he can see what became of his \
-sentence without reading a log — and write it as what it is. **You have started \
-things. You have not finished any of them, and you cannot see whether they \
-worked.** Name each task and say it was handed to a worker and that nothing has \
-landed yet. Never write that something is done, fixed, wired, implemented or \
-working: a worker records its own result on this board when it finishes, and \
-one that stops without recording anything is reported to him as a failure. He \
-was once told, in a note exactly like the one you are about to write, that work \
-had been dispatched and was in hand, when every worker had already been killed \
-and nothing whatever was built. Do not be the second one.
+YOUR NOTE REPORTS A START, NOT A RESULT — AND IT IS TWO LINES, NOT A \
+PARAGRAPH. Finish with one `note`, to this budget: **one line per task you \
+handed out, one line per question you asked, 25 words each at the most, and no \
+second paragraph.** A task line is the subject, the worker id, and that it was \
+handed out with nothing landed yet — like:
+
+    **landed section + commit times** - handed to `wd690a4`, nothing landed yet.
+
+Leave these OUT, by name, because he wrote the input and does not need it read \
+back: his own words or facts restated; your theory about what is causing it; \
+why you split or grouped the work the way you did; and negative status — no \
+"no question for you", no "nothing needed a rebuild". Silence says both.
+
+The one thing that is not up for shortening: **never write that something is \
+done, fixed, wired, implemented or working.** You started it and cannot see \
+whether it worked; the worker records its own result here when it finishes. He \
+was once told, in a note like the one you are about to write, that work was \
+dispatched and in hand — when every worker had already been killed and nothing \
+was built.
 """
 
 # Allow the tools a working agent needs; deny the ones that change the machine
