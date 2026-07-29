@@ -998,6 +998,29 @@ qs ipc call brightness status  # level/hw/gamma/floor/backend, without driving i
   question you are asking now, not a preference) but IS carried across a reload
   in `Procs.stateJson`.
 
+### The media seekbar scrubs on the WHEEL too
+
+One detent moves the seek by 5% of the track — the number is
+`../hyprvtb/vtbDeco.cpp`'s `VTB_PLAYBAR_SCROLL`, so scrubbing a titlebar and
+scrubbing this bar cost the same gesture. A **fraction**, never seconds: the
+widget plays 90-second interludes and hour-long mixes. Three things it encodes,
+all of which the plugin had to learn first:
+
+- **`WheelNotch`, never a sign test.** A trackpad is ~125 Hz of sub-pixel
+  deltas; per-event stepping threw the song forward by minutes in the titlebar
+  copy. Its `maxSteps` clamp is also the debounce — a separate timer would
+  either drop the notch you ended on or leave the fill behind the wheel.
+- **`seek.pending` is what the bar SHOWS** until the player's position catches
+  up (or 1.5s passes). Its real job is not the redraw but the *accumulation*:
+  without it every notch of a burst re-derives its step from a position up to
+  500ms stale, so three fast notches move the song by one. It is bounded so a
+  source that reports `canSeek` and then ignores `SetPosition` cannot leave a
+  lie on the bar.
+- **The wheel rides the same `enabled: seek.seekable` gate as the click**, so
+  an unseekable source keeps its arrow cursor and the notch falls through —
+  the same shape as the lyrics list's click-to-seek. The fill is *not* dimmed
+  there: it is a reading, and it is still true.
+
 ### The player's queue drawer, and where its rows come from
 
 The queue is **served by the player app**, not scraped: MPRIS carries the current
@@ -1059,7 +1082,7 @@ draws it.
   track lost its lyrics.
 
   ```bash
-  ./tools/media-lyrics-probe.sh    # 26 assertions, ~15s, nothing on screen
+  ./tools/media-lyrics-probe.sh    # 30 assertions, ~15s, nothing on screen
   ```
 
   That is the regression test for all of it, and for the fallback: it drives the

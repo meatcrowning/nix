@@ -437,6 +437,46 @@ Item {
             readonly property real frac: Media.dispLen > 0
                 ? Math.max(0, Math.min(1, Media.dispPos / Media.dispLen)) : 0
 
+            // One wheel detent moves the seek by 5% of the track. Taken from
+            // hyprvtb's titlebar playbar (VTB_PLAYBAR_SCROLL, ../hyprvtb/
+            // vtbDeco.cpp) to the number — the same gesture on the same control
+            // in the other codebase that draws one, so scrubbing a titlebar and
+            // scrubbing this bar cost the same number of notches. Its finding
+            // that 3% is too timid to skim with is not worth re-deriving here.
+            //
+            // A FRACTION of the track, never a count of SECONDS: this widget
+            // plays 90-second interludes and hour-long mixes, and any constant
+            // in seconds is either too coarse to land inside the first or too
+            // fine to cross the second. A percentage crosses either in the same
+            // twenty notches.
+            readonly property real wheelFrac: 0.05
+            // Under this much movement there is nothing to show and nothing
+            // worth putting on the bus; also the "has the player caught up"
+            // test below. ~one pixel of a 250px track.
+            readonly property real echoEps: 0.004
+
+            // What the bar SHOWS: the seek we last asked for, until the
+            // player's own position catches up (or `echo` gives up on it).
+            // Both halves are load-bearing, and both are vtbDeco's playbarFrac
+            // reasoning one file over:
+            //  * the fill moves on the notch, not one MPRIS position sample
+            //    later — Media re-emits at 200-500ms, which is long enough to
+            //    read as the bar ignoring you;
+            //  * the NEXT notch accumulates onto it. Without that, every event
+            //    of a burst re-derives its step from a stale position, so three
+            //    fast notches move the song by one. That is the actual bug this
+            //    property exists for, not the redraw.
+            // It is BOUNDED on purpose: a source that reports canSeek and then
+            // ignores SetPosition (or clamps to a chapter) must not be able to
+            // leave a lie on the bar — after `echo` the fill snaps back to
+            // whatever the player really did. Same 1500ms/0.004 as the plugin.
+            property real pending: -1
+            readonly property real shownFrac: pending >= 0 ? pending : frac
+            onFracChanged: if (pending >= 0 && Math.abs(frac - pending) <= echoEps) {
+                pending = -1; echo.stop();
+            }
+            Timer { id: echo; interval: 1500; onTriggered: seek.pending = -1 }
+
             Rectangle { // track
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
@@ -446,21 +486,55 @@ Item {
                 border.color: Theme.border
                 Rectangle { // fill
                     anchors { left: parent.left; top: parent.top; bottom: parent.bottom; margins: 1 }
-                    width: Math.round((parent.width - 2) * seek.frac)
+                    width: Math.round((parent.width - 2) * seek.shownFrac)
                     color: Theme.accent
                 }
             }
 
-            function seekTo(x) {
+            function seekFrac(f) {
                 if (!seek.seekable) return;
-                Media.player.position = Math.max(0, Math.min(1, x / width)) * Media.player.length;
+                var t = Math.max(0, Math.min(1, f));
+                if (seek.pending >= 0 && Math.abs(t - seek.pending) < seek.echoEps) return;
+                seek.pending = t;
+                echo.restart();
+                Media.player.position = t * Media.player.length;
             }
+            function seekTo(x) { seek.seekFrac(x / width); }
             MouseArea {
                 anchors { fill: parent; topMargin: -4; bottomMargin: -4 }
+                // The wheel rides the SAME gate as the click, deliberately: a
+                // disabled MouseArea takes no wheel either, so on a source with
+                // no SetPosition the bar keeps its arrow cursor, does nothing,
+                // and the notch falls through to whatever is under the widget.
+                // Same rule the lyrics list already follows a few hundred lines
+                // down (a click-to-seek MouseArea only where canSeek, plain
+                // text otherwise) — one gate, so there is no state where the
+                // bar takes a drag but silently eats a scroll, or the reverse.
+                // The fill itself is NOT dimmed when unseekable: it is a
+                // READING, and it is still true — dimming it would say the
+                // position is unavailable rather than that the control is.
                 enabled: seek.seekable
                 cursorShape: seek.seekable ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onPressed: (mouse) => seek.seekTo(mouse.x)
                 onPositionChanged: (mouse) => { if (pressed) seek.seekTo(mouse.x); }
+                // WheelNotch, never a sign test (see WheelNotch.qml): a
+                // trackpad is ~125Hz of sub-pixel deltas and a sign-only
+                // handler would fire a full 5% per event — the exact bug
+                // vtbDeco.cpp had to fix in the titlebar copy, where one
+                // two-finger flick threw the song forward by minutes. It banks
+                // the sub-detent remainder, so slow careful scrubbing still
+                // moves, and clamps a burst to maxSteps so a flick cannot stack
+                // a fan of SetPosition calls. That clamp IS the debounce — a
+                // separate timer would either drop the notch you ended on or
+                // lag the fill behind the wheel.
+                // (`seekNotch`, not `notch`: ids are scoped to the whole FILE,
+                // and the volume column above already took that one.)
+                WheelNotch { id: seekNotch }
+                onWheel: (wheel) => {
+                    var n = seekNotch.steps(wheel);
+                    if (n !== 0)
+                        seek.seekFrac(seek.shownFrac + n * seek.wheelFrac);
+                }
             }
         }
 

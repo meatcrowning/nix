@@ -40,6 +40,11 @@ import Quickshell
 Singleton {
     property real volume: 42
     property bool muted: false
+    // Media.cavaWanted reads this. Without it the binding takes `undefined`
+    // and the "no undefined bools" assertion below fails on a warning that
+    // belongs to the STUB, not to the widget — which is what it did between
+    // audioActive landing (the cava-on-silence gate) and 2026-07-28.
+    property bool audioActive: false
     function setVolume(v) {}
     function adjustVolume(v) {}
 }
@@ -133,6 +138,14 @@ ShellRoot {
                 findLists(c, out);
             }
             return out;
+        }
+        function findSeek(it) {          // the seekbar: the item that can seek
+            if (it.seekFrac !== undefined && it.wheelFrac !== undefined) return it;
+            for (let i = 0; i < it.children.length; i++) {
+                const r = win.findSeek(it.children[i]);
+                if (r) return r;
+            }
+            return null;
         }
         function listOf(want) {          // the two lists differ by row count
             const all = findLists(mc, []);
@@ -234,6 +247,40 @@ ShellRoot {
                     + " lyricIndex=" + Media.lyricIndex
                     + " colours=" + (ok && n > 0 ? "ok" : "BAD") + " realized=" + n
                     + " text=" + Theme.text + " dim=" + Theme.textDim + s);
+
+                // Scroll-to-scrub. Found by DUCK TYPING (`seekFrac`) rather
+                // than by id: ids are not reachable from outside the component
+                // and a child index would break the next time a row moves.
+                //
+                // The fake player's seek() is a no-op and its position is a
+                // constant, which is exactly the case worth asserting: the bar
+                // must show the seek it asked for, and — the half that is the
+                // whole reason `pending` exists — a SECOND notch must land 5%
+                // past the first rather than re-deriving from the player's
+                // unmoved position and repeating it.
+                const sk = win.findSeek(mc);
+                let sc = "none";
+                if (sk) {
+                    const f0 = sk.shownFrac;
+                    sk.seekFrac(sk.shownFrac + sk.wheelFrac);
+                    const f1 = sk.shownFrac;
+                    sk.seekFrac(sk.shownFrac + sk.wheelFrac);
+                    const f2 = sk.shownFrac;
+                    sc = "seekable=" + sk.seekable
+                       + " step=" + sk.wheelFrac.toFixed(2)
+                       + " f0=" + f0.toFixed(3)
+                       + " d1=" + (f1 - f0).toFixed(3)
+                       + " d2=" + (f2 - f1).toFixed(3);
+                    // …and that a pending seek is what the bar SHOWS. Asserted
+                    // by hand rather than from the two seeks above, because
+                    // Quickshell echoes a `position` write back into the
+                    // property immediately, so against this fake player the
+                    // pending value is consumed in the same tick it is set.
+                    sk.pending = 0.5;
+                    sc += " pinned=" + sk.shownFrac.toFixed(3);
+                    sk.pending = -1;
+                }
+                console.warn("PROBE SCRUB " + sc);
                 Qt.exit(0);
         }
     }
@@ -285,6 +332,11 @@ check "height invariant off"   "PROBE OLD-no-field .* implicitHeight=230 natural
 # No binding may take undefined, and no payload transition may throw.
 nocheck "no undefined bools"   "Unable to assign \[undefined\]"
 nocheck "no TypeError"         "TypeError"
+# Scroll to scrub: the step, and that a burst of notches ADDS UP.
+check "scrub is seekable"      "PROBE SCRUB seekable=true step=0.05"
+check "one notch is 5%"        "PROBE SCRUB .* d1=0.050 "
+check "notches accumulate"     "PROBE SCRUB .* d2=0.050"
+check "pending seek is shown"  "PROBE SCRUB .* pinned=0.500"
 nocheck "no ReferenceError"    "ReferenceError"
 
 echo
