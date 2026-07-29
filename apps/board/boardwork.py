@@ -367,7 +367,10 @@ pending and why>'
 
    **It starts with a TAG, then a SHORT description, and only then any \
 elaboration or background** — that is his rule for this list, and the tool \
-refuses a bullet without one. Pick the one that is true:
+refuses a bullet without one. **One line for the summary; anything more goes \
+on INDENTED continuation lines under it, and it is a sentence or two, not a \
+paragraph** — *"it shouldnt really elaborate that much though"*. Pick the one \
+that is true:
 `COMPLETION:` it is done and on his machine; `PARTIAL:` some of it landed and \
 some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
 `QUESTION:` you need a word from him before anything else moves; \
@@ -643,6 +646,7 @@ def role_flags(role):
     if effort:
         argv += ["--effort", effort]
     return argv
+
 
 
 def _task_name():

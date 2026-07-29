@@ -239,6 +239,16 @@ def parse(src):
         nonlocal prose
         if prose is not None:
             prose["text"] = text(prose.pop("raw", ""))
+            # ...and the same mapping over each HALF of a bullet, for the view
+            # that draws the summary and the elaboration as two blocks. The one
+            # thing the split costs is a `**bold span**` that wraps ACROSS the
+            # first line — its two markers land in different halves and neither
+            # is stripped. `text` is the joined string and is unaffected, so the
+            # cost is confined to a writer who wraps mid-emphasis, and the rule
+            # for this section is a short summary line anyway.
+            if "headRaw" in prose:
+                prose["summary"] = text(prose.pop("headRaw"))
+                prose["detail"] = text(prose.pop("tailRaw", ""))
         if prose is not None and prose["text"]:
             if sec == "landed" and date is not None:
                 date["prose"].append(prose)
@@ -397,11 +407,21 @@ def parse(src):
         # bullet can be removed as a unit: a WAITING ON YOU TO DO item routinely
         # wraps onto indented continuation lines, and deleting only `line` would
         # leave his half-sentence behind as an orphan paragraph.
+        # A bullet keeps its FIRST line apart from what wrapped under it — his:
+        # *"in the to do section, it should show the PARTIAL INFORMATION whatever
+        # text, then a single line summarizing, a new line, and THEN the
+        # elaboration if needed."* `raw` still holds the whole thing joined, so
+        # every existing consumer (`tag_of`, removal, `reply`, the menus, the
+        # glyph check) is untouched; `headRaw`/`tailRaw` are what the view draws
+        # as two blocks. See `close_prose` for the one thing this costs.
         if mb:
             close_prose()
-            prose = {"kind": "bullet", "raw": mb.group(2), "line": i, "endLine": i}
+            prose = {"kind": "bullet", "raw": mb.group(2), "line": i, "endLine": i,
+                     "headRaw": mb.group(2), "tailRaw": ""}
         elif prose is not None:
             prose["raw"] = (prose["raw"] + " " + ln.strip()).strip()
+            if "tailRaw" in prose:
+                prose["tailRaw"] = (prose["tailRaw"] + " " + ln.strip()).strip()
             prose["endLine"] = i
         else:
             prose = {"kind": "para", "raw": ln.strip(), "line": i, "endLine": i}
@@ -416,6 +436,8 @@ def parse(src):
     for t in out["todo"]:
         t["tag"] = tag_of(t["text"])
         t["placedRaw"] = t.get("placedRaw", "")
+        t["summary"] = t.get("summary", t["text"])
+        t["detail"] = t.get("detail", "")
         t["placed"] = format_placed(t["placedRaw"])
     out["todoGroups"] = todo_groups(out["todo"])
     return out
@@ -922,8 +944,17 @@ def add_landed_row(lines, commit, what, date=None, when=""):
 # the user can easily know what that message is about. any sort of elaboration or
 # background should go after the short description of the message"*.
 #
-# So a bullet is TAG, then a SHORT description, then anything else — and the TAG
-# is checked HERE, at the one function every writer of that section already goes
+# So a bullet is TAG, then a SHORT description, then anything else — and the
+# SHAPE of "anything else" is his too: *"it should show the PARTIAL INFORMATION
+# whatever text, then a single line summarizing, a new line, and THEN the
+# elaboration if needed. it shouldnt really elaborate that much though"*. One
+# line of summary on the bullet's own line; the elaboration, if there has to be
+# one, on INDENTED continuation lines under it, and **a sentence or two, not a
+# paragraph**. `parse()` splits the two into `summary`/`detail` and the view
+# draws them as two blocks with a gap; `text` stays the joined string every
+# other consumer already reads.
+#
+# The TAG is checked HERE, at the one function every writer of that section goes
 # through (`boardmove.note`, `boardmove.stall`, the `why` of `give_back`, and
 # board-watch's four failure templates). One choke point, so a new writer cannot
 # be added that forgets.
