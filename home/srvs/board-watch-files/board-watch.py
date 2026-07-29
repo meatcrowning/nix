@@ -648,7 +648,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision"):
 
 QUEUE_FAIL = (
     "- FAILED: **nobody could work out what to do with what you typed into the board** "
-    "- the orchestrator exited {how}. Nothing was dispatched and nothing was "
+    "- Solomon exited {how}. Nothing was dispatched and nothing was "
     "committed. What you wrote, so it is not lost: \"{text}\" Log: "
     "`~/.cache/board-watch.log`\n")
 
@@ -692,7 +692,9 @@ def work_the_queue():
     session = str(uuid.uuid4())
     # Registered so it shows up on his board as a running agent with his own
     # words as its title — the same card, the same box, so he can add to it
-    # while it is still deciding.
+    # while it is still deciding. `kind="orchestrator"` is also what names it:
+    # `ba.register` gives that kind `Solomon`, always, and `boardwork.cards()`
+    # pins the row to the top of the list whether or not this run exists.
     ba.register(aid, msgs[0]["text"][:70], os.getpid(), kind="orchestrator",
                 where="board-watch", session=session)
     log("orchestrating %d thing(s) he typed" % len(msgs))

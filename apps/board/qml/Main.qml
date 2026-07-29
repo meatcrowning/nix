@@ -63,6 +63,14 @@ Window {
     readonly property var agents: Agents.list
     readonly property var agentCards: Agents.cards
     readonly property var queuedNotes: Agents.queued
+    // Is anything actually HAPPENING? Not `agentCards.length`, since Solomon's
+    // standing row is drawn whether or not it is: `boardwork.cards()` pins the
+    // orchestrator at the top and substitutes a `ready` row when none is
+    // running, so the list is never empty any more. This is what the section's
+    // "nothing is running" sentence and its two-lines-per-card preamble hang
+    // off — both are about the cards under Solomon.
+    readonly property bool nothingRunning:
+        win.agentCards.filter((c) => c.state !== "idle").length === 0
 
     // A note to an agent takes the SAME path his answers take: never lost, and
     // honest about which of the two things happened. `boardagents.send()` files
@@ -605,10 +613,13 @@ Window {
                     // finished rather than as broken — one dim sentence, no
                     // empty frame, no "0 agents". The box at the top of the
                     // page still works, which is the point: what he writes
-                    // there waits for the next orchestrator.
+                    // there waits for the next orchestrator. Solomon's standing
+                    // row below says the same thing from the other end — who
+                    // will pick it up — so this stays a sentence about the
+                    // WORKERS and is gated on them, not on the list's length.
                     PixelText {
                         width: agentsCol.width
-                        visible: win.agentCards.length === 0
+                        visible: win.nothingRunning
                         height: visible ? implicitHeight : 0
                         color: Theme.dim
                         text: "nothing is running"
@@ -621,7 +632,7 @@ Window {
                     // disclaimer where a sentence belongs (§5.2).
                     Para {
                         width: agentsCol.width
-                        visible: win.agentCards.length > 0
+                        visible: !win.nothingRunning
                         height: visible ? implicitHeight : 0
                         bottomPadding: 6
                         color: Theme.dim
@@ -637,9 +648,13 @@ Window {
                     // keep agents ordered by birth/age so they dont move around
                     // so much"* — because a card jumped between sections every
                     // time its agent picked up a different tool. `boardwork.py`
-                    // owns the order and it is birth and nothing else: a new
-                    // agent appends at the bottom and the rows above it stay
-                    // put, including when one stops. The two states that were
+                    // owns the order and it is birth and nothing else BELOW
+                    // the first row: a new agent appends at the bottom and the
+                    // rows above it stay put, including when one stops. The
+                    // first row is Solomon, pinned — *"he should always be kept
+                    // on the top of the agent list"* — and it is drawn even
+                    // with no orchestrator running, saying `ready`. The two
+                    // states that were
                     // headings rather than phases — a task queued above the cap
                     // and an agent that has stopped — say so in words on the
                     // card itself.
