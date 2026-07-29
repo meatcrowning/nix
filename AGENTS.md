@@ -97,6 +97,49 @@ Never run bare `qs` — it launches a second panel.
 
 ---
 
+## When it is okay to rebuild or hot-reload
+
+**This is THE rule, and it binds every agent here — interactive, background, or
+spawned by the board.** It was scattered across a memory, a boundary and three
+prompts until 2026-07-29; it lives here now so nobody has to have read the right
+memory to know it.
+
+**Rebuilding and reloading is standing behaviour, at your judgement, at any
+hour.** Don't queue it for when he is away, don't ask, don't hand it back as
+*"to go live, run…"*. Definition of done for a change here is *applied*, not
+*pushed*. He is at the machine most of the time and said so explicitly: any
+time, on the agent's judgement.
+
+What that judgement is made of — the parts that are **not** free:
+
+- **Preflight, then the host's own command.** `./tools/preflight.sh`, then
+  `sudo rebuild-top` on `top` / `home-manager switch --flake ~/nix#air` on
+  `book`. Nothing staged in the index across it (see The index is SHARED).
+- **Cheap reloads are cheap, so just do them.** The Quickshell `Theme.qml`
+  bump and `hyprctl reload` cannot take the session with them — a QML parse
+  error keeps the old tree and toasts, and `reload` re-runs the live Lua with
+  no session disturbance.
+- **The compiled `hyprvtb` hot-swap is the one that is not.** Build it always;
+  `hyprctl reload` swaps it live and is survivable *by design* since v2.65,
+  with `hypr-supervise` quarantining a build that dies — **on `top` only.
+  `book` is a Fedora session with no supervisor and no net.** So swap it live
+  on `top` if the work needs it; on `book`, leave it for the next login and say
+  so. **Never `hyprctl plugin load` / `unload`** on either — that one is
+  unconditional and unrecoverable.
+- **A rebuild that bumps Hyprland or hyprutils makes any live swap impossible**
+  (the new plugin links a newer toolchain than the running compositor). Then it
+  is next-login, and saying so is part of the job.
+- **The Ask-first list below is unchanged.** Pin bumps, anything that changes
+  login/logout, re-architecting the panel or the plugin: those are still his
+  call, and this rule does not reach them.
+- **Say what you did.** A rebuild or a reload is reported, in a line — not
+  narrated, not silent.
+
+The only agents this does not apply to are ones told otherwise in their own
+prompt for a specific run: an explicit instruction from him always wins.
+
+---
+
 ## Which machine you are on
 
 **You are told, at session start. Do not guess, and do not re-derive it.** A
@@ -301,10 +344,11 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `docs/board.md` without waiting to be told about them.** A `path` unit on the
   file plus a 5-minute timer; when a decision becomes *newly answered* it spawns
   one headless `claude -p` on that one decision. Two rules from him, both
-  settled: the agent **works but never rebuilds** (it commits and pushes; a
-  change that needs `sudo rebuild-top` is left undone with a note on the board),
-  and it fires **only while he is at the machine** — locked or away, the answer
-  is queued, not dropped. The filter is semantic, never authorship: an agent
+  settled: the agent **works, and since 2026-07-29 it may rebuild and reload
+  too** — at its own judgement, any hour, under "When it is okay to rebuild or
+  hot-reload" above and nothing looser (it used to be forbidden outright and
+  left such work undone with a note) — and it fires **only while he is at the
+  machine**: locked or away, the answer is queued, not dropped. The filter is semantic, never authorship: an agent
   moving an item to LANDED, or the docs sync pulling somebody's prose edit, adds
   no answer and must not fire. It runs on **both** machines; the duplicate two
   watchers over one synced file would otherwise cause is prevented by HOST

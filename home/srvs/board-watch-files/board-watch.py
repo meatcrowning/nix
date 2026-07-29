@@ -11,12 +11,15 @@ the systemd units and the reasoning for the mechanism. Read that file first.
 
 WHAT IT WILL AND WILL NOT DO — his two decisions, and they are settled:
 
-  * The agent WORKS, but never REBUILDS. It implements, tests, commits with a
-    pathspec and pushes to main. It never runs `sudo rebuild-top`, never
-    reloads the compositor and never touches the live panel. `apps/` runs live
-    source, so most work is picked up on his next relaunch anyway; anything that
-    genuinely needs a rebuild is left undone and SAID SO on the board. The
-    machine must never change underneath him.
+  * The agent WORKS, and since 2026-07-29 it MAY REBUILD AND RELOAD — at its
+    own judgement, any hour, under `~/nix/AGENTS.md` -> "When it is okay to
+    rebuild or hot-reload" and nothing looser. It used to be the reverse (never,
+    work left undone with a note) and he lifted it himself: *"it should be any
+    time but should still adhere to the rule that's written down SOMEWHERE"*.
+    Two consequences worth stating: the rule lives in `AGENTS.md` and NOT in
+    this prompt — a fifth paraphrase is how it came to be true nowhere — and
+    what an agent runs or deliberately leaves pending still has to be SAID on
+    the board, because he is at the machine while it happens.
   * It fires only while he is AT the machine. Away, asleep or locked, the answer
     is QUEUED, not dropped — see gate() and the "no state update" trick below.
 
@@ -488,14 +491,17 @@ His answer: {answer}
 
 RULES, in force for this session:
 
-1. **NEVER rebuild and never change the running machine.** No `sudo \
-rebuild-top`, `nixos-rebuild`, `home-manager switch`, `hyprctl` (reload, \
-plugin, dispatch or otherwise), `qs ipc`, `systemctl`, `loginctl`. `apps/` runs live source, so a \
-`.py`/`.qml` change there is picked up when he next relaunches the app and \
-needs nothing from you. If the work genuinely cannot land without a rebuild, a \
-compositor reload or a panel hot-reload: **stop, leave that part undone**, and \
-say so on the board (below). Half a change plus an honest note beats a machine \
-that changed while he was not looking.
+1. **You MAY rebuild and reload, at your own judgement, at any hour** — he is \
+usually at the machine and decided this deliberately, so it is standing \
+behaviour and not something to ask about: a change here is done when it is \
+APPLIED, not when it is pushed. **Read `AGENTS.md` -> "When it is okay to \
+rebuild or hot-reload" before you run one** and stay inside it — preflight \
+first, nothing staged across it, cheap reloads freely, the `hyprvtb` live \
+hot-swap only on `top` (never `hyprctl plugin load`/`unload`, on either \
+machine), and the Ask-first list still his. `apps/` runs live source and needs \
+none of it — a `.py`/`.qml` change there is picked up when he next relaunches \
+the app. Whatever you run or deliberately leave, **say so on the board** \
+(below); a rebuild left pending needs its reason.
 2. **Never open a window on his screen and never drive his running apps.** No \
 screenshots, no GUI, no MPRIS, no launching a packaged app "just to check". \
 Offscreen harnesses (`QT_QPA_PLATFORM=offscreen`) and `tools/sandbox.sh` only. \

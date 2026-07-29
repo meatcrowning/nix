@@ -83,7 +83,8 @@ kills by. So `_spawn_worker` asks the user manager for a transient unit instead:
 
 Four things fall out of it, and all four are why this and not `KillMode=process`
 on the parent (which also survives — both were measured — but is a `.nix` change
-that only takes effect after a rebuild this system is not allowed to run):
+that only takes effect after a rebuild, and at the time this system was not
+allowed to run one at all):
 
   * **The worker outlives the tick, the orchestrator, and every later tick.**
     Its cgroup is its own and nothing sweeps it. `tools/board-watch-test.py`
@@ -221,13 +222,13 @@ def set_cap(n):
 HOST = os.environ.get("BOARD_WATCH_HOST") or os.uname().nodename
 
 _HOSTS = {
-    "top": "x86_64 NixOS, flake attribute `top`. A rebuild here would be "
-           "`sudo rebuild-top` - which you are not allowed to run",
+    "top": "x86_64 NixOS, flake attribute `top`. The rebuild here is "
+           "`./tools/preflight.sh` then `sudo rebuild-top` (passwordless, no "
+           "tty needed)",
     "book": "an aarch64 MacBook Air running Fedora Asahi with home-manager "
             "layered on top, flake attribute `air`. It is NOT NixOS: there is "
-            "no `rebuild-top` and no `sys/` here, and the equivalent of a "
-            "rebuild is `home-manager switch --flake ~/nix#air` - which you "
-            "are not allowed to run either",
+            "no `rebuild-top` and no `sys/` here, and the rebuild is "
+            "`home-manager switch --flake ~/nix#air`, no root needed",
 }
 
 
@@ -240,14 +241,25 @@ def host_line():
 
 #: The rules every agent this system spawns runs under. They are HIS decisions,
 #: already settled (see `home/srvs/board-watch-files/board-watch.py`), and the
-#: two new prompts below quote them verbatim rather than paraphrasing: a worker
-#: that rebuilds his machine while he is looking at something else is the one
-#: failure this whole feature must not have.
-RULES = """1. **NEVER rebuild and never change the running machine.** No `sudo \
-rebuild-top`, `nixos-rebuild`, `home-manager switch`, `hyprctl`, `qs ipc`, \
-`systemctl`, `loginctl`. `apps/` runs live source, so a `.py`/`.qml` change is \
-picked up when he next relaunches. If the work cannot land without a rebuild or \
-a reload: **stop, leave that part undone**, and say so on the board.
+#: two new prompts below quote them verbatim rather than paraphrasing.
+#:
+#: Rule 1 was the reverse of this until 2026-07-29 — no rebuild, ever, work left
+#: undone with a note. He lifted it himself, in these words: *"it should be any
+#: time but should still adhere to the rule that's written down SOMEWHERE"*. So
+#: the rule is no longer stated here: `~/nix/AGENTS.md` -> "When it is okay to
+#: rebuild or hot-reload" is the single copy, and this points at it. A fifth
+#: paraphrase in a prompt is how it came to be true nowhere.
+RULES = """1. **You MAY rebuild and reload, at your own judgement, at any \
+hour** — he is usually at the machine and decided this deliberately. It is \
+standing behaviour, not something to ask about: a change here is done when it \
+is APPLIED, not when it is pushed. **Read `AGENTS.md` -> "When it is okay to \
+rebuild or hot-reload" before you run one** and stay inside it — preflight \
+first, nothing staged across it, cheap reloads freely, the `hyprvtb` live \
+hot-swap only on `top` (never `hyprctl plugin load`/`unload`, on either \
+machine), and the Ask-first list still his. `apps/` is live source and needs \
+none of this — a `.py`/`.qml` change there is picked up when he next relaunches. \
+Whatever you do or deliberately do not, **say so in your note**; if you leave a \
+rebuild pending, say why.
 2. **Never open a window on his screen and never drive his running apps.** \
 Offscreen harnesses (`QT_QPA_PLATFORM=offscreen`) and `tools/sandbox.sh` only; \
 he does every visual check himself.
@@ -422,8 +434,11 @@ from it. "the scrollbar arrows feel sluggish" is a dispatchable task: a worker \
 can find the stepper, measure it and change it.
   * **ASK** when it implies a choice between real alternatives he has not made, \
 when it would change something desktop-wide (the design language, a shared \
-component, every app at once), when it needs a rebuild or a compositor reload, \
-or when "how much" is the actual question and only he knows. A question costs \
+component, every app at once), when it touches the Ask-first list in \
+`AGENTS.md` (a pin bump, login/logout behaviour, re-architecting the panel or \
+the plugin), or when "how much" is the actual question and only he knows. \
+**Needing a rebuild or a reload is NOT a reason to ask** — a worker may run \
+one now, under rule 1. A question costs \
 him ten seconds whenever he feels like it. A wrong guess costs a worker, a \
 commit and a change he has to notice and undo.
   * **At most two questions for one input.** A wall of questions is its own \
@@ -469,17 +484,33 @@ dispatched and in hand — when every worker had already been killed and nothing
 was built.
 """
 
-# Allow the tools a working agent needs; deny the ones that change the machine
-# out from under him. board-watch imports these rather than keeping a second
-# copy — one list, so a hole cannot be opened in one spawner and not the other.
-# The prompt is the primary defence and this is the mechanical one; a prefix
-# matcher is not a sandbox (see `docs/agents/board-watch.md`).
+# Allow the tools a working agent needs; deny the ones nothing here may ever
+# do. board-watch imports these rather than keeping a second copy — one list, so
+# a hole cannot be opened in one spawner and not the other. The prompt is the
+# primary defence and this is the mechanical one; a prefix matcher is not a
+# sandbox (see `docs/agents/board-watch.md`).
+#
+# THE REBUILD AND RELOAD ENTRIES ARE GONE (2026-07-29), by his decision on the
+# board: an agent here may rebuild and reload at its own judgement, under
+# `~/nix/AGENTS.md` -> "When it is okay to rebuild or hot-reload". What is left
+# is what that rule itself forbids outright, so the two halves now agree instead
+# of the list contradicting the prompt:
+#
+#   * `hyprctl plugin` — load/unload erases hyprvtb's config keys for good and
+#     no reload repairs it. `hyprctl reload` and the rest are allowed.
+#   * `loginctl` — ends or locks his session; never a step in doing work.
+#   * the reverting git commands — he leaves real uncommitted work in this tree.
+#
+# `Bash(sudo:*)` had to go WITH them, and not as an oversight: a deny rule beats
+# an allow rule, so keeping it while carving out `Bash(sudo rebuild-top:*)`
+# would have left the rebuild blocked on `top` and the decision unimplemented.
+# What guards root is sudo itself and it is a better gate than this list ever
+# was — NOPASSWD covers exactly the one hardcoded `rebuild-top` wrapper
+# (`sys/nixos-rebuild.nix`), and anything else is `sudo -A`, which puts a dialog
+# in front of HIM. book has no such wrapper and needs no root to rebuild at all.
 ALLOW = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task", "TodoWrite",
          "NotebookEdit", "WebFetch", "WebSearch"]
-DENY = ["Bash(sudo:*)", "Bash(rebuild-top:*)", "Bash(nixos-rebuild:*)",
-        "Bash(rbsys:*)", "Bash(rbhome:*)", "Bash(update:*)",
-        "Bash(home-manager:*)",
-        "Bash(hyprctl:*)", "Bash(qs:*)", "Bash(systemctl:*)", "Bash(loginctl:*)",
+DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
         "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
 

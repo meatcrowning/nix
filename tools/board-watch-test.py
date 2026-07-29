@@ -849,7 +849,12 @@ def main():
         r.edit("- [ ] Do it the short way", "- [x] Do it the short way")
         r.run(spawn="cat > " + os.path.join(d, "prompt.txt"))
         prompt = open(os.path.join(d, "prompt.txt")).read()
-        for want in ("`top`", "NEVER rebuild", "-- <explicit> <paths>",
+        # "When it is okay to rebuild or hot-reload" replaced "NEVER rebuild"
+        # here on 2026-07-29: an agent may rebuild now, and what the prompt must
+        # still carry is the POINTER to the one written rule (`~/nix/AGENTS.md`)
+        # rather than a paraphrase of it.
+        for want in ("`top`", "When it is okay to rebuild or hot-reload",
+                     "-- <explicit> <paths>",
                      "Push to `main`", "never drive his running apps",
                      "First question?", "Do it the short way"):
             check("prompt carries %r" % want, want in prompt)
@@ -880,7 +885,8 @@ def main():
         check("...carrying what he wrote, verbatim",
               "have another look at the panel spacing" in note_prompt)
         check("...under the same rules a decision run gets",
-              "NEVER rebuild" in note_prompt and "-- <explicit> <paths>" in note_prompt
+              "When it is okay to rebuild or hot-reload" in note_prompt
+              and "-- <explicit> <paths>" in note_prompt
               and "Push to `main`" in note_prompt)
         # WHAT THAT AGENT IS NOW FOR. It used to do the work itself; since he
         # asked for a control surface it ORCHESTRATES — it splits the input up,
