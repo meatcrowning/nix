@@ -12,6 +12,55 @@ controls it), FMPS rating/playcount/favourite tag writeback (journaled to
 `~/.local/state/player/tagwrites.log`, gated by prefs `tagWrites: off|log|on`,
 ships in `log`), synced lyrics, ReplayGain volume levelling.
 
+## Every write to a library file goes through `atomicsave.py`
+
+**There are exactly two paths that modify a file in `aud/`** — `TagWriter`
+(FMPS rating / FAVORITE / playcount) and `lyrics.write_embedded` (USLT /
+`LYRICS` / `©lyr`, also used by `tools/lyrics-sync.py`) — and **both** now end
+in `atomicsave.atomic_save(path, mutate)`: copy beside the original, mutate the
+copy, `fsync`, `os.replace()`. Never add a third `mutagen.save()`.
+
+Both used to save in place, which for a tag block that outgrows its padding
+shifts the audio data itself; an interruption there leaves a truncated file on
+exFAT, with no snapshots anywhere on this machine to undo it. The lyrics path
+was the live one — it defaults on and had already written to the library.
+
+The module's docstring carries the reasoning; the four rules it is easy to
+undo are: the temp file must be **in the target's own directory** (elsewhere,
+`os.replace` is not a rename), it must **keep the original extension**
+(`mutagen.File()` scores partly on the filename — a `.tmp` copy of a `.dsf`
+sniffs wrong), **mtime is preserved** (the scan caches on (mtime, size) and
+dbsync ships the DB to book on mtime passing through SMB byte-exact; both write
+paths update the DB row themselves, so no rescan has anything to rediscover —
+size still changes, so a genuine re-read still happens), and free space is
+checked against the **target's own filesystem** before the copy, failing with
+`NoSpace` and a journal line rather than filling the disk. The old "in-place, no
+free-space cost" rationale was written against a 95%-full SSD; it is 932G with
+662G free (2026-07-28).
+
+`TagWriter` **coalesces**, because a copy is far heavier than an in-place save:
+a popped entry waits `COALESCE_S` (1.5s) and then absorbs every other queued
+entry for the same path, last value winning per field. Five stars clicked in a
+row are one rewrite of the FLAC.
+
+```bash
+tools/atomic-write-test.py --samples DIR [--exfat-probe DIR]
+```
+
+Runs on COPIES only and refuses to run inside `aud/`. Per format
+(mp3/flac/m4a/dsf/wav) it hashes the **audio stream alone**
+(`ffmpeg -map 0:a -f s16le - | md5sum` — never plain `-f md5 -`, which is
+nondeterministic with cover art), round-trips the tags, and checks mtime and
+temp-file hygiene; then every failure path (no space, missing file, unreadable
+audio, read-only directory, a `mutate()` that raises) for "original intact, no
+litter"; then hammers `os.replace()` with a concurrent reader to show it is a
+real rename on **exFAT** too. 53/53 on the SSD, 2026-07-28.
+
+**`tagWrites` cannot be changed while the app is running** — `Prefs` holds the
+whole file in memory and rewrites all of it on any `set()` (volume, sort,
+album-grid scroll, quit), and reads prefs only at startup. `tools/set-pref.py`
+sets a key from outside, backs the file up, and refuses while `main.py` is up.
+
 **ALL chrome is hyprvtb titlebar buttons** — transport + view switcher + sort +
 search toggle + a bottom-anchored settings button whose drawer (surfer's
 `dm`-panel idiom) holds rescan and the album gallery's live column count — plus
