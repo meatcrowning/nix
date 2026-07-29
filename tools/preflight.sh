@@ -54,6 +54,18 @@ if ! "$REPO/tools/seed-drift.sh" --quiet; then
   fail=1
 fi
 
+# 6. A deployed board-watch.py that is not the repo's. The watcher is a
+#    home-manager unit, so a fix in the repo does NOTHING until the next
+#    switch on that host — twice now a "correct" fix could not reach him, and
+#    a stale watcher once ran an orchestrator with no timeout for 100 minutes.
+#    Warning only: it is a deploy-lag fact, not a fault in the tree.
+DEPLOYED="$HOME/.config/scripts/board-watch.py"
+SRC="$REPO/home/srvs/board-watch-files/board-watch.py"
+if [ -e "$DEPLOYED" ] && [ -e "$SRC" ] && ! cmp -s "$DEPLOYED" "$SRC"; then
+  echo "WARN: deployed board-watch.py differs from the repo copy - the running"
+  echo "      watcher is a rebuild behind (this host's switch deploys it)."
+fi
+
 # 5. The systemd user manager's compositor identity. Hyprland imports its own
 #    HYPRLAND_INSTANCE_SIGNATURE/WAYLAND_DISPLAY into that manager-global store
 #    at every startup, so a nested test compositor claims it — and, SIGKILLed by
