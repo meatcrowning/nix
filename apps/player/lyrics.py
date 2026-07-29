@@ -41,6 +41,9 @@ from trackmatch import (  # noqa: E402
     artist_matches as _artist_matches,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import atomicsave  # noqa: E402  (sibling module; also used by main.py)
+
 import mutagen  # noqa: E402
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, USLT
@@ -125,17 +128,22 @@ def read_embedded(path):
 
 
 def write_embedded(path, text):
-    """Write `text` into the file's lyrics frame, in place. Raises on failure.
+    """Write `text` into the file's lyrics frame. Raises on failure.
 
     Only the lyrics frame is touched — nothing else in the file's tags is read,
-    rewritten or reordered, so this stays as close to a no-op as a tag edit can
-    be on a 95%-full disk.
+    rewritten or reordered. The write itself is ATOMIC (copy → mutate → fsync →
+    os.replace, see atomicsave.py): a synced LRC is several KB and routinely
+    outgrows an MP3's tag padding, which makes an in-place save a rewrite of
+    the audio data with no way back if it is interrupted.
     """
     if not text or not text.strip():
         raise ValueError("refusing to write empty lyrics")
-    audio = mutagen.File(path)
-    if audio is None:
-        raise RuntimeError("mutagen could not open")
+    atomicsave.atomic_save(path, lambda audio: _apply_lyrics(audio, text))
+
+
+def _apply_lyrics(audio, text):
+    """The tag mutation only — handed a mutagen object for a temp copy by
+    atomic_save, which owns opening it and calling save()."""
     tags = audio.tags
     if isinstance(audio, MP4):
         audio["\xa9lyr"] = [text]
@@ -156,7 +164,6 @@ def write_embedded(path, text):
                   "Lyrics", "UnsyncedLyrics", "syncedlyrics", "SYNCEDLYRICS"):
             audio.pop(k, None)
         audio["LYRICS"] = [text]
-    audio.save()
 
 
 # ---------------------------------------------------------------------------

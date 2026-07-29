@@ -15,9 +15,11 @@ touched just to browse. Ratings (FMPS_RATING 0..1), play counts
 (FMPS_PLAYCOUNT) and favourites (FAVORITE=1) live IN the files' tags, like the
 rest of this library's history (fooyin/Strawberry wrote the existing ones); the
 DB is a queryable mirror, rebuilt from tags at any time. Tag writes go through
-a journaling worker with a prefs kill-switch (tagWrites: off|log|on) because
-the SSD runs 95% full and an interrupted in-place rewrite is the one way this
-app could damage the library.
+a journaling worker with a prefs kill-switch (tagWrites: off|log|on), and every
+write to a library file — ratings here, lyrics in lyrics.py — is atomic (copy →
+mutate → fsync → os.replace, see atomicsave.py), because an interrupted
+in-place rewrite is the one way this app could damage the library and exFAT has
+no snapshots to undo it.
 
 Playback is libmpv (python-mpv): decodes everything including DSF/DSD (to PCM),
 gapless-audio=weak joins compatible streams. The app owns the queue and mirrors
@@ -62,6 +64,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
+import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 import lyrics as lyricslib  # noqa: E402  (sibling module; also used by tools/)
 import trackmatch  # noqa: E402  (pylib; the one artist/title normaliser)
 import mutagen  # noqa: E402
@@ -1078,8 +1081,18 @@ class TagWriter(QObject):
     journaled to $XDG_STATE_HOME/player/tagwrites.log BEFORE touching the file;
     the prefs key tagWrites gates behaviour: "off" (drop), "log" (journal only
     — the shipped default until the journal has been eyeballed), "on" (journal
-    + write). Mutagen rewrites in place (no free-space cost on the 95%-full
-    SSD) and only ever touches the specific FMPS/FAVORITE keys."""
+    + write). Only the specific FMPS/FAVORITE keys are ever touched, and the
+    write is ATOMIC — copy, mutate the copy, fsync, os.replace (atomicsave.py).
+
+    Because a copy is much heavier than the in-place save this replaces, the
+    queue COALESCES: entries are given COALESCE_S to accumulate and every
+    pending entry for the same path is merged into one write (last value wins
+    per field). Five stars clicked in a row are one rewrite of the FLAC, not
+    five."""
+
+    # Long enough to swallow a burst of clicks, short enough that a rating is
+    # in the file before the user could plausibly pull the SSD out.
+    COALESCE_S = 1.5
 
     def __init__(self, prefs, parent=None):
         super().__init__(parent)
@@ -1109,12 +1122,31 @@ class TagWriter(QObject):
         except OSError:
             pass
 
+    def _drain_same_path(self, entry):
+        """Merge every other queued entry for this path into `entry`, removing
+        them from the queue. Called with the lock held."""
+        keep = []
+        for other in self._q:
+            if other["path"] != entry["path"]:
+                keep.append(other)
+                continue
+            for k in ("rating", "favorite", "play_count"):
+                if other[k] != "keep":
+                    entry[k] = other[k]
+            entry["ts"] = other["ts"]
+        self._q = keep
+        return entry
+
     def _loop(self):
         while True:
             with self._cv:
                 while not self._q:
                     self._cv.wait()
                 entry = self._q.pop(0)
+            # Let a burst land before paying for a whole-file copy.
+            time.sleep(self.COALESCE_S)
+            with self._cv:
+                entry = self._drain_same_path(entry)
             path = entry["path"]
             if not os.path.exists(path):
                 self._journal(entry, "missing-requeued")
@@ -1134,9 +1166,12 @@ class TagWriter(QObject):
 
     @staticmethod
     def _write(path, entry):
-        audio = mutagen.File(path)
-        if audio is None:
-            raise RuntimeError("mutagen could not open")
+        atomicsave.atomic_save(path, lambda audio: TagWriter._apply(audio, entry))
+
+    @staticmethod
+    def _apply(audio, entry):
+        """The tag mutation only — handed a mutagen object for a temp copy by
+        atomic_save, which owns opening it and calling save()."""
         rating, favorite, plays = entry["rating"], entry["favorite"], entry["play_count"]
         tags = audio.tags
         if isinstance(tags, ID3) or (tags is None and hasattr(audio, "add_tags")
@@ -1182,7 +1217,6 @@ class TagWriter(QObject):
                 set_vc("FAVORITE", "1" if favorite else None)
             if plays != "keep":
                 set_vc("FMPS_PLAYCOUNT", int(plays))
-        audio.save()
 
 
 # ---------------------------------------------------------------------------
