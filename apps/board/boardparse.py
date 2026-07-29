@@ -992,6 +992,13 @@ def _tag_refusal(line):
         % ("/".join(t + ":" for t in TODO_TAGS), line.strip()[:80]))
 
 
+def is_tagged(text):
+    """Does this text START a message — `COMPLETION: ...`, with or without its
+    `- `? The public half of `_TODO_TAG`, for the writers that have to tell one
+    message from the next (`boardctl._note_text`, `check_one_ask`)."""
+    return bool(_TODO_TAG.match("- " + text.lstrip().lstrip("-*+ ")))
+
+
 def check_todo_tag(bullet):
     """Refuse a WAITING ON YOU TO DO bullet that does not say what it is.
 
@@ -1017,6 +1024,136 @@ def check_todo_tag(bullet):
     return bullet
 
 
+# ------------------------------------------------ ONE BOARD ITEM PER ASK
+# His rule, 2026-07-29: *"messages should be SEPARATED"* — when an agent reports
+# on several things, each one is its own bullet. Never several asks folded into
+# one message.
+#
+# It is not a style preference, it is how the board CLEARS. Replying to a bullet
+# clears that bullet (bc1454d), so an ask folded into another agent's paragraph
+# is cleared by a reply that was never about it, and survives nowhere he can
+# see. That happened: worker Purson (`w88cd31`) was handed four asks and wrote
+# ONE bullet — *"PARTIAL: **times on everything under needs you** - landed, plus
+# two more items you sent while I was in there"* — whose headline named the
+# first. He replied to it; asks 2-4 went with it.
+#
+# The write path already SUPPORTS separation: `boardmove.note` prefixes `- ` per
+# line, so several unindented lines in one call are several bullets, each with
+# its own `<!-- placed: -->` stamp, each clearable on its own. What was missing
+# was anything that stopped a writer bundling instead. These four checks are
+# that, and they are STRUCTURAL — a machine cannot read intent, but every one of
+# these shapes is a second ask wearing a disguise:
+#
+#   1. a second TAG further along a bullet's line. `boardctl.py note 'A: x'
+#      'B: y'` used to join its argv with a space and land one bullet saying
+#      both; now argv that looks like that is split into bullets instead
+#      (`boardctl.cmd_note`) and anything that still gets through is refused.
+#   2. a TAG on an INDENTED line — an ask hidden in the elaboration, which is
+#      the one place the tag check deliberately does not look.
+#   3. more than one `**headline**` on one line. The shape is
+#      `TAG: **what you were asked** - what you did`; a second bold span in it
+#      is a second thing you were asked.
+#   4. a sub-bullet list under a bullet, or a phrase that COUNTS other work
+#      ("plus two more items", "the other three"). His shape for the detail is
+#      *"a sentence or two, not a paragraph"* about THAT ask; a list or a tally
+#      is the rest of the run hiding under the first item's headline.
+#
+# What it deliberately does NOT do is guess at prose. Two asks written as two
+# plain sentences pass, and the prompts (`boardwork.RULES`/`WORKER_PROMPT` rule
+# 9) carry the rest. Mechanism where mechanism reaches; a rule where it does not.
+#
+# **His own words are DATA, not prose to be read**: the mechanical failure
+# templates interpolate what he typed, and a note that says a worker died must
+# never be refused because of how he phrased the thing it died on. So they pass
+# it through `oneline()` and the checks skip anything inside a `` ` `` span.
+_INLINE_TAG = re.compile(r"\S[ \t]+(?:%s):[ \t]" % "|".join(TODO_TAGS))
+_SUB_BULLET = re.compile(r"^[ \t]+[-*+][ \t]+\S")
+_BOLD = re.compile(r"\*\*.+?\*\*")
+_CODE = re.compile(r"`[^`]*`")
+_COUNTS_MORE = re.compile(
+    r"\b(?:plus|and|with|besides)\s+(?:the\s+)?"
+    r"(?:two|three|four|five|six|\d+)\s+(?:more|other|further|remaining)\b"
+    r"|\bthe\s+(?:second|third|fourth|fifth|other|remaining)\s+"
+    r"(?:item|items|ask|asks|task|tasks|thing|things)\b"
+    r"|\b(?:two|three|four|five|\d+)\s+(?:more|other|further)\s+"
+    r"(?:item|items|ask|asks|task|tasks|thing|things)\b", re.I)
+
+
+def _bundle_refusal(why, line):
+    return BoardError(
+        "one board item per ask - %s. Reply clears a bullet, so an ask folded "
+        "into another one is cleared by a reply that was never about it. Make "
+        "it its own `note` call, or its own unindented line in this one. Got: "
+        "%s" % (why, line.strip()[:80]))
+
+
+def check_one_ask(bullet):
+    """Refuse a WAITING ON YOU TO DO message that bundles more than one ask.
+
+    See the block comment above for the four shapes and why each one is a second
+    ask. Called from `add_todo_bullet` beside `check_todo_tag` — the same one
+    choke point, so a new writer cannot be added that forgets this either.
+    """
+    for line in bullet.split("\n"):
+        if not line.strip():
+            continue
+        bare = _CODE.sub("``", line)
+        if bare[:1].isspace():                       # an indented continuation
+            if is_tagged(bare):
+                raise _bundle_refusal(
+                    "this line is tagged, so it is an ask of its own and must "
+                    "not hide in another item's elaboration", line)
+            if _SUB_BULLET.match(bare):
+                raise _bundle_refusal(
+                    "a list under a bullet is several things in one message; "
+                    "the elaboration is a sentence or two about THIS ask", line)
+        else:
+            # ...without the `- ` marker: the tag it introduces is the bullet's
+            # own and only a LATER one is a second message.
+            body = re.sub(r"^[-*+][ \t]+", "", bare.lstrip())
+            if _INLINE_TAG.search(body):
+                raise _bundle_refusal(
+                    "there is a second tag further along this line, so it is "
+                    "two messages written as one", line)
+            if len(_BOLD.findall(body)) > 1:
+                raise _bundle_refusal(
+                    "a bullet leads with ONE `**headline**` naming the one "
+                    "thing it is about", line)
+        # The tally is looked for in the PROSE, never in the `**headline**`:
+        # *"INFORMATION: **the third item** - ..."* is a bullet naming what it
+        # is about, not one counting the rest of the run into itself.
+        if _COUNTS_MORE.search(_BOLD.sub("", bare)):
+            raise _bundle_refusal(
+                "it counts other work into this item; that work gets its own "
+                "bullet, with its own headline he can reply to", line)
+    return bullet
+
+
+def oneline(text, limit=160, code=False):
+    """His words, or another agent's title, made safe to interpolate into a
+    bullet. Collapses every run of whitespace — a newline in the middle of a
+    template used to make its second line an untagged bullet, and the whole
+    failure note was then refused, so nothing said the worker had died — and
+    caps the length. ASCII `...`, never the ellipsis glyph: the pixel font has
+    none (docs/DESIGN.md §2.3).
+
+    `code=True` returns it as a CODE SPAN, which is the honest one for anything
+    he typed: the checks above skip a span, so his `**` and his tag words reach
+    the board unedited instead of being read as structure. Use the plain form
+    only where the text has to sit inside a `**headline**`, and accept that it
+    loses those two markers there — a glob like `apps/**/qml` is exactly why
+    this is a flag and not a blanket strip.
+    """
+    s = " ".join(str(text or "").split()).replace("`", "'")
+    if not code:
+        s = s.replace("**", "")
+        for t in TODO_TAGS:
+            s = re.sub(r"\b%s:" % t, t, s)
+    if len(s) > limit:
+        s = s[:limit].rstrip() + "..."
+    return ("`%s`" % s) if code and s else s
+
+
 def add_todo_bullet(lines, doc, bullet, when=None):
     """One `- ` bullet into WAITING ON YOU TO DO, after the last one there.
 
@@ -1028,6 +1165,7 @@ def add_todo_bullet(lines, doc, bullet, when=None):
     wrapped continuation and keeps its place above the stamp.
     """
     check_todo_tag(bullet)
+    check_one_ask(bullet)
     if not bullet.endswith("\n"):
         bullet += "\n"
     stamp = placed_now(when)

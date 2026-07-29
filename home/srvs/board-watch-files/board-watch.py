@@ -447,20 +447,28 @@ def save_state(d):
 #: tag set is not just his three: these four templates exist so a failure cannot
 #: read as information, and the tag now says so in the first word.
 FAIL_TEMPLATE = (
-    "- FAILED: **board-watch tried decision {num} ({title}) and did not finish it** - "
-    "the agent exited {how}. Nothing was committed on its behalf; the answer is "
-    "still on record above. Log: `~/.cache/board-watch.log`\n")
+    "- FAILED: **board-watch tried decision {num} and did not finish it** - it "
+    "was `{title}`; the agent exited {how}. Nothing was committed on its "
+    "behalf; the answer is still on record above. Log: "
+    "`~/.cache/board-watch.log`\n")
 
 
 #: A worker's process is gone and it never used `note`, `land` or `ask`. It did
 #: not finish, and the one thing this system must never do is let that read as
 #: done — so it lands in WAITING ON YOU TO DO in words, quoting the task, since
 #: by the time this runs the worker's card has already left his board.
+#:
+#: **What he typed goes in a code span, and through `bp.oneline`.** It is DATA,
+#: not prose: the separation checks (`boardparse.check_one_ask`) read `**`, a
+#: tag and a phrase counting other work as structure, and a newline in it used
+#: to make the template's second line an untagged bullet — either way the note
+#: saying a worker died would be refused, which is the one failure this file
+#: exists to prevent. Same for `{title}` and `{text}` below.
 WORKER_FAIL = (
-    "- FAILED: **a worker stopped without finishing: {task}** - it was dispatched from "
-    "something you typed into the box and it recorded nothing on this board, so "
-    "nothing landed for it. Answer or type it again to have another go. Log: "
-    "`~/.cache/board-work/{aid}.log`\n")
+    "- FAILED: **a worker stopped without finishing** - it was working on "
+    "`{task}`, dispatched from something you typed into the box, and it "
+    "recorded nothing on this board, so nothing landed for it. Answer or type "
+    "it again to have another go. Log: `~/.cache/board-work/{aid}.log`\n")
 
 
 def note_on_board(bullet):
@@ -544,6 +552,16 @@ not run"), `FAILED:` (nothing landed), `QUESTION:` (you need a word from him \
 before anything else moves) or `INFORMATION:` (a fact, nothing asked of him). \
 The tool refuses an untagged bullet; it is how he tells at a glance what a line \
 on that list is about.
+
+   **ONE BOARD ITEM PER ASK.** If you have more than one thing to report, that \
+is more than one `note` call — never several folded into one message, in the \
+headline or in the elaboration under it. **Replying to a bullet CLEARS that \
+bullet**, so an ask folded into another one is cleared by a reply that was \
+never about it and survives nowhere he can see. The tool refuses the shapes it \
+can recognise (a second tag on a line, a second `**headline**`, a tagged or \
+bulleted line in the elaboration); the rest is on you. Several tagged strings \
+in one call, or several unindented lines, land as several bullets, each \
+clearable on its own.
 
    `land` when the work is complete: it removes the IN FLIGHT row and appends \
 `| commit | what |` under today's date in LANDED. `note` when it is not: the \
@@ -649,7 +667,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision"):
 QUEUE_FAIL = (
     "- FAILED: **nobody could work out what to do with what you typed into the board** "
     "- Solomon exited {how}. Nothing was dispatched and nothing was "
-    "committed. What you wrote, so it is not lost: \"{text}\" Log: "
+    "committed. What you wrote, so it is not lost: {text} Log: "
     "`~/.cache/board-watch.log`\n")
 
 
@@ -713,7 +731,8 @@ def work_the_queue():
     log("the orchestrator FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
     # The last stop. He must never have to wonder where a sentence he typed
     # went, so the failure carries the text itself onto the board.
-    note_on_board(QUEUE_FAIL.format(how=how, text=" ".join(notes.split())[:300]))
+    note_on_board(QUEUE_FAIL.format(
+        how=how, text=bp.oneline(notes, 300, code=True)))
     return True
 
 
@@ -923,7 +942,7 @@ def tick():
             log("a worker stopped without recording anything: %s"
                 % rec.get("task", "")[:80])
             note_on_board(WORKER_FAIL.format(
-                task=" ".join(rec.get("task", "").split())[:200],
+                task=bp.oneline(rec.get("task", ""), 200, code=True),
                 aid=rec.get("agent") or "?"))
     except (OSError, bm.BoardError) as e:
         log("could not reap finished workers: %s" % e)
@@ -1084,7 +1103,9 @@ def tick():
     # as handled, which is worse than it still being open — so the decision goes
     # back where it was, byte for byte, and the bullet says what happened. One
     # edit, so the row is never gone while the decision is not yet back.
-    bullet = FAIL_TEMPLATE.format(num=item["num"] or "?", title=item["title"],
+    bullet = FAIL_TEMPLATE.format(num=item["num"] or "?",
+                                  title=bp.oneline(item["title"], 120,
+                                                   code=True),
                                   how=how)
     if moved:
         try:

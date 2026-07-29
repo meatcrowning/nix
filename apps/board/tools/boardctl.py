@@ -12,6 +12,8 @@ happen. This is the third way, and it is the one an agent should use:
     boardctl.py back 'cover art' --why 'FAILED: **cover art** - blocked on FOCUS'
     boardctl.py stall 'board app'                  # a row nothing owns -> to-do
     boardctl.py note 'PARTIAL: **Relaunch `player`** - live source, no hot reload.'
+    boardctl.py note 'COMPLETION: **the fade** - landed.' \\
+                     'PARTIAL: **the tooltip** - needs a rebuild.'   # TWO items
     boardctl.py list
 
     boardctl.py agents                             # who is running, by phase
@@ -120,13 +122,35 @@ def cmd_back(a):
     return 0
 
 
+def _note_text(argv):
+    """The argv of `note`, as one MESSAGE PER ASK.
+
+    Ordinary use is one quoted string and joins with a space as it always did.
+    But `note 'COMPLETION: a' 'PARTIAL: b'` is two messages, and joining those
+    with a space made one bullet claiming to be both — the bundling his
+    separation rule exists to stop (`boardparse.check_one_ask`). Every argument
+    after the first that STARTS with a tag is therefore its own line, which
+    `boardmove.note` turns into its own bullet, with its own stamp, clearable on
+    its own.
+    """
+    out = []
+    for word in argv:
+        if out and bp.is_tagged(word):
+            out.append(word)
+        elif out:
+            out[-1] += " " + word
+        else:
+            out.append(word)
+    return "\n".join(out)
+
+
 def cmd_note(a):
-    if bm.note(" ".join(a.text), path=a.board):
+    if bm.note(_note_text(a.text), path=a.board):
         # ...and, if a worker wrote it, that it reported AT ALL. `reap()` reads
         # exactly this: a worker whose process goes without one of `note`,
         # `land` or `ask` behind it is reported to him as having stopped without
         # finishing, rather than being silently indistinguishable from success.
-        bw.mark_reported(what=" ".join(a.text))
+        bw.mark_reported(what=_note_text(a.text))
         print("added to WAITING ON YOU TO DO")
         return 0
     print("nothing written", file=sys.stderr)
@@ -368,7 +392,9 @@ def main(argv=None):
 
     s = sub.add_parser("note", help="add one bullet to WAITING ON YOU TO DO; it "
                                     "must start with %s, then a short "
-                                    "description, then any background"
+                                    "description, then any background. ONE ASK "
+                                    "PER BULLET - pass several tagged strings, "
+                                    "or several lines, for several items"
                                     % "/".join(t + ":" for t in bp.TODO_TAGS))
     s.add_argument("text", nargs="+")
     s.set_defaults(fn=cmd_note)
