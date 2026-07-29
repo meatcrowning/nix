@@ -46,6 +46,12 @@ Window {
     readonly property var doc: Board.doc
     readonly property var needs: doc && doc.needs ? doc.needs : []
     readonly property var todo: doc && doc.todo ? doc.todo : []
+    // The same bullets as `todo`, in sub-sections by what they SAY THEY ARE.
+    // Grouped once per load in `boardparse.todo_groups()`, never here: a view
+    // that regrouped per delegate would do it on every scroll (§2.3's ingest
+    // rule, the same reason the glyph map lives at the parse). `todo` stays the
+    // flat list everything else — removal, undo, reply — still works from.
+    readonly property var todoGroups: doc && doc.todoGroups ? doc.todoGroups : []
     readonly property var flight: doc && doc.flight ? doc.flight : []
     readonly property var landed: doc && doc.landed ? doc.landed : []
     readonly property var intro: doc && doc.intro ? doc.intro : ({})
@@ -354,102 +360,137 @@ Window {
                         color: win.fgDim
                         text: "to do, when you feel like it"
                     }
+                    // ...and they are grouped by that first word — his:
+                    // *"the information, completion, partial etc of a message
+                    // should be used to organize them on the board. under the
+                    // needs you section there should be sub sections for each
+                    // of these headers"*.
+                    //
+                    // A sub-heading is the SAME band the sections use, one rung
+                    // quieter: no accent, and `interactive: false` so it carries
+                    // no `[-]` and cannot be clicked — it groups, it does not
+                    // collapse. It is a heading and NOT a count: no tally, no
+                    // badge, no severity colour, exactly as the flat list had
+                    // none (AGENTS.md, and §8.1's ramp means a machine fault).
+                    // A tag with no bullets has no heading at all; the order and
+                    // why it is that order live in `boardparse.TODO_ORDER`.
                     Repeater {
-                        model: win.todo
-                        delegate: Item {
-                            id: todoRow
+                        model: win.todoGroups
+                        delegate: Column {
+                            id: todoGroup
                             required property var modelData
-                            // The reply box is opened from the row's own menu
-                            // and stays open until he sends or clears it, like
-                            // every other editor here — a draft is never thrown
-                            // away by a click somewhere else.
-                            property bool replying: win.draftOf("todo:" + modelData.line) !== ""
                             width: needsCol.width
-                            implicitHeight: bar.implicitHeight
-                                            + (replying ? replyBox.height + 4 : 0)
-                            height: implicitHeight
 
                             Item {
-                                id: bar
-                                width: parent.width
-                                implicitHeight: todoText.implicitHeight
-                                height: implicitHeight
-                                Rectangle {
-                                    anchors.fill: parent
-                                    color: tma.containsMouse ? Theme.highlight : "transparent"
-                                }
-                                PixelText {
-                                    id: todoMark
-                                    x: 0
-                                    color: win.fgDim
-                                    text: "-"
-                                }
-                                Para {
-                                    id: todoText
-                                    x: todoMark.width + 8
-                                    width: parent.width - x
-                                    color: win.fgText
-                                    text: todoRow.modelData.text
-                                }
-                                MouseArea {
-                                    id: tma
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    // Left is here for the DOUBLE click only —
-                                    // *"i should be able to just double click
-                                    // on stuff in the to do when you feel like
-                                    // it section to remove them"*. A single
-                                    // left click stays inert: there is nothing
-                                    // for it to do on a bullet the store gives
-                                    // no checkbox, and a row that reacted to
-                                    // one pass of the pointer would make the
-                                    // removal an accident waiting to happen.
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    onClicked: (m) => {
-                                        if (m.button !== Qt.RightButton)
-                                            return;
-                                        var p = mapToItem(null, m.x, m.y);
-                                        win.todoMenu(todoRow.modelData, p.x, p.y,
-                                                     todoRow);
-                                    }
-                                    onDoubleClicked: (m) => {
-                                        if (m.button !== Qt.LeftButton)
-                                            return;
-                                        Board.removeTodo(todoRow.modelData.line);
-                                    }
-                                }
+                                width: 1
+                                height: todoGroup.modelData.label !== "" ? 4 : 0
                             }
-
-                            // *"the top item on the right click menu for to do
-                            // items should be `reply` that lets me reply
-                            // directly to it instead of typing in the top box
-                            // like i am doing now"*. Same component, same
-                            // `boardagents.send()` path, same conservation
-                            // property — what it adds is the quote, so whoever
-                            // picks it up knows which chore he meant, and the
-                            // removal: a chore he has answered leaves the list.
-                            InputBox {
-                                id: replyBox
-                                y: bar.height + 4
-                                width: parent.width
-                                visible: todoRow.replying
-                                height: visible ? implicitHeight : 0
-                                draft: win.draftOf("todo:" + todoRow.modelData.line)
-                                fgAccent: win.fgAccent
-                                fgText: win.fgText
+                            SectionHead {
+                                width: todoGroup.width
+                                visible: todoGroup.modelData.label !== ""
+                                label: todoGroup.modelData.label
+                                interactive: false
                                 fgDim: win.fgDim
-                                placeholder: "reply to this one - it goes to the inbox"
-                                onDraftEdited: (b) => win.setDraft(
-                                    "todo:" + todoRow.modelData.line, b)
-                                onSubmitted: (b) => {
-                                    if (win.replyToTodo(todoRow.modelData, b))
-                                        todoRow.replying = false;
-                                }
                             }
 
-                            function beginReply() {
-                                todoRow.replying = true;
-                                replyBox.beginEdit();
+                            Repeater {
+                                model: todoGroup.modelData.items
+                                delegate: Item {
+                                    id: todoRow
+                                    required property var modelData
+                                    // The reply box is opened from the row's own menu
+                                    // and stays open until he sends or clears it, like
+                                    // every other editor here — a draft is never thrown
+                                    // away by a click somewhere else.
+                                    property bool replying: win.draftOf("todo:" + modelData.line) !== ""
+                                    width: needsCol.width
+                                    implicitHeight: bar.implicitHeight
+                                                    + (replying ? replyBox.height + 4 : 0)
+                                    height: implicitHeight
+
+                                    Item {
+                                        id: bar
+                                        width: parent.width
+                                        implicitHeight: todoText.implicitHeight
+                                        height: implicitHeight
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            color: tma.containsMouse ? Theme.highlight : "transparent"
+                                        }
+                                        PixelText {
+                                            id: todoMark
+                                            x: 0
+                                            color: win.fgDim
+                                            text: "-"
+                                        }
+                                        Para {
+                                            id: todoText
+                                            x: todoMark.width + 8
+                                            width: parent.width - x
+                                            color: win.fgText
+                                            text: todoRow.modelData.text
+                                        }
+                                        MouseArea {
+                                            id: tma
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            // Left is here for the DOUBLE click only —
+                                            // *"i should be able to just double click
+                                            // on stuff in the to do when you feel like
+                                            // it section to remove them"*. A single
+                                            // left click stays inert: there is nothing
+                                            // for it to do on a bullet the store gives
+                                            // no checkbox, and a row that reacted to
+                                            // one pass of the pointer would make the
+                                            // removal an accident waiting to happen.
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                            onClicked: (m) => {
+                                                if (m.button !== Qt.RightButton)
+                                                    return;
+                                                var p = mapToItem(null, m.x, m.y);
+                                                win.todoMenu(todoRow.modelData, p.x, p.y,
+                                                             todoRow);
+                                            }
+                                            onDoubleClicked: (m) => {
+                                                if (m.button !== Qt.LeftButton)
+                                                    return;
+                                                Board.removeTodo(todoRow.modelData.line);
+                                            }
+                                        }
+                                    }
+
+                                    // *"the top item on the right click menu for to do
+                                    // items should be `reply` that lets me reply
+                                    // directly to it instead of typing in the top box
+                                    // like i am doing now"*. Same component, same
+                                    // `boardagents.send()` path, same conservation
+                                    // property — what it adds is the quote, so whoever
+                                    // picks it up knows which chore he meant, and the
+                                    // removal: a chore he has answered leaves the list.
+                                    InputBox {
+                                        id: replyBox
+                                        y: bar.height + 4
+                                        width: parent.width
+                                        visible: todoRow.replying
+                                        height: visible ? implicitHeight : 0
+                                        draft: win.draftOf("todo:" + todoRow.modelData.line)
+                                        fgAccent: win.fgAccent
+                                        fgText: win.fgText
+                                        fgDim: win.fgDim
+                                        placeholder: "reply to this one - it goes to the inbox"
+                                        onDraftEdited: (b) => win.setDraft(
+                                            "todo:" + todoRow.modelData.line, b)
+                                        onSubmitted: (b) => {
+                                            if (win.replyToTodo(todoRow.modelData, b))
+                                                todoRow.replying = false;
+                                        }
+                                    }
+
+                                    function beginReply() {
+                                        todoRow.replying = true;
+                                        replyBox.beginEdit();
+                                    }
+                                }
                             }
                         }
                     }

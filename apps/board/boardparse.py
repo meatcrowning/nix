@@ -322,6 +322,69 @@ def parse(src):
     for it in out["needs"]:
         it["answer"] = "\n".join(it["answerRaw"]).strip()
         it["answered"] = bool(it["answer"]) or any(o["checked"] for o in it["options"])
+    for t in out["todo"]:
+        t["tag"] = tag_of(t["text"])
+    out["todoGroups"] = todo_groups(out["todo"])
+    return out
+
+
+# ------------------------------------------------- what a bullet IS, for drawing
+#
+# `TODO_TAGS` (below) is the WRITE-side rule: a bullet says what it is in its
+# first word. These two are the READ-side use of the same word — the view groups
+# the bullets by it instead of drawing one flat list, which is his: *"the
+# information, completion, partial etc of a message should be used to organize
+# them on the board. under the needs you section there should be sub sections
+# for each of these headers"*.
+#
+# It is computed HERE, once per load, for the same reason the glyph map is: a
+# view that regrouped per delegate would do it on every scroll. Nothing about
+# the STORE changes — no sub-headings are ever written into `board.md`, the raw
+# lines and every index into them are untouched, and a group holds the very same
+# bullet dicts the flat `todo` list does, so removing one and putting it back is
+# the same edit it always was.
+#
+# THE ORDER, and why it is this one. It is by WHAT THE BULLET ASKS OF HIM, and
+# it is fixed by tag — not by age, not by count, not by when it arrived, so a
+# bullet never moves between two readings and no group is ranked against a
+# clock (the no-pressure requirement, `AGENTS.md`).
+#
+#   QUESTION     nothing moves until he says a word. It is the only group that
+#                is waiting on him, so it is first.
+#   FAILED       something was attempted and nothing landed. Second because the
+#                one thing this system must never do is let a failure sink to
+#                the bottom of a list of good news.
+#   PARTIAL      some of it landed and some did not; there is a remainder.
+#   COMPLETION   done, and on his machine. A record.
+#   INFORMATION  a fact; nothing is asked of him at all. Last for that reason.
+#
+# An untagged bullet — the store is full of ones written before the tag rule —
+# comes FIRST, under no heading at all, so nothing claims it as something it is
+# not. Reading is untouched by the tag rule and it is untouched by this too.
+TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION")
+
+
+def tag_of(text):
+    """The tag a drawn bullet leads with, or `""` for one that leads with none."""
+    head = text.split(":", 1)[0].strip()
+    return head if head in TODO_TAGS else ""
+
+
+def todo_groups(todos):
+    """The WAITING bullets as `[{tag, label, items}]`, in `TODO_ORDER`.
+
+    A tag with no bullets gets no entry, so it gets no heading — an empty
+    sub-section would be a slot he has to fill, which is the shape this board
+    refuses everywhere else.
+    """
+    out = []
+    untagged = [t for t in todos if not t.get("tag")]
+    if untagged:
+        out.append({"tag": "", "label": "", "items": untagged})
+    for tag in TODO_ORDER:
+        items = [t for t in todos if t.get("tag") == tag]
+        if items:
+            out.append({"tag": tag, "label": tag.lower(), "items": items})
     return out
 
 
