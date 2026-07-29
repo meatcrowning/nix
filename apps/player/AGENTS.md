@@ -101,12 +101,31 @@ properties (defaulting to the lit tones, so a harness can build one alone).
 **third** app to grey its chrome and leave its content lit, after painter and
 reader, which is why §3.1.1 exists and why this is tested.
 
+**The artwork fades with them**, through a fourth derived value on the same
+chain — `readonly property real fgArt: win.active ? 1.0 : 0.55`, wired
+`Main` → `AlbumGrid` → `AlbumPanel` and `Main` → `NowPlaying`. **All three
+covers**: the gallery thumbnails, the album section's art and the now-playing
+full-bleed cover. This REVERSES the first implementation, which left the art lit
+by analogy with filer's `PreviewTile`; **his call, 2026-07-28** — *"dim it with
+everything else — the window reads as one unfocused surface"*. Do not restore
+the old reading, in code or in `docs/DESIGN.md` §3.1.1.
+
+The mechanism is plain `opacity` on the existing `Image`, i.e. compositing the
+cover toward the `Theme.bgAlt` fill every artBox already draws behind it — no
+shader, no `Qt5Compat` effect and no extra item in a gallery of tiles (verified:
+the item count of the whole window is unchanged at 406, and load+first-frame CPU
+time is indistinguishable). A grey scrim in `Theme.inactive` was the obvious
+alternative and is wrong for the same reason `Theme.dim` is exempt below: the
+grey is lighter than a dark sleeve, so it would BRIGHTEN half the library.
+**0.55 is measured**: over 200 real thumbnails from `~/.cache/player/art`
+composited on the live palette's `bgAlt` it moves the mean cover 18.5 L\* (median
+18.3), against `fgDim`'s 22.5 L\* and `fgText`/`fgAccent`'s 47.3 L\* — just under
+the weaker text move, because a cover is a large field where a step reads
+stronger than in glyph-sized text, and matching 47 would take the average sleeve
+to near-black and read as broken rather than quiet.
+
 Deliberately NOT faded, and each for a reason:
 
-- **The cover art** — the gallery thumbnails, the now-playing full-bleed cover,
-  the album section's art. An image is content, not a foreground tone; filer's
-  `PreviewTile` already settled this by fading its filename and selection frame
-  and leaving the thumbnail alone.
 - **`Theme.dim`** — the tertiary tone (the `♫` art placeholder, an unrated star,
   a play count, the search placeholder). It sits *below* the inactive grey, so
   mapping it there would BRIGHTEN it on focus loss.
@@ -134,7 +153,13 @@ second offscreen window — no faked flag); the propagation (every visible item 
 every view is asked what colour it *ended up* with, which is the layer both
 earlier occurrences of the bug lived in); and the pixels (480x826 — the size
 player actually runs at — histogrammed focused vs unfocused, with a fake palette
-that gives every theme slot a unique hue so a count is unambiguous). Two traps
+that gives every theme slot a unique hue so a count is unambiguous). The
+propagation layer also asks every visible `Image` whether it took `fgArt` (an
+`AlbumPanel` whose relay through `AlbumGrid` is missing dims the gallery and
+leaves the open album section lit), and the pixel layer asserts the art
+**differs** between the frames — gone at the lit RGB, and back at the exact tone
+`fgArt` over `bgAlt` predicts, in the same pixel count, so a cover that had been
+blanked fails as loudly as one left lit. 39/39, 2026-07-28. Two traps
 that harness paid for: `highlight` must not be a grey, because `Theme.inactive`
 over `bg` composites to exactly `#404040`; and Qt caches a directory's file
 listing on first load, so a scratch `.qml` written afterwards fails with "File

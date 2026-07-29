@@ -28,8 +28,11 @@ Three layers:
      colour by the harness's fake palette, so a pixel count is an unambiguous
      answer to "is this slot still on screen": the three foreground slots must
      fall to ZERO, and bg / bgAlt / border / highlight must be IDENTICAL between
-     the two frames. The cover art is counted too — it must NOT move, which is
-     the §3.1.1 reading that an image is content, not a foreground tone.
+     the two frames. The cover art is counted too — and since 2026-07-28 it must
+     MOVE: he reversed the earlier "an image is content, so it stays lit"
+     reading with *"dim it with everything else — the window reads as one
+     unfocused surface"*, so every flat-colour art pixel is composited toward
+     `bgAlt` by `Main.fgArt` and none of them survive at the exact art RGB.
 
 Run it with player's own Qt env, not the bare system python — and never through
 the packaged `player` binary, which takes no arguments and would open a real
@@ -412,6 +415,27 @@ def histogram(img, names):
     return counts
 
 
+def blend(fg, bg, a):
+    """`fg` drawn at opacity `a` over an opaque `bg` — what Qt's renderer does
+    to a cover when the window loses focus."""
+    return QColor(*[round(getattr(fg, c)() * a + getattr(bg, c)() * (1 - a))
+                    for c in ("red", "green", "blue")])
+
+
+def near_count(img, want, tol=2):
+    """Pixels within `tol` per channel of `want` — the composite is computed in
+    the renderer, so an exact match is one rounding rule away from a false
+    failure."""
+    n = 0
+    for y in range(img.height()):
+        for x in range(img.width()):
+            p = QColor(img.pixel(x, y))
+            if (abs(p.red() - want.red()) <= tol and abs(p.green() - want.green()) <= tol
+                    and abs(p.blue() - want.blue()) <= tol):
+                n += 1
+    return n
+
+
 def main():
     argv = sys.argv[1:]
     pngdir = None
@@ -505,6 +529,8 @@ def main():
           win.property("fgText") == lit["Theme.text"]
           and win.property("fgDim") == lit["Theme.textDim"]
           and win.property("fgAccent") == lit["Theme.accent"])
+    check("a focused window draws its ARTWORK at full opacity",
+          win.property("fgArt") == 1.0, win.property("fgArt"))
     focus(False)
     check("the window reports itself INACTIVE once another window takes focus",
           win.property("active") is False)
@@ -512,6 +538,12 @@ def main():
           win.property("fgText") == inactive and win.property("fgDim") == inactive
           and win.property("fgAccent") == inactive,
           (win.property("fgText"), win.property("fgDim"), win.property("fgAccent")))
+    # HIS call, 2026-07-28: the cover art dims with the rest of the foreground.
+    # An image has no `Theme.inactive` version, so the fade is an opacity onto
+    # the `Theme.bgAlt` fill behind every cover — a multiplier, not a tone.
+    fga = win.property("fgArt")
+    check("an UNFOCUSED window also fades the ARTWORK (0 < fgArt < 1)",
+          isinstance(fga, float) and 0.0 < fga < 1.0, fga)
 
     # ------------------------------------------------ 2. the propagation
     # PySide hands a QML `Window` root back as a bare QWindow: no
@@ -554,6 +586,18 @@ def main():
         label = view + ("+" + "+".join(extra) if extra else "")
         check("nothing in the %s view is still lit while unfocused" % label,
               not leaks, sorted(set(leaks))[:8])
+        # Every cover on screen must have taken `fgArt`. This is the layer an
+        # unwired pane fails in — AlbumPanel gets its value relayed through
+        # AlbumGrid, so a missing line there dims the gallery and leaves the
+        # open album section lit at full brightness.
+        arts = [it for it in descendants(root)
+                if it.metaObject().className().startswith("QQuickImage")
+                and visible_chain(it, root)]
+        unfaded = ["%s <- %s" % (it.metaObject().className(), ancestry(it, root))
+                   for it in arts if abs(it.opacity() - fga) > 1e-6]
+        if arts:
+            check("every cover drawn in the %s view is faded to fgArt" % label,
+                  not unfaded, sorted(set(unfaded))[:8])
         for k in extra:
             win.setProperty(k, False)
 
@@ -591,12 +635,26 @@ def main():
                 if h_on[k] != h_off[k]}
         check("%s: background, bgAlt, border and highlight pixels are IDENTICAL" % label,
               not same, same)
-        # The playlists page draws no artwork at all, so there the claim is only
-        # that nothing appeared; the albums and now-playing pages carry the real
-        # evidence (thumbnails and a full-bleed cover).
-        check("%s: the cover art does NOT dim (an image is not a foreground tone)" % label,
-              h_on["art"] == h_off["art"],
-              (h_on["art"], h_off["art"]))
+        # The artwork DOES dim (his call, 2026-07-28). The fake art is one flat
+        # colour, so every pixel of it is composited toward `bgAlt` by the same
+        # factor and the exact art RGB must vanish entirely — a partial count
+        # would mean some cover was left lit. The playlists page draws no
+        # artwork at all, so there the claim is only that nothing appeared; the
+        # albums and now-playing pages carry the real evidence (thumbnails and a
+        # full-bleed cover).
+        if h_on["art"]:
+            check("%s: the cover art DIMS with the foreground (S3.1.1, his call)" % label,
+                  h_off["art"] == 0, (h_on["art"], h_off["art"]))
+            # ...and is DIMMED, not erased: the same pixel count comes back at
+            # the tone `fgArt` over `bgAlt` predicts. A cover that had gone
+            # blank, or been hidden, would pass the check above just as well.
+            faded = near_count(off, blend(QColor(ART_RGB), QColor(SLOTS["bgAlt"]), fga))
+            check("%s: those pixels are still THERE, at the predicted faded tone" % label,
+                  abs(faded - h_on["art"]) <= max(4, h_on["art"] // 50),
+                  (h_on["art"], faded))
+        else:
+            check("%s: no artwork appeared out of nowhere when unfocused" % label,
+                  h_off["art"] == 0, (h_on["art"], h_off["art"]))
         for k in extra:
             win.setProperty(k, False)
 

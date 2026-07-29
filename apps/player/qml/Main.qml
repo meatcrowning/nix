@@ -68,6 +68,30 @@ Window {
     readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
     readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
 
+    // ...and the ARTWORK fades with them — HIS call (2026-07-28): "dim it with
+    // everything else, the window reads as one unfocused surface". This reverses
+    // the earlier reading (kept in docs/DESIGN.md §3.1.1) that an image is
+    // content and stays lit; do not "fix" it back. All of it: the now-playing
+    // full-bleed cover, the gallery thumbnails and the album section's cover.
+    //
+    // A photograph has no `Theme.inactive` version, so the fade is the one move
+    // an image can make without a shader: it composites toward the `Theme.bgAlt`
+    // fill every cover is already drawn on top of, i.e. plain item opacity. A
+    // GREY scrim was the obvious alternative and is wrong — `Theme.inactive` is
+    // lighter than a dark sleeve, so it would BRIGHTEN half the library, the
+    // same trap `Theme.dim` is exempt for above. Desaturation would need a
+    // Qt5Compat effect and an FBO per tile in a gallery of them.
+    //
+    // 0.55 is measured, not picked: over 200 real thumbnails from
+    // ~/.cache/player/art, composited on the live palette's `bgAlt`, it moves
+    // the mean cover 18.5 L* (median 18.3) — against the 22.5 L* `fgDim` moves
+    // and the 47.3 L* `fgText`/`fgAccent` move. So the cover steps with the
+    // window rather than a beat behind it, on the weaker of the two text moves:
+    // the cover is a large field, where a tonal step reads far stronger than it
+    // does in glyph-sized text, and matching the 47 would take the average
+    // sleeve to near-black — "broken", not "quiet".
+    readonly property real fgArt: win.active ? 1.0 : 0.55
+
     // The OUTER titlebar shows the window title — put the playing track there
     // ("artist — title") instead of a static app name. The inner column's
     // footer carries the position readout (see tbTime), below the scrub track.
@@ -278,6 +302,7 @@ Window {
             fgText: win.fgText
             fgDim: win.fgDim
             fgAccent: win.fgAccent
+            fgArt: win.fgArt
             onOpened: function(albumId) { win.openAlbum(albumId); }
             onSearchArtist: function(artist) { win.browseArtist(artist); }
         }
@@ -296,6 +321,7 @@ Window {
             fgText: win.fgText
             fgDim: win.fgDim
             fgAccent: win.fgAccent
+            fgArt: win.fgArt
             onOpenAlbum: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtist: function(artist) { win.browseArtist(artist); }
         }
