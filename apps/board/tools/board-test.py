@@ -738,6 +738,38 @@ def test_agents(tmp):
           [g["id"] for g in gone] == ["note-x"]
           and not any(a["id"] == "note-x" for a in ba.agents()), gone)
 
+    # ---- an agent is listed ONCE, however it was spawned ----
+    # The dedupe against interactive sessions has to hold for both shapes of
+    # agent, and they are opposites. A decision/note agent's registered pid is
+    # board-watch's tick process, with the `claude` as its CHILD — only ancestry
+    # catches that. A WORKER gets its own systemd unit, so the pid registered
+    # for it IS the `claude` process, which appears in nobody's ancestor list
+    # but its own — and it was drawn a second time as an anonymous session
+    # until the dedupe considered the pid itself as well.
+    fake = {
+        900001: (1, "claude", ["claude", "-p"]),        # a worker, unit-spawned
+        900002: (1, "claude", ["claude"]),              # his terminal: nobody's
+        900003: (1, "python3", ["python3", "board-watch.py"]),
+        900004: (900003, "claude", ["claude", "-p"]),   # ...its child
+    }
+    ba.register("unit-worker", "a worker in its own unit", 900001, kind="worker")
+    ba.register("tick-agent", "an agent under the tick", 900003, kind="note")
+    got = ba.agents(procs=fake)
+    check("a worker whose OWN pid is the claude process is listed once",
+          [a["kind"] for a in got if a["pid"] == 900001] == ["worker"],
+          [(a["id"], a["kind"]) for a in got if a["pid"] == 900001])
+    check("...and an agent whose claude is a CHILD is still listed once",
+          [a["kind"] for a in got if a["pid"] in (900003, 900004)] == ["note"],
+          [(a["id"], a["kind"], a["pid"]) for a in got if a["pid"] in (900003, 900004)])
+    check("...while a session nobody here spawned is still listed as a session",
+          [(a["id"], a["kind"], a["title"]) for a in got if a["pid"] == 900002]
+          == [("s900002", "session", "an interactive Claude Code session")],
+          [(a["id"], a["kind"]) for a in got if a["pid"] == 900002])
+    for aid in ("unit-worker", "tick-agent"):
+        p = os.path.join(ba.agents_dir(), "%s.json" % aid)
+        if os.path.exists(p):
+            os.unlink(p)
+
     # ---- the watcher's own state, said honestly ----
     check("an unaskable watcher says so rather than looking healthy",
           "could not be asked" in ba.watcher_state("")["text"])
