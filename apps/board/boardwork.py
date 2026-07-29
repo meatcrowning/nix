@@ -1038,28 +1038,40 @@ def _idle_orchestrator_row():
     the same place at the top with the same name on it.
 
     It says `ready` and NOTHING ELSE, because that is all that is true. No
-    claim, no observed line, no inbox of its own — a message left for an
-    orchestrator that does not exist would have nobody to read it, and the
-    queue (the box at the top of the window) is where such a message already
-    goes. `id` is empty for exactly that reason: `AgentRow.addressable` is
-    what draws the box, and an unaddressable row does not offer one.
+    observed line and no inbox of its own — a message left for an orchestrator
+    that does not exist would have nobody to read it, and the queue (the box at
+    the top of the window) is where such a message already goes. `id` is empty
+    for exactly that reason: `AgentRow.addressable` is what draws the box, and
+    an unaddressable row does not offer one.
+
+    **It leads with `Solomon is ready`**, like every other card leads with its
+    own name — [his, 2026-07-29] the orchestrator's card should read *"Solomon
+    is ..."* like the rest, and he said so twice. Putting the name in the name
+    column instead was the first answer and it was not what he asked for.
+
+    This is NOT §10.6's forbidden manufactured claim. That rule exists so a
+    claim is never derived from an observation, making the two agree by
+    construction — and there is no observation here, and no process to observe:
+    this row is a placeholder for the absence of an agent, and every word on it
+    is written by this function. `doingLine` stays empty, which is the half of
+    §10.6 that does bind: nothing pretends to have seen him do anything.
     """
     return {
         "id": "", "name": ba.ORCHESTRATOR_NAME, "kind": ba.ORCHESTRATOR_KIND,
         "title": "hands out what you type, and does none of the work himself",
         "where": "", "state": "idle", "running": False,
-        # NO claim and NO observation, deliberately — this row is not a process
-        # and there is nothing to observe. His *"Solomon is ..."* top line is
-        # not bought here: the name column already puts the whole name on this
-        # row's first line (`AgentRow.nameNeeded`, asserted below in
-        # `tools/board-test.py`). It is the LIVE orchestrator's card that had no
-        # name on its top line, and that is fixed where every other agent's is —
-        # by Solomon claiming a phase, which `ORCHESTRATOR_PROMPT` now tells him
-        # to do.
-        "phase": "ready", "says": "", "saysLine": "",
+        # NO observation, deliberately — this row is not a process and there is
+        # nothing to observe. The top line is the ONE sentence that is true of
+        # him while nothing is happening, in the shape every other card uses.
+        # (The LIVE orchestrator's card gets its top line the way every worker
+        # does, by claiming a phase, which `ORCHESTRATOR_PROMPT` tells him to.)
+        "phase": "ready", "says": "ready",
+        "saysLine": "%s is ready" % ba.ORCHESTRATOR_NAME,
         "actually": "", "doingLine": "", "observed": "unlinked",
         "contextLine": "", "unread": 0, "waiting": [], "born": 0.0,
-        "detail": "ready - what you type at the top of this window goes to him"}
+        # The detail line no longer repeats `ready` — the line above it says so
+        # now, and §9.1 suppresses metadata a card has already stated.
+        "detail": "what you type at the top of this window goes to him"}
 
 
 def _is_orchestrator(a):

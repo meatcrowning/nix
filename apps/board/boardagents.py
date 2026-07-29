@@ -818,7 +818,7 @@ def describe(a):
     # times when hes not doing something"* — and the sentence has to be true, so
     # it says what actually happens next rather than claiming anyone is working.
     if a["state"] == "idle":
-        return "ready - what you type at the top of this window goes to him"
+        return "what you type at the top of this window goes to him"
     if a["state"] == "running":
         if a["kind"] == "session":
             return "running - board sees the process, not what it is doing"

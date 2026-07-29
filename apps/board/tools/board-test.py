@@ -2030,10 +2030,15 @@ def test_work(tmp):
     check("with NO orchestrator running, Solomon still holds the top row",
           idle.get("name") == ba.ORCHESTRATOR_NAME
           and idle.get("state") == "idle", idle)
-    check("...reading as ready, and never as work in flight",
-          idle.get("saysLine") == "" and idle.get("doingLine") == ""
-          and idle.get("running") is False
-          and ba.describe(idle).startswith("ready - "), ba.describe(idle))
+    check("...leading with his NAME, the way every other card does",
+          idle.get("saysLine") == "%s is ready" % ba.ORCHESTRATOR_NAME,
+          idle.get("saysLine"))
+    check("...and never as work in flight: nothing pretends to observe him",
+          idle.get("doingLine") == "" and idle.get("running") is False
+          and idle.get("observed") == "unlinked", idle)
+    check("...with the detail line no longer repeating `ready` under it",
+          ba.describe(idle) == "what you type at the top of this window "
+                               "goes to him", ba.describe(idle))
     check("...offered no inbox, there being nobody there to read one",
           idle.get("id") == "", idle)
     # ...and the card of a LIVE Solomon leads with his name, which is the one
@@ -2776,9 +2781,11 @@ def test_window(app, tmp):
           and cards[0].get("state") == "idle"
           and all(c.get("name") != ba.ORCHESTRATOR_NAME for c in cards[1:]),
           [(c.get("name"), c.get("state")) for c in cards])
-    check("...saying he is ready, with no claim and no observation on him",
-          cards[0].get("saysLine") == "" and cards[0].get("doingLine") == ""
-          and cards[0].get("detail", "").startswith("ready - ")
+    check("...leading with `Solomon is ready`, the way every card leads",
+          cards[0].get("saysLine") == "%s is ready" % ba.ORCHESTRATOR_NAME,
+          cards[0].get("saysLine"))
+    check("...with no observation on him: nothing claims to have SEEN him",
+          cards[0].get("doingLine") == ""
           and cards[0].get("running") is False, cards[0])
     check("...and no box under it, there being nobody there to send to",
           cards[0].get("id") == "" and cards[0].get("waiting") == [], cards[0])
@@ -2934,11 +2941,18 @@ def test_window(app, tmp):
           .get("Fold VScroll into qmlcommon") == keep[-1].property("textDim"),
           [(s, t.property("color").name()) for _, s, t in muteLines])
 
-    # ---- ...and the name column MEASURES, because Solomon is seven long ----
-    # The pool is capped at six so the titles line up down the list; the one
-    # name that is not from the pool is `Solomon`, and the row he was asked to
-    # be pinned to is the worst possible place to elide. So the column widens
-    # for him and for nobody else.
+    # ---- ...and SOLOMON'S OWN ROW LEADS WITH HIS NAME ----
+    # [his, 2026-07-29] the orchestrator's card should read *"Solomon is ..."*
+    # like everybody else's, and he said so twice. The first answer put the name
+    # in the name column on the title row, which is not what he asked for; the
+    # standing row now carries `Solomon is ready` as its top line
+    # (`boardwork._idle_orchestrator_row`), so `nameNeeded` is false on it and
+    # the name column is not what is being measured here any more.
+    #
+    # The column's WIDTH rule still exists and still matters — the pool is
+    # capped at six characters so the titles line up down the list, and
+    # `Solomon` is seven — so it is asserted below for whichever card is
+    # actually drawing one.
     solItem = None
     for it in descendants(win.contentItem()):
         if it.property("nameNeeded") is None:
@@ -2950,20 +2964,28 @@ def test_window(app, tmp):
     cols = [c for c in (descendants(solItem) if solItem is not None else [])
             if c.property("nameW") is not None]
     cellW = solItem.property("cellW") if solItem is not None else 0
-    check("Solomon's own row draws the whole name, not six characters of it",
-          bool(solLines)
-          and ba.ORCHESTRATOR_NAME in [s for _, s, _ in solLines],
+    lead = "%s is ready" % ba.ORCHESTRATOR_NAME
+    check("Solomon's row LEADS with his name, like every other card",
+          bool(solLines) and solLines[0][1] == lead,
           [(y, s) for y, s, _ in solLines])
-    check("...in a column wide enough that the title cannot run under it",
-          bool(cols) and cellW
-          and cols[0].property("nameW")
-          >= (len(ba.ORCHESTRATOR_NAME) + 1) * cellW,
+    check("...whole, not six characters of it - the pool's cap is not his",
+          ba.ORCHESTRATOR_NAME in solLines[0][1] if solLines else False,
+          [(y, s) for y, s, _ in solLines])
+    check("...so the name column is not drawn twice on the same card",
+          solItem is not None and solItem.property("nameNeeded") is False
+          and len([s for _, s, _ in solLines
+                   if s == ba.ORCHESTRATOR_NAME]) == 0,
+          [(y, s) for y, s, _ in solLines])
+    check("...and it still MEASURES for a card that does draw one",
+          not cols or not cellW
+          or all(c.property("nameW") >= (len(ba.ORCHESTRATOR_NAME) + 1) * cellW
+                 for c in cols if c.property("nameW") > 0),
           [(c.property("nameW"), cellW) for c in cols])
     check("...and the standing row reads as quiet, not as an agent at work",
           solItem is not None and solItem.property("running") is False
-          and solItem.property("titleFirst") is True
+          and solItem.property("titleFirst") is False
           and {s: t.property("color") for _, s, t in solLines}
-          .get(ba.ORCHESTRATOR_NAME) == keep[-1].property("textDim"),
+          .get(lead) == solItem.property("fgDim"),
           [(s, t.property("color").name()) for _, s, t in solLines])
     check("...and 'nothing is running' is about the WORKERS, not about him",
           prop(win, "nothingRunning") is False, prop(win, "nothingRunning"))
