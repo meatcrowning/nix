@@ -3428,6 +3428,12 @@ def main():
         os.makedirs(SHOTS, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["XDG_STATE_HOME"] = os.path.join(tmp, "state")
+        # ...and the WORKER LOGS with it (`boardwork._log_path`). Without this
+        # every worker a dispatch test spawns left an empty log in his real
+        # `~/.cache/board-work/`, which is the directory an agent reads to find
+        # out what actually ran (2026-07-29: 682 of 714 files there were debris
+        # from these two harnesses).
+        os.environ["XDG_CACHE_HOME"] = os.path.join(tmp, "cache")
         os.environ["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
         os.makedirs(os.path.join(tmp, "rt"))
         os.makedirs(os.path.join(tmp, "mv"))
