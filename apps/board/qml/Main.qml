@@ -425,9 +425,9 @@ Window {
                             // directly to it instead of typing in the top box
                             // like i am doing now"*. Same component, same
                             // `boardagents.send()` path, same conservation
-                            // property — the only difference is that the chore
-                            // is quoted into what he sends, so whoever picks it
-                            // up knows which one he meant.
+                            // property — what it adds is the quote, so whoever
+                            // picks it up knows which chore he meant, and the
+                            // removal: a chore he has answered leaves the list.
                             InputBox {
                                 id: replyBox
                                 y: bar.height + 4
@@ -949,16 +949,51 @@ Window {
     // the chore's own text travels with his sentence, because "yes, do that one"
     // means nothing to the orchestrator that reads it half an hour later.
     // Returns whether it went, so the row can close its editor.
+    //
+    // HIS SENTENCE COMES FIRST, and the quote after it. Everything downstream
+    // leads with the HEAD of this one string — the `waiting for the next agent`
+    // line drawn above, `board-watch`'s card title for the orchestrator it
+    // spawns (`msgs[0]["text"][:70]`), every `boardctl` listing — so a body that
+    // opened with the quote made all of them announce the chore he was
+    // answering and bury the answer. *"the resulting agent created should
+    // indicate the reply from the user rather than the original message"*.
+    //
+    // And answered is answered: the bullet LEAVES the list once the message is
+    // on disk (`msg !== ""`), never before, so a reply he made and a chore still
+    // sitting there cannot both be true.
     function replyToTodo(t, body) {
         if (body.trim() === "")
             return false;
         var msg = Agents.send("", "", "",
-                              "about the `to do` bullet \"" + t.text + "\": " + body);
+                              body + "  (about the `to do` bullet \""
+                              + t.text + "\")");
         if (msg === "")
             return false;
-        win.status = msg;
         win.setDraft("todo:" + t.line, "");
+        // `Board.removeTodo` is the ONE removal path — the menu entry and the
+        // double click take it too — so this inherits its one-level undo and a
+        // reply to the wrong row costs a right-click, not his prose. Re-resolved
+        // against the doc as it is NOW rather than trusting the index this row
+        // was drawn from: three programs write this file and it syncs every five
+        // minutes, and a stale line would take somebody else's bullet.
+        var line = win.todoLineOf(t);
+        win.status = (line >= 0 && Board.removeTodo(line))
+                     ? msg + " - chore removed, `put it back` undoes it"
+                     : msg;
         return true;
+    }
+
+    // Where that bullet is NOW, or -1 if it has gone. Its own line when the text
+    // there still matches, so two chores worded identically cannot swap places.
+    function todoLineOf(t) {
+        var rows = win.todo;
+        for (var i = 0; i < rows.length; i++)
+            if (rows[i].line === t.line && rows[i].text === t.text)
+                return rows[i].line;
+        for (var j = 0; j < rows.length; j++)
+            if (rows[j].text === t.text)
+                return rows[j].line;
+        return -1;
     }
 
     // A `to do` bullet. §7.2's ordering is a safety property: the thing he does

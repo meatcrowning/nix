@@ -1830,9 +1830,67 @@ def test_window(app, tmp):
           len(q) == before + 1, q)
     check("...quoting the chore, so the reply is not context-free",
           any(chore["text"] in t and "make it dim" in t for t in q), q)
+
+    # *"the resulting agent created should indicate the reply from the user
+    # rather than the original message"*. Everything downstream reads the HEAD
+    # of this one string — the queue line drawn in the agents section, and
+    # `board-watch`'s `msgs[0]["text"][:70]` card title for the orchestrator it
+    # spawns — so the assertion is about what the first 70 characters SAY.
+    mine = [t for t in q if "make it dim" in t][0]
+    check("...leading with HIS reply, not with the chore he replied to",
+          mine.startswith("yes, that one, and make it dim"), mine)
+    check("...so the card an agent is given is his sentence, not the bullet",
+          "make it dim" in mine[:70] and not mine[:70].startswith("about the"),
+          mine[:70])
+
+    # *"when the user replies to something in the to do section it should then
+    # remove the entry from the to do section"* — and only once the message is
+    # actually on disk, which the send above returned.
+    spin(250)
+    check("...and replying CLEARS the chore off the list",
+          len(prop(win, "todo")) == 0, prop(win, "todo"))
+    check("...out of the file itself, section left standing",
+          B.parse(B.read(path))["todo"] == []
+          and "## WAITING ON YOU TO DO" in B.read(path))
+    check("...through the same one-level undo, so a misdirected reply is cheap",
+          board.property("undoText") == chore["text"],
+          board.property("undoText"))
+    board.undoRemove()
+    spin(250)
+    check("...which puts the bullet back byte-for-byte",
+          [t["text"] for t in prop(win, "todo")] == [chore["text"]],
+          prop(win, "todo"))
+
     check("an empty reply writes nothing at all",
-          win.replyToTodo(chore, "   ") is False
+          win.replyToTodo(prop(win, "todo")[0], "   ") is False
           and len(ba.pending()) == before + 1)
+    check("...and leaves the chore exactly where it was",
+          len(prop(win, "todo")) == 1, prop(win, "todo"))
+
+    # A bullet whose line has MOVED since the row was drawn is still the bullet
+    # that goes: the reply re-resolves it against the doc as it is now. Modelled
+    # by handing `replyToTodo` a stale index for a chore that is really there.
+    live = dict(prop(win, "todo")[0])
+    stale = dict(live)
+    stale["line"] = live["line"] + 500
+    ok = win.replyToTodo(stale, "this one, please")
+    check("a reply against a stale line still removes the right chore",
+          ok is True and len(prop(win, "todo")) == 0, prop(win, "todo"))
+    board.undoRemove()
+    spin(250)
+    check("...and that one is restorable too",
+          len(prop(win, "todo")) == 1, prop(win, "todo"))
+
+    # A chore that has genuinely gone (an agent cleared it, the sync brought a
+    # new file) must not take an unrelated bullet with it — the reply still
+    # goes, nothing is removed.
+    gone = dict(prop(win, "todo")[0])
+    gone["text"] = "a chore that is no longer in the store at all"
+    n = len(ba.pending())
+    ok = win.replyToTodo(gone, "sure")
+    check("replying to a chore that has gone sends, and removes nothing",
+          ok is True and len(ba.pending()) == n + 1
+          and len(prop(win, "todo")) == 1, prop(win, "todo"))
 
     # ---- it survives the small screen (§5.6) ----
     win2.setWidth(420)
