@@ -104,7 +104,50 @@ Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
   palette's one hue, and the only ramp that says *severity* is warn/crit, which
   on this desktop means a machine fault (§8.1, §9.3) and is forbidden here by
   the no-pressure rule. A badge would be the counted, sortable thing that rule
-  refuses outright. The word does the work.
+  refuses outright. The word does the work. What the tag *does* decide is which
+  SUB-SECTION the bullet is drawn in — below.
+
+### ...and the tag is what the bullets are grouped by on screen
+
+*"the information, completion, partial etc of a message should be used to
+organize them on the board. under the needs you section there should be sub
+sections for each of these headers"*. So `to do, when you feel like it` is no
+longer one flat list: each tag that has bullets gets a sub-heading with its own
+bullets under it.
+
+**It is a VIEW change and nothing else.** No sub-heading is ever written into
+`board.md`, the on-disk format is untouched, and the round-trip contract holds
+byte-for-byte. `boardparse.parse()` tags each bullet (`tag_of`) and buckets them
+(`todo_groups`) at the end of the read — once per load, for the same reason the
+glyph map is applied at ingest (§2.3) — and a bullet inside a group is **the
+same dict**, with the same `line`/`endLine`, that the flat `todo` list holds. So
+removal, the one-level undo, `reply` and every stale-line re-resolution work
+exactly as they did; `Main.qml` still keeps `win.todo` beside `win.todoGroups`
+and every one of those paths reads the flat one.
+
+- **The order is `boardparse.TODO_ORDER`: QUESTION, FAILED, PARTIAL,
+  COMPLETION, INFORMATION** — by what the bullet ASKS OF HIM, and fixed by tag.
+  `QUESTION` first because nothing moves until he says a word, and it is the
+  only group waiting on him. `FAILED` second because the one thing this system
+  must never do is let a failure sink to the bottom of a list of good news
+  (the same reason the tag exists at all). Then the one with a remainder
+  (`PARTIAL`), then the two that are pure record (`COMPLETION`, `INFORMATION`).
+  **This is not sort-by-urgency and must not become one**: the order is a
+  constant, not a function of age, count or arrival, so a bullet never moves
+  between two readings and no group is ranked against a clock.
+- **A tag with no bullets gets no heading at all** — an empty sub-section would
+  be a slot he has to fill, which is the shape this board refuses everywhere.
+- **An untagged bullet — the store is full of ones written before the tag rule —
+  is drawn FIRST, under no heading**, so nothing claims it as something it is
+  not. Reading stays untouched by the tag rule, and by this.
+- **The sub-heading is `SectionHead`, one rung quieter**: `interactive: false`
+  (no `[-]`, no click — it groups, it does not collapse) and not `accented`, so
+  it is the dim label plus the border hairline. No new chrome, and **it is a
+  heading and NOT a count**: no tally, no badge, no severity colour, exactly as
+  the flat list had none.
+- The empty state is unchanged — `nothing needs you` still keys off the section
+  being empty, and an empty section draws no headings because there are no
+  groups.
 
 ## The no-pressure requirement is a design constraint
 
@@ -277,8 +320,8 @@ whole pipeline, and what each piece is allowed to claim:
 | --- | --- | --- |
 | he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
 | board-watch's next run | drains the queue and spawns ONE **orchestrator**, and WAITS for it | `board-watch.py:work_the_queue` |
-| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
-| each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **never rebuilds** | `boardwork._spawn_worker` |
+| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, hands one to a worker already in those files, or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
+| each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **and may rebuild or reload** under `~/nix/AGENTS.md` -> "When it is okay to rebuild or hot-reload" | `boardwork._spawn_worker` |
 | a card per worker | two sentences — what it claims, then what it is observed doing — in one flat list, oldest first | `boardwork.cards()` + `qml/AgentRow.qml` |
 | a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
 
@@ -348,6 +391,71 @@ so an unbounded fan-out is a real cost and a real risk.
 a control surface may hide. `boardwork.promote()` runs at the top of every
 board-watch tick, so the worst case for a queued task is one timer interval,
 exactly like `reconcile()` and `sweep()`.
+
+### A NEW WORKER IS NOT THE ONLY ANSWER: handing an item to one already in those files
+
+*"it should also know when to give items to existing agents who are already
+working out of the same place or doing the same or similar things"*. So the
+orchestrator's list of verbs now opens with `boardctl.py agents` — what is
+running, the task each was given, and the `--where` it was dispatched against —
+and closes with `boardctl.py inbox send '<the item>' --to <Name>`.
+
+**No new machinery, and deliberately so: a handoff IS the inbox.** It is the
+same `boardagents.send()` the box at the top takes and the same three
+directories, so the conservation property holds unchanged, and the worker reads
+it through the `boardctl.py inbox take` its own prompt already tells it to run
+between steps. What changed is who may write into it — it was his channel
+alone — and the worker prompt now says so: a note is either him, which outranks
+the prompt, or the orchestrator handing over a further item, which is part of
+the job and gets said in the final note.
+
+Everything else about it is the honest reading of what that channel can do:
+
+- **Workers only.** In `boardctl.py agents` a worker is the row with a NAME in
+  front of its id and a path or glob in its last column. The orchestrator's own
+  row is named too (`register` mints one for every registration) and is told
+  apart by its `where`, which is `board-watch`; a decision agent and his
+  interactive session have **no** name at all — and a decision agent's prompt
+  forbids it to pick up anything else, which is why it may not be a target.
+- **`delivered` is not `taken`,** exactly as everywhere else here. A handoff
+  waits for the worker to check between steps; nothing interrupts it and there
+  is no reply.
+- **A miss is not a loss.** `send` files the message to the QUEUE whenever the
+  named agent is not live — a worker that finished first, a name that resolves
+  to nothing — and `sweep()` escalates one that was delivered and never read.
+  The queue is drained into a fresh orchestrator on a later tick, so the item
+  comes back around and is dispatched from **its own words**. That is why the
+  prompt says to write the item in full, as a `dispatch` would be written.
+- **It takes no slot against the cap**, which is a consequence and is written
+  down as one: handing work over to get under the cap is refused in the prompt,
+  because `dispatch` already queues what is over it and `promote()` starts it.
+- **It is still a START, not a result** — reported as one `INFORMATION:` line
+  naming the worker, inside the same note budget as a dispatch.
+
+The neighbouring rule is the same one read from the other end: two items in ONE
+message that touch the same files are one `dispatch`, not a dispatch and a
+handoff.
+
+### What the orchestrator and its workers are told, beyond the board
+
+`boardwork.RULES` is quoted verbatim into both prompts, and it is the board's
+half of `~/.claude/orchestrator-briefing.md` — the standing constraints a
+regular `~/nix` triage agent gets and this system was never given. Beyond the
+board's own rules it now carries: **read `docs/HARDWARE.md` before measuring
+anything about the metal**, **read `docs/DESIGN.md` in SLICES** (its Contents
+table plus the two or three sections a change touches — the whole file is ~35k
+tokens and an agent that runs out of context mid-task leaves the tree
+half-edited), **a pathspec is not enough when another agent holds the same
+file** (`git diff` every hunk, commit against HEAD as it is now), and **a real
+bug next to your work is his standing approval to deal with** — fix it in its
+own commit if you are doing the work, dispatch it if you are the one handing
+work out, and never ask him about a well-scoped improvement. The screen rule
+and the sandbox were already rule 2; `sudo` is not in the prompt because
+`boardwork.DENY` forbids it outright.
+
+The decision agent's prompt (`board-watch.py`) keeps its own hand-written
+copy of rules 1-5 and does **not** see these; it is one item, already scoped by
+him, and it is not a dispatch target.
 
 ### The one thing that could hold the whole system up, and does not
 
@@ -490,8 +598,18 @@ docstring is the authority. It is drawn as **two plain sentences led by the
 agent's name**, which is how he asked to read it: *"[agent name] is [what the
 agent says its doing] and then the line below should be the [agent name] is
 actually [what it is actualy doing]"*. The bare labels `says` and `doing` in a
-column beside the two texts are what that replaced. The short version, and
-every line of it is a rule:
+column beside the two texts are what that replaced.
+
+**The two sentences are the card's FIRST and SECOND lines, and the title row is
+the THIRD** — his call, and the reason is that the title row does not move:
+*"the very first line of an agent in the agent section should be the [name] is
+[what the agent says theyre doing]. the second line should be [name] is actually
+doing XYZ. the third line should be what the current first line is"*. What the
+agent was handed, and the `where` it works in, are fixed for the life of the
+card; the two live lines are what he re-reads. The detail line, any note
+waiting in the agent's inbox, and the box he types into stay below all three.
+
+The short version, and every line of it is a rule:
 
 - **`says` is the agent's own words** (`boardctl.py phase coding --doing '...'`).
   It carries the OBJECT — *"the vtbclient parser"* — which watching tool calls

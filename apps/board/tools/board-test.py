@@ -738,6 +738,50 @@ def test_todo_tags(tmp):
     missing = [t for t in B.TODO_TAGS if ("%s:" % t) not in prompts]
     check("no tag exists that no writer can emit", not missing, missing)
 
+    # ---- ...and the READ side groups by that same word, for the view ----
+    # *"the information, completion, partial etc of a message should be used to
+    # organize them on the board. under the needs you section there should be
+    # sub sections for each of these headers"*. A VIEW change: the store keeps
+    # one flat list, `parse()` buckets it, and a bullet in a group is the same
+    # dict (same `line`) the flat list holds, so removing and restoring one is
+    # the edit it always was.
+    open(path, "w").write(FIXTURE)
+    for b in ("INFORMATION: a fact.", "COMPLETION: it landed.",
+              "FAILED: nothing landed.", "QUESTION: say the word?",
+              "PARTIAL: half of it.", "COMPLETION: this one too."):
+        bm.note(b, path=path)
+    d = B.parse(B.read(path))
+    groups = d["todoGroups"]
+    check("the WAITING bullets are grouped by their tag, in TODO_ORDER",
+          [g["tag"] for g in groups]
+          == ["", "QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION"],
+          [g["tag"] for g in groups])
+    check("...QUESTION first, because nothing moves until he says a word",
+          groups[1]["tag"] == "QUESTION" and groups[1]["label"] == "question")
+    check("...and FAILED is not buried under the good news",
+          [g["tag"] for g in groups].index("FAILED")
+          < [g["tag"] for g in groups].index("COMPLETION"))
+    check("...an untagged bullet is first and gets NO heading",
+          groups[0]["tag"] == "" and groups[0]["label"] == ""
+          and len(groups[0]["items"]) == 1, groups[0]["items"])
+    check("...a tag with two bullets is one group, in file order",
+          [t["line"] for t in groups[-2]["items"]]
+          == sorted(t["line"] for t in groups[-2]["items"])
+          and len(groups[-2]["items"]) == 2,
+          [t["text"] for t in groups[-2]["items"]])
+    flat = [t for g in groups for t in g["items"]]
+    check("...every bullet is in exactly one group and none is invented",
+          sorted(t["line"] for t in flat)
+          == sorted(t["line"] for t in d["todo"]),
+          (len(flat), len(d["todo"])))
+    check("...and a tag with no bullets gets no group, so no empty heading",
+          "QUESTION" not in [g["tag"] for g in B.parse(FIXTURE)["todoGroups"]],
+          [g["tag"] for g in B.parse(FIXTURE)["todoGroups"]])
+    # The grouping is a read, and a read must not touch the file.
+    before = B.read(path)
+    B.parse(before)
+    check("...and grouping writes nothing", B.read(path) == before)
+
 
 # ------------------------------------- 1b2. clearing a chore off the TO DO list
 TODO_FIXTURE = """# Board
@@ -1597,6 +1641,45 @@ def test_window(app, tmp):
           len(prop(win, "todo")) == 1, prop(win, "todo"))
     shot(win, "01-populated")
 
+    # ---- ...in sub-sections, one per tag that HAS bullets ----
+    # A heading is a heading and not a count: the band is the same SectionHead
+    # the sections use, one rung quieter (no accent, `interactive: false`, so no
+    # `[-]` and no click), and a tag nothing carries draws nothing at all.
+    def heads():
+        # Top to bottom, not in traversal order: `descendants()` walks the tree
+        # and the order it yields siblings in is not the order they are drawn
+        # in, so the ORDER of the sub-sections has to be read off the geometry.
+        from PySide6.QtCore import QPointF                              # noqa: E402
+        got = [(it.mapToItem(win.contentItem(), QPointF(0, 0)).y(),
+                it.property("label"))
+               for it in descendants(win.contentItem())
+               if it.property("interactive") is not None
+               and it.property("accented") is not None]
+        return [lab for _y, lab in sorted(got, key=lambda p: p[0])]
+
+    check("an untagged chore alone draws NO sub-heading over it",
+          not [h for h in heads() if h in [t.lower() for t in B.TODO_TAGS]],
+          heads())
+    for b in ("- COMPLETION: it landed.\n", "- QUESTION: say the word?\n",
+              "- FAILED: nothing landed.\n"):
+        B.edit(path, lambda d, b=b: B.add_todo_bullet(d["lines"], d, b))
+    spin(400)
+    drawn = [h for h in heads() if h in [t.lower() for t in B.TODO_TAGS]]
+    check("each tag that has bullets draws its own sub-heading, in order",
+          drawn == ["question", "failed", "completion"], drawn)
+    check("...and the ones nothing carries draw none",
+          "partial" not in drawn and "information" not in drawn, drawn)
+    rows = [it for it in descendants(win.contentItem())
+            if it.property("replying") is not None]
+    check("...with every bullet still drawn exactly once, under one of them",
+          len(rows) == len(prop(win, "todo")) == 4, (len(rows), len(prop(win, "todo"))))
+    open(path, "w").write(FIXTURE)
+    spin(400)
+    check("...and the section goes back to one bare bullet when they go",
+          len(prop(win, "todo")) == 1
+          and not [h for h in heads() if h in [t.lower() for t in B.TODO_TAGS]],
+          heads())
+
     # ---- answering, through the same path the click takes ----
     key = prop(win, "needs")[0]["key"]
     check("choosing an option is written back", board.choose(key, 1, True) is True)
@@ -1862,6 +1945,12 @@ def test_window(app, tmp):
     _tsc(tmp, u2, [("Grep", {"pattern": "activewindow"})])
     ba.register("w-read", "Find where focus is decided", os.getpid(),
                 kind="worker", where="hyprvtb", session=u2)
+    # The one card NEITHER sentence names: a worker that stopped without ever
+    # saying anything and without a transcript to observe. It is what the
+    # 7-cell name column exists for, and with the sentences now ABOVE the title
+    # row it is also the only card whose top line is that row.
+    ba.register("w-mute", "Fold VScroll into qmlcommon", dead,
+                kind="worker", where="apps/qmlcommon/**")
     agents.refresh()
     spin(300)
     cards = prop(win, "agentCards")
@@ -1902,6 +1991,100 @@ def test_window(app, tmp):
                             + " " + str(r.get("detail", "")))
                   for r in rows.values()), list(rows.values())[:1])
 
+    # ---- and the ORDER those three lines are DRAWN in ----
+    # His: *"the very first line of an agent in the agent section should be the
+    # [name] is [what the agent says theyre doing]. the second line should be
+    # [name] is actually doing XYZ. the third line should be what the current
+    # first line is"*. Nothing in the model above says anything about order —
+    # only the drawn item does, so this is checked on screen and not on a dict.
+    def _absy(it, root):
+        y, p = 0.0, it
+        while p is not None and p is not root:
+            y += p.y()
+            p = p.parentItem()
+        return y
+
+    def _texts(it):
+        """Every non-empty visible text on one agent's card, top line first."""
+        out = []
+        for t in descendants(it):
+            s = t.property("text")
+            if isinstance(s, str) and s.strip() and t.isVisible():
+                out.append((round(_absy(t, it), 1), s, t))
+        return sorted(out, key=lambda r: r[0])
+
+    # An AgentRow is the item that publishes both sentences; key them by the
+    # card's own title, which is the one string that is unique per card here.
+    drawnCards = {}
+    for it in descendants(win.contentItem()):
+        if it.property("doingLine") is None or it.property("nameNeeded") is None:
+            continue
+        a = prop(it, "agent")
+        if isinstance(a, dict) and a.get("title"):
+            drawnCards[str(a["title"])] = it
+
+    cardItem = drawnCards.get("Wire FOCUS through vtbclient")
+    lines = _texts(cardItem) if cardItem is not None else []
+    ys = {s: y for y, s, _ in lines}
+    check("the card's FIRST line is what the agent SAYS it is doing",
+          bool(lines) and lines[0][1] == card.get("saysLine"),
+          [(y, s) for y, s, _ in lines])
+    check("...its SECOND is what it is OBSERVED doing, still under the claim",
+          ys.get(card.get("doingLine"), -1) > ys.get(card.get("saysLine"), 1e9),
+          [(y, s) for y, s, _ in lines])
+    check("...and the title row it used to open with is now the THIRD",
+          ys.get("Wire FOCUS through vtbclient", -1)
+          > ys.get(card.get("doingLine"), 1e9),
+          [(y, s) for y, s, _ in lines])
+    check("...with `where` still on the title's own line, right-aligned",
+          ys.get("apps/pylib/**") == ys.get("Wire FOCUS through vtbclient"),
+          [(y, s) for y, s, _ in lines])
+    # The tone ladder, retuned for the new order (docs/DESIGN.md §10.6): the
+    # LEAD tone goes to whichever line is drawn first, so a card never opens on
+    # its quietest text. It is position, not trust, that picks it.
+    tone = {s: t.property("color") for _, s, t in lines}
+    check("...and the top line takes the lead tone, not the quietest one",
+          tone.get(card.get("saysLine")) == keep[-1].property("text")
+          and tone.get("Wire FOCUS through vtbclient") == keep[-1].property("dim"),
+          (tone.get(card.get("saysLine")), tone.get("Wire FOCUS through vtbclient")))
+    # NOTHING ON THIS LIST IS ANONYMOUS, and the name is never drawn twice over.
+    # The 7-cell name column exists for exactly the card no sentence names, and
+    # now that the sentences are ABOVE it, it is still the card's own top line
+    # when it appears.
+    check("a card whose sentences name the agent draws no separate name column",
+          cardItem is not None and cardItem.property("nameNeeded") is False,
+          cardItem and cardItem.property("nameNeeded"))
+    anon = []
+    for c in cards:
+        it = drawnCards.get(c.get("title"))
+        nm = c.get("name") or ""
+        if it is None or not nm:
+            continue
+        drawn = _texts(it)
+        if not any(nm in s for _, s, _ in drawn):
+            anon.append(c.get("title"))
+        elif it.property("nameNeeded") and drawn and nm not in [
+                s for y, s, _ in drawn if y == drawn[0][0]]:
+            # the column is the ONLY place the name can be on such a card, and
+            # the title row it shares is that card's own top line
+            anon.append(c.get("title") + " (name column not on the top line)")
+    check("...and no card is anonymous, whichever of the three lines it has",
+          anon == [], anon)
+    mute = drawnCards.get("Fold VScroll into qmlcommon")
+    muteLines = _texts(mute) if mute is not None else []
+    # The name column and the title share one line, so compare the whole top
+    # line rather than an order between two items at the same y.
+    top = [s for y, s, _ in muteLines if muteLines and y == muteLines[0][0]]
+    check("a card NO sentence names gets the name column back, leading the card",
+          mute is not None and mute.property("nameNeeded") is True
+          and rows.get("Fold VScroll into qmlcommon", {}).get("name") in top
+          and "Fold VScroll into qmlcommon" in top,
+          [(y, s) for y, s, _ in muteLines])
+    check("...and that title row, being this card's top line, takes the lead tone",
+          bool(muteLines) and {s: t.property("color") for _, s, t in muteLines}
+          .get("Fold VScroll into qmlcommon") == keep[-1].property("textDim"),
+          [(s, t.property("color").name()) for _, s, t in muteLines])
+
     # ...with the store's own sections folded away, so the shot is of THIS
     # section rather than of whatever happens to be above it.
     win.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
@@ -1911,6 +2094,7 @@ def test_window(app, tmp):
     spin(200)
     ba.unregister("w-code")
     ba.unregister("w-read")
+    ba.unregister("w-mute")
     # ...and a finished agent leaves the list rather than rotting in it
     os.unlink(bm.stash_file("drawn-dead"))
     os.unlink(bm.stash_file("drawn-live"))
