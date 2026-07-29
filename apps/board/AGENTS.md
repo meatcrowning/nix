@@ -279,7 +279,7 @@ whole pipeline, and what each piece is allowed to claim:
 | board-watch's next run | drains the queue and spawns ONE **orchestrator**, and WAITS for it | `board-watch.py:work_the_queue` |
 | the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
 | each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **never rebuilds** | `boardwork._spawn_worker` |
-| a card per worker | grouped by phase, saying what it claims AND what it is observed doing | `boardwork.groups()` + `qml/AgentRow.qml` |
+| a card per worker | two sentences — what it claims, then what it is observed doing — in one flat list, oldest first | `boardwork.cards()` + `qml/AgentRow.qml` |
 | a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
 
 Rules that fall out of it, all load-bearing:
@@ -469,12 +469,14 @@ supply.
 - **No two LIVE agents share one.** `pick_name` walks the pool past anything a
   running agent already answers to, so a note he addresses to Marbas is never
   ambiguous. Above `len(NAMES)` live agents a name repeats; the cap is 4.
-- **A card draws the name and never the id.** It sits in the same 7-cell label
-  column as `says` and `doing`, so the three lines line up as one block — which
-  is why an entry is **six ASCII characters at most** (§2.1's cell, §2.3's
-  cmap). `AgentRow` starts the title at `7 * cellW` and does not elide, so a
-  seventh character runs under it: that is what rules out `Focalor`, `Gremory`
-  and the other long spellings, and `board-test.py` asserts it.
+- **A card draws the name and never the id**, and it draws it as the SUBJECT of
+  both sentences — `Marbas is coding - ...` / `Marbas is actually ...`. The
+  7-cell name column beside the title is now the fallback for a card no
+  sentence names (a stopped agent nothing was ever seen doing), so a name is
+  still **six ASCII characters at most** (§2.1's cell, §2.3's cmap): `AgentRow`
+  starts the title at `7 * cellW` and does not elide, so a seventh character
+  runs under it. That is what rules out `Focalor`, `Gremory` and the other long
+  spellings, and `board-test.py` asserts it.
 - **Nothing that has nobody on it is given a name**: a task queued above the cap,
   a decision he answered, an interactive session. Same rule as the inbox box —
   a name is a claim that somebody is on it.
@@ -484,7 +486,12 @@ supply.
 
 His call, in one sentence: *"i want both. i want what its saying its doing and
 what its actually doing"*. `boardphase.py` is the whole mechanism and its
-docstring is the authority. The short version, and every line of it is a rule:
+docstring is the authority. It is drawn as **two plain sentences led by the
+agent's name**, which is how he asked to read it: *"[agent name] is [what the
+agent says its doing] and then the line below should be the [agent name] is
+actually [what it is actualy doing]"*. The bare labels `says` and `doing` in a
+column beside the two texts are what that replaced. The short version, and
+every line of it is a rule:
 
 - **`says` is the agent's own words** (`boardctl.py phase coding --doing '...'`).
   It carries the OBJECT — *"the vtbclient parser"* — which watching tool calls
@@ -499,9 +506,10 @@ docstring is the authority. The short version, and every line of it is a rule:
   load-bearing: lose it and every card silently degrades to *"cannot see what it
   is doing"* with no error anywhere. `tools/board-watch-test.py` asserts the
   spawn passes it.
-- **The card is filed under the OBSERVED phase, never the claim.** An agent
-  saying `testing` while every recent call is an `Edit` appears under *coding*,
-  saying *testing* — and **that divergence is a feature, not an error**. Nothing
+- **The second sentence is the OBSERVED one, never the claim.** An agent saying
+  `testing` while every recent call is an `Edit` reads *"Marbas is testing - the
+  parser"* on one line and *"Marbas is actually editing vtbclient.py"* on the
+  next — and **that divergence is a feature, not an error**. Nothing
   hides it, reconciles it, warns about it or colours it: the warn/crit ramp on
   this desktop means a machine fault (§8.1, §9.3), not an agent being optimistic
   about itself.
@@ -515,7 +523,14 @@ docstring is the authority. The short version, and every line of it is a rule:
   machine business exactly like `ESCALATE_AFTER_S`; the no-pressure rule is not
   suspended because the subject is a robot.
 - **Present tense only while the process is there.** A stopped agent's last
-  observed action is labelled `last`, not `doing`.
+  observed action reads *"Marbas was last seen editing Main.qml"* — never
+  *"is actually"*, which is false about a process that is gone — and a stopped
+  agent nothing was ever seen doing gets no second sentence at all rather than
+  an invented past. `boardphase.says_line`/`doing_line` decide all of that in
+  one place, because the joining is a judgement about the real strings: a claim
+  with no phase word (`boardctl.py phase` takes the phase as optional) is
+  QUOTED — *"Marbas says: the vtbclient parser"* — rather than forced after
+  "is", where it would not be a sentence.
 - **Transcripts reach megabytes** (a long session's is ~1.8 MB), so nothing ever
   reads one whole: each agent's record keeps a byte offset and a poll reads only
   the delta, advancing past complete lines only — a transcript is appended to
@@ -538,15 +553,27 @@ all of it.
   exactly three, all through `boardparse.edit()`.
 - **The no-pressure rule applies here too**: no ages, no elapsed times, no
   counts, no urgency ordering, nothing from the warn/crit ramp. A running agent
-  is just running. The order is running -> unowned -> exited, which is stable
-  (a row must not move under his cursor between two polls), not urgent.
+  is just running. The order is BIRTH, oldest first (`boardwork.cards()`),
+  which is stable — a row must not move under his cursor between two polls —
+  and is not urgency: a new agent appends at the bottom and nothing above it
+  moves for the rest of its life. The stamps that decide it never reach the
+  screen (`boardagents.born`), which is what keeps an ordering from becoming an
+  age.
 - **A finished agent leaves the list at once** — board-watch drops the stash on
   success and on failure alike — and **a failed one is told apart in WORDS**
   (`exited without finishing`), with §9.1's accent gutter present only on a
   running row. Colour says nothing here; §8.1's ramp means a machine fault.
-- **Nothing in the phase groups is a count or an ordering by urgency**, and an
-  EMPTY phase is not drawn at all — an idle board is one dim sentence, not a
-  column of eight empty headings (§5.2).
+- **There are NO phase headings over the cards.** He asked for them and then
+  asked for them back out: *"maybe for now take out the 'coding' 'Testing'
+  'finishing touches' text and just keep agents ordered by birth/age so they
+  dont move around so much"* — a card jumped from one section to another every
+  time its agent picked up a different tool. The phase itself is untouched
+  (`boardphase.py` still derives it, the agent still cannot set it, and the
+  observed sentence is built from it) and `boardwork.groups()` still buckets
+  for `boardctl.py agents`, where a terminal listing has no cursor to keep
+  still. The two states that were headings rather than phases — **queued** (no
+  process yet) and **stopped** — say so in words on the card's own `detail`
+  line, so nothing depends on a heading being there.
 - **The interactive session is not faked.** It is not a systemd unit, so it is
   listed as what can actually be observed — a process — and described as
   `running - board sees the process, not what it is doing`. Nothing invents a
@@ -837,8 +864,10 @@ replaced by rename (a sync, a `git checkout`) still reloading, a section
 emptying out completely, **a running agent and a failed one drawn differently
 and a finished one leaving the list**, **the one box at the top being the only
 un-attached one on the page and what he types into it landing in the queue
-exactly once**, **cards grouped by what each agent is OBSERVED doing, carrying
-both statements, with no time, age or count anywhere on them**, and
+exactly once**, **the cards as one flat list with no phase sections in it,
+oldest first and the same order on the next poll, each reading as two sentences
+led by the agent's name, a stopped one never in the present tense, and no time,
+age, birth or count anywhere on them**, and
 `grabWindow()` PNGs with `--shots`:
 the real store, the fixture populated, a decision answered, an EMPTY `NEEDS
 YOU`, an EMPTY agents section (with `/proc` stubbed away, since the process

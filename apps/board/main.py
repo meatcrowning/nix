@@ -37,12 +37,14 @@ The pieces, and where the rules come from:
     control surface: he types a sentence, it lands in the same inbox, and
     board-watch spawns an ORCHESTRATOR that splits it into worker agents or
     asks him a question. This module owns the dispatch, the concurrency cap and
-    what happens to work above it, and the phase groups the cards are drawn in.
+    what happens to work above it, and the order the cards are drawn in — one
+    flat list, oldest first, so a card never moves once it is on screen.
   * `boardphase.py` — what an agent SAYS it is doing and what it is OBSERVED
     doing, kept apart on purpose (*"i want both"*). The claim is the agent's own
     words; the observation is derived from the tool calls in its live
-    transcript and cannot be faked. Cards are filed under the OBSERVED phase,
-    always, and a disagreement between the two is drawn rather than resolved.
+    transcript and cannot be faked. The card's second sentence is the OBSERVED
+    one, always, and a disagreement between the two is drawn rather than
+    resolved.
   * QML draws it: pixel font at the desktop's size through `DeskStyle`, the wal
     palette parsed and watched out of the panel's `Theme.qml`, motion from
     `qmlcommon/Motion.qml`, `Kinetic*` views, `VScroll`, and the chrome in the
@@ -482,7 +484,7 @@ class Agents(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
-        self._groups = []
+        self._cards = []
         self._queued = []
         self._watcher = ""
         # The registry, the stashes and the inboxes are all files, so watch
@@ -549,6 +551,13 @@ class Agents(QObject):
             # when one of them is nothing at all.
             "says": a.get("says", ""),
             "actually": a.get("actually", ""),
+            # ...and the same two as the sentences the card draws, built once
+            # in `boardphase.py` (`says_line`/`doing_line`) because the joining
+            # is a judgement about the real strings: a stopped agent is
+            # described in the PAST tense, and a claim with no phase word is
+            # quoted rather than forced after "is".
+            "saysLine": a.get("saysLine", ""),
+            "doingLine": a.get("doingLine", ""),
             "observed": a.get("observed", "unlinked"),
             "detail": boardagents.describe(a),
             "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
@@ -560,17 +569,17 @@ class Agents(QObject):
         self._rewatch()
         try:
             rows = [self._row(a) for a in boardagents.agents()]
-            # Sectioned by the OBSERVED phase — `boardwork.groups()` is the one
-            # place that decides which card goes where, so boardctl's listing
-            # and this window cannot drift apart.
-            groups = [{"phase": g["phase"], "label": g["label"],
-                       "rows": [self._row(a) for a in g["rows"]]}
-                      for g in boardwork.groups()]
+            # ONE FLAT LIST, oldest first — `boardwork.cards()` is the one place
+            # that decides the order, and it is birth and nothing else, so a
+            # card does not move under his cursor when the agent changes phase
+            # or stops. Queued tasks come after the live ones; they have no
+            # birth yet.
+            cards = [self._row(a) for a in boardwork.cards()]
             queued = [m["text"] for m in boardagents.pending()]
         except OSError:
             return
-        if rows != self._rows or queued != self._queued or groups != self._groups:
-            self._rows, self._queued, self._groups = rows, queued, groups
+        if rows != self._rows or queued != self._queued or cards != self._cards:
+            self._rows, self._queued, self._cards = rows, queued, cards
             self.changed.emit()
 
     @Property("QVariantList", notify=changed)
@@ -578,8 +587,8 @@ class Agents(QObject):
         return self._rows
 
     @Property("QVariantList", notify=changed)
-    def groups(self):
-        return self._groups
+    def cards(self):
+        return self._cards
 
     @Property(int, notify=changed)
     def cap(self):

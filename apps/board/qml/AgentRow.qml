@@ -4,22 +4,41 @@ import QtQuick
 // IS OBSERVED DOING, and the box he types into to reach it.
 //
 // THE TWO LINES ARE THE POINT, and they are his call — *"i want both. i want
-// what its saying its doing and what its actually doing"*:
+// what its saying its doing and what its actually doing"*. They are two plain
+// SENTENCES, led by the agent's own name, because that is how he asked to read
+// them: *"[agent name] is [what the agent says its doing] and then the line
+// below should be the [agent name] is actually [what it is actualy doing]"*.
+// The bare words `says` and `doing` in a label column beside the two texts are
+// what that replaced.
 //
-//   says:   the agent's own words (`boardctl.py phase`). Carries the OBJECT —
-//           "the vtbclient parser" — which watching tool calls can never give.
-//           Absent until it says something; absence is drawn as absence.
-//   doing:  derived from the tool calls in its live transcript
-//           (`boardphase.py`). Carries the VERB — "editing Main.qml" — and
-//           cannot be faked, forgotten or left stale.
+//   ...is...           the agent's own words (`boardctl.py phase`). Carries the
+//                      OBJECT — "the vtbclient parser" — which watching tool
+//                      calls can never give. Absent until it says something;
+//                      absence is drawn as absence.
+//   ...is actually...  derived from the tool calls in its live transcript
+//                      (`boardphase.py`). Carries the VERB — "editing
+//                      Main.qml" — and cannot be faked, forgotten or left
+//                      stale.
+//
+// **Both sentences are built in `boardphase.py` (`says_line`/`doing_line`), not
+// here**, because the joining is a judgement about the real strings rather than
+// string concatenation: an agent that named no phase is quoted instead of
+// forced after "is", and a STOPPED agent goes into the past tense — *"Marbas is
+// actually ..."* is false about a process that is gone, and *"was last seen
+// ..."* is the honest form of the same fact.
 //
 // **Neither is ever shown as the other, and neither is ever filled in from the
-// other.** The card is filed under the section its OBSERVED phase names, so an
-// agent claiming `testing` while it edits appears under *coding*, saying
-// *testing*. That divergence is information he asked to be able to see: it is
-// not an error, so there is no warning, no badge and nothing from the warn/crit
-// ramp — which on this desktop means a machine fault (§8.1, §9.3), not an agent
-// being optimistic about itself. Two true statements, drawn plainly.
+// other.** The second sentence is the OBSERVED one, so an agent claiming
+// *testing* while it edits says *testing* on one line and *is actually editing
+// Main.qml* on the next. That divergence is information he asked to be able to
+// see: it is not an error, so there is no warning, no badge and nothing from
+// the warn/crit ramp — which on this desktop means a machine fault (§8.1,
+// §9.3), not an agent being optimistic about itself. Two true statements,
+// drawn plainly.
+//
+// There are no phase headings over these cards any more, and no sections at
+// all: one flat list, oldest first (`boardwork.cards()`), so a card does not
+// move when the agent picks up a different tool.
 //
 // The ladder does the rest (§3.3): `doing` is the load-bearing fact and takes
 // the ordinary secondary tone; `says` sits a rung quieter, because it is
@@ -63,23 +82,30 @@ Item {
     readonly property var waiting: agent && agent.waiting ? agent.waiting : []
     readonly property string says: agent && agent.says ? agent.says : ""
     readonly property string actually: agent && agent.actually ? agent.actually : ""
+    // The two sentences, as `boardphase.py` phrased them. Empty means there is
+    // nothing honest to say, and empty is then drawn as nothing at all.
+    readonly property string saysLine: agent && agent.saysLine ? agent.saysLine : ""
+    readonly property string doingLine: agent && agent.doingLine ? agent.doingLine : ""
     // A card with no id is not an agent — it is a task waiting for a slot, or
     // the section's own box. It gets no inbox, because there is nothing running
     // to put a message in front of.
     readonly property bool addressable: agent && agent.id !== undefined
                                         && String(agent.id) !== ""
     // The process-level sentence earns its line only when it has something to
-    // say. For an ordinary running agent the group heading and the two lines
+    // say — and with the phase headings gone it is what states the two
+    // conditions that were headings: a task nobody has started yet, and one
+    // whose agent has stopped. For an ordinary running agent the two sentences
     // above have already said everything, and a third dim line repeating "it
     // reads its inbox between steps" under every card is the noise §5.2 calls a
     // defect.
     readonly property bool showDetail: agent && (!running || waiting.length > 0
                                                  || agent.kind === "pending")
-    // Something was genuinely seen in its transcript. When nothing was AND the
-    // agent has stopped, the observed line is dropped rather than drawn in the
-    // past tense about a thing that never happened.
-    readonly property bool seen: agent && (agent.observed === "ok"
-                                           || agent.observed === "quiet")
+    // The name gets a cell of its own ONLY when neither sentence below is
+    // going to say it — a stopped agent nothing was ever seen doing, or a
+    // queued task with no name at all. Otherwise it would be drawn three times
+    // in four lines. (`boardagents.NAMES`' width rule is this column's.)
+    readonly property bool nameNeeded: name !== "" && saysLine === ""
+                                       && doingLine === ""
 
     implicitHeight: col.implicitHeight + 8
     height: implicitHeight
@@ -111,11 +137,10 @@ Item {
         // live sections read the same way one under the other. The `where`
         // column drops widest-first as the window narrows (§9.1), at width 0.
         //
-        // The name sits in the SAME 7-cell label column as `says` and `doing`
-        // below it, so the three lines of a card line up as one block and the
-        // name reads as the subject of both sentences under it. It takes the
-        // title's own colour: it is part of that line, not a second tier, and
-        // §3.3's ladder is already carrying the says/doing distinction.
+        // The name is normally NOT drawn here: it is the subject of both
+        // sentences below, and repeating it in a column of its own would say it
+        // three times. It comes back in its 7-cell column for a card that has
+        // no sentence to carry it, so nothing on this list is ever anonymous.
         Item {
             width: col.width
             implicitHeight: titleT.implicitHeight
@@ -125,13 +150,13 @@ Item {
             readonly property real whereW: wide && row.agent && row.agent.where !== ""
                 ? Math.min(row.agent.where.length * row.cellW + 2, width * 0.4)
                 : 0
-            readonly property real nameW: row.name !== "" ? 7 * row.cellW : 0
+            readonly property real nameW: row.nameNeeded ? 7 * row.cellW : 0
 
             PixelText {
                 id: nameT
                 x: 0
                 y: 0
-                visible: row.name !== ""
+                visible: row.nameNeeded
                 color: row.running ? row.fgText : row.fgDim
                 text: row.name
             }
@@ -156,58 +181,39 @@ Item {
             }
         }
 
-        // ---- what it SAYS ----
+        // ---- "<name> is <what it says it is doing>" ----
         // Its own words. Drawn only when there are some: an agent that has not
         // said anything is silent, and manufacturing a claim out of the
         // observation below would make the two agree by construction and throw
         // away the only thing having two of them buys.
-        Item {
+        //
+        // It sits a rung quieter than the line under it (§3.3): the
+        // observation is the load-bearing fact and this is somebody's account
+        // of themselves.
+        Para {
+            id: saysT
             width: col.width
-            visible: row.says !== ""
-            implicitHeight: visible ? saysT.implicitHeight : 0
-            height: implicitHeight
-            PixelText {
-                id: saysLabel
-                x: 0
-                color: Theme.dim
-                text: "says"
-            }
-            Para {
-                id: saysT
-                x: 7 * row.cellW
-                width: parent.width - x
-                color: Theme.dim
-                text: row.says
-            }
+            visible: row.saysLine !== ""
+            height: visible ? implicitHeight : 0
+            color: Theme.dim
+            text: row.saysLine
         }
 
-        // ---- what it is ACTUALLY doing ----
+        // ---- "<name> is actually <what it is observed doing>" ----
         // Observed, never the claim. When it cannot be observed it says that
-        // ("cannot read its transcript", "nothing recently") rather than
-        // quietly falling back to the line above — §10's rule, and the reason
-        // there are two lines at all.
-        Item {
+        // ("board cannot see what it is doing", "has actually done nothing
+        // recently") rather than quietly falling back to the line above —
+        // §10's rule, and the reason there are two lines at all. Past tense
+        // once the process is gone, and nothing at all when a stopped agent
+        // was never seen doing anything: `boardphase.doing_line` decides both,
+        // and hands this an empty string to say so.
+        Para {
+            id: doingT
             width: col.width
-            visible: row.actually !== "" && (row.running || row.seen)
-            implicitHeight: visible ? doingT.implicitHeight : 0
-            height: implicitHeight
-            PixelText {
-                id: doingLabel
-                x: 0
-                color: row.fgDim
-                // Present tense only while the process is there. A stopped
-                // agent's last observed action is evidence, not activity, and
-                // saying `doing` over it would be this card's one dishonest
-                // word.
-                text: row.running ? "doing" : "last"
-            }
-            Para {
-                id: doingT
-                x: 7 * row.cellW
-                width: parent.width - x
-                color: row.fgDim
-                text: row.actually
-            }
+            visible: row.doingLine !== ""
+            height: visible ? implicitHeight : 0
+            color: row.fgDim
+            text: row.doingLine
         }
 
         // The process-level fact, in words: gone, hand-started, or holding an

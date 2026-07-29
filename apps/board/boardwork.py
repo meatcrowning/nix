@@ -17,10 +17,16 @@ A CARD CARRIES TWO STATEMENTS, AND NEITHER IS THE OTHER
 What an agent SAYS it is doing, and what it is OBSERVED doing, are both drawn —
 his call, in one sentence: *"i want both"*. `boardphase.py` owns the whole of
 that and its docstring is the authority; what matters here is which one this
-module sections the cards by. **It is the observed one, always.** A phase is
-derived from the tool calls in the agent's live transcript and cannot be set by
-the agent; the claim is drawn beside it and never promoted. A card that says
-`testing` under a `coding` heading is this system working, not failing.
+module builds the OBSERVED sentence from. **It is the observed one, always.** A
+phase is derived from the tool calls in the agent's live transcript and cannot
+be set by the agent; the claim is drawn on the line above it and never
+promoted. A card saying it is `testing` while its transcript reads `coding` is
+this system working, not failing.
+
+The cards are drawn as ONE FLAT LIST, oldest first — `cards()`. The phase
+headings his first sentence asked for are gone, at his second: a card that
+jumped between sections as the agent picked up a different tool was harder to
+read than no grouping at all.
 
 Three consequences that are rules:
 
@@ -137,8 +143,10 @@ DEFAULT_CAP = 4
 #: wedged run cannot hold a slot for the rest of the day.
 WORKER_TIMEOUT_S = int(os.environ.get("BOARD_WORK_TIMEOUT", "2700"))
 
-# The phases, in the order work moves through them, and the exact words on the
-# section heads. His five, plus three states that are REAL and must not be
+# The phases, in the order work moves through them, and the exact words for
+# them. They no longer head sections on his board — `cards()` says why — and
+# are `boardctl.py agents`' listing plus the vocabulary the observed sentence
+# is built from. His five, plus three states that are REAL and must not be
 # smuggled into one of them:
 #   unreported — running, but nothing observed in its transcript yet
 #   queued     — dispatched above the cap; no process exists for it
@@ -781,13 +789,58 @@ def promote(cap_=None):
 
 
 # ------------------------------------------------------------ what he sees
-def groups(agents=None, pend=None):
-    """The agent cards, in phase sections, in the order work moves through them.
+def _queued_row(t):
+    """A dispatched task with no worker on it yet. It is drawn — work that
+    exists and is not running is the last thing a control surface may hide —
+    and with the phase headings gone its own sentence is what says so."""
+    return {
+        # No name either, and for the same reason it is offered no inbox:
+        # nobody has been spawned for it yet, and naming a worker that does
+        # not exist would be the card claiming somebody is on it.
+        "id": "", "name": "", "kind": "pending", "title": t.get("task", ""),
+        "where": t.get("where", ""), "state": "queued", "running": False,
+        "phase": "queued", "says": "", "saysLine": "", "unread": 0,
+        "waiting": [],
+        # A task with no process has nothing to observe and says so, rather
+        # than borrowing the sentence a running card would use.
+        "actually": "not started - a worker starts when a slot frees",
+        "doingLine": "",
+        "detail": "not started - a worker starts when a slot frees"}
 
-    Empty phases are NOT returned — §5.2, dead space is a defect, and a column
-    of empty headings would be this app inventing structure the machine does not
-    have. Nothing here is a count, an age or an ordering by urgency: within a
-    phase the order is `boardagents.agents()`' own stable one.
+
+def cards(agents=None, pend=None):
+    """Every card the window draws, ONE FLAT LIST, oldest first.
+
+    His call, and the reason is the moving: *"maybe for now take out the
+    'coding' 'Testing' 'finishing touches' text and just keep agents ordered by
+    birth/age so they dont move around so much"*. A card used to jump between
+    phase sections every time the agent picked up a different tool, which made
+    the list unreadable while it was working. Ordered by birth, a new agent
+    appends at the BOTTOM and nothing above it moves for the rest of its life —
+    not when it changes phase, and not when it stops.
+
+    The phase itself did not go anywhere: `boardphase.py` still derives it from
+    the transcript, it still cannot be set by the agent, and it is still what
+    the observed sentence on the card is built from. What went is the grouping.
+
+    **Ordering is not an age.** `born` never reaches the screen (see
+    `boardagents.born`), nothing here counts, and queued tasks sit after the
+    live ones because they have no birth yet — not because they are less
+    urgent. There is no urgency in this app.
+    """
+    rows = ba.agents() if agents is None else agents
+    pend = pending() if pend is None else pend
+    out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
+    return out + [_queued_row(t) for t in pend]
+
+
+def groups(agents=None, pend=None):
+    """The same cards bucketed by phase — `boardctl.py agents`' listing, and no
+    longer what the window draws (`cards()` is, flat and birth-ordered).
+
+    A terminal listing has no cursor to move under and no rows to keep still,
+    so the phase sections are still the useful shape there. Empty phases are
+    not returned.
     """
     rows = ba.agents() if agents is None else agents
     pend = pending() if pend is None else pend
@@ -804,17 +857,7 @@ def groups(agents=None, pend=None):
         else:
             buckets["unreported"].append(a)
     for t in pend:
-        buckets["queued"].append({
-            # No name either, and for the same reason it is offered no inbox:
-            # nobody has been spawned for it yet, and naming a worker that does
-            # not exist would be the card claiming somebody is on it.
-            "id": "", "name": "", "kind": "pending", "title": t.get("task", ""),
-            "where": t.get("where", ""), "state": "queued", "running": False,
-            "phase": "queued", "says": "", "unread": 0, "waiting": [],
-            # A task with no process has nothing to observe and says so, rather
-            # than borrowing the sentence a running card would use.
-            "actually": "not started - a worker starts when a slot frees",
-            "detail": "not started - a worker starts when a slot frees"})
+        buckets["queued"].append(_queued_row(t))
     return [{"phase": p, "label": PHASE_LABELS[p], "rows": buckets[p]}
             for p in PHASES if buckets[p]]
 
