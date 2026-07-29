@@ -37,6 +37,13 @@ same function — it reads both off `DeskStyle` behind a `typeof` guard. Until
 they were published here, every app's `motion.ms()` silently used the 1.0/false
 fallback, so the two controls moved the panel and left all six apps behind, in
 exactly the way the font size did.
+
+It carries `scrollbarStyle` (docs/DESIGN.md 9.2) for the third time on the same
+argument. That one is unusual in that the panel does not consume it at all — the
+panel has no scrollbar anywhere — so it is a setting that lives in the panel's
+store and is read only by the apps. That is deliberate: settings.json is the one
+channel a Settings-window control has into `apps/`, and a second one would be a
+second thing to keep in sync for no gain.
 """
 
 import json
@@ -67,13 +74,23 @@ MAX_FONT_SIZE = 24
 DEFAULT_REDUCE_MOTION = False
 DEFAULT_ANIM_SPEED = 1.0
 
+# Which scrollbar apps/qmlcommon/VScroll.qml draws (docs/DESIGN.md 9.2). The
+# panel has no scrollbar anywhere, so this key's only consumers are the apps —
+# it still lives in the panel's settings.json because that file IS the
+# cross-app settings channel, and a second one would be a second thing to keep
+# in sync. Validate against the known set rather than passing the string
+# through: an unknown value would silently draw nothing, and VScroll's own
+# fallback (for a harness with no DeskStyle at all) is the same default.
+SCROLLBAR_STYLES = ("win31", "beveled", "flat")
+DEFAULT_SCROLLBAR_STYLE = "win31"
+
 
 def settings_path():
     return Path(os.environ.get("DESK_SETTINGS") or SETTINGS_PATH)
 
 
 class DeskStyle(QObject):
-    """Live `fontFamily` / `fontSize` / `reduceMotion` / `animSpeed`.
+    """Live `fontFamily` / `fontSize` / `reduceMotion` / `animSpeed` / `scrollbarStyle`.
 
     Watches the file AND its directory. The directory watch is the load-bearing
     one: SettingsStore writes atomically (temp file + rename), which swaps the
@@ -91,6 +108,7 @@ class DeskStyle(QObject):
         self._size = DEFAULT_FONT_SIZE
         self._reduce = DEFAULT_REDUCE_MOTION
         self._speed = DEFAULT_ANIM_SPEED
+        self._scrollbar = DEFAULT_SCROLLBAR_STYLE
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
         self._watcher.directoryChanged.connect(self._on_change)
@@ -132,9 +150,13 @@ class DeskStyle(QObject):
         speed = float(speed)
         if not math.isfinite(speed) or speed <= 0:
             speed = DEFAULT_ANIM_SPEED
-        now = (family, size, reduce_motion, speed)
-        if now != (self._family, self._size, self._reduce, self._speed):
-            self._family, self._size, self._reduce, self._speed = now
+        bar = data.get("scrollbarStyle")
+        if bar not in SCROLLBAR_STYLES:
+            bar = DEFAULT_SCROLLBAR_STYLE
+        now = (family, size, reduce_motion, speed, bar)
+        if now != (self._family, self._size, self._reduce, self._speed, self._scrollbar):
+            (self._family, self._size, self._reduce,
+             self._speed, self._scrollbar) = now
             self.changed.emit()
 
     @Property(str, notify=changed)
@@ -152,3 +174,7 @@ class DeskStyle(QObject):
     @Property(float, notify=changed)
     def animSpeed(self):
         return self._speed
+
+    @Property(str, notify=changed)
+    def scrollbarStyle(self):
+        return self._scrollbar

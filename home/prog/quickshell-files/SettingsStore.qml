@@ -125,6 +125,14 @@ Singleton {
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
+            // Which scrollbar the seven Qt apps draw (docs/DESIGN.md 9.2).
+            // win31 | beveled | flat. The panel itself draws no scrollbar at
+            // all — its one page never scrolls — so this key exists here purely
+            // because settings.json is the desktop's one cross-app settings
+            // channel: pylib/deskstyle.py reads it onto the DeskStyle context
+            // property and apps/qmlcommon/VScroll.qml binds to it, exactly like
+            // fontFamily/fontSize/reduceMotion/animSpeed.
+            property string scrollbarStyle: "win31"
             // Motion
             property bool   reduceMotion: false
             property real   animSpeed: 1.0             // 1.0 = the baked 220ms; <1 faster
@@ -293,7 +301,8 @@ Singleton {
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
-        windowRounding: 0, trayTint: true, reduceMotion: false, animSpeed: 1.0,
+        windowRounding: 0, trayTint: true, scrollbarStyle: "win31",
+        reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
