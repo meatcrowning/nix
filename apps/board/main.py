@@ -27,6 +27,12 @@ The pieces, and where the rules come from:
     re-serialises the document; it replaces the lines it names and returns the
     rest of the file unchanged, byte for byte. Its docstring is the store's
     format and the round-trip contract.
+  * `boardagents.py` — the one section of this window that is NOT the store:
+    who is working right now (the stashes `boardmove` already keeps, `/proc`,
+    and one systemctl query) and the box he types into to reach them. An
+    agent's stdin is closed, so a message is a FILE that is never in two places
+    and never in none; its docstring is the authority on what the box can and
+    cannot honestly promise.
   * QML draws it: pixel font at the desktop's size through `DeskStyle`, the wal
     palette parsed and watched out of the panel's `Theme.qml`, motion from
     `qmlcommon/Motion.qml`, `Kinetic*` views, `VScroll`, and the chrome in the
@@ -65,6 +71,7 @@ from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
 
 import boardparse  # noqa: E402  (beside this file)
+import boardagents  # noqa: E402  (beside this file)
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "board" / "state.json"
@@ -343,6 +350,134 @@ class Board(QObject):
         QGuiApplication.clipboard().setText(text)
 
 
+class Agents(QObject):
+    """Who is working right now, and the one way he can reach them.
+
+    `boardagents.py` is the whole mechanism and its docstring is authoritative:
+    the liveness rule is `boardmove`'s (pid + kernel start time, so a recycled
+    pid cannot fake life) and a message is a FILE, because an agent's stdin is
+    closed and there is nothing to type into. This class is only the Qt skin on
+    it — a poll, a systemctl query that does not block the GUI thread, and the
+    strings the section draws.
+
+    IT WRITES NOTHING TO `board.md`. Everything here lives under
+    `~/.local/state/board/`; the store's only writers stay `boardparse.edit()`'s
+    three (the app's answers, boardctl, board-watch).
+    """
+
+    changed = Signal()
+    #: for the titlebar footer, the same channel Board uses
+    status = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = []
+        self._queued = []
+        self._watcher = ""
+        # The registry, the stashes and the inboxes are all files, so watch
+        # them — but /proc is not, so poll as well. 2.5s is well under "prompt"
+        # for a finished agent leaving the list and costs one /proc walk.
+        self._watch = QFileSystemWatcher(self)
+        self._watch.directoryChanged.connect(lambda _p: self.refresh())
+        self._poll = QTimer(self)
+        self._poll.setInterval(2500)
+        self._poll.timeout.connect(self.refresh)
+        self._poll.start()
+        # systemctl is a fork; it does not happen on the GUI thread's clock.
+        self._proc = QProcess(self)
+        self._proc.finished.connect(self._on_systemctl)
+        self._unit = QTimer(self)
+        self._unit.setInterval(10000)
+        self._unit.timeout.connect(self._ask_systemd)
+        self._unit.start()
+        self._ask_systemd()
+        self.refresh()
+
+    # ---- reading ----
+    def _rewatch(self):
+        want = [boardagents.inbox_dir("queue"), boardagents.agents_dir(),
+                boardagents.bm.stash_dir()]
+        for d in want:
+            if os.path.isdir(d) and d not in self._watch.directories():
+                self._watch.addPath(d)
+
+    #: `systemctl` is not on this app's wrapped PATH on every machine, and a
+    #: QProcess that cannot start reports nothing at all — which would read as
+    #: "the watcher is fine" instead of "we could not ask" (§10). Find it.
+    SYSTEMCTL = next((p for p in ("/run/current-system/sw/bin/systemctl",
+                                  "/usr/bin/systemctl", "/bin/systemctl")
+                      if os.path.exists(p)), "systemctl")
+
+    def _ask_systemd(self):
+        if self._proc.state() != QProcess.NotRunning:
+            return
+        self._proc.start(Agents.SYSTEMCTL,
+                         ["--user", "show", "board-watch.service",
+                          "-p", "ActiveState", "-p", "SubState", "-p", "Result"])
+
+    def _on_systemctl(self, *_a):
+        raw = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
+        text = boardagents.watcher_state(raw)["text"]
+        if text != self._watcher:
+            self._watcher = text
+            self.changed.emit()
+
+    @Slot()
+    def refresh(self):
+        self._rewatch()
+        try:
+            rows = []
+            for a in boardagents.agents():
+                rows.append({
+                    "id": a["id"], "kind": a["kind"], "title": a["title"],
+                    "where": a["where"], "state": a["state"],
+                    "running": a["state"] == "running",
+                    "detail": boardagents.describe(a),
+                    "waiting": [m["text"] for m in boardagents.for_agent(a["id"])],
+                })
+            queued = [m["text"] for m in boardagents.pending()]
+        except OSError:
+            return
+        if rows != self._rows or queued != self._queued:
+            self._rows, self._queued = rows, queued
+            self.changed.emit()
+
+    @Property("QVariantList", notify=changed)
+    def list(self):
+        return self._rows
+
+    @Property("QVariantList", notify=changed)
+    def queued(self):
+        return self._queued
+
+    @Property(str, notify=changed)
+    def watcher(self):
+        return self._watcher
+
+    # ---- writing ----
+    @Slot(str, str, str, str, result=str)
+    def send(self, agent_id, title, kind, text):
+        """His words to an agent. The return value is what the UI SAYS happened,
+        and the two cases are kept apart on purpose (§10): `delivered` means the
+        message is in a running agent's inbox, not that it has read it — the row
+        goes on saying `unread` until the agent actually takes it, and if it
+        never does, `sweep()` moves it to the queue for the next one.
+        """
+        try:
+            msg = boardagents.send(text, to=agent_id or None, to_title=title,
+                                   to_kind=kind)
+        except OSError as e:
+            return "could not save that note - " + (e.strerror or "?")
+        if msg is None:
+            return ""
+        self.refresh()
+        if msg["state"] == "delivered":
+            return "left in its inbox - it reads that between steps"
+        if agent_id:
+            return "it is not running - queued for the next agent instead"
+        return "queued - the next agent board-watch spawns gets it"
+
+
 class Settings(QObject):
     """board's own persisted UI state, `~/.local/state/board/state.json`.
 
@@ -395,7 +530,9 @@ def main():
     style = DeskStyle()
     titlebar = Titlebar()
     board = Board(args[0] if args else None)
+    agents = Agents()
 
+    ctx.setContextProperty("Agents", agents)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)

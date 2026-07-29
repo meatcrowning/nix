@@ -18,6 +18,14 @@
 # rather than by editing the markdown (it comes from the per-user profile at the
 # end of the list — do not trim that entry).
 #
+# AND IT CARRIES HIS NOTES. The board app draws a box against every running
+# agent (apps/board/boardagents.py). An agent's stdin is closed, so a message is
+# a file: the spawned agent is told to poll `boardctl.py inbox take`, and
+# anything nobody reads is swept into a queue that a tick of this script works
+# with an agent of its own. Third consequence for this file, after the two
+# below: the timer interval is also the worst case for a note he typed while
+# nothing was running, since the queue is only looked at on a tick.
+#
 # TOP ONLY, on purpose. `home/` is shared verbatim with `air`/book and docs/
 # syncs both ways every five minutes, so deploying this to both machines would
 # have the same answer picked up twice, by two agents, on two checkouts of the

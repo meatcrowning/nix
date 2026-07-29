@@ -1,7 +1,7 @@
 # `board` — what needs him, what is moving, what landed
 
-Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`
-and `qml/`.
+Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
+`boardagents.py` and `qml/`.
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 (including the `air` system-python split) and runs the **live** source at
 `/home/lam/nix/apps/board/main.py`, so `.py`/`.qml` edits need no rebuild. See
@@ -141,6 +141,73 @@ Rules that fall out of it, all of them load-bearing:
 - **An empty NEEDS YOU is now the resting state**, not a parse failure. Nothing
   in this app or its harness may treat "no decisions" as a regression.
 
+## The `agents` section: the only part of this window that is NOT the store
+
+He asked for *"a display on the board of currently active systemd claude agents
+running and a brief title / description and a text box for me to send commands /
+new ideas / fixes to an agent"*. That section is `boardagents.py` plus
+`qml/AgentRow.qml`, and it reads the MACHINE, not `board.md`:
+
+- **the stashes** `boardmove.start()` already writes (title, where, owning pid
+  and that pid's kernel start time),
+- **`/proc`**, for `claude` processes nothing here spawned,
+- **one `systemctl --user show board-watch.service`**, run through `QProcess` so
+  a fork never lands on the GUI thread's clock.
+
+Rules, all of them load-bearing:
+
+- **There is ONE liveness rule and it is `boardmove._alive`** — pid plus kernel
+  start time, so a recycled pid cannot make a dead agent look alive. Do not add
+  a second definition of "running" anywhere in this tree.
+- **It writes nothing to the store.** Everything it persists is under
+  `~/.local/state/board/` (`inbox/`, `agents/`). `board.md`'s writers are still
+  exactly three, all through `boardparse.edit()`.
+- **The no-pressure rule applies here too**: no ages, no elapsed times, no
+  counts, no urgency ordering, nothing from the warn/crit ramp. A running agent
+  is just running. The order is running -> unowned -> exited, which is stable
+  (a row must not move under his cursor between two polls), not urgent.
+- **A finished agent leaves the list at once** — board-watch drops the stash on
+  success and on failure alike — and **a failed one is told apart in WORDS**
+  (`exited without finishing`), with §9.1's accent gutter present only on a
+  running row. Colour says nothing here; §8.1's ramp means a machine fault.
+- **The interactive session is not faked.** It is not a systemd unit, so it is
+  listed as what can actually be observed — a process — and described as
+  `running - board sees the process, not what it is doing`. Nothing invents a
+  title for it.
+- **Empty is the resting state**: `nothing is running`, in `Theme.dim`, with the
+  box still there. Same reading as `nothing needs you`.
+
+### The box, and the promise it can honestly make
+
+**You cannot type into a running agent.** `claude -p` is headless with stdin
+closed, and the interactive session's stdin is his terminal's. So a message is a
+FILE, and a message is in exactly one of three directories at every instant —
+`inbox/to/<agent>/`, `inbox/queue/`, `inbox/taken/` — only ever moved between
+them by `os.replace()`. That is why "nothing he types can be lost" is a property
+of the filesystem here and not of anybody's diligence, and it is what
+`tools/board-test.py` asserts after every path.
+
+| he types it... | what happens | what the footer says |
+| --- | --- | --- |
+| to a RUNNING agent | into that agent's inbox; the row keeps showing it as `waiting in its inbox` until the agent takes it | `left in its inbox - it reads that between steps` |
+| to one that has FINISHED | straight to the queue | `it is not running - queued for the next agent instead` |
+| with NOTHING running | straight to the queue | `queued - the next agent board-watch spawns gets it` |
+
+`delivered` never means "it read it" — only `taken` does, and that is a file
+move an agent performs. Anything nobody takes is escalated to the queue by
+`sweep()` (its agent went, or it has sat unread past `ESCALATE_AFTER_S`, which
+is machine business and never drawn), and the queue is drained by a board-watch
+run of its own (`work_the_queue`, `NOTE_PROMPT`). If that run fails, the bullet
+it leaves in WAITING ON YOU TO DO **quotes what he wrote**. There is no path
+where a sentence he typed reaches nobody and says nothing.
+
+**Agents reach their side with `boardctl.py inbox take`** — `BOARD_AGENT_ID`
+names the inbox, board-watch's prompt tells every agent it spawns to check it
+between steps, and an interactive session finds its own id by walking its
+process ancestry. **Only agents spawned after this landed have that line in
+their prompt**; an older one will never look, which is exactly what the
+escalation exists for.
+
 ## Never clobber him — three defences
 
 The store is edited by agents and by a sync timer **while this window is open**.
@@ -164,16 +231,17 @@ The store is edited by agents and by a sync timer **while this window is open**.
 
 ## What it draws, and why it looks like that
 
-One page, three sections, in his stated order of interest — **what needs you,
-what is moving, what happened** — inside **one** `KineticFlickable`. §9.2
+One page, four sections, in his stated order of interest — **what needs you,
+what is moving, who is running it, what happened** — inside **one**
+`KineticFlickable`. §9.2
 forbids nested scroll regions, so every section sizes to its whole content and a
 wheel notch means the same thing wherever the cursor is. `VScroll` is the bar and
 the gutter is reserved from its own `barW`, never a literal.
 
 - **Sections are told apart by a RULE and by spacing, never by size or weight**
   (§2.2 — the font ships Regular only, and every size here is one desktop-wide
-  setting). `needs you` takes an accent rule; `in flight` and `landed` take the
-  border hairline. The band is also the collapse control and says so: `[-]` /
+  setting). `needs you` takes an accent rule; `in flight`, `agents` and `landed`
+  take the border hairline. The band is also the collapse control and says so: `[-]` /
   `[+]`, ASCII, because the font has no triangles (§2.3).
 - **An ANSWERED decision carries the 2px accent gutter** §9.1 gives a current
   row. Nothing marks an unanswered one: an open question is this file's resting
@@ -200,7 +268,7 @@ the gutter is reserved from its own `barW`, never a literal.
 
 ### Chrome: the hyprvtb titlebar (§12, §7.4)
 
-`ny` / `if` / `ld` jump to a section **and** report position — the lit one is the
+`ny` / `if` / `ag` / `ld` jump to a section **and** report position — the lit one is the
 section the top of the viewport is in, like reader's outline marking. `md` opens
 the store in `reader`, and says so if `reader` cannot be launched.
 
@@ -232,22 +300,29 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 ```
 
-`tools/board-test.py`, offscreen, four layers: **the round trip** (pure Python
+`tools/board-test.py`, offscreen, five layers: **the round trip** (pure Python
 — byte-identity, one-line edits, the radio, the `> ` marker preserved on a
 clear, the atomic write), **the moves** (start/land/back/note/reconcile: every
 decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
 table and not the `Queued` one below it, an unanswered decision is refused, a
 dead owner is reclaimed, and an edit computed from stale bytes is retried rather
-than landed), **the real store** (it parses, every decision has a
+than landed), **the agents** (a live agent, a dead one and a hand-moved one are
+told apart by `boardmove`'s own liveness rule; and every path the box takes is a
+CONSERVATION check — after each one his message is on disk exactly once, in
+exactly one of the three directories, whether it was read, escalated or
+drained), **the real store** (it parses, every decision has a
 title, an `if unanswered` line and somewhere to write an answer, and the font
 audit above), and **the window** — the real `qml/Main.qml` under
 `QT_QPA_PLATFORM=offscreen`, including the stale-write refusal, an external edit
 appearing without a relaunch, **all three sections redrawing when an item moves
 between them — with his scroll position and his half-typed draft kept**, a store
 replaced by rename (a sync, a `git checkout`) still reloading, a section
-emptying out completely, and `grabWindow()` PNGs with `--shots`: the real
-store, the fixture populated, a decision answered, an EMPTY `NEEDS YOU`, a
-420x600 window, and an unreadable store. It redirects `XDG_STATE_HOME` into a
+emptying out completely, **a running agent and a failed one drawn differently
+and a finished one leaving the list**, and `grabWindow()` PNGs with `--shots`:
+the real store, the fixture populated, a decision answered, an EMPTY `NEEDS
+YOU`, an EMPTY agents section (with `/proc` stubbed away, since the process
+running the harness is itself under a Claude session), the agents section
+populated, a 420x600 window, and an unreadable store. It redirects `XDG_STATE_HOME` into a
 scratch dir (a harness here **must**, or it rewrites his own app's state), works
 on a COPY of the store for every write, and stubs the Titlebar, because the real
 one registers buttons against the harness's pid in the live compositor.

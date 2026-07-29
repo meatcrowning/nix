@@ -12,6 +12,18 @@ happen. This is the third way, and it is the one an agent should use:
     boardctl.py note '**Relaunch `player`** - live source, no hot reload.'
     boardctl.py list
 
+    boardctl.py agents                             # who is running right now
+    boardctl.py inbox take                         # HIS notes to you, mid-flight
+    boardctl.py inbox send 'also fix the tooltip' --to <agent id>
+
+**If you are an agent, run `inbox take` between steps.** It is how a sentence he
+typed into the board's agents section while you were already running reaches
+you: your stdin is closed, so the only channel is a file you poll. It prints his
+words and nothing else, they outrank the prompt you started with, and taking
+them is what stops the watcher escalating them to another agent later. The
+mechanism, the guarantees and what the box can and cannot promise are in
+`boardagents.py`'s docstring.
+
 Every one of those is a targeted line edit under an advisory lock, with a
 digest re-check and an atomic replace (`boardparse.edit`) — so it is safe to run
 while he has the board open, while the five-minute docs sync is running, and
@@ -37,6 +49,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import boardagents as ba                                           # noqa: E402
 import boardmove as bm                                             # noqa: E402
 import boardparse as bp                                            # noqa: E402
 
@@ -92,6 +105,50 @@ def cmd_list(a):
     return 0
 
 
+def cmd_agents(a):
+    for ag in ba.agents():
+        print("  %-10s %-52s %s" % (ag["state"], ag["title"][:52], ag["where"]))
+        if ag["unread"]:
+            print("             %d unread note(s) - `boardctl.py inbox take`"
+                  % ag["unread"])
+    q = ba.pending()
+    if q:
+        print("QUEUED FOR THE NEXT AGENT")
+        for m in q:
+            print("  " + m["text"][:100])
+    return 0
+
+
+def cmd_inbox(a):
+    if a.what == "take":
+        msgs = ba.take(a.id, include_queue=a.queue)
+        for m in msgs:
+            print(m["text"])
+        if not msgs and not a.quiet:
+            print("(nothing in your inbox)")
+        return 0
+    if a.what == "send":
+        msg = ba.send(" ".join(a.text), to=a.to)
+        if msg is None:
+            print("boardctl: nothing to send", file=sys.stderr)
+            return 1
+        print("%s: %s" % (msg["state"], msg["text"][:120]))
+        return 0
+    if a.what == "sweep":
+        moved, dropped = ba.sweep()
+        for m in moved:
+            print("to the queue: " + m["text"][:100])
+        for r in dropped:
+            print("dropped a dead registration: " + str(r.get("title")))
+        return 0
+    for m in ba.pending():
+        print("queued  " + m["text"][:100])
+    for ag in ba.agents():
+        for m in ba.for_agent(ag["id"]):
+            print("unread  [%s] %s" % (ag["title"][:30], m["text"][:100]))
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="boardctl", description=__doc__.split("\n")[0])
     p.add_argument("--board", default=bp.BOARD_PATH)
@@ -129,6 +186,21 @@ def main(argv=None):
 
     s = sub.add_parser("list", help="what is where")
     s.set_defaults(fn=cmd_list)
+
+    s = sub.add_parser("agents", help="who is running right now")
+    s.set_defaults(fn=cmd_agents)
+
+    s = sub.add_parser("inbox", help="his mid-flight notes to a running agent")
+    s.add_argument("what", nargs="?", default="list",
+                   choices=["list", "take", "send", "sweep"])
+    s.add_argument("text", nargs="*", help="send: the note")
+    s.add_argument("--id", default=None,
+                   help="take: whose inbox (default: $BOARD_AGENT_ID, else this session)")
+    s.add_argument("--to", default=None, help="send: an agent id; omit to queue it")
+    s.add_argument("--queue", action="store_true",
+                   help="take: drain the queue too (board-watch only)")
+    s.add_argument("--quiet", action="store_true", help="take: print nothing if empty")
+    s.set_defaults(fn=cmd_inbox)
 
     a = p.parse_args(argv)
     try:

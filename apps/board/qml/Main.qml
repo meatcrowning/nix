@@ -50,6 +50,26 @@ Window {
     readonly property var landed: doc && doc.landed ? doc.landed : []
     readonly property var intro: doc && doc.intro ? doc.intro : ({})
 
+    // The machine, not the store: who is running, and what he has written to
+    // them that nobody has picked up yet (`boardagents.py`).
+    readonly property var agents: Agents.list
+    readonly property var queuedNotes: Agents.queued
+
+    // A note to an agent takes the SAME path his answers take: never lost, and
+    // honest about which of the two things happened. `boardagents.send()` files
+    // it either in a running agent's inbox or in the queue, and says which; the
+    // footer repeats it in his own words rather than in an exit code.
+    function sendTo(agent, body) {
+        if (body.trim() === "")
+            return;
+        var msg = Agents.send(agent ? agent.id : "", agent ? agent.title : "",
+                              agent ? agent.kind : "", body);
+        if (msg !== "") {
+            win.status = msg;
+            win.setDraft("msg:" + (agent ? agent.id : "queue"), "");
+        }
+    }
+
     // A window sized for reading one column of prose beside the panel: the bar
     // reserves 376px on the right of a 1920px screen and Hyprland's `gaps_out`
     // takes 35 top and bottom of 1080, so 880x880 sits inside what is actually
@@ -140,6 +160,7 @@ Window {
     // with no genuine history gets nothing rather than an invented one.
     readonly property string section: {
         if (secLanded.visible && scroller.contentY >= secLanded.y - 4) return "landed";
+        if (secAgents.visible && scroller.contentY >= secAgents.y - 4) return "agents";
         if (secFlight.visible && scroller.contentY >= secFlight.y - 4) return "flight";
         return "needs";
     }
@@ -148,6 +169,8 @@ Window {
           tip: "what needs you" },
         { id: "flight", label: "if", state: section === "flight" ? 1 : 0,
           tip: "what is in flight" },
+        { id: "agents", label: "ag", state: section === "agents" ? 1 : 0,
+          tip: "who is running now" },
         { id: "landed", label: "ld", state: section === "landed" ? 1 : 0,
           tip: "what landed" },
         "-",
@@ -169,6 +192,7 @@ Window {
             switch (id) {
             case "needs":  win.jump(secNeeds);  break;
             case "flight": win.jump(secFlight); break;
+            case "agents": win.jump(secAgents); break;
             case "landed": win.jump(secLanded); break;
             case "reader":
                 if (!Board.openInReader())
@@ -446,6 +470,119 @@ Window {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            Item { width: 1; height: 18 }
+
+            // ================================================ who is running
+            // NOT part of the store. Every other section on this page is
+            // `board.md`; this one is the machine — stashes, `/proc` and one
+            // systemctl query, read by `boardagents.py`. It sits under IN
+            // FLIGHT because it answers the next question that section raises
+            // ("is anything actually working on that?") and above LANDED,
+            // which is history.
+            //
+            // It obeys the same no-pressure rule as the rest: no ages, no
+            // counts, no urgency ordering, nothing in the warn/crit ramp. A
+            // running agent is just running.
+            SectionHead {
+                width: page.width
+                label: "agents"
+                collapsed: win.isCollapsed("agents")
+                fgAccent: win.fgAccent
+                fgDim: win.fgDim
+                onToggled: win.toggleCollapsed("agents")
+            }
+
+            Item {
+                id: secAgents
+                width: page.width
+                visible: !win.isCollapsed("agents")
+                implicitHeight: visible ? agentsCol.implicitHeight : 0
+                height: implicitHeight
+
+                Column {
+                    id: agentsCol
+                    width: parent.width
+
+                    // Nothing running is the NORMAL state, and it must read as
+                    // finished rather than as broken — one dim sentence, no
+                    // empty frame, no "0 agents". The box below it still works,
+                    // which is the point: what he writes waits for the next one.
+                    PixelText {
+                        width: agentsCol.width
+                        visible: win.agents.length === 0
+                        height: visible ? implicitHeight : 0
+                        color: Theme.dim
+                        text: "nothing is running"
+                    }
+
+                    Repeater {
+                        model: win.agents
+                        delegate: AgentRow {
+                            required property var modelData
+                            width: agentsCol.width
+                            agent: modelData
+                            cellW: win.cellW
+                            fgAccent: win.fgAccent
+                            fgText: win.fgText
+                            fgDim: win.fgDim
+                            draft: win.draftOf("msg:" + modelData.id)
+                            onDraftEdited: (b) => win.setDraft("msg:" + modelData.id, b)
+                            onSend: (b) => win.sendTo(modelData, b)
+                            onContextRequested: (mx, my) =>
+                                win.rowMenu(modelData.title + "  " + modelData.detail, mx, my)
+                        }
+                    }
+
+                    // With nobody running there is no row to type into, so the
+                    // section grows its own box. Same component, no target:
+                    // `boardagents.send()` files it in the queue and the next
+                    // agent board-watch spawns is handed it.
+                    AgentRow {
+                        width: agentsCol.width
+                        visible: win.agents.length === 0
+                        height: visible ? implicitHeight : 0
+                        agent: ({ id: "", kind: "", title: "", where: "",
+                                  running: false, waiting: [],
+                                  detail: "board-watch spawns one when you answer a decision" })
+                        cellW: win.cellW
+                        fgAccent: win.fgAccent
+                        fgText: win.fgText
+                        fgDim: win.fgDim
+                        draft: win.draftOf("msg:queue")
+                        onDraftEdited: (b) => win.setDraft("msg:queue", b)
+                        onSend: (b) => win.sendTo(null, b)
+                    }
+
+                    // Notes waiting for the NEXT agent — either he wrote them
+                    // with nothing running, or an agent went away without
+                    // reading them. Drawn because a message he cannot see is a
+                    // message he has to assume was lost.
+                    Repeater {
+                        model: win.queuedNotes
+                        delegate: Para {
+                            required property var modelData
+                            width: agentsCol.width
+                            color: win.fgDim
+                            text: "  waiting for the next agent: " + modelData
+                        }
+                    }
+
+                    Item { width: 1; height: 6 }
+
+                    // The watcher's own state, from systemd. It is the thing
+                    // that will pick the queue up, so "is it armed?" is a fair
+                    // question for this section to answer.
+                    PixelText {
+                        width: agentsCol.width
+                        visible: Agents.watcher !== ""
+                        height: visible ? implicitHeight : 0
+                        elide: Text.ElideRight
+                        color: Theme.dim
+                        text: Agents.watcher
                     }
                 }
             }

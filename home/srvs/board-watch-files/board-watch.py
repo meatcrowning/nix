@@ -36,6 +36,15 @@ longer fingerprinted, so **moving an item into IN FLIGHT by hand suppresses the
 auto-spawn for it**. That is correct — work is already underway — but it means
 whoever moves it owns doing the work.
 
+AND HE CAN TALK TO IT WHILE IT RUNS. The board app draws a box against every
+running agent, because he asked to be able to send "commands / new ideas /
+fixes" to one mid-flight. An agent's stdin is closed, so a message is a FILE:
+the prompt below tells every agent to run `boardctl.py inbox take` between
+steps, `BOARD_AGENT_ID` names its inbox, and anything nobody reads is swept into
+a queue that a run of this script works on its own (`work_the_queue`, using
+`NOTE_PROMPT`). The mechanism, and the argument that nothing he types can be
+lost, are in `apps/board/boardagents.py`'s docstring.
+
 THE THREE HAZARDS, and how each is defended:
 
   1. THE FEEDBACK LOOP. An agent that works a decision edits board.md itself
@@ -98,6 +107,7 @@ OFF = os.path.join(STATE, "off")
 AGENT_TIMEOUT_S = int(os.environ.get("BOARD_WATCH_TIMEOUT", "2700"))   # 45 min
 
 sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", "pylib")]
+import boardagents as ba                                         # noqa: E402
 import boardmove as bm                                           # noqa: E402
 import boardparse as bp                                          # noqa: E402
 
@@ -389,6 +399,62 @@ repo inside this checkout, so commit the result from inside `docs/`.
 7. If the answer is ambiguous or the work turns out to be much larger than the \
 item implies, do the smallest honest thing and write what you found onto the \
 board instead of guessing big.
+8. **He can reach you WHILE you run. Check for it between steps:**
+
+       python3 apps/board/tools/boardctl.py inbox take --quiet
+
+   The board app has a box against your row; your stdin is closed, so a file is \
+the only channel there is. Anything that command prints is him, typing at you \
+mid-flight — a correction, an extra idea, a fix — and it OUTRANKS this prompt \
+where the two disagree. Run it after each meaningful step and once before you \
+finish. Taking a note is also what stops the watcher handing it to a second \
+agent later, so take them even if you decide not to act, and say on the board \
+what you did with them.
+
+There is nobody to ask. Finish, or write down why you did not.
+"""
+
+# The same job, for a note he wrote when nothing was running (or when the agent
+# it was addressed to never read it). `boardagents.py` guarantees such a message
+# reaches SOMEBODY; this is the somebody.
+NOTE_PROMPT = """You are running headless, with no human watching, on the \
+machine `top` (x86_64 NixOS, flake attribute `top`). Work in `{repo}`.
+
+He typed this into the agents section of his board (the `board` app) for an \
+agent to pick up. Nothing was running at the time, or whatever was running \
+never read it, so it is yours. It is the whole job.
+
+--- what he wrote ---
+{notes}
+--- end ---
+
+RULES, in force for this session: exactly the ones a decision run gets, and \
+they are not negotiable.
+
+1. **NEVER rebuild and never change the running machine.** No `sudo \
+rebuild-top`, `nixos-rebuild`, `hyprctl`, `qs ipc`, `systemctl`, `loginctl`. \
+`apps/` runs live source, so a `.py`/`.qml` change is picked up when he next \
+relaunches. If the work cannot land without a rebuild or a reload: **stop, \
+leave that part undone**, and say so on the board.
+2. **Never open a window on his screen and never drive his running apps.** \
+Offscreen harnesses and `tools/sandbox.sh` only; he does every visual check.
+3. **The git index here is SHARED.** `git commit -m "msg" -- <explicit> \
+<paths>`, always. `git add -N` for new files. Never a destructive or reverting \
+git command.
+4. **Push to `main`** when it works. No branch, no PR.
+5. Read `AGENTS.md` at the repo root, then the nested one closest to what you \
+are editing, then `docs/DESIGN.md` if you put pixels on a screen.
+6. **Record what you did on the board, with the tool, never by hand** - from \
+`{repo}`:
+
+       python3 apps/board/tools/boardctl.py note '**<what he asked for>** - \
+<what you did, what you did not, and whether a rebuild is now pending and why>'
+
+   `docs/` is its own git repo inside this checkout, so commit the result from \
+inside `docs/`.
+7. If what he wrote is ambiguous, do the smallest honest thing and write what \
+you found onto the board instead of guessing big. If it is not a task at all \
+(a thought, a note to himself), put it on the board as a bullet and stop.
 
 There is nobody to ask. Finish, or write down why you did not.
 """
@@ -406,10 +472,15 @@ DENY = ["Bash(sudo:*)", "Bash(rebuild-top:*)", "Bash(nixos-rebuild:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
 
 
-def spawn(item, prompt):
-    """Run the agent. Returns (exit code, how it ended, seconds)."""
+def spawn(prompt, agent_id, label):
+    """Run the agent. Returns (exit code, how it ended, seconds).
+
+    `BOARD_AGENT_ID` is what makes his mid-flight notes reachable: it is the
+    inbox `boardctl.py inbox take` reads with no argument, and the same id the
+    board app addresses the box on this agent's row to.
+    """
     stub = os.environ.get("BOARD_WATCH_SPAWN")
-    env = dict(os.environ, BOARD_WATCH_KEY=item["key"])
+    env = dict(os.environ, BOARD_WATCH_KEY=agent_id, BOARD_AGENT_ID=agent_id)
     if stub:
         cmd = ["/bin/sh", "-c", stub]
     else:
@@ -418,7 +489,7 @@ def spawn(item, prompt):
                "--allowedTools", *ALLOW,
                "--disallowedTools", *DENY,
                "--output-format", "text",
-               "-n", "board: decision %s" % (item["num"] or item["key"])]
+               "-n", label]
     t0 = time.time()
     try:
         p = subprocess.run(cmd, cwd=REPO, env=env, timeout=AGENT_TIMEOUT_S,
@@ -434,6 +505,45 @@ def spawn(item, prompt):
     if p.returncode != 0 and p.stderr:
         log("agent stderr: " + " ".join(p.stderr.split())[:400])
     return p.returncode, "with status %d" % p.returncode, time.time() - t0
+
+
+QUEUE_FAIL = (
+    "- **an agent could not finish the note you sent from the board** - it "
+    "exited {how}. Nothing was committed on its behalf. What you wrote, so it "
+    "is not lost: \"{text}\" Log: `~/.cache/board-watch.log`\n")
+
+
+def work_the_queue():
+    """Spawn ONE agent for the notes he typed that nobody picked up.
+
+    This is the other half of `boardagents.py`'s promise. The box on the board's
+    agents section files a message either in a running agent's inbox or in the
+    queue; the queue has to be somebody's job or the promise is a lie, and this
+    is the somebody. Returns True if a run happened.
+    """
+    msgs = ba.drain()          # BEFORE the spawn: see boardagents.drain()
+    if not msgs:
+        return False
+    notes = "\n\n".join(m["text"] for m in msgs)
+    aid = "note-%d" % os.getpid()
+    # Registered so it shows up on his board as a running agent with his own
+    # words as its title — the same row, the same box, so he can add to it.
+    ba.register(aid, msgs[0]["text"][:70], os.getpid(), kind="note",
+                where="board-watch")
+    log("firing on %d queued note(s)" % len(msgs))
+    try:
+        rc, how, secs = spawn(NOTE_PROMPT.format(repo=REPO, notes=notes), aid,
+                              "board: a note from him")
+    finally:
+        ba.unregister(aid)
+    if rc == 0:
+        log("the queued note finished in %dm%02ds" % (secs // 60, secs % 60))
+        return True
+    log("the queued note FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
+    # The last stop. He must never have to wonder where a sentence he typed
+    # went, so the failure carries the text itself onto the board.
+    note_on_board(QUEUE_FAIL.format(how=how, text=" ".join(notes.split())[:300]))
+    return True
 
 
 # ------------------------------------------------------------------------ run
@@ -465,6 +575,20 @@ def main():
                 % (rec.get("num") or rec.get("key")))
     except (bm.BoardError, OSError) as e:
         log("could not reconcile stranded items: %s" % e)
+
+    # AND NOTHING HE TYPED IS LOST EITHER. A note he wrote to an agent that has
+    # since gone — or that never read it — is moved to the queue here, and the
+    # queue is drained at the bottom of this function by a run of its own. Same
+    # shape as reconcile above: a guarantee that costs a directory listing.
+    try:
+        escalated, dropped = ba.sweep()
+        if escalated:
+            log("%d note(s) nobody read moved to the queue" % len(escalated))
+        for rec in dropped:
+            log("dropped a registration whose process is gone: %s"
+                % rec.get("title"))
+    except OSError as e:
+        log("could not sweep the inbox: %s" % e)
 
     try:
         src = bp.read(BOARD)
@@ -504,6 +628,15 @@ def main():
             state["queued"] = []
             save_state(state)
         log("no new answer")
+        # A tick with no new answer is when his notes get worked: one agent per
+        # invocation still holds, and a decision always outranks a note.
+        if ba.pending():
+            may, why = gate()
+            if may:
+                work_the_queue()
+            else:
+                log("%d note(s) waiting for the gate - %s"
+                    % (len(ba.pending()), why))
         return 0
 
     keys = [i["key"] for i in fired_candidates]
@@ -566,7 +699,8 @@ def main():
         log("could not move decision %s into IN FLIGHT (%s) - working it anyway"
             % (item["num"] or "?", e))
 
-    rc, how, secs = spawn(item, prompt)
+    rc, how, secs = spawn(prompt, item["key"],
+                          "board: decision %s" % (item["num"] or item["key"]))
     state = load_state()
     state["runs"] = (state["runs"] + [{
         "key": item["key"], "num": item["num"], "rc": rc,
