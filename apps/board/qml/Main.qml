@@ -412,6 +412,8 @@ Window {
                                         id: bar
                                         width: parent.width
                                         implicitHeight: todoText.implicitHeight
+                                                        + (todoMore.visible
+                                                           ? todoMore.implicitHeight + 6 : 0)
                                         height: implicitHeight
                                         Rectangle {
                                             anchors.fill: parent
@@ -423,12 +425,43 @@ Window {
                                             color: win.fgDim
                                             text: "-"
                                         }
+                                        // TAG plus ONE summary line, then a gap,
+                                        // then the elaboration if there is any —
+                                        // his: *"it should show the PARTIAL
+                                        // INFORMATION whatever text, then a
+                                        // single line summarizing, a new line,
+                                        // and THEN the elaboration if needed. it
+                                        // shouldnt really elaborate that much
+                                        // though"*.
+                                        //
+                                        // The split is the PARSE's (`summary` /
+                                        // `detail` beside the joined `text` the
+                                        // rest of this app still uses); the
+                                        // store on disk is untouched and its
+                                        // round trip is still byte-identical.
+                                        // §5.2: a bullet with nothing under it
+                                        // COLLAPSES rather than reserving the
+                                        // gap — that absence is permanent, not
+                                        // transient, so there is no blank line
+                                        // to look at.
                                         Para {
                                             id: todoText
                                             x: todoMark.width + 8
                                             width: parent.width - x - (15 * win.cellW + 8)
                                             color: win.fgText
-                                            text: todoRow.modelData.text
+                                            text: todoRow.modelData.summary
+                                                  ? todoRow.modelData.summary
+                                                  : todoRow.modelData.text
+                                        }
+                                        Para {
+                                            id: todoMore
+                                            x: todoText.x
+                                            y: todoText.implicitHeight + 6
+                                            width: todoText.width
+                                            visible: text !== ""
+                                            color: win.fgDim
+                                            text: todoRow.modelData.detail
+                                                  ? todoRow.modelData.detail : ""
                                         }
                                         // WHEN it was put on the board — his:
                                         // *"mesages in the needs you section

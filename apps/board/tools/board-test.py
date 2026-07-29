@@ -732,6 +732,33 @@ def test_placed(tmp):
     # The same stamp, read a day apart, must draw the same words: an item that
     # aged overnight is not allowed to say so (`AGENTS.md`, the no-pressure
     # requirement). That is what makes this an absolute time and not an age.
+    # ---- a summary line, a gap, then the elaboration ----
+    # *"it should show the PARTIAL INFORMATION whatever text, then a single line
+    # summarizing, a new line, and THEN the elaboration if needed."* A VIEW/parse
+    # split only: `text` stays the joined string every other consumer reads.
+    B.write(path, FIXTURE.replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- COMPLETION: **the thing** - it works now\n"
+        "  Why it did not before, and what to watch.\n"
+        "- INFORMATION: nothing under this one"))
+    src = B.read(path)
+    doc = B.parse(src)
+    check("the store still round-trips byte for byte", "".join(doc["lines"]) == src)
+    long_, short = doc["todo"]
+    check("a bullet with continuations splits into a summary and its elaboration",
+          long_["summary"] == "COMPLETION: the thing - it works now"
+          and long_["detail"] == "Why it did not before, and what to watch.",
+          (long_["summary"], long_["detail"]))
+    check("...with the joined text left exactly as every other consumer reads it",
+          long_["text"] == "COMPLETION: the thing - it works now Why it did not "
+                           "before, and what to watch.", long_["text"])
+    check("...and a bullet with nothing under it grows no empty second block",
+          short["summary"] == short["text"] and short["detail"] == "",
+          (short["summary"], short["detail"]))
+    check("...and the tag is still read off the whole line, as it always was",
+          [t["tag"] for t in doc["todo"]] == ["COMPLETION", "INFORMATION"],
+          [t["tag"] for t in doc["todo"]])
+
     import inspect
     body = inspect.getsource(B.format_placed).split('"""')[-1]
     check("what draws the time cannot see the clock, so it cannot become an age",
@@ -2699,6 +2726,35 @@ def test_placed_window(app, tmp):
           texts.count(stamp) == 2, [t for t in texts if t == stamp])
 
     # The reservation is unconditional, so nothing reflows as the board fills.
+    # ---- the bullet's two blocks are two items, with a gap, or one and none ----
+    B.write(path, FIXTURE.replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- COMPLETION: **the thing** - it works now\n"
+        "  Why it did not before, and what to watch.\n"
+        "- INFORMATION: nothing under this one"))
+    engine2, win2, keep2 = build(app, path)
+    spin(400)
+    drawn = [str(it.property("text")) for it in descendants(win2.contentItem())
+             if it.property("text") is not None and it.isVisible()]
+    check("the elaboration is drawn as its OWN block, under the summary",
+          "COMPLETION: the thing - it works now" in drawn
+          and "Why it did not before, and what to watch." in drawn,
+          [t for t in drawn if "the thing" in t or "watch" in t])
+    # ...and the one with nothing under it is SHORTER, because the gap and the
+    # second block collapse rather than being reserved (§5.2).
+    rows = {}
+    for it in descendants(win2.contentItem()):
+        if it.property("replying") is None:
+            continue
+        texts = [str(t.property("text")) for t in descendants(it)
+                 if t.property("text") is not None]
+        for t in texts:
+            if t.startswith(("COMPLETION:", "INFORMATION:")):
+                rows[t.split(":")[0]] = it.property("height")
+    check("...and a bullet with none is SHORTER: no gap, no empty second block",
+          len(rows) == 2 and rows["INFORMATION"] < rows["COMPLETION"], rows)
+    shot(win2, "07-todo-summary")
+
     cardW, titles = title_width(win.contentItem())
     check("...and the question text is the same width stamped or not",
           titles0 > 0 and titles0 == titles, (titles0, titles))

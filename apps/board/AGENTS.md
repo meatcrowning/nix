@@ -67,6 +67,27 @@ background should go after the short description of the message"*. So a bullet
 is **TAG, then a SHORT description, then anything else** — and that ordering
 binds every writer, `boardmove.note` and both prompts included.
 
+**And the shape of "anything else" is his too**: *"it should show the PARTIAL
+INFORMATION whatever text, then a single line summarizing, a new line, and THEN
+the elaboration if needed. it shouldnt really elaborate that much though"*. So:
+
+- **ONE line of summary**, on the bullet's own line, after the tag. Not two.
+- **The elaboration, if there has to be one, goes on INDENTED continuation lines
+  under it — and it is a sentence or two, not a paragraph.** "it shouldnt really
+  elaborate that much" is the instruction to the writers, not a layout note: a
+  bullet that needs three paragraphs needs a doc under `docs/` and a link.
+- **`parse()` splits them into `summary` and `detail`** beside the joined `text`
+  every other consumer already reads (removal, the one-level undo, `reply`, the
+  menus, `tag_of`, the glyph check), and `qml/Main.qml` draws them as two blocks
+  with a 6px gap, the elaboration a rung dimmer. **It is a VIEW change**: the
+  store on disk is untouched and its round trip is still byte-identical.
+- **A bullet with nothing under it COLLAPSES** rather than reserving the gap
+  (§5.2 — that absence is permanent, not transient), so it draws exactly as it
+  always did and there is no blank line to look at.
+- The one thing the split costs: a `**bold span**` that wraps ACROSS the first
+  line puts its two markers in different halves and neither is stripped. `text`
+  is unaffected, and the rule above says the summary is one short line anyway.
+
 Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 
 | | it means | who emits it |
