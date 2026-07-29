@@ -251,6 +251,53 @@ class Rig:
             return [l.rstrip() for l in f][-n:]
 
 
+def check_session_id_is_passed(r):
+    """`spawn()` must hand `claude` a `--session-id` it chose.
+
+    That flag is the ONLY reason his board can say what an agent is actually
+    doing rather than merely that it is alive: the transcript at
+    `~/.claude/projects/*/<uuid>.jsonl` is found by that uuid and tailed by
+    `apps/board/boardphase.py`. Lose the flag and every card silently degrades
+    to "cannot see what it is doing" — a regression with no error anywhere.
+
+    Checked by importing the watcher and intercepting `subprocess.run`, because
+    the stub path (`BOARD_WATCH_SPAWN`) deliberately replaces the whole command
+    line and so cannot see it.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("bw_under_test", WATCHER)
+    mod = importlib.util.module_from_spec(spec)
+    env = r.env()
+    old = dict(os.environ)
+    os.environ.update({k: v for k, v in env.items() if isinstance(v, str)})
+    os.environ.pop("BOARD_WATCH_SPAWN", None)
+    seen = {}
+    try:
+        spec.loader.exec_module(mod)
+
+        class Done(Exception):
+            pass
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            raise Done()
+
+        real = mod.subprocess.run
+        mod.subprocess.run = fake_run
+        try:
+            mod.spawn("a prompt", "k", "label", session="fixed-uuid-here")
+        except Done:
+            pass
+        finally:
+            mod.subprocess.run = real
+    finally:
+        os.environ.clear()
+        os.environ.update(old)
+    cmd = seen.get("cmd") or []
+    ok = "--session-id" in cmd and cmd[cmd.index("--session-id") + 1] == "fixed-uuid-here"
+    check("the spawn hands claude the session id its card is read from", ok, str(cmd[:8]))
+
+
 def main():
     d = tempfile.mkdtemp(prefix="board-watch-test-")
     try:
@@ -438,12 +485,26 @@ def main():
               + '; echo "$BOARD_WATCH_KEY" >> ' + r.fired)
         note_prompt = open(os.path.join(d, "note.txt")).read()
         check("an open gate spawns ONE agent for it",
-              len(r.fires()) == 1 and r.fires()[0].startswith("note-"), str(r.fires()))
+              len(r.fires()) == 1 and r.fires()[0].startswith("orch-"), str(r.fires()))
         check("...carrying what he wrote, verbatim",
               "have another look at the panel spacing" in note_prompt)
         check("...under the same rules a decision run gets",
               "NEVER rebuild" in note_prompt and "-- <explicit> <paths>" in note_prompt
               and "Push to `main`" in note_prompt)
+        # WHAT THAT AGENT IS NOW FOR. It used to do the work itself; since he
+        # asked for a control surface it ORCHESTRATES — it splits the input up,
+        # dispatches workers and asks him when only he can decide. The prompt is
+        # the whole mechanism, so assert it says so rather than trusting it.
+        check("...and it is an ORCHESTRATOR: it plans and dispatches, it does not build",
+              "you do not do the work" in note_prompt
+              and "boardctl.py dispatch" in note_prompt, note_prompt[:200])
+        check("...told to ASK rather than guess big, with the cheap/expensive trade named",
+              "boardctl.py ask" in note_prompt and "--if-unanswered" in note_prompt
+              and "wrong guess" in note_prompt)
+        check("...and told the cap, so it neither rations nor floods",
+              re.search(r"limit on how many workers run at once \(\d+", note_prompt)
+              is not None)
+        check_session_id_is_passed(r)
         check("...and the queue is drained, so it cannot run twice",
               r.queued() == [], r.queued())
         r.clear()
@@ -456,14 +517,44 @@ def main():
         r.note("check whether the clock is off by a pixel")
         r.run(spawn="exit 3")
         after = r.text()
-        bullet = [l for l in after.splitlines() if "note you sent" in l]
-        check("a failed note run leaves a bullet on the board", len(bullet) == 1,
+        bullet = [l for l in after.splitlines() if "what you typed into the board" in l]
+        check("a failed orchestrator run leaves a bullet on the board", len(bullet) == 1,
               str(bullet))
         check("...quoting what he wrote, so it is not lost with the run",
               bool(bullet) and "off by a pixel" in bullet[0], str(bullet))
         check("...and moves nothing else in the file",
-              "\n".join(l for l in after.splitlines() if "note you sent" not in l
+              "\n".join(l for l in after.splitlines()
+                        if "what you typed into the board" not in l
                         ).rstrip("\n") == before.rstrip("\n"))
+        print("work above the concurrency cap waits for a slot, on a tick")
+        # The orchestrator fans out through `boardctl dispatch`, which refuses
+        # to exceed the cap and files the rest instead. Somebody has to start
+        # those, and it is a tick of this script — the same place `reconcile()`
+        # un-strands an item and `sweep()` rescues a note. Asserted here because
+        # a task that is queued and never promoted is work he asked for that
+        # silently never happens.
+        import boardwork as bw
+        os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+        os.environ["BOARD_MAX_WORKERS"] = "1"
+        try:
+            states = r.state_home(
+                lambda: [bw.dispatch("piece %d" % i)["state"] for i in range(3)])
+            check("dispatch runs one and queues the rest, never dropping one",
+                  states == ["running", "queued", "queued"], str(states))
+            live = r.state_home(bw.live_workers)
+            for a in live:
+                os.kill(a["pid"], 9)
+            r.run()
+            left = r.state_home(lambda: [t["task"] for t in bw.pending()])
+            check("a tick starts queued work once a slot frees",
+                  left == ["piece 2"], str(left))
+            check("...and says so in the log",
+                  any("started queued work" in l for l in open(r.log)))
+            for a in r.state_home(bw.live_workers):
+                os.kill(a["pid"], 9)
+        finally:
+            os.environ.pop("BOARD_WORK_SPAWN", None)
+            os.environ.pop("BOARD_MAX_WORKERS", None)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

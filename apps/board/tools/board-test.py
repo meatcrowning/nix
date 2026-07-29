@@ -33,7 +33,9 @@ Run it with board's own Qt env, not the bare system python:
 rewrite where the user's own app reopens — and every write test runs against a
 COPY of the store in that scratch dir. This harness never writes board.md.
 """
+import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -588,6 +590,235 @@ def test_agents(tmp):
         os.unlink(os.path.join(bm.stash_dir(), n))
 
 
+# ------------------------------------- 1d. what an agent SAYS vs what it DOES
+def _tsc(tmp, uuid_, calls):
+    """A synthetic transcript, in the shape the real ones have. Written under
+    `BOARD_TRANSCRIPTS`, never into his `~/.claude` — that syncs to book."""
+    d = os.path.join(tmp, "transcripts", "-proj")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, uuid_ + ".jsonl")
+    with open(p, "a") as f:
+        for name, inp in calls:
+            f.write(json.dumps({"type": "assistant", "timestamp": "2026-07-29T00:00:00Z",
+                                "message": {"content": [{"type": "tool_use",
+                                                         "name": name, "input": inp}]}})
+                    + "\n")
+    return p
+
+
+def test_phase(tmp):
+    """The observed half, which is the half that cannot be faked.
+
+    The claim and the observation are two fields and neither is ever the other:
+    that is the whole design, so it is asserted rather than trusted.
+    """
+    os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
+    import boardphase as bph
+
+    check("an Edit reads as coding", bph.classify("Edit", {}) == "coding")
+    check("a Read reads as researching", bph.classify("Read", {}) == "researching")
+    check("a test run reads as testing",
+          bph.classify("Bash", {"command": "python3 tools/board-test.py"}) == "testing")
+    check("a commit reads as finishing touches",
+          bph.classify("Bash", {"command": "git commit -m x -- a"}) == "finishing")
+    check("an ordinary shell command claims no phase at all",
+          bph.classify("Bash", {"command": "ls -la"}) is None)
+    check("reading is the background noise of every phase, not a phase of its own",
+          bph.phase_of_window([{"phase": "coding"}, {"phase": "researching"},
+                               {"phase": "researching"}]) == "coding")
+
+    u = "11111111-2222-3333-4444-555555555555"
+    _tsc(tmp, u, [])
+    r = bph.observe("ph-a", session=u)
+    check("a linked agent that has done nothing says exactly that",
+          r["observed"] == "none" and bph.actually(r) == "nothing yet", r)
+    check("...and is not filed under a phase it has not reached",
+          r["phase"] == "unreported", r["phase"])
+    r = bph.observe("ph-none")
+    check("an agent with NO session says it cannot be observed, and never guesses",
+          r["observed"] == "unlinked" and "cannot see what it is doing"
+          in bph.actually(r), bph.actually(r))
+
+    _tsc(tmp, u, [("Read", {"file_path": "/x/boardparse.py"}),
+                  ("Grep", {"pattern": "edit"})])
+    r = bph.observe("ph-a")
+    off = r["offset"]
+    check("tool calls in the transcript become the phase",
+          r["phase"] == "researching", r["phase"])
+    check("...and the activity line names the thing, not the tool",
+          bph.actually(r) == "searching for edit", bph.actually(r))
+    _tsc(tmp, u, [("Edit", {"file_path": "/x/Main.qml"})])
+    r = bph.observe("ph-a")
+    check("an edit moves the card to coding, with no relaunch and no report",
+          r["phase"] == "coding" and bph.actually(r) == "editing Main.qml", r["phase"])
+    check("...having read ONLY the new bytes (a transcript reaches megabytes)",
+          r["offset"] > off, (off, r["offset"]))
+
+    # THE DIVERGENCE. This is the thing he asked to be able to see.
+    check("an agent that has said nothing shows no claim, rather than a guess",
+          bph.says(bph.observe("ph-a")) == "")
+    bph.claim("ph-a", "testing", "the parser round-trips")
+    r = bph.observe("ph-a")
+    check("a claim is recorded and drawn in the agent's own words",
+          bph.says(r) == "testing - the parser round-trips", bph.says(r))
+    check("...and does NOT move the card: the phase stays the observed one",
+          r["phase"] == "coding", r["phase"])
+    check("...and the observation is never replaced by the claim",
+          bph.actually(r) == "editing Main.qml", bph.actually(r))
+
+    # A transcript is appended to WHILE this reads it.
+    with open(_tsc(tmp, u, []), "a") as f:
+        f.write('{"type":"assis')
+    r = bph.observe("ph-a")
+    check("half a line at the end of a live transcript is left for the next poll",
+          r["phase"] == "coding", r)
+
+    old = bph.QUIET_AFTER_S
+    try:
+        bph.QUIET_AFTER_S = 0
+        r = bph.observe("ph-a")
+        check("an agent that has stopped doing anything says so",
+              r["observed"] == "quiet" and "nothing recently" in bph.actually(r),
+              bph.actually(r))
+        check("...in words, with no elapsed time anywhere in it",
+              not re.search(r"\d+\s*(s|m|h|sec|min|hour)", bph.actually(r)),
+              bph.actually(r))
+        check("...while its own claim is left standing, unmarked",
+              bph.says(r) == "testing - the parser round-trips")
+    finally:
+        bph.QUIET_AFTER_S = old
+
+
+# ------------------------------------------ 1e. the fan-out: the cap and asking
+def test_work(tmp):
+    import boardagents as ba
+    import boardmove as bm
+    import boardparse as B
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "2"
+
+    dispatched = ["task one", "task two", "task three", "task four"]
+    states = [bw.dispatch(t, where="apps/x/**")["state"] for t in dispatched]
+    check("dispatch runs up to the cap and QUEUES the rest, never drops one",
+          states == ["running", "running", "queued", "queued"], states)
+
+    def filed():
+        out = []
+        for sub in ("pending", "taken"):
+            for name in os.listdir(bw.work_dir(sub)):
+                if name.endswith(".json") and not name.startswith("."):
+                    with open(os.path.join(bw.work_dir(sub), name)) as f:
+                        out.append((sub, json.load(f)["task"]))
+        return out
+
+    everywhere = filed()
+    check("every dispatched task is on disk EXACTLY once, in exactly one place",
+          sorted(t for _, t in everywhere) == sorted(dispatched)
+          and len(everywhere) == len(dispatched), everywhere)
+
+    g = {x["phase"]: [r["title"] for r in x["rows"]] for x in bw.groups()}
+    check("work above the cap is DRAWN as waiting, not hidden",
+          sorted(g.get("queued", [])) == ["task four", "task three"], g.get("queued"))
+    check("...and it is not offered an inbox, having no process to reach",
+          all(r["id"] == "" for x in bw.groups() if x["phase"] == "queued"
+              for r in x["rows"]))
+
+    for a in bw.live_workers():
+        os.kill(a["pid"], 9)
+    time.sleep(0.4)
+    check("a worker whose process is gone stops holding a slot",
+          len(bw.live_workers()) == 0, bw.live_workers())
+    started = bw.promote()
+    check("...and the queued work starts, oldest first",
+          [r["task"] for r in started] == ["task three", "task four"],
+          [r["task"] for r in started])
+    check("...leaving nothing queued and still nothing lost",
+          bw.pending() == []
+          and sorted(t for _, t in filed()) == sorted(dispatched), filed())
+    for a in bw.live_workers():
+        os.kill(a["pid"], 9)
+    time.sleep(0.4)
+
+    # A DEAD AGENT'S CARD DOES NOT GO ON CLAIMING A PHASE. Two layers: the
+    # group is decided by liveness, and the sweep drops the record entirely.
+    import boardphase as bph
+    _stash(bm, "gone-one", "Something being built", os.getpid(),
+           where="apps/thing/**")
+    ba.register("gone-two", "A worker that died", 999999, kind="worker",
+                where="apps/x/**")
+    bph.claim("gone-two", "coding", "wiring it up")
+    g = {x["phase"]: [r["title"] for r in x["rows"]] for x in bw.groups()}
+    check("a dead agent is filed under `stopped`, whatever it last claimed",
+          "A worker that died" in g.get("stopped", [])
+          and "A worker that died" not in g.get("coding", []), g)
+    check("...and its claim is still readable rather than deleted out from under him",
+          bph.says(bph.read_sidecar("gone-two")) == "coding - wiring it up")
+    ba.sweep()
+    check("...and the sweep then drops it from the list entirely",
+          "gone-two" not in [a["id"] for a in ba.agents()])
+    check("...taking its observation record with it, not leaving one per agent ever run",
+          not os.path.exists(bph.sidecar("gone-two")))
+    bm.forget("gone-one")
+
+    check("the cap is a file he can change without a rebuild",
+          bw.set_cap(6) == 6 and open(bw.cap_file()).read().strip() == "6")
+    os.environ["BOARD_MAX_WORKERS"] = "2"
+
+    # ---- asking him something: the SAME list his own questions are in ----
+    path = os.path.join(tmp, "ask.md")
+    open(path, "w").write(FIXTURE)
+    src = B.read(path)
+    try:
+        bm.ask("Something?", path=path)
+        check("a question with no `if unanswered` sentence is refused", False)
+    except bm.BoardError as e:
+        check("a question with no `if unanswered` sentence is refused",
+              "if-unanswered" in str(e), str(e)[:60])
+    check("...and the refusal wrote nothing", B.read(path) == src)
+
+    key = bm.ask("How far should the fade reach?",
+                 context=["The titlebar and the body disagree."],
+                 options=["apps only", "apps and panel"],
+                 if_unanswered="the apps get it and nothing else does",
+                 asked_by="the FOCUS signal task", path=path)
+    doc = B.parse(B.read(path))
+    asked = [it for it in doc["needs"] if it["key"] == key]
+    check("an agent's question lands in NEEDS YOU as an ordinary decision",
+          len(asked) == 1, [it["key"] for it in doc["needs"]])
+    if asked:
+        it = asked[0]
+        check("...numbered on from his own, with options, an answer line and the "
+              "sentence that makes it safe to ignore",
+              it["num"] == "3" and len(it["options"]) == 2
+              and it["answerFrom"] >= 0 and it["ifUnanswered"] != "",
+              (it["num"], len(it["options"]), it["answerFrom"], it["ifUnanswered"]))
+        check("...and it is indistinguishable from one he wrote: no robot flag",
+              "agent" not in it["title"].lower())
+    check("...and nothing else in the file moved",
+          B.read(path).startswith(src[:src.index("### 2.")]),
+          B.read(path)[:60])
+
+    # board-watch would otherwise record this key on its next tick and never
+    # fire on it — see boardwork.seed_watch_state.
+    st = os.path.join(tmp, "watchstate")
+    os.makedirs(st, exist_ok=True)
+    os.environ["BOARD_WATCH_STATE"] = st
+    check("with no board-watch state yet, seeding is a no-op rather than a crash",
+          bw.seed_watch_state(key) is False)
+    with open(os.path.join(st, "state.json"), "w") as f:
+        json.dump({"answers": {"first-question": "idx:|ans:"}}, f)
+    check("a brand-new question is seeded into board-watch as UNANSWERED",
+          bw.seed_watch_state(key) is True)
+    with open(os.path.join(st, "state.json")) as f:
+        answers = json.load(f)["answers"]
+    check("...so his answer to it is an ordinary change to a known decision",
+          answers.get(key) == "idx:|ans:", answers)
+    del os.environ["BOARD_WATCH_STATE"]
+    del os.environ["BOARD_WORK_SPAWN"]
+
+
 # ----------------------------------------------------------------- 2. the store
 def test_real_store():
     import boardparse as B
@@ -960,9 +1191,71 @@ def test_window(app, tmp):
     said = agents.send("drawn-dead", "Widen the clock", "decision", "never mind")
     agents.refresh()
     spin(250)
-    check("a note to an agent that has finished says it was queued instead",
-          "queued" in said and "never mind" in prop(win, "queuedNotes"),
+    check("a note to an agent that has finished goes to the inbox instead",
+          "inbox" in said and "never mind" in prop(win, "queuedNotes"),
           (said, prop(win, "queuedNotes")))
+    # ---- THE ONE BOX, and the conservation of what he types into it ----
+    # It is the control surface: free text, enter, into the inbox. The claim it
+    # makes is not "sent" but "never lost", so this is a conservation check like
+    # every other path through the box — the sentence is on disk exactly once,
+    # in exactly one of the three directories, and it is the same write path a
+    # note to a running agent takes rather than a second one.
+    boxes = [it for it in descendants(win.contentItem())
+             if it.property("placeholder") is not None]
+    check("the page has ONE box that is not attached to any agent",
+          len([b for b in boxes if "inbox" in str(b.property("placeholder"))]) == 1,
+          [str(b.property("placeholder")) for b in boxes])
+    typed = "the scrollbar arrows feel sluggish"
+    said = keep[5].send("", "", "", typed)
+    spin(200)
+    check("what he types with nothing named goes to the inbox, and says only that",
+          "inbox" in said and "orchestrator" in said, said)
+    where = [(d, n) for d in ("queue", "taken")
+             for n in os.listdir(ba.inbox_dir(d))
+             if n.endswith(".json") and typed in open(
+                 os.path.join(ba.inbox_dir(d), n)).read()]
+    check("...and it is on disk exactly once, in exactly one directory",
+          len(where) == 1 and where[0][0] == "queue", where)
+    check("...and appears on the board as waiting, so it is never invisible",
+          typed in prop(win, "queuedNotes"), prop(win, "queuedNotes"))
+
+    # ---- the cards, grouped by what each agent is OBSERVED doing ----
+    import boardphase as bph
+    import boardwork as bw
+    os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
+    u = "22222222-3333-4444-5555-666666666666"
+    _tsc(tmp, u, [("Read", {"file_path": "/x/vtbclient.py"}),
+                  ("Edit", {"file_path": "/x/vtbclient.py"})])
+    ba.register("w-code", "Wire FOCUS through vtbclient", os.getpid(),
+                kind="worker", where="apps/pylib/**", session=u)
+    bph.claim("w-code", "testing", "the vtbclient parser")
+    u2 = "33333333-4444-5555-6666-777777777777"
+    _tsc(tmp, u2, [("Grep", {"pattern": "activewindow"})])
+    ba.register("w-read", "Find where focus is decided", os.getpid(),
+                kind="worker", where="hyprvtb", session=u2)
+    agents.refresh()
+    spin(300)
+    groups = {g["label"]: [r["title"] for r in g["rows"]]
+              for g in prop(win, "agentGroups")}
+    check("cards are grouped by phase, under his own words",
+          "coding" in groups and "researching" in groups, list(groups))
+    check("...by what the agent is OBSERVED doing, not by what it says",
+          "Wire FOCUS through vtbclient" in groups.get("coding", []), groups)
+    rows = {r["title"]: r for g in prop(win, "agentGroups") for r in g["rows"]}
+    card = rows.get("Wire FOCUS through vtbclient", {})
+    check("...and the card carries BOTH statements, neither standing in for the other",
+          card.get("says") == "testing - the vtbclient parser"
+          and card.get("actually") == "editing vtbclient.py",
+          (card.get("says"), card.get("actually")))
+    check("an agent that has said nothing shows no claim at all",
+          rows.get("Find where focus is decided", {}).get("says") == "",
+          rows.get("Find where focus is decided"))
+    check("no card carries a time, an age or a count",
+          not any(re.search(r"\b\d+\s*(s|m|h|min|sec|hour|ago)\b",
+                            str(r.get("says", "")) + " " + str(r.get("actually", ""))
+                            + " " + str(r.get("detail", "")))
+                  for r in rows.values()), list(rows.values())[:1])
+
     # ...with the store's own sections folded away, so the shot is of THIS
     # section rather than of whatever happens to be above it.
     win.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
@@ -970,6 +1263,8 @@ def test_window(app, tmp):
     shot(win, "06-agents")
     win.setProperty("collapsed", {})
     spin(200)
+    ba.unregister("w-code")
+    ba.unregister("w-read")
     # ...and a finished agent leaves the list rather than rotting in it
     os.unlink(bm.stash_file("drawn-dead"))
     os.unlink(bm.stash_file("drawn-live"))
@@ -1043,6 +1338,9 @@ def main():
         test_roundtrip(os.path.join(tmp, "rt"))
         test_moves(os.path.join(tmp, "mv"))
         test_agents(tmp)
+        test_phase(tmp)
+        os.makedirs(os.path.join(tmp, "work"))
+        test_work(os.path.join(tmp, "work"))
         app = QGuiApplication(sys.argv)
         test_real_store()
         test_real_window(app)

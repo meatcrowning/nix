@@ -12,9 +12,27 @@ happen. This is the third way, and it is the one an agent should use:
     boardctl.py note '**Relaunch `player`** - live source, no hot reload.'
     boardctl.py list
 
-    boardctl.py agents                             # who is running right now
+    boardctl.py agents                             # who is running, by phase
     boardctl.py inbox take                         # HIS notes to you, mid-flight
     boardctl.py inbox send 'also fix the tooltip' --to <agent id>
+
+The orchestrator's verbs — how one sentence he typed becomes several agents
+(`../boardwork.py` is the mechanism and the authority):
+
+    boardctl.py dispatch 'wire FOCUS through vtbclient' --where 'apps/pylib/**'
+    boardctl.py ask 'How far should the fade reach?' --option 'apps only' \\
+        --option 'apps and panel' --if-unanswered 'the apps get it, nothing else'
+    boardctl.py cap 6                              # workers allowed at once
+    boardctl.py phase coding --doing 'the vtbclient parser'
+
+**`phase` records what you SAY you are doing and does not set the phase your
+card is filed under.** That is derived from your own tool calls
+(`../boardphase.py`); he sees both, side by side, on purpose. Say it anyway —
+it is the only line that carries WHAT you are working on rather than which verb
+you last used.
+
+**`ask` refuses without `--if-unanswered`.** Every question on this board draws
+that sentence, always; it is what makes a question safe to walk away from.
 
 **If you are an agent, run `inbox take` between steps.** It is how a sentence he
 typed into the board's agents section while you were already running reaches
@@ -52,6 +70,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import boardagents as ba                                           # noqa: E402
 import boardmove as bm                                             # noqa: E402
 import boardparse as bp                                            # noqa: E402
+import boardphase as bph                                           # noqa: E402
+import boardwork as bw                                             # noqa: E402
 
 
 def cmd_start(a):
@@ -106,16 +126,72 @@ def cmd_list(a):
 
 
 def cmd_agents(a):
-    for ag in ba.agents():
-        print("  %-10s %-52s %s" % (ag["state"], ag["title"][:52], ag["where"]))
-        if ag["unread"]:
-            print("             %d unread note(s) - `boardctl.py inbox take`"
-                  % ag["unread"])
+    for g in bw.groups():
+        print(g["label"].upper())
+        for ag in g["rows"]:
+            print("  %-52s %s" % (ag["title"][:52], ag["where"]))
+            # The two statements, kept apart on the page exactly as the card
+            # keeps them apart on screen. `says` is the agent; `actually` is its
+            # transcript. Never merged, never one used for the other.
+            if ag.get("says"):
+                print("      says:   " + ag["says"][:70])
+            print("      doing:  " + str(ag.get("actually") or "")[:70])
+            if ag.get("unread"):
+                print("      %d unread note(s) - `boardctl.py inbox take`"
+                      % ag["unread"])
     q = ba.pending()
     if q:
         print("QUEUED FOR THE NEXT AGENT")
         for m in q:
             print("  " + m["text"][:100])
+    return 0
+
+
+def cmd_dispatch(a):
+    rec = bw.dispatch(" ".join(a.task), where=a.where, context=a.context)
+    if rec is None:
+        print("boardctl: nothing to dispatch", file=sys.stderr)
+        return 1
+    if rec["state"] == "queued":
+        print("queued (%d already running, the cap is %d) - a later tick starts it: %s"
+              % (len(bw.live_workers()), bw.cap(), rec["task"][:70]))
+        return 0
+    if rec["state"] == "failed":
+        print("boardctl: could not start a worker - " + rec.get("why", "?"),
+              file=sys.stderr)
+        return 1
+    print("running as %s: %s" % (rec["id"], rec["task"][:70]))
+    return 0
+
+
+def cmd_phase(a):
+    """What the agent SAYS. It does not set the phase its card is filed under —
+    that is read from the agent's own transcript and cannot be written from
+    here. Say so on every call, so no agent is left believing it drove the UI."""
+    rec = bph.claim(a.id, phase=a.phase, doing=a.doing)
+    if rec is None:
+        print("boardctl: no agent id (set BOARD_AGENT_ID, or pass --id)",
+              file=sys.stderr)
+        return 1
+    print("recorded what you say you are doing: " + (bph.says(rec) or "(nothing)"))
+    print("the phase on your card is read from your tool calls, not from this")
+    return 0
+
+
+def cmd_ask(a):
+    key = bm.ask(" ".join(a.question), context=a.context, options=a.option,
+                 if_unanswered=a.if_unanswered, asked_by=a.asked_by, path=a.board)
+    bw.seed_watch_state(key)
+    print("asked, in NEEDS YOU: " + " ".join(a.question)[:90])
+    print("he answers it whenever he likes; nothing waits on it")
+    return 0
+
+
+def cmd_cap(a):
+    if a.n is None:
+        print(bw.cap())
+        return 0
+    print("at most %d workers at once" % bw.set_cap(a.n))
     return 0
 
 
@@ -187,8 +263,38 @@ def main(argv=None):
     s = sub.add_parser("list", help="what is where")
     s.set_defaults(fn=cmd_list)
 
-    s = sub.add_parser("agents", help="who is running right now")
+    s = sub.add_parser("agents", help="who is running right now, by phase")
     s.set_defaults(fn=cmd_agents)
+
+    s = sub.add_parser("dispatch", help="hand one piece of work to a worker agent")
+    s.add_argument("task", nargs="+")
+    s.add_argument("--where", default="", help="the files it will touch")
+    s.add_argument("--context", default="",
+                   help="what you know that the worker does not")
+    s.set_defaults(fn=cmd_dispatch)
+
+    s = sub.add_parser("phase", help="say what YOU are doing (the card also "
+                                     "shows what you are observed doing)")
+    s.add_argument("phase", nargs="?", default="", choices=[""] + bph.CLAIMABLE)
+    s.add_argument("--doing", default="", help="one short line, present tense")
+    s.add_argument("--id", default=None, help="default: $BOARD_AGENT_ID")
+    s.set_defaults(fn=cmd_phase)
+
+    s = sub.add_parser("ask", help="park a question for him in NEEDS YOU")
+    s.add_argument("question", nargs="+")
+    s.add_argument("--context", action="append", default=[],
+                   help="a paragraph of what raises it; repeatable")
+    s.add_argument("--option", action="append", default=[],
+                   help="an alternative he can tick; repeatable")
+    s.add_argument("--if-unanswered", dest="if_unanswered", default="",
+                   help="REQUIRED: what happens if he never answers")
+    s.add_argument("--asked-by", dest="asked_by", default=None,
+                   help="what you were working on when it came up")
+    s.set_defaults(fn=cmd_ask)
+
+    s = sub.add_parser("cap", help="how many workers may run at once")
+    s.add_argument("n", nargs="?", type=int, default=None)
+    s.set_defaults(fn=cmd_cap)
 
     s = sub.add_parser("inbox", help="his mid-flight notes to a running agent")
     s.add_argument("what", nargs="?", default="list",
