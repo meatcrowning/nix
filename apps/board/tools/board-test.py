@@ -1966,8 +1966,40 @@ def test_phase(tmp):
           bph.context_line(bph.observe("ph-a")))
     _tsc_usage(tmp, u, "claude-opus-5[1m]", {"input_tokens": 300000})
     r = bph.observe("ph-a")
-    check("...and the WINDOW is read from the model id, never assumed",
+    check("...and the WINDOW is read from the model id when the id says",
           bph.context_line(r) == "300k/1m", bph.context_line(r))
+
+    # ---- THE DENOMINATOR IS EVIDENCE, NOT THE STAMP ----
+    # His: *"sometimes itll show the active context as being larger than the max
+    # context so idk what that really means is some context getting lost or is it
+    # just not reporting correctly"*. It was mis-reporting, and nothing was lost.
+    # Measured 2026-07-29 over 188 transcripts in ~/.claude/projects: NOT ONE of
+    # ~38k assistant entries stamped `[1m]`, while 29 sessions climbed past 200k
+    # - one to 582k, monotonically, with no compaction, which a 200k model
+    # cannot do. So `[1m]` is a hint that is nearly always missing, and the
+    # window shown is the smallest one that HOLDS what was measured (§10).
+    check("a session that stood in 450k was on a 1m model, whatever its id said",
+          bph._fits(450_000) == bph.CONTEXT_WINDOW_1M
+          and bph._fits(62_000) == bph.CONTEXT_WINDOW
+          and bph._fits(200_000) == bph.CONTEXT_WINDOW,
+          (bph._fits(450_000), bph._fits(62_000), bph._fits(200_000)))
+    check("...and past every window a Claude model has, there is nothing honest to draw",
+          bph._fits(2_000_000) == 0, bph._fits(2_000_000))
+    u2 = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+    _tsc_usage(tmp, u2, "claude-opus-5", {"cache_read_input_tokens": 452000})
+    r = bph.observe("ph-b", session=u2)
+    check("an unstamped 1m session is never drawn as 452k/200k - the impossible state",
+          bph.context_line(r) == "452k/1m", (r.get("ctxWindow"), bph.context_line(r)))
+    _tsc_usage(tmp, u2, "claude-opus-5", {"cache_read_input_tokens": 90000})
+    r = bph.observe("ph-b")
+    check("...and compacting back to 90k does not shrink the window it proved",
+          bph.context_line(r) == "90k/1m", (r.get("ctxPeak"), bph.context_line(r)))
+    check("a record written before any of this still cannot draw the impossible",
+          (bph.context_line({"ctxUsed": 452_000, "ctxWindow": 200_000}),
+           bph.context_line({"ctxUsed": 9_000_000, "ctxWindow": 200_000}))
+          == ("452k/1m", ""),
+          (bph.context_line({"ctxUsed": 452_000, "ctxWindow": 200_000}),
+           bph.context_line({"ctxUsed": 9_000_000, "ctxWindow": 200_000})))
     check("a small count is not dressed up as thousands",
           (bph._k(812), bph._k(1500), bph._k(1_200_000)) == ("812", "2k", "1.2m"),
           (bph._k(812), bph._k(1500), bph._k(1_200_000)))

@@ -108,11 +108,15 @@ QUIET_AFTER_S = int(os.environ.get("BOARD_QUIET_AFTER", "180"))
 
 #: The context window an agent is assumed to have, in tokens, when nothing in
 #: its transcript says otherwise. 200k is Claude Code's standing window for the
-#: Claude models this desktop runs; an agent on the long-context variant says so
-#: in the model id it stamps on every assistant message (`...[1m]`), which
-#: `_window_for` reads rather than guessing. Nothing here asks the network.
+#: Claude models this desktop runs; the long-context variant is 1m. Nothing
+#: here asks the network.
 CONTEXT_WINDOW = 200_000
 CONTEXT_WINDOW_1M = 1_000_000
+
+#: Every window a Claude model on this desktop has, smallest first. The one
+#: shown is the smallest of these that actually HOLDS the measured figure —
+#: see `_fits`.
+CONTEXT_TIERS = (CONTEXT_WINDOW, CONTEXT_WINDOW_1M)
 
 def projects_dir():
     """Where Claude Code keeps transcripts. `BOARD_TRANSCRIPTS` redirects it, so
@@ -517,6 +521,11 @@ def doing_line(rec, who="", running=True):
 # LAST one — the cached parts are the bulk of it, so leaving them out would draw
 # a number an order of magnitude too small.
 #
+# **So is the DENOMINATOR.** The model id is supposed to name the window and
+# almost never does (`_window_for`), so the window shown is the smallest one
+# that can actually hold what was measured (`_fits`). A card must never draw
+# `452k/200k` — it did, and he read it as context going missing.
+#
 # **It degrades to ABSENCE.** No session, no transcript, no assistant turn yet,
 # or a usage object with nothing readable in it: the card draws nothing there,
 # the way it draws every other thing it cannot see. A zero would be a claim that
@@ -527,20 +536,51 @@ def doing_line(rec, who="", running=True):
 # warn/crit on this desktop means exactly that (§8.1, §9.3). It is one dim
 # string, and it says its own denominator so it needs no legend (§10.5).
 def _window_for(model):
-    """The context window for a model id, from the id itself.
+    """The window a model id CLAIMS, or 0 when it claims nothing.
 
-    Claude Code writes the id it is running on every assistant entry, and the
-    long-context variants carry it in the name (`claude-opus-5[1m]`). That is
-    the only statement of the window anywhere in the transcript, so it is what
-    is read; everything else falls to `CONTEXT_WINDOW`.
+    The long-context variants are supposed to carry it in the name
+    (`claude-opus-5[1m]`). In practice that suffix reaches the transcript
+    almost never — measured 2026-07-29 across 188 transcripts under
+    `~/.claude/projects`: **not one** of ~38k assistant entries stamped `[1m]`,
+    while the sessions themselves plainly ran the 1m window (see `_fits`). So
+    this is a hint that is usually absent, never a statement to rely on.
     """
     m = str(model or "").lower()
-    return CONTEXT_WINDOW_1M if "[1m]" in m or "-1m" in m else CONTEXT_WINDOW
+    return CONTEXT_WINDOW_1M if "[1m]" in m or "-1m" in m else 0
 
 
-def _context_of(last):
+def _fits(used, claimed=0):
+    """The smallest window that HOLDS `used`, or 0 when none does.
+
+    **The transcript proves its own window.** An agent that stood in 450k
+    tokens without the API refusing the call was on a 1m model, whatever its
+    model id said — and the model id, above, mostly says nothing. So the
+    denominator is derived from the measurement rather than from the stamp:
+    the smallest tier that both holds the figure and is at least what the id
+    claimed.
+
+    This is the affordance-honesty rule (§10) applied to a number. `452k/200k`
+    was drawn for real and states something that cannot happen; his reading of
+    it — *"is some context getting lost"* — is exactly the wrong conclusion an
+    impossible display invites, and no context was ever lost. Past the largest
+    window any Claude model has there is nothing honest left to draw, so this
+    returns 0 and the line degrades to absence like every other thing this
+    module cannot see.
+    """
+    for tier in CONTEXT_TIERS:
+        if tier >= used and tier >= claimed:
+            return tier
+    return 0
+
+
+def _context_of(last, peak=0):
     """(tokens standing in the window, window) from one transcript entry, or
-    (0, 0) if it does not say."""
+    (0, 0) if it does not say.
+
+    `peak` is the largest figure this agent has ever shown, carried in its
+    record: a session that has once proved itself 1m stays 1m, so the
+    denominator does not shrink back after Claude Code compacts.
+    """
     if not isinstance(last, dict):
         return 0, 0
     u = last.get("usage")
@@ -555,7 +595,11 @@ def _context_of(last):
             continue
     if total <= 0:
         return 0, 0
-    return total, _window_for(last.get("model"))
+    try:
+        peak = int(peak or 0)
+    except (TypeError, ValueError):
+        peak = 0
+    return total, _fits(max(total, peak), _window_for(last.get("model")))
 
 
 def _k(n):
@@ -569,7 +613,13 @@ def _k(n):
 
 
 def context_line(rec):
-    """`62k/200k`, or "" when nothing was measured. Both halves or neither."""
+    """`62k/200k`, or "" when nothing was measured. Both halves or neither.
+
+    It re-checks the pair rather than trusting it: a record written before
+    `_fits` existed can hold an impossible `452k/200k`, and it would survive
+    every poll that reads no new assistant entry. Nothing here may draw a
+    number standing in a window that cannot hold it.
+    """
     rec = rec or {}
     try:
         used, window = int(rec.get("ctxUsed") or 0), int(rec.get("ctxWindow") or 0)
@@ -577,6 +627,10 @@ def context_line(rec):
         return ""
     if used <= 0 or window <= 0:
         return ""
+    if used > window:
+        window = _fits(used)
+        if window <= 0:
+            return ""
     return "%s/%s" % (_k(used), _k(window))
 
 
@@ -625,8 +679,13 @@ def observe(agent_id, session=None):
         # The tally is carried in the record like everything else here, so a
         # poll that reads no new assistant entry keeps the last MEASURED
         # figure rather than dropping the line off the card and back on.
-        used, window = _context_of(last)
+        used, window = _context_of(last, rec.get("ctxPeak"))
         if used:
+            try:
+                was = int(rec.get("ctxPeak") or 0)
+            except (TypeError, ValueError):
+                was = 0
+            rec["ctxPeak"] = max(was, used)
             rec["ctxUsed"], rec["ctxWindow"] = used, window
         if calls:
             rec["recent"] = (list(rec.get("recent") or []) + calls)[-WINDOW:]
