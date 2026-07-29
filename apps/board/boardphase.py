@@ -92,6 +92,7 @@ A poll on an idle agent is one `stat`.
 """
 import json
 import os
+import re
 import time
 
 import boardagents as ba
@@ -306,7 +307,43 @@ def read_sidecar(agent_id):
         return {}
 
 
+#: The five the CLASSIFIER can produce from a transcript, and the vocabulary the
+#: observed phase is filed under. An agent's own claim is NOT limited to these —
+#: see `clean_phase_word` — but the machine's reading of it still is: nothing
+#: derived from tool calls can say a word that is not in here.
 CLAIMABLE = ["planning", "researching", "coding", "testing", "finishing"]
+
+#: A claimed word is drawn inside a sentence on a card that is one line high.
+#: Long enough for `investigating`; short enough that nothing can shove the rest
+#: of the line off the row.
+CLAIM_WORD_MAX = 16
+
+
+def clean_phase_word(word):
+    """One lowercase word, or "" if that is not what was handed in.
+
+    *"allow agents more freedom to indicate what they are doing, but it should
+    still only be a single word - and still actually related to what they say
+    they are doing. enhancing the existing coding/testing etc"* — so the fixed
+    five stopped being a whitelist and became a starting set.
+
+    What is still enforced is only what protects the card: ONE word, letters
+    (a hyphen inside is a word), lowercase, and short. Multi-word is REFUSED
+    rather than silently truncated to its first word — an agent that meant
+    *"code review"* and got `code` would be misreported, and refusing is
+    something it can read and correct in one call (§10.2: refuse visibly,
+    never no-op).
+
+    The honesty check is NOT here and is not a vocabulary: it is the observed
+    line under the claim, which the agent cannot write. That is the whole reason
+    a free word is safe to allow.
+    """
+    w = " ".join(str(word or "").split()).lower()
+    if not w or len(w) > CLAIM_WORD_MAX:
+        return ""
+    if not re.fullmatch(r"[a-z]+(?:-[a-z]+)*", w):
+        return ""
+    return w
 
 
 def claim(agent_id, phase="", doing=""):
@@ -320,12 +357,19 @@ def claim(agent_id, phase="", doing=""):
     aid = ba.clean_id(agent_id or ba.self_id() or "")
     if not aid:
         return None
-    phase = (phase or "").strip().lower()
+    # ANY single word, not the five (`clean_phase_word`). A word that cannot be
+    # drawn is refused loudly rather than dropped: silently recording nothing is
+    # how the old fixed list left an agent believing it had said something.
+    word = clean_phase_word(phase)
+    if str(phase or "").strip() and not word:
+        raise ValueError(
+            "a phase is ONE word, letters only, at most %d characters"
+            % CLAIM_WORD_MAX)
     with bp.locked(sidecar(aid), timeout=5.0):
         rec = read_sidecar(aid)
         rec["id"] = aid
-        if phase in CLAIMABLE:
-            rec["claimPhase"] = phase
+        if word:
+            rec["claimPhase"] = word
         # A claim that names no words keeps the last ones rather than blanking
         # the line: he is reading a sentence, and an agent moving from one
         # phase to the next should not wipe what it said it was on.

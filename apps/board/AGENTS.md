@@ -726,6 +726,21 @@ The short version, and every line of it is a rule:
 - **`says` is the agent's own words** (`boardctl.py phase coding --doing '...'`).
   It carries the OBJECT — *"the vtbclient parser"* — which watching tool calls
   can never give you.
+- **The claimed word is ANY single word, not a fixed five** — [his, 2026-07-29]
+  *"allow agents more freedom to indicate what they are doing, but it should
+  still only be a single word - and still actually related to what they say they
+  are doing. enhancing the existing coding/testing etc"*. So `bisecting`,
+  `measuring`, `waiting` are all legal claims beside the classic
+  planning/researching/coding/testing/finishing. `boardphase.clean_phase_word`
+  is the whole rule and it enforces only what protects the card: one word,
+  letters (a hyphen inside is one word), lowercase, at most
+  `CLAIM_WORD_MAX`. Anything else is **REFUSED**, loudly, by `claim()` and by
+  the CLI — a phrase is never truncated to its first word, because an agent
+  that meant *"code review"* and got `code` would be misreported. **The honesty
+  check is not a vocabulary**: it is the observed line under the claim, which
+  the agent cannot write, and that is exactly why a free word is safe to allow.
+  `bph.CLAIMABLE` is now only what the CLASSIFIER can produce from a
+  transcript — the observed phase, and what `boardwork.groups()` buckets by.
 - **`doing` is derived from the agent's live transcript**,
   `~/.claude/projects/*/<session-uuid>.jsonl`, which Claude Code appends to as
   the agent works. It carries the VERB — *"editing vtbclient.py"* — and cannot
@@ -816,7 +831,10 @@ all of it.
   asked for them back out: *"maybe for now take out the 'coding' 'Testing'
   'finishing touches' text and just keep agents ordered by birth/age so they
   dont move around so much"* — a card jumped from one section to another every
-  time its agent picked up a different tool. The phase itself is untouched
+  time its agent picked up a different tool. **That was about the HEADINGS, and
+  it is not the later request that opened the claimed word up** (above, same
+  day): what came out was the sectioning, what stayed is the phase itself.
+  The phase is untouched
   (`boardphase.py` still derives it, the agent still cannot set it, and the
   observed sentence is built from it) and `boardwork.groups()` still buckets
   for `boardctl.py agents`, where a terminal listing has no cursor to keep
