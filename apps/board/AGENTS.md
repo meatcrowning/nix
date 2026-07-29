@@ -277,13 +277,28 @@ whole pipeline, and what each piece is allowed to claim:
 | --- | --- | --- |
 | he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
 | board-watch's next run | drains the queue and spawns ONE **orchestrator**, and WAITS for it | `board-watch.py:work_the_queue` |
-| the orchestrator | splits the input up; `dispatch`es workers or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
+| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
 | each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **never rebuilds** | `boardwork._spawn_worker` |
 | a card per worker | grouped by phase, saying what it claims AND what it is observed doing | `boardwork.groups()` + `qml/AgentRow.qml` |
 | a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
 
 Rules that fall out of it, all load-bearing:
 
+- **ONE MESSAGE IS OFTEN SEVERAL JOBS, and it is counted before anything is
+  dispatched.** *"the orchestrator should be able to know when to break tasks up
+  to different agents when the user puts multiple perhaps unrelated requests /
+  features / etc into a single inbox message"* — the shape
+  `~/.claude/orchestrator-briefing.md` opens with (*"The prompt may contain
+  several unrelated requests, or one — you decide"*). So the prompt says to read
+  the input for how many DISTINCT asks it holds — two features, a bug plus a
+  feature, a knob plus a task — and give each independent one **its own worker**,
+  so they run concurrently: a worker handed a shopping list half-finishes both
+  jobs and leaves one commit that is hard to undo. **Genuinely coupled pieces
+  stay in ONE worker** (same file, same behaviour, one change) — splitting those
+  is two agents making conflicting edits to the same file, which is worse.
+  DISPATCH-OR-ASK then applies **per item**, so one message can yield two
+  dispatches, or a dispatch plus one question, while the *at most two questions
+  for one input* ceiling goes on binding the whole message rather than each item.
 - **The box writes down the path that already existed.** `boardagents.send()`
   with no agent named — the same one a note to a running agent takes, with the
   same conservation property (a message is in exactly one of `to/`, `queue/`,
