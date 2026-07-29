@@ -19,6 +19,9 @@ let
   reader =
     if host == "air" then
       pkgs.writeShellScriptBin "reader" ''
+        # `mimetype` for the same reason as the `top` wrapper below; book needs
+        # it more, its graphical session PATH holding no nix profile at all.
+        export PATH="${pkgs.perlPackages.FileMimeInfo}/bin:$PATH"
         exec /usr/bin/python3 /home/lam/nix/apps/reader/main.py "$@"
       ''
     else
@@ -36,6 +39,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/reader \
             --add-flags /home/lam/nix/apps/reader/main.py \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.perlPackages.FileMimeInfo ]} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
