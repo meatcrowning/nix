@@ -858,6 +858,26 @@ The short version, and every line of it is a rule:
   the agent cannot write, and that is exactly why a free word is safe to allow.
   `bph.CLAIMABLE` is now only what the CLASSIFIER can produce from a
   transcript — the observed phase, and what `boardwork.groups()` buckets by.
+- **...and there is a MENU of them, `bph.PHASE_WORDS`, which is not a
+  whitelist** — [his, 2026-07-29] *"create a larger list of words that could
+  describe what an agent is doing, i.e. more than just coding or planning - and
+  allow agents to select from this new larger list"*. ~33 words that follow
+  "is" as English, the classic five first; `clean_phase_word` still accepts
+  anything that passes its four rules, so an off-list word is legal and refused
+  by nothing. What the list buys is that an agent bisecting a regression reaches
+  for `bisecting` instead of rounding itself off to `coding`. It reaches agents
+  through `boardwork.phase_word_menu()`, which GENERATES the block rule 8 shows
+  — a menu retyped beside the constant is a menu that drifts from what the code
+  takes, and `tools/board-test.py` asserts both that every word survives
+  `clean_phase_word` and that the block comes from the list.
+- **Solomon claims a phase like everybody else, and that is what puts his name
+  on his own top line.** A card with no claim leads with the OBSERVED line,
+  which names nobody by design, so the orchestrator's card named him nowhere on
+  the line he reads first — [his, 2026-07-29] it should say *"Solomon is …"*
+  like the rest. The fix is in `ORCHESTRATOR_PROMPT`, not in the card: a claim
+  is never manufactured for an agent (above), so he is TOLD to make one. The
+  IDLE row is a different thing and is unchanged — it is not a process, it has
+  no claim and no observation, and its name comes from the 7-cell column.
 - **`doing` is derived from the agent's live transcript**,
   `~/.claude/projects/*/<session-uuid>.jsonl`, which Claude Code appends to as
   the agent works. It carries the VERB — *"editing vtbclient.py"* — and cannot

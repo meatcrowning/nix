@@ -342,10 +342,13 @@ the start and whenever you move on:
        python3 apps/board/tools/boardctl.py phase researching --doing '<one \
 short line, present tense, naming the THING>'
 
-   **Pick the single word that best names what you are doing.** The classic \
-five — `planning`, `researching`, `coding`, `testing`, `finishing` — are fine, \
-and so is a freer one (`bisecting`, `measuring`, `waiting`): one word, letters \
-only, and TRUE of what you are actually doing. \
+   **Pick the single word that best names what you are doing.** These are the \
+ones worth reaching for first:
+
+{phase_words}
+
+   It is a MENU, not a whitelist: any other single word is accepted too, so \
+long as it is one word, letters only, and TRUE of what you are actually doing. \
 **Your words do not set the phase the card is filed under** — that is derived \
 from what you actually do, and you cannot change it from here. Say it anyway: \
 it is the only channel that carries WHAT you are working on rather than which \
@@ -447,6 +450,15 @@ worker sees only this>' --where '<the files it will touch>'
     python3 apps/board/tools/boardctl.py cap <n>      # a SETTING, applied now
 
     python3 apps/board/tools/boardctl.py agents       # who is running, and on what
+
+    python3 apps/board/tools/boardctl.py phase reading --doing '<one short \\
+line>'
+
+SAY WHAT YOU ARE DOING, with that last one, before you read anything and again \
+when you move on. Your card is pinned to the top of his board and its first \
+line is built from this — without it the card names you nowhere on that line, \
+which he has asked for by name. One word, letters only, true: `reading`, \
+`planning`, `dispatching`, `waiting`.
 
     python3 apps/board/tools/boardctl.py inbox send '<the item, in full>' \\
 --to <Name>                                           # hand it to one of them
@@ -656,6 +668,20 @@ def role_flags(role):
     return argv
 
 
+def phase_word_menu(per_line=6, indent="       "):
+    """`boardphase.PHASE_WORDS` as the block a prompt shows an agent.
+
+    Wrapped rather than one word a line: thirty-odd single lines in the middle
+    of rule 8 would read as more important than the rule, and the point of the
+    list is that it is glanceable. It is generated, never typed out beside the
+    constant — a menu that drifts from what the code accepts is worse than no
+    menu.
+    """
+    words = list(bph.PHASE_WORDS)
+    rows = [words[i:i + per_line] for i in range(0, len(words), per_line)]
+    return "\n".join(indent + "  ".join("`%s`" % w for w in r) for r in rows)
+
+
 def _task_name():
     return "%s-%s.json" % (time.strftime("%Y%m%dT%H%M%S"), os.urandom(3).hex())
 
@@ -844,7 +870,7 @@ def _spawn_worker(rec):
     session = str(uuid.uuid4())
     prompt = WORKER_PROMPT.format(
         repo=REPO, host=host_line(), task=rec["task"], rules=RULES,
-        name=name, aid=aid,
+        name=name, aid=aid, phase_words=phase_word_menu(),
         context=("--- what the orchestrator knows that you do not ---\n%s\n--- end ---\n\n"
                  % rec["context"]) if rec.get("context") else "")
     stub = os.environ.get("BOARD_WORK_SPAWN")
@@ -1002,6 +1028,14 @@ def _idle_orchestrator_row():
         "id": "", "name": ba.ORCHESTRATOR_NAME, "kind": ba.ORCHESTRATOR_KIND,
         "title": "hands out what you type, and does none of the work himself",
         "where": "", "state": "idle", "running": False,
+        # NO claim and NO observation, deliberately — this row is not a process
+        # and there is nothing to observe. His *"Solomon is ..."* top line is
+        # not bought here: the name column already puts the whole name on this
+        # row's first line (`AgentRow.nameNeeded`, asserted below in
+        # `tools/board-test.py`). It is the LIVE orchestrator's card that had no
+        # name on its top line, and that is fixed where every other agent's is —
+        # by Solomon claiming a phase, which `ORCHESTRATOR_PROMPT` now tells him
+        # to do.
         "phase": "ready", "says": "", "saysLine": "",
         "actually": "", "doingLine": "", "observed": "unlinked",
         "contextLine": "", "unread": 0, "waiting": [], "born": 0.0,

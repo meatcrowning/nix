@@ -317,6 +317,39 @@ def read_sidecar(agent_id):
 #: derived from tool calls can say a word that is not in here.
 CLAIMABLE = ["planning", "researching", "coding", "testing", "finishing"]
 
+#: THE MENU AN AGENT IS SHOWN, and it is a menu and not a whitelist —
+#: [his, 2026-07-29] *"create a larger list of words that could describe what an
+#: agent is doing, i.e. more than just coding or planning - and allow agents to
+#: select from this new larger list to indicate what they alledge they are
+#: doing"*. `clean_phase_word` still takes ANY single word (his rule from the
+#: same day, and the honesty check is the observed line, never a vocabulary), so
+#: nothing here REFUSES a word that is not on it. What the list buys is that an
+#: agent bisecting a regression reaches for `bisecting` instead of rounding
+#: itself off to `coding` — the five were a menu by accident, and a menu of five
+#: makes every card say one of five things.
+#:
+#: Every word FOLLOWS "is" as English, because that is the sentence the card
+#: builds (`says_line`) — gerunds throughout bar `blocked`, which is the one
+#: state a gerund cannot say; every word passes `clean_phase_word`
+#: (lowercase letters, one word, at most `CLAIM_WORD_MAX`), which
+#: `tools/board-test.py` asserts rather than trusting.
+PHASE_WORDS = [
+    # the classic five first: they are what most work still is
+    "planning", "researching", "coding", "testing", "finishing",
+    # finding out
+    "reading", "exploring", "investigating", "debugging", "bisecting",
+    "profiling", "measuring", "benchmarking", "tracing", "auditing",
+    # making
+    "designing", "drafting", "implementing", "refactoring", "porting",
+    "packaging", "documenting", "cleaning",
+    # checking
+    "verifying", "reviewing", "reproducing",
+    # landing
+    "building", "rebuilding", "committing", "merging", "rebasing",
+    # neither, and honest
+    "waiting", "blocked",
+]
+
 #: A claimed word is drawn inside a sentence on a card that is one line high.
 #: Long enough for `investigating`; short enough that nothing can shove the rest
 #: of the line off the row.
