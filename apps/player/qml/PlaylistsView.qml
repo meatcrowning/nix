@@ -6,6 +6,10 @@ import QtQuick
 Item {
     id: root
     property string current: ""
+    // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1).
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
     // From the track list's right-click menu; the window owns navigation.
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
@@ -49,8 +53,8 @@ Item {
                         x: 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData
-                        color: modelData === root.current ? Theme.accent
-                               : (nameMouse.containsMouse ? Theme.text : Theme.textDim)
+                        color: modelData === root.current ? root.fgAccent
+                               : (nameMouse.containsMouse ? root.fgText : root.fgDim)
                     }
                     MouseArea {
                         id: nameMouse
@@ -86,10 +90,11 @@ Item {
             PixelText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.current + "  (" + PlaylistModel.count + ")"
-                color: Theme.textDim
+                color: root.fgDim
             }
             HeaderButton {
                 label: "> play all"
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.playSmart(root.current)
             }
         }
@@ -100,6 +105,9 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             model: PlaylistModel
+            fgText: root.fgText
+            fgDim: root.fgDim
+            fgAccent: root.fgAccent
             showNumber: false
             onPlayed: function(index) { Library.playFromModel(PlaylistModel, index); }
             onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }

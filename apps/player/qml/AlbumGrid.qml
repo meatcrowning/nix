@@ -21,6 +21,15 @@ Item {
     // the whole grid — a delegate-owned copy would be one file read per album
     // row (qmlcommon/Motion.qml).
     Motion { id: motion }
+    // The three foreground tones, handed in already faded by Main
+    // (docs/DESIGN.md §3.1.1). The COVER ART is deliberately not among them:
+    // an image is content, not a foreground tone, and filer's PreviewTile
+    // leaves its thumbnails at full brightness while fading the filename and
+    // the selection frame over them. Same reading here.
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
+
     // The album to expand; 0 collapses. Owned by Main (so the mouse
     // back/forward history can restore it), toggled through `opened`.
     property int expandedAlbumId: 0
@@ -42,14 +51,20 @@ Item {
     // drawer and can change live.
     property int cols: 7
     readonly property int safeCols: Math.max(1, cols)     // never divide by 0
-    readonly property int cellW: Math.max(1, Math.floor(width / safeCols))
+    // Flush left and right means flush against the SCROLLBAR, which is always
+    // on and up to 16px wide now (docs/DESIGN.md 9.2). Dividing the full width
+    // put the last column's cover under it.
+    // (`vbar ?` because this is a ROOT property and the bar is built with the
+    // view below it — an unguarded id read here can land one turn early.)
+    readonly property int gridW: Math.max(1, width - (vbar ? vbar.barW : 16))
+    readonly property int cellW: Math.max(1, Math.floor(gridW / safeCols))
 
     // Retiling changes both the cell size and how many rows there are, so hold
     // the album that was at the top of the viewport in place instead of
     // letting contentY mean something completely different.
     property int _lastCols: cols
     onColsChanged: {
-        var oldCellW = Math.max(1, Math.floor(width / Math.max(1, _lastCols)));
+        var oldCellW = Math.max(1, Math.floor(gridW / Math.max(1, _lastCols)));
         // contentY is measured from originY, which is not 0 once the cells
         // have been resized before (see WheelScroll.qml's clamp note) — the
         // row under the viewport top is the offset INTO the content.
@@ -243,14 +258,14 @@ Item {
                                     text: tile.a ? tile.a.album : ""
                                     clip: true
                                     height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                                    color: Theme.text
+                                    color: root.fgText
                                 }
                                 PixelText {
                                     width: parent.width
                                     text: tile.a ? ((tile.a.year > 0 ? tile.a.year + "  " : "") + tile.a.artist) : ""
                                     clip: true
                                     height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                                    color: Theme.textDim
+                                    color: root.fgDim
                                 }
                             }
                         }
@@ -262,7 +277,10 @@ Item {
                             visible: tileMouse.containsMouse
                                      || (tile.a && tile.a.albumId === root.expandedAlbumId)
                             color: "transparent"
-                            border.color: Theme.accent
+                            // An accent frame drawn OVER the art, so it is a
+                            // foreground and fades (§3.1.1) — unlike a
+                            // `Theme.border` hairline, which does not.
+                            border.color: root.fgAccent
                             border.width: 1
                         }
 
@@ -325,6 +343,9 @@ Item {
                         AlbumPanel {
                             objectName: "albumPanel"
                             albumId: root.expandedAlbumId
+                            fgText: root.fgText
+                            fgDim: root.fgDim
+                            fgAccent: root.fgAccent
                             onClosed: root.opened(0)
                             onOpenAlbumRequested: function(aid) { root.opened(aid); }
                             onBrowseArtistRequested: function(a) { root.searchArtist(a); }
@@ -339,7 +360,7 @@ Item {
         anchors.centerIn: parent
         visible: AlbumsModel.count === 0
         text: "no albums - is the library drive mounted?"  // ASCII: the font has no em dash
-        color: Theme.textDim
+        color: root.fgDim
     }
 
     CtxMenu {

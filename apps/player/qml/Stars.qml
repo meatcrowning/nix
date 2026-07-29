@@ -7,6 +7,10 @@ Row {
     id: root
     property real rating: -1   // FMPS 0..1, or -1 unrated
     property bool interactive: true
+    // A filled star is an accent foreground and fades with the window
+    // (docs/DESIGN.md §3.1.1); the empty '·' stays `Theme.dim`, which is already
+    // below the inactive grey.
+    property color fgAccent: Theme.accent
     signal rated(real fmps)  // 0..1, or -1 to clear
 
     spacing: 0
@@ -19,7 +23,7 @@ Row {
             PixelText {
                 anchors.centerIn: parent
                 text: root.rating >= (index + 0.5) / 5 ? "*" : "·"
-                color: root.rating >= (index + 0.5) / 5 ? Theme.accent : Theme.dim
+                color: root.rating >= (index + 0.5) / 5 ? root.fgAccent : Theme.dim
             }
             MouseArea {
                 anchors.fill: parent

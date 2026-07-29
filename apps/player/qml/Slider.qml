@@ -13,6 +13,10 @@ Item {
     property real to: 10
     property real value: 0
     property real step: 1
+    // The fill and the handle's edge are accent foregrounds and fade with the
+    // window (docs/DESIGN.md §3.1.1); the `Theme.border` track and the
+    // `Theme.bg` handle body do not.
+    property color fgAccent: Theme.accent
     signal moved(real v)
 
     implicitWidth: 150
@@ -30,7 +34,7 @@ Item {
         x: 0
         width: handle.x + handle.width / 2
         height: 2
-        color: Theme.accent
+        color: root.fgAccent
     }
     Rectangle {
         id: handle
@@ -39,7 +43,7 @@ Item {
         y: (parent.height - height) / 2
         x: root.frac * (root.width - width)
         color: Theme.bg
-        border.color: Theme.accent
+        border.color: root.fgAccent
         border.width: 1
     }
     MouseArea {
