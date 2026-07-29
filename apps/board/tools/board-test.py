@@ -1292,35 +1292,36 @@ def test_phase(tmp):
               bph.actually(r))
         check("...while its own claim is left standing, unmarked",
               bph.says(r) == "testing - the parser round-trips")
-        check("...and the quiet sentence is still English after the name",
-              bph.doing_line(r, "Marbas")
-              .startswith("Marbas has actually done nothing recently"),
+        check("...and the quiet line says it with no subject and no opener",
+              bph.doing_line(r, "Marbas").startswith("nothing recently"),
               bph.doing_line(r, "Marbas"))
     finally:
         bph.QUIET_AFTER_S = old
 
-    # ---- the same two, as the SENTENCES the card draws ----
-    # *"[agent name] is [what the agent says its doing] ... [agent name] is
-    # actually [what it is actualy doing]"*. What is asserted here is the
-    # JOINING: every one of these has to read as English for the real strings,
-    # and a stopped agent must not be described in the present tense.
+    # ---- the same two, as the LINES the card draws ----
+    # *"[agent name] is [what the agent says its doing]"* on the first line, and
+    # on the second the observation ALONE — *"actually just take out the [agent]
+    # is actually and just display the text after it"*. What is asserted here is
+    # the JOINING: the claim has to read as English for the real strings, the
+    # observation must carry no subject, and a stopped agent must not be
+    # described in the present tense.
     r = bph.observe("ph-a")
     check("a card's first sentence is the agent's own claim, led by its name",
           bph.says_line(r, "Marbas") == "Marbas is testing - the parser round-trips",
           bph.says_line(r, "Marbas"))
-    check("...and its second is the observation, and says `actually`",
-          bph.doing_line(r, "Marbas") == "Marbas is actually editing Main.qml",
+    check("...and its second line is the observation ALONE, with no opener",
+          bph.doing_line(r, "Marbas") == "editing Main.qml",
           bph.doing_line(r, "Marbas"))
-    check("a STOPPED agent is put in the PAST tense, never `is actually`",
+    check("a STOPPED agent is put in the PAST tense, and still gets no subject",
           bph.doing_line(r, "Marbas", running=False)
-          == "Marbas was last seen editing Main.qml",
+          == "last seen editing Main.qml",
           bph.doing_line(r, "Marbas", running=False))
     check("...and one that was never seen doing anything says nothing at all",
           bph.doing_line({"observed": "none"}, "Marbas", running=False) == "",
           bph.doing_line({"observed": "none"}, "Marbas", running=False))
-    check("an agent with no name is `it`, and nothing invents one",
+    check("an agent with no name is `it` in the CLAIM, and nothing invents one",
           bph.says_line(r) == "it is testing - the parser round-trips"
-          and bph.doing_line(r) == "it is actually editing Main.qml",
+          and bph.doing_line(r) == "editing Main.qml",
           (bph.says_line(r), bph.doing_line(r)))
     check("a claim with no phase word is QUOTED, not forced after `is`",
           bph.says_line({"claimDoing": "the vtbclient parser"}, "Marbas")
@@ -1332,8 +1333,8 @@ def test_phase(tmp):
           bph.doing_line({"observed": "unlinked"}, "Marbas")
           == "board cannot see what Marbas is doing - only that the process is there")
     check("nothing seen yet is stated as itself",
-          bph.doing_line({"observed": "none"}, "Marbas")
-          == "Marbas has not done anything yet")
+          bph.doing_line({"observed": "none"}, "Marbas") == "nothing yet",
+          bph.doing_line({"observed": "none"}, "Marbas"))
 
 
 # ------------------------------------------ 1e. the fan-out: the cap and asking
@@ -1959,6 +1960,36 @@ def test_window(app, tmp):
     check("...and stays visible on its row until it is read",
           rows.get("drawn-live", {}).get("waiting") == ["also dim the tracklist"],
           rows.get("drawn-live", {}).get("waiting"))
+
+    # ---- ...on ONE line, however much he typed ----
+    # He types paragraphs into that box, and wrapped in full they buried the
+    # three lines the card is for. The cut is marked with ASCII "..." — a
+    # hardcoded UI string is ASCII by rule (docs/DESIGN.md §2.3), which is also
+    # why Qt's own `elide` (it draws U+2026) is not what does it.
+    agents.send("drawn-live", "Dim the cover art", "decision", "z" * 400)
+    agents.refresh()
+    spin(250)
+    waits = []
+    for it in descendants(win.contentItem()):
+        s = it.property("text")
+        if isinstance(s, str) and "waiting in its inbox" in s and it.isVisible():
+            waits.append((s, it))
+    longNote = [(s, t) for s, t in waits if "zzz" in s]
+    check("a long note waiting in an inbox is cut to ONE line",
+          len(longNote) == 1 and longNote[0][1].property("lineCount") == 1,
+          [(len(s), s[:40]) for s, _ in waits])
+    check("...marked with ASCII `...`, never the unicode ellipsis (S2.3)",
+          bool(longNote) and longNote[0][0].endswith("...")
+          and "…" not in longNote[0][0],
+          [s[-8:] for s, _ in waits])
+    check("...with the label left whole, and only the message body shortened",
+          bool(longNote)
+          and longNote[0][0].startswith("  waiting in its inbox: ")
+          and len(longNote[0][0]) < 400,
+          [len(s) for s, _ in waits])
+    check("...and a note that already fits is not cut at all",
+          any(s.endswith("also dim the tracklist") for s, _ in waits),
+          [s[-30:] for s, _ in waits])
     said = agents.send("drawn-dead", "Widen the clock", "decision", "never mind")
     agents.refresh()
     spin(250)
@@ -2079,10 +2110,9 @@ def test_window(app, tmp):
     check("the section is ONE flat list - no phase headings over the cards",
           all(isinstance(c, dict) and "rows" not in c for c in cards),
           [list(c)[:3] for c in cards[:2]])
-    check("a card reads as two sentences led by the agent's name",
+    check("a card leads with the claim as a sentence, then the observation alone",
           card.get("saysLine") == card.get("name") + " is testing - the vtbclient parser"
-          and card.get("doingLine") == card.get("name")
-                                       + " is actually editing vtbclient.py",
+          and card.get("doingLine") == "editing vtbclient.py",
           (card.get("saysLine"), card.get("doingLine")))
     check("...and it still carries BOTH statements, neither standing in for the other",
           card.get("says") == "testing - the vtbclient parser"
@@ -2099,9 +2129,14 @@ def test_window(app, tmp):
           and rows.get("Find where focus is decided", {}).get("saysLine") == "",
           rows.get("Find where focus is decided"))
     check("a STOPPED agent is never described in the present tense",
-          all("is actually" not in r.get("doingLine", "")
+          all(r.get("doingLine", "") == ""
+              or r.get("doingLine", "").startswith("last seen ")
               for r in cards if not r.get("running")),
           [r.get("doingLine") for r in cards if not r.get("running")])
+    check("...and no card repeats its own name on the observed line",
+          all(not r.get("name") or not r.get("doingLine", "")
+              .startswith(r.get("name")) for r in cards),
+          [(r.get("name"), r.get("doingLine")) for r in cards])
     check("...and the birth the order comes from never reaches the window",
           all("born" not in r for r in cards), list(rows.values())[:1])
     check("no card carries a time, an age or a count",
@@ -2168,10 +2203,10 @@ def test_window(app, tmp):
           and tone.get("Wire FOCUS through vtbclient") == keep[-1].property("dim"),
           (tone.get(card.get("saysLine")), tone.get("Wire FOCUS through vtbclient")))
     # NOTHING ON THIS LIST IS ANONYMOUS, and the name is never drawn twice over.
-    # The 7-cell name column exists for exactly the card no sentence names, and
-    # now that the sentences are ABOVE it, it is still the card's own top line
-    # when it appears.
-    check("a card whose sentences name the agent draws no separate name column",
+    # The 7-cell name column exists for exactly the card whose CLAIM does not
+    # name the agent — the observed line no longer carries a subject at all — and
+    # it leads the card whenever the title row is that card's own top line.
+    check("a card whose claim names the agent draws no separate name column",
           cardItem is not None and cardItem.property("nameNeeded") is False,
           cardItem and cardItem.property("nameNeeded"))
     anon = []
@@ -2183,10 +2218,11 @@ def test_window(app, tmp):
         drawn = _texts(it)
         if not any(nm in s for _, s, _ in drawn):
             anon.append(c.get("title"))
-        elif it.property("nameNeeded") and drawn and nm not in [
-                s for y, s, _ in drawn if y == drawn[0][0]]:
+        elif it.property("nameNeeded") and it.property("titleFirst") and drawn \
+                and nm not in [s for y, s, _ in drawn if y == drawn[0][0]]:
             # the column is the ONLY place the name can be on such a card, and
-            # the title row it shares is that card's own top line
+            # when nothing is drawn above the title row it shares, that row is
+            # the card's own top line
             anon.append(c.get("title") + " (name column not on the top line)")
     check("...and no card is anonymous, whichever of the three lines it has",
           anon == [], anon)
