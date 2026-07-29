@@ -6,6 +6,9 @@ import QtQuick
 Item {
     id: root
     property string current: ""
+    // From the track list's right-click menu; the window owns navigation.
+    signal openAlbumRequested(int albumId)
+    signal browseArtistRequested(string artist)
 
     onVisibleChanged: {
         if (visible && current === "") {
@@ -99,6 +102,8 @@ Item {
             model: PlaylistModel
             showNumber: false
             onPlayed: function(index) { Library.playFromModel(PlaylistModel, index); }
+            onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
+            onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
         }
     }
 }

@@ -260,6 +260,8 @@ Window {
         PlaylistsView {
             anchors.fill: parent
             visible: win.view === "playlists"
+            onOpenAlbumRequested: function(albumId) { win.openAlbum(albumId); }
+            onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
         }
         NowPlaying {
             anchors.fill: parent
@@ -276,6 +278,14 @@ Window {
         z: 40
         query: searchInput.text
         onClosed: win.closeSearch()
+        // Leaving the results for an album means leaving the overlay too — it
+        // covers the gallery the album section opens in. browseArtist already
+        // drops `searching` itself (it re-uses the search bar as a filter).
+        onOpenAlbumRequested: function(albumId) {
+            win.closeSearch();
+            win.openAlbum(albumId);
+        }
+        onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
     }
 
     // The desktop's motion, from the plugin's published key (qmlcommon/Motion.qml).

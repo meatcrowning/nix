@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import sys
@@ -48,8 +49,8 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QObject, Qt, QThread, QTimer, QUrl, Signal, Slot,
-                            Property, QFileSystemWatcher)
+from PySide6.QtCore import (QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal,
+                            Slot, Property, QFileSystemWatcher)
 from PySide6.QtCore import QAbstractListModel, QModelIndex
 from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
@@ -1574,13 +1575,106 @@ class Player(QObject):
     @Slot(int)
     def queueAlbum(self, album_id):
         rows = self._library.album_tracks(album_id)
-        fresh = [r for r in rows if os.path.exists(r["path"])]
+        self.queueTracks([r["id"] for r in rows])
+
+    def _fresh_rows(self, ids):
+        """Library rows for `ids`, in the order given, minus anything whose file
+        is gone (the library drive can be unplugged under a listing)."""
+        rows = self._library.tracks_by_ids([int(i) for i in ids])
+        return [r for r in rows if os.path.exists(r["path"])]
+
+    @Slot("QVariantList")
+    def queueTracks(self, ids):
+        """Append tracks to the end of the queue — the right-click menu's "add
+        to queue", and what queueAlbum is now built out of.
+
+        An empty queue has no end to append to, so it becomes a plain play.
+        `_orig_queue` (the pre-shuffle order, non-None only while shuffle is on)
+        has to grow too: it is what unshuffling restores, so anything added
+        while shuffled and NOT mirrored here silently disappears the moment the
+        shuffle button is turned off."""
+        fresh = self._fresh_rows(ids)
+        if not fresh:
+            return
         if not self._queue:
             self.playTracks([r["id"] for r in fresh], 0)
             return
         self._queue.extend(fresh)
+        if self._orig_queue is not None:
+            self._orig_queue.extend(fresh)
         for r in fresh:
             self._mpv.command("loadfile", r["path"], "append")
+        self.queueChanged.emit()
+
+    @Slot("QVariantList")
+    def playNext(self, ids):
+        """Insert tracks directly after the playing one, leaving it playing.
+
+        With nothing playing there is no "next" to insert before — the menu
+        disables the entry in that case, and this falls back to a plain play
+        rather than dropping the request."""
+        fresh = self._fresh_rows(ids)
+        if not fresh:
+            return
+        if not self._queue or self._index < 0:
+            self.playTracks([r["id"] for r in fresh], 0)
+            return
+        cur = self._queue[self._index]
+        at = self._index + 1
+        self._queue[at:at] = fresh
+        if self._orig_queue is not None:
+            try:
+                oat = self._orig_queue.index(cur) + 1
+            except ValueError:
+                oat = len(self._orig_queue)
+            self._orig_queue[oat:oat] = fresh
+        self._resync_tail()          # rebuilds mpv's upcoming entries in place
+        self.queueChanged.emit()
+
+    @Slot("QVariantList")
+    def removeFromQueue(self, indices):
+        """Drop rows from the queue by their queue index (the queue's own
+        right-click menu).
+
+        Removing the PLAYING row is a real thing to ask for, so it is allowed
+        and the row that slides into the gap starts playing — the alternative
+        (refusing) would leave the one row you most want gone unremovable.
+        Removing anything else must not interrupt playback: the index is
+        shifted arithmetically rather than through `_set_index`, which would
+        also zero the position readout and the play-count accumulator of a
+        track that never stopped."""
+        idxs = sorted({int(i) for i in indices if 0 <= int(i) < len(self._queue)},
+                      reverse=True)
+        if not idxs:
+            return
+        dropped = [self._queue[i] for i in idxs]
+        removed_current = self._index in idxs
+        for i in idxs:
+            del self._queue[i]
+        if self._orig_queue is not None:
+            for t in dropped:
+                try:
+                    self._orig_queue.remove(t)
+                except ValueError:
+                    pass
+        if not self._queue:
+            self._orig_queue = None
+            self._set_index(-1)
+            try:
+                self._mpv.command("stop")
+            except Exception:
+                pass
+            self.queueChanged.emit()
+            return
+        if removed_current:
+            self.queueChanged.emit()
+            self._sync_mpv(min(idxs[-1], len(self._queue) - 1))
+            return
+        shift = sum(1 for i in idxs if i < self._index)
+        if shift:
+            self._index -= shift
+            self.indexChanged.emit()
+        self._resync_tail()
         self.queueChanged.emit()
 
     @Slot(str)
@@ -2151,6 +2245,54 @@ class Bridge(QObject):
     def playFromModel(self, model, start):
         ids = [model.get(i)["trackId"] for i in range(model.count)]
         self._player.playTracks(ids, start)
+
+    # ---- track writes (docs/DESIGN.md §10 — a drawn control has to work) ----
+    #
+    # QML's `Library` context property is THIS object, not the Library — the
+    # views call `Library.setRating`/`setFavorite`/`setInstrumental` on the
+    # Bridge, and until these existed each click raised
+    # "TypeError: Property 'setRating' of object Bridge is not a function"
+    # inside onClicked and died there: the stars and the heart were drawn,
+    # hovered and clickable and wrote nothing. Anything QML calls on `Library`
+    # has to be forwarded from here.
+
+    @Slot(int, float)
+    def setRating(self, track_id, rating):
+        self._library.setRating(int(track_id), float(rating))
+
+    @Slot(int, bool)
+    def setFavorite(self, track_id, fav):
+        self._library.setFavorite(int(track_id), bool(fav))
+
+    @Slot(int, bool)
+    def setInstrumental(self, track_id, yes):
+        self._library.setInstrumental(int(track_id), bool(yes))
+
+    # ---- reveal (the track menu's "open folder in filer") ----
+
+    @Property(bool, constant=True)
+    def canReveal(self):
+        """Whether there is a filer to reveal into. The menu greys the entry
+        out when there isn't, rather than offering an action that would do
+        nothing at all (docs/DESIGN.md §7.2 — never offer an action that can
+        silently fail). Resolved once: PATH does not change under a session."""
+        return shutil.which("filer") is not None
+
+    @Slot(int)
+    def revealTrack(self, track_id):
+        """Open the track's containing directory in filer.
+
+        filer takes a DIRECTORY argument and has no select-this-file mode, so
+        the menu entry says "open folder in filer" and not "show in filer" —
+        the label promises exactly what happens."""
+        rows = self._library.tracks_by_ids([int(track_id)])
+        if not rows:
+            return
+        d = os.path.dirname(rows[0]["path"])
+        exe = shutil.which("filer")
+        if not exe or not os.path.isdir(d):
+            return
+        QProcess.startDetached(exe, [d])
 
     # ---- refresh plumbing ----
 

@@ -20,7 +20,64 @@ because plugin builds ≤2.44 abort the compositor on a zero-height fill rect
 (fixed plugin-side in v2.45 — guard every computed rect when adding hyprvtb
 drawing).
 
+**The now-playing cover art is RESPONSIVE, and the narrow window is the
+reference.** `NowPlaying.qml`'s art is a full-width top row in the ~480x826
+window this page normally lives in, and a full-height LEFT COLUMN once the
+window is wide (`sideArt`) — because a top row scales a square cover to the
+window's *width*, so maximized it kept a 1406x472 band, 30% of the art. Both
+branches bleed to the window outline; neither letterboxes (docs/DESIGN.md §5.1).
+Two constraints when touching it: the switch reads **window geometry only**,
+never `artFrac` (a layout that flipped mid-drag would rearrange the page under
+the cursor), and it must be a **strict no-op below the breakpoint** — verified
+by rendering both branches offscreen and comparing PNGs byte-for-byte across
+sizes, `artFrac` values and with/without lyrics, which is the harness pattern to
+reuse for any further change here.
+
 **Track list, album grid and both lyrics panes are `Kinetic*` views from `../qmlcommon/`** — player's scrolling policy is the scrollbar and the wheel only, never drag-flicking, so the compositor's momentum is the only momentum. `WheelScroll.qml` used to live in `player/qml/`; it is shared now and player is no longer its owner. `TrackList` passes `wheelEnabled: root.scrollable` so a table sized to hold every row (AlbumPanel) hands the wheel out to the gallery behind it. See [`../AGENTS.md`](../AGENTS.md).
+
+## Right-click: one menu for every listing (`qml/TrackMenu.qml`)
+
+player draws a track in five places — the queue, an album's inline section, a
+smart playlist, the search results and the now-playing header — and every one of
+them opens the **same** `TrackMenu`. The look and the ordering rule are
+`docs/DESIGN.md` §7.2 (which also carries the vocabulary and why each entry
+greys out when it does); this section is the mechanics.
+
+- **Four of the five come free from `TrackList`**, which owns the menu and the
+  right-click handler. A new listing gets one by existing.
+- **The menu is parented to `Window.contentItem`, not to the list.** `CtxMenu`
+  measures and clamps against its own bounds, and the queue is a ~240px column
+  in a 480px window — owned by the list, the menu would be clamped to a sliver
+  of the window or cut off at the list's edge. The right-click `MouseArea` is
+  declared **last** in the delegate (so it covers the right-hand rating column
+  that `rowMouse` deliberately stops short of) and accepts **only**
+  `Qt.RightButton`, so every left click still falls through to the stars, the
+  heart and `rowMouse` underneath it.
+- **`TrackList` never navigates.** "go to album" / "search for artist" are
+  relayed out as `openAlbumRequested` / `browseArtistRequested` and the window
+  decides — the same reason `NowPlaying` already had those two signals. The
+  relay chain for the album section runs `AlbumPanel` → `AlbumGrid` → `Main`.
+- **The site supplies the two facts only it knows**: `inAlbum` (this listing IS
+  that album, so "go to album" is absent rather than a no-op) and `isQueue`
+  (rows are queue rows, so they can be removed).
+- **No multi-select anywhere in this app**, so the menu acts on the row under
+  the cursor. The Player slots all take a LIST of ids/indices, so a selection
+  model would not need them changed.
+
+Queue mutation lives in `Player.queueTracks` / `playNext` / `removeFromQueue`
+(`queueAlbum` is now just `queueTracks` over an album's ids). Two traps they
+exist to respect: `_orig_queue` — the pre-shuffle order — has to be mutated
+alongside `_queue`, or anything added while shuffled vanishes the moment shuffle
+is turned off; and a removal that does **not** touch the playing row must shift
+`_index` arithmetically rather than through `_set_index`, which would also zero
+the position readout and the play-count accumulator of a track that never
+stopped.
+
+```bash
+tools/queue-ops-test.py   # headless; a Player built without __init__ (so no
+                          # libmpv, no audio device) driven against a fake mpv
+                          # playlist. The LIVE player is never touched.
+```
 
 ## The queue socket (`start_queue_server`)
 
