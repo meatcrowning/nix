@@ -246,6 +246,174 @@ def test_roundtrip(tmp):
           os.listdir(tmp))
 
 
+# --------------------------------------------------- 1b. moving between sections
+def test_moves(tmp):
+    """An answered decision has to STOP asking him, and a failed agent has to
+    leave no trace. Both are byte-level claims, so they are tested here beside
+    the round trip rather than through the window.
+
+    Everything runs on a copy in the scratch dir, with XDG_STATE_HOME already
+    redirected (main() does it), so the stash these write is the harness's own.
+    """
+    import boardmove as bm
+    import boardparse as B
+
+    path = os.path.join(tmp, "board.md")
+
+    def reset():
+        open(path, "w").write(FIXTURE)
+        for n in os.listdir(bm.stash_dir()):
+            os.unlink(os.path.join(bm.stash_dir(), n))
+        return B.read(path)
+
+    def lines_differing(a, b):
+        la, lb = a.splitlines(True), b.splitlines(True)
+        common = [ln for ln in la if ln in lb]
+        return len(la) - len(common), len(lb) - len([ln for ln in lb if ln in la])
+
+    # ---- NEEDS YOU -> IN FLIGHT ----
+    src = reset()
+    doc = B.parse(src)
+    B.write(path, "".join(B.toggle_option(doc["lines"], doc["needs"][0], 0, True)))
+    src = B.read(path)
+    span = B.item_span(B.parse(src)["lines"], B.parse(src)["needs"][0])
+    kept = src.splitlines(True)[:span[0]] + src.splitlines(True)[span[1]:]
+    rec = bm.start("1", where="apps/thing", path=path)
+    out = B.read(path)
+    doc2 = B.parse(out)
+    check("starting a decision takes it out of NEEDS YOU",
+          len(doc2["needs"]) == 1 and doc2["needs"][0]["num"] == "2",
+          [d["num"] for d in doc2["needs"]])
+    check("...and puts a row in IN FLIGHT carrying his answer",
+          any(r["what"] == "First question?" and "the first way" in r["notes"]
+              for r in doc2["flight"]),
+          [(r["what"], r["notes"]) for r in doc2["flight"]])
+    check("...in the section's OWN table, not the one below it",
+          doc2["flight"][2]["what"] == "First question?",
+          [r["what"] for r in doc2["flight"]])
+    # Every line that was not part of the decision comes out in the same order,
+    # untouched: the move is a relocation plus one inserted row, not a rewrite.
+    left = [ln for ln in out.splitlines(True) if ln != rec["row"]]
+    check("...and every other line of the file is untouched, in order",
+          left == kept, [ln for ln in kept if ln not in left][:3])
+
+    # ---- ...and back again, byte for byte ----
+    bm.give_back("1", path=path)
+    check("handing a decision back restores the file EXACTLY", B.read(path) == src,
+          lines_differing(src, B.read(path)))
+
+    # every decision, from wherever it sits in the section
+    for num in ("1", "2"):
+        src = reset()
+        d = B.parse(src)
+        it = [i for i in d["needs"] if i["num"] == num][0]
+        B.write(path, "".join(B.set_answer(d["lines"], it, "do it")))
+        src = B.read(path)
+        bm.start(num, path=path)
+        bm.give_back(num, path=path)
+        check("decision %s: start -> back is byte-identical" % num,
+              B.read(path) == src, lines_differing(src, B.read(path)))
+
+    # ---- it is HIS to resolve: an unanswered one is refused ----
+    reset()
+    try:
+        bm.start("1", path=path)
+        check("an UNANSWERED decision is refused", False)
+    except bm.BoardError:
+        check("an UNANSWERED decision is refused", True)
+    check("...and the refusal wrote nothing", B.read(path) == FIXTURE)
+
+    # ---- IN FLIGHT -> LANDED ----
+    src = reset()
+    d = B.parse(src)
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
+    bm.start("1", path=path)
+    bm.land("1", "abc1234", what="thing: did the first way", path=path)
+    doc3 = B.parse(B.read(path))
+    check("landing removes the IN FLIGHT row",
+          not any(r["what"] == "First question?" for r in doc3["flight"]),
+          [r["what"] for r in doc3["flight"]])
+    check("...and appends it under today's date with the commit",
+          any(r["commit"] == "abc1234" and r["what"] == "thing: did the first way"
+              for g in doc3["landed"] for r in g["rows"]),
+          [(g["date"], [r["commit"] for r in g["rows"]]) for g in doc3["landed"]])
+    check("...and the stash is dropped, so nothing reclaims it",
+          not os.path.exists(bm.stash_file(rec["key"])))
+
+    # a date the file has no group for gets one, at the TOP (newest first)
+    bm.land("Another thing", "beef567", what="a later day", date="2026-09-09",
+            path=path)
+    doc4 = B.parse(B.read(path))
+    check("a new date opens a new LANDED group, newest first",
+          doc4["landed"][0]["date"] == "2026-09-09"
+          and doc4["landed"][0]["rows"][0]["commit"] == "beef567",
+          [g["date"] for g in doc4["landed"]])
+
+    # ---- a bullet for him ----
+    src = B.read(path)
+    bm.note("**Relaunch `thing`** - live source.", path=path)
+    doc5 = B.parse(B.read(path))
+    check("a note lands as one bullet in WAITING ON YOU TO DO",
+          len(doc5["todo"]) == 2
+          and len(B.read(path).splitlines()) == len(src.splitlines()) + 1,
+          [t["text"] for t in doc5["todo"]])
+
+    # ---- NOTHING STAYS STRANDED: a dead owner is reclaimed ----
+    src = reset()
+    d = B.parse(src)
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
+    src = B.read(path)
+    bm.start("1", pid=os.getpid(), path=path)
+    check("an item whose agent is still alive is left alone",
+          bm.reconcile(path=path) == [])
+    bm.give_back("1", path=path)
+
+    dead = os.fork()
+    if dead == 0:
+        os._exit(0)
+    os.waitpid(dead, 0)                       # a pid that is certainly gone
+    bm.start("1", pid=dead, path=path)
+    moved = bm.reconcile(path=path)
+    check("an item whose agent DIED is returned to NEEDS YOU",
+          len(moved) == 1 and moved[0]["num"] == "1", moved)
+    back = B.read(path)
+    check("...verbatim, with only a bullet added to say so",
+          back.replace(back.splitlines(True)[-1], "") == src
+          or len(back.splitlines()) == len(src.splitlines()) + 1,
+          len(back.splitlines()) - len(src.splitlines()))
+    check("...and the bullet says what happened",
+          any("is gone" in t["text"] for t in B.parse(back)["todo"]),
+          [t["text"] for t in B.parse(back)["todo"]])
+
+    # ---- the write is guarded against a racing writer ----
+    reset()
+    hits = {"n": 0}
+
+    def racer(doc):
+        hits["n"] += 1
+        if hits["n"] == 1:                    # somebody else writes mid-edit
+            open(path, "a").write("\nan agent appended this.\n")
+        return B.add_todo_bullet(doc["lines"], doc, "- late\n")
+
+    B.edit(path, racer)
+    txt = B.read(path)
+    check("an edit computed from stale bytes is retried, not landed",
+          hits["n"] == 2 and "an agent appended this." in txt
+          and txt.count("- late") == 1, (hits["n"], txt.count("- late")))
+
+    # ---- the CLI itself runs ----
+    import subprocess
+    cli = os.path.join(BOARD, "tools", "boardctl.py")
+    p = subprocess.run([sys.executable, cli, "--board", path, "list"],
+                       capture_output=True, text=True)
+    check("boardctl list runs against a fixture",
+          p.returncode == 0 and "IN FLIGHT" in p.stdout, p.stderr.strip()[:200])
+    p = subprocess.run([sys.executable, cli, "--board", path, "start", "nope"],
+                       capture_output=True, text=True)
+    check("boardctl refuses a selector that matches nothing, and says so",
+          p.returncode == 1 and "no decision" in p.stderr, p.stderr.strip()[:200])
+
+
 # ----------------------------------------------------------------- 2. the store
 def test_real_store():
     import boardparse as B
@@ -256,8 +424,11 @@ def test_real_store():
     src = B.read(B.BOARD_PATH)
     doc = B.parse(src)
     check("the real board.md round-trips unchanged", "".join(doc["lines"]) == src)
-    check("...and every section parsed",
-          bool(doc["needs"]) and bool(doc["flight"]) and bool(doc["landed"]),
+    # NEEDS YOU is deliberately NOT required to be non-empty: with the moves in
+    # `boardmove.py` an answered decision leaves it, so an empty section is the
+    # resting state (and the one he sees most often), not a parse regression.
+    check("...and the sections that have content parsed",
+          bool(doc["flight"]) and bool(doc["landed"]),
           (len(doc["needs"]), len(doc["todo"]), len(doc["flight"]), len(doc["landed"])))
     check("every decision has a title and an `if unanswered` line",
           all(d["title"] and d["ifUnanswered"] for d in doc["needs"]),
@@ -393,7 +564,12 @@ def test_real_window(app):
         return
     engine, win, keep = build(app, B.BOARD_PATH)
     spin(500)
-    check("the real store draws", len(prop(win, "needs")) > 0)
+    # Not "there is a decision": there may legitimately be none (`boardmove.py`
+    # takes answered ones out). What must hold is that his real document draws.
+    check("the real store draws",
+          len(prop(win, "flight")) > 0 and len(prop(win, "landed")) > 0,
+          (len(prop(win, "needs")), len(prop(win, "flight")),
+           len(prop(win, "landed"))))
     shot(win, "00-real-store")
     # ...and with the two live sections folded away, which is how LANDED gets
     # onto one screen — the collapse is persisted state, so this is a real
@@ -484,6 +660,89 @@ def test_window(app, tmp):
     check("an item added underneath us appears without a relaunch",
           len(prop(win, "needs")) == 3, len(prop(win, "needs")))
 
+    # ---- EVERY section is live, not just NEEDS YOU ----
+    # An agent moving an item out from under him is the ordinary case now
+    # (`boardmove.py`), and it changes two sections at once. Both must redraw
+    # with no relaunch, and his place in the document must not move.
+    import boardmove as bm
+    scrollers = [it for it in descendants(win.contentItem())
+                 if it.property("contentHeight") is not None
+                 and it.property("contentX") is not None
+                 and it.property("originY") is not None]
+    check("the page is one scroll region", len(scrollers) == 1, len(scrollers))
+    scroller = scrollers[0] if scrollers else None
+    if scroller is not None:
+        # A real scroll position needs real overflow: at 880x880 this fixture
+        # fits, and a contentY nothing could have produced is not a test.
+        win.setHeight(320)
+        spin(200)
+        scroller.setProperty("contentY", 120)
+        spin(150)
+    win.setProperty("drafts", {"second-question": "half a sentence he is typing"})
+    before_needs, before_flight = len(prop(win, "needs")), len(prop(win, "flight"))
+
+    B.write(path, "".join(B.set_answer(B.parse(B.read(path))["lines"],
+                                       B.parse(B.read(path))["needs"][1], "go on")))
+    spin(400)
+    rec = bm.start("2", where="apps/thing", path=path)
+    spin(500)
+    check("an item moved to IN FLIGHT leaves NEEDS YOU on screen, no relaunch",
+          len(prop(win, "needs")) == before_needs - 1,
+          (before_needs, len(prop(win, "needs"))))
+    check("...and arrives in IN FLIGHT in the same reload",
+          len(prop(win, "flight")) == before_flight + 1
+          and any("Second question?" == r["what"] for r in prop(win, "flight")),
+          [r["what"] for r in prop(win, "flight")])
+    check("...carrying his answer back to him, and no time or count",
+          any(r["notes"] == "you said: go on" for r in prop(win, "flight")),
+          [r["notes"] for r in prop(win, "flight")])
+    if scroller is not None:
+        check("...without moving his place in the document",
+              abs(scroller.property("contentY") - 120) < 1,
+              (scroller.property("contentY"), scroller.property("contentHeight"),
+               scroller.property("height")))
+        win.setHeight(880)
+        spin(150)
+    check("...and without losing the answer he was half-way through typing",
+          prop(win, "drafts").get("second-question") == "half a sentence he is typing",
+          prop(win, "drafts"))
+
+    # LANDED is the third section, and it is live too
+    before_landed = len(prop(win, "landed"))
+    bm.land("Second question?", "aa11bb2", what="thing: went on", date="2026-09-09",
+            path=path)
+    spin(500)
+    check("landing redraws IN FLIGHT and LANDED together",
+          len(prop(win, "flight")) == before_flight
+          and len(prop(win, "landed")) == before_landed + 1,
+          (len(prop(win, "flight")), len(prop(win, "landed"))))
+
+    # ---- the file REPLACED wholesale, the way a git checkout or a sync does ----
+    # An atomic save swaps the inode, so a watch on the file alone stops firing.
+    # This is the case the directory watch exists for; assert it rather than
+    # trust it.
+    B.write(path, "".join(B.add_needs_item(
+        B.parse(B.read(path))["lines"],
+        ["### 9. A question from the other machine?\n", "\n", "- [ ] sure\n",
+         "\n", ">\n", "\n", "*If unanswered:* nothing.\n", "\n"])))
+    spin(500)
+    check("a file REPLACED by rename (a sync, a git checkout) still reloads",
+          any(d["num"] == "9" for d in prop(win, "needs")),
+          [d["num"] for d in prop(win, "needs")])
+
+    # ---- a section emptying out entirely still redraws ----
+    doc = B.parse(B.read(path))
+    lines = doc["lines"]
+    for it in reversed(doc["needs"]):
+        lines, _ = B.cut_item(lines, it)
+    B.write(path, "".join(lines))
+    spin(500)
+    check("NEEDS YOU emptying completely redraws to the empty state",
+          len(prop(win, "needs")) == 0, len(prop(win, "needs")))
+    check("...and the other two sections are still there",
+          len(prop(win, "flight")) > 0 and len(prop(win, "landed")) > 0,
+          (len(prop(win, "flight")), len(prop(win, "landed"))))
+
     # ---- the empty NEEDS YOU state, the one he will see most often ----
     empty = os.path.join(tmp, "empty.md")
     open(empty, "w").write(EMPTY_FIXTURE)
@@ -521,8 +780,10 @@ def main():
         os.environ["XDG_STATE_HOME"] = os.path.join(tmp, "state")
         os.environ["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
         os.makedirs(os.path.join(tmp, "rt"))
+        os.makedirs(os.path.join(tmp, "mv"))
         os.makedirs(os.path.join(tmp, "win"))
         test_roundtrip(os.path.join(tmp, "rt"))
+        test_moves(os.path.join(tmp, "mv"))
         app = QGuiApplication(sys.argv)
         test_real_store()
         test_real_window(app)
