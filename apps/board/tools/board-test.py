@@ -610,6 +610,125 @@ def test_landed(tmp):
           p.stderr.strip()[:160])
 
 
+# ------------------- 1a1a. LANDED reconciles against git, the way IN FLIGHT
+#                            reconciles against /proc
+def test_landed_sweep(tmp):
+    """*"the landed page it still is stuck with commits from an hour ago"*.
+
+    `land()` is something a WORKER has to remember, and on 2026-07-29 three
+    commits were on `origin/main` with no row because nobody did. So the section
+    catches up on its own: `boardmove.reconcile_landed()` diffs `git log`
+    against the hashes already in the file and appends the rest.
+
+    Four claims, and they are what stops a self-healing section from becoming a
+    section that rewrites itself — missing commits are APPENDED in commit order
+    with their own time, a second run is a NO-OP, every line that was there is
+    byte-identical afterwards, and the two bounds hold: nothing older than the
+    oldest commit LANDED already names (a fixed window would have appended 96
+    rows of pre-board history the first time it ran), and nothing younger than
+    `min_age`, which is the race against the worker still about to land it.
+    """
+    import subprocess
+
+    import boardmove as bm
+    import boardparse as B
+
+    repo = os.path.join(tmp, "repo")
+    os.makedirs(repo)
+    base = dict(os.environ, GIT_CONFIG_GLOBAL=os.path.join(tmp, "gitconfig"),
+                GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t",
+                GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                GIT_COMMITTER_EMAIL="t@t")
+
+    def git(*a, **env):
+        return subprocess.run(["git", "-C", repo] + list(a), env=dict(base, **env),
+                              capture_output=True, text=True)
+
+    git("init", "-q", "-b", "main")
+    epoch = 1785300000                     # fixed; rendered in the local zone
+    made = []
+    for i, subject in enumerate(("first thing", "second thing", "third thing",
+                                 "fourth thing")):
+        ts = epoch + i * 600
+        open(os.path.join(repo, "f%d" % i), "w").write("x")
+        git("add", "-A")
+        # The harness owns "how old" every commit is, not the clock.
+        git("commit", "-q", "-m", subject,
+            GIT_AUTHOR_DATE="@%d +0000" % ts, GIT_COMMITTER_DATE="@%d +0000" % ts)
+        made.append(ts)
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    log = [(ln.split()[0], int(ln.split()[1]))
+           for ln in git("log", "refs/remotes/origin/main",
+                         "--format=%h %ct").stdout.splitlines()][::-1]
+    check("the harness built four commits at the epochs it asked for",
+          [ts for _h, ts in log] == made, ([ts for _h, ts in log], made))
+
+    # LANDED names the SECOND commit and nothing else: the first is below the
+    # floor and must stay unrecorded, the third and fourth are the holes.
+    day = bm._local(made[1]).date().isoformat()
+    path = os.path.join(tmp, "board.md")
+    src = FIXTURE.replace("### 2026-07-28", "### " + day) \
+                 .replace("| `abc1234` | did a thing |\n", "") \
+                 .replace("| `def5678` | did another thing |",
+                          "| `%s` | second thing |" % log[1][0])
+    open(path, "w").write(src)
+    before = B.read(path)
+    now = made[-1] + 60
+
+    check("a commit younger than min_age is left to the worker that made it",
+          [r["commit"] for r in
+           bm.landed_missing(path=path, repo=repo, min_age=600, now=now)]
+          == [log[2][0]],
+          [r["commit"] for r in
+           bm.landed_missing(path=path, repo=repo, min_age=600, now=now)])
+    check("...and with every hole younger than that, there is nothing to do",
+          bm.landed_missing(path=path, repo=repo, min_age=1400, now=now) == [])
+
+    rows = bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now,
+                               force=True)
+    check("every commit on origin/main with no row is appended, in commit order",
+          [r["commit"] for r in rows] == [log[2][0], log[3][0]],
+          [(r["commit"], r["what"]) for r in rows])
+    check("...with the subject as What and the commit's OWN 12-hour time as When",
+          [(r["what"], r["when"]) for r in rows]
+          == [("third thing", bm.landed_when(made[2])),
+              ("fourth thing", bm.landed_when(made[3]))],
+          [(r["what"], r["when"]) for r in rows])
+    check("...and never the commit below the oldest row the section already has",
+          all(r["commit"] != log[0][0] for r in rows))
+
+    after = B.read(path)
+    check("...under the `### <date>` group that day already has, not a new one",
+          after.count("### " + day) == 1, after.count("### " + day))
+    lost = [ln for ln in before.splitlines(True)
+            if ln not in after.splitlines(True)]
+    check("...append-only: every line that was there is byte-identical after",
+          all(ln.startswith("| Commit |") or ln.startswith("|---|")
+              for ln in lost), lost)
+    doc = B.parse(B.read(path))
+    got = [r["commit"] for g in doc["landed"] for r in g["rows"]]
+    check("...and the day still reads in commit order, nothing reordered",
+          got == [log[1][0], log[2][0], log[3][0]], got)
+
+    # ---- THE claim: it can run forever and never write the same row twice ----
+    again = bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now,
+                                force=True)
+    check("a second run appends nothing at all", again == [], again)
+    check("...and leaves the file byte-identical", B.read(path) == after)
+
+    # ---- the throttle, so the app may call it on every refresh ----
+    bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now)
+    check("an unforced run inside the throttle window does not write either",
+          B.read(path) == after)
+
+    # ---- an empty section is not a licence to import the whole repo ----
+    empty = os.path.join(tmp, "empty.md")
+    open(empty, "w").write(FIXTURE.replace("| `abc1234` | did a thing |\n", "")
+                                  .replace("| `def5678` | did another thing |\n", ""))
+    check("no commit recorded means no floor, and no floor means no sweep",
+          bm.landed_missing(path=empty, repo=repo, min_age=0, now=now) == [])
+
+
 # ------------------- 1b1b. everything in NEEDS YOU says WHEN it was put there
 def test_placed(tmp):
     """*"mesages in the needs you section should all have the time they were
@@ -2779,6 +2898,8 @@ def main():
         test_moves(os.path.join(tmp, "mv"))
         os.makedirs(os.path.join(tmp, "ld"))
         test_landed(os.path.join(tmp, "ld"))
+        os.makedirs(os.path.join(tmp, "ls"))
+        test_landed_sweep(os.path.join(tmp, "ls"))
         os.makedirs(os.path.join(tmp, "tg"))
         test_todo_tags(os.path.join(tmp, "tg"))
         os.makedirs(os.path.join(tmp, "pl"))
