@@ -262,6 +262,12 @@ your instincts about this codebase."""
 WORKER_PROMPT = """You are running headless, with no human watching, on the \
 machine {host}. Work in `{repo}`.
 
+**You are {name}.** That is the name on your card on his board and the name the \
+orchestrator used when it wrote down who was handed what, so it is the name he \
+will use if he types something at you. Your id is `{aid}`; it is what your \
+systemd unit, your log and your inbox are keyed on, and it is what the tools \
+below want when one asks for an agent id.
+
 An orchestrator split up something he asked for and gave you one piece of it. \
 This is your whole job; another agent has the rest, and may be editing other \
 files in this same checkout right now.
@@ -292,7 +298,17 @@ honest costs you nothing; a claim that does not match your tool calls is \
 visible to him and is not hidden.
 
 7. **When you are done, record it on the board — with the tool, never by \
-hand:**
+hand.** If you COMMITTED anything, every commit gets a line in LANDED, one \
+call each:
+
+       python3 apps/board/tools/boardctl.py land --commit <hash> --what \
+'<one line, imperative, like the commit subject>'
+
+   That is what the LANDED section is: what actually reached his machine. You \
+have no IN FLIGHT row and you do not need one — `land` with no selector simply \
+records the commit, and reads its time out of git itself.
+
+   Then, commits or none, one line saying where it ended up:
 
        python3 apps/board/tools/boardctl.py note '**<what you were asked>** - \
 <what you did, what you did not, and whether a rebuild is now pending and why>'
@@ -395,10 +411,15 @@ RULES that bind you and every worker you dispatch:
 YOUR NOTE REPORTS A START, NOT A RESULT — AND IT IS TWO LINES, NOT A \
 PARAGRAPH. Finish with one `note`, to this budget: **one line per task you \
 handed out, one line per question you asked, 25 words each at the most, and no \
-second paragraph.** A task line is the subject, the worker id, and that it was \
-handed out with nothing landed yet — like:
+second paragraph.** A task line is the subject, the worker's NAME, and that it \
+was handed out with nothing landed yet — like:
 
-    **landed section + commit times** - handed to `wd690a4`, nothing landed yet.
+    **landed section + commit times** - handed to Rosa (`wd690a4`), nothing \
+landed yet.
+
+Every worker has an ordinary first name and `dispatch` prints it; use it. **One \
+identifier per line**: the name, and the coded id in parentheses after it only \
+because that is what its log under `~/.cache/board-work/` is called.
 
 Leave these OUT, by name, because he wrote the input and does not need it read \
 back: his own words or facts restated; your theory about what is causing it; \
@@ -607,9 +628,16 @@ def _spawn_worker(rec):
     it live.
     """
     aid = "w%s" % os.urandom(3).hex()
+    # ...and its NAME, at the same instant, because he asked to be able to refer
+    # to a worker as a person rather than as a hex string. It is chosen once and
+    # stored in the record (`boardagents.register`), never re-derived on a read,
+    # so a card cannot rename itself between two polls. Nothing on disk is keyed
+    # on it: the unit, the log and the sidecar below all stay on `aid`.
+    name = ba.pick_name(aid)
     session = str(uuid.uuid4())
     prompt = WORKER_PROMPT.format(
         repo=REPO, host=host_line(), task=rec["task"], rules=RULES,
+        name=name, aid=aid,
         context=("--- what the orchestrator knows that you do not ---\n%s\n--- end ---\n\n"
                  % rec["context"]) if rec.get("context") else "")
     stub = os.environ.get("BOARD_WORK_SPAWN")
@@ -632,10 +660,10 @@ def _spawn_worker(rec):
         pid = _start_detached(cmd, env, logpath)
         how = "detached"
     if pid is None:
-        return {"id": aid, "pid": 0, "state": "failed",
+        return {"id": aid, "name": name, "pid": 0, "state": "failed",
                 "why": "neither systemd-run nor a plain spawn would start it"}
     ba.register(aid, rec["task"][:70], pid, kind="worker",
-                where=rec.get("where") or "", session=session)
+                where=rec.get("where") or "", session=session, name=name)
     # The task file learns which agent owns it, so `reap()` can tell a worker
     # that finished and said so from one that vanished mid-sentence. Written
     # after the spawn: before it there is no id, and a task with an id but no
@@ -648,8 +676,8 @@ def _spawn_worker(rec):
                                          if k != "file"})
         except OSError:
             pass
-    return {"id": aid, "pid": pid, "session": session, "state": "running",
-            "agent": aid, "spawned": how}
+    return {"id": aid, "name": name, "pid": pid, "session": session,
+            "state": "running", "agent": aid, "spawned": how}
 
 
 # ------------------------------------- a dispatch is a START, never a RESULT
@@ -750,7 +778,10 @@ def groups(agents=None, pend=None):
             buckets["unreported"].append(a)
     for t in pend:
         buckets["queued"].append({
-            "id": "", "kind": "pending", "title": t.get("task", ""),
+            # No name either, and for the same reason it is offered no inbox:
+            # nobody has been spawned for it yet, and naming a worker that does
+            # not exist would be the card claiming somebody is on it.
+            "id": "", "name": "", "kind": "pending", "title": t.get("task", ""),
             "where": t.get("where", ""), "state": "queued", "running": False,
             "phase": "queued", "says": "", "unread": 0, "waiting": [],
             # A task with no process has nothing to observe and says so, rather
