@@ -729,6 +729,136 @@ def test_landed_sweep(tmp):
           bm.landed_missing(path=empty, repo=repo, min_age=0, now=now) == [])
 
 
+# ------------------- 1a1b. ...and it FETCHES, or it is blind to the other host
+def test_landed_fetch(tmp):
+    """*"you say that but landed still didnt update even after i rebooted"*.
+
+    `git log origin/main` reads a REMOTE-TRACKING ref, and nothing moves one but
+    a fetch. Pushing from this machine moves it as a side effect, which is why
+    the sweep appeared to work at all — it saw this host's own commits and was
+    blind to every commit the OTHER host pushed, on a freshly booted machine
+    forever. Reboot, look at LANDED, nothing.
+
+    Three claims: the stale ref is the whole bug (a commit on the remote is
+    invisible until a fetch), the sweep asks for that fetch and then sees it,
+    and it asks WITHOUT WAITING — `Board._catch_up` runs on the GUI thread and
+    off-LAN a fetch blocks until DNS gives up, so the ref lands for the next
+    sweep, not this one.
+
+    Plus the two bounds that made the hole outlast his patience: the non-lead
+    host's delay is the docs-sync round trip (20 min), not the 45 it was, and a
+    hash that appeared while the sweep was computing is never appended twice.
+    """
+    import socket
+    import subprocess
+
+    import boardmove as bm
+    import boardparse as B
+
+    up = os.path.join(tmp, "up")          # what "origin" is
+    down = os.path.join(tmp, "down")      # ...and this machine's clone of it
+    os.makedirs(up)
+    base = dict(os.environ, GIT_CONFIG_GLOBAL=os.path.join(tmp, "gitconfig"),
+                GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t",
+                GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                GIT_COMMITTER_EMAIL="t@t")
+
+    def git(repo, *a, **env):
+        return subprocess.run(["git", "-C", repo] + list(a), env=dict(base, **env),
+                              capture_output=True, text=True)
+
+    git(up, "init", "-q", "-b", "main")
+    epoch = 1785300000
+    made = []
+    for i, subject in enumerate(("first thing", "second thing", "third thing")):
+        ts = epoch + i * 600
+        open(os.path.join(up, "f%d" % i), "w").write("x")
+        git(up, "add", "-A")
+        git(up, "commit", "-q", "-m", subject,
+            GIT_AUTHOR_DATE="@%d +0000" % ts, GIT_COMMITTER_DATE="@%d +0000" % ts)
+        made.append(ts)
+    # This machine cloned it two commits ago and has been rebooted since. The
+    # third commit is the other host's, pushed while this one was off.
+    git(up, "branch", "-q", "held", "HEAD~1")
+    subprocess.run(["git", "clone", "-q", "--branch", "held", up, down],
+                   env=base, capture_output=True, text=True)
+    git(down, "update-ref", "refs/remotes/origin/main", "refs/remotes/origin/held")
+    short = [ln.split()[0] for ln in
+             git(up, "log", "main", "--format=%h").stdout.splitlines()][::-1]
+
+    day = bm._local(made[0]).date().isoformat()
+    path = os.path.join(tmp, "board.md")
+    open(path, "w").write(
+        FIXTURE.replace("### 2026-07-28", "### " + day)
+               .replace("| `abc1234` | did a thing |\n", "")
+               .replace("| `def5678` | did another thing |",
+                        "| `%s` | first thing |" % short[0]))
+    now = made[-1] + 3600
+
+    # ---- the bug, in one line ----
+    check("a commit only on the remote is invisible to a stale origin/main",
+          [r["commit"] for r in
+           bm.landed_missing(path=path, repo=down, min_age=0, now=now)]
+          == [short[1]],
+          [r["commit"] for r in
+           bm.landed_missing(path=path, repo=down, min_age=0, now=now)])
+
+    # ---- ...and the sweep asks git to move the ref ----
+    check("the sweep fetches, and does not wait for it",
+          bm._fetch_origin(down, now=now) is True)
+    check("...and not again inside the fetch throttle",
+          bm._fetch_origin(down, now=now + 1) is False)
+    for _ in range(200):                  # it is detached; give it a moment
+        if git(down, "rev-parse", "origin/main").stdout.strip() \
+                == git(up, "rev-parse", "main").stdout.strip():
+            break
+        time.sleep(0.05)
+    check("...after which origin/main names the other host's commit",
+          git(down, "rev-parse", "origin/main").stdout.strip()
+          == git(up, "rev-parse", "main").stdout.strip())
+    check("...and THAT is the row that had no row",
+          [r["commit"] for r in
+           bm.landed_missing(path=path, repo=down, min_age=0, now=now)]
+          == [short[1], short[2]],
+          [r["commit"] for r in
+           bm.landed_missing(path=path, repo=down, min_age=0, now=now)])
+    check("a repo with no origin is never dialled at all",
+          bm._fetch_origin(up, now=now + 10_000) is False)
+
+    # ---- the delay on the host he actually sits at ----
+    real = socket.gethostname
+    try:
+        socket.gethostname = lambda: "book"
+        got_other = [r["commit"] for r in
+                     bm.landed_missing(path=path, repo=down, now=made[-1] + 1500)]
+        socket.gethostname = lambda: bm.LANDED_LEAD_HOST
+        got_lead = [r["commit"] for r in
+                    bm.landed_missing(path=path, repo=down, now=made[-1] + 700)]
+    finally:
+        socket.gethostname = real
+    check("a hole is filled on the non-lead host after the sync round trip, not 45 minutes",
+          bm.LANDED_OTHER_MIN_AGE == 1200 and got_other == [short[1], short[2]],
+          (bm.LANDED_OTHER_MIN_AGE, got_other))
+    check("...and the lead host still goes first, at ten minutes",
+          got_lead == [short[1], short[2]], got_lead)
+
+    # ---- a hash that appeared under the sweep is not appended twice ----
+    rows = bm.reconcile_landed(path=path, repo=down, min_age=0, now=now,
+                               force=True, fetch=False)
+    check("the sweep writes the two holes", [r["commit"] for r in rows]
+          == [short[1], short[2]], [r["commit"] for r in rows])
+    after = B.read(path)
+    stale = bm.landed_missing
+    try:
+        bm.landed_missing = lambda **kw: rows          # ...as a racing retry sees them
+        again = bm.reconcile_landed(path=path, repo=down, min_age=0, now=now,
+                                    force=True, fetch=False)
+    finally:
+        bm.landed_missing = stale
+    check("a row another writer just landed is skipped, not duplicated",
+          again == [] and B.read(path) == after, again)
+
+
 # ------------------- 1b1b. everything in NEEDS YOU says WHEN it was put there
 def test_placed(tmp):
     """*"mesages in the needs you section should all have the time they were
@@ -3040,6 +3170,8 @@ def main():
         test_landed(os.path.join(tmp, "ld"))
         os.makedirs(os.path.join(tmp, "ls"))
         test_landed_sweep(os.path.join(tmp, "ls"))
+        os.makedirs(os.path.join(tmp, "lf"))
+        test_landed_fetch(os.path.join(tmp, "lf"))
         os.makedirs(os.path.join(tmp, "tg"))
         test_todo_tags(os.path.join(tmp, "tg"))
         os.makedirs(os.path.join(tmp, "pl"))
