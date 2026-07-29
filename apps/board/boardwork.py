@@ -645,7 +645,6 @@ def role_flags(role):
     return argv
 
 
-
 def _task_name():
     return "%s-%s.json" % (time.strftime("%Y%m%dT%H%M%S"), os.urandom(3).hex())
 
