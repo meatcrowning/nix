@@ -31,6 +31,14 @@ heading to hang document history, a copy action, an outline or a search
 highlight on. The cost is inline images and bold — both already accepted losses
 on this desktop.
 
+**An HTML comment is drawn by nothing** - it used to come out as an ordinary
+paragraph, which showed up when `docs/board.md` grew one: `boardparse`'s
+`<!-- answered-on: <host> -->` stamp, saying which machine an answer was typed
+on so that board-watch, which now runs on both, cannot work it twice
+(`apps/board/AGENTS.md`). `mdparse` skips a comment as a BLOCK, since one may
+span lines, and an unterminated one to the end of the file - what every renderer
+does. Regression: `tools/reader-test.py`.
+
 **Blocks in, rows out.** `mdparse.parse()` returns a flat list of dicts
 (`h`, `p`, `li`, `quote`, `code`, `table`, `hr`), each carrying inline **runs**
 (`plain | code | link`). `qml/RichText.qml` wraps runs into terminal rows: the

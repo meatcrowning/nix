@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, config, ... }:
 
 # Act on his answers to `docs/board.md` without waiting for him to mention them.
 #
@@ -44,11 +44,33 @@
 #     once a slot frees — the same guarantee reconcile() and sweep() already
 #     gave stranded items and unread notes.
 #
-# TOP ONLY, on purpose. `home/` is shared verbatim with `air`/book and docs/
-# syncs both ways every five minutes, so deploying this to both machines would
-# have the same answer picked up twice, by two agents, on two checkouts of the
-# same repo. An answer he types on book still gets worked: it reaches top with
-# the next sync tick and fires here, once, when he is next at this machine.
+# BOTH MACHINES, and the duplicate is prevented by AFFINITY rather than by a
+# gate. This was `top`-only until 2026-07-29 — `home/` is shared verbatim with
+# `air`/book and docs/ syncs both ways every five minutes, so deploying it to
+# both would have had one answer picked up twice, by two agents, on two
+# checkouts of the same two repos. The cost of that gate was that answering on
+# book did nothing at all until he was next sitting at top, which is not what he
+# asked for. So instead:
+#
+#   * A DECISION is stamped with the machine he answered it on — an HTML comment
+#     the parser owns (`boardparse.set_answer_host`, written by the board app in
+#     the same targeted line edit as the answer). `board-watch.py`'s `owns()`
+#     fires only on its own host's stamp; an unstamped one (a hand edit, or an
+#     answer predating the stamp) belongs to `top`, the machine that is always
+#     on. Re-answering an item on the other machine restamps it and is therefore
+#     the hand-off. There is no automatic takeover, on purpose: a claim would
+#     have to live in a file that syncs every five minutes, and a five-minute
+#     window in which both machines believe they own an item is the very
+#     duplicate this is preventing.
+#   * TYPED INPUT needs no rule at all. The inbox lives under
+#     `~/.local/state/board/`, which nothing syncs, so a sentence exists only on
+#     the machine it was typed on and is worked there. Same for the worker
+#     queue, the cap, the watcher's fingerprints and the kill switch.
+#
+# On book this is a systemd USER unit under standalone home-manager on Fedora —
+# no `sys/` involved, nothing NixOS-specific. `systemd.user.startServices`
+# defaults to true (home-manager 25.05+), so `home-manager switch --flake
+# ~/nix#air` reloads the manager and starts these three units itself.
 #
 # TWO TRIGGERS, and both are needed. Measured on top 2026-07-28 with a scratch
 # path unit rather than reasoned about, because `board` writes via temp file +
@@ -66,7 +88,6 @@
 # unlocks, since nothing on this desktop emits an unlock signal we can watch.
 
 {
-config = lib.mkIf (host == "top") {
   xdg.configFile."scripts/board-watch.py" = {
     source = ./board-watch-files/board-watch.py;
     executable = true;
@@ -125,20 +146,35 @@ config = lib.mkIf (host == "top") {
       # Pinned, because the ambient systemd-user PATH cannot be relied on for
       # any of these: claude is the agent; git/gh are what it commits and pushes
       # with (the credential helper is `!gh auth git-credential`); hyprctl and
-      # quickshell answer the at-the-machine gate; systemd/coreutils/util-linux
-      # supply loginctl, date and flock. `bash` and `openssh` are here for the
-      # agent's own use, not the watcher's.
+      # quickshell answer the at-the-machine gate; coreutils/util-linux supply
+      # date and flock. `bash` and `openssh` are here for the agent's own use,
+      # not the watcher's.
+      #
+      # THE TAIL HAS TO NAME BOTH MACHINES' PROFILE LAYOUTS, since this now
+      # deploys to book as well and `claude`, `python3`, `hyprctl` and `qs` all
+      # come out of a profile rather than out of this list:
+      #   ~/.nix-profile/bin              standalone home-manager (book)
+      #   /etc/profiles/per-user/lam/bin  home-manager as a NixOS module (top)
+      #   /run/current-system/sw/bin      NixOS system packages (top)
+      #   /usr/bin:/bin                   Fedora (book) — and where book's
+      #                                   systemctl/loginctl/systemd-run come
+      #                                   from, deliberately: they must match
+      #                                   the user manager that is actually
+      #                                   running, which on Fedora is Fedora's.
+      #                                   Hence `pkgs.systemd` is top-only.
+      # NOT `%h`: systemd expands specifiers in ExecStart but NOT in
+      # Environment= (measured on top with a scratch transient unit — the value
+      # arrived as the literal `%h/x`), so this interpolates the real path.
       Environment = [
-        "PATH=${lib.makeBinPath [
+        "PATH=${lib.makeBinPath ([
           pkgs.coreutils
           pkgs.util-linux
-          pkgs.systemd
           pkgs.bash
           pkgs.git
           pkgs.gh
           pkgs.openssh
           pkgs.nix
-        ]}:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin"
+        ] ++ lib.optional (host == "top") pkgs.systemd)}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
       ];
       ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-watch.py";
       # Outer guard only. The script caps the agent itself at 45 minutes so the
@@ -192,5 +228,4 @@ config = lib.mkIf (host == "top") {
     };
     Install.WantedBy = [ "timers.target" ];
   };
-};
 }

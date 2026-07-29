@@ -254,6 +254,39 @@ def test_roundtrip(tmp):
           not [n for n in os.listdir(tmp) if n.startswith(".board-")],
           os.listdir(tmp))
 
+    # ---- WHICH MACHINE he answered on -------------------------------------
+    # board-watch runs on `top` AND `book` and this file syncs both ways, so an
+    # unstamped answer would be worked twice. The stamp is what makes the host
+    # he typed on the host that works it — and it is a line edit like every
+    # other, invisible in his prose, and removed again when the answer goes.
+    d0 = B.parse(src)
+    it0 = d0["needs"][0]
+    ticked = B.toggle_option(d0["lines"], it0, 1, True)
+    d1 = B.parse("".join(ticked))
+    stamped = "".join(B.set_answer_host(d1["lines"], d1["needs"][0], "book"))
+    diff = lines_differing(src, stamped)
+    check("stamping the host adds one line and rewrites none",
+          diff is None and len(stamped.splitlines()) == len(src.splitlines()) + 1,
+          diff)
+    d2 = B.parse(stamped)
+    it2 = d2["needs"][0]
+    check("...which parses back as the host, not as prose",
+          it2["answerHost"] == "book" and it2["hostLine"] >= 0
+          and not any("answered-on" in (b.get("raw") or "")
+                      for b in it2["body"]), repr(it2["answerHost"]))
+    check("...and is not mistaken for his answer or his `if unanswered` line",
+          it2["answer"] == it0["answer"]
+          and it2["ifUnanswered"] == it0["ifUnanswered"])
+    check("...restamping the same host is byte-identical",
+          "".join(B.set_answer_host(d2["lines"], it2, "book")) == stamped)
+    restamped = "".join(B.set_answer_host(d2["lines"], it2, "top"))
+    check("...restamping the OTHER host changes exactly that one line",
+          (lines_differing(stamped, restamped) or []) == [it2["hostLine"]])
+    cleared = "".join(B.set_answer_host(d2["lines"], it2, ""))
+    d3 = B.parse(cleared)
+    check("...and clearing it restores the file byte-for-byte",
+          "".join(B.toggle_option(d3["lines"], d3["needs"][0], 1, False)) == src)
+
 
 # --------------------------------------------------- 1b. moving between sections
 def test_moves(tmp):
@@ -1164,6 +1197,23 @@ def test_window(app, tmp):
           prop(win, "needs")[0]["answer"] == "none of these - do the third thing"
           and prop(win, "needs")[0]["answered"] is True,
           prop(win, "needs")[0]["answer"])
+    # ...and it recorded WHICH MACHINE, in the same write. board-watch runs on
+    # `top` and on `book` and this file syncs both ways, so an answer with no
+    # stamp is one two agents work. The app is the only thing that writes it.
+    check("answering stamps the machine he answered on",
+          prop(win, "needs")[0]["answerHost"] == os.uname().nodename,
+          prop(win, "needs")[0]["answerHost"])
+    check("...and the stamp is not drawn anywhere in the item",
+          not any("answered-on" in (b.get("text") or "")
+                  for b in prop(win, "needs")[0]["body"]))
+    check("...and clearing the answer takes the stamp with it",
+          board.answer(key, "") is True
+          and board.choose(key, 1, False) is True
+          and not prop(win, "needs")[0]["answerHost"],
+          prop(win, "needs")[0]["answerHost"])
+    board.choose(key, 1, True)
+    board.answer(key, "none of these - do the third thing")
+    spin(200)
     shot(win, "02-answered")
 
     # ---- the answer editor, open ----

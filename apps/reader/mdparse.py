@@ -220,6 +220,21 @@ def parse(text, base_dir=""):
             i += 1
             continue
 
+        # An HTML COMMENT is drawn by nothing, which is what makes it the way to
+        # put a machine-readable fact into a document a human reads. It was
+        # rendered here as an ordinary paragraph until `docs/board.md` grew one:
+        # `boardparse`'s `<!-- answered-on: <host> -->` stamp, which says which
+        # machine an answer was typed on so that board-watch running on BOTH
+        # machines cannot work it twice. Skipped as a BLOCK, since a comment may
+        # span lines; an unterminated one is skipped to the end of the file,
+        # which is what every markdown renderer does with it.
+        if line.lstrip().startswith("<!--"):
+            flush_para()
+            while i < n and "-->" not in lines[i]:
+                i += 1
+            i += 1
+            continue
+
         head = _HEADING.match(line)
         if head:
             flush_para()

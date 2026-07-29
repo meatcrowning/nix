@@ -286,6 +286,30 @@ class Board(QObject):
                 return it
         return None
 
+    def _stamp(self, lines, key):
+        """Record WHICH MACHINE he just answered on, in the same write.
+
+        board-watch runs on `top` AND on `book` now and `docs/board.md` syncs
+        both ways every five minutes, so an unstamped answer is read by two
+        watchers and worked by two agents on two checkouts of the same repos.
+        The stamp is what makes the host an answer was typed on the host that
+        works it. `boardparse.set_answer_host()` owns the line; this only
+        decides which host, and that no answer means no stamp.
+
+        Re-parsed from the lines the caller has ALREADY computed, because
+        `set_answer` can change how many lines the `>` block occupies and every
+        index below it with it.
+        """
+        try:
+            doc = boardparse.parse("".join(lines))
+        except Exception:                       # a parse must never cost a write
+            return lines
+        for it in doc["needs"]:
+            if it["key"] == key:
+                return boardparse.set_answer_host(
+                    doc["lines"], it, os.uname().nodename if it["answered"] else "")
+        return lines
+
     def _commit(self, lines):
         """Write `lines`, but only if the file on disk is still the one they
         were computed from. A stale line index would land his answer in the
@@ -319,7 +343,8 @@ class Board(QObject):
             self.status.emit("that option is no longer there - reloaded")
             self._load()
             return False
-        ok = self._commit(boardparse.toggle_option(self._doc["lines"], it, index, checked))
+        ok = self._commit(self._stamp(
+            boardparse.toggle_option(self._doc["lines"], it, index, checked), key))
         if ok:
             self.status.emit("saved")
         return ok
@@ -339,7 +364,8 @@ class Board(QObject):
             # editor in this case; this is the belt to that pair of braces.
             self.status.emit("this item has no answer line to write to")
             return False
-        ok = self._commit(boardparse.set_answer(self._doc["lines"], it, text))
+        ok = self._commit(self._stamp(
+            boardparse.set_answer(self._doc["lines"], it, text), key))
         if ok:
             self.status.emit("saved" if text.strip() else "answer cleared")
         return ok
