@@ -620,10 +620,30 @@ click** on the row and the row's right-click menu. Every point of it is a rule:
   row**, and it is **not a second write path** — `boardagents.send()` with
   nothing named, exactly what the box at the top does, so the conservation
   property still holds. The one thing it adds is the QUOTE: the chore's own text
-  travels with his sentence (`about the `to do` bullet "...": ...`), because
-  "yes, do that one" means nothing to the orchestrator that reads it half an
-  hour later. §7.2's ordering still holds — the thing he does most is first,
-  read-only next, the undo, then the one destructive entry behind its separator.
+  travels with his sentence, because "yes, do that one" means nothing to the
+  orchestrator that reads it half an hour later. §7.2's ordering still holds —
+  the thing he does most is first, read-only next, the undo, then the one
+  destructive entry behind its separator.
+- **His sentence is FIRST in the body, the quote comes after it**
+  (`<his reply>  (about the `to do` bullet "...")`), and that order is the whole
+  point: *"the resulting agent created should indicate the reply from the user
+  rather than the original message"*. Everything downstream reads the HEAD of
+  that one string — the `waiting for the next agent` line this window draws,
+  `board-watch`'s card title for the orchestrator it spawns
+  (`msgs[0]["text"][:70]`), every `boardctl` listing — so a body that opened with
+  the quote made all of them announce the chore and bury the answer. Reordering
+  the string was the whole fix; none of those readers changed.
+- **A reply REMOVES the chore** — *"when the user replies to something in the to
+  do section it should then remove the entry from the to do section"* — and only
+  once `Agents.send()` has returned non-empty, so a reply he made and a chore
+  still sitting there cannot both be true. It goes through `Board.removeTodo`,
+  the same one path the menu entry and the double click take, so it inherits the
+  one-level undo: a reply aimed at the wrong row costs a right-click, not his
+  prose. The bullet is **re-resolved against the doc as it is now**
+  (`todoLineOf`, by text, preferring its own line) rather than trusting the index
+  the row was drawn from — three programs write this file and it syncs every five
+  minutes, and a stale line would take somebody else's bullet. A chore that has
+  gone in the meantime removes nothing and the reply still goes.
 - **A bullet is removed as a UNIT.** `boardparse.remove_todo` deletes
   `line`..`endLine` — a chore routinely wraps onto indented continuation lines,
   and `remove_row` above it is for a *table* row, which is one line by
@@ -710,8 +730,10 @@ the file byte-for-byte from the first, a middle and the LAST position, the
 section empties completely and an agent can still add to it afterwards, and a
 stale line index is refused rather than obeyed; a DOUBLE click on the real
 delegate removes one and a single left click does not, driven with `QTest`; and
-`reply` is the top entry on that row's menu, opening the row's own box and
-sending down the queue with the chore quoted), **the moves**
+`reply` is the top entry on that row's menu, opening the row's own box, sending
+down the queue with his sentence leading and the chore quoted after it, and
+clearing the answered bullet off the list — restorably, against a stale line
+index, and removing nothing when the chore has already gone), **the moves**
 (start/land/back/note/reconcile: every
 decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
 table and not the `Queued` one below it, an unanswered decision is refused, a
