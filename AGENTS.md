@@ -222,8 +222,9 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
 - `home/` — home-manager config for `lam`, auto-imported. `home/pkgs/` package
   categories, `home/prog/` per-program config, `home/srvs/` user services.
 - `lam.nix` — the home-manager entry point; imports `home/`.
-- `apps/` — six vendored Qt/QML apps (`filer`, `viewer`, `player`, `painter`,
-  `surfer`, `askpass`) plus `pylib/`, the shared Python helpers — most importantly
+- `apps/` — eight vendored Qt/QML apps (`filer`, `viewer`, `player`, `painter`,
+  `surfer`, `askpass`, `reader`, `board`) plus `pylib/`, the shared Python
+  helpers — most importantly
   `vtbclient.py`, the hyprvtb titlebar-button socket bridge each app draws its
   chrome through.
     - It lives **outside** `home/`/`sys/` on purpose: `umport` would try to
