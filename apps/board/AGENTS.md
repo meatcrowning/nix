@@ -367,13 +367,24 @@ Rules that fall out of it, all of them load-bearing:
       than avoided — `land` upgrades a sweep-written row in place, and the sweep
       heals a duplicate row. End to end a push shows up in about two ticks: one
       to fetch, one to read it.
-    - **It runs in the BOARD APP**, `Board._catch_up` on a 60 s timer and at
-      launch, throttled to `LANDED_SWEEP_EVERY` inside `boardmove`. That is the
-      one place the section is actually drawn — so what he is looking at has
-      just been reconciled — and `apps/` is live source, so it needed no rebuild
-      on either machine. `board-watch.py` was the other candidate and is a
-      home-manager file: a deploy on both hosts before it does anything, and it
-      only runs while he is at the machine anyway.
+    - **TWO callers, and the second one is why he reported this four times.**
+      `Board._catch_up` (the app) on a 60 s timer and at launch, throttled to
+      `LANDED_SWEEP_EVERY` inside `boardmove`; that is where the section is
+      drawn, so what he is looking at has just been reconciled. But the app is
+      the WRONG place to be the only caller, twice over: it sweeps only while
+      the window is open, and `apps/` being live source, a window opened before
+      a fix goes on running the code from before it — so both earlier fixes were
+      correct and neither could reach the process he had on screen. So
+      `board-watch.py`'s `tick()` calls it too: a systemd unit on `top` and on
+      `book`, headless, running whether or not the board is drawn, logging what
+      it appended to `~/.cache/board-watch.log` so the next report has a trace
+      instead of an argument. It passes `fetch_wait=True` — it has no GUI thread
+      to block, and a detached fetch would be killed with the oneshot's cgroup
+      on the way out, so it reads the ref it fetched in the SAME tick. It sweeps
+      only a board that lives INSIDE `LANDED_REPO`, which is what keeps a
+      harness's `BOARD_WATCH_BOARD` fixture from being handed this repo's real
+      history. Being a home-manager file it needs one deploy per host
+      (`home-manager switch --flake ~/nix#air` on `book`).
     - **`docs/` is deliberately NOT swept.** Its history is mostly the 5-minute
       sync timer's own commits and they would bury the section. A docs commit
       worth recording is recorded by hand, as it always was.
@@ -421,6 +432,10 @@ Rules that fall out of it, all of them load-bearing:
       rather than duplicated; `test_landed_dedupe` asserts a two-minute-old
       commit is a hole on every host and that the repeat row is the one removed;
       `test_landed_upgrade` asserts `land` rewrites in place and adds no row.
+      `tools/board-watch-test.py` → `test_landed_sweep_runs_on_a_tick` is the
+      one that covers the app being SHUT: a real watcher process, a backdated
+      commit nobody landed, `BOARD_LANDED_REPO` pointing both at a throwaway
+      repo, and the row plus its log line after ONE tick.
 - **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
   Only a decision agent has a row (`start()` made it); a WORKER dispatched out
   of the box never did, so every commit the fan-out produced was unrecordable —
