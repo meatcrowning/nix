@@ -10,6 +10,245 @@ chrome via hyprvtb like the others.
 
 **Wheel events in this window are rescaled, and QML must undo it.** `ZoomFilter` divides every touchpad wheel event by `pylib/kinetic.py`'s `WHEEL_GAIN` (1/6) so QtWebEngine pages track the finger at the same rate the QML apps do; that is window-wide, so any scrollable QML surface here takes `wheelGain: WheelGain` (the reciprocal, published by `main.py` from the same constant) — the file picker does. Real mouse detents are passed through untouched (`is_wheel_detent`); applying the gain to them made top's wheel scroll pages at 1/6 speed twice already. The page itself is Chromium's own scroller and cannot use `WheelScroll`: parity there is the gain plus the compositor's >=300 ms withheld stop, which zeroes Chromium's 200 ms fling estimator so it adds no fling of its own. See [`../AGENTS.md`](../AGENTS.md).
 
+## Ad blocking — the engine is only half of it
+
+`AdBlocker` + `Cosmetic` in `main.py`. The engine is Brave's adblock-rust (the
+`adblock` pip package, pinned by `home/prog/surfer.nix`), and **three things it
+cannot do on its own are done here.** Each one was a silent no-op before, and
+each has a measured before/after in `tools/adblock-test.py` — run that after
+touching any of it (it drives the classes headlessly against a scratch
+`$XDG_CACHE_HOME`, never the user's browser).
+
+### Two engines, and every branch is feature-detected
+
+**`top` runs the jampe fork (adblock-rust 0.12.5); `book` runs PyPI's `adblock`
+0.6.0 (adblock-rust 0.5.6) in Fedora's system python and always will** — that
+build is the last one on PyPI and the fork is a nix override. They differ in
+ways that are silent, not loud, so **nothing here branches on a version
+number.** Each branch logs which way it went.
+
+| | top (0.12.5) | book (0.6.0) |
+|---|---|---|
+| resource format | modern, `dependencies` spliced | `{{1}}` templates |
+| resource source | `brave-resources.json`, 208 entries, **100.0 % of scriptlet rules** (9551/9554) | uBO **1.48.6** tarball, 82 entries, **81.6 %** (2647/3245) |
+| `##…:has()` | already in `hide_selectors` | dropped — recovered by `_scan_procedural()` |
+| `procedural_actions` | live | absent |
+| `style_selectors` | **gone**; `:style()` is a procedural action | present |
+| `Engine.add_resource` | gone, `add_resources` batch only | singular only |
+| `_sanitize()` | no-op (fixed upstream) | load-bearing |
+
+`_resource_source()` picks the library from `hasattr(Engine, "add_resource")`,
+and `Cosmetic._engine_procedural()` picks the procedural path from whether
+`procedural_actions` exists at all — `None` (no such field) is deliberately not
+the same as an empty set (no rules on this page). **Do not delete the legacy
+side of either branch because top no longer takes it**: that is book's only
+path, and it degrades rather than breaks.
+
+**1. The RESOURCE LIBRARY, or no scriptlet ever fires.** adblock-rust only
+materialises a `##+js(name, arg…)` body once its resource storage holds
+`name`; with none loaded, `injected_script` is the empty string for every site,
+forever. That is why first-party video/pre-roll ads went straight through:
+YouTube and Twitch serve them same-origin from the same `/videoplayback`
+endpoint as the real video, so there is no URL for a network rule to match and
+uBO defeats them purely with scriptlets. On top the library is fetched
+assembled; on book `_assemble_resources()` builds it from uBO's own tree, a
+faithful Python port of adblock-rust's `resource_assembler.rs` (both halves:
+`scriptlets.js` templates, and `redirect-resources.js` +
+`web_accessible_resources/`). Either way it is cached as `resources.json` beside
+the lists — **stamped with its source**, so switching engines discards it rather
+than registering inert bodies — and refreshed on the same schedule.
+
+Registering the wrong format is **not an error**; it just silently stops
+substituting arguments, which is the exact failure this subsystem exists to
+remove. Note `brave/adblock-rust`'s `data/brave/brave-resources.json` is the
+right file — `brave/adblock-resources`'s `dist/resources.json` is Brave's own 17
+custom scriptlets and carries no uBO library at all.
+
+**2. PROCEDURAL cosmetics.** On top the engine hands back `procedural_actions`
+as a set of JSON strings — `{"selector":[{"type":"css-selector","arg":"p"},
+{"type":"has-text","arg":"Ad"}],"action":{"type":"remove"}}`, no `action` key
+meaning hide — which `Cosmetic.proceduralJson` passes through **unmodified** for
+`CosmeticInjector`'s runtime to apply. The engine does not apply them. **This is
+the only route by which a `##…:style(…)` rule now arrives at all**, since
+`style_selectors` is gone and such rules are absent from `hide_selectors`;
+dropping procedural handling loses them outright. On book there is no such
+field, so `_scan_procedural()` re-reads the raw lists and recovers the subset
+Chromium evaluates natively — `:has()` with no uBO-only pseudo-class beside it,
+1126 rules over 1027 domains, all domain-specific — and emits it as plain CSS
+through `specificCss`. The two are mutually exclusive by construction:
+`proceduralJson` is `[]` on book precisely because those rules already went out
+as CSS, and the pre-scan never runs on top because `:has()` is already in
+`hide_selectors` there.
+
+**3. A PARSER BUG in the legacy engine.** `_sanitize()`. An element-hiding
+exception whose `domain=` mixes positive and negated entries —
+`@@*$ghide,domain=a.com|~www.a.com`, one line in uBO's `filters-2024.txt` — is
+read as "everywhere except", turning `generichide` on for **every site** and
+disabling generic cosmetic filtering wholesale (boards.4chan.org 539 hide
+selectors → 1). Dropping the negations restores the narrow intent. Fixed
+upstream by 0.12.5 — measured identical with and without on the fork — so on top
+it is a no-op, and it stays for book.
+
+**The escape hatch, and the one rule set that is ours.** EasyList deliberately
+allow-lists 4chan's self-hosted ads (`@@||4cdn.org/adv/`,
+`@@||4channel.org/adv/`), so `_CUSTOM_RULES` re-blocks those paths with
+`$important` — the only operator that beats an `@@` exception, and a *path*
+rule because blocking the host would take out `s.4cdn.org`'s stylesheets and
+`i.4cdn.org`'s images. `$important` is **final** in this engine (measured: no
+exception undoes it, not even `@@…$important`), so `~/.config/surfer/blocklist.txt`
+cancels one by *suppressing* it (`_custom_rules`) rather than by allow-listing
+over it — otherwise the documented override would silently do nothing. That
+file also now takes **verbatim Adblock rules**, not just hosts, alongside the
+`host` / `!host` forms.
+
+**The compiled-engine cache is stamped** (`engine.meta`) with the `adblock`
+version, the resource source, the subscription set and `blocklist.txt`'s
+contents. Without it, adding a list or editing `blocklist.txt` changed nothing
+until the 7-day refresh happened to fire — and the package bump would have fed
+the fork a `engine.dat` written by 0.5.6 (adblock-rust's DAT has had no
+cross-version compatibility since 0.10.0; measured, that raises
+`DeserializationError: VersionMismatch(0)`, which `_load_engine_cache` catches
+**by class name as well as by type**, since the class is not importable from
+every binding). **Bump the `vN` literal in `_cache_stamp` whenever you change
+how the engine is BUILT**; the hashed inputs can only see a data change, never
+a code one.
+
+**Slots `CosmeticInjector` calls:** `specificCss` (raw CSS), `proceduralJson`
+(engine actions, verbatim), `specificJs` (CSS + scriptlets, the fallback
+carrier), `genericJs`. Add to those rather than making the injector read CSS
+back out of `specificJs`'s output.
+
+**Run `tools/adblock-test.py` under BOTH pythons** — the surfer wrapper's pyEnv
+and one holding PyPI `adblock` 0.6.0 — after touching resources or procedural
+code. It detects which engine it has and asserts the matching branch; both
+currently pass with the same scratch cache directory, each correctly discarding
+the other's `engine.dat` and `resources.json`.
+
+Everything logs through `AdBlocker._log`, so `grep 'surfer adblock:'
+~/.cache/surfer.log` is the whole subsystem: which lists were fetched, how many
+resources registered, how many hide-exception rules were repaired, how many
+procedural rules were recovered, and why a cache was discarded.
+
+## Cosmetic ad-blocking rides the PROFILE, at document creation
+
+Element hiding is a **profile-level `QWebEngineScript`** (`COSMETIC_RUNTIME_JS` +
+`CosmeticInjector` in `main.py`, registered by `sharedProfile`'s
+`Component.onCompleted` in `Main.qml`), not a per-view `runJavaScript` at
+load-finished. The old placement was late by construction: the ads had painted,
+nothing re-ran after `history.pushState` (i.e. all of YouTube after the first
+click), and a lazily-inserted ad slot brought no new rules with it.
+
+**A profile script is compiled once for every page, so it cannot carry one
+site's selectors.** It is a courier: rules are pulled per-page out of Python
+over the `surfercos://` scheme, whose five hosts each take a base64url JSON blob
+as their path (the `gmxhr` convention) —
+`s` (specific hide CSS, `text/css`), `x` (the scriptlets, alone), `g`
+(`Cosmetic.genericJs`, narrowed to the page's own class/id tokens), `p`
+(procedural filters, JSON), and `j` (`Cosmetic.specificJs` verbatim — the
+fallback path only, see below).
+
+**Why the flash is actually gone, and what you must not undo.** Measured on
+PySide6 6.11 (`tools/cosmetic-test.py`): at `DocumentCreation`,
+`document.documentElement` is still **null**. Anything that waits for a parent —
+a `<style>`, a `<script>`, even a `MutationObserver` on `document` — lands after
+the parser has built the whole body, and the ad gets a frame (verified: the ad
+was still `display: block` in the page's first `requestAnimationFrame`). Exactly
+two things work with no DOM, and the runtime is built on both:
+
+- a **synchronous `XMLHttpRequest`** — the reply comes from `CosmeticInjector`
+  in-process, no network and no disk; and
+- **`document.adoptedStyleSheets`** with a constructed `CSSStyleSheet`, which is
+  also exempt from `style-src`, so this is the CSP-proof path as well as the
+  fast one.
+
+So the specific rules — the ones that depend only on the url and can therefore
+be known this early — are fetched and adopted inside the document-creation
+callback itself. Everything that genuinely needs a DOM is deferred.
+
+**Never `eval`/`new Function` engine output.** Deferred JS runs as a
+`<script src="surfercos://…">`; the scheme is registered
+`ContentSecurityPolicyIgnored` (like `gmxhr`/`surfercmd`), which is what lets it
+run on a site with a strict `script-src` — `new Function` would not survive one.
+
+**MAIN world, deliberately, and it is now load-bearing twice over.** An isolated
+world gets its own `history` wrapper, so a `pushState` hook installed there
+never sees the page's own calls. And uBO's `json-prune`-shaped scriptlets — the
+YouTube payload is exactly this: it shadows the page's own player response —
+are **completely inert** anywhere but `ScriptWorldId.MainWorld`. Do not move
+this to `ApplicationWorld` to "isolate" it.
+
+**Scriptlets are separated from the CSS on purpose, and fetched separately.**
+They have to run EARLIER than the CSS can be appended: at document-start, before
+the page reads its own globals. Run as one blob at document creation they would
+not run at all — `Cosmetic._inject` appends the `<style>` first, and with no
+`documentElement` that throws and takes the whole outer `try` (scriptlet
+included) with it. So `x` serves the scriptlet alone and the runtime `eval`s it
+inside the document-creation call. This is the ONE eval on this path and it has
+a fallback: a page whose CSP forbids `unsafe-eval` gets the same code as a
+`<script src>` off the CSP-ignored scheme as soon as there is a parent. Late
+beats inert.
+
+**Two string seams, and what happens when one breaks.** Until `Cosmetic` grows
+`specificCss` / `scriptletJs` slots (both are preferred automatically if they
+appear), `CosmeticInjector` recovers the CSS and the scriptlet from
+`Cosmetic._inject`'s JS by `var css=` (read back with a JSON decoder, so any
+selector content is exact) and by the trailing `try{…}catch(e){}`. Both return
+**None**, never `""`, when the seam is gone — "no rules here" and "could not
+read them" must stay distinguishable. On None the `s` body becomes the
+`/*surfer-fallback*/` marker, the runtime falls back to running the engine's JS
+the old (late) way over `j`, and one line goes to stderr. A change on the engine
+side therefore costs the head start, not the blocking.
+
+**Injected CSS is author-origin with `!important`, and there is no better
+option here.** User-origin would win over page author rules without an
+`!important` war, but the only APIs that grant it are the WebExtensions
+`scripting.insertCSS({origin:"user"})` and CDP — QtWebEngine exposes neither,
+and a constructed `CSSStyleSheet` is author-origin by definition. The engine
+already emits `!important` on every hide rule, so this costs nothing today; it
+is written down so nobody re-derives it.
+
+**Accumulate adopted CSS, never replace it.** An SPA route change re-asks for
+the new url's rules; on the same host the engine returns the same string and the
+dedupe keeps the sheet at one entry, but where it does not, a `replaceSync` of
+just the new rules silently UN-hides what the previous route hid while that DOM
+is still on screen. The harness gives its two routes deliberately different
+rules for exactly this reason.
+
+**The observer has an escape hatch, and it is not optional.** Above ~400
+mutation records/second the `MutationObserver` **disconnects** in favour of a
+plain poll and comes back 10 s later (Brave's design). A throttle alone still
+pays the per-record cost, and ad-heavy pages genuinely storm. The observer only
+ever harvests the class/id **tokens** of *added* nodes, each asked about exactly
+once — no selector matching in JS, no full-document re-query per mutation.
+
+**Procedural filters are the embedder's job.** adblock-rust returns
+`procedural_actions` as a set of JSON strings and does *not* apply them;
+`CosmeticInjector._procedural` unwraps either shape (set/list of strings, or one
+JSON document) so the page only ever sees objects. **No `action` key means
+hide.** `##…:style(…)` arrives ONLY here since adblock-rust 0.12.5 dropped
+`style_selectors`, so the `style` action is not optional — without it those
+rules vanish silently. `runProc` compiles the operator chain
+(fast path: a leading `css-selector` is resolved with `querySelectorAll` and the
+chain starts at index 1) and applies the action **by attribute** — a random
+per-page `data-surfer-*` tag plus one attribute per distinct style string,
+backed by a stylesheet rule — never `element.style`, which a page can watch and
+undo. `remove-class`/`remove-attr` check before removing, because both fire a
+mutation even when they remove nothing, and that is how a filter becomes an
+infinite loop. **An unknown operator must yield nothing, never everything.**
+
+Nothing on this path inspects, rewrites or filters a selector, so `:has()` and
+anything else the engine emits reaches the page verbatim.
+
+Verified headlessly by **[`tools/cosmetic-test.py`](tools/cosmetic-test.py)** —
+19 checks against a real offscreen QtWebEngine profile and a local page: hidden
+before the parse-time script *and* before the first frame, a `json-prune`-shaped
+scriptlet shadowing a page global before the page reads it, a lazily-inserted
+slot, an SPA route change picking up the new url's rules without dropping the
+old ones, `:has()` passthrough, the procedural operators and their by-attribute
+styling, an unknown operator hiding nothing, a 1500-node mutation storm, and
+both string seams (including the "seam is gone" case). Run it after touching
+either half.
+
 ## Split view — two tabs in one window, kitty's two buttons
 
 **`|` splits right (side by side) and `_` splits down (stacked)** — kitty's own

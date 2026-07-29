@@ -689,6 +689,18 @@ Window {
         objectName: "sharedProfile"   // Python installs the gmxhr scheme handler on this
         storageName: "surfer"
         offTheRecord: false
+        // Cosmetic ad-blocking, PROFILE-WIDE and at document-creation: one
+        // static courier script (COSMETIC_RUNTIME_JS) that pulls this page's
+        // hide rules from Python over surfercos:// and keeps re-applying them
+        // through a MutationObserver + pushState/replaceState/popstate hooks.
+        // It replaces the old per-view load-finished injection, which flashed
+        // the ads first and never re-ran on an SPA route change.
+        //
+        // Assigned from QML and not from _wire_profile because PySide6 6.11
+        // does not bind QQuickWebEngineScriptCollection — `profile.userScripts`
+        // is unreachable from Python, while QML reaches it and takes the same
+        // Python-made QWebEngineScript list each view takes for userscripts.
+        Component.onCompleted: userScripts.collection = CosmeticInject.scripts
         // Spell-checking (red squiggle + right-click suggestions in
         // showContextMenu) is enabled IMPERATIVELY in main.py's _wire_profile,
         // NOT declaratively here: setting spellCheckEnabled/spellCheckLanguages
@@ -806,19 +818,14 @@ Window {
                         // the mid-session fallback that wrecks text antialiasing
                         // — see GPU_PROBE_JS / CmdHandler._log_gpu in main.py
                         if (gpuProbeJs) webview.runJavaScript(gpuProbeJs);
-                        // cosmetic ad-blocking (element hiding) — the half the
-                        // network interceptor can't do. Specific (per-site)
-                        // rules first; then gather the page's classes/ids and
-                        // inject the matching generic rules. No-op when the
-                        // adblock-rust engine isn't available. See Cosmetic in main.py.
-                        var u = "" + webview.url;
-                        var sj = Cosmetic.specificJs(u);
-                        if (sj) webview.runJavaScript(sj);
-                        webview.runJavaScript(Cosmetic.collectorJs(), (ci) => {
-                            if (!ci) return;
-                            var gj = Cosmetic.genericJs(u, ci.c || [], ci.i || []);
-                            if (gj) webview.runJavaScript(gj);
-                        });
+                        // NOTE: cosmetic ad-blocking is NOT here any more. It
+                        // used to be, and load-finished is too late by
+                        // definition — the ads had already painted, nothing
+                        // re-ran on an SPA route change, and a lazily-inserted
+                        // ad slot brought no new rules with it. It now rides the
+                        // shared profile as a document-creation script; see
+                        // sharedProfile.userScripts above and COSMETIC_RUNTIME_JS
+                        // / CosmeticInjector in main.py.
                     }
                 }
 
