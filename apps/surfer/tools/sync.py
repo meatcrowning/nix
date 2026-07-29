@@ -61,10 +61,12 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 
 DEFAULT_HOST = os.environ.get("SURFER_SYNC_HOST", "top")
 
@@ -360,6 +362,29 @@ def guard_local():
         raise SystemExit("surfer is running here — close it first (profile is locked)")
 
 
+def guard_reachable(host, deadline=2.0):
+    """Name resolution with a hard deadline. ssh's ConnectTimeout bounds the
+    TCP connect but NOT the DNS lookup, and off the LAN (no tailnet up)
+    resolving `top` takes ~8s to FAIL — paid before the browser window can
+    open, since the wrapper brackets the launch with `pull`. On the LAN it
+    resolves in milliseconds, so 2s is generous; unresolvable aborts fast."""
+    got = []
+
+    def probe():
+        try:
+            socket.getaddrinfo(host, 22, type=socket.SOCK_STREAM)
+            got.append(True)
+        except OSError:
+            got.append(False)
+
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(deadline)
+    if not got or not got[0]:
+        raise SystemExit(
+            f"{host} did not resolve within {deadline:.0f}s — off the LAN/tailnet, skipping")
+
+
 def guard_remote(host):
     p = _remote(host, ["is-running"], check=False)
     if p.returncode == 0 and p.stdout.strip() == b"RUNNING":
@@ -396,6 +421,7 @@ def guard_schema(host):
 
 def cmd_pull(args):
     guard_local()
+    guard_reachable(args.host)
     guard_remote(args.host)
     guard_schema(args.host)
     payload = json.loads(_remote(args.host, ["dump"]).stdout.decode())
@@ -406,6 +432,7 @@ def cmd_pull(args):
 
 def cmd_push(args):
     guard_local()
+    guard_reachable(args.host)
     guard_remote(args.host)
     guard_schema(args.host)
     payload = json.dumps(dump_cookies(cookies_path())).encode()
@@ -433,6 +460,7 @@ def cmd_status(args):
     print(f"local  : {local['count']:4d} cookies  schema v{local['version']}"
           f"  encrypted={local['encrypted']}")
     try:
+        guard_reachable(args.host)
         remote = json.loads(_remote(args.host, ["schema"]).stdout.decode())
         print(f"{args.host:7}: {remote['count']:4d} cookies  schema v{remote['version']}"
               f"  encrypted={remote['encrypted']}")

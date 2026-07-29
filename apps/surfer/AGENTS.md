@@ -396,6 +396,9 @@ third being `homeUrl`), with the first process still alive throughout.
 `tools/sync.py` merges the two machines' browser state; `home/prog/surfer.nix`'s
 **air** wrapper brackets the run with it (`pull` before the window opens, `push`
 after it closes; `SURFER_NO_SYNC=1` opts out, and the sync is timeout-bounded +
+`guard_reachable`-gated (a 2 s hard deadline on resolving `top` — ssh's
+`ConnectTimeout` does not cover DNS, and off the LAN/tailnet the bare name
+takes ~8 s to *fail*, paid before the window could open) +
 `|| true` so an absent `top` never blocks the browser — log at
 `~/.cache/surfer-sync.log`). Only air brackets it because Fedora runs no sshd:
 **book is the only machine that can initiate**, and it still converges both ways
