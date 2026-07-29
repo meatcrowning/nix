@@ -272,6 +272,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `.gitignore`, whose exclusions mean nothing in another tree while that tree's
   own secrets go unguarded. `DESIGN.md` and `HARDWARE.md` live in here;
   a few docs stay outside on purpose and `docs/README.md` says which and why.
+- `home/srvs/board-watch.nix` + `board-watch-files/` — **acts on his answers to
+  `docs/board.md` without waiting to be told about them.** A `path` unit on the
+  file plus a 5-minute timer; when a decision becomes *newly answered* it spawns
+  one headless `claude -p` on that one decision. Two rules from him, both
+  settled: the agent **works but never rebuilds** (it commits and pushes; a
+  change that needs `sudo rebuild-top` is left undone with a note on the board),
+  and it fires **only while he is at the machine** — locked or away, the answer
+  is queued, not dropped. The filter is semantic, never authorship: an agent
+  moving an item to LANDED, or the docs sync pulling somebody's prose edit, adds
+  no answer and must not fire. `top` only (`home/` is shared with book, and two
+  machines acting on one answer is two agents on one repo). Kill switch:
+  `touch ~/.local/state/board-watch/off`. Log `~/.cache/board-watch.log`;
+  harness `tools/board-watch-test.py`; runbook `docs/agents/board-watch.md`.
 - `home/srvs/claude-state.nix` + `claude-state-files/` — two-way sync of **the
   whole of `~/.claude`** between `top` and `book` via the PRIVATE repo
   `github.com/meatcrowning/claude-state`: memories, `orchestrator-briefing.md`,

@@ -75,6 +75,22 @@ So, as binding as the parse:
   with nothing on it reads as finished rather than as broken. It is the state he
   will see most often.
 
+## Answering here now STARTS something
+
+`home/srvs/board-watch.nix` watches this file and, when a decision becomes
+newly answered, spawns one headless agent on that one decision. Two consequences
+for anything in this app that writes:
+
+- **A write must remain a targeted line edit**, above — the watcher fingerprints
+  only the ticked option indices and the `>` text, so a re-serialisation that
+  moved lines would still not fire it, but a rewritten option list would look
+  like him changing his mind. The round-trip contract is now load-bearing twice.
+- **The watcher never fires on its own writes or the agent's**, so this app does
+  not have to coordinate with it, mark anything, or know it exists. Do not add a
+  "worked by an agent" flag to the store to help it; the filter is deliberately
+  content-based and authorship-blind (a `git pull` from book has no author it
+  could ask about anyway).
+
 ## Never clobber him — three defences
 
 The store is edited by agents and by a sync timer **while this window is open**.

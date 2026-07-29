@@ -619,6 +619,15 @@ Scope {
         target: "lock"
         function activate(): void { lock.activate(); }
         function suspend(): void { lock.suspend(); }
+        // `qs ipc call lock status` — the ONLY honest answer to "is the session
+        // locked?" on this desktop. The lock is ours (ext-session-lock, via
+        // Lock.qml) and nothing publishes it anywhere else: neither hypridle
+        // nor quickshell contains the string `SetLockedHint`, so logind's
+        // LockedHint stays `no` through a lock and an unlock, and Hyprland
+        // exposes no session-lock query or event either. Anything that must not
+        // act while he is locked away — `home/srvs/board-watch.nix` is the
+        // first — asks here.
+        function status(): string { return lock.locked ? "locked" : "unlocked"; }
     }
 
     // Let Hyprland toggle the launcher: `qs ipc call launcher toggle`.
