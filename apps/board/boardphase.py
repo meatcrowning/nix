@@ -355,12 +355,18 @@ def actually(rec):
     return "cannot see what it is doing - only that the process is there"
 
 
-# ------------------------------------------------- the same two, as SENTENCES
+# --------------------------------------------- the same two, as the CARD LINES
 # His words: *"in the agents tab it should read: [agent name] is [what the agent
 # says its doing] and then the line below should be the [agent name] is actually
 # [what it is actualy doing]"*. So the card no longer draws the bare words
-# `says` and `doing` in a label column beside the two texts — it draws two
-# plain sentences, and these build them.
+# `says` and `doing` in a label column beside the two texts — the CLAIM is a
+# plain sentence led by the agent's name, and these build both lines.
+#
+# **The second line dropped its opener** [his, 2026-07-29]: *"actually just take
+# out the [agent] is actually and just display the text after it"*. So the
+# observation is now the description ALONE — `editing Main.qml`, not *"Marbas is
+# actually editing Main.qml"*. The name is already the subject of the line
+# above it, and saying it twice was the redundancy §9.1 rules out.
 #
 # **The joining is chosen for the REAL strings, not assumed.** `says()` is
 # `"<phase> - <words>"` and every phase word is a gerund (`planning`,
@@ -370,10 +376,11 @@ def actually(rec):
 # *"the vtbclient parser"* is a legal claim — and *"Marbas is the vtbclient
 # parser"* is not a sentence. That case gets `says:` instead of `is`.
 #
-# The observation is joined the same way and for the same reason: only the `ok`
-# state is a verb phrase. `nothing recently`, `nothing yet` and the unlinked
-# sentence each need their own shape, and a STOPPED agent needs the past tense
-# — *"Marbas is actually ..."* is false about a process that is gone.
+# The observation still needs a shape per state, for the same reason: only the
+# `ok` state is a bare verb phrase. `nothing recently`, `nothing yet` and the
+# unlinked sentence each say their own thing — and a STOPPED agent goes to
+# `last seen ...`, because with no subject on the line the tense has nowhere
+# else to live, and the present tense is false about a process that is gone.
 def _subject(who):
     """`it` for anything with no name — a decision he answered, an interactive
     session. Same fallback the card's box already uses; nothing invents one."""
@@ -401,8 +408,12 @@ def says_line(rec, who=""):
 
 
 def doing_line(rec, who="", running=True):
-    """The observation as a sentence. Never the claim, and never present tense
-    about a process that has stopped.
+    """The observation as the card's second line: the description ALONE, with no
+    subject and no *"is actually"* opener. Never the claim, and never present
+    tense about a process that has stopped.
+
+    `who` is still taken because the one state that cannot be said without a
+    subject — nothing observable at all — names the agent instead.
 
     "" only when there is nothing honest to say about a stopped agent — it was
     never seen doing anything, and inventing a past for it is worse than the
@@ -413,19 +424,18 @@ def doing_line(rec, who="", running=True):
     state = rec.get("observed")
     last = rec.get("doing") or ""
     if not running:
-        # PAST TENSE, and only about something actually seen. This is the
-        # `doing`/`last` split the label column used to carry.
-        return ("%s was last seen %s" % (subj, last)) if last and \
+        # PAST TENSE, and only about something actually seen. `last seen` is
+        # what carries the tense now that the subject is gone from the line.
+        return ("last seen %s" % last) if last and \
             state in ("ok", "quiet") else ""
     if state == "ok":
-        return "%s is actually %s" % (subj, last or "working")
+        return last or "working"
     if state == "quiet":
         # Words, never a duration — the threshold is machine business.
-        return ("%s has actually done nothing recently - last seen %s"
-                % (subj, last)) if last else \
-            "%s has actually done nothing recently" % subj
+        return ("nothing recently - last seen %s" % last) if last else \
+            "nothing recently"
     if state == "none":
-        return "%s has not done anything yet" % subj
+        return "nothing yet"
     return "board cannot see what %s is doing - only that the process is there" \
         % subj
 

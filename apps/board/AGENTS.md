@@ -579,9 +579,9 @@ supply.
   running agent already answers to, so a note he addresses to Marbas is never
   ambiguous. Above `len(NAMES)` live agents a name repeats; the cap is 4.
 - **A card draws the name and never the id**, and it draws it as the SUBJECT of
-  both sentences — `Marbas is coding - ...` / `Marbas is actually ...`. The
-  7-cell name column beside the title is now the fallback for a card no
-  sentence names (a stopped agent nothing was ever seen doing), so a name is
+  the CLAIM — `Marbas is coding - ...`. The observed line under it carries no
+  subject at all (below), so the 7-cell name column beside the title is the
+  fallback for a card whose agent has said nothing, so a name is
   still **six ASCII characters at most** (§2.1's cell, §2.3's cmap): `AgentRow`
   starts the title at `7 * cellW` and does not elide, so a seventh character
   runs under it. That is what rules out `Focalor`, `Gremory` and the other long
@@ -625,9 +625,11 @@ The short version, and every line of it is a rule:
   load-bearing: lose it and every card silently degrades to *"cannot see what it
   is doing"* with no error anywhere. `tools/board-watch-test.py` asserts the
   spawn passes it.
-- **The second sentence is the OBSERVED one, never the claim.** An agent saying
+- **The second line is the OBSERVED one, never the claim, and it is the
+  description ALONE** — [his, 2026-07-29] *"actually just take out the [agent]
+  is actually and just display the text after it"*. An agent saying
   `testing` while every recent call is an `Edit` reads *"Marbas is testing - the
-  parser"* on one line and *"Marbas is actually editing vtbclient.py"* on the
+  parser"* on one line and *"editing vtbclient.py"* on the
   next — and **that divergence is a feature, not an error**. Nothing
   hides it, reconciles it, warns about it or colours it: the warn/crit ramp on
   this desktop means a machine fault (§8.1, §9.3), not an agent being optimistic
@@ -642,9 +644,10 @@ The short version, and every line of it is a rule:
   machine business exactly like `ESCALATE_AFTER_S`; the no-pressure rule is not
   suspended because the subject is a robot.
 - **Present tense only while the process is there.** A stopped agent's last
-  observed action reads *"Marbas was last seen editing Main.qml"* — never
-  *"is actually"*, which is false about a process that is gone — and a stopped
-  agent nothing was ever seen doing gets no second sentence at all rather than
+  observed action reads *"last seen editing Main.qml"* — with no subject on the
+  line there is nowhere else for the tense to live, and the present tense is
+  false about a process that is gone — and a stopped
+  agent nothing was ever seen doing gets no second line at all rather than
   an invented past. `boardphase.says_line`/`doing_line` decide all of that in
   one place, because the joining is a judgement about the real strings: a claim
   with no phase word (`boardctl.py phase` takes the phase as optional) is
@@ -731,6 +734,14 @@ of the filesystem here and not of anybody's diligence, and it is what
 | to a RUNNING agent | into that agent's inbox; the row keeps showing it as `waiting in its inbox` until the agent takes it | `left in Marbas's inbox - Marbas reads that between steps` (`its`/`it` for an agent with no name) |
 | to one that has FINISHED | straight to the queue | `it is not running - queued for the next agent instead` |
 | with NOTHING running | straight to the queue | `queued - the next agent board-watch spawns gets it` |
+
+**On the card that `waiting in its inbox` line is cut to ONE line**, marked with
+ASCII `...` — he types paragraphs into those boxes, and wrapped in full they
+buried the three lines the card is for (§5.2). Nothing is lost by the cut: the
+agent is handed the untouched text by `boardctl.py inbox take`. The marker is
+ASCII and not Qt's `elide` because `elide` draws U+2026 and a hardcoded UI
+string on this desktop is ASCII (docs/DESIGN.md §2.3); the width is a character
+count, which is exact in a monospace font (§2.7).
 
 `delivered` never means "it read it" — only `taken` does, and that is a file
 move an agent performs. Anything nobody takes is escalated to the queue by
