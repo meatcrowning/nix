@@ -113,6 +113,44 @@ Window {
         collapsed = c;
         Settings.set("collapsed", c);
     }
+    // ---- ...and state he would NOT notice reverting: one chore, folded ----
+    // *"i should be able to collapse to a single line and expand messages in
+    // the to do section via the mark to the left of the messages."* A view
+    // gesture and nothing else: the store is not touched, and the byte-identical
+    // round trip is untouched with it.
+    //
+    // KEYED ON THE BULLET'S OWN TEXT, and SESSION-ONLY, and both halves are
+    // deliberate. A bullet's line number is what the rest of this app addresses
+    // it by, and it is exactly the wrong key here: the file is rewritten under
+    // this window by agents and by the docs sync, so a line remembered as
+    // folded would come back folded over a DIFFERENT chore — the one failure
+    // this list may not have. The text moves with the bullet and cannot do
+    // that; two identical bullets folding together is a tie, not a lie, and an
+    // agent rewording one unfolds it, which is right. Session-only because
+    // `collapsed` above is for the three sections, which are few, named and
+    // permanent — a map of his prose growing an entry per chore he ever folded
+    // is not state worth keeping, and a fold he does not remember making is
+    // worse than one he has to make again.
+    property var todoFolded: ({})
+    function isTodoFolded(t) { return todoFolded[t] === true; }
+    function toggleTodoFolded(t) {
+        var f = {};
+        for (var i in todoFolded) f[i] = todoFolded[i];
+        f[t] = !(f[t] === true);
+        todoFolded = f;          // reassigned: a mutated object notifies nothing
+    }
+
+    // Cut a string to `cells` characters, marking the cut with ASCII "...".
+    // NEVER the unicode ellipsis and never `Text.ElideRight`, which draws one:
+    // the font has no U+2026 and a missing glyph clips the row it is on
+    // (§2.3). Exact in characters because the font is monospace (§2.7). The
+    // twin of `AgentRow.clipTo`, which cuts a card's inbox line the same way.
+    function clipTo(s, cells) {
+        if (cells < 4)
+            return "...";
+        return s.length <= cells ? s : s.slice(0, cells - 3) + "...";
+    }
+
     function draftOf(k) { return drafts[k] !== undefined ? String(drafts[k]) : ""; }
     function setDraft(k, v) {
         var d = {};
@@ -418,6 +456,11 @@ Window {
                                     // every other editor here — a draft is never thrown
                                     // away by a click somewhere else.
                                     property bool replying: win.draftOf("todo:" + modelData.line) !== ""
+                                    // Folded to its one summary line, by his
+                                    // click on the mark. `win.todoFolded` says
+                                    // what the key is and why it is the text.
+                                    readonly property bool folded:
+                                        win.isTodoFolded(modelData.text)
                                     width: needsCol.width
                                     implicitHeight: bar.implicitHeight
                                                     + (replying ? replyBox.height + 4 : 0)
@@ -434,11 +477,26 @@ Window {
                                             anchors.fill: parent
                                             color: tma.containsMouse ? Theme.highlight : "transparent"
                                         }
+                                        // THE MARK IS THE FOLD CONTROL — his:
+                                        // *"i should be able to collapse to a
+                                        // single line and expand messages in
+                                        // the to do section via the mark to the
+                                        // left of the messages."* So it says
+                                        // which way it goes, in the same ASCII
+                                        // vocabulary the section bands use
+                                        // (`SectionHead`, §2.3 — the font has
+                                        // no triangles): `-` open, `+` folded.
+                                        // One character rather than the band's
+                                        // `[-]`, because a bullet is a bullet
+                                        // and the list must not gain two cells
+                                        // of indent; the pointing hand and the
+                                        // row's own hover light are what say it
+                                        // is a target (§10).
                                         PixelText {
                                             id: todoMark
                                             x: 0
                                             color: win.fgDim
-                                            text: "-"
+                                            text: todoRow.folded ? "+" : "-"
                                         }
                                         // TAG plus ONE summary line, then a gap,
                                         // then the elaboration if there is any —
@@ -459,21 +517,43 @@ Window {
                                         // gap — that absence is permanent, not
                                         // transient, so there is no blank line
                                         // to look at.
+                                        // Folded, this is ONE line — *"collapse
+                                        // to a single line"* — so a summary
+                                        // that does not fit is CUT, in
+                                        // characters, with an ASCII marker.
+                                        // **Not `Text.ElideRight`**: Qt elides
+                                        // with U+2026, a glyph this font does
+                                        // not have, and a missing glyph clips
+                                        // the whole row (§2.3). `maximumLineCount`
+                                        // still pins the height, so a string
+                                        // the cut underestimates cannot grow a
+                                        // second line. The width does not
+                                        // change with the fold, so unfolding
+                                        // reflows nothing beside it.
                                         Para {
                                             id: todoText
+                                            readonly property string full:
+                                                todoRow.modelData.summary
+                                                ? todoRow.modelData.summary
+                                                : todoRow.modelData.text
                                             x: todoMark.width + 8
                                             width: parent.width - x - (15 * win.cellW + 8)
                                             color: win.fgText
-                                            text: todoRow.modelData.summary
-                                                  ? todoRow.modelData.summary
-                                                  : todoRow.modelData.text
+                                            maximumLineCount: todoRow.folded ? 1 : 9999
+                                            text: todoRow.folded
+                                                  ? win.clipTo(full,
+                                                        Math.floor(width / win.cellW))
+                                                  : full
                                         }
                                         Para {
                                             id: todoMore
                                             x: todoText.x
-                                            y: todoText.implicitHeight + 6
+                                            y: todoText.height + 6
                                             width: todoText.width
-                                            visible: text !== ""
+                                            // Folded, the elaboration is the
+                                            // half that goes: the summary is
+                                            // what he asked to keep.
+                                            visible: text !== "" && !todoRow.folded
                                             color: win.fgDim
                                             text: todoRow.modelData.detail
                                                   ? todoRow.modelData.detail : ""
@@ -527,6 +607,33 @@ Window {
                                                     return;
                                                 Board.removeTodo(todoRow.modelData.line);
                                             }
+                                        }
+                                        // ...and the mark's own band, over the
+                                        // top of that one, because the fold is
+                                        // *"via the mark to the left of the
+                                        // messages"*. Two rules from §5.1 and
+                                        // §10 shape it: the HIT BAND EXCEEDS
+                                        // THE INK — one dim character is a
+                                        // 8px target and he has already
+                                        // reported a collapse handle as
+                                        // unclickable once — and it takes the
+                                        // LEFT button only, so a right-click
+                                        // anywhere on the row still opens the
+                                        // row's menu underneath.
+                                        //
+                                        // It swallows the double-click-to-
+                                        // remove in this band, and that is the
+                                        // safe way round: folding twice is
+                                        // nothing, and removing his chore by
+                                        // accident is not.
+                                        MouseArea {
+                                            x: 0
+                                            width: todoMark.width + 8
+                                            height: parent.height
+                                            acceptedButtons: Qt.LeftButton
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.toggleTodoFolded(
+                                                todoRow.modelData.text)
                                         }
                                     }
 

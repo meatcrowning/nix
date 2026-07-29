@@ -3074,6 +3074,7 @@ def test_window(app, tmp):
     # the item captured above is a dangling pointer (it segfaults, promptly).
     rows = [it for it in descendants(win.contentItem())
             if it.property("replying") is not None]
+
     win.todoMenu(chore, 20, 20, rows[0] if rows else None)
     spin(150)
     menus = [it for it in descendants(win.contentItem())
@@ -3261,6 +3262,74 @@ def test_placed_window(app, tmp):
     check("...and a bullet with none is SHORTER: no gap, no empty second block",
           len(rows) == 2 and rows["INFORMATION"] < rows["COMPLETION"], rows)
     shot(win2, "07-todo-summary")
+
+    # ---- FOLDING ONE CHORE, from the mark to the left of it ----
+    # *"i should be able to collapse to a single line and expand messages in
+    # the to do section via the mark to the left of the messages."* Here rather
+    # than beside the other chore tests because this is the fixture with an
+    # elaboration to fold AWAY. Three claims: the mark says which way it goes,
+    # folding takes the elaboration and leaves the summary, and the store does
+    # not move a byte — it is a VIEW gesture and the round trip is contractual.
+    from PySide6.QtCore import QPointF, Qt                             # noqa: E402
+    from PySide6.QtTest import QTest                                   # noqa: E402
+    foldRow, otherRow = None, None
+    for it in descendants(win2.contentItem()):
+        if it.property("folded") is None:
+            continue
+        a = prop(it, "modelData")
+        if isinstance(a, dict) and a.get("detail"):
+            foldRow = it
+        elif isinstance(a, dict):
+            otherRow = it
+    marks = [it for it in descendants(foldRow) if foldRow is not None
+             and str(it.property("text")) in ("-", "+")]
+    detail = [it for it in descendants(foldRow) if foldRow is not None
+              and str(it.property("text")) == "Why it did not before, "
+                                              "and what to watch."]
+    storeBefore = open(path).read()
+    tallBefore = foldRow.height() if foldRow is not None else 0
+    check("a chore's mark says which way it goes, in ASCII the font has (2.3)",
+          len(marks) == 1 and str(marks[0].property("text")) == "-",
+          [str(m.property("text")) for m in marks])
+    check("...and its elaboration is drawn, this one being open",
+          len(detail) == 1 and detail[0].isVisible(),
+          [d.isVisible() for d in detail])
+    if foldRow is not None:
+        QTest.mouseClick(win2, Qt.LeftButton, Qt.NoModifier,
+                         foldRow.mapToScene(QPointF(4, 8)).toPoint())
+        spin(250)
+    check("clicking the mark folds that chore to a single line",
+          foldRow is not None and foldRow.property("folded") is True
+          and foldRow.height() < tallBefore,
+          (tallBefore, foldRow is not None and foldRow.height()))
+    check("...the elaboration is what goes, the summary being what he keeps",
+          bool(detail) and not detail[0].isVisible()
+          and bool(marks) and marks[0].isVisible(),
+          [d.isVisible() for d in detail])
+    check("...and the mark now says it is folded, so the row is not a dead end",
+          bool(marks) and str(marks[0].property("text")) == "+",
+          [str(m.property("text")) for m in marks])
+    check("...with nothing cut by a glyph this font cannot draw (2.3)",
+          foldRow is not None
+          and all("…" not in str(t.property("text") or "")
+                  for t in descendants(foldRow)),
+          [str(t.property("text")) for t in descendants(foldRow)
+           if foldRow is not None and t.property("text")])
+    check("...one chore at a time - this is not a section-wide switch",
+          otherRow is not None and otherRow.property("folded") is False,
+          otherRow is not None and otherRow.property("folded"))
+    check("...and the chore is untouched on disk, folding being a VIEW only",
+          open(path).read() == storeBefore
+          and len(prop(win2, "todo")) == 2, prop(win2, "todo"))
+    if foldRow is not None:
+        QTest.mouseClick(win2, Qt.LeftButton, Qt.NoModifier,
+                         foldRow.mapToScene(QPointF(4, 8)).toPoint())
+        spin(250)
+    check("...and clicking it again puts the whole chore back, unchanged",
+          foldRow is not None and foldRow.property("folded") is False
+          and abs(foldRow.height() - tallBefore) < 1
+          and bool(detail) and detail[0].isVisible(),
+          (tallBefore, foldRow is not None and foldRow.height()))
 
     cardW, titles = title_width(win.contentItem())
     check("...and the question text is the same width stamped or not",

@@ -87,6 +87,26 @@ the elaboration if needed. it shouldnt really elaborate that much though"*. So:
 - The one thing the split costs: a `**bold span**` that wraps ACROSS the first
   line puts its two markers in different halves and neither is stripped. `text`
   is unaffected, and the rule above says the summary is one short line anyway.
+- **He can FOLD one, from the mark to its left** — [his, 2026-07-29] *"i should
+  be able to collapse to a single line and expand messages in the to do section
+  via the mark to the left of the messages."* The mark is the control and says
+  which way it goes, `-` open / `+` folded, one character in the same ASCII
+  vocabulary the section bands use (§2.3 — no triangles in this font). Folded,
+  the elaboration goes and the summary is cut to one line **in characters, with
+  an ASCII `...`** — `Main.qml`'s `clipTo`, never `Text.ElideRight`, which
+  draws a U+2026 the font does not have and clips the row.
+  Also a VIEW change: nothing is written.
+  - **Keyed on the bullet's TEXT, and session-only**, both deliberately
+    (`win.todoFolded`). The line number is what the rest of the app addresses a
+    bullet by and is exactly the wrong key here — the file is rewritten under
+    this window by agents and by the docs sync, so a remembered line would come
+    back folded over a *different* chore. The text moves with the bullet;
+    rewording one unfolds it, which is right. Nothing is persisted: the section
+    collapse in `Settings` is three named permanent sections, not a map of his
+    prose growing an entry per chore he ever folded.
+  - The mark's hit band is wider than its ink and takes the LEFT button only
+    (§5.1, §10) — a right-click anywhere still opens the row's menu, and the
+    double-click-that-removes is swallowed in that band on purpose.
 
 Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 
@@ -713,13 +733,51 @@ supply.
   the CLAIM — `Marbas is coding - ...`. The observed line under it carries no
   subject at all (below), so the 7-cell name column beside the title is the
   fallback for a card whose agent has said nothing, so a name is
-  still **six ASCII characters at most** (§2.1's cell, §2.3's cmap): `AgentRow`
-  starts the title at `7 * cellW` and does not elide, so a seventh character
-  runs under it. That is what rules out `Focalor`, `Gremory` and the other long
-  spellings, and `board-test.py` asserts it.
+  still **six ASCII characters at most** (§2.1's cell, §2.3's cmap): the column
+  is 7 cells for a pool name, and the title starts after it without eliding, so
+  a seventh character would sit against the title with no gap. That is what
+  rules out `Focalor`, `Gremory` and the other long spellings, and
+  `board-test.py` asserts it. The column itself **measures** (`AgentRow`'s
+  `nameW`) rather than assuming 7, for the one name that is not from the pool —
+  below.
 - **Nothing that has nobody on it is given a name**: a task queued above the cap,
   a decision he answered, an interactive session. Same rule as the inbox box —
-  a name is a claim that somebody is on it.
+  a name is a claim that somebody is on it. The one exception is Solomon, and
+  it is an exception on purpose (below): he is a ROLE that is always there, not
+  a claim that anything is in flight, and his row says `ready` in so many
+  words.
+
+### ...and the orchestrator's name is SOLOMON, always, and it is pinned
+
+[his, 2026-07-29] *"make the main orchestrators name Solomon. he should always
+be kept on the top of the agent list and should basically indicate like he's
+there and ready to go at all times when hes not doing something."* Three
+separable rules, and `board-test.py` asserts each of them separately.
+
+- **The name is fixed and out of the pool.** `boardagents.ORCHESTRATOR_NAME`;
+  `register()` applies it off `kind="orchestrator"`, so every path that starts
+  one gets it without asking. Solomon is not in `NAMES`, so no worker can be
+  him and `pick_name` never shuffles onto him. The pool is the Lemegeton's
+  demons and Solomon is the king who binds them — the one that hands out the
+  work is the one name never drawn from the bag.
+- **He is seven characters, and he is not truncated.** That is what widened
+  `AgentRow`'s `nameW` from a hardcoded `7 * cellW` to a measured
+  `max(7, len+1) * cellW`. The pool stays at six so the titles line up down the
+  rest of the list.
+- **He is first, whatever was born when.** `boardwork.cards()` pins every
+  orchestrator row above every worker; birth-order still governs everything
+  below. Two overlapping orchestrators (successive things typed close together)
+  are BOTH Solomon and both pinned — one role, briefly doing two things, and a
+  message addressed to him reaches a live one.
+- **The row exists with nothing running.** `boardwork._idle_orchestrator_row()`
+  — `state: "idle"`, no claim, no observed line, and **no id, so no inbox**:
+  a note left for an orchestrator that does not exist would have nobody to read
+  it, and the box at the top of the window already queues one for the next.
+  `describe()` gives it the only sentence that is true — *"ready - what you
+  type at the top of this window goes to him"*.
+- **So the list is never empty**, and the section's "nothing is running"
+  sentence is gated on `Main.qml`'s `nothingRunning` (any card that is not the
+  standing row) rather than on the list's length.
 - `boardctl.py inbox send --to` takes either the name or the id.
 
 ### A card says what the agent CLAIMS and what it is OBSERVED doing — both
