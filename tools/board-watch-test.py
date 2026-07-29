@@ -140,6 +140,23 @@ Some prose about the first question.
 
 fails = []
 
+#: A bullet's "placed" stamp. Writing ANY bullet into a section stamps the
+#: bullets already there with the time they were placed (`boardparse`, so the
+#: board can draw how long something has been waiting) — so a fixture nobody
+#: touched legitimately gains a line, and the three "nothing else in the file
+#: moved" checks below read that as the watcher rewriting his board. It is not
+#: what any of them is about, so it comes off both sides.
+PLACED = re.compile(r"^\s*<!--\s*placed:")
+
+
+def unmoved(after, before, *drop):
+    """True when `after` is `before` apart from the lines `drop` names."""
+    def keep(t):
+        return "\n".join(l for l in t.splitlines()
+                         if not PLACED.match(l)
+                         and not any(d in l for d in drop)).rstrip("\n")
+    return keep(after) == keep(before)
+
 
 def check(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + (("  -- " + detail) if
@@ -602,9 +619,7 @@ def test_the_loop():
         again = [l for l in r.text().splitlines() if "caught itself looping" in l]
         check("...once per streak, never once per run", len(again) == 1, str(again))
         check("...and nothing else in the file moved",
-              "\n".join(l for l in r.text().splitlines()
-                        if "caught itself looping" not in l).rstrip("\n")
-              == before.rstrip("\n"))
+              unmoved(r.text(), before, "caught itself looping"))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -919,11 +934,9 @@ def main():
               str(note))
         rest_before = before.replace("- [ ] Do it the short way",
                                      "- [x] Do it the short way")
-        rest_after = "\n".join(l for l in after.splitlines()
-                               if "board-watch tried" not in l)
         check("...and nothing else in the file moved",
-              rest_after.rstrip("\n") == rest_before.rstrip("\n"),
-              "%d vs %d chars" % (len(rest_after), len(rest_before)))
+              unmoved(after, rest_before, "board-watch tried"),
+              "%d vs %d chars" % (len(after), len(rest_before)))
         r.clear()
         r.run()
         check("the failure note does not itself fire", r.fires() == [],
@@ -1007,9 +1020,7 @@ def main():
         check("...quoting what he wrote, so it is not lost with the run",
               bool(bullet) and "off by a pixel" in bullet[0], str(bullet))
         check("...and moves nothing else in the file",
-              "\n".join(l for l in after.splitlines()
-                        if "what you typed into the board" not in l
-                        ).rstrip("\n") == before.rstrip("\n"))
+              unmoved(after, before, "what you typed into the board"))
         print("work above the concurrency cap waits for a slot, on a tick")
         # The orchestrator fans out through `boardctl dispatch`, which refuses
         # to exceed the cap and files the rest instead. Somebody has to start
