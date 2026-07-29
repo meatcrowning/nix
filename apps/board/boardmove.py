@@ -80,9 +80,18 @@ import boardparse as bp                                            # noqa: E402
 from boardparse import BoardError                                  # noqa: E402,F401
 
 
-def stash_dir():
+def state_dir():
+    """Where this app keeps its own bookkeeping. NOT `stash_dir()`: every
+    `.json` in there is read back as an in-flight item (see `_stashes`), so a
+    file that is not one belongs here instead."""
     base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-    d = os.path.join(base, "board", "inflight")
+    d = os.path.join(base, "board")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def stash_dir():
+    d = os.path.join(state_dir(), "inflight")
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -139,9 +148,17 @@ def _stashes():
             continue
         try:
             with open(os.path.join(stash_dir(), name)) as f:
-                out.append(json.load(f))
+                rec = json.load(f)
         except (OSError, ValueError):
             continue
+        # A stash is identified by its `key` (`stash_file()` is named from it).
+        # Anything else that ends up in this directory is not one, and drawing
+        # it as an item in flight invents an agent out of a stray file — which
+        # is exactly what the LANDED sweep's timestamp did until it moved to
+        # `state_dir()`. Left as a guard so a stamp already on disk, on either
+        # machine, stops being a card without anything having to delete it.
+        if isinstance(rec, dict) and rec.get("key"):
+            out.append(rec)
     return out
 
 
@@ -720,7 +737,12 @@ _LOG_FMT = "%H\x1f%ct\x1f%s"
 
 
 def _sweep_stamp():
-    return os.path.join(stash_dir(), "landed-sweep.json")
+    # `state_dir()`, NOT `stash_dir()`: this is a throttle, not an item that is
+    # in flight, and `_stashes()` reads every `.json` under the stash dir as
+    # one. Parked there it was drawn on his board as an unowned agent titled
+    # "a decision" — a card for a timestamp — on any machine where the sweep
+    # had ever run.
+    return os.path.join(state_dir(), "landed-sweep.json")
 
 
 def _sweep_due(now, every=LANDED_SWEEP_EVERY):
