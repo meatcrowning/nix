@@ -150,6 +150,17 @@
       # date and flock. `bash` and `openssh` are here for the agent's own use,
       # not the watcher's.
       #
+      # `openssh` is TOP-ONLY, and that is not a preference. On book, Fedora's
+      # /etc/ssh/ssh_config pulls in /etc/crypto-policies/back-ends/openssh.config,
+      # which names `GSSAPIKexAlgorithms` and the mlkem768* KEXes — options
+      # nixpkgs' unpatched openssh rejects, so it prints "terminating, 2 bad
+      # configuration options" and never dials, for EVERY destination, not just
+      # top (measured on book 2026-07-29 against both `top` and localhost).
+      # Being first on this PATH it shadowed /usr/bin's working Fedora ssh,
+      # so a board agent on book could not reach the tailnet at all. Dropping it
+      # here lets the /usr/bin tail win, which is the same reason `systemd` is
+      # top-only below.
+      #
       # THE TAIL HAS TO NAME BOTH MACHINES' PROFILE LAYOUTS, since this now
       # deploys to book as well and `claude`, `python3`, `hyprctl` and `qs` all
       # come out of a profile rather than out of this list:
@@ -172,9 +183,8 @@
           pkgs.bash
           pkgs.git
           pkgs.gh
-          pkgs.openssh
           pkgs.nix
-        ] ++ lib.optional (host == "top") pkgs.systemd)}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+        ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
       ];
       ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-watch.py";
       # Outer guard only. The script caps the agent itself at 45 minutes so the
