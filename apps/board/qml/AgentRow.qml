@@ -53,6 +53,13 @@ Item {
     signal contextRequested(real mx, real my)
 
     readonly property bool running: agent && agent.running === true
+    // WHO IT IS, in one ordinary first name — his call: *"i think itd be
+    // interesting to have them referred to by regular names"*. The coded id is
+    // still the key underneath (the inbox this card's box writes to is named by
+    // it, and so are the unit and the log), and it is deliberately NOT drawn:
+    // there is nothing he can do with a hex string on screen, and the name is
+    // the thing he can type back at the machine.
+    readonly property string name: agent && agent.name ? agent.name : ""
     readonly property var waiting: agent && agent.waiting ? agent.waiting : []
     readonly property string says: agent && agent.says ? agent.says : ""
     readonly property string actually: agent && agent.actually ? agent.actually : ""
@@ -100,9 +107,15 @@ Item {
         x: 10
         width: parent.width - x
 
-        // title left, where right — the flight row's shape, so the two live
-        // sections read the same way one under the other. The `where` column
-        // drops widest-first as the window narrows (§9.1), at width 0.
+        // name left, title, where right — the flight row's shape, so the two
+        // live sections read the same way one under the other. The `where`
+        // column drops widest-first as the window narrows (§9.1), at width 0.
+        //
+        // The name sits in the SAME 7-cell label column as `says` and `doing`
+        // below it, so the three lines of a card line up as one block and the
+        // name reads as the subject of both sentences under it. It takes the
+        // title's own colour: it is part of that line, not a second tier, and
+        // §3.3's ladder is already carrying the says/doing distinction.
         Item {
             width: col.width
             implicitHeight: titleT.implicitHeight
@@ -112,6 +125,16 @@ Item {
             readonly property real whereW: wide && row.agent && row.agent.where !== ""
                 ? Math.min(row.agent.where.length * row.cellW + 2, width * 0.4)
                 : 0
+            readonly property real nameW: row.name !== "" ? 7 * row.cellW : 0
+
+            PixelText {
+                id: nameT
+                x: 0
+                y: 0
+                visible: row.name !== ""
+                color: row.running ? row.fgText : row.fgDim
+                text: row.name
+            }
 
             PixelText {
                 id: whereT
@@ -125,9 +148,9 @@ Item {
             }
             Para {
                 id: titleT
-                x: 0
+                x: parent.nameW
                 y: 0
-                width: parent.width - whereT.width - (whereT.width > 0 ? 8 : 0)
+                width: parent.width - x - whereT.width - (whereT.width > 0 ? 8 : 0)
                 color: row.running ? row.fgText : row.fgDim
                 text: row.agent ? row.agent.title : ""
             }
@@ -225,8 +248,13 @@ Item {
             fgAccent: row.fgAccent
             fgText: row.fgText
             fgDim: row.fgDim
-            placeholder: row.running ? "send it a command, an idea or a fix"
-                                     : "leave a note - it goes to the next agent"
+            // ...and it says WHO it reaches. `send Rosa a command` is the whole
+            // point of the name: the box under a card has always gone to that
+            // one agent's inbox, and until now it said `it`.
+            placeholder: row.running
+                ? "send " + (row.name !== "" ? row.name : "it")
+                  + " a command, an idea or a fix"
+                : "leave a note - it goes to the next agent"
             onDraftEdited: (b) => row.draftEdited(b)
             onSubmitted: (b) => row.send(b)
         }

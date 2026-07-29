@@ -535,7 +535,11 @@ class Agents(QObject):
 
     def _row(self, a):
         return {
-            "id": a["id"], "kind": a["kind"], "title": a["title"],
+            # The id is what a message is ADDRESSED to and what the unit, the
+            # log and the sidecar are named; `name` is what he READS. Both cross
+            # over, and the card draws only the second.
+            "id": a["id"], "name": a.get("name", ""),
+            "kind": a["kind"], "title": a["title"],
             "where": a["where"], "state": a["state"],
             "running": a["state"] == "running",
             "phase": a.get("phase", ""),
@@ -606,10 +610,17 @@ class Agents(QObject):
         if msg is None:
             return ""
         self.refresh()
+        # ...and it says WHO, when the agent has a name. `left in Rosa's inbox`
+        # is the same promise as before — in its inbox, not read by it — made
+        # about somebody he can point at.
+        who = boardagents.name_of(agent_id) if agent_id else ""
         if msg["state"] == "delivered":
-            return "left in its inbox - it reads that between steps"
+            return ("left in %s's inbox - %s reads that between steps"
+                    % (who, who)) if who else \
+                   "left in its inbox - it reads that between steps"
         if agent_id:
-            return "it is not running - put in the inbox instead"
+            return ("%s is not running - put in the inbox instead" % who) \
+                if who else "it is not running - put in the inbox instead"
         # The top box. It says where the sentence WENT, never what will come of
         # it: an orchestrator has to read it first, and it only runs while he is
         # at the machine. Promising anything more would be the dishonest kind of

@@ -334,7 +334,8 @@ assumed.
   forbids "done", "fixed", "wired", "implemented", "working" — it did not do the
   work and cannot see whether it happened.
 - **And it says it in one line per task.** The bullet an orchestrator leaves in
-  WAITING ON YOU TO DO is the subject, the worker id, and that nothing has
+  WAITING ON YOU TO DO is the subject, the worker's **name** (its coded id in
+  parentheses, because that is what its log is called), and that nothing has
   landed yet; one more line for anything it asked. The prompt states that as a
   budget — *one line each, 25 words at the most, no second paragraph* — because "concise"
   bought a 150-word paragraph that restated his own sentence back at him
@@ -374,6 +375,35 @@ Rules, all of them load-bearing:
   start time, and not a zombie. A recycled pid cannot make a dead agent look
   alive and neither can an unreaped one. Do not add a second definition of
   "running" anywhere in this tree.
+
+### A worker has a first name, and the name is what he reads
+
+*"can you give the workers regular human names? you can still keep the coded
+names if you'd like but i think itd be interesting to have them referred to by
+regular names"*. So every worker is `Rosa`, not `w1a2b3c`, on the card, in
+`boardctl` output, and in the bullet the orchestrator leaves on the board.
+
+- **The coded id is still the only key, and nothing was renamed.** The systemd
+  unit (`board-worker-<id>`), `~/.cache/board-work/<id>.log`, the observation
+  sidecar, the inbox directory and the `agents/<id>.json` record are all keyed on
+  it — renaming any of them would orphan a worker that is running right now. The
+  name is **presentation**; `boardagents.NAMES` is the pool and the only place
+  names are written down.
+- **It is chosen once, where the id is minted** (`boardwork._spawn_worker`), and
+  **persisted in the record** (`boardagents.register`). Never re-derived on a
+  read: a card that renamed itself between two polls would be worse than a hex
+  string. A record written before this landed gets a name derived from its id
+  (`name_for`, sha1 over the pool) — stable, and the same in every process.
+- **No two LIVE agents share one.** `pick_name` walks the pool past anything a
+  running agent already answers to, so a note he addresses to Rosa is never
+  ambiguous. Above 24 live agents a name repeats; the cap is 4.
+- **A card draws the name and never the id.** It sits in the same 7-cell label
+  column as `says` and `doing`, so the three lines line up as one block —
+  which is why the pool is short ASCII names (§2.1's cell, §2.3's cmap).
+- **Nothing that has nobody on it is given a name**: a task queued above the cap,
+  a decision he answered, an interactive session. Same rule as the inbox box —
+  a name is a claim that somebody is on it.
+- `boardctl.py inbox send --to` takes either the name or the id.
 
 ### A card says what the agent CLAIMS and what it is OBSERVED doing — both
 
@@ -461,7 +491,7 @@ of the filesystem here and not of anybody's diligence, and it is what
 
 | he types it... | what happens | what the footer says |
 | --- | --- | --- |
-| to a RUNNING agent | into that agent's inbox; the row keeps showing it as `waiting in its inbox` until the agent takes it | `left in its inbox - it reads that between steps` |
+| to a RUNNING agent | into that agent's inbox; the row keeps showing it as `waiting in its inbox` until the agent takes it | `left in Rosa's inbox - Rosa reads that between steps` (`its`/`it` for an agent with no name) |
 | to one that has FINISHED | straight to the queue | `it is not running - queued for the next agent instead` |
 | with NOTHING running | straight to the queue | `queued - the next agent board-watch spawns gets it` |
 
@@ -646,7 +676,7 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
 /usr/bin/python3 apps/board/tools/board-test.py --shots /tmp/board-shots
 ```
 
-`tools/board-test.py`, offscreen, nine layers (220 checks). Three of them are
+`tools/board-test.py`, offscreen, nine layers (237 checks). Three of them are
 new and are the ones to read first if the fan-out misbehaves:
 
 - **LANDED** (`test_landed`) — a commit records with NO IN FLIGHT row (the bug
@@ -665,9 +695,11 @@ new and are the ones to read first if the fan-out misbehaves:
   rest; every dispatched task is on disk exactly once in exactly one directory;
   queued work is drawn rather than hidden and is not offered an inbox it has no
   process for; a killed worker stops holding a slot and `promote()` starts the
-  queue oldest-first; a dead agent is filed under `stopped` **whatever it last
-  claimed** and the sweep then drops its record; `ask` refuses without
-  `--if-unanswered` and writes nothing, then lands as an ordinary numbered
+  queue oldest-first; **every worker has a first name** that is unique among the
+  living, persisted in its record rather than re-derived per poll, ASCII, and
+  absent on a task nobody is on yet; a dead agent is filed under `stopped`
+  **whatever it last claimed** and the sweep then drops its record; `ask`
+  refuses without `--if-unanswered` and writes nothing, then lands as an ordinary numbered
   decision with all four parts and no robot flag; and the board-watch seed.
 
 The other six: **the round trip** (pure Python

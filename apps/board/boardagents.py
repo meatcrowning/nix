@@ -61,6 +61,7 @@ minutes or anything that ramps. `started`/`at` stamps exist because escalation
 is machine business, exactly as `boardmove`'s stash time is; they must not reach
 the screen.
 """
+import hashlib
 import json
 import os
 import re
@@ -98,6 +99,69 @@ def agents_dir():
 
 def clean_id(s):
     return re.sub(r"[^a-z0-9._-]+", "-", str(s or "").lower()).strip("-") or "agent"
+
+
+# ------------------------------------------------------------------- the names
+#: **An agent has a first name, and that is what he is shown.** His words:
+#: *"can you give the workers regular human names? you can still keep the coded
+#: names if you'd like but i think itd be interesting to have them referred to
+#: by regular names"*.
+#:
+#: THE NAME IS PRESENTATION AND NOTHING IS KEYED ON IT. The id (`w1a2b3c`) is
+#: still the key: the systemd unit, `~/.cache/board-work/<id>.log`, the
+#: observation sidecar, the inbox directory and every record on disk are named
+#: by it, and a message is addressed by it. Renaming any of those would orphan a
+#: worker that is running right now.
+#:
+#: Short on purpose — the card draws the name in the same label column as `says`
+#: and `doing`, which is 7 font cells wide, so a longer one would push the title
+#: out of line. ASCII only: §2.3, a glyph the font lacks clips the whole row.
+NAMES = ["Anna", "Ben", "Clara", "Dan", "Elena", "Frank", "Grace", "Henry",
+         "Ivy", "Jonah", "Kira", "Leo", "Maya", "Nils", "Omar", "Paula",
+         "Rosa", "Sam", "Tara", "Uma", "Vera", "Will", "Yara", "Zoe"]
+
+
+def name_for(agent_id):
+    """The name an id maps to, with nothing else on the machine consulted.
+
+    DERIVED, never drawn from a bag: the same id is the same name in every
+    process that reads the record — the app polling behind his window,
+    `boardctl`, the agent itself — and a record written before names existed
+    (there is a worker running under one right now) gets a stable name rather
+    than a new one on every poll. `hashlib` and not `hash()`, which is salted
+    per process and would give the app and the CLI different answers.
+    """
+    aid = clean_id(agent_id)
+    n = int(hashlib.sha1(aid.encode("utf-8")).hexdigest()[:8], 16)
+    return NAMES[n % len(NAMES)]
+
+
+def _live_names():
+    """The names currently spoken for. Registrations only, and no /proc walk:
+    this is called at spawn time, which is inside a board-watch tick."""
+    out = set()
+    for rec in _registrations():
+        if bm._alive(rec):
+            out.add(rec.get("name") or name_for(rec.get("id") or ""))
+    return out
+
+
+def pick_name(agent_id, taken=None):
+    """`name_for`, moved along while a LIVE agent already answers to it.
+
+    Two agents called Rosa on one board would make a note he addresses to Rosa
+    ambiguous at the one moment it matters, so the name is chosen ONCE — at the
+    instant the id is minted — and written into the record. Above `len(NAMES)`
+    live agents there is nothing left to move to and a name repeats; the cap is
+    four, and saying that plainly beats inventing `Rosa 2`.
+    """
+    taken = _live_names() if taken is None else taken
+    base = NAMES.index(name_for(agent_id))
+    for i in range(len(NAMES)):
+        cand = NAMES[(base + i) % len(NAMES)]
+        if cand not in taken:
+            return cand
+    return NAMES[base]
 
 
 # ------------------------------------------------------------------- /proc
@@ -189,17 +253,34 @@ def self_id():
 # decision agent needs no registration: boardmove already stashed it, with the
 # same pid and the same start time, and a second record would be a second
 # definition of "running".
-def register(agent_id, title, pid, kind="note", where="board-watch", session=""):
+def register(agent_id, title, pid, kind="note", where="board-watch", session="",
+             name=""):
     """`session` is the `--session-id` the spawner chose, and it is what makes
     the card able to say what the agent is really doing: `boardphase.py` finds
     `~/.claude/projects/*/<session>.jsonl` by it. An agent registered without
-    one is simply not observable, and its card says exactly that."""
+    one is simply not observable, and its card says exactly that.
+
+    `name` is the human name he sees. It is PERSISTED here rather than derived
+    on every read, so it cannot change under him when another agent takes the
+    name this one would have been moved off; the spawner picks it beside the id
+    (`boardwork._spawn_worker`), and a caller that does not is given one here.
+    """
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
+           "name": name or pick_name(agent_id),
            "pidStart": bm._proc_start(pid) if pid else None, "kind": kind,
            "where": where, "session": session or "",
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     _write_json(os.path.join(agents_dir(), rec["id"] + ".json"), rec)
     return rec
+
+
+def name_of(agent_id):
+    """The name in one agent's record, or `""` for anything that has none — a
+    decision he answered, an interactive session, a task with no worker yet.
+    Reads the record rather than deriving, so what the UI says back to him is
+    what the card beside it is drawing."""
+    rec = _read_json(os.path.join(agents_dir(), clean_id(agent_id) + ".json"))
+    return (rec or {}).get("name") or ""
 
 
 def unregister(agent_id):
@@ -404,7 +485,10 @@ def _stash_agents():
             # still thinking, and boardmove refuses to reclaim it for the same
             # reason. Say so rather than pick a side.
             state = "unowned"
-        out.append({"id": clean_id(rec.get("key")), "kind": "decision",
+        # No human name: a decision agent is not a worker out of the box, its
+        # card is headed by the decision he answered, and giving that a first
+        # name would be this app inventing a person for one of HIS items.
+        out.append({"id": clean_id(rec.get("key")), "kind": "decision", "name": "",
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
                     "session": rec.get("session") or "", "state": state})
@@ -420,6 +504,10 @@ def agents(procs=None):
     for rec in _registrations():
         out.append({"id": clean_id(rec.get("id")), "kind": rec.get("kind") or "note",
                     "title": rec.get("title") or "an agent",
+                    # Persisted at registration; derived only for a record
+                    # written before names existed, so a worker that is running
+                    # right now still gets one and keeps it.
+                    "name": rec.get("name") or name_for(rec.get("id") or ""),
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
                     "session": rec.get("session") or "",
                     "state": "running" if bm._alive(rec) else "exited"})
@@ -441,7 +529,7 @@ def agents(procs=None):
             continue
         if pid in owners or owners & set(_ancestors(pid, procs)):
             continue
-        out.append({"id": "s%d" % pid, "kind": "session",
+        out.append({"id": "s%d" % pid, "kind": "session", "name": "",
                     "title": "an interactive Claude Code session",
                     "where": "", "pid": pid, "session": "", "state": "running"})
     # WHAT IT SAYS, AND WHAT IT IS DOING. Imported here rather than at the top:
