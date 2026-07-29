@@ -10,6 +10,17 @@ import "../../qmlcommon"
 Item {
     id: root
     property alias model: list.model
+    // The three foreground tones, handed in ALREADY FADED by the owning pane
+    // (docs/DESIGN.md §3.1.1) — a row must not know whether the window is
+    // focused. This is the app's hottest delegate, so the ternary lives ONCE at
+    // the window and a row just reads the resulting colour — exactly where it
+    // used to read `Theme.text`. Delegate construction cost and binding count
+    // are therefore unchanged; a per-row `winActive ? … : …` would have added
+    // one live conditional per row per column. Defaults are the lit tones, for
+    // a harness that builds a TrackList on its own.
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
     property bool showArtist: true
     // Artist name to LEAVE OFF every row, set explicitly. Normally you want
     // autoHideArtist instead.
@@ -148,7 +159,7 @@ Item {
         // hands the wheel straight out to whatever is behind it — the album
         // gallery keeps scrolling under an open album section.
         wheelEnabled: root.scrollable
-        ScrollBar.vertical: VScroll { visible: root.scrollable }
+        ScrollBar.vertical: VScroll { id: vscroll; visible: root.scrollable }
 
         // Re-centre once the view actually has a size / rows (the queue's height
         // and model both arrive after this component is built, and a
@@ -179,11 +190,13 @@ Item {
             Rectangle {
                 width: 2
                 height: parent.height
-                color: Theme.accent
+                color: root.fgAccent
                 visible: row.isCurrent
             }
+            // A missing file is ALREADY the inactive grey, so an unfocused
+            // window simply makes every row agree with it.
             readonly property color fg: !available ? Theme.inactive
-                                        : (isCurrent ? Theme.accent : Theme.text)
+                                        : (isCurrent ? root.fgAccent : root.fgText)
 
             // Text at integer y=1 in the cell-height row — packed like kitty
             // lines, so per-title ascender ink can't read as uneven gaps.
@@ -194,7 +207,7 @@ Item {
                 width: 30
                 y: 1
                 text: track > 0 ? ((disc > 1 ? disc + "-" : "") + track) : ""
-                color: Theme.textDim
+                color: root.fgDim
             }
             // Title and artist are two texts, not one concatenated string, so
             // the TITLE gets first claim on the width and only the artist is
@@ -255,13 +268,18 @@ Item {
                     clip: true
                     height: parent.height
                     text: nameCell.artistText
-                    color: available ? Theme.textDim : Theme.inactive
+                    color: available ? root.fgDim : Theme.inactive
                 }
             }
             Row {
                 id: rightBits
                 anchors.right: parent.right
-                anchors.rightMargin: 8
+                // Clear the scrollbar, which is always on and up to 16px wide
+                // now (docs/DESIGN.md 9.2) — the old flat 8 put the duration
+                // under it. The delegate is the view's full width on purpose
+                // (the row highlight runs edge to edge), so the gutter is the
+                // trailing column's margin rather than the list's.
+                anchors.rightMargin: root.scrollable ? vscroll.barW + 4 : 8
                 y: 1
                 height: 15
                 spacing: 8
@@ -278,6 +296,7 @@ Item {
                     Stars {
                         anchors.verticalCenter: parent.verticalCenter
                         rating: model.rating !== undefined ? model.rating : -1
+                        fgAccent: root.fgAccent
                         onRated: function(fmps) { Library.setRating(trackId, fmps); }
                     }
                     Item {
@@ -310,7 +329,7 @@ Item {
                         var s = Math.max(0, Math.round(duration));
                         return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
                     }
-                    color: Theme.textDim
+                    color: root.fgDim
                 }
             }
             MouseArea {

@@ -84,6 +84,62 @@ reuse for any further change here.
 
 **Track list, album grid and both lyrics panes are `Kinetic*` views from `../qmlcommon/`** — player's scrolling policy is the scrollbar and the wheel only, never drag-flicking, so the compositor's momentum is the only momentum. `WheelScroll.qml` used to live in `player/qml/`; it is shared now and player is no longer its owner. `TrackList` passes `wheelEnabled: root.scrollable` so a table sized to hold every row (AlbumPanel) hands the wheel out to the gallery behind it. See [`../AGENTS.md`](../AGENTS.md).
 
+## Focus: three tones, derived once, handed down (`docs/DESIGN.md` §3.1.1)
+
+**No file under `qml/` may read `Theme.text`, `Theme.textDim` or `Theme.accent`
+for a thing it draws, and none may read `Window.active`.** `Main.qml` derives
+
+```qml
+readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
+readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
+```
+
+and every pane, list, drawer and leaf takes those three as plain `color`
+properties (defaulting to the lit tones, so a harness can build one alone).
+`Theme.inactive` is the exact grey hyprvtb fades the titlebar to; player was the
+**third** app to grey its chrome and leave its content lit, after painter and
+reader, which is why §3.1.1 exists and why this is tested.
+
+Deliberately NOT faded, and each for a reason:
+
+- **The cover art** — the gallery thumbnails, the now-playing full-bleed cover,
+  the album section's art. An image is content, not a foreground tone; filer's
+  `PreviewTile` already settled this by fading its filename and selection frame
+  and leaving the thumbnail alone.
+- **`Theme.dim`** — the tertiary tone (the `♫` art placeholder, an unrated star,
+  a play count, the search placeholder). It sits *below* the inactive grey, so
+  mapping it there would BRIGHTEN it on focus loss.
+- **`Theme.crit`** — the favourite heart is a status colour, per `PreviewTile`'s
+  error tone.
+- **`Theme.border` / `Theme.bgAlt` / `Theme.highlight` / `Theme.bg`** — §3.1.1
+  moves foregrounds only. The row-highlight fill in particular must not move, or
+  the window reads as broken rather than unfocused.
+- **`CtxMenu` / `TrackMenu`** — `CtxMenu.qml` is byte-identical to filer's, and
+  inside it `Theme.inactive` already means *disabled*: fade the whole menu and a
+  greyed-out entry becomes indistinguishable from a live one. A menu is also
+  only ever open on a focused window. Changing it is a seven-app decision, not
+  player's.
+- **`Theme.windowBorder`** on the settings drawer — nine call sites across five
+  apps draw an overlay frame with it and none of them switch to the
+  `windowBorderInactive` that `Theme` already defines. Worth doing, but
+  desktop-wide and in one pass.
+
+```bash
+tools/focus-fade-test.py [--png DIR]   # offscreen, never touches the live player
+```
+
+Three layers: the derivation (real `Window.active`, driven by activating a
+second offscreen window — no faked flag); the propagation (every visible item in
+every view is asked what colour it *ended up* with, which is the layer both
+earlier occurrences of the bug lived in); and the pixels (480x826 — the size
+player actually runs at — histogrammed focused vs unfocused, with a fake palette
+that gives every theme slot a unique hue so a count is unambiguous). Two traps
+that harness paid for: `highlight` must not be a grey, because `Theme.inactive`
+over `bg` composites to exactly `#404040`; and Qt caches a directory's file
+listing on first load, so a scratch `.qml` written afterwards fails with "File
+name case mismatch".
+
 ## Right-click: one menu for every listing (`qml/TrackMenu.qml`)
 
 player draws a track in five places — the queue, an album's inline section, a

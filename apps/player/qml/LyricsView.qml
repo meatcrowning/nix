@@ -11,6 +11,13 @@ Item {
     id: root
     property int trackId: -1
     property bool active: true    // only fetch while the pane is on screen
+    // Foreground tones, handed in already faded by the now-playing page
+    // (docs/DESIGN.md §3.1.1). The lit/dimmed split BELOW is about which line is
+    // playing; this one is about whether the window is focused, and the two
+    // compose — an unfocused pane greys uniformly, current line included.
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
     property var lyricsData: ({ source: "", synced: false, lines: [], text: "" })
     property int currentLine: -1
     // Whether there is anything to show — the now-playing view collapses this
@@ -99,7 +106,7 @@ Item {
         y: 8
         text: "lyrics" + (root.lyricsData.source && root.lyricsData.source !== "none"
                           ? "  ·  " + root.lyricsData.source : "")
-        color: Theme.textDim
+        color: root.fgDim
     }
 
     // ---- synced ----
@@ -133,7 +140,7 @@ Item {
                 text: modelData.line
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
-                color: index === root.currentLine ? Theme.text : Theme.textDim
+                color: index === root.currentLine ? root.fgText : root.fgDim
             }
             MouseArea {
                 anchors.fill: parent
@@ -155,18 +162,20 @@ Item {
         clip: true
         contentHeight: plainText.implicitHeight
         onWheelScrolled: root.lastUserScrollMs = Date.now()
-        ScrollBar.vertical: VScroll {}
+        ScrollBar.vertical: VScroll { id: vscroll }
 
         PixelText {
             id: plainText
             // NOT parent.width: parent is the Flickable's contentItem, whose
             // width stays 0 when only contentHeight is set — bind to the
             // Flickable itself (minus the scrollbar).
-            width: Math.max(0, plainFlick.width - 12)
+            // The scrollbar's own width, never a literal — it is a desktop-wide
+            // setting now (docs/DESIGN.md 9.2) and ranges 11-16px.
+            width: Math.max(0, plainFlick.width - vscroll.barW)
             text: root.lyricsData.text
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
-            color: Theme.textDim
+            color: root.fgDim
         }
     }
 
@@ -207,6 +216,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: root.lyricsData.source === "instrumental-user"
             label: "search anyway"
+            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: {
                 Library.setInstrumental(root.trackId, false);
                 root.refetch();
@@ -217,6 +227,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: parent.isMiss
             label: "mark instrumental"
+            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: {
                 Library.setInstrumental(root.trackId, true);
                 root.refetch();

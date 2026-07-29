@@ -17,6 +17,13 @@ Item {
     property int maxColumns: 12
     property string scanStatus: ""
     property bool scanning: false
+    // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1).
+    // The drawer's `Theme.windowBorder` frame does NOT fade: it is the frame
+    // that makes this overlay read as a window at all, and Theme already carries
+    // a separate `windowBorderInactive` for a genuinely inactive frame.
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
 
     signal closeRequested()
     signal columnsRequested(int n)
@@ -67,12 +74,13 @@ Item {
                     id: title
                     anchors.left: parent.left
                     text: "settings"
-                    color: Theme.accent
+                    color: root.fgAccent
                 }
                 HeaderButton {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     label: "×"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     onClicked: root.closeRequested()
                 }
             }
@@ -91,7 +99,7 @@ Item {
                         id: colLabel
                         anchors.verticalCenter: parent.verticalCenter
                         text: "cover columns"
-                        color: Theme.text
+                        color: root.fgText
                     }
                     Row {
                         anchors.right: parent.right
@@ -99,6 +107,7 @@ Item {
                         spacing: 2
                         HeaderButton {
                             label: "-"
+                            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                             onClicked: root.columnsRequested(root.columns - 1)
                         }
                         PixelText {
@@ -106,10 +115,11 @@ Item {
                             width: 20
                             horizontalAlignment: Text.AlignHCenter
                             text: root.columns
-                            color: Theme.textDim
+                            color: root.fgDim
                         }
                         HeaderButton {
                             label: "+"
+                            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                             onClicked: root.columnsRequested(root.columns + 1)
                         }
                     }
@@ -119,6 +129,7 @@ Item {
                     from: root.minColumns
                     to: root.maxColumns
                     step: 1
+                    fgAccent: root.fgAccent
                     value: root.columns
                     onMoved: function(v) { root.columnsRequested(v); }
                 }
@@ -140,12 +151,13 @@ Item {
                     PixelText {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "volume levelling"
-                        color: Theme.text
+                        color: root.fgText
                     }
                     HeaderButton {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         label: Player.replayGain
+                        fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                         lit: Player.replayGain !== "off"
                         onClicked: {
                             var modes = ["auto", "track", "album", "off"];
@@ -159,7 +171,7 @@ Item {
                     width: parent.width
                     text: Player.rgStatus
                     wrapMode: Text.Wrap
-                    color: Theme.textDim
+                    color: root.fgDim
                 }
 
                 Item {
@@ -169,13 +181,13 @@ Item {
                     PixelText {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "preamp"
-                        color: Theme.text
+                        color: root.fgText
                     }
                     PixelText {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         text: (Player.rgPreamp >= 0 ? "+" : "") + Player.rgPreamp.toFixed(1) + " dB"
-                        color: Theme.textDim
+                        color: root.fgDim
                     }
                 }
                 Slider {
@@ -184,6 +196,7 @@ Item {
                     from: -15
                     to: 15
                     step: 0.5
+                    fgAccent: root.fgAccent
                     value: Player.rgPreamp
                     onMoved: function(v) { root.rgPreampRequested(v); }
                 }
@@ -198,12 +211,13 @@ Item {
                 PixelText {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "library"
-                    color: Theme.text
+                    color: root.fgText
                 }
                 HeaderButton {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     label: root.scanning ? "scanning" : "rescan"
+                    fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                     lit: root.scanning
                     onClicked: if (!root.scanning) root.rescanRequested()
                 }
@@ -214,7 +228,7 @@ Item {
                 text: root.scanStatus
                 clip: true
                 height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                color: Theme.textDim
+                color: root.fgDim
             }
         }
     }

@@ -19,6 +19,11 @@ Item {
     id: root
     property int albumId: 0
     property var info: ({})
+    // Foreground tones, handed in already faded by the gallery
+    // (docs/DESIGN.md §3.1.1). The album art is not one of them — see AlbumGrid.
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
     signal closed()
     // Relayed out of the track list's right-click menu (AlbumGrid passes them
     // on to the window, which owns navigation).
@@ -74,7 +79,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 1
-        color: Theme.accent
+        color: root.fgAccent
     }
 
     Rectangle {
@@ -118,34 +123,37 @@ Item {
             text: root.info.album || ""
             wrapMode: Text.Wrap
             maximumLineCount: root.stacked ? 2 : 3
-            color: Theme.text
+            color: root.fgText
         }
         PixelText {
             width: parent.width
             text: root.info.artist || ""
             clip: true
             height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-            color: Theme.textDim
+            color: root.fgDim
         }
         PixelText {
             width: parent.width
             text: (root.info.year > 0 ? root.info.year + "  ·  " : "")
                   + (root.info.trackCount || 0) + " tracks"
-            color: Theme.textDim
+            color: root.fgDim
         }
         Item { width: 1; height: 8 }
         Row {
             spacing: 10
             HeaderButton {
                 label: "> play"
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.playAlbum(root.albumId, 0)
             }
             HeaderButton {
                 label: "+ queue"
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: Player.queueAlbum(root.albumId)
             }
             HeaderButton {
                 label: "× close"
+                fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
                 onClicked: root.closed()
             }
         }
@@ -158,6 +166,9 @@ Item {
         width: Math.max(1, root.width - x - (root.stacked ? root.pad : 4))
         height: Math.max(1, root.height - y - 8)
         model: AlbumTracksModel
+        fgText: root.fgText
+        fgDim: root.fgDim
+        fgAccent: root.fgAccent
         showArtist: false
         scrollable: false      // the panel is sized to hold every row
         inAlbum: root.albumId  // "go to album" would land where we already are

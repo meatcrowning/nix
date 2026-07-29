@@ -6,6 +6,10 @@ import QtQuick
 Rectangle {
     id: root
     property string query: ""
+    // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1).
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
     signal closed()
     // From the track list's right-click menu; the window owns navigation (and
     // dismisses this overlay on the way, since it covers the view it lands on).
@@ -22,14 +26,16 @@ Rectangle {
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
             text: "results for \"" + root.query + "\"  (" + SearchModel.count + ")"
-            color: Theme.textDim
+            color: root.fgDim
         }
         HeaderButton {
             label: "> play all"
+            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: Library.playFromModel(SearchModel, 0)
         }
         HeaderButton {
             label: "× close"
+            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
             onClicked: root.closed()
         }
     }
@@ -41,6 +47,9 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         model: SearchModel
+        fgText: root.fgText
+        fgDim: root.fgDim
+        fgAccent: root.fgAccent
         showNumber: false
         onPlayed: function(index) { Library.playFromModel(SearchModel, index); }
         onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }

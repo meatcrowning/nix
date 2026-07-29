@@ -20,6 +20,23 @@ Item {
     // bar carrying that name, exactly as if it had been typed.
     signal browseArtist(string artist)
 
+    // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1)
+    // and passed straight on to the queue, the lyrics pane and the stars.
+    //
+    // THE COVER ART IS NOT FADED. It is an image, not a foreground tone: there
+    // is no `Theme.inactive` version of a photograph, only an opacity or a
+    // desaturation, and neither is anything the design language asks for —
+    // §3.1.1 fades "the things drawn *in* a foreground tone". filer is the
+    // precedent that already had to decide this: PreviewTile greys its filename
+    // and its selection frame when the window is unfocused and leaves the
+    // thumbnail itself untouched, and viewer never dims the image it exists to
+    // show. Dimming a full-bleed album cover would also be by far the loudest
+    // thing on the page — a focus change would read as the artwork loading
+    // rather than as the window going quiet.
+    property color fgText: Theme.text
+    property color fgDim: Theme.textDim
+    property color fgAccent: Theme.accent
+
     // Which name the cover's menu acts on: the ALBUM artist, since that's the
     // tag the gallery filter matches — except on a compilation, where it names
     // no one and the playing track's own artist is the useful answer.
@@ -197,6 +214,9 @@ Item {
             clip: true
             trackId: root.cur.id !== undefined ? root.cur.id : -1
             active: root.visible
+            fgText: root.fgText
+            fgDim: root.fgDim
+            fgAccent: root.fgAccent
         }
 
         Rectangle {
@@ -262,7 +282,7 @@ Item {
                         text: root.cur.title || "nothing playing"
                         wrapMode: Text.Wrap
                         maximumLineCount: 2
-                        color: root.cur.title ? Theme.text : Theme.textDim
+                        color: root.cur.title ? root.fgText : root.fgDim
                     }
                     Row {
                         id: rateBits
@@ -274,6 +294,7 @@ Item {
 
                         Stars {
                             anchors.verticalCenter: parent.verticalCenter
+                            fgAccent: root.fgAccent
                             rating: root.cur.rating === null || root.cur.rating === undefined
                                     ? -1 : root.cur.rating
                             onRated: function(fmps) { Library.setRating(root.cur.id, fmps); }
@@ -299,7 +320,7 @@ Item {
                     text: root.cur.artist || ""
                     clip: true
                     height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
-                    color: Theme.textDim
+                    color: root.fgDim
                 }
                 // Album, with its original release year trailing the name. The
                 // name yields width to the year rather than the other way round,
@@ -316,7 +337,7 @@ Item {
                                         parent.width - (albumYear.visible
                                                         ? albumYear.width + parent.spacing : 0)))
                         height: Theme.fontSize + 2  // descender room, as above
-                        color: Theme.textDim
+                        color: root.fgDim
                     }
                     PixelText {
                         id: albumYear
@@ -362,7 +383,7 @@ Item {
                 anchors.topMargin: 10
                 x: 8
                 text: "queue  (" + Player.queueLength + ")"
-                color: Theme.textDim
+                color: root.fgDim
             }
             TrackList {
                 objectName: "queueList"   // handle for headless layout harnesses
@@ -372,6 +393,9 @@ Item {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 model: QueueModel
+                fgText: root.fgText
+                fgDim: root.fgDim
+                fgAccent: root.fgAccent
                 showNumber: false
                 // A queue is usually one artist deep; let the list work out
                 // whose name has stopped carrying information and drop it.

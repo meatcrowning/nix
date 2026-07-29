@@ -45,7 +45,28 @@ Window {
         Prefs.set("albumCols", n);
     }
 
-    readonly property bool act: win.active
+    // Focus-aware foreground, in lock-step with the titlebar (filer's idiom,
+    // docs/DESIGN.md §3.1.1). hyprvtb greys the titlebar's text and glyphs to
+    // `Theme.inactive` the moment the window loses focus, so EVERY foreground
+    // in the window goes the same way — otherwise the album grid, the queue and
+    // the lyrics stay lit under a dead bar and the window reads as broken
+    // rather than unfocused.
+    //
+    // Derived ONCE here and handed down as plain colours; no pane and no
+    // delegate reads `win.active` or `Theme.text/textDim/accent` for itself.
+    // That is a performance rule too: the track list draws one row per track and
+    // the album grid one tile per album, so a focus change re-evaluates three
+    // expressions per pane instead of one per delegate.
+    //
+    // Three tones only. `Theme.dim` (the tertiary tone: the ♫ art placeholder,
+    // an unrated star, a play count) is already below the grey and would be
+    // BRIGHTENED by it; `Theme.crit` (the favourite heart) is a status colour,
+    // and filer's PreviewTile keeps its error tone lit unfocused for the same
+    // reason. Backgrounds, `Theme.border` hairlines, `Theme.bgAlt` inset fills
+    // and the `Theme.highlight` row fill do not move at all.
+    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
 
     // The OUTER titlebar shows the window title — put the playing track there
     // ("artist — title") instead of a static app name. The inner column's
@@ -254,18 +275,27 @@ Window {
             filtered: searchInput.text !== ""
             expandedAlbumId: win.openAlbumId
             cols: win.albumCols
+            fgText: win.fgText
+            fgDim: win.fgDim
+            fgAccent: win.fgAccent
             onOpened: function(albumId) { win.openAlbum(albumId); }
             onSearchArtist: function(artist) { win.browseArtist(artist); }
         }
         PlaylistsView {
             anchors.fill: parent
             visible: win.view === "playlists"
+            fgText: win.fgText
+            fgDim: win.fgDim
+            fgAccent: win.fgAccent
             onOpenAlbumRequested: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
         }
         NowPlaying {
             anchors.fill: parent
             visible: win.view === "now"
+            fgText: win.fgText
+            fgDim: win.fgDim
+            fgAccent: win.fgAccent
             onOpenAlbum: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtist: function(artist) { win.browseArtist(artist); }
         }
@@ -277,6 +307,9 @@ Window {
         visible: win.searching
         z: 40
         query: searchInput.text
+        fgText: win.fgText
+        fgDim: win.fgDim
+        fgAccent: win.fgAccent
         onClosed: win.closeSearch()
         // Leaving the results for an album means leaving the overlay too — it
         // covers the gallery the album section opens in. browseArtist already
@@ -306,7 +339,7 @@ Window {
         height: 22
         z: 50
         color: Theme.bgAlt
-        border.color: searchInput.activeFocus ? Theme.accent : Theme.border
+        border.color: searchInput.activeFocus ? win.fgAccent : Theme.border
         border.width: 1
 
         TextInput {
@@ -319,7 +352,7 @@ Window {
             font.pixelSize: Theme.fontSize
             font.hintingPreference: Font.PreferFullHinting
             renderType: Text.NativeRendering
-            color: Theme.text
+            color: win.fgText
             clip: true
             onTextChanged: {
                 if (win.searching) Library.search(text);
@@ -352,6 +385,9 @@ Window {
         scanStatus: win.scanStatus
         scanning: win.scanning
         onCloseRequested: win.settingsOpen = false
+        fgText: win.fgText
+        fgDim: win.fgDim
+        fgAccent: win.fgAccent
         onColumnsRequested: function(n) { win.setAlbumCols(n); }
         onRescanRequested: Library.rescan()
         onReplayGainRequested: function(mode) { Player.setReplayGain(mode); }
@@ -387,7 +423,7 @@ Window {
         z: 60
         visible: text !== ""
         text: win.scanStatus
-        color: Theme.textDim
+        color: win.fgDim
     }
 
     // ---- global keys ----
