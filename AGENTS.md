@@ -303,8 +303,12 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   and it fires **only while he is at the machine** — locked or away, the answer
   is queued, not dropped. The filter is semantic, never authorship: an agent
   moving an item to LANDED, or the docs sync pulling somebody's prose edit, adds
-  no answer and must not fire. `top` only (`home/` is shared with book, and two
-  machines acting on one answer is two agents on one repo). Kill switch:
+  no answer and must not fire. It runs on **both** machines; the duplicate two
+  watchers over one synced file would otherwise cause is prevented by HOST
+  AFFINITY — the board app stamps which machine he answered on, and each watcher
+  fires only on its own stamp (an unstamped answer, i.e. a hand edit, belongs to
+  `top`). Typed input needs no rule: the inbox is machine-local. No automatic
+  takeover — re-answer on the other machine to hand an item over. Kill switch:
   `touch ~/.local/state/board-watch/off`. Log `~/.cache/board-watch.log`;
   harness `tools/board-watch-test.py`; runbook `docs/agents/board-watch.md`.
 - `home/srvs/claude-state.nix` + `claude-state-files/` — two-way sync of **the

@@ -42,6 +42,11 @@ What it asserts, in order:
               oneshot unit, because that is the only place the bug exists. And
               a worker that ends without recording anything is reported to him
               as a failure rather than passing for success
+  affinity    TWO MACHINES, ONE FILE: this unit runs on `top` and on `book`
+              now and `docs/board.md` syncs both ways, so an answer stamped for
+              the other machine must NOT fire here, one stamped for this machine
+              must, an UNSTAMPED one (a hand edit) is worked by exactly one of
+              them, and re-answering on the other machine is the hand-off
   the loop    the three defects behind 2026-07-28's 3,151 starts, kept apart
               because they are three: an EMPTY NEEDS YOU seeds once rather than
               forever (and an old state file is upgraded, not re-seeded); a
@@ -597,6 +602,93 @@ def test_the_loop():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_host_affinity():
+    """TWO WATCHERS, ONE FILE — the hazard that came with running on book.
+
+    `home/srvs/board-watch.nix` is no longer `top`-only, and `docs/board.md`
+    syncs both ways every five minutes, so both machines see the same `[x]`.
+    Firing on content alone would put two agents on one job, on two checkouts of
+    the same two repos, both committing and both pushing.
+
+    The defence is the stamp the board app writes beside his answer
+    (`boardparse.set_answer_host`): the machine he typed it on works it. This
+    asserts all three cases against ONE store, which is the point — the same
+    bytes, read by two hosts, must fire exactly once between them.
+    """
+    print("host affinity - two machines, one board.md")
+    d = tempfile.mkdtemp(prefix="board-watch-host-")
+    try:
+        r = Rig(d)
+        r.run(BOARD_WATCH_HOST="top")                     # seed
+        r.clear()
+
+        # He answers on BOOK. The app stamps it as it writes.
+        r.edit("- [ ] Do it the short way\n- [ ] Do it the long way\n\n>\n",
+               "- [x] Do it the short way\n- [ ] Do it the long way\n\n>\n"
+               "<!-- answered-on: book -->\n")
+        doc = bp.parse(r.text())
+        it = [i for i in doc["needs"] if i["key"] == "first-question"][0]
+        check("the stamp parses, and is not drawn as prose",
+              it["answerHost"] == "book" and it["answered"]
+              and not any("answered-on" in (b.get("raw") or "")
+                          for b in it["body"]), repr(it["answerHost"]))
+
+        r.run(BOARD_WATCH_HOST="top")
+        check("an answer stamped for the OTHER machine does not fire here",
+              r.fires() == [], str(r.fires()))
+        check("...and says whose it is, once", any(
+            "answered on book" in l for l in open(r.log)))
+        r.run(BOARD_WATCH_HOST="top")
+        check("...and it is recorded, so it is not re-considered every tick",
+              r.fires() == [] and sum("answered on book" in l
+                                      for l in open(r.log)) == 1)
+
+        # The same bytes, on book.
+        os.makedirs(os.path.join(d, "book"), exist_ok=True)
+        r2 = Rig(os.path.join(d, "book"))
+        r2.run(BOARD_WATCH_HOST="book")                   # seed
+        r2.clear()
+        r2.edit("- [ ] Do it the short way\n- [ ] Do it the long way\n\n>\n",
+                "- [x] Do it the short way\n- [ ] Do it the long way\n\n>\n"
+                "<!-- answered-on: book -->\n")
+        r2.run(BOARD_WATCH_HOST="book")
+        check("...while the machine it was typed on DOES fire",
+              r2.fires() == ["first-question"], str(r2.fires()))
+
+        # The hand-off: re-answering on top restamps, which reads as new HERE
+        # and as already-recorded THERE. It is the whole takeover story, and it
+        # cannot double-fire, because only one host is ever named.
+        r.clear()
+        r.edit("<!-- answered-on: book -->", "<!-- answered-on: top -->")
+        r.run(BOARD_WATCH_HOST="top")
+        check("re-answering on this machine hands the item over",
+              r.fires() == ["first-question"], str(r.fires()))
+
+        # An UNSTAMPED answer — a hand edit, or one predating the stamp — has a
+        # stated owner rather than a race. Both hosts apply the same rule to the
+        # same bytes and exactly one says yes.
+        # Two rigs again, because each machine keeps its OWN fingerprints
+        # (`~/.local/state/board-watch/` syncs nowhere) — which is also why a
+        # tick on one machine can never suppress the other's.
+        legacy = []
+        for name, host in (("legacy-book", "book"), ("legacy-top", "top")):
+            os.makedirs(os.path.join(d, name), exist_ok=True)
+            rg = Rig(os.path.join(d, name))
+            rg.run(BOARD_WATCH_HOST=host)                 # seed
+            rg.clear()
+            rg.edit("- [ ] Yes", "- [x] Yes")             # a HAND edit: no stamp
+            rg.run(BOARD_WATCH_HOST=host)
+            legacy.append(rg.fires())
+        check("an UNSTAMPED answer is not worked by book", legacy[0] == [],
+              str(legacy[0]))
+        check("...and is worked by top, the default owner",
+              legacy[1] == ["second-question"], str(legacy[1]))
+        check("...so exactly one machine works it, which is the whole rule",
+              len(legacy[0]) + len(legacy[1]) == 1)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     d = tempfile.mkdtemp(prefix="board-watch-test-")
     try:
@@ -859,6 +951,7 @@ def main():
 
     test_worker_outlives_the_tick()
     test_the_loop()
+    test_host_affinity()
 
     print()
     if fails:

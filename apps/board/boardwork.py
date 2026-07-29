@@ -201,16 +201,45 @@ def set_cap(n):
 
 
 # ------------------------------------------------------------------ dispatch
+# ------------------------------------------------------------- which machine
+#: This system runs on BOTH machines now (`home/srvs/board-watch.nix`), so an
+#: agent can no longer be told it is on `top`: it was, for a while, and a prompt
+#: naming the wrong host is worse than one naming none — the rebuild command,
+#: the architecture and the flake attribute are all different on book.
+#:
+#: `os.uname().nodename` is the OS hostname (`top` / `book`), which is not the
+#: flake attribute (`top` / `air`); the table below is the one place that
+#: mapping is written down outside `~/nix/AGENTS.md`.
+HOST = os.environ.get("BOARD_WATCH_HOST") or os.uname().nodename
+
+_HOSTS = {
+    "top": "x86_64 NixOS, flake attribute `top`. A rebuild here would be "
+           "`sudo rebuild-top` - which you are not allowed to run",
+    "book": "an aarch64 MacBook Air running Fedora Asahi with home-manager "
+            "layered on top, flake attribute `air`. It is NOT NixOS: there is "
+            "no `rebuild-top` and no `sys/` here, and the equivalent of a "
+            "rebuild is `home-manager switch --flake ~/nix#air` - which you "
+            "are not allowed to run either",
+}
+
+
+def host_line():
+    """``top` (x86_64 NixOS, ...)`, for the top of every prompt."""
+    return "`%s` (%s)" % (HOST, _HOSTS.get(
+        HOST, "a machine this system has no description for - read "
+              "`~/nix/AGENTS.md` before running anything that changes it"))
+
+
 #: The rules every agent this system spawns runs under. They are HIS decisions,
 #: already settled (see `home/srvs/board-watch-files/board-watch.py`), and the
 #: two new prompts below quote them verbatim rather than paraphrasing: a worker
 #: that rebuilds his machine while he is looking at something else is the one
 #: failure this whole feature must not have.
 RULES = """1. **NEVER rebuild and never change the running machine.** No `sudo \
-rebuild-top`, `nixos-rebuild`, `hyprctl`, `qs ipc`, `systemctl`, `loginctl`. \
-`apps/` runs live source, so a `.py`/`.qml` change is picked up when he next \
-relaunches. If the work cannot land without a rebuild or a reload: **stop, \
-leave that part undone**, and say so on the board.
+rebuild-top`, `nixos-rebuild`, `home-manager switch`, `hyprctl`, `qs ipc`, \
+`systemctl`, `loginctl`. `apps/` runs live source, so a `.py`/`.qml` change is \
+picked up when he next relaunches. If the work cannot land without a rebuild or \
+a reload: **stop, leave that part undone**, and say so on the board.
 2. **Never open a window on his screen and never drive his running apps.** \
 Offscreen harnesses (`QT_QPA_PLATFORM=offscreen`) and `tools/sandbox.sh` only; \
 he does every visual check himself.
@@ -219,13 +248,19 @@ right now. `git commit -m "msg" -- <explicit> <paths>`, always. `git add -N` \
 for new files. Never a bare `git commit`, never `-a`, never a destructive or \
 reverting git command (`reset --hard`, `checkout --`, `restore`, `stash`, \
 `clean`).
-4. **Push to `main`** when it works. No branch, no PR.
+4. **Push to `main`** when it works. No branch, no PR — and **`git pull \
+--rebase` immediately before you push.** This system now runs on BOTH of his \
+machines, so another agent on the other host may have pushed since you started; \
+a rejected push is normal and the answer is `git pull --rebase` and push again, \
+never `--force` and never giving up. `~/nix` (public) and `docs/` (private, its \
+own repo inside this checkout) are SEPARATE repos: pull and push each from its \
+own directory.
 5. Read `AGENTS.md` at the repo root, then the nested one closest to what you \
 are editing, then `docs/DESIGN.md` if you put pixels on a screen. They outrank \
 your instincts about this codebase."""
 
 WORKER_PROMPT = """You are running headless, with no human watching, on the \
-machine `top` (x86_64 NixOS, flake attribute `top`). Work in `{repo}`.
+machine {host}. Work in `{repo}`.
 
 An orchestrator split up something he asked for and gave you one piece of it. \
 This is your whole job; another agent has the rest, and may be editing other \
@@ -293,7 +328,7 @@ There is nobody to ask. Finish, or write down why you did not.
 """
 
 ORCHESTRATOR_PROMPT = """You are running headless, with no human watching, on \
-the machine `top` (x86_64 NixOS, flake attribute `top`). Work in `{repo}`.
+the machine {host}. Work in `{repo}`.
 
 **You are the orchestrator, and you do not do the work.** He typed the \
 following into the one box on his board. Your job is to work out what it \
@@ -379,6 +414,7 @@ ALLOW = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task", "TodoWrite",
          "NotebookEdit", "WebFetch", "WebSearch"]
 DENY = ["Bash(sudo:*)", "Bash(rebuild-top:*)", "Bash(nixos-rebuild:*)",
         "Bash(rbsys:*)", "Bash(rbhome:*)", "Bash(update:*)",
+        "Bash(home-manager:*)",
         "Bash(hyprctl:*)", "Bash(qs:*)", "Bash(systemctl:*)", "Bash(loginctl:*)",
         "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
@@ -565,7 +601,7 @@ def _spawn_worker(rec):
     aid = "w%s" % os.urandom(3).hex()
     session = str(uuid.uuid4())
     prompt = WORKER_PROMPT.format(
-        repo=REPO, task=rec["task"], rules=RULES,
+        repo=REPO, host=host_line(), task=rec["task"], rules=RULES,
         context=("--- what the orchestrator knows that you do not ---\n%s\n--- end ---\n\n"
                  % rec["context"]) if rec.get("context") else "")
     stub = os.environ.get("BOARD_WORK_SPAWN")

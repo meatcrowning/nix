@@ -94,6 +94,22 @@ for anything in this app that writes:
   "worked by an agent" flag to the store to help it; the filter is deliberately
   content-based and authorship-blind (a `git pull` from book has no author it
   could ask about anyway).
+- **...with ONE exception, and it is this app's job: the HOST STAMP.** board-watch
+  runs on `top` AND on `book` now, and this file syncs both ways every five
+  minutes, so "he answered this" is not on its own a reason to fire — two
+  watchers would put two agents on one job. So every write here that leaves an
+  item ANSWERED also writes `<!-- answered-on: <hostname> -->` under the `>`
+  block, in the same targeted line edit (`Board._stamp` ->
+  `boardparse.set_answer_host`), and clearing the answer removes it again. The
+  machine he answered on is the machine that works it.
+  - It is an HTML comment because **`board.md` is his and must still read
+    cleanly**: markdown shows nothing for it, `boardparse` consumes it into
+    `item["answerHost"]` so it is not even prose, and `reader` skips HTML
+    comment blocks (`apps/reader/mdparse.py`, changed in the same pass — it used
+    to draw one as an ordinary paragraph). **Nothing in this app draws it.**
+  - Re-answering an item on the other machine restamps it, and the stamp is part
+    of board-watch's fingerprint — so that IS the hand-off. There is no
+    automatic takeover; `docs/agents/board-watch.md` says why.
 
 ### ...and the item MOVES when it does
 
@@ -569,7 +585,7 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 ```
 
-`tools/board-test.py`, offscreen, eight layers (193 checks). Two of them are
+`tools/board-test.py`, offscreen, eight layers (202 checks). Two of them are
 new and are the ones to read first if the fan-out misbehaves:
 
 - **what an agent says vs what it does** (`test_phase`) — the classifier per

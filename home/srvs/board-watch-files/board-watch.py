@@ -83,13 +83,23 @@ THE THREE HAZARDS, and how each is defended:
      are ticked, plus his free text) and fire only when a decision that was
      already known becomes newly answered. An item moving to LANDED, a reworded
      paragraph, a new question, a new IN FLIGHT row: no new answer, no fire.
-  2. THE SYNC ALSO WRITES. nix-docs-sync pulls book's copy every five minutes
-     with no human in the loop. Same filter handles it — and note that an answer
-     he typed on BOOK and that arrived here by `git pull` SHOULD fire. That is
-     the same event, not a false positive, which is exactly why the filter looks
-     at content and not at provenance.
+  2. THE SYNC ALSO WRITES. nix-docs-sync pulls the other machine's copy every
+     five minutes with no human in the loop. Same filter handles the rewordings
+     and the moved rows — but an ANSWER that arrives that way is a special case,
+     and it is the reason for hazard 4.
+  4. TWO WATCHERS, ONE FILE. This unit runs on `top` and on `book` (it was
+     `top`-only until 2026-07-29, which was simply wrong — an answer typed on
+     book did nothing until he was next at the desktop). Both machines see the
+     same `[x]`, so firing on content alone would put two agents on one job, on
+     two checkouts of the same two repos, both committing and both pushing. The
+     defence is HOST AFFINITY, and it is by construction rather than by
+     agreement: the board app stamps the machine he answered on, `fingerprint()`
+     carries the stamp and `owns()` fires only for this host. Nothing is
+     claimed, nothing is negotiated, and neither machine ever has to know
+     whether the other is switched on. See HOST/DEFAULT_HOST/owns() below.
   3. CONCURRENCY. Two rapid edits must not put two agents on one shared git
      index. flock() below, plus systemd's own refusal to run a oneshot twice.
+     (Per machine — hazard 4 is the cross-machine half, and no lock can be.)
 
 FIRST RUN records the whole board and fires nothing: three of his decisions are
 already answered, and waking up to three agents is not the feature. Two things
@@ -123,6 +133,8 @@ filter, the queue and the dedupe can be exercised without spawning anything:
     BOARD_WATCH_SPIN_LIMIT  undrained runs in a row before the backoff (8)
     BOARD_WATCH_SPIN_WINDOW seconds the streak has to have started within (60)
     BOARD_WATCH_SPIN_BACKOFF  seconds a backed-off run sleeps for (60)
+    BOARD_WATCH_HOST        pretend to be this machine (default: the hostname)
+    BOARD_WATCH_DEFAULT_HOST  who works an UNSTAMPED answer (default `top`)
 
 `tools/board-watch-test.py` drives all of them against a throwaway copy.
 """
@@ -130,6 +142,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -142,6 +155,28 @@ BOARD = os.environ.get("BOARD_WATCH_BOARD", os.path.join(REPO, "docs", "board.md
 STATE = os.environ.get("BOARD_WATCH_STATE",
                        os.path.join(HOME, ".local", "state", "board-watch"))
 LOG = os.environ.get("BOARD_WATCH_LOG", os.path.join(HOME, ".cache", "board-watch.log"))
+
+# ------------------------------------------------------------ HOST AFFINITY
+#: WHICH MACHINE THIS IS. This unit runs on `top` AND on `book` now, and
+#: `docs/board.md` syncs both ways every five minutes — so "he answered this" is
+#: not on its own a reason to fire. Two watchers would read the same `[x]` and
+#: put two agents on one job, on two checkouts of the same repos, both
+#: committing and both pushing.
+#:
+#: **The host an answer was typed on works it.** The board app stamps it
+#: (`boardparse.set_answer_host`, an HTML comment the parser owns), the
+#: fingerprint below carries it, and `owns()` is the whole filter. Race-free by
+#: construction: nothing is claimed, nothing is negotiated, and no decision
+#: depends on what the other machine is doing or whether it is even switched on.
+HOST = os.environ.get("BOARD_WATCH_HOST") or os.uname().nodename
+
+#: ...and who works an answer with NO stamp. Only a hand edit in a text editor
+#: produces one now (the app always stamps), plus every answer that predates the
+#: stamp. `top` is the desktop that is always on, so it is the default owner;
+#: book is shut for days at a time and an unstamped answer would sit unworked.
+#: A stated default, not a race: both machines apply the same rule to the same
+#: bytes and exactly one of them says yes.
+DEFAULT_HOST = os.environ.get("BOARD_WATCH_DEFAULT_HOST", "top")
 
 # The kill switch, and it is deliberately a FILE rather than a nix option or a
 # systemd `disable`: he can stop this at 2am with `touch` and no rebuild, and
@@ -199,7 +234,24 @@ def fingerprint(item):
     he already chose must not read as him changing his mind.
     """
     ticked = ",".join(str(o["index"]) for o in item["options"] if o["checked"])
-    return "idx:" + ticked + "|ans:" + " ".join(item["answer"].split())
+    return ("idx:" + ticked + "|ans:" + " ".join(item["answer"].split())
+            + "|on:" + (item.get("answerHost") or ""))
+
+
+def owns(item):
+    """Is this answer THIS machine's to work? See HOST above.
+
+    The stamp is part of the fingerprint on purpose, so it is also the HAND-OFF:
+    re-answering an item on the other machine restamps it, which reads as a new
+    answer there and as an already-recorded one here. That is the whole takeover
+    story today — deliberate, one gesture, and it cannot double-fire, because
+    only one host is ever named. There is no automatic takeover: a claim would
+    have to live in a file that syncs every five minutes, and a five-minute
+    window in which both machines believe they own an item is exactly the
+    duplicate this exists to prevent.
+    """
+    h = (item.get("answerHost") or "").strip()
+    return h == HOST if h else HOST == DEFAULT_HOST
 
 
 def item_span(lines, item):
@@ -418,7 +470,7 @@ def note_on_board(bullet):
 
 # ------------------------------------------------------------------ the agent
 PROMPT = """You are running headless, with no human watching, on the machine \
-`top` (x86_64 NixOS, flake attribute `top`). Work in `{repo}`.
+{host}. Work in `{repo}`.
 
 He answered one decision on his board (`docs/board.md`, the store behind the \
 `board` app). Your whole job is that ONE decision, below, verbatim from the \
@@ -433,8 +485,8 @@ His answer: {answer}
 RULES, in force for this session:
 
 1. **NEVER rebuild and never change the running machine.** No `sudo \
-rebuild-top`, `nixos-rebuild`, `hyprctl` (reload, plugin, dispatch or \
-otherwise), `qs ipc`, `systemctl`, `loginctl`. `apps/` runs live source, so a \
+rebuild-top`, `nixos-rebuild`, `home-manager switch`, `hyprctl` (reload, \
+plugin, dispatch or otherwise), `qs ipc`, `systemctl`, `loginctl`. `apps/` runs live source, so a \
 `.py`/`.qml` change there is picked up when he next relaunches the app and \
 needs nothing from you. If the work genuinely cannot land without a rebuild, a \
 compositor reload or a panel hot-reload: **stop, leave that part undone**, and \
@@ -450,7 +502,13 @@ agents. `git commit -m "msg" -- <explicit> <paths>`, always. Never a bare \
 files: `git add -N` only. Never run a destructive or reverting git command \
 (`reset --hard`, `checkout --`, `restore`, `stash`, `clean`) — he leaves real \
 uncommitted work here.
-4. **Push to `main`** when it works. No branch, no PR.
+4. **Push to `main`** when it works. No branch, no PR — and **`git pull \
+--rebase` immediately before you push**. This system runs on BOTH of his \
+machines now, so the other host's agents push to these same remotes; a rejected \
+push is ordinary, and the answer is `git pull --rebase` and push again. Never \
+`--force`, and never leave the work unpushed because the first attempt bounced. \
+`{repo}` (public) and `{repo}/docs` (private) are SEPARATE repos — pull and push \
+each from its own directory.
 5. Read `AGENTS.md` at the repo root, then the nested one closest to whatever \
 you are editing, then `docs/DESIGN.md` if anything you do puts pixels on a \
 screen. They outrank your instincts about this codebase.
@@ -524,6 +582,16 @@ def spawn(prompt, agent_id, label, session=None, timeout=None):
     """
     stub = os.environ.get("BOARD_WATCH_SPAWN")
     env = dict(os.environ, BOARD_WATCH_KEY=agent_id, BOARD_AGENT_ID=agent_id)
+    # SAY SO, LOUDLY, rather than failing as a bare ENOENT. `claude` reaches
+    # this unit through the PATH pinned in `board-watch.nix`, and that PATH has
+    # to name two different profile layouts: NixOS's `/etc/profiles/per-user`
+    # on top, and standalone home-manager's `~/.nix-profile/bin` on book. If it
+    # is missing, every run fails identically and the board must say why.
+    if not stub and not shutil.which("claude", path=env.get("PATH")):
+        why = ("without starting at all (`claude` is not on this unit's PATH "
+               "on %s; PATH=%s)" % (HOST, env.get("PATH", "")))
+        log("cannot spawn: " + why)
+        return 127, why, 0.0
     if stub:
         cmd = ["/bin/sh", "-c", stub]
     else:
@@ -604,7 +672,8 @@ def work_the_queue():
     log("orchestrating %d thing(s) he typed" % len(msgs))
     try:
         rc, how, secs = spawn(
-            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, notes=notes, rules=bw.RULES,
+            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
+                                          notes=notes, rules=bw.RULES,
                                           cap=bw.cap()),
             aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S)
     finally:
@@ -848,7 +917,16 @@ def tick():
             # an agent, not answered by him. Record it; do not act on it.
             continue
         if fp != seen[item["key"]] and item["answered"]:
-            fired_candidates.append(item)
+            if owns(item):
+                fired_candidates.append(item)
+            else:
+                # Answered on the OTHER machine, which is the one that works it.
+                # Recorded (below) rather than queued, so this is said once and
+                # not on every tick for the rest of the file's life.
+                log("decision %s was answered on %s - %s works it, not %s"
+                    % (item["num"] or item["key"],
+                       item.get("answerHost") or DEFAULT_HOST,
+                       item.get("answerHost") or DEFAULT_HOST, HOST))
 
     if first_run:
         state["answers"] = fresh
@@ -914,7 +992,8 @@ def tick():
     said = ". ".join(parts) if parts else "(answered, but the text is empty)"
 
     log("firing on decision %s (%s) - %s" % (item["num"] or "?", item["key"], why))
-    prompt = PROMPT.format(repo=REPO, item=item_span(doc["lines"], item),
+    prompt = PROMPT.format(repo=REPO, host=bw.host_line(),
+                           item=item_span(doc["lines"], item),
                            answer=said, key=item["key"])
 
     # MOVE IT BEFORE THE AGENT RUNS. An answered decision that sits in NEEDS YOU

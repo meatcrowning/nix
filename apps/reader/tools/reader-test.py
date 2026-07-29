@@ -150,6 +150,21 @@ See [the contents](#second--section) and <https://example.com/x>.
     check("the outline is the headings, with their block index",
           [o["text"] for o in ol] == ["Title One", "Second - Section"], ol)
 
+    # An HTML COMMENT is drawn by NOTHING. `docs/board.md` carries one —
+    # `boardparse`'s `<!-- answered-on: <host> -->` stamp, which says which
+    # machine an answer was typed on so board-watch, running on both machines,
+    # cannot work it twice — and reader opens that file from board's `md` cell.
+    # It used to be drawn as an ordinary paragraph, in the middle of his prose.
+    cm = mdparse.parse("before\n\n<!-- answered-on: top -->\n\nafter\n")
+    check("an HTML comment is not drawn at all",
+          [b["text"] for b in cm] == ["before", "after"], cm)
+    cm2 = mdparse.parse("a\n\n<!-- one\ntwo -->\n\nb\n")
+    check("...including a multi-line one, as a block",
+          [b["text"] for b in cm2] == ["a", "b"], cm2)
+    cm3 = mdparse.parse("a\n\n<!-- never closed\n\nb\n")
+    check("...and an unterminated one swallows the rest, like every renderer",
+          [b["text"] for b in cm3] == ["a"], cm3)
+
     # px() itself, including the case that must NOT be touched
     check("px maps a curly apostrophe", px("don’t") == "don't")
     check("px leaves CJK alone (no ASCII form exists)", px("中文") == "中文")

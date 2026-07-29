@@ -25,6 +25,9 @@ parser keys on):
         prose                 what the decision is
         - [ ] option          alternatives, wrapped continuations indented
         > answer              HIS free text. Always beats the options
+        <!-- answered-on: h -->  WHICH MACHINE he answered on. Drawn by nothing;
+                              board-watch runs on both and only fires for its
+                              own host. `set_answer_host()` is its only writer
         *If unanswered:* ...  what happens if he never answers
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions
     ## IN FLIGHT              a | table |: what / where / notes
@@ -66,6 +69,18 @@ _BULLET = re.compile(r"^(\s*)[-*+]\s+(.*)$")
 _QUOTE = re.compile(r"^\s{0,3}>\s?(.*)$")
 _NUMBERED = re.compile(r"^(\d+)\.\s+(.*)$")
 _IF_UNANS = re.compile(r"^\*If unanswered:\*\s*(.*)$", re.I)
+#: WHICH MACHINE he answered on. board-watch now runs on `top` AND on `book`
+#: (`home/srvs/board-watch.nix`) and `docs/` syncs both ways every five minutes,
+#: so without this the same answer is picked up twice, by two agents, on two
+#: checkouts of the same repos. The host an answer was typed on works it.
+#:
+#: It is an HTML comment on a line of its own, immediately under the `>` block,
+#: because this file is HIS and must go on reading cleanly: markdown renders it
+#: as nothing, `reader` draws nothing for it, and the board app draws nothing
+#: for it either. **The parser owns it** — it is never prose, is written only by
+#: `set_answer_host()` below, and is carried through a relocation with the rest
+#: of the item's raw lines like everything else.
+_ANSWERED_ON = re.compile(r"^\s*<!--\s*answered-on:\s*([A-Za-z0-9._-]+)\s*-->\s*$")
 _TABLE_SEP = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 _HR = re.compile(r"^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$")
 
@@ -188,7 +203,8 @@ def parse(src):
                         "title": text(mn.group(2) if mn else title),
                         "titleLine": i, "body": [], "options": [],
                         "answerFrom": -1, "answerTo": -1, "answer": "",
-                        "answerRaw": [], "ifUnanswered": "", "ifRaw": ""}
+                        "answerRaw": [], "ifUnanswered": "", "ifRaw": "",
+                        "answerHost": "", "hostLine": -1}
             elif sec == "landed":
                 close_item()
                 date = {"date": text(m3.group(1)), "rows": [], "prose": [],
@@ -247,6 +263,14 @@ def parse(src):
                 item["answerFrom"] = i
             item["answerTo"] = i
             item["answerRaw"].append(mq.group(1))
+            continue
+
+        # ---- which machine he answered on ----
+        mh = _ANSWERED_ON.match(ln) if sec == "needs" and item is not None else None
+        if mh:
+            close_prose()
+            item["answerHost"] = mh.group(1)
+            item["hostLine"] = i
             continue
 
         # ---- what happens if he never answers: the whole point of the file ----
@@ -334,6 +358,47 @@ def set_answer(lines, item, answer):
         new = ["> " + ln.rstrip() + "\n" for ln in body.split("\n")]
         new[-1] = new[-1][:-1] + eol
     return out[:frm] + new + out[to + 1:]
+
+
+def set_answer_host(lines, item, host):
+    """Stamp (or clear) the machine an answer was given on. One line, no prose.
+
+    board-watch runs on BOTH machines now and `docs/board.md` syncs both ways,
+    so "he answered this" is not on its own enough to fire: two watchers would
+    read the same `[x]` and put two agents on one job. **The host an answer was
+    typed on works it** — race-free by construction, and it matches how he uses
+    the two machines. This is where that fact is recorded.
+
+    An HTML comment, so his file still reads cleanly (see `_ANSWERED_ON`), and
+    written as a targeted line edit like everything else here: replaced in place
+    if it is already there, inserted directly under the `>` block if it is not,
+    and REMOVED when `host` is empty — an item with no answer must carry no
+    stamp, or clearing an answer would leave a marker behind for a machine that
+    no longer has anything to do.
+
+    The caller passes lines it has already computed the answer edit into, so the
+    indices must come from a parse of THOSE lines, not of the file before them.
+    """
+    out = list(lines)
+    at = item.get("hostLine", -1)
+    if not host:
+        return out[:at] + out[at + 1:] if at >= 0 else out
+    mark = "<!-- answered-on: %s -->" % host
+    if at >= 0:
+        if out[at].rstrip("\n").strip() == mark:
+            return out                          # already ours: byte-identical
+        return out[:at] + [mark + ("\n" if out[at].endswith("\n") else "")] \
+            + out[at + 1:]
+    anchor = item["answerTo"]
+    if anchor < 0:
+        anchor = (item["options"][-1]["line"] if item["options"]
+                  else item["titleLine"])
+    if anchor < 0 or anchor >= len(out):
+        return out
+    if out[anchor].endswith("\n"):
+        return out[:anchor + 1] + [mark + "\n"] + out[anchor + 1:]
+    # the anchor is the last line of a file with no trailing newline
+    return out[:anchor] + [out[anchor] + "\n", mark] + out[anchor + 1:]
 
 
 # ------------------------------------------------- moving an item BETWEEN sections
