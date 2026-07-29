@@ -426,9 +426,32 @@ Window {
                                         Para {
                                             id: todoText
                                             x: todoMark.width + 8
-                                            width: parent.width - x
+                                            width: parent.width - x - (15 * win.cellW + 8)
                                             color: win.fgText
                                             text: todoRow.modelData.text
+                                        }
+                                        // WHEN it was put on the board — his:
+                                        // *"mesages in the needs you section
+                                        // should all have the time they were
+                                        // placed on the board indicated on
+                                        // them."* Same treatment as a LANDED
+                                        // row's `when` and a decision's:
+                                        // trailing edge, `Theme.dim`, a width
+                                        // in CHARACTERS that the message text
+                                        // reserves whether or not this bullet
+                                        // has a stamp (§5.4) — so a bullet
+                                        // written before this existed wraps
+                                        // exactly where a new one does and
+                                        // nothing shifts as the list fills.
+                                        PixelText {
+                                            id: todoWhen
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            width: 15 * win.cellW
+                                            horizontalAlignment: Text.AlignRight
+                                            color: Theme.dim
+                                            text: todoRow.modelData.placed
+                                                  ? todoRow.modelData.placed : ""
                                         }
                                         MouseArea {
                                             id: tma

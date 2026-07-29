@@ -62,6 +62,7 @@ mechanism here could remove. `unowned()` reports them and `stall()` is their
 exit; neither is automatic, because a row this host does not own may be alive on
 the other one.
 """
+import datetime
 import json
 import os
 import re
@@ -503,7 +504,11 @@ def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
         num = (max(nums) + 1) if nums else 1
         title = "%d. %s" % (num, q)
         key["key"] = bp.slug(title)
-        block = ["### %s\n" % title, "\n"]
+        # WHEN it went up, on the line right under the title — his: *"mesages in
+        # the needs you section should all have the time they were placed on the
+        # board indicated on them."* An HTML comment, so the file still reads
+        # cleanly for him; `boardparse._PLACED` owns the shape and the reasons.
+        block = ["### %s\n" % title, bp.placed_now(), "\n"]
         for para in [p for p in (context or []) if (p or "").strip()]:
             block += [" ".join(para.split()) + "\n", "\n"]
         if asked_by:
@@ -520,6 +525,76 @@ def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
     if not bp.edit(path, go):
         raise BoardError("nothing was written")
     return key.get("key", "")
+
+
+def _blame_times(path):
+    """`{line index: local ISO minute}` for the store, from `docs/`'s git log.
+
+    `git blame --line-porcelain`, one call for the whole file. The store is
+    committed and pushed by a five-minute timer, so "when the commit that put
+    this line here was authored" is within a few minutes of when the item
+    actually went up — close enough to be true, and the only record there is for
+    an item written before the stamp existed.
+    """
+    p = os.path.abspath(path)
+    try:
+        r = subprocess.run(
+            ["git", "-C", os.path.dirname(p), "blame", "--line-porcelain",
+             "--", os.path.basename(p)],
+            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if r.returncode != 0:
+        return {}
+    out, n, when, tz = {}, -1, None, "+0000"
+    for ln in r.stdout.splitlines():
+        m = re.match(r"^[0-9a-f]{40}\s+\d+\s+(\d+)", ln)
+        if m:
+            n, when = int(m.group(1)) - 1, None
+        elif ln.startswith("author-time "):
+            when = int(ln.split()[1])
+        elif ln.startswith("author-tz "):
+            tz = ln.split()[1]
+        elif ln.startswith("\t") and n >= 0 and when:
+            off = int(tz[:3]) * 3600 + int(tz[0] + tz[3:]) * 60
+            local = datetime.datetime.utcfromtimestamp(when + off)
+            out[n] = local.strftime("%Y-%m-%dT%H:%M")
+    return out
+
+
+def backfill_placed(path=bp.BOARD_PATH):
+    """Stamp the items that were already on the board when the stamp landed.
+
+    A ONE-OFF migration, run by hand once (2026-07-29) and left here because it
+    is the only honest way to date the items that predate `placed_now()`: every
+    writer stamps from now on, so a second run finds nothing to do. It never
+    touches an item that already has a stamp, and an item git cannot date is
+    left alone rather than given a made-up time — the app draws no time for it,
+    which is the graceful answer and not an empty box.
+
+    Returns how many stamps it wrote.
+    """
+    times = _blame_times(path)
+    if not times:
+        return 0
+    wrote = [0]
+
+    def go(doc):
+        ins = []
+        for it in doc["needs"]:
+            if not it["placedRaw"] and it["titleLine"] in times:
+                ins.append((it["titleLine"], times[it["titleLine"]]))
+        for t in doc["todo"]:
+            if not t.get("placedRaw") and t["line"] in times:
+                ins.append((t.get("endLine", t["line"]), times[t["line"]]))
+        lines = list(doc["lines"])
+        for at, stamp in sorted(ins, reverse=True):
+            lines[at + 1:at + 1] = ["<!-- placed: %s -->\n" % stamp]
+        wrote[0] = len(ins)
+        return lines
+
+    bp.edit(path, go)
+    return wrote[0]
 
 
 def note(text, path=bp.BOARD_PATH):
