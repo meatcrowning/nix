@@ -444,12 +444,16 @@ Rules, all of them load-bearing:
   alive and neither can an unreaped one. Do not add a second definition of
   "running" anywhere in this tree.
 
-### A worker has a first name, and the name is what he reads
+### A worker has a name, and the name is what he reads
 
 *"can you give the workers regular human names? you can still keep the coded
 names if you'd like but i think itd be interesting to have them referred to by
-regular names"*. So every worker is `Rosa`, not `w1a2b3c`, on the card, in
-`boardctl` output, and in the bullet the orchestrator leaves on the board.
+regular names"*, then: *"i want the names of agents to be taken from the names
+of demons in the lesser key of solomon"*. So every worker is `Marbas`, not
+`w1a2b3c`, on the card, in `boardctl` output, and in the bullet the
+orchestrator leaves on the board. The pool is the Lemegeton's — the Ars
+Goetia's 72, plus the short names the Theurgia-Goetia and the Ars Paulina
+supply.
 
 - **The coded id is still the only key, and nothing was renamed.** The systemd
   unit (`board-worker-<id>`), `~/.cache/board-work/<id>.log`, the observation
@@ -463,11 +467,14 @@ regular names"*. So every worker is `Rosa`, not `w1a2b3c`, on the card, in
   string. A record written before this landed gets a name derived from its id
   (`name_for`, sha1 over the pool) — stable, and the same in every process.
 - **No two LIVE agents share one.** `pick_name` walks the pool past anything a
-  running agent already answers to, so a note he addresses to Rosa is never
-  ambiguous. Above 24 live agents a name repeats; the cap is 4.
+  running agent already answers to, so a note he addresses to Marbas is never
+  ambiguous. Above `len(NAMES)` live agents a name repeats; the cap is 4.
 - **A card draws the name and never the id.** It sits in the same 7-cell label
-  column as `says` and `doing`, so the three lines line up as one block —
-  which is why the pool is short ASCII names (§2.1's cell, §2.3's cmap).
+  column as `says` and `doing`, so the three lines line up as one block — which
+  is why an entry is **six ASCII characters at most** (§2.1's cell, §2.3's
+  cmap). `AgentRow` starts the title at `7 * cellW` and does not elide, so a
+  seventh character runs under it: that is what rules out `Focalor`, `Gremory`
+  and the other long spellings, and `board-test.py` asserts it.
 - **Nothing that has nobody on it is given a name**: a task queued above the cap,
   a decision he answered, an interactive session. Same rule as the inbox box —
   a name is a claim that somebody is on it.
@@ -559,7 +566,7 @@ of the filesystem here and not of anybody's diligence, and it is what
 
 | he types it... | what happens | what the footer says |
 | --- | --- | --- |
-| to a RUNNING agent | into that agent's inbox; the row keeps showing it as `waiting in its inbox` until the agent takes it | `left in Rosa's inbox - Rosa reads that between steps` (`its`/`it` for an agent with no name) |
+| to a RUNNING agent | into that agent's inbox; the row keeps showing it as `waiting in its inbox` until the agent takes it | `left in Marbas's inbox - Marbas reads that between steps` (`its`/`it` for an agent with no name) |
 | to one that has FINISHED | straight to the queue | `it is not running - queued for the next agent instead` |
 | with NOTHING running | straight to the queue | `queued - the next agent board-watch spawns gets it` |
 
@@ -793,7 +800,7 @@ new and are the ones to read first if the fan-out misbehaves:
   rest; every dispatched task is on disk exactly once in exactly one directory;
   queued work is drawn rather than hidden and is not offered an inbox it has no
   process for; a killed worker stops holding a slot and `promote()` starts the
-  queue oldest-first; **every worker has a first name** that is unique among the
+  queue oldest-first; **every worker has a name** that is unique among the
   living, persisted in its record rather than re-derived per poll, ASCII, and
   absent on a task nobody is on yet; a dead agent is filed under `stopped`
   **whatever it last claimed** and the sweep then drops its record; `ask`

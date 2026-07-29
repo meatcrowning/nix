@@ -79,6 +79,51 @@ ESCALATE_AFTER_S = int(os.environ.get("BOARD_INBOX_ESCALATE", "1800"))
 CLAUDE_COMMS = ("claude", ".claude-wrapped")
 
 
+# ------------------------------------------------------------ when it was born
+# ORDERING ONLY, AND IT NEVER REACHES THE SCREEN. The cards are drawn oldest
+# first so a new agent appends at the bottom and the rows above it do not move
+# — his reason for asking for one flat list: *"just keep agents ordered by
+# birth/age so they dont move around so much"*. That is the same use `promote()`
+# already makes of a stamp, and it is why the no-time rule (this module's
+# docstring, `boardwork.py`'s) is not bent by it: an ordering is not an age, and
+# nothing derived from these numbers is drawn, counted or ramped.
+def _boot_epoch():
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
+def _pid_born(pid):
+    """A process's own start time as an epoch, for the one kind of agent that
+    carries no stamp of ours: an interactive session nothing here spawned."""
+    ticks = bm._proc_start(pid) if pid else None
+    if ticks is None:
+        return 0.0
+    try:
+        return _boot_epoch() + float(ticks) / os.sysconf("SC_CLK_TCK")
+    except (ValueError, OSError):
+        return 0.0
+
+
+def born(rec, pid=0):
+    """Epoch seconds for a record, from whichever stamp it carries. `0.0` when
+    there is none at all, which sorts oldest — stable, and never a guess drawn
+    as a fact."""
+    for k in ("started", "at"):
+        v = (rec or {}).get(k)
+        if v:
+            try:
+                return time.mktime(time.strptime(str(v)[:19], "%Y-%m-%dT%H:%M:%S"))
+            except ValueError:
+                pass
+    return _pid_born(pid)
+
+
 # --------------------------------------------------------------- state layout
 def _root():
     base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
@@ -102,10 +147,13 @@ def clean_id(s):
 
 
 # ------------------------------------------------------------------- the names
-#: **An agent has a first name, and that is what he is shown.** His words:
+#: **An agent has a name, and that is what he is shown.** His words:
 #: *"can you give the workers regular human names? you can still keep the coded
 #: names if you'd like but i think itd be interesting to have them referred to
-#: by regular names"*.
+#: by regular names"*, then: *"i want the names of agents to be taken from the
+#: names of demons in the lesser key of solomon"* — so the pool is the
+#: Lemegeton's: the Ars Goetia's 72, plus the short names the Theurgia-Goetia
+#: and the Ars Paulina supply.
 #:
 #: THE NAME IS PRESENTATION AND NOTHING IS KEYED ON IT. The id (`w1a2b3c`) is
 #: still the key: the systemd unit, `~/.cache/board-work/<id>.log`, the
@@ -113,12 +161,22 @@ def clean_id(s):
 #: by it, and a message is addressed by it. Renaming any of those would orphan a
 #: worker that is running right now.
 #:
-#: Short on purpose — the card draws the name in the same label column as `says`
-#: and `doing`, which is 7 font cells wide, so a longer one would push the title
-#: out of line. ASCII only: §2.3, a glyph the font lacks clips the whole row.
-NAMES = ["Anna", "Ben", "Clara", "Dan", "Elena", "Frank", "Grace", "Henry",
-         "Ivy", "Jonah", "Kira", "Leo", "Maya", "Nils", "Omar", "Paula",
-         "Rosa", "Sam", "Tara", "Uma", "Vera", "Will", "Yara", "Zoe"]
+#: TWO RULES ON WHAT MAY GO IN, and both are about the row it is drawn in.
+#: **Six characters at most**: the card draws the name in the same label column
+#: as `says` and `doing`, 7 font cells wide, and `AgentRow` starts the title at
+#: `7 * cellW` with no elide — a seventh character runs under the title. That is
+#: what rules out `Focalor`, `Gremory`, `Bifrons` and the rest of the long
+#: spellings. **ASCII only**: §2.3, a glyph the font lacks clips the whole row,
+#: so `Belial` and never a diacritical spelling of it. Distinct
+#: case-insensitively, because `boardctl inbox send --to` matches on the name.
+NAMES = ["Agares", "Aim", "Amon", "Amy", "Anael", "Andras", "Bael", "Balam",
+         "Bariel", "Bathin", "Beleth", "Belial", "Berith", "Bidiel", "Botis",
+         "Buer", "Bune", "Caim", "Eligos", "Foras", "Furcas", "Furfur", "Gaap",
+         "Gediel", "Glasya", "Gusion", "Haures", "Ipos", "Leraje", "Marax",
+         "Marbas", "Murmur", "Orias", "Oriel", "Orobas", "Ose", "Paimon",
+         "Phenex", "Purson", "Raum", "Ronove", "Sallos", "Samael", "Seere",
+         "Shax", "Sitri", "Stolas", "Symiel", "Usiel", "Valac", "Vapula",
+         "Vepar", "Vine", "Vual", "Zagan", "Zepar"]
 
 
 def name_for(agent_id):
@@ -149,11 +207,11 @@ def _live_names():
 def pick_name(agent_id, taken=None):
     """`name_for`, moved along while a LIVE agent already answers to it.
 
-    Two agents called Rosa on one board would make a note he addresses to Rosa
-    ambiguous at the one moment it matters, so the name is chosen ONCE — at the
-    instant the id is minted — and written into the record. Above `len(NAMES)`
-    live agents there is nothing left to move to and a name repeats; the cap is
-    four, and saying that plainly beats inventing `Rosa 2`.
+    Two agents called Marbas on one board would make a note he addresses to
+    Marbas ambiguous at the one moment it matters, so the name is chosen ONCE —
+    at the instant the id is minted — and written into the record. Above
+    `len(NAMES)` live agents there is nothing left to move to and a name
+    repeats; the cap is four, and saying that plainly beats `Marbas 2`.
     """
     taken = _live_names() if taken is None else taken
     base = NAMES.index(name_for(agent_id))
@@ -491,7 +549,8 @@ def _stash_agents():
         out.append({"id": clean_id(rec.get("key")), "kind": "decision", "name": "",
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
-                    "session": rec.get("session") or "", "state": state})
+                    "session": rec.get("session") or "", "state": state,
+                    "born": born(rec, pid or 0)})
     return out
 
 
@@ -510,7 +569,8 @@ def agents(procs=None):
                     "name": rec.get("name") or name_for(rec.get("id") or ""),
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
                     "session": rec.get("session") or "",
-                    "state": "running" if bm._alive(rec) else "exited"})
+                    "state": "running" if bm._alive(rec) else "exited",
+                    "born": born(rec, rec.get("pid") or 0)})
 
     # Interactive sessions: the honest half. A `claude` process that IS one of
     # the agents above, or that descends from one, is already listed; anything
@@ -531,7 +591,8 @@ def agents(procs=None):
             continue
         out.append({"id": "s%d" % pid, "kind": "session", "name": "",
                     "title": "an interactive Claude Code session",
-                    "where": "", "pid": pid, "session": "", "state": "running"})
+                    "where": "", "pid": pid, "session": "", "state": "running",
+                    "born": _pid_born(pid)})
     # WHAT IT SAYS, AND WHAT IT IS DOING. Imported here rather than at the top:
     # `boardphase` imports this module, and the pair would not load otherwise.
     import boardphase as bph
@@ -543,6 +604,15 @@ def agents(procs=None):
         a["phase"] = obs.get("phase") or "unreported"
         a["says"] = bph.says(obs)            # its own words, or "" for silence
         a["actually"] = bph.actually(obs)    # observed, and never the claim
+        # The same two, as the SENTENCES the card draws — *"[agent name] is
+        # [what the agent says its doing]"* and *"[agent name] is actually
+        # [what it is actualy doing]"*. Built in `boardphase` because the
+        # joining is a judgement about the real strings (a stopped agent goes
+        # into the past tense, a claim with no phase word is quoted), and one
+        # place to get that right beats one per surface.
+        who = a.get("name") or ""
+        a["saysLine"] = bph.says_line(obs, who)
+        a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running")
         # `ok` / `quiet` / `none` / `unlinked` — which of the four honest
         # outcomes the observation is, so the card can label the line correctly
         # (`doing` while it runs, `last` once it has stopped) without
