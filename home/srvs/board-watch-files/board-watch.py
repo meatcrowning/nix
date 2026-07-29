@@ -54,11 +54,19 @@ the input up and either `dispatch`es workers or `ask`s him a question in NEEDS
 YOU. `apps/board/boardwork.py` owns the verbs, the concurrency cap and the
 prompt; read its docstring before changing any of it. Three consequences here:
 
-  * **This run is waited on; the workers it starts are not.** A worker is
-    detached, so four 45-minute runs cannot hold this script's flock — a
-    decision he answers five minutes later still fires on time. The orchestrator
-    IS waited on, at a much shorter timeout, because its failure has to put his
-    own sentence back on the board and there is nobody else left to do it.
+  * **This run is waited on; the workers it starts are not.** A worker runs as
+    its OWN transient systemd unit, so four 45-minute runs cannot hold this
+    script's flock — a decision he answers five minutes later still fires on
+    time. It has to be a unit and not merely a detached child: this is a
+    `oneshot`, and a detached child stays in the oneshot's cgroup, so every
+    worker was being killed seconds after it started while the board reported
+    the work as dispatched and in hand (`boardwork._spawn_worker`, 2026-07-29).
+    The orchestrator IS waited on, at a much shorter timeout, because its
+    failure has to put his own sentence back on the board and there is nobody
+    else left to do it.
+  * **A dispatch is a start, not a result.** `reap()` closes out every worker
+    whose process has gone, and one that never recorded anything gets a bullet
+    saying so. He must never be told something landed when it did not.
   * **A tick also PROMOTES work dispatched above the cap.** Same shape and same
     guarantee as `reconcile()` and `sweep()`: worst case one timer interval.
   * **Every spawn passes `--session-id`.** It is how his board says what an
@@ -378,6 +386,17 @@ FAIL_TEMPLATE = (
     "- **board-watch tried decision {num} ({title}) and did not finish it** - "
     "the agent exited {how}. Nothing was committed on its behalf; the answer is "
     "still on record above. Log: `~/.cache/board-watch.log`\n")
+
+
+#: A worker's process is gone and it never used `note`, `land` or `ask`. It did
+#: not finish, and the one thing this system must never do is let that read as
+#: done — so it lands in WAITING ON YOU TO DO in words, quoting the task, since
+#: by the time this runs the worker's card has already left his board.
+WORKER_FAIL = (
+    "- **a worker stopped without finishing: {task}** - it was dispatched from "
+    "something you typed into the box and it recorded nothing on this board, so "
+    "nothing landed for it. Answer or type it again to have another go. Log: "
+    "`~/.cache/board-work/{aid}.log`\n")
 
 
 def note_on_board(bullet):
@@ -775,6 +794,26 @@ def tick():
                 % rec.get("title"))
     except OSError as e:
         log("could not sweep the inbox: %s" % e)
+
+    # AND A WORKER THAT DIED MID-SENTENCE IS SAID SO, rather than being
+    # indistinguishable from one that did the job. The orchestrator can only
+    # ever report what it HANDED OUT; the result of each piece is the worker's
+    # own `note`/`land`/`ask`, and a worker whose process is gone without one is
+    # a failure he has to be able to see. On 2026-07-29 every worker was being
+    # killed seconds after it started (a detached child stays in the oneshot's
+    # cgroup — `boardwork._spawn_worker`), and his board said the work was
+    # dispatched and in hand. Nothing was ever built. This is the half of that
+    # fix which does not depend on the spawn being right.
+    try:
+        _, failed = bw.reap()
+        for rec in failed:
+            log("a worker stopped without recording anything: %s"
+                % rec.get("task", "")[:80])
+            note_on_board(WORKER_FAIL.format(
+                task=" ".join(rec.get("task", "").split())[:200],
+                aid=rec.get("agent") or "?"))
+    except (OSError, bm.BoardError) as e:
+        log("could not reap finished workers: %s" % e)
 
     # AND NO DISPATCHED WORK SITS QUEUED ONCE THERE IS ROOM FOR IT. Work above
     # the concurrency cap is a file in `work/pending/`, not a dropped task

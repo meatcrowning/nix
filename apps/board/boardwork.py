@@ -57,6 +57,57 @@ timer interval. It is drawn on his board in the `queued` group, because work
 that exists and is not running is exactly the thing a control surface must not
 hide.
 
+A WORKER IS ITS OWN SYSTEMD UNIT, and that is not a nicety
+----------------------------------------------------------
+**A detached child stays in its spawner's cgroup, and `board-watch.service` is
+a `oneshot`: when the orchestrator run finished, systemd killed everything left
+in that cgroup — every worker it had just started.** Measured on `top`
+2026-07-29, and it was live for a day: worker `we9f99c` registered at 22:49:16,
+the orchestrator exited at 22:49:29, and the worker's transcript ends thirteen
+seconds in, three tool calls deep, with `[Request interrupted by user]`. Nobody
+interrupted it. The orchestrator honestly reported "dispatched one worker",
+wrote a completion note, and **nothing was ever built** — the failure mode is
+SILENT SUCCESS, which is the worst one this system can have.
+
+`start_new_session=True` was never the fix: that detaches the process GROUP,
+which is a terminal-signal concept, and says nothing about the cgroup systemd
+kills by. So `_spawn_worker` asks the user manager for a transient unit instead:
+
+    systemd-run --user --unit=board-worker-<id> --service-type=exec ...
+
+Four things fall out of it, and all four are why this and not `KillMode=process`
+on the parent (which also survives — both were measured — but is a `.nix` change
+that only takes effect after a rebuild this system is not allowed to run):
+
+  * **The worker outlives the tick, the orchestrator, and every later tick.**
+    Its cgroup is its own and nothing sweeps it. `tools/board-watch-test.py`
+    proves it end to end: a worker dispatched with a job of *sleep past the
+    orchestrator's exit, then write a file* must have written that file.
+  * **It is a genuine systemd unit**, which is what he asked for in the first
+    place — *"a display on the board of currently active systemd claude agents"*.
+  * **`WORKER_TIMEOUT_S` finally means something.** It was declared and never
+    enforced: a detached `Popen` has no timeout. It is `RuntimeMaxSec` now.
+  * **Nothing has to reap it.** The user manager is its parent, so the zombie
+    window `boardmove._alive` guards against cannot open for a worker at all.
+    That clause stays: it is the ONE liveness rule and other callers rely on it.
+
+**Liveness is unchanged.** The unit writes its own pid into `work/pids/` before
+`exec`, so `boardmove._alive` goes on deciding by pid and kernel start time and
+there is still exactly one definition of "running" in this tree. `systemctl` is
+not consulted — a second answer to "is it alive" is the thing that must not
+appear here.
+
+A DISPATCH IS A START, NEVER A RESULT
+--------------------------------------
+The bug above cost him the work twice over: it also produced a board that said
+the work was done. So a worker's ending is now accounted for rather than
+assumed. `mark_reported()` is stamped by `boardctl note|land|ask` whenever
+`BOARD_AGENT_ID` names a worker, and `reap()` — at the top of every board-watch
+tick, beside `reconcile()`, `sweep()` and `promote()` — closes out every worker
+whose process is gone: one that recorded something is `done`, one that did not
+is `failed` AND SAYS SO ON HIS BOARD. The orchestrator's prompt is the other
+half: it may say what it handed out, never that anything landed.
+
 NO TIME PRESSURE. Nothing here hands the UI an elapsed time, an age, a count or
 an ordering by urgency. `at` stamps exist so `promote()` can take the oldest
 pending task first; they never reach the screen. Same rule as the rest of the
@@ -64,6 +115,7 @@ app, and it is the app's founding requirement.
 """
 import json
 import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -214,6 +266,11 @@ hand:**
 every edit is a targeted line edit under a lock. Do not open it in an editor. \
 `docs/` is its own git repo inside this checkout, so commit from inside `docs/`.
 
+   **Run it even if you finished nothing** — say what stopped you. A worker \
+that ends without recording anything is reported on his board as having stopped \
+without finishing, which is deliberate: he must never be told something landed \
+when it did not. That report is the only thing you cannot leave behind.
+
 8. **If you genuinely cannot decide something only he can decide, ASK — do not \
 guess big:**
 
@@ -259,6 +316,16 @@ worker sees only this>' --where '<the files it will touch>'
 
     python3 apps/board/tools/boardctl.py note '**<subject>** - <one line>'
 
+    python3 apps/board/tools/boardctl.py cap <n>      # a SETTING, applied now
+
+SOMETIMES HE IS NOT ASKING FOR WORK, HE IS TURNING A KNOB. *"change the number \
+of allowed agents to 5"* is not a task for a worker — it is this system's own \
+setting, and dispatching an agent for it turns a one-second change into a \
+model session, a commit and a wait. Apply it yourself with the tool above and \
+say so in your note. The knobs you own: the worker cap (`cap`). Anything else \
+that looks like a setting but has no tool here is a `dispatch` like any other, \
+and say in the note that it needed one.
+
 Read enough of the repo to split the work sensibly — `AGENTS.md` at the root, \
 the nested one nearest whatever he is talking about, `docs/DESIGN.md` if it is \
 visual. **Do not edit any file, do not commit, and do not run a test.** A \
@@ -290,8 +357,17 @@ RULES that bind you and every worker you dispatch:
 
 {rules}
 
-Finish by leaving one `note` saying what you dispatched and what you asked, so \
-he can see what you did with his sentence without reading a log. Then stop.
+YOUR NOTE REPORTS A START, NOT A RESULT. Finish by leaving one `note` saying \
+what you HANDED OUT and what you asked, so he can see what became of his \
+sentence without reading a log — and write it as what it is. **You have started \
+things. You have not finished any of them, and you cannot see whether they \
+worked.** Name each task and say it was handed to a worker and that nothing has \
+landed yet. Never write that something is done, fixed, wired, implemented or \
+working: a worker records its own result on this board when it finishes, and \
+one that stops without recording anything is reported to him as a failure. He \
+was once told, in a note exactly like the one you are about to write, that work \
+had been dispatched and was in hand, when every worker had already been killed \
+and nothing whatever was built. Do not be the second one.
 """
 
 # Allow the tools a working agent needs; deny the ones that change the machine
@@ -368,16 +444,116 @@ def dispatch(task, phase="", where="", context="", cap_=None):
     return rec
 
 
-def _spawn_worker(rec):
-    """Start a worker DETACHED and register it. Returns {id, pid, session}.
+#: The transient unit a worker runs as, `board-worker-<agent id>.service`. It is
+#: also what he sees when he asks systemd what claude agents are running, which
+#: is the shape he asked for the agents section in.
+UNIT_PREFIX = "board-worker-"
 
-    Detached on purpose: the orchestrator that calls this is itself running
+#: Set to `1` to force the old detached-`Popen` path. For a machine with no
+#: systemd user manager only — a worker started that way DIES WITH THE TICK when
+#: the caller is `board-watch.service`, which is the bug this replaced.
+NO_UNIT = os.environ.get("BOARD_WORK_NO_UNIT") == "1"
+
+def unit_name(agent_id):
+    return UNIT_PREFIX + ba.clean_id(agent_id)
+
+
+def _start_unit(aid, cmd, env, logpath, title):
+    """Ask the user manager for one transient unit. Returns a pid, or None.
+
+    None means "nothing was started" — the caller may safely fall back. A pid of
+    -1 means "it started and is already gone", which `boardmove._alive` reads as
+    dead; 0 must never be returned, because `_alive` reads 0 as *unowned* and
+    would leave a phantom card running forever.
+
+    `--service-type=exec` is what makes the pid knowable: it does not return
+    until the unit's process has `exec`ed, so `MainPID` is the agent itself and
+    is read exactly once, here, to fill in the registration. **That is a
+    recording, not a liveness rule** — `boardmove._alive` goes on being the only
+    answer to "is it running", by pid and kernel start time, and nothing in this
+    tree asks systemd that question. A worker that manages to exit inside that
+    window has no MainPID left to read and is recorded as already gone, which is
+    true.
+
+    (A pid file written by a shell shim was tried first and is a trap: systemd
+    expands `$` in `ExecStart`, so `echo $$` reaches the shell as a bare `$` and
+    every worker looked like it had exited immediately. Measured.)
+    """
+    if NO_UNIT or not shutil.which("systemd-run"):
+        return None
+    unit = unit_name(aid)
+    run = ["systemd-run", "--user", "--quiet", "--collect",
+           "--unit", unit, "--service-type=exec",
+           "--working-directory", REPO,
+           "--description", "board worker: " + title[:60],
+           # The 45 minutes `WORKER_TIMEOUT_S` always claimed and a detached
+           # Popen could never enforce. One wedged worker must not hold a slot
+           # against the cap for the rest of the day.
+           "--property=RuntimeMaxSec=%d" % WORKER_TIMEOUT_S,
+           "--property=StandardInput=null",
+           "--property=StandardOutput=append:%s" % logpath,
+           "--property=StandardError=append:%s" % logpath]
+    # A transient unit starts in the MANAGER's environment, not ours, so
+    # everything the worker needs has to be carried across explicitly — PATH to
+    # find `claude`, HOME, and the BOARD_* overrides a harness sets. Same set the
+    # `Popen` path passed; a newline cannot go through `--setenv` and nothing we
+    # pass has one.
+    for k in sorted(env):
+        v = env[k]
+        if isinstance(v, str) and "\n" not in v and "\0" not in v:
+            run.append("--setenv=%s=%s" % (k, v))
+    run += ["--"] + cmd
+    try:
+        p = subprocess.run(run, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if p.returncode != 0:
+        return None
+    try:
+        q = subprocess.run(["systemctl", "--user", "show", unit,
+                            "-p", "MainPID", "--value"],
+                           capture_output=True, text=True, timeout=30)
+        return int(q.stdout.strip() or 0) or -1
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return -1           # it ran; we could not see which pid. Not "unowned".
+
+
+def _start_detached(cmd, env, logpath):
+    """The fallback, for a machine with no user manager. Returns a pid or None.
+
+    **Under `board-watch.service` this does not survive the tick** — a detached
+    child stays in the unit's cgroup and a `oneshot` takes its cgroup with it.
+    Kept only so `boardctl dispatch` still works from an ordinary shell where
+    there is nothing to be killed by.
+    """
+    try:
+        log = open(logpath, "ab", buffering=0)
+    except OSError:
+        log = subprocess.DEVNULL
+    try:
+        p = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.DEVNULL,
+                             stdout=log, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    except OSError:
+        return None
+    finally:
+        if log is not subprocess.DEVNULL:
+            log.close()
+    return p.pid
+
+
+def _spawn_worker(rec):
+    """Start a worker in ITS OWN UNIT and register it. Returns {id, pid, session}.
+
+    Not waited on, on purpose: the orchestrator that calls this is itself running
     inside a board-watch tick, and a tick that waits on four 45-minute workers
     would hold board-watch's flock for the rest of the day — nothing else could
-    fire, including the decision he answers in the meantime. So a worker is its
-    own session, reparented to init, and the ONLY things that know it is alive
-    are its registration and `boardmove._alive`. That is also why a worker can
-    outlive the tick that started it and still draw a card.
+    fire, including the decision he answers in the meantime.
+
+    But "not waited on" is not "detached", and conflating the two is what cost
+    him a day of silently-killed workers: see the module docstring. The worker
+    gets a transient systemd unit, so its cgroup is its own and the oneshot that
+    started it takes nothing with it when it exits.
 
     **`--session-id` is why the card can say what the worker is really doing.**
     We choose the uuid, so we know exactly which transcript under
@@ -405,22 +581,86 @@ def _spawn_worker(rec):
                "-n", "board: " + rec["task"][:50]]
     env = dict(os.environ, BOARD_AGENT_ID=aid, BOARD_WATCH_KEY=aid,
                BOARD_WORK_TASK=rec["task"], BOARD_WORK_SESSION=session)
-    try:
-        log = open(_log_path(aid), "ab", buffering=0)
-    except OSError:
-        log = subprocess.DEVNULL
-    try:
-        p = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.DEVNULL,
-                             stdout=log, stderr=subprocess.STDOUT,
-                             start_new_session=True)
-    except OSError as e:
-        return {"id": aid, "pid": 0, "state": "failed", "why": str(e)}
-    finally:
-        if log is not subprocess.DEVNULL:
-            log.close()
-    ba.register(aid, rec["task"][:70], p.pid, kind="worker",
+    logpath = _log_path(aid)
+    pid = _start_unit(aid, cmd, env, logpath, rec["task"])
+    how = "unit"
+    if pid is None:
+        pid = _start_detached(cmd, env, logpath)
+        how = "detached"
+    if pid is None:
+        return {"id": aid, "pid": 0, "state": "failed",
+                "why": "neither systemd-run nor a plain spawn would start it"}
+    ba.register(aid, rec["task"][:70], pid, kind="worker",
                 where=rec.get("where") or "", session=session)
-    return {"id": aid, "pid": p.pid, "session": session, "state": "running"}
+    # The task file learns which agent owns it, so `reap()` can tell a worker
+    # that finished and said so from one that vanished mid-sentence. Written
+    # after the spawn: before it there is no id, and a task with an id but no
+    # process would be reaped as a failure on the very next tick.
+    if rec.get("file"):
+        rec = dict(rec, agent=aid, unit=(UNIT_PREFIX + ba.clean_id(aid))
+                   if how == "unit" else "")
+        try:
+            ba._write_json(rec["file"], {k: v for k, v in rec.items()
+                                         if k != "file"})
+        except OSError:
+            pass
+    return {"id": aid, "pid": pid, "session": session, "state": "running",
+            "agent": aid, "spawned": how}
+
+
+# ------------------------------------- a dispatch is a START, never a RESULT
+def reported_file(agent_id):
+    return os.path.join(work_dir("reported"), ba.clean_id(agent_id) + ".json")
+
+
+def mark_reported(agent_id=None, what=""):
+    """Record that this agent put its result on the board.
+
+    Called by `boardctl note|land|ask`, which are the three ways a worker is
+    allowed to say anything at all. It is what makes `reap()` able to tell a
+    worker that finished from one that stopped mid-sentence — and that
+    distinction is the whole reason it exists, because before it a worker that
+    was killed thirteen seconds in was indistinguishable, on his board, from one
+    that did the job.
+    """
+    aid = ba.clean_id(agent_id or os.environ.get("BOARD_AGENT_ID") or "")
+    if not aid or aid == "agent":
+        return False
+    try:
+        ba._write_json(reported_file(aid),
+                       {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        "what": " ".join((what or "").split())[:300]})
+    except OSError:
+        return False
+    return True
+
+
+def reap():
+    """Close out every worker whose process has gone. Returns (done, failed).
+
+    Run at the top of every board-watch tick, beside `reconcile()`, `sweep()`
+    and `promote()` — same shape, same worst case of one timer interval.
+
+    A `failed` record is not bookkeeping: **the caller puts it on his board**. A
+    worker that stops without recording anything did not do the work, and the
+    one thing this system must never do is let that read as done. It is also the
+    only trace such a worker leaves, since its registration is dropped by
+    `sweep()` and its card leaves the list the moment it dies.
+    """
+    live = {a["id"] for a in ba.agents() if a["state"] == "running"}
+    done, failed = [], []
+    for rec in ba._list(work_dir("taken")):
+        aid = rec.get("agent")
+        if not aid or aid in live:
+            continue          # still working, or dispatched before this existed
+        ok = os.path.exists(reported_file(aid))
+        moved = ba._move(rec, work_dir("done" if ok else "failed"))
+        (done if ok else failed).append(moved)
+        try:
+            os.unlink(reported_file(aid))
+        except OSError:
+            pass
+    return done, failed
 
 
 def promote(cap_=None):

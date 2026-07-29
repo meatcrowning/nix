@@ -357,36 +357,99 @@ Window {
                     Repeater {
                         model: win.todo
                         delegate: Item {
+                            id: todoRow
                             required property var modelData
+                            // The reply box is opened from the row's own menu
+                            // and stays open until he sends or clears it, like
+                            // every other editor here — a draft is never thrown
+                            // away by a click somewhere else.
+                            property bool replying: win.draftOf("todo:" + modelData.line) !== ""
                             width: needsCol.width
-                            implicitHeight: todoText.implicitHeight
+                            implicitHeight: bar.implicitHeight
+                                            + (replying ? replyBox.height + 4 : 0)
                             height: implicitHeight
-                            Rectangle {
-                                anchors.fill: parent
-                                color: tma.containsMouse ? Theme.highlight : "transparent"
-                            }
-                            PixelText {
-                                id: todoMark
-                                x: 0
-                                color: win.fgDim
-                                text: "-"
-                            }
-                            Para {
-                                id: todoText
-                                x: todoMark.width + 8
-                                width: parent.width - x
-                                color: win.fgText
-                                text: modelData.text
-                            }
-                            MouseArea {
-                                id: tma
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.RightButton
-                                onClicked: (m) => {
-                                    var p = mapToItem(null, m.x, m.y);
-                                    win.todoMenu(modelData, p.x, p.y);
+
+                            Item {
+                                id: bar
+                                width: parent.width
+                                implicitHeight: todoText.implicitHeight
+                                height: implicitHeight
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: tma.containsMouse ? Theme.highlight : "transparent"
                                 }
+                                PixelText {
+                                    id: todoMark
+                                    x: 0
+                                    color: win.fgDim
+                                    text: "-"
+                                }
+                                Para {
+                                    id: todoText
+                                    x: todoMark.width + 8
+                                    width: parent.width - x
+                                    color: win.fgText
+                                    text: todoRow.modelData.text
+                                }
+                                MouseArea {
+                                    id: tma
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    // Left is here for the DOUBLE click only —
+                                    // *"i should be able to just double click
+                                    // on stuff in the to do when you feel like
+                                    // it section to remove them"*. A single
+                                    // left click stays inert: there is nothing
+                                    // for it to do on a bullet the store gives
+                                    // no checkbox, and a row that reacted to
+                                    // one pass of the pointer would make the
+                                    // removal an accident waiting to happen.
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: (m) => {
+                                        if (m.button !== Qt.RightButton)
+                                            return;
+                                        var p = mapToItem(null, m.x, m.y);
+                                        win.todoMenu(todoRow.modelData, p.x, p.y,
+                                                     todoRow);
+                                    }
+                                    onDoubleClicked: (m) => {
+                                        if (m.button !== Qt.LeftButton)
+                                            return;
+                                        Board.removeTodo(todoRow.modelData.line);
+                                    }
+                                }
+                            }
+
+                            // *"the top item on the right click menu for to do
+                            // items should be `reply` that lets me reply
+                            // directly to it instead of typing in the top box
+                            // like i am doing now"*. Same component, same
+                            // `boardagents.send()` path, same conservation
+                            // property — the only difference is that the chore
+                            // is quoted into what he sends, so whoever picks it
+                            // up knows which one he meant.
+                            InputBox {
+                                id: replyBox
+                                y: bar.height + 4
+                                width: parent.width
+                                visible: todoRow.replying
+                                height: visible ? implicitHeight : 0
+                                draft: win.draftOf("todo:" + todoRow.modelData.line)
+                                fgAccent: win.fgAccent
+                                fgText: win.fgText
+                                fgDim: win.fgDim
+                                placeholder: "reply to this one - it goes to the inbox"
+                                onDraftEdited: (b) => win.setDraft(
+                                    "todo:" + todoRow.modelData.line, b)
+                                onSubmitted: (b) => {
+                                    if (win.replyToTodo(todoRow.modelData, b))
+                                        todoRow.replying = false;
+                                }
+                            }
+
+                            function beginReply() {
+                                todoRow.replying = true;
+                                replyBox.beginEdit();
                             }
                         }
                     }
@@ -846,13 +909,44 @@ Window {
         menu.open(x, y, items.concat(fileItems()).concat(undoItems()));
     }
 
-    // A `to do` bullet. §7.2's ordering is a safety property: read-only first,
-    // then the undo, and the one destructive entry LAST behind its own separator
-    // so the pointer never lands on it. No confirm — §10.3's two deliberate acts
-    // are the right-click and this entry, exactly as `ProcMenu`'s `force quit`
-    // settled it; the undo above is what covers the misclick.
-    function todoMenu(t, x, y) {
-        var items = [{ label: "copy line", trigger: () => Board.copy(t.text) }];
+    // Replying to one chore rather than to the board as a whole — *"the top
+    // item on the right click menu for to do items should be `reply` that lets
+    // me reply directly to it instead of typing in the top box like i am doing
+    // now"*.
+    //
+    // It is NOT a second way of writing: it is `boardagents.send()`, the one
+    // path the top box and every agent card already take, so a reply is a file
+    // in exactly one of `to/`, `queue/`, `taken/` at every instant and the
+    // conservation argument still holds. The only thing this adds is the QUOTE —
+    // the chore's own text travels with his sentence, because "yes, do that one"
+    // means nothing to the orchestrator that reads it half an hour later.
+    // Returns whether it went, so the row can close its editor.
+    function replyToTodo(t, body) {
+        if (body.trim() === "")
+            return false;
+        var msg = Agents.send("", "", "",
+                              "about the `to do` bullet \"" + t.text + "\": " + body);
+        if (msg === "")
+            return false;
+        win.status = msg;
+        win.setDraft("todo:" + t.line, "");
+        return true;
+    }
+
+    // A `to do` bullet. §7.2's ordering is a safety property: the thing he does
+    // most is first, then read-only, then the undo, and the one destructive
+    // entry LAST behind its own separator so the pointer never lands on it.
+    //
+    // No confirm on the removal, and now two ways to reach it: this entry, and
+    // a DOUBLE click on the row (his ask). Neither is a single click, and the
+    // undo above is what covers the misclick — §10.3's deliberateness is in the
+    // second click and in the fact that a removed line can be put back
+    // byte-for-byte, which is not true of a signal to a process.
+    function todoMenu(t, x, y, row) {
+        var items = [];
+        if (row)
+            items.push({ label: "reply", trigger: () => row.beginReply() });
+        items.push({ label: "copy line", trigger: () => Board.copy(t.text) });
         items = items.concat(fileItems()).concat(undoItems());
         items.push({ separator: true });
         items.push({ label: "remove this from the list",

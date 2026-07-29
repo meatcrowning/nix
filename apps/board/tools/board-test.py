@@ -1345,8 +1345,20 @@ def test_window(app, tmp):
     # note to a running agent takes rather than a second one.
     boxes = [it for it in descendants(win.contentItem())
              if it.property("placeholder") is not None]
+    # "Not attached" is the point: every OTHER box on the page belongs to
+    # something — a running agent's card, or (since he asked to be able to
+    # answer a chore where it sits) one `to do` bullet's own reply. There is
+    # exactly one that belongs to nothing and starts work from scratch.
+    unattached = [b for b in boxes
+                  if str(b.property("placeholder")).startswith("type anything")]
     check("the page has ONE box that is not attached to any agent",
-          len([b for b in boxes if "inbox" in str(b.property("placeholder"))]) == 1,
+          len(unattached) == 1,
+          [str(b.property("placeholder")) for b in boxes])
+    check("...and every other box says what it IS attached to",
+          all("reply to this one" in str(b.property("placeholder"))
+              or "send it a command" in str(b.property("placeholder"))
+              or "leave a note" in str(b.property("placeholder"))
+              for b in boxes if b not in unattached),
           [str(b.property("placeholder")) for b in boxes])
     typed = "the scrollbar arrows feel sluggish"
     said = keep[5].send("", "", "", typed)
@@ -1475,6 +1487,87 @@ def test_window(app, tmp):
           board.property("undoText") == "", board.property("undoText"))
     check("a line that is no longer there is refused, not obeyed",
           board.removeTodo(9999) is False)
+
+    # ---- and a DOUBLE click does it too, which is how he asked to do it ----
+    # *"i should be able to just double click on stuff in the to do when you
+    # feel like it section to remove them"*. It did nothing for a day: the
+    # row's MouseArea was `acceptedButtons: Qt.RightButton`, so the left button
+    # never reached it at all. Driven with real QMouseEvents against the real
+    # delegate, because that is the only thing that would have caught it — the
+    # slot behind it was always fine.
+    # QTest, not hand-built QMouseEvents: Qt Quick derives a double click from
+    # its own press bookkeeping, so a MouseButtonDblClick posted straight at the
+    # window is silently dropped and every version of this test passes. Measured
+    # — a hand-built sequence reached `onClicked` and never `onDoubleClicked`.
+    from PySide6.QtCore import QPointF, Qt                             # noqa: E402
+    from PySide6.QtTest import QTest                                   # noqa: E402
+
+    def at(item, dy=8):
+        return item.mapToScene(QPointF(item.width() / 2, dy)).toPoint()
+
+    rows = [it for it in descendants(win.contentItem())
+            if it.property("replying") is not None]
+    check("every `to do` bullet is drawn as a row that can be replied to",
+          len(rows) == len(prop(win, "todo")) == 1, len(rows))
+    if rows:
+        QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier, at(rows[0]))
+        spin(200)
+        check("a single left click leaves the chore exactly where it was",
+              len(prop(win, "todo")) == 1, prop(win, "todo"))
+        QTest.mouseDClick(win, Qt.LeftButton, Qt.NoModifier, at(rows[0]))
+        spin(250)
+        check("...and a DOUBLE click removes it", len(prop(win, "todo")) == 0,
+              prop(win, "todo"))
+        check("...through the same one-level undo the menu offers",
+              board.property("undoText") == text, board.property("undoText"))
+        board.undoRemove()
+        spin(200)
+
+    # ---- `reply`, the top entry on a chore's own menu ----
+    # *"the top item on the right click menu for to do items should be `reply`
+    # that lets me reply directly to it instead of typing in the top box like i
+    # am doing now"*. It is not a second write path: `boardagents.send()` with
+    # nothing named, exactly as the top box does, with the chore QUOTED so
+    # whoever reads it half an hour later knows which one he meant.
+    chore = prop(win, "todo")[0]
+    # Re-found: the Repeater rebuilt its delegates when the chore came back, so
+    # the item captured above is a dangling pointer (it segfaults, promptly).
+    rows = [it for it in descendants(win.contentItem())
+            if it.property("replying") is not None]
+    win.todoMenu(chore, 20, 20, rows[0] if rows else None)
+    spin(150)
+    menus = [it for it in descendants(win.contentItem())
+             if it.property("items") is not None and it.isVisible()]
+    labels = [str(i.get("label", ""))
+              for i in menus[0].property("items").toVariant()] if menus else []
+    check("`reply` is the TOP entry on a chore's right-click menu",
+          labels[:1] == ["reply"], labels)
+    check("...and the one destructive entry is still LAST, behind a separator",
+          labels[-1:] == ["remove this from the list"], labels)
+    if menus:
+        menus[0].close()
+    spin(100)
+    boxed = [it for it in descendants(rows[0])
+             if "reply to this one" in str(it.property("placeholder"))]
+    check("...and the chore has a reply box of its own, closed until he asks",
+          len(boxed) == 1 and not boxed[0].isVisible(),
+          [b.isVisible() for b in boxed])
+    rows[0].beginReply()
+    spin(200)
+    check("...which `reply` opens in place, rather than sending him to the top box",
+          bool(boxed) and boxed[0].isVisible() and rows[0].property("replying") is True,
+          [b.isVisible() for b in boxed])
+    before = len(ba.pending())
+    ok = win.replyToTodo(chore, "yes, that one, and make it dim")
+    check("replying to a chore goes somewhere and says so", ok is True, ok)
+    q = [m["text"] for m in ba.pending()]
+    check("...on disk exactly once, in the same queue the top box writes to",
+          len(q) == before + 1, q)
+    check("...quoting the chore, so the reply is not context-free",
+          any(chore["text"] in t and "make it dim" in t for t in q), q)
+    check("an empty reply writes nothing at all",
+          win.replyToTodo(chore, "   ") is False
+          and len(ba.pending()) == before + 1)
 
     # ---- it survives the small screen (§5.6) ----
     win2.setWidth(420)
