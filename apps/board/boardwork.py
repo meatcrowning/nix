@@ -363,9 +363,19 @@ verb you last used, and he reads the two side by side deliberately. Being \
 honest costs you nothing; a claim that does not match your tool calls is \
 visible to him and is not hidden.
 
-9. **When you are done, record it on the board — with the tool, never by \
-hand.** If you COMMITTED anything, every commit gets a line in LANDED, one \
-call each:
+9. **Record each piece AS IT FINISHES, not all of it at the end.** [his, \
+2026-07-29] a worker handed several things left his board saying nothing until \
+the whole run was over — *"the board does not update as each task completes"*. \
+So a worker with more than one item on it calls `note` for each one the moment \
+that one is done and pushed, rather than saving a single report for the end. \
+Each call is its own line edit under the lock and takes effect immediately; \
+there is nothing to batch and nothing that batches for you. (LANDED needs no \
+help here at all — it is read straight from the commit log, so a commit is on \
+his board as soon as it is pushed, whether or not you get to `land`.)
+
+   **Record it with the tool, never by hand.** If you COMMITTED anything, every \
+commit gets a line in LANDED, one call each, and the right moment for that call \
+is right after the push:
 
        python3 apps/board/tools/boardctl.py land --commit <hash> --what \
 '<one line, imperative, like the commit subject>'
