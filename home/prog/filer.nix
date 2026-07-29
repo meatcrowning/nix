@@ -28,6 +28,12 @@ let
   filer =
     if host == "air" then
       pkgs.writeShellScriptBin "filer" ''
+        # Same `mimetype` prefix as the `top` wrapper below, and book is the
+        # host that actually needs it: `home.packages` puts it in
+        # ~/.nix-profile/bin, which the graphical session's PATH does not
+        # contain here (measured on book 2026-07-29: Hyprland's own PATH is
+        # /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin).
+        export PATH="${pkgs.perlPackages.FileMimeInfo}/bin:$PATH"
         exec /usr/bin/python3 /home/lam/nix/apps/filer/main.py "$@"
       ''
     else
@@ -52,13 +58,24 @@ let
         # now (a "cannot run gio" toast), and this makes it work instead.
         # book gets /usr/bin/gio from Fedora's glib2 and needs nothing.
 
+        # File-MimeInfo gives `mimetype`, and this is the ONLY way it reaches
+        # the one caller that matters. Opening a non-image shells out to
+        # `xdg-open`, whose generic branch asks `xdg-mime query filetype`,
+        # whose `info_generic()` runs `mimetype` if it is on PATH and
+        # `file --mime-type` otherwise — and `file` reads content, so every
+        # glob-only type (.md, .svg, .csv) resolved to text/plain and the
+        # defaults in mime-defaults.nix were never consulted for it.
+        # `home.packages` there is not enough: it lands in a profile bin dir
+        # that this app inherits only when it was launched from a shell.
+
+
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''
           runHook preInstall
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
             --add-flags /home/lam/nix/apps/filer/main.py \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.glib ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.glib pkgs.perlPackages.FileMimeInfo ]} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
