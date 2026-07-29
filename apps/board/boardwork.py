@@ -83,8 +83,7 @@ kills by. So `_spawn_worker` asks the user manager for a transient unit instead:
 
 Four things fall out of it, and all four are why this and not `KillMode=process`
 on the parent (which also survives — both were measured — but is a `.nix` change
-that only takes effect after a rebuild, and at the time this system was not
-allowed to run one at all):
+that only takes effect after a rebuild this system is not allowed to run):
 
   * **The worker outlives the tick, the orchestrator, and every later tick.**
     Its cgroup is its own and nothing sweeps it. `tools/board-watch-test.py`
@@ -222,13 +221,13 @@ def set_cap(n):
 HOST = os.environ.get("BOARD_WATCH_HOST") or os.uname().nodename
 
 _HOSTS = {
-    "top": "x86_64 NixOS, flake attribute `top`. The rebuild here is "
-           "`./tools/preflight.sh` then `sudo rebuild-top` (passwordless, no "
-           "tty needed)",
+    "top": "x86_64 NixOS, flake attribute `top`. A rebuild here would be "
+           "`sudo rebuild-top` - which you are not allowed to run",
     "book": "an aarch64 MacBook Air running Fedora Asahi with home-manager "
             "layered on top, flake attribute `air`. It is NOT NixOS: there is "
-            "no `rebuild-top` and no `sys/` here, and the rebuild is "
-            "`home-manager switch --flake ~/nix#air`, no root needed",
+            "no `rebuild-top` and no `sys/` here, and the equivalent of a "
+            "rebuild is `home-manager switch --flake ~/nix#air` - which you "
+            "are not allowed to run either",
 }
 
 
@@ -241,25 +240,14 @@ def host_line():
 
 #: The rules every agent this system spawns runs under. They are HIS decisions,
 #: already settled (see `home/srvs/board-watch-files/board-watch.py`), and the
-#: two new prompts below quote them verbatim rather than paraphrasing.
-#:
-#: Rule 1 was the reverse of this until 2026-07-29 — no rebuild, ever, work left
-#: undone with a note. He lifted it himself, in these words: *"it should be any
-#: time but should still adhere to the rule that's written down SOMEWHERE"*. So
-#: the rule is no longer stated here: `~/nix/AGENTS.md` -> "When it is okay to
-#: rebuild or hot-reload" is the single copy, and this points at it. A fifth
-#: paraphrase in a prompt is how it came to be true nowhere.
-RULES = """1. **You MAY rebuild and reload, at your own judgement, at any \
-hour** — he is usually at the machine and decided this deliberately. It is \
-standing behaviour, not something to ask about: a change here is done when it \
-is APPLIED, not when it is pushed. **Read `AGENTS.md` -> "When it is okay to \
-rebuild or hot-reload" before you run one** and stay inside it — preflight \
-first, nothing staged across it, cheap reloads freely, the `hyprvtb` live \
-hot-swap only on `top` (never `hyprctl plugin load`/`unload`, on either \
-machine), and the Ask-first list still his. `apps/` is live source and needs \
-none of this — a `.py`/`.qml` change there is picked up when he next relaunches. \
-Whatever you do or deliberately do not, **say so in your note**; if you leave a \
-rebuild pending, say why.
+#: two new prompts below quote them verbatim rather than paraphrasing: a worker
+#: that rebuilds his machine while he is looking at something else is the one
+#: failure this whole feature must not have.
+RULES = """1. **NEVER rebuild and never change the running machine.** No `sudo \
+rebuild-top`, `nixos-rebuild`, `home-manager switch`, `hyprctl`, `qs ipc`, \
+`systemctl`, `loginctl`. `apps/` runs live source, so a `.py`/`.qml` change is \
+picked up when he next relaunches. If the work cannot land without a rebuild or \
+a reload: **stop, leave that part undone**, and say so on the board.
 2. **Never open a window on his screen and never drive his running apps.** \
 Offscreen harnesses (`QT_QPA_PLATFORM=offscreen`) and `tools/sandbox.sh` only; \
 he does every visual check himself.
@@ -267,7 +255,13 @@ he does every visual check himself.
 right now. `git commit -m "msg" -- <explicit> <paths>`, always. `git add -N` \
 for new files. Never a bare `git commit`, never `-a`, never a destructive or \
 reverting git command (`reset --hard`, `checkout --`, `restore`, `stash`, \
-`clean`).
+`clean`). **A pathspec is not enough when somebody else holds the same file**: \
+`git commit -- x.py` takes the WORKING TREE copy of it, their half-finished \
+edits and debug probes included. `git diff` what you are about to commit and \
+confirm every hunk is yours; if it is not, narrow the pathspec or leave that \
+file alone. And commit against HEAD as it is NOW, never a copy of the tree you \
+read an hour ago — a stale pathspec silently reverts whatever landed while you \
+worked, and has.
 4. **Push to `main`** when it works. No branch, no PR — and **`git pull \
 --rebase` immediately before you push.** This system now runs on BOTH of his \
 machines, so another agent on the other host may have pushed since you started; \
@@ -277,7 +271,32 @@ own repo inside this checkout) are SEPARATE repos: pull and push each from its \
 own directory.
 5. Read `AGENTS.md` at the repo root, then the nested one closest to what you \
 are editing, then `docs/DESIGN.md` if you put pixels on a screen. They outrank \
-your instincts about this codebase."""
+your instincts about this codebase.
+6. **Find things out cheaply: read before you measure, and read in SLICES.** \
+`docs/HARDWARE.md` is the \
+one reference for what these two machines physically are — cores, RAM, both \
+GPUs, the sensor chip and the real fan layout, the disks, the display — and \
+every fact in it names the command that established it; read it BEFORE you go \
+measuring the metal, and add what you find that is not in it. `docs/DESIGN.md` \
+is ~2,300 lines: read its Contents table and then the two or three sections \
+your change actually touches, never the whole file, and grep a long \
+`AGENTS.md` to the section rather than swallowing it. Budget your context \
+deliberately — an agent that runs out mid-task leaves the tree half-edited, \
+which here is worse than a slow one. And **never run `sudo -A` merely to prove \
+that something works**: every one of those puts a real password dialog in front \
+of him and asks for his root password while he is doing something else. One \
+agent checking the askpass path that way burned three failed attempts of his. \
+Use it when the task genuinely needs root, and verify that path offscreen \
+(`apps/askpass/tools/askpass-selftest.py`) instead.
+7. **A real bug next to your work is yours to DEAL WITH, not just to report.** \
+He has standing approval for this: a setting that has silently never applied, a \
+poisoned diagnostic channel, a binding loop, a control that does nothing. Do \
+not ask him first. Dealing with it means FIXING it if you are the one doing the \
+work — its own commit, its own pathspec — or dispatching it if you are the one \
+who hands work out. Judgement, not licence: only if you can establish the cause \
+and verify the fix as rigorously as your own task, and never if it turns into a \
+re-architecture, lands in his Ask-first list, or would swallow the job you were \
+actually given. Then say what you found, fixed or left."""
 
 WORKER_PROMPT = """You are running headless, with no human watching, on the \
 machine {host}. Work in `{repo}`.
@@ -301,7 +320,7 @@ RULES, in force for this session, and not negotiable:
 
 {rules}
 
-6. **Say what you are working on.** He is looking at a card for this agent, and \
+8. **Say what you are working on.** He is looking at a card for this agent, and \
 it shows two lines: what you SAY you are doing, and what you are OBSERVED doing \
 (read from your own transcript — every tool call you make). From `{repo}`, at \
 the start and whenever you move on:
@@ -317,7 +336,7 @@ verb you last used, and he reads the two side by side deliberately. Being \
 honest costs you nothing; a claim that does not match your tool calls is \
 visible to him and is not hidden.
 
-7. **When you are done, record it on the board — with the tool, never by \
+9. **When you are done, record it on the board — with the tool, never by \
 hand.** If you COMMITTED anything, every commit gets a line in LANDED, one \
 call each:
 
@@ -351,7 +370,7 @@ that ends without recording anything is reported on his board as having stopped 
 without finishing, which is deliberate: he must never be told something landed \
 when it did not. That report is the only thing you cannot leave behind.
 
-8. **If you genuinely cannot decide something only he can decide, ASK — do not \
+10. **If you genuinely cannot decide something only he can decide, ASK — do not \
 guess big:**
 
        python3 apps/board/tools/boardctl.py ask '<the question>' \\
@@ -362,12 +381,17 @@ guess big:**
    It appears in the questions list on his board and he answers at his leisure. \
 Then finish the part you CAN do and stop; there is nobody to wait for.
 
-9. **He can reach you WHILE you run. Check between steps:**
+11. **You can be reached WHILE you run. Check between steps:**
 
        python3 apps/board/tools/boardctl.py inbox take --quiet
 
-   Your stdin is closed, so a file is the only channel there is. Anything that \
-prints is him typing at you mid-flight, and it OUTRANKS this prompt.
+   Your stdin is closed, so a file is the only channel there is. Run it after \
+each meaningful step and once more before you write your final note. Two things \
+arrive that way. **Him**, typing at you mid-flight — a correction, an extra \
+idea — and that OUTRANKS this prompt where the two disagree. Or **the \
+orchestrator**, handing you a further item because you are already in those \
+files: that is part of your job now, and your final note says what you did with \
+it. Take them either way — an unread note is handed to somebody else later.
 
 There is nobody to ask. Finish, or write down why you did not.
 """
@@ -399,6 +423,11 @@ worker sees only this>' --where '<the files it will touch>'
 
     python3 apps/board/tools/boardctl.py cap <n>      # a SETTING, applied now
 
+    python3 apps/board/tools/boardctl.py agents       # who is running, and on what
+
+    python3 apps/board/tools/boardctl.py inbox send '<the item, in full>' \\
+--to <Name>                                           # hand it to one of them
+
 SOMETIMES HE IS NOT ASKING FOR WORK, HE IS TURNING A KNOB. *"change the number \
 of allowed agents to 5"* is not a task for a worker — it is this system's own \
 setting, and dispatching an agent for it turns a one-second change into a \
@@ -426,6 +455,38 @@ the same file, which is worse.
   * **Apply the rule below per item**, so one message can yield two dispatches, \
 or a dispatch and a question. The two-question ceiling still binds the whole \
 message, not each item.
+  * **Two items that touch the same files are ONE dispatch**, even when he \
+wrote them as two sentences. That is the same rule as the one above, read from \
+the other end.
+
+SOMEBODY MAY ALREADY BE IN THOSE FILES. Run `agents` before you dispatch \
+anything. It lists what is running right now, each with the task it was given \
+and the files it was dispatched against. When an item you are about to hand out \
+is the same job as one already in flight, or lands in the same files, HAND IT \
+TO THAT AGENT instead of starting a second one: two workers editing one file is \
+the thing this system is built not to do.
+
+  * **Only a WORKER may be handed anything.** In that listing a worker is a row \
+with a NAME in front of its id and a path or glob in its last column. A row \
+whose last column reads `board-watch` is YOU. A row with no name at all is \
+either a decision agent, whose own prompt forbids it to pick up anything else, \
+or his interactive session — never hand work to either.
+  * **Write the item in FULL, the way you would write a `dispatch`.** Those \
+words are all anybody downstream gets.
+  * **`inbox send` prints what happened, and you must read that line.** \
+`delivered` means it is sitting in that worker's inbox; the worker reads its \
+inbox between steps, so nothing is interrupted and nothing is instant. \
+`queued` means that worker had already gone, and the item is waiting for the \
+next agent instead — which is why the words have to stand on their own. Neither \
+outcome loses it; neither is immediate.
+  * **Hand over only what is genuinely the same work.** An item that can stand \
+on its own gets its own worker even if it is nearby, because a handoff waits on \
+somebody else's pace. In two minds: dispatch.
+  * A handoff takes no slot against the cap — a consequence, never a reason. Do \
+not hand work over to get under the cap; `dispatch` queues what is over it and \
+a later tick starts it.
+  * **Report it exactly like a dispatch** — one line, `INFORMATION:`, naming \
+the worker it went to: `handed to Marbas (`wd690a4`), already in those files`.
 
 DISPATCH OR ASK — the rule, because guessing big is the expensive mistake:
 
@@ -441,6 +502,13 @@ the plugin), or when "how much" is the actual question and only he knows. \
 one now, under rule 1. A question costs \
 him ten seconds whenever he feels like it. A wrong guess costs a worker, a \
 commit and a change he has to notice and undo.
+  * **ASK, too, when it changes what happens at login or logout, or reaches \
+outside this repo into his home directory.** Those are his by standing rule, \
+whatever else the input implies.
+  * **A well-scoped improvement is NOT a question.** His words: *"honestly i \
+might not [mind] if you just dispatch agents to do those sorts of things \
+without asking me"*. If you can state the change in one sentence and it does \
+not land in any of the above, dispatch it and say so in the note.
   * **At most two questions for one input.** A wall of questions is its own \
 kind of pressure, and this board exists because he did not want that.
   * Every `ask` MUST carry `--if-unanswered`. That sentence is what makes it \
@@ -484,33 +552,17 @@ dispatched and in hand — when every worker had already been killed and nothing
 was built.
 """
 
-# Allow the tools a working agent needs; deny the ones nothing here may ever
-# do. board-watch imports these rather than keeping a second copy — one list, so
-# a hole cannot be opened in one spawner and not the other. The prompt is the
-# primary defence and this is the mechanical one; a prefix matcher is not a
-# sandbox (see `docs/agents/board-watch.md`).
-#
-# THE REBUILD AND RELOAD ENTRIES ARE GONE (2026-07-29), by his decision on the
-# board: an agent here may rebuild and reload at its own judgement, under
-# `~/nix/AGENTS.md` -> "When it is okay to rebuild or hot-reload". What is left
-# is what that rule itself forbids outright, so the two halves now agree instead
-# of the list contradicting the prompt:
-#
-#   * `hyprctl plugin` — load/unload erases hyprvtb's config keys for good and
-#     no reload repairs it. `hyprctl reload` and the rest are allowed.
-#   * `loginctl` — ends or locks his session; never a step in doing work.
-#   * the reverting git commands — he leaves real uncommitted work in this tree.
-#
-# `Bash(sudo:*)` had to go WITH them, and not as an oversight: a deny rule beats
-# an allow rule, so keeping it while carving out `Bash(sudo rebuild-top:*)`
-# would have left the rebuild blocked on `top` and the decision unimplemented.
-# What guards root is sudo itself and it is a better gate than this list ever
-# was — NOPASSWD covers exactly the one hardcoded `rebuild-top` wrapper
-# (`sys/nixos-rebuild.nix`), and anything else is `sudo -A`, which puts a dialog
-# in front of HIM. book has no such wrapper and needs no root to rebuild at all.
+# Allow the tools a working agent needs; deny the ones that change the machine
+# out from under him. board-watch imports these rather than keeping a second
+# copy — one list, so a hole cannot be opened in one spawner and not the other.
+# The prompt is the primary defence and this is the mechanical one; a prefix
+# matcher is not a sandbox (see `docs/agents/board-watch.md`).
 ALLOW = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task", "TodoWrite",
          "NotebookEdit", "WebFetch", "WebSearch"]
-DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
+DENY = ["Bash(sudo:*)", "Bash(rebuild-top:*)", "Bash(nixos-rebuild:*)",
+        "Bash(rbsys:*)", "Bash(rbhome:*)", "Bash(update:*)",
+        "Bash(home-manager:*)",
+        "Bash(hyprctl:*)", "Bash(qs:*)", "Bash(systemctl:*)", "Bash(loginctl:*)",
         "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
 
