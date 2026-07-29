@@ -49,6 +49,7 @@ import sqlite3
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, QProcess, Qt, QThread, QTimer, QUrl, Signal,
@@ -875,6 +876,11 @@ class Library(QObject):
         self._tagwriter = tagwriter
         self._scanner = None
         self._search_rows = None  # lazy [(casefolded haystack, id)]
+        # Rows for files opened by path that the library has never scanned —
+        # negative ids, memory only, never written to the DB. See ids_for_paths.
+        self._transient = {}
+        self._transient_by_path = {}
+        self._transient_seq = 0
         self.changed.connect(lambda: setattr(self, "_search_rows", None))
 
     # ---- scanning ----
@@ -964,7 +970,78 @@ class Library(QObject):
         marks = ",".join("?" * len(ids))
         rows = {r["id"]: r for r in self._rows(
             f"SELECT * FROM tracks WHERE id IN ({marks})", tuple(ids))}
+        # Transient rows (a file opened from argv that the library has never
+        # seen) carry NEGATIVE ids and live only in memory, so the DB query
+        # above can never return them. See ids_for_paths.
+        rows.update({i: self._transient[i] for i in ids if i in self._transient})
         return [rows[i] for i in ids if i in rows]
+
+    # ---- opening a file by path (argv / the OPEN verb) ----
+
+    def ids_for_paths(self, paths):
+        """Track ids for arbitrary filesystem paths, in the order given.
+
+        A path inside the library resolves to its real row, which is the whole
+        point: a double-clicked track then behaves exactly like the same track
+        clicked in the queue — ratings, play count, lyrics and the album it
+        belongs to all work, because it IS that row.
+
+        A path the library has never scanned gets a TRANSIENT row instead, held
+        only in memory under a negative id. It has to be a row of the same shape
+        (read_tags supplies every tag column) because the queue, the models and
+        the QML all read one; and it has to be negative because every write path
+        keys on the id and must miss:
+
+          * `setRating`/`setFavorite`/`bump_playcount` all UPDATE ... WHERE id=?,
+            which matches nothing, and then guard their tag write on `_track()`
+            having found a row — so nothing is written to a file this library
+            does not own.
+          * `LyricsProvider._resolve_one` looks the id up and returns early.
+          * `save_state` stores the id and `restore_state` resolves it through
+            `tracks_by_ids` against a fresh process, where the transient map is
+            empty — so a one-off file does not come back at the next launch,
+            which is the behaviour we want anyway.
+
+        Files that mutagen cannot read at all are dropped rather than queued as
+        a row with no duration: mpv would skip them instantly and the user would
+        see a queue entry blink past. Whatever survives is what gets played."""
+        out = []
+        for p in paths:
+            try:
+                path = str(Path(p).resolve())
+            except OSError:
+                continue
+            if not os.path.isfile(path):
+                continue
+            row = self._con.execute(
+                "SELECT * FROM tracks WHERE path=?", (path,)).fetchone()
+            if row is not None:
+                out.append(int(row["id"]))
+                continue
+            known = self._transient_by_path.get(path)
+            if known is not None:
+                out.append(known)
+                continue
+            t = read_tags(path)
+            if t is None:
+                print("open: unreadable:", path, flush=True)
+                continue
+            st = os.stat(path)
+            self._transient_seq -= 1
+            tid = self._transient_seq
+            t.update({"id": tid, "path": path, "album_id": None,
+                      "mtime": st.st_mtime, "size": st.st_size,
+                      "added_at": time.time(), "last_played": None,
+                      "meta_mtime": None})
+            # A file outside the library often has no tags at all; the filename
+            # is the only name there is, and an untitled row draws as a blank
+            # line in every list that shows it.
+            if not t.get("title"):
+                t["title"] = Path(path).stem
+            self._transient[tid] = t
+            self._transient_by_path[path] = tid
+            out.append(tid)
+        return out
 
     def search(self, text):
         """Casefolded substring search over title/artist/album — Unicode-correct
@@ -1601,6 +1678,23 @@ class Player(QObject):
         if self._queue:
             self._sync_mpv(min(start, len(self._queue) - 1))
 
+    @Slot("QVariantList")
+    def playPaths(self, paths):
+        """Replace the queue with files named by path and start playing.
+
+        This is what `player /path/to/track.flac` and the desktop entry's `%F`
+        land in — see `paths_from_argv` and the queue socket's OPEN verb. It
+        REPLACES rather than appends, which is what every other player does with
+        a file handed to it from the file manager, and is the only reading of
+        "open this" that cannot leave the track buried behind an hour of queue.
+
+        Empty is a no-op, deliberately: a launch whose arguments were all
+        unreadable or all missing must leave a running player exactly as it
+        was rather than stop the music."""
+        ids = self._library.ids_for_paths([str(p) for p in paths])
+        if ids:
+            self.playTracks(ids, 0)
+
     @Slot(int, int)
     def playAlbum(self, album_id, start=0):
         rows = self._library.album_tracks(album_id)
@@ -1858,7 +1952,10 @@ class Player(QObject):
             "shuffle": self._shuffle, "loop": self._loop,
         })
 
-    def restore_state(self):
+    def restore_state(self, resume=True):
+        """Bring back the saved queue. `resume=False` restores the queue and the
+        shuffle/loop modes but does not touch mpv or the playhead — for a launch
+        that is about to replace the queue with a file from the command line."""
         st = self._prefs.get("queue") or {}
         ids = st.get("ids") or []
         if not ids:
@@ -1870,7 +1967,7 @@ class Player(QObject):
         self.shuffleChanged.emit()
         self.loopChanged.emit()
         idx = int(st.get("index", -1))
-        if 0 <= idx < len(self._queue):
+        if resume and 0 <= idx < len(self._queue):
             # Restore paused at the saved spot — don't blast audio on login.
             self._sync_mpv(idx, paused=True)
             pos = float(st.get("position", 0.0))
@@ -2376,6 +2473,13 @@ def start_queue_server(player, app, lyrics=None):
                            queue/index change
         client -> server   GOTO <index>
                            LYRICS <0|1>     — "I am showing a lyrics box"
+                           OPEN <enc> [<enc> …]  — play these files now
+
+    OPEN is not the panel's; it is how a SECOND launch hands its `%F` arguments
+    to the player that is already running and exits (`handoff_paths`). It is
+    answered with a snapshot line so the launcher knows it was taken rather than
+    waiting out a timeout. Paths are percent-encoded because this protocol
+    splits on whitespace and a filename may contain any byte but NUL and '/'.
 
     LYRICS is a SUBSCRIPTION, not a query, and it is opt-in for a reason.
     Resolving lyrics is not free: `LyricsProvider` reads tags, may hit
@@ -2394,8 +2498,10 @@ def start_queue_server(player, app, lyrics=None):
     PUSH, not poll: the panel is drawing this at 60fps behind a slide animation
     and a file it had to re-read on a timer would be both later and more work.
     A stale socket file from a crash would make listen() fail, so it is removed
-    first — safe because two players never run at once (the second would fail on
-    the library lock long before this).
+    first. That is safe precisely because this socket is also the singleton
+    check: `handoff_paths` connects to it first, and a launch that gets an
+    answer never reaches startup at all, so nothing that reaches here has a live
+    player to steal the path from.
 
     Every failure here is caught and printed: the panel's queue drawer is a
     convenience, and nothing about it may take the music player down with it.
@@ -2499,6 +2605,17 @@ def start_queue_server(player, app, lyrics=None):
                     player.jumpTo(int(parts[1]))
                 except Exception as e:
                     print("queue server: bad GOTO:", e, flush=True)
+            elif len(parts) >= 2 and parts[0] == "OPEN":
+                # Percent-encoded because this protocol splits on whitespace and
+                # a filename may hold any byte but NUL and '/'.
+                try:
+                    player.playPaths([urllib.parse.unquote(p) for p in parts[1:]])
+                except Exception as e:
+                    print("queue server: bad OPEN:", e, flush=True)
+                # Answer, so the launcher that sent this knows it was taken and
+                # can exit instead of guessing at a timeout.
+                c.write(snapshot(c in want))
+                c.flush()
             elif len(parts) == 2 and parts[0] == "LYRICS":
                 on = parts[1] not in ("0", "false", "off")
                 was = bool(want)
@@ -2649,10 +2766,97 @@ def start_mpris(player, app):
 
 
 # ---------------------------------------------------------------------------
+# Opening a file from the command line
+# ---------------------------------------------------------------------------
+#
+# `home/prog/player.nix` writes `Exec=…/bin/player %F`, so the desktop passes
+# the double-clicked file(s) as plain arguments — and until this existed the app
+# threw them away and opened the library at whatever it was last showing. That
+# defect is the only reason `home/prog/mime-defaults.nix` held player back to
+# nine of the fourteen extensions in AUDIO_EXTS (docs/agents/mime-defaults-audit.md).
+
+QUEUE_SOCK = "player-queue.sock"
+
+
+def paths_from_argv(argv):
+    """The audio files named on the command line, absolute and de-duplicated.
+
+    `%F` yields paths, but a caller that reads the desktop entry loosely may
+    hand over `file://` URIs instead, so both are accepted. Anything starting
+    with `-` is skipped: QGuiApplication owns the option namespace here (-style,
+    -platform …) and this app defines no options of its own.
+
+    Filtering on AUDIO_EXTS is deliberate — the MIME association is what makes
+    this reachable, and honouring it for a `.pdf` somebody dropped on the icon
+    would be the app claiming a type it never registered. Nothing is opened or
+    stat'ed here; existence is settled by `Library.ids_for_paths`, which is also
+    where the file is parsed."""
+    out, seen = [], set()
+    for a in argv:
+        if a.startswith("-"):
+            continue
+        if a.startswith("file://"):
+            a = urllib.parse.unquote(urllib.parse.urlparse(a).path)
+        elif re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", a):
+            continue  # some other scheme; not a local file, not ours to open
+        p = os.path.abspath(os.path.expanduser(a))
+        if os.path.splitext(p)[1].lower() not in AUDIO_EXTS:
+            continue
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def handoff_paths(paths, timeout=2.0):
+    """Give `paths` to a player that is already running; True if one took them.
+
+    Two players must never run at once — they would fight over the MPRIS name,
+    the queue socket and the same mpv-shaped hole in the audio device, and the
+    user would hear both. Before this, a second launch did exactly that; the
+    module used to claim the library lock prevented it, and there is no such
+    lock (sqlite's WAL lets a second writer in after a 60s wait).
+
+    The queue socket is the singleton check, because it already exists and is
+    already only ever created by a live player. Plain stdlib sockets rather than
+    QLocalSocket: this runs before QGuiApplication, on the path where the whole
+    point is not to start Qt at all. A failure of ANY kind falls through to a
+    normal startup — an unreachable socket means no player, which is exactly the
+    case a normal startup handles."""
+    if not paths:
+        return False
+    sock_path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", QUEUE_SOCK)
+    line = ("OPEN " + " ".join(urllib.parse.quote(p) for p in paths) + "\n").encode()
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(timeout)
+        s.connect(sock_path)
+        s.sendall(line)
+        # The server answers OPEN with a snapshot line. It also writes one on
+        # connect, so wait for the SECOND newline — the first proves only that
+        # something is listening, not that it understood the verb.
+        buf = b""
+        while buf.count(b"\n") < 2:
+            chunk = s.recv(65536)
+            if not chunk:
+                return False
+            buf += chunk
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
 def main():
+    open_paths = paths_from_argv(sys.argv[1:])
+    if handoff_paths(open_paths):
+        return
+
     app = QGuiApplication(sys.argv)
     app.setApplicationName("player")
     app.setDesktopFileName("player")
@@ -2700,7 +2904,13 @@ def main():
         sys.exit(1)
 
     bridge.refreshAlbums()
-    player.restore_state()
+    # With files on the command line, restore the SESSION (shuffle, loop, the
+    # saved queue) but not the playhead: `restore_state` re-syncs mpv and posts
+    # a delayed seek to the saved position, which would land 300 ms later on the
+    # queue playPaths has replaced by then and seek the wrong track.
+    player.restore_state(resume=not open_paths)
+    if open_paths:
+        player.playPaths(open_paths)
     start_mpris(player, app)
     start_queue_server(player, app, lyrics)
     QTimer.singleShot(400, library.rescan)  # incremental; UI is already up
