@@ -434,8 +434,12 @@ def save_state(d):
 
 
 # -------------------------------------------------- telling him it went wrong
+#: Every bullet this file writes is `FAILED:` — the tag `boardparse.TODO_TAGS`
+#: keeps for "it was attempted and nothing landed". That is the whole reason the
+#: tag set is not just his three: these four templates exist so a failure cannot
+#: read as information, and the tag now says so in the first word.
 FAIL_TEMPLATE = (
-    "- **board-watch tried decision {num} ({title}) and did not finish it** - "
+    "- FAILED: **board-watch tried decision {num} ({title}) and did not finish it** - "
     "the agent exited {how}. Nothing was committed on its behalf; the answer is "
     "still on record above. Log: `~/.cache/board-watch.log`\n")
 
@@ -445,7 +449,7 @@ FAIL_TEMPLATE = (
 #: done — so it lands in WAITING ON YOU TO DO in words, quoting the task, since
 #: by the time this runs the worker's card has already left his board.
 WORKER_FAIL = (
-    "- **a worker stopped without finishing: {task}** - it was dispatched from "
+    "- FAILED: **a worker stopped without finishing: {task}** - it was dispatched from "
     "something you typed into the box and it recorded nothing on this board, so "
     "nothing landed for it. Answer or type it again to have another go. Log: "
     "`~/.cache/board-work/{aid}.log`\n")
@@ -519,8 +523,16 @@ the loop from `{repo}` with exactly one of:
 
        python3 apps/board/tools/boardctl.py land {key} --commit <hash> \
 --what '<one line, imperative, like a commit subject>'
-       python3 apps/board/tools/boardctl.py note '**<title>** - <what is done, \
-what is not, and whether a rebuild is now pending and why>'
+       python3 apps/board/tools/boardctl.py note '<TAG>: **<title>** - <what \
+is done, what is not, and whether a rebuild is now pending and why>'
+
+   **A note STARTS WITH A TAG, then a short description, and only then any \
+background.** One of `COMPLETION:` (it is done and on his machine), `PARTIAL:` \
+(some of it landed, some did not — including "it needs a rebuild, which you may \
+not run"), `FAILED:` (nothing landed), `QUESTION:` (you need a word from him \
+before anything else moves) or `INFORMATION:` (a fact, nothing asked of him). \
+The tool refuses an untagged bullet; it is how he tells at a glance what a line \
+on that list is about.
 
    `land` when the work is complete: it removes the IN FLIGHT row and appends \
 `| commit | what |` under today's date in LANDED. `note` when it is not: the \
@@ -621,7 +633,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None):
 
 
 QUEUE_FAIL = (
-    "- **nobody could work out what to do with what you typed into the board** "
+    "- FAILED: **nobody could work out what to do with what you typed into the board** "
     "- the orchestrator exited {how}. Nothing was dispatched and nothing was "
     "committed. What you wrote, so it is not lost: \"{text}\" Log: "
     "`~/.cache/board-watch.log`\n")
@@ -748,7 +760,7 @@ SPIN_WINDOW_S = float(os.environ.get("BOARD_WATCH_SPIN_WINDOW", "60"))
 SPIN_BACKOFF_S = float(os.environ.get("BOARD_WATCH_SPIN_BACKOFF", "60"))
 
 SPIN_NOTE = (
-    "- **board-watch caught itself looping and slowed down** - something he "
+    "- FAILED: **board-watch caught itself looping and slowed down** - something he "
     "typed into the board's box could not be worked, so the inbox queue never "
     "emptied and the watcher was re-triggered over and over. It is now backing "
     "off to one run a minute and will pick the work up by itself once the cause "

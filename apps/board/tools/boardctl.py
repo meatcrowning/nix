@@ -9,9 +9,9 @@ happen. This is the third way, and it is the one an agent should use:
     boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> IN FLIGHT
     boardctl.py land 'cover art' --commit a3c2aac --what 'player: dim the art'
     boardctl.py land --commit a3c2aac --what 'player: dim the art'   # no row
-    boardctl.py back 'cover art' --why 'blocked on the FOCUS signal'
+    boardctl.py back 'cover art' --why 'FAILED: **cover art** - blocked on FOCUS'
     boardctl.py stall 'board app'                  # a row nothing owns -> to-do
-    boardctl.py note '**Relaunch `player`** - live source, no hot reload.'
+    boardctl.py note 'PARTIAL: **Relaunch `player`** - live source, no hot reload.'
     boardctl.py list
 
     boardctl.py agents                             # who is running, by phase
@@ -341,10 +341,15 @@ def main(argv=None):
 
     s = sub.add_parser("back", help="return a stranded IN FLIGHT item to NEEDS YOU")
     s.add_argument("selector")
-    s.add_argument("--why", default=None, help="a bullet for WAITING ON YOU TO DO")
+    s.add_argument("--why", default=None,
+                   help="a bullet for WAITING ON YOU TO DO; same tag rule as "
+                        "`note`, and usually `FAILED:`")
     s.set_defaults(fn=cmd_back)
 
-    s = sub.add_parser("note", help="add one bullet to WAITING ON YOU TO DO")
+    s = sub.add_parser("note", help="add one bullet to WAITING ON YOU TO DO; it "
+                                    "must start with %s, then a short "
+                                    "description, then any background"
+                                    % "/".join(t + ":" for t in bp.TODO_TAGS))
     s.add_argument("text", nargs="+")
     s.set_defaults(fn=cmd_note)
 

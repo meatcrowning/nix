@@ -310,8 +310,17 @@ records the commit, and reads its time out of git itself.
 
    Then, commits or none, one line saying where it ended up:
 
-       python3 apps/board/tools/boardctl.py note '**<what you were asked>** - \
-<what you did, what you did not, and whether a rebuild is now pending and why>'
+       python3 apps/board/tools/boardctl.py note '<TAG>: **<what you were \
+asked>** - <what you did, what you did not, and whether a rebuild is now \
+pending and why>'
+
+   **It starts with a TAG, then a SHORT description, and only then any \
+elaboration or background** — that is his rule for this list, and the tool \
+refuses a bullet without one. Pick the one that is true:
+`COMPLETION:` it is done and on his machine; `PARTIAL:` some of it landed and \
+some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
+`QUESTION:` you need a word from him before anything else moves; \
+`INFORMATION:` a fact, nothing asked of him.
 
    `docs/board.md` is a store three programs parse and write concurrently; \
 every edit is a targeted line edit under a lock. Do not open it in an editor. \
@@ -365,7 +374,8 @@ worker sees only this>' --where '<the files it will touch>'
         --option '<one way>' --option '<another way>' \\
         --if-unanswered '<what happens if he never answers>'
 
-    python3 apps/board/tools/boardctl.py note '**<subject>** - <one line>'
+    python3 apps/board/tools/boardctl.py note 'INFORMATION: **<subject>** - \
+<one line>'
 
     python3 apps/board/tools/boardctl.py cap <n>      # a SETTING, applied now
 
@@ -411,11 +421,14 @@ RULES that bind you and every worker you dispatch:
 YOUR NOTE REPORTS A START, NOT A RESULT — AND IT IS TWO LINES, NOT A \
 PARAGRAPH. Finish with one `note`, to this budget: **one line per task you \
 handed out, one line per question you asked, 25 words each at the most, and no \
-second paragraph.** A task line is the subject, the worker's NAME, and that it \
-was handed out with nothing landed yet — like:
+second paragraph.** Every line STARTS WITH A TAG, then the short description, \
+then anything else — his rule for this list, and the tool refuses a line \
+without one. Yours are `INFORMATION:` for a task you handed out or a knob you \
+turned, and `QUESTION:` for one you asked him. A task line is then the subject, \
+the worker's NAME, and that it was handed out with nothing landed yet — like:
 
-    **landed section + commit times** - handed to Rosa (`wd690a4`), nothing \
-landed yet.
+    INFORMATION: **landed section + commit times** - handed to Rosa \
+(`wd690a4`), nothing landed yet.
 
 Every worker has an ordinary first name and `dispatch` prints it; use it. **One \
 identifier per line**: the name, and the coded id in parentheses after it only \

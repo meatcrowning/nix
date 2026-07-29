@@ -45,7 +45,7 @@ Consequences that are rules, not preferences:
     - [ ] option          ALTERNATIVES; wrapped continuations are indented
     > answer              his free text. Always beats the options
     *If unanswered:* ...  what happens if he never answers
-## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions
+## WAITING ON YOU TO DO   `- <TAG>: ` bullets. Actions, not decisions
 ## IN FLIGHT              a | table |: what / where / notes
 ## LANDED                 `### <date>` groups of | commit | what | when |,
                           plus prose. `when` is the commit's own local time in
@@ -55,6 +55,56 @@ Consequences that are rules, not preferences:
 Everything else — the `# Board` preamble, the `---` rules — is preserved and not
 drawn. `boardparse.py`'s module docstring is the authoritative statement of both
 the format and the round-trip contract; do not restate it elsewhere.
+
+### Every WAITING bullet says WHAT IT IS in its first word
+
+*"messages in the to do section should start with either QUESTION:
+INFORMATION: COMPLETION: or something like those, maybe others too?, so that the
+user can easily know what that message is about. any sort of elaboration or
+background should go after the short description of the message"*. So a bullet
+is **TAG, then a SHORT description, then anything else** — and that ordering
+binds every writer, `boardmove.note` and both prompts included.
+
+Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
+
+| | it means | who emits it |
+| --- | --- | --- |
+| `QUESTION:` | nothing moves until he says a word | an agent's own `note` |
+| `INFORMATION:` | a fact; nothing is asked of him | the orchestrator's note, `stall` |
+| `COMPLETION:` | done, and on his machine | a worker's or decision agent's `note` |
+| `PARTIAL:` | some landed, some did not — a pending rebuild counts | the same |
+| `FAILED:` | attempted, nothing landed | every failure path in `board-watch.py`, and `reconcile`'s dead-agent bullet |
+
+- **There is no tag nothing can write**, and `tools/board-test.py` asserts that.
+  His three are the starting set he opened up (*"or something like those, maybe
+  others too?"*); `PARTIAL:` and `FAILED:` exist because the writers that were
+  already there could not be honest with only three — most of what a worker
+  leaves is *some of it*, and a failure filed as information is exactly what
+  this system must never do.
+- **`QUESTION:` is not a decision.** A decision is a numbered item in NEEDS YOU
+  with options and an `*If unanswered:*` line (`boardmove.ask`). This tag is the
+  small "say the word and X" an agent leaves on its way out.
+- **The check is in `boardparse.add_todo_bullet`** — the one function every
+  writer of that section already goes through — so a new writer cannot be added
+  that forgets, and an untagged bullet is **REFUSED**, not defaulted. A
+  refusal is an error the writing agent reads and fixes in one retry; a default
+  would put a wrong word in front of his message.
+- **Every LINE is checked, not just the first.** The orchestrator writes one
+  line per task in one `note` call, and `note` prefixes `- ` **per line**: doing
+  it once for the whole string left the second line a bare paragraph glued onto
+  the bullet above it, which is how *"**default handlers for every app we
+  wrote** - handed to Sam"* came to be drawn inside somebody else's message
+  (2026-07-29). An INDENTED line is a wrapped continuation and needs no tag —
+  that is where his "elaboration or background" goes.
+- **READING is untouched.** The store is his and is full of bullets written
+  before this existed: they parse, they draw, they can still be removed and
+  restored byte-for-byte. Only writing is constrained.
+- **Nothing in `qml/` draws the tag specially** — it is plain text at the front
+  of the line, in the row's own tone. A colour would have to come from the
+  palette's one hue, and the only ramp that says *severity* is warn/crit, which
+  on this desktop means a machine fault (§8.1, §9.3) and is forbidden here by
+  the no-pressure rule. A badge would be the counted, sortable thing that rule
+  refuses outright. The word does the work.
 
 ## The no-pressure requirement is a design constraint
 
@@ -334,9 +384,12 @@ assumed.
   forbids "done", "fixed", "wired", "implemented", "working" — it did not do the
   work and cannot see whether it happened.
 - **And it says it in one line per task.** The bullet an orchestrator leaves in
-  WAITING ON YOU TO DO is the subject, the worker's **name** (its coded id in
+  WAITING ON YOU TO DO is `INFORMATION:` (a start is a fact, never a result),
+  then the subject, the worker's **name** (its coded id in
   parentheses, because that is what its log is called), and that nothing has
-  landed yet; one more line for anything it asked. The prompt states that as a
+  landed yet; one more line for anything it asked, tagged `QUESTION:`. The tag
+  is *inside* this budget and not a second rule beside it — the line is still
+  one line. The prompt states that as a
   budget — *one line each, 25 words at the most, no second paragraph* — because "concise"
   bought a 150-word paragraph that restated his own sentence back at him
   (2026-07-29: *"it really doesnt need to elaborate that much. im not even sure
@@ -350,7 +403,7 @@ assumed.
 - **`boardwork.reap()` runs at the top of every tick**, beside `reconcile()`,
   `sweep()` and `promote()`. A worker whose process is gone with a stamp behind
   it is filed under `work/done/`; one without is filed under `work/failed/` and
-  **gets a bullet in WAITING ON YOU TO DO quoting its task**. That bullet is the
+  **gets a `FAILED:` bullet in WAITING ON YOU TO DO quoting its task**. That bullet is the
   only trace such a worker leaves — its registration is dropped by `sweep()` and
   its card leaves the list the moment it dies.
 - A worker's prompt therefore says to run `note` **even when it finished
@@ -696,8 +749,18 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
 /usr/bin/python3 apps/board/tools/board-test.py --shots /tmp/board-shots
 ```
 
-`tools/board-test.py`, offscreen, nine layers (237 checks). Three of them are
+`tools/board-test.py`, offscreen, ten layers (267 checks). Four of them are
 new and are the ones to read first if the fan-out misbehaves:
+
+- **the tags** (`test_todo_tags`) — a writer that emits an untagged bullet
+  **FAILS**, and writes nothing: no tag, a lowercase one, a word that is not in
+  the set, no space after the colon, a tag with no description behind it, and a
+  multi-line note whose second line forgot one. Every tag in the set has a
+  writer that can emit it; `stall` and `reconcile` carry theirs; every
+  `board-watch.py` failure template says `FAILED:` (checked as SOURCE — that
+  file is deployed by home-manager, so the copy that runs on a machine is the
+  last one a rebuild put there); and an old untagged bullet still parses, draws,
+  removes and restores.
 
 - **LANDED** (`test_landed`) — a commit records with NO IN FLIGHT row (the bug
   that made the section look frozen), the time comes from git rather than from
