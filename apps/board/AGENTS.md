@@ -450,8 +450,9 @@ file** (`git diff` every hunk, commit against HEAD as it is now), and **a real
 bug next to your work is his standing approval to deal with** — fix it in its
 own commit if you are doing the work, dispatch it if you are the one handing
 work out, and never ask him about a well-scoped improvement. The screen rule
-and the sandbox were already rule 2; `sudo` is not in the prompt because
-`boardwork.DENY` forbids it outright.
+and the sandbox were already rule 2, and **`sudo -A` is never a test**: it puts
+a real password dialog in front of him, so it belongs to work that genuinely
+needs root and never to proving that something works.
 
 The decision agent's prompt (`board-watch.py`) keeps its own hand-written
 copy of rules 1-5 and does **not** see these; it is one item, already scoped by
@@ -649,6 +650,22 @@ The short version, and every line of it is a rule:
   with no phase word (`boardctl.py phase` takes the phase as optional) is
   QUOTED — *"Marbas says: the vtbclient parser"* — rather than forced after
   "is", where it would not be a sentence.
+- **The LEAD TONE goes to whichever of the three lines is drawn first**, so a
+  card never opens on its quietest text (`AgentRow.leadTone`, docs/DESIGN.md
+  §10.6). Ordinarily that is the claim, at `Theme.text`; the observation keeps
+  the ordinary secondary tone under it; the title row drops to `Theme.dim`. A
+  card with no claim leads with the observation instead, and one with neither
+  leads with the title row. **Position picks the tone, not rank** — while the
+  title row was on top the claim sat a rung *quieter* than the observation, for
+  being somebody's account of themselves, and keeping that under the new order
+  would make the first line of every card the dimmest thing on it.
+- **The 7-cell name column exists for the card NO sentence names** — a stopped
+  agent nothing was ever seen doing, or a queued task — so nothing on the list
+  is anonymous and the name is never drawn twice. It lives on the title row, so
+  on such a card that row is also the top line and takes the lead tone. The
+  condition is one property (`AgentRow.titleFirst`) and both the column and the
+  ladder read it; `tools/board-test.py` asserts the drawn order, the tones and
+  both branches of the fallback offscreen.
 - **Transcripts reach megabytes** (a long session's is ~1.8 MB), so nothing ever
   reads one whole: each agent's record keeps a byte offset and a poll reads only
   the delta, advancing past complete lines only — a transcript is appended to

@@ -1,7 +1,7 @@
 import QtQuick
 
-// One agent's card: what it was asked to do, WHAT IT SAYS it is doing, WHAT IT
-// IS OBSERVED DOING, and the box he types into to reach it.
+// One agent's card: WHAT IT SAYS it is doing, WHAT IT IS OBSERVED DOING, what
+// it was asked to do, and the box he types into to reach it.
 //
 // THE TWO LINES ARE THE POINT, and they are his call — *"i want both. i want
 // what its saying its doing and what its actually doing"*. They are two plain
@@ -10,6 +10,14 @@ import QtQuick
 // below should be the [agent name] is actually [what it is actualy doing]"*.
 // The bare words `says` and `doing` in a label column beside the two texts are
 // what that replaced.
+//
+// **The two sentences come FIRST, and the title row is the THIRD line** — his
+// call again, in as many words: *"the very first line of an agent in the agent
+// section should be the [name] is [what the agent says theyre doing]. the
+// second line should be [name] is actually doing XYZ. the third line should be
+// what the current first line is"*. What a card is FOR is the live pair; the
+// brief it was handed and the `where` it works in never change for the life of
+// the agent, so they sit UNDER the two lines that do.
 //
 //   ...is...           the agent's own words (`boardctl.py phase`). Carries the
 //                      OBJECT — "the vtbclient parser" — which watching tool
@@ -40,9 +48,20 @@ import QtQuick
 // all: one flat list, oldest first (`boardwork.cards()`), so a card does not
 // move when the agent picks up a different tool.
 //
-// The ladder does the rest (§3.3): `doing` is the load-bearing fact and takes
-// the ordinary secondary tone; `says` sits a rung quieter, because it is
-// somebody's account of themselves.
+// The ladder does the rest, and the reorder RETUNED it (§10.6): **the lead
+// tone goes to whichever of the three lines is actually drawn first**, so a
+// card never opens on its quietest text. Ordinarily that is `says`, at
+// `fgText`; `doing` keeps the ordinary secondary tone under it; and the title
+// row — the standing brief, unchanged since the agent was handed it — drops to
+// `Theme.dim` now that it is third.
+//
+// It reads the other way round when it has to: a card with no claim leads with
+// `doing`, and a card with neither sentence leads with the title row, which is
+// the case the name column exists for. Position, not trust, picks the tone —
+// the old order had `says` a rung quieter than `doing` for being somebody's
+// account of themselves, and that reading would now make the first line of
+// every card the dimmest thing on it. §10.6's rule is that neither side is
+// filled in from the other; it was never that one outranks the other.
 //
 // WHAT THIS CARD STILL MAY NOT SAY (docs/DESIGN.md §10, and `boardagents.py`'s
 // docstring):
@@ -100,12 +119,20 @@ Item {
     // defect.
     readonly property bool showDetail: agent && (!running || waiting.length > 0
                                                  || agent.kind === "pending")
-    // The name gets a cell of its own ONLY when neither sentence below is
+    // The title row is the card's THIRD line — unless there is no sentence
+    // above it to be third to. Both the name column and the tone ladder hang
+    // off that one condition.
+    readonly property bool titleFirst: saysLine === "" && doingLine === ""
+    // The name gets a cell of its own ONLY when neither sentence ABOVE it is
     // going to say it — a stopped agent nothing was ever seen doing, or a
     // queued task with no name at all. Otherwise it would be drawn three times
     // in four lines. (`boardagents.NAMES`' width rule is this column's.)
-    readonly property bool nameNeeded: name !== "" && saysLine === ""
-                                       && doingLine === ""
+    readonly property bool nameNeeded: name !== "" && titleFirst
+    // The lead tone, for whichever line is drawn first. A stopped agent leads
+    // at `fgDim` rather than `fgText` — that was already how the title row
+    // said "this one is over", and it is one rung, not a colour (§3.5's job is
+    // done by the words in the detail line).
+    readonly property color leadTone: running ? fgText : fgDim
 
     implicitHeight: col.implicitHeight + 8
     height: implicitHeight
@@ -133,14 +160,58 @@ Item {
         x: 10
         width: parent.width - x
 
+        // ---- FIRST LINE: "<name> is <what it says it is doing>" ----
+        // Its own words. Drawn only when there are some: an agent that has not
+        // said anything is silent, and manufacturing a claim out of the
+        // observation below would make the two agree by construction and throw
+        // away the only thing having two of them buys.
+        //
+        // It takes the lead tone because it is the card's top line, not
+        // because a claim outranks an observation — see the ladder note at the
+        // top of this file. An agent that has said nothing yields the lead to
+        // the line under it.
+        Para {
+            id: saysT
+            width: col.width
+            visible: row.saysLine !== ""
+            height: visible ? implicitHeight : 0
+            color: row.leadTone
+            text: row.saysLine
+        }
+
+        // ---- SECOND LINE: "<name> is actually <what it is observed doing>" ----
+        // Observed, never the claim. When it cannot be observed it says that
+        // ("board cannot see what it is doing", "has actually done nothing
+        // recently") rather than quietly falling back to the line above —
+        // §10's rule, and the reason there are two lines at all. Past tense
+        // once the process is gone, and nothing at all when a stopped agent
+        // was never seen doing anything: `boardphase.doing_line` decides both,
+        // and hands this an empty string to say so.
+        Para {
+            id: doingT
+            width: col.width
+            visible: row.doingLine !== ""
+            height: visible ? implicitHeight : 0
+            color: row.saysLine === "" ? row.leadTone : row.fgDim
+            text: row.doingLine
+        }
+
+        // ---- THIRD LINE ----
         // name left, title, where right — the flight row's shape, so the two
         // live sections read the same way one under the other. The `where`
         // column drops widest-first as the window narrows (§9.1), at width 0.
         //
+        // It is LAST of the three: what the agent was handed, and where it
+        // works, are fixed for the life of the card, and the two lines above
+        // are the ones worth re-reading. So it takes the quiet tone — except on
+        // a card with no sentence above it at all, where it IS the top line and
+        // takes the lead one.
+        //
         // The name is normally NOT drawn here: it is the subject of both
-        // sentences below, and repeating it in a column of its own would say it
+        // sentences above, and repeating it in a column of its own would say it
         // three times. It comes back in its 7-cell column for a card that has
-        // no sentence to carry it, so nothing on this list is ever anonymous.
+        // no sentence to carry it, so nothing on this list is ever anonymous —
+        // which is the same condition, `row.titleFirst`.
         Item {
             width: col.width
             implicitHeight: titleT.implicitHeight
@@ -157,7 +228,7 @@ Item {
                 x: 0
                 y: 0
                 visible: row.nameNeeded
-                color: row.running ? row.fgText : row.fgDim
+                color: row.leadTone
                 text: row.name
             }
 
@@ -168,7 +239,7 @@ Item {
                 width: parent.whereW
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideLeft
-                color: row.fgDim
+                color: row.titleFirst ? row.fgDim : Theme.dim
                 text: row.agent ? row.agent.where : ""
             }
             Para {
@@ -176,44 +247,9 @@ Item {
                 x: parent.nameW
                 y: 0
                 width: parent.width - x - whereT.width - (whereT.width > 0 ? 8 : 0)
-                color: row.running ? row.fgText : row.fgDim
+                color: row.titleFirst ? row.leadTone : Theme.dim
                 text: row.agent ? row.agent.title : ""
             }
-        }
-
-        // ---- "<name> is <what it says it is doing>" ----
-        // Its own words. Drawn only when there are some: an agent that has not
-        // said anything is silent, and manufacturing a claim out of the
-        // observation below would make the two agree by construction and throw
-        // away the only thing having two of them buys.
-        //
-        // It sits a rung quieter than the line under it (§3.3): the
-        // observation is the load-bearing fact and this is somebody's account
-        // of themselves.
-        Para {
-            id: saysT
-            width: col.width
-            visible: row.saysLine !== ""
-            height: visible ? implicitHeight : 0
-            color: Theme.dim
-            text: row.saysLine
-        }
-
-        // ---- "<name> is actually <what it is observed doing>" ----
-        // Observed, never the claim. When it cannot be observed it says that
-        // ("board cannot see what it is doing", "has actually done nothing
-        // recently") rather than quietly falling back to the line above —
-        // §10's rule, and the reason there are two lines at all. Past tense
-        // once the process is gone, and nothing at all when a stopped agent
-        // was never seen doing anything: `boardphase.doing_line` decides both,
-        // and hands this an empty string to say so.
-        Para {
-            id: doingT
-            width: col.width
-            visible: row.doingLine !== ""
-            height: visible ? implicitHeight : 0
-            color: row.fgDim
-            text: row.doingLine
         }
 
         // The process-level fact, in words: gone, hand-started, or holding an
