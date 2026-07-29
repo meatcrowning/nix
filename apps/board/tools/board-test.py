@@ -610,23 +610,32 @@ def test_landed(tmp):
           p.stderr.strip()[:160])
 
 
-# ------------------- 1a1a. LANDED reconciles against git, the way IN FLIGHT
-#                            reconciles against /proc
-def test_landed_sweep(tmp):
-    """*"the landed page it still is stuck with commits from an hour ago"*.
+# ------------------- 1a1a. LANDED IS READ FROM THE COMMIT LOG, every time
+def test_landed_view(tmp):
+    """*"it should just read from the commit log of the repo itself. it
+    shouldnt need an agent to do that"* — 2026-07-29, after the third time he
+    found the section hours stale.
 
-    `land()` is something a WORKER has to remember, and on 2026-07-29 three
-    commits were on `origin/main` with no row because nobody did. So the section
-    catches up on its own: `boardmove.reconcile_landed()` diffs `git log`
-    against the hashes already in the file and appends the rest.
+    Both earlier fixes made something WRITE the missing rows, and a writer has
+    to be DEPLOYED: the board window is live source with no hot reload, so the
+    one he had open never ran the first fix, and the watcher is a home-manager
+    unit, so on `top` the second one needed a rebuild before it existed there.
+    `boardmove.landed_view()` derives the section instead, so there is nothing
+    stamped left to go stale.
 
-    Four claims, and they are what stops a self-healing section from becoming a
-    section that rewrites itself — missing commits are APPENDED in commit order
-    with their own time, a second run is a NO-OP, every line that was there is
-    byte-identical afterwards, and the two bounds hold: nothing older than the
-    oldest commit LANDED already names (a fixed window would have appended 96
-    rows of pre-board history the first time it ran), and nothing younger than
-    `min_age`, which is the race against the worker still about to land it.
+    Six claims, and together they are the whole contract:
+
+      * a commit NOBODY recorded is in the section anyway, from `git log`;
+      * it is found on **local HEAD**, with no fetch and no `origin/main` — the
+        old sweep read the remote-tracking ref alone, so a commit made on this
+        machine was invisible until somebody pushed;
+      * **both repos**: `~/nix` and the separate `docs/` repo inside it;
+      * the docs sync timer's own `sync(host): n doc(s)` commits are dropped,
+        or forty a day of them would bury the section;
+      * a cached row wins on WORDING and never on existence — the sentence
+        `land --what` chose survives, and the hash is not listed twice;
+      * **it writes NOTHING.** The file is byte-identical afterwards, which is
+        what makes it safe to call on every repaint.
     """
     import subprocess
 
@@ -634,257 +643,87 @@ def test_landed_sweep(tmp):
     import boardparse as B
 
     repo = os.path.join(tmp, "repo")
-    os.makedirs(repo)
+    docs = os.path.join(repo, "docs")
+    os.makedirs(docs)
     base = dict(os.environ, GIT_CONFIG_GLOBAL=os.path.join(tmp, "gitconfig"),
                 GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t",
                 GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
                 GIT_COMMITTER_EMAIL="t@t")
 
-    def git(*a, **env):
-        return subprocess.run(["git", "-C", repo] + list(a), env=dict(base, **env),
+    def git(where, *a):
+        return subprocess.run(["git", "-C", where] + list(a), env=base,
                               capture_output=True, text=True)
 
-    git("init", "-q", "-b", "main")
-    epoch = 1785300000                     # fixed; rendered in the local zone
-    made = []
-    for i, subject in enumerate(("first thing", "second thing", "third thing",
-                                 "fourth thing")):
-        ts = epoch + i * 600
-        open(os.path.join(repo, "f%d" % i), "w").write("x")
-        git("add", "-A")
-        # The harness owns "how old" every commit is, not the clock.
-        git("commit", "-q", "-m", subject,
-            GIT_AUTHOR_DATE="@%d +0000" % ts, GIT_COMMITTER_DATE="@%d +0000" % ts)
-        made.append(ts)
-    git("update-ref", "refs/remotes/origin/main", "HEAD")
-    log = [(ln.split()[0], int(ln.split()[1]))
-           for ln in git("log", "refs/remotes/origin/main",
-                         "--format=%h %ct").stdout.splitlines()][::-1]
-    check("the harness built four commits at the epochs it asked for",
-          [ts for _h, ts in log] == made, ([ts for _h, ts in log], made))
+    def commit(where, subject, ago):
+        name = subject.replace("/", "_")[:40]
+        open(os.path.join(where, name), "w").write("x")
+        # By NAME, not `-A`: `docs/` is a nested repo with no commit of its own
+        # yet, and `git add -A` in the outer one fails outright on that.
+        git(where, "add", "--", name)
+        when = "@%d +0000" % int(time.time() - ago)
+        base["GIT_AUTHOR_DATE"] = base["GIT_COMMITTER_DATE"] = when
+        git(where, "commit", "-q", "-m", subject)
+        return git(where, "rev-parse", "--short", "HEAD").stdout.strip()
 
-    # LANDED names the SECOND commit and nothing else: the first is below the
-    # floor and must stay unrecorded, the third and fourth are the holes.
-    day = bm._local(made[1]).date().isoformat()
+    for where in (repo, docs):
+        git(where, "init", "-q", "-b", "main")
+    # Minutes ago, so every one of them falls on TODAY — the date group the
+    # fixture below opens. NOTHING is pushed and no `origin/main` ref is ever
+    # created: reading local HEAD is the point.
+    landed_by_hand = commit(repo, "the one an agent recorded", 600)
+    nobody = commit(repo, "the one NOBODY recorded", 400)
+    doc_side = commit(docs, "a docs commit, the other repo", 300)
+    commit(docs, "sync(book): 1 doc(s)", 200)
+
     path = os.path.join(tmp, "board.md")
-    src = FIXTURE.replace("### 2026-07-28", "### " + day) \
-                 .replace("| `abc1234` | did a thing |\n", "") \
-                 .replace("| `def5678` | did another thing |",
-                          "| `%s` | second thing |" % log[1][0])
-    open(path, "w").write(src)
-    before = B.read(path)
-    now = made[-1] + 60
-
-    check("a commit younger than min_age is left to the worker that made it",
-          [r["commit"] for r in
-           bm.landed_missing(path=path, repo=repo, min_age=600, now=now)]
-          == [log[2][0]],
-          [r["commit"] for r in
-           bm.landed_missing(path=path, repo=repo, min_age=600, now=now)])
-    check("...and with every hole younger than that, there is nothing to do",
-          bm.landed_missing(path=path, repo=repo, min_age=1400, now=now) == [])
-
-    rows = bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now,
-                               force=True)
-    check("every commit on origin/main with no row is appended, in commit order",
-          [r["commit"] for r in rows] == [log[2][0], log[3][0]],
-          [(r["commit"], r["what"]) for r in rows])
-    check("...with the subject as What and the commit's OWN 12-hour time as When",
-          [(r["what"], r["when"]) for r in rows]
-          == [("third thing", bm.landed_when(made[2])),
-              ("fourth thing", bm.landed_when(made[3]))],
-          [(r["what"], r["when"]) for r in rows])
-    check("...and never the commit below the oldest row the section already has",
-          all(r["commit"] != log[0][0] for r in rows))
-
-    after = B.read(path)
-    check("...under the `### <date>` group that day already has, not a new one",
-          after.count("### " + day) == 1, after.count("### " + day))
-    lost = [ln for ln in before.splitlines(True)
-            if ln not in after.splitlines(True)]
-    check("...append-only: every line that was there is byte-identical after",
-          all(ln.startswith("| Commit |") or ln.startswith("|---|")
-              for ln in lost), lost)
-    doc = B.parse(B.read(path))
-    got = [r["commit"] for g in doc["landed"] for r in g["rows"]]
-    check("...and the day still reads in commit order, nothing reordered",
-          got == [log[1][0], log[2][0], log[3][0]], got)
-
-    # ---- THE claim: it can run forever and never write the same row twice ----
-    again = bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now,
-                                force=True)
-    check("a second run appends nothing at all", again == [], again)
-    check("...and leaves the file byte-identical", B.read(path) == after)
-
-    # ---- the throttle, so the app may call it on every refresh ----
-    bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now)
-    check("an unforced run inside the throttle window does not write either",
-          B.read(path) == after)
-
-    # ---- an empty section is not a licence to import the whole repo ----
-    empty = os.path.join(tmp, "empty.md")
-    open(empty, "w").write(FIXTURE.replace("| `abc1234` | did a thing |\n", "")
-                                  .replace("| `def5678` | did another thing |\n", ""))
-    check("no commit recorded means no floor, and no floor means no sweep",
-          bm.landed_missing(path=empty, repo=repo, min_age=0, now=now) == [])
-
-
-# ------------------- 1a1b. ...and it FETCHES, or it is blind to the other host
-def test_landed_fetch(tmp):
-    """*"you say that but landed still didnt update even after i rebooted"*.
-
-    `git log origin/main` reads a REMOTE-TRACKING ref, and nothing moves one but
-    a fetch. Pushing from this machine moves it as a side effect, which is why
-    the sweep appeared to work at all — it saw this host's own commits and was
-    blind to every commit the OTHER host pushed, on a freshly booted machine
-    forever. Reboot, look at LANDED, nothing.
-
-    Three claims: the stale ref is the whole bug (a commit on the remote is
-    invisible until a fetch), the sweep asks for that fetch and then sees it,
-    and it asks WITHOUT WAITING — `Board._catch_up` runs on the GUI thread and
-    off-LAN a fetch blocks until DNS gives up, so the ref lands for the next
-    sweep, not this one.
-
-    Plus the two bounds that made the hole outlast his patience: the non-lead
-    host's delay is the docs-sync round trip (20 min), not the 45 it was, and a
-    hash that appeared while the sweep was computing is never appended twice.
-    """
-    import socket
-    import subprocess
-
-    import boardmove as bm
-    import boardparse as B
-
-    up = os.path.join(tmp, "up")          # what "origin" is
-    down = os.path.join(tmp, "down")      # ...and this machine's clone of it
-    os.makedirs(up)
-    base = dict(os.environ, GIT_CONFIG_GLOBAL=os.path.join(tmp, "gitconfig"),
-                GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t",
-                GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
-                GIT_COMMITTER_EMAIL="t@t")
-
-    def git(repo, *a, **env):
-        return subprocess.run(["git", "-C", repo] + list(a), env=dict(base, **env),
-                              capture_output=True, text=True)
-
-    git(up, "init", "-q", "-b", "main")
-    epoch = 1785300000
-    made = []
-    for i, subject in enumerate(("first thing", "second thing", "third thing")):
-        ts = epoch + i * 600
-        open(os.path.join(up, "f%d" % i), "w").write("x")
-        git(up, "add", "-A")
-        git(up, "commit", "-q", "-m", subject,
-            GIT_AUTHOR_DATE="@%d +0000" % ts, GIT_COMMITTER_DATE="@%d +0000" % ts)
-        made.append(ts)
-    # This machine cloned it two commits ago and has been rebooted since. The
-    # third commit is the other host's, pushed while this one was off.
-    git(up, "branch", "-q", "held", "HEAD~1")
-    subprocess.run(["git", "clone", "-q", "--branch", "held", up, down],
-                   env=base, capture_output=True, text=True)
-    git(down, "update-ref", "refs/remotes/origin/main", "refs/remotes/origin/held")
-    short = [ln.split()[0] for ln in
-             git(up, "log", "main", "--format=%h").stdout.splitlines()][::-1]
-
-    day = bm._local(made[0]).date().isoformat()
-    path = os.path.join(tmp, "board.md")
+    day = time.strftime("%Y-%m-%d")
     open(path, "w").write(
         FIXTURE.replace("### 2026-07-28", "### " + day)
-               .replace("| `abc1234` | did a thing |\n", "")
-               .replace("| `def5678` | did another thing |",
-                        "| `%s` | first thing |" % short[0]))
-    now = made[-1] + 3600
+               .replace("| `abc1234` | did a thing |",
+                        "| `%s` | the sentence the agent chose |"
+                        % landed_by_hand))
+    before = B.read(path)
 
-    # ---- the bug, in one line ----
-    check("a commit only on the remote is invisible to a stale origin/main",
-          [r["commit"] for r in
-           bm.landed_missing(path=path, repo=down, min_age=0, now=now)]
-          == [short[1]],
-          [r["commit"] for r in
-           bm.landed_missing(path=path, repo=down, min_age=0, now=now)])
-
-    # ---- ...and the sweep asks git to move the ref ----
-    check("the sweep fetches, and does not wait for it",
-          bm._fetch_origin(down, now=now) is True)
-    check("...and not again inside the fetch throttle",
-          bm._fetch_origin(down, now=now + 1) is False)
-    for _ in range(200):                  # it is detached; give it a moment
-        if git(down, "rev-parse", "origin/main").stdout.strip() \
-                == git(up, "rev-parse", "main").stdout.strip():
-            break
-        time.sleep(0.05)
-    check("...after which origin/main names the other host's commit",
-          git(down, "rev-parse", "origin/main").stdout.strip()
-          == git(up, "rev-parse", "main").stdout.strip())
-    check("...and THAT is the row that had no row",
-          [r["commit"] for r in
-           bm.landed_missing(path=path, repo=down, min_age=0, now=now)]
-          == [short[1], short[2]],
-          [r["commit"] for r in
-           bm.landed_missing(path=path, repo=down, min_age=0, now=now)])
-    check("a repo with no origin is never dialled at all",
-          bm._fetch_origin(up, now=now + 10_000) is False)
-
-    # ---- the delay, which is now one tick and not a docs-sync round trip ----
-    check("the fetch rides the sweep's own tick, so it cannot be the slow part",
-          bm.LANDED_FETCH_EVERY <= bm.LANDED_SWEEP_EVERY <= 60,
-          (bm.LANDED_FETCH_EVERY, bm.LANDED_SWEEP_EVERY))
-    real = socket.gethostname
+    old_repo, old_docs = bm.LANDED_REPO, bm.LANDED_DOCS_REPO
+    bm.LANDED_REPO, bm.LANDED_DOCS_REPO = repo, docs
+    bm._tip_cache["key"] = None                 # the fixture is a new pair
     try:
-        got = {}
-        for hostname in ("book", "top", "somewhere-else"):
-            socket.gethostname = lambda h=hostname: h
-            got[hostname] = [r["commit"] for r in
-                             bm.landed_missing(path=path, repo=down,
-                                               now=made[-1] + 120)]
+        doc = B.parse(B.read(path))
+        view = bm.landed_view(doc, fetch=False)
     finally:
-        socket.gethostname = real
-    check("a two-minute-old commit is a hole on EVERY host, not in 10 or 20 minutes",
-          all(v == [short[1], short[2]] for v in got.values()), got)
-    check("...because there is no per-host stagger left to make one host wait",
-          not hasattr(bm, "LANDED_OTHER_MIN_AGE")
-          and not hasattr(bm, "LANDED_LEAD_HOST"))
+        bm.LANDED_REPO, bm.LANDED_DOCS_REPO = old_repo, old_docs
+        bm._tip_cache["key"] = None
 
-    # ---- a hash that appeared under the sweep is not appended twice ----
-    rows = bm.reconcile_landed(path=path, repo=down, min_age=0, now=now,
-                               force=True, fetch=False)
-    check("the sweep writes the two holes", [r["commit"] for r in rows]
-          == [short[1], short[2]], [r["commit"] for r in rows])
-    after = B.read(path)
-    stale = bm.landed_missing
-    try:
-        bm.landed_missing = lambda **kw: rows          # ...as a racing retry sees them
-        again = bm.reconcile_landed(path=path, repo=down, min_age=0, now=now,
-                                    force=True, fetch=False)
-    finally:
-        bm.landed_missing = stale
-    check("a row another writer just landed is skipped, not duplicated",
-          again == [] and B.read(path) == after, again)
+    rows = [(r["commit"], r["what"]) for g in view for r in g["rows"]]
+    whats = [w for _c, w in rows]
+    check("a commit NOBODY recorded is in the section, straight from git log",
+          (nobody, "the one NOBODY recorded") in rows, rows)
+    check("...found on local HEAD, with no fetch and no origin/main at all",
+          not os.path.exists(os.path.join(repo, ".git", "refs", "remotes")))
+    check("...and the separate docs/ repo is read too, it being where half the "
+          "work lands", (doc_side, "a docs commit, the other repo") in rows,
+          rows)
+    check("the docs sync timer's own commits are dropped, not drawn",
+          not any(w.startswith("sync(") for w in whats), whats)
+    check("a cached row wins on WORDING: the agent's sentence survives",
+          (landed_by_hand, "the sentence the agent chose") in rows, rows)
+    check("...and never on existence: its hash is listed once, not twice",
+          len([c for c, _w in rows if c == landed_by_hand]) == 1, rows)
+    check("the rows a git-less fixture already had are all still there",
+          "did another thing" in whats, whats)
+    check("IT WRITES NOTHING — that is what makes it safe on every repaint",
+          B.read(path) == before)
 
 
-# ------------------- 1a1c. ...and the wait is gone, because a duplicate is
-#                            REMOVED rather than avoided
-def test_landed_dedupe(tmp):
-    """*"why is the wait time so absurdly high? it should just notice when a new
-    commit is added and append it to the list"*.
+# ------------------- 1a1b. ...and the window it derives over is BOUNDED
+def test_landed_window(tmp):
+    """A repo takes ~80 commits a day. Unbounded, the section would become the
+    whole log, so the computed half reaches back `LANDED_DAYS` days and no
+    further than the oldest date group the file already has — and older groups
+    are shown exactly as the file wrote them.
 
-    It waited because `board.md` syncs between the two machines with no lock
-    across it, so two hosts could sweep one hole and union-merge into two rows —
-    and the answer was to make the second host wait out the sync round trip, 20
-    minutes, to look at a hole he could already see. The answer now is that the
-    duplicate is UNDONE: the sweep already reads every hash in the section, so a
-    repeat that says only what the sweep itself would write is one `remove_row`.
-
-    Four claims, and the last two are the ones that keep a self-healing section
-    from becoming a section that edits people's words:
-
-      * the byte-identical repeat two sweeps produce goes, leaving one row;
-      * when the repeat is a SWEEP row and the survivor is somebody's sentence,
-        it is the sweep row that goes, whichever order they sit in;
-      * two DIFFERENT sentences for one hash are both left alone — that is a
-        union merge of prose and a human should look at it;
-      * everything else in the file is byte-identical, and a second run does
-        nothing at all.
+    Three claims: a commit inside the window arrives, one outside it does not,
+    and a group older than the window keeps every row it had.
     """
     import subprocess
 
@@ -898,82 +737,41 @@ def test_landed_dedupe(tmp):
                 GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
                 GIT_COMMITTER_EMAIL="t@t")
 
-    def git(*a, **env):
-        return subprocess.run(["git", "-C", repo] + list(a), env=dict(base, **env),
+    def git(*a):
+        return subprocess.run(["git", "-C", repo] + list(a), env=base,
                               capture_output=True, text=True)
 
     git("init", "-q", "-b", "main")
-    epoch = 1785300000
-    made = []
-    for i, subject in enumerate(("first thing", "second thing", "third thing",
-                                 "fourth thing")):
-        ts = epoch + i * 600
-        open(os.path.join(repo, "f%d" % i), "w").write("x")
+    made = {}
+    for label, ago in (("ancient", 40 * 86400), ("today", 300)):
+        open(os.path.join(repo, label), "w").write("x")
         git("add", "-A")
-        git("commit", "-q", "-m", subject,
-            GIT_AUTHOR_DATE="@%d +0000" % ts, GIT_COMMITTER_DATE="@%d +0000" % ts)
-        made.append(ts)
-    git("update-ref", "refs/remotes/origin/main", "HEAD")
-    short = [ln.split()[0] for ln in
-             git("log", "refs/remotes/origin/main", "--format=%h").stdout.splitlines()][::-1]
-    day = bm._local(made[0]).date().isoformat()
-    now = made[-1] + 3600
+        when = "@%d +0000" % int(time.time() - ago)
+        base["GIT_AUTHOR_DATE"] = base["GIT_COMMITTER_DATE"] = when
+        git("commit", "-q", "-m", "the %s one" % label)
+        made[label] = git("rev-parse", "--short", "HEAD").stdout.strip()
 
-    def board(rows):
-        """A LANDED whose one date group holds exactly `rows`, as raw lines."""
-        p = os.path.join(tmp, "b%d.md" % board.n)
-        board.n += 1
-        open(p, "w").write(
-            FIXTURE.replace("### 2026-07-28", "### " + day)
-                   .replace("| `abc1234` | did a thing |\n", "")
-                   .replace("| `def5678` | did another thing |\n",
-                            "".join(rows)))
-        return p
-    board.n = 0
+    path = os.path.join(tmp, "board.md")
+    day = time.strftime("%Y-%m-%d")
+    open(path, "w").write(FIXTURE.replace("### 2026-07-28", "### " + day))
 
-    def rows_of(p):
-        return [(r["commit"], r["what"])
-                for g in B.parse(B.read(p))["landed"] for r in g["rows"]]
+    old_repo, old_docs = bm.LANDED_REPO, bm.LANDED_DOCS_REPO
+    bm.LANDED_REPO, bm.LANDED_DOCS_REPO = repo, os.path.join(repo, "nope")
+    bm._tip_cache["key"] = None
+    try:
+        view = bm.landed_view(B.parse(B.read(path)), fetch=False)
+    finally:
+        bm.LANDED_REPO, bm.LANDED_DOCS_REPO = old_repo, old_docs
+        bm._tip_cache["key"] = None
 
-    # ---- 1. what two sweeps racing across the sync actually leave behind ----
-    dup = "| `%s` | second thing |\n" % short[1]
-    path = board([dup, dup, "| `%s` | third thing |\n" % short[2]])
-    before = B.read(path)
-    bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now, force=True,
-                        fetch=False)
-    check("the identical row two hosts both wrote is removed, and one is kept",
-          rows_of(path) == [(short[1], "second thing"),
-                            (short[2], "third thing"),
-                            (short[3], "fourth thing")], rows_of(path))
-    lost = [ln for ln in before.splitlines(True)
-            if ln not in B.read(path).splitlines(True)]
-    check("...and nothing else in the file went with it",
-          lost == [] or all(ln.startswith("| Commit |") or ln.startswith("|---|")
-                            for ln in lost), lost)
-    after = B.read(path)
-    bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now, force=True,
-                        fetch=False)
-    check("...and a second run leaves the file byte-identical", B.read(path) == after)
-
-    # ---- 2. the sweep row loses to the sentence somebody chose, both ways ----
-    said = "| `%s` | board: the sentence the agent wrote |\n" % short[1]
-    for order, name in (([dup, said], "sweep row first"),
-                        ([said, dup], "sentence first")):
-        p = board(order + ["| `%s` | third thing |\n" % short[2]])
-        bm.reconcile_landed(path=p, repo=repo, min_age=0, now=now, force=True,
-                            fetch=False)
-        check("...%s: the raw subject goes and the sentence stays" % name,
-              [r for r in rows_of(p) if r[0] == short[1]]
-              == [(short[1], "board: the sentence the agent wrote")],
-              rows_of(p))
-
-    # ---- 3. two people's sentences are not this function's to arbitrate ----
-    other = "| `%s` | board: a different sentence entirely |\n" % short[1]
-    p = board([said, other, "| `%s` | third thing |\n" % short[2]])
-    bm.reconcile_landed(path=p, repo=repo, min_age=0, now=now, force=True,
-                        fetch=False)
-    check("two different sentences for one hash are BOTH left alone",
-          len([r for r in rows_of(p) if r[0] == short[1]]) == 2, rows_of(p))
+    whats = [r["what"] for g in view for r in g["rows"]]
+    check("a commit inside the window is derived into the section",
+          "the today one" in whats, whats)
+    check("...and one from forty days ago is NOT: the window is what keeps "
+          "eighty commits a day from becoming the section", 
+          "the ancient one" not in whats, whats)
+    check("...while the rows the file already had are untouched",
+          "did a thing" in whats and "did another thing" in whats, whats)
 
 
 # ------------------- 1a1d. ...and `land` upgrades the row the sweep beat it to
@@ -3617,11 +3415,9 @@ def main():
         os.makedirs(os.path.join(tmp, "ld"))
         test_landed(os.path.join(tmp, "ld"))
         os.makedirs(os.path.join(tmp, "ls"))
-        test_landed_sweep(os.path.join(tmp, "ls"))
-        os.makedirs(os.path.join(tmp, "lf"))
-        test_landed_fetch(os.path.join(tmp, "lf"))
-        os.makedirs(os.path.join(tmp, "ldd"))
-        test_landed_dedupe(os.path.join(tmp, "ldd"))
+        test_landed_view(os.path.join(tmp, "ls"))
+        os.makedirs(os.path.join(tmp, "lw"))
+        test_landed_window(os.path.join(tmp, "lw"))
         os.makedirs(os.path.join(tmp, "lup"))
         test_landed_upgrade(os.path.join(tmp, "lup"))
         os.makedirs(os.path.join(tmp, "tg"))

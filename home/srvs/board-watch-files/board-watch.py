@@ -879,27 +879,20 @@ def tick():
     except (bm.BoardError, OSError) as e:
         log("could not reconcile stranded items: %s" % e)
 
-    # AND LANDED IS RECONCILED AGAINST GIT, HERE, not only in the app. The
-    # sweep used to run in `Board._catch_up` alone, which means it ran only
-    # while the board WINDOW was open — and `apps/` being live source, a window
-    # opened before a fix keeps running the code from before it. That is why he
-    # reported the same hole four times against two correct fixes: neither could
-    # reach the process he was looking at. This tick is a systemd unit on both
-    # `top` and `book`, it runs whether or not the board is on screen, and it
-    # says what it appended so the next report has a trace instead of an
-    # argument. `fetch_wait=True`: nothing here is a GUI thread, and a detached
-    # fetch would be killed with this oneshot's cgroup on the way out.
-    # Only for the board that lives INSIDE the repo it is the record of:
-    # `BOARD_WATCH_BOARD` points a harness at a throwaway file, and a sweep that
-    # ignored that would append this repo's real history to a fixture.
-    if os.path.abspath(BOARD).startswith(
-            os.path.abspath(bm.LANDED_REPO) + os.sep):
-        try:
-            for r in bm.reconcile_landed(path=BOARD, fetch_wait=True):
-                log("LANDED: recorded %s (%s) that nobody landed"
-                    % (r["commit"], r["what"]))
-        except (bm.BoardError, OSError, ValueError) as e:
-            log("could not reconcile LANDED against git: %s" % e)
+    # THERE IS NO LANDED SWEEP HERE ANY MORE, AND THAT IS THE FIX, not an
+    # omission. This tick used to call `bm.reconcile_landed()` to APPEND the
+    # commits nobody had recorded, because the app's own sweep only ran while
+    # the board window was open. Both were correct code and neither could reach
+    # him: the window he had open was running the live source from before the
+    # first fix, and this file is a home-manager unit, so on `top` the second
+    # one needed a `sudo rebuild-top` before it existed there at all. He was
+    # blunt about the shape of it — *"it should just read from the commit log of
+    # the repo itself. it shouldnt need an agent to do that"* — and he was
+    # right: `bm.landed_view()` DERIVES the section from `git log` at the moment
+    # it is drawn, so there is no stamped state left to be stale and a watcher
+    # that is three rebuilds behind cannot make LANDED wrong.
+    #
+    # NOTHING IS ADDED HERE, so nothing here needs deploying to keep it current.
 
     # AND NOTHING HE TYPED IS LOST EITHER. A note he wrote to an agent that has
     # since gone — or that never read it — is moved to the queue here, and the

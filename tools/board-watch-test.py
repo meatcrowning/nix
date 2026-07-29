@@ -711,22 +711,24 @@ def test_host_affinity():
         shutil.rmtree(d, ignore_errors=True)
 
 
-def test_landed_sweep_runs_on_a_tick():
-    """A commit on `origin/main` reaches LANDED with the board window CLOSED.
+def test_landed_needs_no_tick():
+    """**The watcher no longer touches LANDED, and that is the fix.**
 
-    He reported the same hole four times. Both earlier fixes were correct and
-    neither could reach him, because the sweep only ever ran in `Board._catch_up`
-    — inside the app, so only while the window was open, and `apps/` being live
-    source, an app opened before a fix goes on running the code from before it.
-    So the tick sweeps too, and this is the check that says so: a real watcher
-    process, no GUI anywhere, a commit that no worker ever landed.
+    He reported the same hole four times against two correct fixes, because
+    both of them made something WRITE the missing rows and a writer has to be
+    deployed: the board window is live source with no hot reload, so the one he
+    had open never ran the first fix, and this watcher is a home-manager unit,
+    so on `top` the second one needed a `sudo rebuild-top` before it existed
+    there at all. His verdict was to stop writing them — *"it should just read
+    from the commit log of the repo itself. it shouldnt need an agent to do
+    that"*.
 
-    `BOARD_LANDED_REPO` is what makes it testable — it points the sweep at a
-    throwaway repo, and the tick's own guard (board must live INSIDE that repo)
-    is what keeps every OTHER test in this file from having ~/nix's real history
-    appended to its fixture.
+    So the two claims here are the inverse of the ones this test used to make:
+    a tick appends NOTHING to LANDED, and the commit nobody recorded is in the
+    section anyway, derived by `bm.landed_view()` from `git log` with no watcher
+    involved at all. That is what makes a stale watcher harmless.
     """
-    print("\nLANDED catches up on a tick, with no app running")
+    print("\nLANDED is derived from git, so a tick does not have to write it")
     d = tempfile.mkdtemp(prefix="board-watch-landed-")
     try:
         repo = os.path.join(d, "repo")
@@ -742,23 +744,17 @@ def test_landed_sweep_runs_on_a_tick():
 
         git("init", "-q", "-b", "main")
         made = []
-        # Backdated, because the sweep leaves a commit younger than
-        # `LANDED_MIN_AGE` to the worker that is probably still running and
-        # about to land it. Minutes, not hours: both must fall on TODAY, which
-        # is the date group the fixture below opens.
         for age, subject in ((240, "the one LANDED already names"),
                              (120, "the one nobody landed")):
             open(os.path.join(repo, str(age)), "w").write("x")
-            git("add", "-A")
+            git("add", "--", str(age))
             when = "@%d +0000" % int(time.time() - age)
             base["GIT_AUTHOR_DATE"] = base["GIT_COMMITTER_DATE"] = when
             git("commit", "-q", "-m", subject)
             made.append(git("rev-parse", "--short", "HEAD").stdout.strip())
-        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        # NO `origin/main` is created. The old sweep read that ref alone and was
+        # blind to anything this machine had not pushed; the view reads HEAD.
 
-        # The board lives inside that repo, the way the real one lives in ~/nix,
-        # and LANDED names the FIRST commit only — which is both the floor the
-        # sweep works down to and the proof it is not inventing history.
         r = Rig(d)
         r.board = os.path.join(repo, "docs", "board.md")
         day = time.strftime("%Y-%m-%d")
@@ -767,26 +763,34 @@ def test_landed_sweep_runs_on_a_tick():
                            .replace("| `abc1234` | did a thing |",
                                     "| `%s` | the one LANDED already names |"
                                     % made[0]))
+        before = open(r.board).read()
         env = dict(BOARD_LANDED_REPO=repo)
         p = subprocess.run([sys.executable, WATCHER], env=r.env(**env),
                            capture_output=True, text=True, timeout=120)
         if VERBOSE:
             print("    rc=%d %s" % (p.returncode, p.stderr.strip()[:300]))
-        text = open(r.board).read()
-        check("a commit nobody landed is in LANDED after ONE tick, no app open",
-              ("| `%s` | the one nobody landed |" % made[1]) in text
-              or ("| `%s` | the one nobody landed " % made[1]) in text,
-              text[text.index("## LANDED"):][:400])
-        check("...and the tick says so in the log, so a report has a trace",
-              any("LANDED: recorded %s" % made[1] in l for l in open(r.log)),
-              "".join(open(r.log)))
-        check("...and the commit the section already named is not repeated",
-              text.count("`%s`" % made[0]) == 1)
-        n = text.count("| `")
-        subprocess.run([sys.executable, WATCHER], env=r.env(**env),
-                       capture_output=True, text=True, timeout=120)
-        check("...and a second tick appends nothing: the sweep is idempotent",
-              open(r.board).read().count("| `") == n)
+        check("a tick appends NOTHING to LANDED - nothing has to be deployed "
+              "for the section to be current", open(r.board).read() == before,
+              open(r.board).read()[:400])
+
+        sys.path.insert(0, os.path.join(REPO, "apps", "board"))
+        sys.path.insert(0, os.path.join(REPO, "apps", "pylib"))
+        import boardparse as B
+        import boardmove as bm
+        old_repo, old_docs = bm.LANDED_REPO, bm.LANDED_DOCS_REPO
+        bm.LANDED_REPO, bm.LANDED_DOCS_REPO = repo, os.path.join(repo, "docs")
+        bm._tip_cache["key"] = None
+        try:
+            view = bm.landed_view(B.parse(B.read(r.board)), fetch=False)
+        finally:
+            bm.LANDED_REPO, bm.LANDED_DOCS_REPO = old_repo, old_docs
+            bm._tip_cache["key"] = None
+        whats = [row["what"] for g in view for row in g["rows"]]
+        check("...and the commit nobody landed is in the section regardless, "
+              "read straight out of git", "the one nobody landed" in whats,
+              whats)
+        check("...with the row somebody DID record still saying his sentence",
+              "the one LANDED already names" in whats, whats)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -1056,7 +1060,7 @@ def main():
     test_worker_outlives_the_tick()
     test_the_loop()
     test_host_affinity()
-    test_landed_sweep_runs_on_a_tick()
+    test_landed_needs_no_tick()
 
     print()
     if fails:
