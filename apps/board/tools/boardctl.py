@@ -8,13 +8,15 @@ happen. This is the third way, and it is the one an agent should use:
 
     boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> IN FLIGHT
     boardctl.py land 'cover art' --commit a3c2aac --what 'player: dim the art'
+    boardctl.py land --commit a3c2aac --what 'player: dim the art'   # no row
     boardctl.py back 'cover art' --why 'blocked on the FOCUS signal'
+    boardctl.py stall 'board app'                  # a row nothing owns -> to-do
     boardctl.py note '**Relaunch `player`** - live source, no hot reload.'
     boardctl.py list
 
     boardctl.py agents                             # who is running, by phase
     boardctl.py inbox take                         # HIS notes to you, mid-flight
-    boardctl.py inbox send 'also fix the tooltip' --to <agent id>
+    boardctl.py inbox send 'also fix the tooltip' --to Rosa   # or --to <agent id>
 
 The orchestrator's verbs — how one sentence he typed becomes several agents
 (`../boardwork.py` is the mechanism and the authority):
@@ -30,6 +32,13 @@ card is filed under.** That is derived from your own tool calls
 (`../boardphase.py`); he sees both, side by side, on purpose. Say it anyway —
 it is the only line that carries WHAT you are working on rather than which verb
 you last used.
+
+**A worker has a first name.** It is minted beside the coded id when the worker
+is spawned and it is what every line here identifies it by — his call: *"i think
+itd be interesting to have them referred to by regular names"*. The id is still
+the only key: the systemd unit, `~/.cache/board-work/<id>.log` and the inbox
+directory are all named by it, so it is printed in parentheses after the name.
+`inbox send --to` accepts either.
 
 **`ask` refuses without `--if-unanswered`.** Every question on this board draws
 that sentence, always; it is what makes a question safe to walk away from.
@@ -52,11 +61,20 @@ SELECTORS are forgiving on purpose, because the caller is usually a language
 model holding a decision's title and not its slug: a number (`4`), the slug, or
 any unambiguous part of the title. Ambiguity is an error, never a guess.
 
+**`land` does not need an IN FLIGHT row.** A decision agent has one; a worker
+dispatched out of the box never did, so for a day the fan-out's commits reached
+LANDED never — `land` refused, and `note` was all a worker could reach. Every
+agent that commits something records it here, with or without a row.
+
 WHAT IT WILL NOT DO. It does not resolve a decision — `start` refuses an item he
 has not answered (`--force` if you genuinely mean to, and say why on the board).
 It does not delete anything: `land` moves a row to LANDED, `back` returns the
-whole decision verbatim from the stash. And it writes no times, ages or counts
-anywhere in the file; see `boardmove.py`.
+whole decision verbatim from the stash, and `stall` — the exit for a row no
+stash on this host owns, which is most of what IN FLIGHT accumulates — moves the
+row's three cells into WAITING ON YOU TO DO rather than dropping them. And it
+writes no ages, elapsed times or counts anywhere in the file — a LANDED row's
+`when` is the commit's own time, a fact about the past and not a clock running
+against him; see `boardmove.py`.
 
 `--board PATH` points it at a fixture instead of the real store; that is how
 `tools/board-test.py` drives it.
@@ -83,9 +101,16 @@ def cmd_start(a):
 
 
 def cmd_land(a):
-    row = bm.land(a.selector, a.commit, what=a.what, date=a.date, path=a.board)
-    bw.mark_reported(what=a.what or row["what"])
-    print("landed: %s (%s)" % (a.what or row["what"], a.commit))
+    row = bm.land(a.selector, a.commit, what=a.what, date=a.date, when=a.when,
+                  path=a.board)
+    what = a.what or row.get("what") or a.commit
+    bw.mark_reported(what=what)
+    when = bm.commit_time(a.commit) if a.when is None else a.when
+    print("landed: %s (%s%s)" % (what, a.commit, ", " + when if when else ""))
+    if not row:
+        # No IN FLIGHT row was moved — the commit was simply recorded. Say so,
+        # rather than letting it read as though something moved sections.
+        print("recorded in LANDED; nothing was moved out of IN FLIGHT")
     return 0
 
 
@@ -108,12 +133,27 @@ def cmd_note(a):
     return 1
 
 
+def cmd_stall(a):
+    row = bm.stall(a.selector, path=a.board)
+    print("out of IN FLIGHT, into WAITING ON YOU TO DO: " + row["what"])
+    return 0
+
+
 def cmd_reconcile(a):
     moved = bm.reconcile(path=a.board)
     for rec in moved:
         print("returned to NEEDS YOU (its agent is gone): " + rec["title"])
     if not moved:
         print("nothing stranded")
+    # ...and the rows reconcile structurally cannot reach. Reported, never
+    # acted on: this host has no way to tell a row the OTHER machine is working
+    # from one nothing is. Saying nothing is how the section silted up.
+    rest = bm.unowned(path=a.board)
+    if rest:
+        print("%d row(s) no stash on this host owns - `boardctl.py stall "
+              "<row>` moves one to WAITING ON YOU TO DO:" % len(rest))
+        for r in rest:
+            print("  " + r["what"])
     return 0
 
 
@@ -131,11 +171,39 @@ def cmd_list(a):
     return 0
 
 
+def _who(ag):
+    """How an agent is IDENTIFIED in this tool's output: by its first name, with
+    the coded id after it because that is what its log and its unit are called.
+    A row with neither — a task queued above the cap — has nobody on it yet and
+    is not given a name it has not got."""
+    name, aid = ag.get("name") or "", ag.get("id") or ""
+    if name and aid:
+        return "%s (%s)" % (name, aid)
+    return name or aid
+
+
+def _resolve_to(who):
+    """`--to` takes an id OR a first name, because the name is what he reads on
+    the card and on the orchestrator's note. Case-insensitive; an id wins, since
+    that is the thing nothing else can collide with."""
+    want = (who or "").strip().lower()
+    if not want:
+        return None
+    rows = ba.agents()
+    for ag in rows:
+        if ag["id"].lower() == want:
+            return ag["id"]
+    for ag in rows:
+        if (ag.get("name") or "").lower() == want:
+            return ag["id"]
+    return who
+
+
 def cmd_agents(a):
     for g in bw.groups():
         print(g["label"].upper())
         for ag in g["rows"]:
-            print("  %-52s %s" % (ag["title"][:52], ag["where"]))
+            print("  %-20s %-46s %s" % (_who(ag), ag["title"][:46], ag["where"]))
             # The two statements, kept apart on the page exactly as the card
             # keeps them apart on screen. `says` is the agent; `actually` is its
             # transcript. Never merged, never one used for the other.
@@ -169,8 +237,12 @@ def cmd_dispatch(a):
     # STARTED, and that is all this can honestly say. The worker records its own
     # result on the board when it finishes; if it stops without one, the next
     # board-watch tick says so. See `boardwork.reap()`.
-    print("started as %s (unit %s%s) - nothing has landed yet: %s"
-          % (rec["id"], bw.UNIT_PREFIX, rec["id"], rec["task"][:70]))
+    # THE NAME IS WHAT THE NOTE SAYS. It is printed first and by itself because
+    # the orchestrator reads this line and writes one identifier down from it;
+    # the id follows because the log and the unit are named after it.
+    print("started as %s - id %s, unit %s%s - nothing has landed yet: %s"
+          % (rec.get("name") or rec["id"], rec["id"], bw.UNIT_PREFIX, rec["id"],
+             rec["task"][:70]))
     return 0
 
 
@@ -215,7 +287,7 @@ def cmd_inbox(a):
             print("(nothing in your inbox)")
         return 0
     if a.what == "send":
-        msg = ba.send(" ".join(a.text), to=a.to)
+        msg = ba.send(" ".join(a.text), to=_resolve_to(a.to))
         if msg is None:
             print("boardctl: nothing to send", file=sys.stderr)
             return 1
@@ -232,7 +304,8 @@ def cmd_inbox(a):
         print("queued  " + m["text"][:100])
     for ag in ba.agents():
         for m in ba.for_agent(ag["id"]):
-            print("unread  [%s] %s" % (ag["title"][:30], m["text"][:100]))
+            print("unread  [%s] %s" % (_who(ag) or ag["title"][:30],
+                                       m["text"][:100]))
     return 0
 
 
@@ -252,11 +325,18 @@ def main(argv=None):
                    help="start an UNANSWERED decision (say why on the board)")
     s.set_defaults(fn=cmd_start)
 
-    s = sub.add_parser("land", help="move an IN FLIGHT row into LANDED with its commit")
-    s.add_argument("selector")
+    s = sub.add_parser("land", help="record a commit in LANDED (and move its "
+                                    "IN FLIGHT row, if it has one)")
+    s.add_argument("selector", nargs="?", default="",
+                   help="an IN FLIGHT row to move; omit if you have none")
     s.add_argument("--commit", required=True)
-    s.add_argument("--what", default=None, help="one line; defaults to the row's own")
+    s.add_argument("--what", default=None,
+                   help="one line; defaults to the row's own, and is REQUIRED "
+                        "when there is no row")
     s.add_argument("--date", default=None, help="YYYY-MM-DD; defaults to today")
+    s.add_argument("--when", default=None,
+                   help="the time, 12-hour; defaults to the commit's own "
+                        "committer date, read from git")
     s.set_defaults(fn=cmd_land)
 
     s = sub.add_parser("back", help="return a stranded IN FLIGHT item to NEEDS YOU")
@@ -267,6 +347,11 @@ def main(argv=None):
     s = sub.add_parser("note", help="add one bullet to WAITING ON YOU TO DO")
     s.add_argument("text", nargs="+")
     s.set_defaults(fn=cmd_note)
+
+    s = sub.add_parser("stall", help="an IN FLIGHT row nothing owns -> one "
+                                     "bullet in WAITING ON YOU TO DO")
+    s.add_argument("selector")
+    s.set_defaults(fn=cmd_stall)
 
     s = sub.add_parser("reconcile", help="return every item whose agent has died")
     s.set_defaults(fn=cmd_reconcile)
@@ -313,7 +398,8 @@ def main(argv=None):
     s.add_argument("text", nargs="*", help="send: the note")
     s.add_argument("--id", default=None,
                    help="take: whose inbox (default: $BOARD_AGENT_ID, else this session)")
-    s.add_argument("--to", default=None, help="send: an agent id; omit to queue it")
+    s.add_argument("--to", default=None,
+                   help="send: an agent id or its first name; omit to queue it")
     s.add_argument("--queue", action="store_true",
                    help="take: drain the queue too (board-watch only)")
     s.add_argument("--quiet", action="store_true", help="take: print nothing if empty")

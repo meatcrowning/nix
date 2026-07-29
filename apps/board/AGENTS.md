@@ -174,12 +174,28 @@ Rules that fall out of it, all of them load-bearing:
   third. A group that gains its first timed row gains the `When` header in the
   same edit — a markdown row with more cells than its header drops the extras in
   every renderer, and this file is read in `reader` and on GitHub too.
-- **An item cannot be stranded.** Three ways back out of IN FLIGHT: the agent
-  lands it, the watcher hands it back when the agent exits badly, or
+- **An item cannot be stranded.** Four ways back out of IN FLIGHT: the agent
+  lands it, the watcher hands it back when the agent exits badly,
   `boardmove.reconcile()` — run at the top of every board-watch tick — sees the
-  owning pid is gone and hands it back itself. Worst case is one timer interval.
-  A hand-started item (`boardctl start` with no `--pid`) is never reclaimed
-  automatically; nothing can tell whether that session is still thinking.
+  owning pid is gone and hands it back itself, or `boardctl stall <row>` moves a
+  row nothing owns into WAITING ON YOU TO DO. The first three are worst-case one
+  timer interval. A hand-started item (`boardctl start` with no `--pid`) is
+  never reclaimed automatically; nothing can tell whether that session is still
+  thinking.
+- **The first three are keyed on the STASH, and the stash is machine-local.**
+  `board.md` syncs both ways; `~/.local/state/board/inflight/` does not. So from
+  either machine, a row the *other* one started is indistinguishable from a row
+  nobody started — and neither is a row written before the stash existed, or one
+  added by hand. `reconcile()` covers what this host started and nothing else,
+  which is why IN FLIGHT could only ever grow: reading it on 2026-07-29 he said
+  it *"doesnt update at all its still got old stuff in it"*, and four of its
+  five rows were ones no mechanism here could remove. `boardmove.unowned()`
+  reports them (`boardctl reconcile` prints the list after its own work) and
+  `stall()` is their exit. **Neither is automatic and neither should become
+  one** — a row this host does not own may be perfectly alive on the other.
+  `stall` MOVES the row's three cells into WAITING ON YOU TO DO rather than
+  dropping them, and refuses a row whose decision is stashed here, because
+  `back` would put his actual question back instead of flattening it.
 - **A failed decision does NOT re-fire.** Its answer is already recorded in the
   watcher's state, so it comes back to NEEDS YOU and sits there with the bullet
   saying what happened. Re-answering it is what starts it again — deliberately,
