@@ -669,6 +669,206 @@ def reconcile(path=bp.BOARD_PATH):
     return moved
 
 
+# ------------------------------------------------- LANDED catches up by itself
+# `land()` is a thing a worker has to REMEMBER, and the record of what reached
+# his machine cannot rest on that. It already failed twice the same way: a
+# worker that lands a commit under a pathspec and never comes back, one that is
+# killed mid-run, one that simply is not told. He read the section on 2026-07-29
+# and said *"the landed page it still is stuck with commits from an hour ago"* —
+# three commits were on `origin/main` and none of them was in the file.
+#
+# So the section reconciles against git the same way IN FLIGHT reconciles
+# against `/proc`: whatever is on `origin/main` and not in LANDED is a hole, and
+# a hole gets filled. Append-only, in commit order, never a rewrite.
+
+#: The repo LANDED is a record of. `docs/` is deliberately NOT swept: its
+#: history is mostly the 5-minute sync timer's own commits, and a sweep over it
+#: would bury his board in them. A docs commit worth recording is recorded by
+#: hand, with `land`, exactly as it always was.
+LANDED_REPO = os.path.expanduser("~/nix")
+
+#: How far back the sweep may reach: never before the OLDEST commit LANDED
+#: already names. Everything earlier predates the board and was never meant to
+#: be in it — a fixed window would have appended 96 rows of history the first
+#: time it ran. An empty LANDED has no floor and so sweeps nothing, which is the
+#: safe answer rather than the whole repo.
+
+#: A commit is left alone until it is this old, because the worker that made it
+#: is very often still running and about to `land` it itself — and two writers
+#: appending the same hash is exactly the duplicate this must not create.
+LANDED_MIN_AGE = 600                # 10 minutes
+
+#: ...and `board.md` SYNCS between the machines, so both hosts can be looking at
+#: the same hole with no lock between them. The stagger is the whole answer:
+#: `top` fills a hole after 10 minutes, any other host waits 45. The docs sync
+#: runs every 5 minutes each way, so book sees top's row with ~30 minutes to
+#: spare, and if top is off book still catches up — just later. Nothing here
+#: reorders or rewrites, so the worst case of a lost race is one duplicate row,
+#: not a damaged file.
+LANDED_LEAD_HOST = "top"
+LANDED_OTHER_MIN_AGE = 2700         # 45 minutes
+
+#: Don't shell out to git on every repaint. The board app refreshes on every
+#: inotify event on the file, and agents write to it constantly.
+LANDED_SWEEP_EVERY = 120
+
+#: How much history to ask git for. The floor above is always inside this on any
+#: board that is being used; it only bounds the cost of the call.
+LANDED_LOG_LIMIT = 500
+
+_LOG_FMT = "%H\x1f%ct\x1f%s"
+
+
+def _sweep_stamp():
+    return os.path.join(stash_dir(), "landed-sweep.json")
+
+
+def _sweep_due(now, every=LANDED_SWEEP_EVERY):
+    try:
+        with open(_sweep_stamp()) as f:
+            last = float(json.load(f).get("at") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        last = 0
+    if now - last < every:
+        return False
+    try:
+        with open(_sweep_stamp(), "w") as f:
+            json.dump({"at": now}, f)
+    except OSError:
+        pass
+    return True
+
+
+def _git_log(repo=LANDED_REPO, ref="origin/main", limit=LANDED_LOG_LIMIT):
+    """`[(full hash, committer epoch, subject)]`, newest first. Empty on any
+    failure — a missing repo, no `origin/main`, git not on PATH — because a
+    sweep that cannot read git must do nothing, not guess."""
+    try:
+        p = subprocess.run(
+            ["git", "-C", repo, "log", ref, "--no-merges",
+             "--format=" + _LOG_FMT, "-n", str(int(limit))],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if p.returncode != 0:
+        return []
+    out = []
+    for line in p.stdout.splitlines():
+        parts = line.split("\x1f", 2)
+        if len(parts) != 3:
+            continue
+        try:
+            out.append((parts[0].lower(), int(parts[1]), parts[2].strip()))
+        except ValueError:
+            continue
+    return out
+
+
+def landed_commits(doc):
+    """Every commit hash LANDED already names, lowercased and unfenced.
+
+    They are SHORT hashes in the file, so matching is by prefix against a full
+    one. A row with no commit (`no change`, a decision settled) contributes
+    nothing.
+    """
+    out = []
+    for grp in doc.get("landed") or []:
+        for row in grp.get("rows") or []:
+            c = (row.get("commit") or "").strip().strip("`").lower()
+            if re.fullmatch(r"[0-9a-f]{4,40}", c):
+                out.append(c)
+    return out
+
+
+def _local(ts):
+    return datetime.datetime.fromtimestamp(ts)
+
+
+def landed_when(ts):
+    """A commit's own local time in LANDED's form — `1:28 am`. Same clock
+    `commit_time()` writes, derived here from the epoch we already have rather
+    than by asking git a second time per commit."""
+    return _local(ts).strftime("%I:%M %p").lstrip("0").lower()
+
+
+def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None):
+    """What is on `origin/main` and not in LANDED. Oldest first, ready to append.
+
+    Three bounds, and each one exists to stop this doing something he did not
+    ask for:
+
+      * the FLOOR — nothing older than the oldest commit LANDED already names.
+      * the AGE — nothing younger than `min_age`, so a live worker gets to
+        record its own commit first.
+      * the DATE — a commit only joins a `### <date>` group that already exists,
+        or opens a new one if its date is newer than every group there. Never
+        one wedged in the middle: LANDED is newest-group-first and this must not
+        invent that structure from a commit's date.
+    """
+    now = time.time() if now is None else now
+    if min_age is None:
+        min_age = (LANDED_MIN_AGE if socket.gethostname() == LANDED_LEAD_HOST
+                   else LANDED_OTHER_MIN_AGE)
+    doc = bp.parse(bp.read(path))
+    log = _git_log(repo)
+    if not log:
+        return []
+    have = landed_commits(doc)
+    if not have:
+        return []
+
+    def recorded(full):
+        return any(full.startswith(h) for h in have)
+
+    floor = min((ts for full, ts, _s in log if recorded(full)), default=None)
+    if floor is None:
+        return []                    # LANDED names nothing this repo knows
+
+    dates = [g.get("date", "").strip() for g in doc.get("landed") or []]
+    dates = [d for d in dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)]
+    newest = max(dates) if dates else ""
+
+    out = []
+    for full, ts, subject in log:
+        if ts <= floor or ts > now - min_age or recorded(full):
+            continue
+        date = _local(ts).date().isoformat()
+        if dates and date not in dates and date < newest:
+            continue
+        out.append({"commit": full[:7], "what": subject, "date": date,
+                    "when": landed_when(ts), "ts": ts})
+    out.sort(key=lambda r: r["ts"])
+    return out
+
+
+def reconcile_landed(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None,
+                     now=None, force=False):
+    """Append every missing commit to LANDED. Returns the rows it wrote.
+
+    Idempotent by construction: the second run finds those hashes in the file
+    and has nothing to do. One `bp.edit`, so the whole catch-up is one atomic
+    write under the same lock every other writer takes, and a run with nothing
+    to append does not write at all.
+    """
+    now = time.time() if now is None else now
+    if not force and not _sweep_due(now):
+        return []
+    rows = landed_missing(path=path, repo=repo, min_age=min_age, now=now)
+    if not rows:
+        return []
+
+    def go(doc):
+        lines = doc["lines"]
+        for r in rows:
+            lines = bp.add_landed_row(lines, r["commit"], r["what"],
+                                      r["date"], r["when"])
+        return lines
+
+    if not bp.edit(path, go):
+        return []
+    return rows
+
+
 def status(path=bp.BOARD_PATH):
     doc = bp.parse(bp.read(path))
     owned = {_norm(r.get("title")): r for r in _stashes()}

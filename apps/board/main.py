@@ -83,6 +83,7 @@ from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
 
 import boardparse  # noqa: E402  (beside this file)
+import boardmove  # noqa: E402  (beside this file)
 import boardagents  # noqa: E402  (beside this file)
 import boardwork  # noqa: E402  (beside this file)
 
@@ -234,9 +235,34 @@ class Board(QObject):
         self._settle.setSingleShot(True)
         self._settle.setInterval(120)
         self._settle.timeout.connect(self._reload)
+        # LANDED CATCHES UP BY ITSELF. `boardmove.land()` is something a worker
+        # has to remember, and a record of what reached his machine cannot rest
+        # on that — a worker that dies, or is never told, leaves a commit on
+        # `origin/main` that the section never mentions. He read it stuck an
+        # hour behind on 2026-07-29. So the sweep runs HERE, where the section
+        # is drawn: whatever he is looking at has just been reconciled against
+        # git, whether or not the watcher is up and with no rebuild to deploy
+        # it (this is live source; `board-watch.py` is not). It is throttled to
+        # `boardmove.LANDED_SWEEP_EVERY` inside, so this cadence costs nothing
+        # most times it fires, and it is append-only — a run with nothing to
+        # add does not write, so it cannot loop through our own file watcher.
+        self._sweep = QTimer(self)
+        self._sweep.setInterval(60000)
+        self._sweep.timeout.connect(self._catch_up)
+        self._sweep.start()
         self._load()
+        self._catch_up()
 
     # ---- reading ----
+
+    def _catch_up(self):
+        try:
+            rows = boardmove.reconcile_landed(path=self._path)
+        except (boardparse.BoardError, OSError, ValueError):
+            return                    # §10: never fatal, and never a dialog
+        if rows:
+            self.status.emit("LANDED: recorded %d commit%s nobody had"
+                             % (len(rows), "" if len(rows) == 1 else "s"))
 
     def _rewatch(self):
         if os.path.isfile(self._path) and self._path not in self._watcher.files():
@@ -559,6 +585,9 @@ class Agents(QObject):
             "saysLine": a.get("saysLine", ""),
             "doingLine": a.get("doingLine", ""),
             "observed": a.get("observed", "unlinked"),
+            # How much context it is standing in, against what it can hold —
+            # already formatted, and "" when nothing could be measured.
+            "contextLine": a.get("contextLine", ""),
             "detail": boardagents.describe(a),
             "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
                        if a["id"] else [],
