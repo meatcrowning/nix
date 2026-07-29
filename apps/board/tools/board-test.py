@@ -825,22 +825,25 @@ def test_landed_fetch(tmp):
     check("a repo with no origin is never dialled at all",
           bm._fetch_origin(up, now=now + 10_000) is False)
 
-    # ---- the delay on the host he actually sits at ----
+    # ---- the delay, which is now one tick and not a docs-sync round trip ----
+    check("the fetch rides the sweep's own tick, so it cannot be the slow part",
+          bm.LANDED_FETCH_EVERY <= bm.LANDED_SWEEP_EVERY <= 60,
+          (bm.LANDED_FETCH_EVERY, bm.LANDED_SWEEP_EVERY))
     real = socket.gethostname
     try:
-        socket.gethostname = lambda: "book"
-        got_other = [r["commit"] for r in
-                     bm.landed_missing(path=path, repo=down, now=made[-1] + 1500)]
-        socket.gethostname = lambda: bm.LANDED_LEAD_HOST
-        got_lead = [r["commit"] for r in
-                    bm.landed_missing(path=path, repo=down, now=made[-1] + 700)]
+        got = {}
+        for hostname in ("book", "top", "somewhere-else"):
+            socket.gethostname = lambda h=hostname: h
+            got[hostname] = [r["commit"] for r in
+                             bm.landed_missing(path=path, repo=down,
+                                               now=made[-1] + 120)]
     finally:
         socket.gethostname = real
-    check("a hole is filled on the non-lead host after the sync round trip, not 45 minutes",
-          bm.LANDED_OTHER_MIN_AGE == 1200 and got_other == [short[1], short[2]],
-          (bm.LANDED_OTHER_MIN_AGE, got_other))
-    check("...and the lead host still goes first, at ten minutes",
-          got_lead == [short[1], short[2]], got_lead)
+    check("a two-minute-old commit is a hole on EVERY host, not in 10 or 20 minutes",
+          all(v == [short[1], short[2]] for v in got.values()), got)
+    check("...because there is no per-host stagger left to make one host wait",
+          not hasattr(bm, "LANDED_OTHER_MIN_AGE")
+          and not hasattr(bm, "LANDED_LEAD_HOST"))
 
     # ---- a hash that appeared under the sweep is not appended twice ----
     rows = bm.reconcile_landed(path=path, repo=down, min_age=0, now=now,
@@ -857,6 +860,173 @@ def test_landed_fetch(tmp):
         bm.landed_missing = stale
     check("a row another writer just landed is skipped, not duplicated",
           again == [] and B.read(path) == after, again)
+
+
+# ------------------- 1a1c. ...and the wait is gone, because a duplicate is
+#                            REMOVED rather than avoided
+def test_landed_dedupe(tmp):
+    """*"why is the wait time so absurdly high? it should just notice when a new
+    commit is added and append it to the list"*.
+
+    It waited because `board.md` syncs between the two machines with no lock
+    across it, so two hosts could sweep one hole and union-merge into two rows —
+    and the answer was to make the second host wait out the sync round trip, 20
+    minutes, to look at a hole he could already see. The answer now is that the
+    duplicate is UNDONE: the sweep already reads every hash in the section, so a
+    repeat that says only what the sweep itself would write is one `remove_row`.
+
+    Four claims, and the last two are the ones that keep a self-healing section
+    from becoming a section that edits people's words:
+
+      * the byte-identical repeat two sweeps produce goes, leaving one row;
+      * when the repeat is a SWEEP row and the survivor is somebody's sentence,
+        it is the sweep row that goes, whichever order they sit in;
+      * two DIFFERENT sentences for one hash are both left alone — that is a
+        union merge of prose and a human should look at it;
+      * everything else in the file is byte-identical, and a second run does
+        nothing at all.
+    """
+    import subprocess
+
+    import boardmove as bm
+    import boardparse as B
+
+    repo = os.path.join(tmp, "repo")
+    os.makedirs(repo)
+    base = dict(os.environ, GIT_CONFIG_GLOBAL=os.path.join(tmp, "gitconfig"),
+                GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t",
+                GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                GIT_COMMITTER_EMAIL="t@t")
+
+    def git(*a, **env):
+        return subprocess.run(["git", "-C", repo] + list(a), env=dict(base, **env),
+                              capture_output=True, text=True)
+
+    git("init", "-q", "-b", "main")
+    epoch = 1785300000
+    made = []
+    for i, subject in enumerate(("first thing", "second thing", "third thing",
+                                 "fourth thing")):
+        ts = epoch + i * 600
+        open(os.path.join(repo, "f%d" % i), "w").write("x")
+        git("add", "-A")
+        git("commit", "-q", "-m", subject,
+            GIT_AUTHOR_DATE="@%d +0000" % ts, GIT_COMMITTER_DATE="@%d +0000" % ts)
+        made.append(ts)
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    short = [ln.split()[0] for ln in
+             git("log", "refs/remotes/origin/main", "--format=%h").stdout.splitlines()][::-1]
+    day = bm._local(made[0]).date().isoformat()
+    now = made[-1] + 3600
+
+    def board(rows):
+        """A LANDED whose one date group holds exactly `rows`, as raw lines."""
+        p = os.path.join(tmp, "b%d.md" % board.n)
+        board.n += 1
+        open(p, "w").write(
+            FIXTURE.replace("### 2026-07-28", "### " + day)
+                   .replace("| `abc1234` | did a thing |\n", "")
+                   .replace("| `def5678` | did another thing |\n",
+                            "".join(rows)))
+        return p
+    board.n = 0
+
+    def rows_of(p):
+        return [(r["commit"], r["what"])
+                for g in B.parse(B.read(p))["landed"] for r in g["rows"]]
+
+    # ---- 1. what two sweeps racing across the sync actually leave behind ----
+    dup = "| `%s` | second thing |\n" % short[1]
+    path = board([dup, dup, "| `%s` | third thing |\n" % short[2]])
+    before = B.read(path)
+    bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now, force=True,
+                        fetch=False)
+    check("the identical row two hosts both wrote is removed, and one is kept",
+          rows_of(path) == [(short[1], "second thing"),
+                            (short[2], "third thing"),
+                            (short[3], "fourth thing")], rows_of(path))
+    lost = [ln for ln in before.splitlines(True)
+            if ln not in B.read(path).splitlines(True)]
+    check("...and nothing else in the file went with it",
+          lost == [] or all(ln.startswith("| Commit |") or ln.startswith("|---|")
+                            for ln in lost), lost)
+    after = B.read(path)
+    bm.reconcile_landed(path=path, repo=repo, min_age=0, now=now, force=True,
+                        fetch=False)
+    check("...and a second run leaves the file byte-identical", B.read(path) == after)
+
+    # ---- 2. the sweep row loses to the sentence somebody chose, both ways ----
+    said = "| `%s` | board: the sentence the agent wrote |\n" % short[1]
+    for order, name in (([dup, said], "sweep row first"),
+                        ([said, dup], "sentence first")):
+        p = board(order + ["| `%s` | third thing |\n" % short[2]])
+        bm.reconcile_landed(path=p, repo=repo, min_age=0, now=now, force=True,
+                            fetch=False)
+        check("...%s: the raw subject goes and the sentence stays" % name,
+              [r for r in rows_of(p) if r[0] == short[1]]
+              == [(short[1], "board: the sentence the agent wrote")],
+              rows_of(p))
+
+    # ---- 3. two people's sentences are not this function's to arbitrate ----
+    other = "| `%s` | board: a different sentence entirely |\n" % short[1]
+    p = board([said, other, "| `%s` | third thing |\n" % short[2]])
+    bm.reconcile_landed(path=p, repo=repo, min_age=0, now=now, force=True,
+                        fetch=False)
+    check("two different sentences for one hash are BOTH left alone",
+          len([r for r in rows_of(p) if r[0] == short[1]]) == 2, rows_of(p))
+
+
+# ------------------- 1a1d. ...and `land` upgrades the row the sweep beat it to
+def test_landed_upgrade(tmp):
+    """The sweep fills a hole about two minutes after the push now, so a worker
+    that takes longer than that to come back and `land` will regularly find its
+    own commit already recorded — under the raw commit subject.
+
+    `land` used to be dropped on the floor there ("skip a hash the doc already
+    names"), which threw away the sentence the agent chose. It now rewrites that
+    one What cell in place: same line, same commit, same time, one targeted line
+    edit like every other write in this store. Four claims — the cell changes,
+    no row is added, the time and every other line survive, and re-stating a row
+    that already reads that way is a no-op and not an error.
+    """
+    import boardmove as bm
+    import boardparse as B
+
+    path = os.path.join(tmp, "board.md")
+    open(path, "w").write(
+        FIXTURE.replace("| `def5678` | did another thing |",
+                        "| `def5678` | board: swept subject | 3:42 pm |"))
+    before = B.read(path)
+
+    bm.land(None, "def5678", what="board: the sentence the agent chose",
+            path=path)
+    doc = B.parse(B.read(path))
+    got = [(r["commit"], r["what"], r["when"])
+           for g in doc["landed"] for r in g["rows"]]
+    check("`land` on a hash LANDED already names rewrites that row's What",
+          got == [("abc1234", "did a thing", ""),
+                  ("def5678", "board: the sentence the agent chose", "3:42 pm")],
+          got)
+    check("...in place: no row was added, the file is the same length",
+          len(B.read(path).splitlines()) == len(before.splitlines()))
+    check("...and it kept the commit's own time rather than re-reading git",
+          "3:42 pm" in B.read(path))
+    after = B.read(path)
+    bm.land(None, "def5678", what="board: the sentence the agent chose",
+            path=path)
+    check("...and saying it a second time is a no-op, not a refusal",
+          B.read(path) == after)
+
+    # ---- with an IN FLIGHT row to retire, it is still ONE edit ----
+    bm.land("A thing being built", "def5678", what="board: upgraded again",
+            path=path)
+    doc = B.parse(B.read(path))
+    check("a selector still retires its IN FLIGHT row while upgrading the row",
+          [r["what"] for r in doc["flight"]] == ["Another thing"]
+          and any(r["what"] == "board: upgraded again"
+                  for g in doc["landed"] for r in g["rows"]),
+          ([r["what"] for r in doc["flight"]],
+           [r["what"] for g in doc["landed"] for r in g["rows"]]))
 
 
 # ------------------- 1b1b. everything in NEEDS YOU says WHEN it was put there
@@ -3359,6 +3529,10 @@ def main():
         test_landed_sweep(os.path.join(tmp, "ls"))
         os.makedirs(os.path.join(tmp, "lf"))
         test_landed_fetch(os.path.join(tmp, "lf"))
+        os.makedirs(os.path.join(tmp, "ldd"))
+        test_landed_dedupe(os.path.join(tmp, "ldd"))
+        os.makedirs(os.path.join(tmp, "lup"))
+        test_landed_upgrade(os.path.join(tmp, "lup"))
         os.makedirs(os.path.join(tmp, "tg"))
         test_todo_tags(os.path.join(tmp, "tg"))
         os.makedirs(os.path.join(tmp, "pl"))
