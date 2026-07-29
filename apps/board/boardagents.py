@@ -733,6 +733,10 @@ def agents(procs=None):
         # (`doing` while it runs, `last` once it has stopped) without
         # re-deriving it from the sentence.
         a["observed"] = obs.get("observed") or "unlinked"
+        # HOW FULL IT IS: `62k/200k`, measured out of the transcript's own
+        # `usage` stamps, and "" when nothing was measured. Formatted in
+        # `boardphase` beside the two sentences, for the same reason they are.
+        a["contextLine"] = bph.context_line(obs)
     # A STABLE order, so a row does not move under his cursor between two polls
     # — and it is not an urgency ordering (there is none in this app): the ones
     # that are working come first, the ones that have stopped last, and inside a
