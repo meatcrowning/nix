@@ -20,6 +20,10 @@ Item {
     property int albumId: 0
     property var info: ({})
     signal closed()
+    // Relayed out of the track list's right-click menu (AlbumGrid passes them
+    // on to the window, which owns navigation).
+    signal openAlbumRequested(int albumId)
+    signal browseArtistRequested(string artist)
 
     readonly property int rowH: Theme.fontSize + 2
     readonly property int pad: 10
@@ -156,7 +160,10 @@ Item {
         model: AlbumTracksModel
         showArtist: false
         scrollable: false      // the panel is sized to hold every row
+        inAlbum: root.albumId  // "go to album" would land where we already are
         onPlayed: function(index) { Player.playAlbum(root.albumId, index); }
+        onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
+        onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
     }
     PixelText {
         x: tracks.x

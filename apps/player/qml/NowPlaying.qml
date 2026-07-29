@@ -1,9 +1,12 @@
 import QtQuick
 
-// Now playing, two ROWS. The top row is the cover art, edge to edge — it fills
-// the full width and meets the window's outline, no margins (its height is a
-// draggable, persisted fraction of the view; square covers crop, not
-// letterbox). The bottom row is split into two columns: the left carries the
+// Now playing, in two parts: the cover art, and everything else. The art is
+// edge to edge — it meets the window's outline with no margins, and square
+// covers crop rather than letterbox (docs/DESIGN.md §5.1). WHICH edge it takes
+// is responsive (`sideArt`, below): a top row in the narrow window this page
+// normally lives in, its height a draggable persisted fraction of the view; a
+// left column once the window is wide, where a top row would crop the cover
+// down to a band. The rest is split into two columns: the left carries the
 // playing track's identity (title + rating + artist + album) and under it the
 // queue — no transport controls and no position readout, both of which live in
 // the titlebar now; the right column is the lyrics, which
@@ -34,24 +37,62 @@ Item {
     property real artFrac: Number(Prefs.get("npArtFrac", 0.45))
     property real lyricsW: Number(Prefs.get("npLyricsWidth", 320))
 
-    // ---- top row: cover art -------------------------------------------------
+    // Art on TOP, or art in a COLUMN down the left? A top row spans the whole
+    // window width, so `PreserveAspectCrop` scales a square cover to that WIDTH
+    // and keeps only the horizontal band the row is tall. In the narrow window
+    // this page normally lives in that costs little (480x826: 77% of the cover
+    // survives); maximized it is ruinous (1880x1050: a 1880x472 band — 25% of
+    // the art, a slice of somebody's hair). The crop gets worse the wider the
+    // window, which is the opposite of what more space should buy.
+    //
+    // So once the window is wide enough that a full-height cover leaves a usable
+    // content column, the art becomes that column: as good as uncropped, still
+    // bleeding to the three edges it touches (docs/DESIGN.md §5.1), and the
+    // width it frees goes to the queue and the lyrics rather than to nothing
+    // (§5.2). Same responsive reading as AlbumPanel's `stacked`, and §5.6.
+    //
+    // Two constants. The content column's floor is 420 — near the 480 the whole
+    // page gets in the narrowest window player will open (Main.qml's
+    // `minimumWidth` on top), so nothing in it is squeezed below a width it
+    // already survives every day, and the cover keeps the rest. That matters at
+    // the size this is actually judged at: maximized here is ~1406x1006, not
+    // 1880, because the panel reserves 376px of the 1920 — 420 leaves 98% of
+    // the cover, 480 would clip 8% of it. 0.6 is the point where the column is
+    // worth taking — it shows at least 60% of the cover against the 25-42% the
+    // row shows at those widths — and every pixel above the floor goes to the
+    // content, so a genuinely wide window gets both a whole cover and a roomy
+    // queue.
+    //
+    // The test is WINDOW GEOMETRY only, never `artFrac` — a layout that could
+    // flip mid-drag would be the split handle rearranging the page under the
+    // cursor.
+    readonly property int artColMin: 420
+    readonly property bool sideArt: width >= height * 0.6 + artColMin
+
+    // ---- cover art: the top row, or the left column --------------------------
     Item {
         id: artRow
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
+        x: 0
+        y: 0
         // On air the window runs narrow: never let the row grow taller than
         // it is wide, or a square cover crops away most of its width. On top
         // the window is wide enough that the fraction alone is the right cap.
         readonly property real hCap: OnAir ? Math.min(root.height * 0.8, root.width)
                                            : root.height * 0.8
-        height: Math.max(60, Math.min(hCap, root.height * root.artFrac))
+        // In the column the cover runs the full height and takes every pixel of
+        // width the content column can spare, up to square. There is nothing
+        // left to trade at that point, so that mode has no drag handle.
+        width: root.sideArt ? Math.min(root.height, root.width - root.artColMin)
+                            : root.width
+        height: root.sideArt ? root.height
+                             : Math.max(60, Math.min(hCap, root.height * root.artFrac))
 
         Rectangle {
             id: artBox
-            // Edge to edge: the cover fills the whole top row, meeting the
-            // window's own outline — no letterbox margins around it. Square
-            // art is therefore cropped, not fitted.
+            // Edge to edge: the cover fills whichever region artRow is —
+            // the top row, or the left column — meeting the window's own
+            // outline with no letterbox margins around it. Art that does not
+            // match that region's shape is therefore cropped, not fitted.
             anchors.fill: parent
             color: Theme.bgAlt
             clip: true
@@ -104,20 +145,24 @@ Item {
         }
     }
 
+    // The one divider between the art and the content — under it when the art
+    // is a top row, beside it when the art is a left column.
     Rectangle {
         id: hsep
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: artRow.bottom
-        height: 1
+        x: root.sideArt ? artRow.width : 0
+        y: root.sideArt ? 0 : artRow.height
+        width: root.sideArt ? 1 : root.width
+        height: root.sideArt ? root.height : 1
         color: Theme.border
     }
-    Item {   // drag handle over the row split
+    Item {   // drag handle over the row split (top-row layout only)
         anchors.left: parent.left
         anchors.right: parent.right
         y: hsep.y - 3
         height: 7
         z: 10
+        visible: !root.sideArt
+        enabled: !root.sideArt
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.SplitVCursor
@@ -130,13 +175,13 @@ Item {
         }
     }
 
-    // ---- bottom row ---------------------------------------------------------
+    // ---- the content: under the art, or beside it ---------------------------
     Item {
         id: bottomRow
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: hsep.bottom
-        anchors.bottom: parent.bottom
+        x: root.sideArt ? hsep.x + hsep.width : 0
+        y: root.sideArt ? 0 : hsep.y + hsep.height
+        width: Math.max(0, root.width - x)
+        height: Math.max(0, root.height - y)
 
         // ---- right column: lyrics (zero width when the track has none) ----
         LyricsView {
@@ -288,6 +333,28 @@ Item {
                 // every transport control is now in exactly one place.
             }
 
+            // The now-playing header is a track too (docs/DESIGN.md §7.1). The
+            // cover above it carries the ALBUM's menu; this one carries the
+            // playing track's, so "add to queue"/"go to album" are reachable
+            // from the thing they are about. Right button ONLY, so the stars
+            // and the heart underneath keep every left click, and no "play
+            // now" — this row is what is already playing.
+            MouseArea {
+                anchors.fill: info
+                acceptedButtons: Qt.RightButton
+                enabled: root.cur.id !== undefined
+                onPressed: function(m) {
+                    var p = mapToItem(headerMenu, m.x, m.y);
+                    headerMenu.openForTrack(p.x, p.y, {
+                        trackId: root.cur.id,
+                        artist: root.cur.artist || "",
+                        albumId: root.cur.albumId || 0,
+                        openAlbum: function(aid) { root.openAlbum(aid); },
+                        browseArtist: function(a) { root.browseArtist(a); }
+                    });
+                }
+            }
+
             // ---- queue, filling the rest of the left column ----
             PixelText {
                 id: queueHead
@@ -315,7 +382,11 @@ Item {
                 currentRow: Player.index
                 followCurrent: true
                 ratingsOnHover: true
+                // These rows ARE the queue, so their menu can remove them.
+                isQueue: true
                 onPlayed: function(index) { Player.jumpTo(index); }
+                onOpenAlbumRequested: function(aid) { root.openAlbum(aid); }
+                onBrowseArtistRequested: function(a) { root.browseArtist(a); }
             }
         }
     }
@@ -323,6 +394,13 @@ Item {
     CtxMenu {
         id: coverMenu
         objectName: "coverMenu"   // handle for headless harnesses
+        anchors.fill: parent
+    }
+    // The shared track menu, for the header block. (The queue below owns its
+    // own instance, inside TrackList.)
+    TrackMenu {
+        id: headerMenu
+        objectName: "headerMenu"
         anchors.fill: parent
     }
 }

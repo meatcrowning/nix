@@ -7,6 +7,10 @@ Rectangle {
     id: root
     property string query: ""
     signal closed()
+    // From the track list's right-click menu; the window owns navigation (and
+    // dismisses this overlay on the way, since it covers the view it lands on).
+    signal openAlbumRequested(int albumId)
+    signal browseArtistRequested(string artist)
 
     color: Theme.bg
 
@@ -39,6 +43,8 @@ Rectangle {
         model: SearchModel
         showNumber: false
         onPlayed: function(index) { Library.playFromModel(SearchModel, index); }
+        onOpenAlbumRequested: function(aid) { root.openAlbumRequested(aid); }
+        onBrowseArtistRequested: function(a) { root.browseArtistRequested(a); }
     }
 
     PixelText {

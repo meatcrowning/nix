@@ -326,6 +326,8 @@ Item {
                             objectName: "albumPanel"
                             albumId: root.expandedAlbumId
                             onClosed: root.opened(0)
+                            onOpenAlbumRequested: function(aid) { root.opened(aid); }
+                            onBrowseArtistRequested: function(a) { root.searchArtist(a); }
                         }
                     }
                 }

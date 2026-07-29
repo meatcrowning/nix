@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import "../../qmlcommon"
 
 // A reusable track table (album detail, playlists, search, queue): one packed
@@ -108,6 +109,28 @@ Item {
     // artist" would otherwise clip against blank space.
     property bool ratingsOnHover: false
     signal played(int index)
+
+    // ---- right-click (docs/DESIGN.md §7.1) ----
+    // Every listing gets the SAME menu (TrackMenu.qml); what differs is the two
+    // facts only the owner knows — which album this listing already is, and
+    // whether its rows are queue rows. Navigation is relayed rather than acted
+    // on here: a table has no business knowing how the window switches views.
+    property int inAlbum: 0          // this listing IS this album -> no "go to album"
+    property bool isQueue: false     // rows are queue rows -> "remove from queue"
+    signal openAlbumRequested(int albumId)
+    signal browseArtistRequested(string artist)
+
+    // Parented to the WINDOW, not to this list. The queue column is ~240px
+    // wide and every listing here clips, so a menu living inside one would be
+    // measured and clamped against a sliver of the window — or simply cut off
+    // at the list's edge. CtxMenu clamps against its own bounds, so those
+    // bounds have to be the window's.
+    TrackMenu {
+        id: trackMenu
+        objectName: "trackMenu"
+        parent: root.Window.contentItem ? root.Window.contentItem : root
+        anchors.fill: parent
+    }
 
     function centerCurrent() {
         if (!followCurrent || currentRow < 0 || currentRow >= list.count || list.height <= 0)
@@ -300,6 +323,29 @@ Item {
                 anchors.rightMargin: rightBits.width + 8
                 hoverEnabled: true
                 onDoubleClicked: root.played(index)
+            }
+            // Right-click opens the shared track menu. Declared LAST so it is
+            // on top of the whole row — including the right-hand column that
+            // rowMouse deliberately stops short of — and accepting ONLY the
+            // right button, so every left click still falls through to the
+            // stars, the heart and rowMouse underneath it.
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.RightButton
+                onPressed: function (m) {
+                    var p = mapToItem(trackMenu, m.x, m.y);
+                    trackMenu.openForTrack(p.x, p.y, {
+                        trackId: trackId,
+                        artist: artist,
+                        albumId: albumId,
+                        available: available,
+                        playNow: function () { root.played(index); },
+                        queueIndex: root.isQueue ? index : -1,
+                        inAlbum: root.inAlbum,
+                        openAlbum: function (aid) { root.openAlbumRequested(aid); },
+                        browseArtist: function (a) { root.browseArtistRequested(a); }
+                    });
+                }
             }
         }
     }
