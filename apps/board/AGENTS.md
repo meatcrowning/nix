@@ -1,6 +1,7 @@
 # `board` — what needs him, what is moving, what landed
 
-Vendored source of the decision board: `main.py`, `boardparse.py` and `qml/`.
+Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`
+and `qml/`.
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 (including the `air` system-python split) and runs the **live** source at
 `/home/lam/nix/apps/board/main.py`, so `.py`/`.qml` edits need no rebuild. See
@@ -69,7 +70,10 @@ So, as binding as the parse:
 - **Nothing leaves NEEDS YOU because board says so.** The store's own rule: an
   agent may add items and move things between IN FLIGHT and LANDED, but only he
   resolves a decision. board ticks boxes and writes his sentence; it never
-  deletes an item.
+  deletes an item. An item leaves NEEDS YOU only once **he** has answered it and
+  work has actually started — see *Answering here now STARTS something*, below.
+  That is not this app doing it: `boardmove.py` is, on behalf of whoever is doing
+  the work, and the GUI still has no move in it at all.
 - The empty state says `nothing needs you` / `nothing here expires - come back
   whenever`, in `Theme.dim` with the section rule above it unchanged, so a board
   with nothing on it reads as finished rather than as broken. It is the state he
@@ -90,6 +94,52 @@ for anything in this app that writes:
   "worked by an agent" flag to the store to help it; the filter is deliberately
   content-based and authorship-blind (a `git pull` from book has no author it
   could ask about anyway).
+
+### ...and the item MOVES when it does
+
+An answered decision that stays in NEEDS YOU is the board asking him for
+something he already gave, so as work starts the decision is **relocated into IN
+FLIGHT**, and to LANDED when it lands. `boardmove.py` is the whole mechanism and
+its docstring is the authoritative statement; the short version:
+
+```bash
+apps/board/tools/boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> IN FLIGHT
+apps/board/tools/boardctl.py land 4 --commit a3c2aac --what 'player: dim the art'
+apps/board/tools/boardctl.py back 4 --why 'blocked on the FOCUS signal'
+apps/board/tools/boardctl.py note '**Relaunch `player`** - live source.'
+```
+
+Rules that fall out of it, all of them load-bearing:
+
+- **Every writer goes through `boardparse.edit()`** — advisory lock, digest
+  re-check, atomic replace. `boardctl`, `board-watch` and the app can all write
+  while he has the window open. **Nothing hand-edits this file**, agents
+  included; the watcher's prompt says so in as many words.
+- **A move is a RELOCATION, not a summary.** The decision's raw lines are cut and
+  stashed under `~/.local/state/board/inflight/`, so `back` restores them
+  byte-for-byte, in their original position, and a failed agent leaves no trace
+  in the store at all. `tools/board-test.py` asserts that for every item.
+- **The moved row carries his answer and nothing else.** The ticked option, his
+  sentence, or both — it is the one thing in the item he wrote, and LANDED will
+  not carry it. **No start time, no age, no count**: the no-pressure requirement
+  above applies to IN FLIGHT exactly as it does to NEEDS YOU, and a start time is
+  an elapsed time the moment he reads it. The stash records one because
+  reclaiming a dead agent's item is machine business; it never reaches the file.
+- **An item cannot be stranded.** Three ways back out of IN FLIGHT: the agent
+  lands it, the watcher hands it back when the agent exits badly, or
+  `boardmove.reconcile()` — run at the top of every board-watch tick — sees the
+  owning pid is gone and hands it back itself. Worst case is one timer interval.
+  A hand-started item (`boardctl start` with no `--pid`) is never reclaimed
+  automatically; nothing can tell whether that session is still thinking.
+- **A failed decision does NOT re-fire.** Its answer is already recorded in the
+  watcher's state, so it comes back to NEEDS YOU and sits there with the bullet
+  saying what happened. Re-answering it is what starts it again — deliberately,
+  because the alternative is a crash loop spawning an agent every five minutes.
+- **Moving an item by hand SUPPRESSES the auto-spawn for it**, because only
+  NEEDS YOU is fingerprinted. Correct — work is underway — but whoever moves it
+  owns doing the work.
+- **An empty NEEDS YOU is now the resting state**, not a parse failure. Nothing
+  in this app or its harness may treat "no decisions" as a regression.
 
 ## Never clobber him — three defences
 
@@ -182,13 +232,20 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 ```
 
-`tools/board-test.py`, offscreen, three layers: **the round trip** (pure Python
+`tools/board-test.py`, offscreen, four layers: **the round trip** (pure Python
 — byte-identity, one-line edits, the radio, the `> ` marker preserved on a
-clear, the atomic write), **the real store** (it parses, every decision has a
+clear, the atomic write), **the moves** (start/land/back/note/reconcile: every
+decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
+table and not the `Queued` one below it, an unanswered decision is refused, a
+dead owner is reclaimed, and an edit computed from stale bytes is retried rather
+than landed), **the real store** (it parses, every decision has a
 title, an `if unanswered` line and somewhere to write an answer, and the font
 audit above), and **the window** — the real `qml/Main.qml` under
 `QT_QPA_PLATFORM=offscreen`, including the stale-write refusal, an external edit
-appearing without a relaunch, and `grabWindow()` PNGs with `--shots`: the real
+appearing without a relaunch, **all three sections redrawing when an item moves
+between them — with his scroll position and his half-typed draft kept**, a store
+replaced by rename (a sync, a `git checkout`) still reloading, a section
+emptying out completely, and `grabWindow()` PNGs with `--shots`: the real
 store, the fixture populated, a decision answered, an EMPTY `NEEDS YOU`, a
 420x600 window, and an unreadable store. It redirects `XDG_STATE_HOME` into a
 scratch dir (a harness here **must**, or it rewrites his own app's state), works

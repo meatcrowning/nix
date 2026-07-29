@@ -20,6 +20,22 @@ WHAT IT WILL AND WILL NOT DO — his two decisions, and they are settled:
   * It fires only while he is AT the machine. Away, asleep or locked, the answer
     is QUEUED, not dropped — see gate() and the "no state update" trick below.
 
+AND IT MOVES THE ITEM. Answering used to leave the decision sitting in NEEDS YOU
+for the whole run, so the board went on asking him for something he had already
+given. Now the decision is relocated into IN FLIGHT — his answer on the row, its
+raw lines stashed — as the agent is spawned, and one of three things brings it
+back out: the agent lands it (`boardctl land`, which the prompt below tells it
+to use), the agent fails and `give_back()` puts the decision back byte-for-byte
+with a bullet saying so, or this process is killed outright and the NEXT tick's
+reconcile() sees a dead owner pid and does the same. An item cannot sit in IN
+FLIGHT with nothing working on it for longer than one timer interval. All of
+that mechanism is `apps/board/boardmove.py`; read its docstring.
+
+Consequence worth knowing: an item that has been moved out of NEEDS YOU is no
+longer fingerprinted, so **moving an item into IN FLIGHT by hand suppresses the
+auto-spawn for it**. That is correct — work is already underway — but it means
+whoever moves it owns doing the work.
+
 THE THREE HAZARDS, and how each is defended:
 
   1. THE FEEDBACK LOOP. An agent that works a decision edits board.md itself
@@ -82,6 +98,7 @@ OFF = os.path.join(STATE, "off")
 AGENT_TIMEOUT_S = int(os.environ.get("BOARD_WATCH_TIMEOUT", "2700"))   # 45 min
 
 sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", "pylib")]
+import boardmove as bm                                           # noqa: E402
 import boardparse as bp                                          # noqa: E402
 
 
@@ -293,50 +310,20 @@ FAIL_TEMPLATE = (
 
 
 def note_on_board(bullet):
-    """Add one bullet to WAITING ON YOU TO DO, as a targeted line insert.
+    """Add one bullet to WAITING ON YOU TO DO.
 
     He must be able to see that something was attempted and failed WITHOUT
     reading a log, so a failure that only reached the log is a failure that did
-    not happen. Same contract as the app's writes (apps/board/AGENTS.md): the
-    raw line list with exactly one line inserted, atomic replace, and a refusal
-    if the file moved under us between the read and the write.
+    not happen. `boardmove.note` is the shared implementation — the same
+    targeted line insert, advisory lock, digest re-check and atomic replace
+    `boardctl` and the app use, so three writers cannot interleave into a
+    half-written store.
     """
-    for attempt in range(3):
-        try:
-            src = bp.read(BOARD)
-        except OSError:
-            return False
-        doc = bp.parse(src)
-        lines = doc["lines"]
-        if doc["todo"]:
-            at = max(t["line"] for t in doc["todo"]) + 1
-        else:
-            # No bullets yet: put it under the heading, or at the end of the
-            # file if the section is missing entirely (never invent a heading —
-            # that is a store-shape decision and not this script's to make).
-            at = None
-            for i, ln in enumerate(lines):
-                if re.match(r"^##\s+waiting on you", ln, re.I):
-                    at = i + 1
-                    while at < len(lines) and not lines[at].strip():
-                        at += 1
-                    break
-            if at is None:
-                at = len(lines)
-        out = lines[:at] + [bullet] + lines[at:]
-        # Re-read and compare before publishing: board(1), the sync and an agent
-        # all write this file, and a stale index would land the note inside
-        # somebody else's paragraph.
-        try:
-            if bp.digest(bp.read(BOARD)) != doc["digest"]:
-                time.sleep(1 + attempt)
-                continue
-            bp.write(BOARD, "".join(out))
-            return True
-        except OSError:
-            return False
-    log("could not add the failure note: board.md kept changing under us")
-    return False
+    try:
+        return bm.note(bullet, path=BOARD)
+    except (bm.BoardError, OSError) as e:
+        log("could not add the failure note: %s" % e)
+        return False
 
 
 # ------------------------------------------------------------------ the agent
@@ -377,15 +364,28 @@ uncommitted work here.
 5. Read `AGENTS.md` at the repo root, then the nested one closest to whatever \
 you are editing, then `docs/DESIGN.md` if anything you do puts pixels on a \
 screen. They outrank your instincts about this codebase.
-6. **When you are done, update `docs/board.md` yourself** — it is a separate \
-git repo inside this checkout, so commit it from inside `docs/`. Either:
-   - move the item to LANDED under today's date with the commit hash, if the \
-work is complete; or
-   - leave it where it is and add a short line to the item saying exactly what \
-is done, what is not, and — if a rebuild is now pending — that it is pending \
-and why. Do not tick or untick anything, and do not remove his answer.
-   Leave the rest of the file byte-identical: it is a store other programs \
-parse, and a reflow is a bug.
+6. **When you are done, record it on the board — with the tool, never by \
+hand.** This decision has ALREADY been moved out of NEEDS YOU and into IN \
+FLIGHT for you, carrying your answer, so he can see it is being worked. Close \
+the loop from `{repo}` with exactly one of:
+
+       python3 apps/board/tools/boardctl.py land {key} --commit <hash> \
+--what '<one line, imperative, like a commit subject>'
+       python3 apps/board/tools/boardctl.py note '**<title>** - <what is done, \
+what is not, and whether a rebuild is now pending and why>'
+
+   `land` when the work is complete: it removes the IN FLIGHT row and appends \
+`| commit | what |` under today's date in LANDED. `note` when it is not: the \
+row stays in flight and he gets a bullet in WAITING ON YOU TO DO. Run \
+`boardctl.py --help` for the rest.
+
+   **Do not edit `docs/board.md` in an editor.** It is a store three programs \
+parse and write concurrently — the app he may have open right now, the \
+five-minute sync, and this tool — and every one of those edits is a targeted \
+line edit under a lock with a digest re-check. A hand-written table row or a \
+reflowed section is a bug, and a half-written one syncs to the other machine. \
+`boardctl` never touches a line it was not asked to. `docs/` is its own git \
+repo inside this checkout, so commit the result from inside `docs/`.
 7. If the answer is ambiguous or the work turns out to be much larger than the \
 item implies, do the smallest honest thing and write what you found onto the \
 board instead of guessing big.
@@ -454,6 +454,17 @@ def main():
     except OSError:
         log("skipped: another board-watch run holds the lock")
         return 0
+
+    # NOTHING STAYS STRANDED. If a previous run was killed outright — OOM,
+    # reboot, systemd's TimeoutStartSec — its decision is sitting in IN FLIGHT
+    # with nothing working on it. Hand back every item whose owning process is
+    # gone, before deciding what to fire on. Worst case is one timer interval.
+    try:
+        for rec in bm.reconcile(path=BOARD):
+            log("returned decision %s to NEEDS YOU: its agent is gone"
+                % (rec.get("num") or rec.get("key")))
+    except (bm.BoardError, OSError) as e:
+        log("could not reconcile stranded items: %s" % e)
 
     try:
         src = bp.read(BOARD)
@@ -535,7 +546,26 @@ def main():
 
     log("firing on decision %s (%s) - %s" % (item["num"] or "?", item["key"], why))
     prompt = PROMPT.format(repo=REPO, item=item_span(doc["lines"], item),
-                           answer=said)
+                           answer=said, key=item["key"])
+
+    # MOVE IT BEFORE THE AGENT RUNS. An answered decision that sits in NEEDS YOU
+    # while an agent works it is the board asking him for something he has
+    # already given — the whole reason this exists. The move carries his answer
+    # onto the row and stashes the decision verbatim, so the failure paths below
+    # can put it back exactly as he wrote it. `pid` is OURS: if this process is
+    # killed outright, the next tick's reconcile() sees a dead owner and hands
+    # the item back on its own.
+    moved = False
+    try:
+        rec = bm.start(item["key"], where="board-watch", pid=os.getpid(),
+                       path=BOARD)
+        moved = True
+        log("moved decision %s into IN FLIGHT" % (item["num"] or "?"))
+    except (bm.BoardError, OSError) as e:
+        # Bookkeeping must never cost him the work. Spawn anyway and say so.
+        log("could not move decision %s into IN FLIGHT (%s) - working it anyway"
+            % (item["num"] or "?", e))
+
     rc, how, secs = spawn(item, prompt)
     state = load_state()
     state["runs"] = (state["runs"] + [{
@@ -547,12 +577,27 @@ def main():
     if rc == 0:
         log("decision %s finished in %dm%02ds" % (item["num"] or "?",
                                                   secs // 60, secs % 60))
+        # It worked: whatever the agent did with the row (landed it, or left it
+        # in flight because a rebuild is pending), the item is not stranded and
+        # must not be yanked back into NEEDS YOU by the next reconcile().
+        bm.forget(item["key"])
         return 0
 
     log("decision %s FAILED %s after %dm%02ds" % (item["num"] or "?", how,
                                                   secs // 60, secs % 60))
-    note_on_board(FAIL_TEMPLATE.format(num=item["num"] or "?",
-                                       title=item["title"], how=how))
+    # HAND IT BACK. An item left in IN FLIGHT with nothing working on it reads
+    # as handled, which is worse than it still being open — so the decision goes
+    # back where it was, byte for byte, and the bullet says what happened. One
+    # edit, so the row is never gone while the decision is not yet back.
+    bullet = FAIL_TEMPLATE.format(num=item["num"] or "?", title=item["title"],
+                                  how=how)
+    if moved:
+        try:
+            bm.give_back(item["key"], why=bullet, path=BOARD)
+            return 0
+        except (bm.BoardError, OSError) as e:
+            log("could not hand decision %s back: %s" % (item["num"] or "?", e))
+    note_on_board(bullet)
     return 0
 
 

@@ -7,8 +7,12 @@ module is a *parser plus a line editor*, never a serialiser:
 
   * `parse(text)` reads the four sections into structures the QML draws.
   * every write is a TARGETED LINE EDIT on the raw line list — tick a box,
-    replace the `>` answer block — and returns the whole file back. Nothing this
-    module did not deliberately change comes out different, byte for byte.
+    replace the `>` answer block, relocate a whole decision from NEEDS YOU into
+    IN FLIGHT — and returns the whole file back. Nothing this module did not
+    deliberately change comes out different, byte for byte.
+  * `edit(path, fn)` wraps one of those in the advisory lock, the digest
+    re-check and the atomic write, so the app, `board-watch` and
+    `tools/boardctl.py` can all write this file while he has it open.
 
 A round-trip that reformats his prose, re-wraps a table or reorders a section is
 a bug, and `tools/board-test.py` asserts exactly that: parse -> write with no
@@ -40,10 +44,14 @@ line is kept beside the mapped one, because the raw line is what gets written
 back: mapping a line and then saving it would quietly rewrite his prose into
 ASCII.
 """
+import contextlib
+import datetime
+import fcntl
 import hashlib
 import os
 import re
 import tempfile
+import time
 
 from glyphs import px
 
@@ -183,7 +191,8 @@ def parse(src):
                         "answerRaw": [], "ifUnanswered": "", "ifRaw": ""}
             elif sec == "landed":
                 close_item()
-                date = {"date": text(m3.group(1)), "rows": [], "prose": []}
+                date = {"date": text(m3.group(1)), "rows": [], "prose": [],
+                        "line": i}
                 out["landed"].append(date)
             continue
 
@@ -320,6 +329,325 @@ def set_answer(lines, item, answer):
         new = ["> " + ln.rstrip() + "\n" for ln in body.split("\n")]
         new[-1] = new[-1][:-1] + eol
     return out[:frm] + new + out[to + 1:]
+
+
+# ------------------------------------------------- moving an item BETWEEN sections
+# Answering a decision here STARTS something (`AGENTS.md`), and until this
+# existed the item went on sitting in NEEDS YOU while an agent worked it — the
+# board asking him for something he had already given. These are the line edits
+# that move it on: NEEDS YOU -> IN FLIGHT when work starts, IN FLIGHT -> LANDED
+# when it lands, and IN FLIGHT -> NEEDS YOU, verbatim, when the agent died.
+#
+# Same contract as everything above: they RELOCATE raw lines and insert whole
+# ones. Nothing is re-rendered, nothing is re-wrapped, and a decision that comes
+# back comes back byte-for-byte as he wrote it — which is why the block is moved
+# rather than summarised.
+
+
+class BoardError(Exception):
+    """Something about the file's shape stopped an edit. Never a crash: the
+    callers of this module report it (§10) rather than dying on it."""
+
+
+def section_bounds(lines, name):
+    """(start, end) for one `## ` section: the heading's own line, and the line
+    the NEXT `## ` heading starts on (or the end of the file). (-1, -1) if the
+    section is not there — never invent a heading, that is a store-shape
+    decision and not this module's to make."""
+    start = -1
+    for i, ln in enumerate(lines):
+        m = _H2.match(ln.rstrip("\n"))
+        if not m:
+            continue
+        if start < 0:
+            if _section_of(m.group(1)) == name:
+                start = i
+        else:
+            return start, i
+    return (start, len(lines)) if start >= 0 else (-1, -1)
+
+
+def _content_end(lines, start, end):
+    """Where new content goes at the bottom of a section: after its last real
+    line, before the trailing blanks and the `---` rule that separates it from
+    the next heading."""
+    at = end
+    while at > start + 1:
+        prev = lines[at - 1].rstrip("\n")
+        if not prev.strip() or _HR.match(prev):
+            at -= 1
+        else:
+            break
+    return at
+
+
+def _table_span(lines, start, end):
+    """(first, after_last) of the FIRST contiguous pipe table in [start, end).
+
+    "First" matters: IN FLIGHT carries a second `Queued` table under a prose
+    block, and the parser reads both as flight rows. A row appended after the
+    last of those would silently join the queue.
+    """
+    i = start
+    while i < end and not lines[i].lstrip().startswith("|"):
+        i += 1
+    if i >= end:
+        return -1, -1
+    j = i
+    while j < end and lines[j].lstrip().startswith("|"):
+        j += 1
+    return i, j
+
+
+def cell(s):
+    """Anything -> one table cell. A `|` would end the cell and a newline would
+    end the row, so both are neutralised; nothing else about his text changes."""
+    return " ".join(str(s).replace("|", r"\|").split())
+
+
+def item_span(lines, item):
+    """(start, end) of a decision's raw lines — `### n. title` down to the next
+    heading or rule, trailing blank line included, so a cut and a re-insert
+    reproduce the spacing he had."""
+    start = item["titleLine"]
+    for i in range(start + 1, len(lines)):
+        s = lines[i].rstrip("\n")
+        if _H2.match(s) or _H3.match(s) or _HR.match(s):
+            return start, i
+    return start, len(lines)
+
+
+def raw_title(lines, item):
+    """A decision's title AS IT IS SPELLED IN THE FILE, number stripped.
+
+    Not `item["title"]`: that one has been through `text()` at ingest, which is
+    a one-way trip (`—` -> `-`, backticks gone). Writing it into a table cell
+    would quietly rewrite his prose into ASCII — the exact bug this module's
+    docstring exists to prevent. Anything going BACK into the file comes from
+    here; the mapping happens on the next read, for drawing, as it should.
+    """
+    m = _H3.match(lines[item["titleLine"]].rstrip("\n"))
+    t = m.group(1) if m else item["title"]
+    mn = _NUMBERED.match(t)
+    return (mn.group(2) if mn else t).strip()
+
+
+def raw_option(lines, opt):
+    """An option's label as spelled in the file, wrapped continuations joined."""
+    m = _OPTION.match(lines[opt["line"]].rstrip("\n"))
+    if not m:
+        return opt["label"]
+    out = [m.group(3).strip()]
+    for i in range(opt["line"] + 1, len(lines)):
+        s = lines[i].rstrip("\n")
+        if (not s.strip() or not s.startswith((" ", "\t"))
+                or _OPTION.match(s) or _QUOTE.match(s)):
+            break
+        out.append(s.strip())
+    return " ".join(out)
+
+
+def cut_item(lines, item):
+    """Lift a decision out of NEEDS YOU. Returns (lines without it, its block)."""
+    a, b = item_span(lines, item)
+    return lines[:a] + lines[b:], lines[a:b]
+
+
+def add_needs_item(lines, block, before=None):
+    """Put a decision back into NEEDS YOU, verbatim.
+
+    `before` is the raw heading line the item used to sit above, recorded at the
+    cut. With it, a decision that is handed back lands where it was and the file
+    is byte-identical to before the move — his numbering stays in order, and a
+    failed agent leaves no trace in the store at all. Without it (that heading is
+    gone now), the item goes to the end of the section rather than guessing.
+    """
+    s, e = section_bounds(lines, "needs")
+    if s < 0:
+        raise BoardError("there is no `## NEEDS YOU` section to put it back in")
+    at = -1
+    if before:
+        want = before.rstrip("\n")
+        for i in range(s + 1, e):
+            if lines[i].rstrip("\n") == want:
+                at = i
+                break
+    if at < 0:
+        at = _content_end(lines, s, e)
+    head, tail = list(lines[:at]), list(lines[at:])
+    blk = [ln if ln.endswith("\n") else ln + "\n" for ln in block]
+    while blk and not blk[-1].strip():        # its own trailing blank(s)...
+        blk.pop()
+    if head and head[-1].strip():
+        blk.insert(0, "\n")
+    if tail and tail[0].strip():              # ...restored only if the tail
+        blk.append("\n")                      # does not already supply one
+    return head + blk + tail
+
+
+FLIGHT_HEAD = ["| What | Where | Notes |\n", "|---|---|---|\n"]
+LANDED_HEAD = ["| Commit | What |\n", "|---|---|\n"]
+
+
+def flight_row(what, where="", notes=""):
+    return "| %s | %s | %s |\n" % (cell(what), cell(where), cell(notes))
+
+
+def add_flight_row(lines, row):
+    """Append a row to IN FLIGHT's own table (not the `Queued` one below it).
+
+    The table header is written if the section has no table yet — that is the
+    documented shape of this section, unlike a `##` heading, which is never
+    invented.
+    """
+    s, e = section_bounds(lines, "flight")
+    if s < 0:
+        raise BoardError("there is no `## IN FLIGHT` section to move it into")
+    a, b = _table_span(lines, s + 1, e)
+    if a < 0:
+        at = _content_end(lines, s, e)
+        new = (["\n"] if lines[at - 1:at] and lines[at - 1].strip() else []) \
+            + FLIGHT_HEAD + [row]
+        return lines[:at] + new + lines[at:]
+    return lines[:b] + [row] + lines[b:]
+
+
+def remove_row(lines, line_index):
+    """Drop one table row by its index into the raw line list."""
+    if line_index < 0 or line_index >= len(lines):
+        raise BoardError("that row is no longer where it was")
+    return lines[:line_index] + lines[line_index + 1:]
+
+
+def add_landed_row(lines, commit, what, date=None):
+    """Append `| commit | what |` under today's `### <date>` group, creating the
+    group at the TOP of LANDED if today has none. LANDED is newest first and
+    append-only — the file says so in its own preamble."""
+    date = date or datetime.date.today().isoformat()
+    row = "| `%s` | %s |\n" % (cell(commit), cell(what))
+    s, e = section_bounds(lines, "landed")
+    if s < 0:
+        raise BoardError("there is no `## LANDED` section to record it in")
+
+    grp, first_grp = -1, -1
+    for i in range(s + 1, e):
+        m = _H3.match(lines[i].rstrip("\n"))
+        if not m:
+            continue
+        if first_grp < 0:
+            first_grp = i
+        if m.group(1).strip() == date:
+            grp = i
+            break
+    if grp < 0:
+        at = first_grp if first_grp >= 0 else _content_end(lines, s, e)
+        return lines[:at] + ["### %s\n" % date, "\n"] + LANDED_HEAD + [row, "\n"] \
+            + lines[at:]
+
+    end = e
+    for i in range(grp + 1, e):
+        if _H3.match(lines[i].rstrip("\n")):
+            end = i
+            break
+    a, b = _table_span(lines, grp + 1, end)
+    if a < 0:
+        at = grp + 1
+        while at < end and not lines[at].strip():
+            at += 1
+        return lines[:at] + LANDED_HEAD + [row, "\n"] + lines[at:]
+    return lines[:b] + [row] + lines[b:]
+
+
+def add_todo_bullet(lines, doc, bullet):
+    """One `- ` bullet into WAITING ON YOU TO DO, after the last one there."""
+    if not bullet.endswith("\n"):
+        bullet += "\n"
+    if doc["todo"]:
+        at = max(t["line"] for t in doc["todo"]) + 1
+        return lines[:at] + [bullet] + lines[at:]
+    s, e = section_bounds(lines, "todo")
+    if s < 0:
+        # No section: put it at the end of the file rather than inventing a
+        # heading. He still sees it; the store's shape is still his.
+        return lines + ([] if not lines or lines[-1].endswith("\n") else ["\n"]) \
+            + ["\n", bullet]
+    at = s + 1
+    while at < e and not lines[at].strip():
+        at += 1
+    return lines[:at] + [bullet] + lines[at:]
+
+
+# ------------------------------------------------------- one edit, done safely
+# board(1), the five-minute docs sync, board-watch and any agent with a terminal
+# all write this file. Two defences, and they are separate on purpose: the
+# ADVISORY LOCK keeps the writers that opt in from interleaving at all, and the
+# DIGEST RE-CHECK catches the one that did not (the app takes no lock — it
+# re-reads and refuses, `main.py:_commit`).
+
+def lock_path(path):
+    """Beside the state dir, never beside the store: `docs/` is a git checkout a
+    timer commits and pushes, and a stray lock file would sync to book."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    d = os.path.join(base, "board")
+    os.makedirs(d, exist_ok=True)
+    key = hashlib.sha256(os.path.abspath(path).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(d, "edit-%s.lock" % key)
+
+
+@contextlib.contextmanager
+def locked(path, timeout=20.0):
+    """Advisory `flock` around one read-modify-write. Best effort: a machine
+    where the lock cannot be created still gets the digest re-check."""
+    try:
+        f = open(lock_path(path), "w")
+    except OSError:
+        yield False
+        return
+    try:
+        end = time.time() + timeout
+        got = False
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                got = True
+                break
+            except OSError:
+                if time.time() >= end:
+                    break
+                time.sleep(0.1)
+        try:
+            yield got
+        finally:
+            if got:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    finally:
+        f.close()
+
+
+def edit(path, fn, attempts=5):
+    """Read -> `fn(doc)` -> write, atomically, and only onto the exact bytes the
+    edit was computed from.
+
+    `fn` returns the new raw line list, or None to write nothing. It may raise
+    `BoardError` to refuse. Returns True if the file changed.
+    """
+    last = None
+    for n in range(attempts):
+        with locked(path):
+            src = read(path)
+            doc = parse(src)
+            out = fn(doc)
+            if out is None:
+                return False
+            new = "".join(out)
+            if new == src:
+                return False
+            if digest(read(path)) == doc["digest"]:
+                write(path, new)
+                return True
+            last = "board.md changed under the edit"
+        time.sleep(0.15 * (n + 1))
+    raise BoardError(last or "could not get a clean read of board.md")
 
 
 def digest(src):

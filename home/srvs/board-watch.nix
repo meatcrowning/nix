@@ -9,6 +9,15 @@
 # note, the kill switch — is in board-watch-files/board-watch.py; read its
 # docstring before changing anything here.
 #
+# It also MOVES the decision out of NEEDS YOU and into IN FLIGHT as it spawns,
+# and hands it back if the agent dies (apps/board/boardmove.py). Two
+# consequences for this file: the timer interval below is also the worst-case
+# latency for reclaiming an item whose agent was killed outright, since that
+# reconcile runs at the top of every tick; and PATH must keep reaching a
+# `python3`, because the agent closes the loop with apps/board/tools/boardctl.py
+# rather than by editing the markdown (it comes from the per-user profile at the
+# end of the list — do not trim that entry).
+#
 # TOP ONLY, on purpose. `home/` is shared verbatim with `air`/book and docs/
 # syncs both ways every five minutes, so deploying this to both machines would
 # have the same answer picked up twice, by two agents, on two checkouts of the
