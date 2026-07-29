@@ -31,8 +31,11 @@ parser keys on):
         *If unanswered:* ...  what happens if he never answers
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions
     ## IN FLIGHT              a | table |: what / where / notes
-    ## LANDED                 `### <date>` groups of | commit | what | tables,
-                              plus prose blocks between them
+    ## LANDED                 `### <date>` groups of | commit | what | when |
+                              tables, plus prose blocks between them. `when` is
+                              the commit's own local time, 12-hour, and is
+                              OPTIONAL: a row written before it existed, or one
+                              with no commit to read a time from, has two cells
 
 Everything else in the file — the `# Board` preamble, the `---` rules, anything
 a future agent adds that this parser has no case for — is carried through
@@ -234,9 +237,17 @@ def parse(src):
             elif sec == "landed" and date is not None:
                 if head[:1] == ["commit"]:
                     continue
+                # `when` is the THIRD cell and it is optional, in both
+                # directions: rows written before it existed have two cells and
+                # parse with an empty time, and an older copy of this app
+                # reading a newer file simply never looks at cells[2]. That is
+                # why it is last and not between the two — `what` stays at a
+                # fixed index whatever the row's age, and `board.md` syncs
+                # between the two machines with either app on either end.
                 date["rows"].append({
                     "commit": text(cells[0] if cells else ""),
                     "what": text(cells[1]) if len(cells) > 1 else "",
+                    "when": text(cells[2]) if len(cells) > 2 else "",
                     "line": i})
             continue
 
@@ -556,7 +567,7 @@ def add_needs_item(lines, block, before=None):
 
 
 FLIGHT_HEAD = ["| What | Where | Notes |\n", "|---|---|---|\n"]
-LANDED_HEAD = ["| Commit | What |\n", "|---|---|\n"]
+LANDED_HEAD = ["| Commit | What | When |\n", "|---|---|---|\n"]
 
 
 def flight_row(what, where="", notes=""):
@@ -670,12 +681,44 @@ def add_todo_block(lines, doc, block, before=None):
     return lines[:at] + list(block) + lines[at:]
 
 
-def add_landed_row(lines, commit, what, date=None):
-    """Append `| commit | what |` under today's `### <date>` group, creating the
-    group at the TOP of LANDED if today has none. LANDED is newest first and
-    append-only — the file says so in its own preamble."""
+def landed_row(commit, what, when=""):
+    """One LANDED row. THREE cells when there is a time, two when there is not.
+
+    A row with no time is written the old way rather than with an empty third
+    cell, because half the rows in the file have no commit to read a time from
+    (`no change`, a decision settled) and `| x |  |` is a hole a human reads as
+    a mistake. The parser treats a missing third cell and an empty one alike.
+    """
+    when = cell(when)
+    body = "| `%s` | %s" % (cell(commit), cell(what))
+    return body + (" | %s |\n" % when if when else " |\n")
+
+
+def _widen_landed_head(lines, a, b):
+    """Give a two-column LANDED table its `When` header, in place.
+
+    A markdown row with more cells than its header has drops the extras in every
+    renderer there is — and this file is read in `reader` and on GitHub, not
+    only by this parser. So the first time a timed row joins an old group, the
+    group's header line and its separator are replaced (two lines, nothing
+    else). A table that already has three columns is left byte-identical.
+    """
+    if a < 0 or b <= a + 1:
+        return lines
+    head = _table_cells(lines[a].rstrip("\n"))
+    if len(head) >= 3 or [c.lower() for c in head[:1]] != ["commit"]:
+        return lines
+    if not _TABLE_SEP.match(lines[a + 1].rstrip("\n")):
+        return lines
+    return lines[:a] + list(LANDED_HEAD) + lines[a + 2:]
+
+
+def add_landed_row(lines, commit, what, date=None, when=""):
+    """Append `| commit | what | when |` under today's `### <date>` group,
+    creating the group at the TOP of LANDED if today has none. LANDED is newest
+    first and append-only — the file says so in its own preamble."""
     date = date or datetime.date.today().isoformat()
-    row = "| `%s` | %s |\n" % (cell(commit), cell(what))
+    row = landed_row(commit, what, when)
     s, e = section_bounds(lines, "landed")
     if s < 0:
         raise BoardError("there is no `## LANDED` section to record it in")
@@ -706,6 +749,8 @@ def add_landed_row(lines, commit, what, date=None):
         while at < end and not lines[at].strip():
             at += 1
         return lines[:at] + LANDED_HEAD + [row, "\n"] + lines[at:]
+    if when:
+        lines = _widen_landed_head(lines, a, b)
     return lines[:b] + [row] + lines[b:]
 
 

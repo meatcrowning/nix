@@ -671,8 +671,14 @@ Window {
                                     onDraftEdited: (b) =>
                                         win.setDraft("msg:" + modelData.id, b)
                                     onSend: (b) => win.sendTo(modelData, b)
+                                    // `copy line` gives him the whole row as a
+                                    // sentence, so it leads with WHO — that is
+                                    // the half he would otherwise have to go
+                                    // back to the screen for.
                                     onContextRequested: (mx, my) =>
-                                        win.rowMenu(modelData.title + "  "
+                                        win.rowMenu((modelData.name
+                                                     ? modelData.name + "  " : "")
+                                                    + modelData.title + "  "
                                                     + modelData.actually, mx, my)
                                 }
                             }
@@ -786,8 +792,27 @@ Window {
                                         id: lwhat
                                         x: lcommit.width + 8
                                         width: parent.width - x
+                                               - (lwhen.width > 0 ? lwhen.width + 8 : 0)
                                         color: win.fgDim
                                         text: lrow.modelData.what
+                                    }
+                                    // WHEN it happened, at the trailing edge
+                                    // (§9.1: metadata clusters there) and a
+                                    // rung dimmer than the line it belongs to,
+                                    // because the what is the point and the
+                                    // time is not. Its width is a CHARACTER
+                                    // COUNT like the commit's — `implicitWidth`
+                                    // on an elided Text measures out at zero —
+                                    // and it is 0 for a row that has no time,
+                                    // so the old rows give the space back.
+                                    PixelText {
+                                        id: lwhen
+                                        anchors.right: parent.right
+                                        width: lrow.modelData.when ? 8 * win.cellW : 0
+                                        visible: width > 0
+                                        horizontalAlignment: Text.AlignRight
+                                        color: Theme.dim
+                                        text: lrow.modelData.when ? lrow.modelData.when : ""
                                     }
                                     MouseArea {
                                         id: lma
@@ -797,7 +822,10 @@ Window {
                                         onClicked: (m) => {
                                             var p = mapToItem(null, m.x, m.y);
                                             win.rowMenu(lrow.modelData.commit + "  "
-                                                        + lrow.modelData.what, p.x, p.y);
+                                                        + lrow.modelData.what
+                                                        + (lrow.modelData.when
+                                                           ? "  " + lrow.modelData.when : ""),
+                                                        p.x, p.y);
                                         }
                                     }
                                 }
