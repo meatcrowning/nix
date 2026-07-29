@@ -355,6 +355,81 @@ def actually(rec):
     return "cannot see what it is doing - only that the process is there"
 
 
+# ------------------------------------------------- the same two, as SENTENCES
+# His words: *"in the agents tab it should read: [agent name] is [what the agent
+# says its doing] and then the line below should be the [agent name] is actually
+# [what it is actualy doing]"*. So the card no longer draws the bare words
+# `says` and `doing` in a label column beside the two texts — it draws two
+# plain sentences, and these build them.
+#
+# **The joining is chosen for the REAL strings, not assumed.** `says()` is
+# `"<phase> - <words>"` and every phase word is a gerund (`planning`,
+# `researching`, `coding`, `testing`, `finishing`), so it follows "is" as
+# English. The words on their own may be a noun phrase — `boardctl.py phase`
+# takes the phase as OPTIONAL and its `--doing` is *"one short line"*, so
+# *"the vtbclient parser"* is a legal claim — and *"Marbas is the vtbclient
+# parser"* is not a sentence. That case gets `says:` instead of `is`.
+#
+# The observation is joined the same way and for the same reason: only the `ok`
+# state is a verb phrase. `nothing recently`, `nothing yet` and the unlinked
+# sentence each need their own shape, and a STOPPED agent needs the past tense
+# — *"Marbas is actually ..."* is false about a process that is gone.
+def _subject(who):
+    """`it` for anything with no name — a decision he answered, an interactive
+    session. Same fallback the card's box already uses; nothing invents one."""
+    return who or "it"
+
+
+def says_line(rec, who=""):
+    """The claim as a sentence, or "" when the agent has said nothing.
+
+    Silence stays silence: this never falls back to the observation, for the
+    reason `says()` gives.
+    """
+    rec = rec or {}
+    phase, doing = rec.get("claimPhase") or "", rec.get("claimDoing") or ""
+    subj = _subject(who)
+    if phase and doing:
+        return "%s is %s - %s" % (subj, phase, doing)
+    if phase:
+        return "%s is %s" % (subj, phase)
+    if doing:
+        # No phase word to lean on, so the words are quoted rather than forced
+        # into a sentence they may not fit.
+        return "%s says: %s" % (subj, doing)
+    return ""
+
+
+def doing_line(rec, who="", running=True):
+    """The observation as a sentence. Never the claim, and never present tense
+    about a process that has stopped.
+
+    "" only when there is nothing honest to say about a stopped agent — it was
+    never seen doing anything, and inventing a past for it is worse than the
+    card's own `exited without finishing` line saying all there is.
+    """
+    rec = rec or {}
+    subj = _subject(who)
+    state = rec.get("observed")
+    last = rec.get("doing") or ""
+    if not running:
+        # PAST TENSE, and only about something actually seen. This is the
+        # `doing`/`last` split the label column used to carry.
+        return ("%s was last seen %s" % (subj, last)) if last and \
+            state in ("ok", "quiet") else ""
+    if state == "ok":
+        return "%s is actually %s" % (subj, last or "working")
+    if state == "quiet":
+        # Words, never a duration — the threshold is machine business.
+        return ("%s has actually done nothing recently - last seen %s"
+                % (subj, last)) if last else \
+            "%s has actually done nothing recently" % subj
+    if state == "none":
+        return "%s has not done anything yet" % subj
+    return "board cannot see what %s is doing - only that the process is there" \
+        % subj
+
+
 def forget(agent_id):
     try:
         os.unlink(sidecar(agent_id))

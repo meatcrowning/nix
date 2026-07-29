@@ -53,7 +53,7 @@ Window {
     // The machine, not the store: who is running, and what he has written to
     // them that nobody has picked up yet (`boardagents.py`).
     readonly property var agents: Agents.list
-    readonly property var agentGroups: Agents.groups
+    readonly property var agentCards: Agents.cards
     readonly property var queuedNotes: Agents.queued
 
     // A note to an agent takes the SAME path his answers take: never lost, and
@@ -611,77 +611,70 @@ Window {
                     // there waits for the next orchestrator.
                     PixelText {
                         width: agentsCol.width
-                        visible: win.agentGroups.length === 0
+                        visible: win.agentCards.length === 0
                         height: visible ? implicitHeight : 0
                         color: Theme.dim
                         text: "nothing is running"
                     }
 
                     // What this section is, said once. It is the honest frame
-                    // for every card below it: a card carries what the agent
-                    // SAYS and what it is OBSERVED doing, and the phase it is
-                    // filed under is the observed one. Once, here — not
-                    // repeated per card, which would be a disclaimer where a
-                    // sentence belongs (§5.2).
+                    // for every card below it: two sentences, the agent's own
+                    // account of itself and then what its tool calls show.
+                    // Once, here — not repeated per card, which would be a
+                    // disclaimer where a sentence belongs (§5.2).
                     Para {
                         width: agentsCol.width
-                        visible: win.agentGroups.length > 0
+                        visible: win.agentCards.length > 0
                         height: visible ? implicitHeight : 0
                         bottomPadding: 6
                         color: Theme.dim
-                        text: "grouped by what each agent is observed doing. "
-                              + "`says` is its own account of itself; `doing` is "
-                              + "read from its tool calls."
+                        text: "each agent says what it is doing, and the line "
+                              + "under it is what it is actually doing, read "
+                              + "from its tool calls. oldest first."
                     }
 
-                    // ---- the phases ----
-                    // planning / researching / coding / testing / finishing
-                    // touches, plus the three states that are real and are not
-                    // any of his five: nothing observed yet, not started yet
-                    // (above the concurrency cap), and stopped. `boardwork.py`
-                    // owns the list and the order; an EMPTY phase is not drawn
-                    // at all, so an idle board is one dim sentence and not a
-                    // column of empty headings (§5.2).
+                    // ---- the cards ----
+                    // ONE FLAT LIST, oldest first. The phase headings his first
+                    // sentence asked for are gone at his second — *"take out
+                    // the 'coding' 'Testing' 'finishing touches' text and just
+                    // keep agents ordered by birth/age so they dont move around
+                    // so much"* — because a card jumped between sections every
+                    // time its agent picked up a different tool. `boardwork.py`
+                    // owns the order and it is birth and nothing else: a new
+                    // agent appends at the bottom and the rows above it stay
+                    // put, including when one stops. The two states that were
+                    // headings rather than phases — a task queued above the cap
+                    // and an agent that has stopped — say so in words on the
+                    // card itself.
                     Repeater {
-                        model: win.agentGroups
-                        delegate: Column {
-                            id: grp
+                        model: win.agentCards
+                        delegate: AgentRow {
                             required property var modelData
                             width: agentsCol.width
-
-                            PixelText {
-                                width: parent.width
-                                topPadding: 8
-                                bottomPadding: 2
-                                color: win.fgDim
-                                text: grp.modelData.label
-                            }
-
-                            Repeater {
-                                model: grp.modelData.rows
-                                delegate: AgentRow {
-                                    required property var modelData
-                                    width: agentsCol.width
-                                    agent: modelData
-                                    cellW: win.cellW
-                                    fgAccent: win.fgAccent
-                                    fgText: win.fgText
-                                    fgDim: win.fgDim
-                                    draft: win.draftOf("msg:" + modelData.id)
-                                    onDraftEdited: (b) =>
-                                        win.setDraft("msg:" + modelData.id, b)
-                                    onSend: (b) => win.sendTo(modelData, b)
-                                    // `copy line` gives him the whole row as a
-                                    // sentence, so it leads with WHO — that is
-                                    // the half he would otherwise have to go
-                                    // back to the screen for.
-                                    onContextRequested: (mx, my) =>
-                                        win.rowMenu((modelData.name
-                                                     ? modelData.name + "  " : "")
-                                                    + modelData.title + "  "
-                                                    + modelData.actually, mx, my)
-                                }
-                            }
+                            agent: modelData
+                            cellW: win.cellW
+                            fgAccent: win.fgAccent
+                            fgText: win.fgText
+                            fgDim: win.fgDim
+                            draft: win.draftOf("msg:" + modelData.id)
+                            onDraftEdited: (b) =>
+                                win.setDraft("msg:" + modelData.id, b)
+                            onSend: (b) => win.sendTo(modelData, b)
+                            // `copy line` gives him the whole row as a
+                            // sentence, and the observed one already leads with
+                            // WHO — that is the half he would otherwise have to
+                            // go back to the screen for. A card with no
+                            // sentence (a queued task, an agent that stopped
+                            // unseen) falls back to the line that says what it
+                            // is instead.
+                            onContextRequested: (mx, my) =>
+                                win.rowMenu((modelData.doingLine !== ""
+                                             ? modelData.doingLine
+                                             : (modelData.name
+                                                ? modelData.name + " - " : "")
+                                               + modelData.detail)
+                                            + "  (" + modelData.title + ")",
+                                            mx, my)
                         }
                     }
 

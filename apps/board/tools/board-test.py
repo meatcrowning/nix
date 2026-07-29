@@ -1177,8 +1177,48 @@ def test_phase(tmp):
               bph.actually(r))
         check("...while its own claim is left standing, unmarked",
               bph.says(r) == "testing - the parser round-trips")
+        check("...and the quiet sentence is still English after the name",
+              bph.doing_line(r, "Marbas")
+              .startswith("Marbas has actually done nothing recently"),
+              bph.doing_line(r, "Marbas"))
     finally:
         bph.QUIET_AFTER_S = old
+
+    # ---- the same two, as the SENTENCES the card draws ----
+    # *"[agent name] is [what the agent says its doing] ... [agent name] is
+    # actually [what it is actualy doing]"*. What is asserted here is the
+    # JOINING: every one of these has to read as English for the real strings,
+    # and a stopped agent must not be described in the present tense.
+    r = bph.observe("ph-a")
+    check("a card's first sentence is the agent's own claim, led by its name",
+          bph.says_line(r, "Marbas") == "Marbas is testing - the parser round-trips",
+          bph.says_line(r, "Marbas"))
+    check("...and its second is the observation, and says `actually`",
+          bph.doing_line(r, "Marbas") == "Marbas is actually editing Main.qml",
+          bph.doing_line(r, "Marbas"))
+    check("a STOPPED agent is put in the PAST tense, never `is actually`",
+          bph.doing_line(r, "Marbas", running=False)
+          == "Marbas was last seen editing Main.qml",
+          bph.doing_line(r, "Marbas", running=False))
+    check("...and one that was never seen doing anything says nothing at all",
+          bph.doing_line({"observed": "none"}, "Marbas", running=False) == "",
+          bph.doing_line({"observed": "none"}, "Marbas", running=False))
+    check("an agent with no name is `it`, and nothing invents one",
+          bph.says_line(r) == "it is testing - the parser round-trips"
+          and bph.doing_line(r) == "it is actually editing Main.qml",
+          (bph.says_line(r), bph.doing_line(r)))
+    check("a claim with no phase word is QUOTED, not forced after `is`",
+          bph.says_line({"claimDoing": "the vtbclient parser"}, "Marbas")
+          == "Marbas says: the vtbclient parser",
+          bph.says_line({"claimDoing": "the vtbclient parser"}, "Marbas"))
+    check("an agent that has said nothing gets no sentence at all",
+          bph.says_line({}, "Marbas") == "")
+    check("an unobservable agent says THAT, and never the claim",
+          bph.doing_line({"observed": "unlinked"}, "Marbas")
+          == "board cannot see what Marbas is doing - only that the process is there")
+    check("nothing seen yet is stated as itself",
+          bph.doing_line({"observed": "none"}, "Marbas")
+          == "Marbas has not done anything yet")
 
 
 # ------------------------------------------ 1e. the fan-out: the cap and asking
@@ -1216,6 +1256,28 @@ def test_work(tmp):
     check("...and it is not offered an inbox, having no process to reach",
           all(r["id"] == "" for x in bw.groups() if x["phase"] == "queued"
               for r in x["rows"]))
+
+    # ---- ONE FLAT LIST, OLDEST FIRST ----
+    # *"just keep agents ordered by birth/age so they dont move around so
+    # much"*. The order is birth and nothing else, so a card stays where it is
+    # for the whole life of its agent — through every phase it goes through and
+    # through it stopping.
+    cards = bw.cards()
+    check("the cards are one flat list, with no phase sections in it",
+          all("rows" not in c and "label" not in c for c in cards),
+          [list(c)[:4] for c in cards[:2]])
+    live_cards = [c for c in cards if c["state"] != "queued"]
+    check("...ordered oldest first, so a new agent appends at the bottom",
+          [c["id"] for c in live_cards]
+          == [c["id"] for c in sorted(live_cards,
+                                      key=lambda c: (c.get("born") or 0, c["id"]))],
+          [(c["id"], c.get("born")) for c in live_cards])
+    check("...with queued work after the live agents, having no birth yet",
+          [c["state"] == "queued" for c in cards]
+          == sorted(c["state"] == "queued" for c in cards),
+          [c["state"] for c in cards])
+    check("...and the same order on the next poll, so nothing moves under him",
+          [c["id"] for c in bw.cards()] == [c["id"] for c in cards])
 
     # ---- the names: shown everywhere, keyed on nowhere ----
     # *"can you give the workers regular human names?"* — the id goes on being
@@ -1786,7 +1848,7 @@ def test_window(app, tmp):
     check("...and appears on the board as waiting, so it is never invisible",
           typed in prop(win, "queuedNotes"), prop(win, "queuedNotes"))
 
-    # ---- the cards, grouped by what each agent is OBSERVED doing ----
+    # ---- the cards: two sentences each, one flat list, oldest first ----
     import boardphase as bph
     import boardwork as bw
     os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
@@ -1802,26 +1864,41 @@ def test_window(app, tmp):
                 kind="worker", where="hyprvtb", session=u2)
     agents.refresh()
     spin(300)
-    groups = {g["label"]: [r["title"] for r in g["rows"]]
-              for g in prop(win, "agentGroups")}
-    check("cards are grouped by phase, under his own words",
-          "coding" in groups and "researching" in groups, list(groups))
-    check("...by what the agent is OBSERVED doing, not by what it says",
-          "Wire FOCUS through vtbclient" in groups.get("coding", []), groups)
-    rows = {r["title"]: r for g in prop(win, "agentGroups") for r in g["rows"]}
+    cards = prop(win, "agentCards")
+    rows = {r["title"]: r for r in cards}
     card = rows.get("Wire FOCUS through vtbclient", {})
-    check("...and the card carries BOTH statements, neither standing in for the other",
+    check("the section is ONE flat list - no phase headings over the cards",
+          all(isinstance(c, dict) and "rows" not in c for c in cards),
+          [list(c)[:3] for c in cards[:2]])
+    check("a card reads as two sentences led by the agent's name",
+          card.get("saysLine") == card.get("name") + " is testing - the vtbclient parser"
+          and card.get("doingLine") == card.get("name")
+                                       + " is actually editing vtbclient.py",
+          (card.get("saysLine"), card.get("doingLine")))
+    check("...and it still carries BOTH statements, neither standing in for the other",
           card.get("says") == "testing - the vtbclient parser"
           and card.get("actually") == "editing vtbclient.py",
           (card.get("says"), card.get("actually")))
+    check("...so what it SAYS and what it DOES can still disagree on screen",
+          "testing" in card.get("saysLine", "")
+          and "editing" in card.get("doingLine", ""),
+          (card.get("saysLine"), card.get("doingLine")))
     check("...and it is drawn as a PERSON: the card carries a first name",
           card.get("name") in ba.NAMES, card.get("name"))
     check("an agent that has said nothing shows no claim at all",
-          rows.get("Find where focus is decided", {}).get("says") == "",
+          rows.get("Find where focus is decided", {}).get("says") == ""
+          and rows.get("Find where focus is decided", {}).get("saysLine") == "",
           rows.get("Find where focus is decided"))
+    check("a STOPPED agent is never described in the present tense",
+          all("is actually" not in r.get("doingLine", "")
+              for r in cards if not r.get("running")),
+          [r.get("doingLine") for r in cards if not r.get("running")])
+    check("...and the birth the order comes from never reaches the window",
+          all("born" not in r for r in cards), list(rows.values())[:1])
     check("no card carries a time, an age or a count",
           not any(re.search(r"\b\d+\s*(s|m|h|min|sec|hour|ago)\b",
-                            str(r.get("says", "")) + " " + str(r.get("actually", ""))
+                            str(r.get("saysLine", "")) + " "
+                            + str(r.get("doingLine", ""))
                             + " " + str(r.get("detail", "")))
                   for r in rows.values()), list(rows.values())[:1])
 
