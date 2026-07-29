@@ -3,8 +3,10 @@ import QtQuick.Window
 import QtQuick.Controls.Basic
 import "../../qmlcommon"
 
-// board's window: one page, three sections, in his stated order of interest —
-// what needs him, what is moving, what happened.
+// board's window: one page, four sections — what needs him, who is running,
+// what happened, and what is moving. That last one sits at the BOTTOM at his
+// request (*"for now"*), and it is a display order only: the store's own
+// section order is untouched.
 //
 // ONE SCROLL REGION, deliberately. docs/DESIGN.md §9.2 forbids nested scroll
 // regions ("the user should not be able to scroll the tracklist in the
@@ -165,21 +167,26 @@ Window {
     // There are deliberately no `<`/`>` history cells and no `NavButtons`:
     // board has one page and no journey to retrace, and §11.1 says a program
     // with no genuine history gets nothing rather than an invented one.
+    // BOTTOM-UP, and it has to be: the first test that matches wins, so the
+    // sections are asked about in reverse page order. It follows the page, and
+    // the page order changed — IN FLIGHT sits below LANDED now, at his request
+    // ("for now"), so `flight` is asked FIRST here and `needs` is the fallback.
     readonly property string section: {
+        if (secFlight.visible && scroller.contentY >= secFlight.y - 4) return "flight";
         if (secLanded.visible && scroller.contentY >= secLanded.y - 4) return "landed";
         if (secAgents.visible && scroller.contentY >= secAgents.y - 4) return "agents";
-        if (secFlight.visible && scroller.contentY >= secFlight.y - 4) return "flight";
         return "needs";
     }
+    // ...and the cells read left-to-right as the page reads top-to-bottom.
     readonly property var tbButtons: [
         { id: "needs",  label: "ny", state: section === "needs" ? 1 : 0,
           tip: "what needs you" },
-        { id: "flight", label: "if", state: section === "flight" ? 1 : 0,
-          tip: "what is in flight" },
         { id: "agents", label: "ag", state: section === "agents" ? 1 : 0,
           tip: "who is running now" },
         { id: "landed", label: "ld", state: section === "landed" ? 1 : 0,
           tip: "what landed" },
+        { id: "flight", label: "if", state: section === "flight" ? 1 : 0,
+          tip: "what is in flight" },
         "-",
         { id: "reader", label: "md", state: 0, tip: "open board.md in reader" },
     ]
@@ -555,128 +562,21 @@ Window {
 
             Item { width: 1; height: 18 }
 
-            // ================================================ what is moving
-            SectionHead {
-                width: page.width
-                label: "in flight"
-                collapsed: win.isCollapsed("flight")
-                fgAccent: win.fgAccent
-                fgDim: win.fgDim
-                onToggled: win.toggleCollapsed("flight")
-            }
-
-            Item {
-                id: secFlight
-                width: page.width
-                visible: !win.isCollapsed("flight")
-                implicitHeight: visible ? flightCol.implicitHeight : 0
-                height: implicitHeight
-
-                Column {
-                    id: flightCol
-                    width: parent.width
-
-                    Repeater {
-                        model: win.intro.flight ? win.intro.flight : []
-                        delegate: Para {
-                            required property var modelData
-                            width: flightCol.width
-                            color: win.fgDim
-                            text: modelData.text
-                            bottomPadding: 8
-                        }
-                    }
-
-                    PixelText {
-                        width: flightCol.width
-                        visible: win.flight.length === 0
-                        height: visible ? implicitHeight : 0
-                        color: Theme.dim
-                        text: "nothing running"
-                    }
-
-                    // A row is one line: what on the left, where on the right in
-                    // the dim tone, with the note under it. The `where` column
-                    // drops widest-first as the window narrows (§9.1) — at
-                    // width 0, so what is beside it keeps its anchor.
-                    Repeater {
-                        model: win.flight
-                        delegate: Item {
-                            id: frow
-                            required property var modelData
-                            width: flightCol.width
-                            implicitHeight: whatT.implicitHeight
-                                            + (noteT.visible ? noteT.implicitHeight : 0) + 4
-                            height: implicitHeight
-
-                            readonly property bool wide: width > 56 * win.cellW
-                            // Sized from the CHARACTER COUNT, not from the
-                            // item's own implicitWidth: `width: min(implicitWidth,
-                            // ...)` on an elided Text is self-referential and
-                            // resolves to zero — measured, the column simply
-                            // vanished. The font is monospace, so a count is
-                            // exact anyway (§2.7).
-                            readonly property real whereW: wide
-                                ? Math.min(modelData.where.length * win.cellW + 2,
-                                           frow.width * 0.4)
-                                : 0
-
-                            Rectangle {
-                                anchors.fill: parent
-                                color: fma.containsMouse ? Theme.highlight : "transparent"
-                            }
-                            PixelText {
-                                id: whereT
-                                anchors.right: parent.right
-                                y: 0
-                                width: frow.whereW
-                                horizontalAlignment: Text.AlignRight
-                                elide: Text.ElideLeft
-                                color: win.fgDim
-                                text: frow.modelData.where
-                            }
-                            Para {
-                                id: whatT
-                                x: 0
-                                y: 0
-                                width: parent.width - whereT.width - (whereT.width > 0 ? 8 : 0)
-                                color: win.fgText
-                                text: frow.modelData.what
-                            }
-                            Para {
-                                id: noteT
-                                x: 12
-                                y: whatT.implicitHeight
-                                width: parent.width - x
-                                visible: frow.modelData.notes !== ""
-                                color: win.fgDim
-                                text: frow.modelData.notes
-                            }
-                            MouseArea {
-                                id: fma
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.RightButton
-                                onClicked: (m) => {
-                                    var p = mapToItem(null, m.x, m.y);
-                                    win.rowMenu(frow.modelData.what + "  "
-                                                + frow.modelData.where, p.x, p.y);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Item { width: 1; height: 18 }
-
             // ================================================ who is running
             // NOT part of the store. Every other section on this page is
             // `board.md`; this one is the machine — stashes, `/proc` and one
-            // systemctl query, read by `boardagents.py`. It sits under IN
-            // FLIGHT because it answers the next question that section raises
-            // ("is anything actually working on that?") and above LANDED,
+            // systemctl query, read by `boardagents.py`. It sits directly under
+            // NEEDS YOU because it answers the next question a decision raises
+            // ("is anything actually working on that?"), and above LANDED,
             // which is history.
+            //
+            // The page order is NEEDS YOU, AGENTS, LANDED, IN FLIGHT — IN
+            // FLIGHT went to the bottom at his request, *"for now"*. It is a
+            // display order only: `board.md`'s own section order is unchanged
+            // and `boardparse.SECTIONS` still reads the file as it is written.
+            // Three things follow this order and would lie if it moved without
+            // them: the `section` position readout (asked bottom-up, first
+            // match wins), the `tbButtons` cells, and `jump()`.
             //
             // It obeys the same no-pressure rule as the rest: no ages, no
             // counts, no urgency ordering, nothing in the warn/crit ramp. A
@@ -943,6 +843,121 @@ Window {
                                     color: win.fgDim
                                     text: (lprose.modelData.kind === "bullet" ? "- " : "")
                                           + lprose.modelData.text
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Item { width: 1; height: 18 }
+
+            // ================================================ what is moving
+            SectionHead {
+                width: page.width
+                label: "in flight"
+                collapsed: win.isCollapsed("flight")
+                fgAccent: win.fgAccent
+                fgDim: win.fgDim
+                onToggled: win.toggleCollapsed("flight")
+            }
+
+            Item {
+                id: secFlight
+                width: page.width
+                visible: !win.isCollapsed("flight")
+                implicitHeight: visible ? flightCol.implicitHeight : 0
+                height: implicitHeight
+
+                Column {
+                    id: flightCol
+                    width: parent.width
+
+                    Repeater {
+                        model: win.intro.flight ? win.intro.flight : []
+                        delegate: Para {
+                            required property var modelData
+                            width: flightCol.width
+                            color: win.fgDim
+                            text: modelData.text
+                            bottomPadding: 8
+                        }
+                    }
+
+                    PixelText {
+                        width: flightCol.width
+                        visible: win.flight.length === 0
+                        height: visible ? implicitHeight : 0
+                        color: Theme.dim
+                        text: "nothing running"
+                    }
+
+                    // A row is one line: what on the left, where on the right in
+                    // the dim tone, with the note under it. The `where` column
+                    // drops widest-first as the window narrows (§9.1) — at
+                    // width 0, so what is beside it keeps its anchor.
+                    Repeater {
+                        model: win.flight
+                        delegate: Item {
+                            id: frow
+                            required property var modelData
+                            width: flightCol.width
+                            implicitHeight: whatT.implicitHeight
+                                            + (noteT.visible ? noteT.implicitHeight : 0) + 4
+                            height: implicitHeight
+
+                            readonly property bool wide: width > 56 * win.cellW
+                            // Sized from the CHARACTER COUNT, not from the
+                            // item's own implicitWidth: `width: min(implicitWidth,
+                            // ...)` on an elided Text is self-referential and
+                            // resolves to zero — measured, the column simply
+                            // vanished. The font is monospace, so a count is
+                            // exact anyway (§2.7).
+                            readonly property real whereW: wide
+                                ? Math.min(modelData.where.length * win.cellW + 2,
+                                           frow.width * 0.4)
+                                : 0
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: fma.containsMouse ? Theme.highlight : "transparent"
+                            }
+                            PixelText {
+                                id: whereT
+                                anchors.right: parent.right
+                                y: 0
+                                width: frow.whereW
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideLeft
+                                color: win.fgDim
+                                text: frow.modelData.where
+                            }
+                            Para {
+                                id: whatT
+                                x: 0
+                                y: 0
+                                width: parent.width - whereT.width - (whereT.width > 0 ? 8 : 0)
+                                color: win.fgText
+                                text: frow.modelData.what
+                            }
+                            Para {
+                                id: noteT
+                                x: 12
+                                y: whatT.implicitHeight
+                                width: parent.width - x
+                                visible: frow.modelData.notes !== ""
+                                color: win.fgDim
+                                text: frow.modelData.notes
+                            }
+                            MouseArea {
+                                id: fma
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.RightButton
+                                onClicked: (m) => {
+                                    var p = mapToItem(null, m.x, m.y);
+                                    win.rowMenu(frow.modelData.what + "  "
+                                                + frow.modelData.where, p.x, p.y);
                                 }
                             }
                         }
