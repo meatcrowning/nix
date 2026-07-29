@@ -189,10 +189,15 @@ def self_id():
 # decision agent needs no registration: boardmove already stashed it, with the
 # same pid and the same start time, and a second record would be a second
 # definition of "running".
-def register(agent_id, title, pid, kind="note", where="board-watch"):
+def register(agent_id, title, pid, kind="note", where="board-watch", session=""):
+    """`session` is the `--session-id` the spawner chose, and it is what makes
+    the card able to say what the agent is really doing: `boardphase.py` finds
+    `~/.claude/projects/*/<session>.jsonl` by it. An agent registered without
+    one is simply not observable, and its card says exactly that."""
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
            "pidStart": bm._proc_start(pid) if pid else None, "kind": kind,
-           "where": where, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+           "where": where, "session": session or "",
+           "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     _write_json(os.path.join(agents_dir(), rec["id"] + ".json"), rec)
     return rec
 
@@ -369,6 +374,20 @@ def sweep():
         if not bm._alive(rec):
             unregister(rec["id"])
             dropped.append(rec)
+    # ...and the observation sidecars of agents that no longer exist at all.
+    # This is the DURABLE half of "a dead agent's card does not go on claiming
+    # `coding`"; the immediate half is that liveness, not the sidecar, decides
+    # the group (`boardwork.groups`). Left alone, these would accumulate one
+    # file per agent that ever ran.
+    import boardphase as bph
+    alive_ids = {a["id"] for a in agents()}
+    try:
+        names = os.listdir(bph.sidecar_dir())
+    except OSError:
+        names = []
+    for name in names:
+        if name.endswith(".json") and name[:-5] not in alive_ids:
+            bph.forget(name[:-5])
     return moved, dropped
 
 
@@ -388,7 +407,7 @@ def _stash_agents():
         out.append({"id": clean_id(rec.get("key")), "kind": "decision",
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
-                    "state": state})
+                    "session": rec.get("session") or "", "state": state})
     return out
 
 
@@ -402,6 +421,7 @@ def agents(procs=None):
         out.append({"id": clean_id(rec.get("id")), "kind": rec.get("kind") or "note",
                     "title": rec.get("title") or "an agent",
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
+                    "session": rec.get("session") or "",
                     "state": "running" if bm._alive(rec) else "exited"})
 
     # Interactive sessions: the honest half. A `claude` process that descends
@@ -415,9 +435,23 @@ def agents(procs=None):
             continue
         out.append({"id": "s%d" % pid, "kind": "session",
                     "title": "an interactive Claude Code session",
-                    "where": "", "pid": pid, "state": "running"})
+                    "where": "", "pid": pid, "session": "", "state": "running"})
+    # WHAT IT SAYS, AND WHAT IT IS DOING. Imported here rather than at the top:
+    # `boardphase` imports this module, and the pair would not load otherwise.
+    import boardphase as bph
     for a in out:
         a["unread"] = len(for_agent(a["id"]))
+        obs = bph.observe(a["id"], session=a.get("session"))
+        # The phase the card is FILED under is the observed one, never the
+        # claim — `boardwork.groups()` reads exactly this key.
+        a["phase"] = obs.get("phase") or "unreported"
+        a["says"] = bph.says(obs)            # its own words, or "" for silence
+        a["actually"] = bph.actually(obs)    # observed, and never the claim
+        # `ok` / `quiet` / `none` / `unlinked` — which of the four honest
+        # outcomes the observation is, so the card can label the line correctly
+        # (`doing` while it runs, `last` once it has stopped) without
+        # re-deriving it from the sentence.
+        a["observed"] = obs.get("observed") or "unlinked"
     # A STABLE order, so a row does not move under his cursor between two polls
     # — and it is not an urgency ordering (there is none in this app): the ones
     # that are working come first, the ones that have stopped last, and inside a
@@ -447,15 +481,23 @@ def watcher_state(raw=None):
     if active in ("activating", "active", "reloading"):
         return {"state": active, "text": "board-watch is running a tick now"}
     return {"state": active,
-            "text": "board-watch is armed - answering a decision starts an agent"}
+            "text": "board-watch is armed - it picks up the box and your answers"}
 
 
 # ------------------------------------------------------ what the row says
 def describe(a):
-    """The one line under an agent's title. Words, not colour (§3.5) — this is
-    what tells a failed agent from a running one without touching the warn/crit
-    ramp, which on this desktop means a machine fault and not a dead subprocess.
+    """The one line under an agent's two statements. Words, not colour (§3.5) —
+    this is what tells a failed agent from a running one without touching the
+    warn/crit ramp, which on this desktop means a machine fault and not a dead
+    subprocess.
+
+    It no longer carries what the agent is doing: that is now TWO lines, `says`
+    and `actually`, which `boardphase.py` owns and the card draws separately.
+    What is left here is the process-level fact — alive, gone, or not ours —
+    plus the one thing about the inbox he needs to see.
     """
+    if a["state"] == "queued":
+        return "not started yet - a worker starts when a slot frees"
     if a["state"] == "running":
         if a["kind"] == "session":
             return "running - board sees the process, not what it is doing"
@@ -463,5 +505,7 @@ def describe(a):
             return "running - your note is in its inbox, unread"
         return "running - it reads its inbox between steps"
     if a["state"] == "exited":
-        return "exited without finishing - the decision comes back on the next check"
+        if a["kind"] == "decision":
+            return "exited without finishing - the decision comes back on the next check"
+        return "exited without finishing - nothing was committed on its behalf"
     return "started by hand - board cannot tell whether it is still running"

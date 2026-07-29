@@ -33,6 +33,16 @@ The pieces, and where the rules come from:
     agent's stdin is closed, so a message is a FILE that is never in two places
     and never in none; its docstring is the authority on what the box can and
     cannot honestly promise.
+  * `boardwork.py` — the fan-out. The box at the TOP of this window is his
+    control surface: he types a sentence, it lands in the same inbox, and
+    board-watch spawns an ORCHESTRATOR that splits it into worker agents or
+    asks him a question. This module owns the dispatch, the concurrency cap and
+    what happens to work above it, and the phase groups the cards are drawn in.
+  * `boardphase.py` — what an agent SAYS it is doing and what it is OBSERVED
+    doing, kept apart on purpose (*"i want both"*). The claim is the agent's own
+    words; the observation is derived from the tool calls in its live
+    transcript and cannot be faked. Cards are filed under the OBSERVED phase,
+    always, and a disagreement between the two is drawn rather than resolved.
   * QML draws it: pixel font at the desktop's size through `DeskStyle`, the wal
     palette parsed and watched out of the panel's `Theme.qml`, motion from
     `qmlcommon/Motion.qml`, `Kinetic*` views, `VScroll`, and the chrome in the
@@ -72,6 +82,7 @@ from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
 
 import boardparse  # noqa: E402  (beside this file)
 import boardagents  # noqa: E402  (beside this file)
+import boardwork  # noqa: E402  (beside this file)
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "board" / "state.json"
@@ -372,6 +383,7 @@ class Agents(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
+        self._groups = []
         self._queued = []
         self._watcher = ""
         # The registry, the stashes and the inboxes are all files, so watch
@@ -396,7 +408,7 @@ class Agents(QObject):
     # ---- reading ----
     def _rewatch(self):
         want = [boardagents.inbox_dir("queue"), boardagents.agents_dir(),
-                boardagents.bm.stash_dir()]
+                boardagents.bm.stash_dir(), boardwork.work_dir("pending")]
         for d in want:
             if os.path.isdir(d) and d not in self._watch.directories():
                 self._watch.addPath(d)
@@ -422,29 +434,53 @@ class Agents(QObject):
             self._watcher = text
             self.changed.emit()
 
+    def _row(self, a):
+        return {
+            "id": a["id"], "kind": a["kind"], "title": a["title"],
+            "where": a["where"], "state": a["state"],
+            "running": a["state"] == "running",
+            "phase": a.get("phase", ""),
+            # THE TWO STATEMENTS, and they cross into QML as two fields. Never
+            # merged here and never defaulted from each other: `boardphase.py`
+            # has already decided what each of them honestly says, including
+            # when one of them is nothing at all.
+            "says": a.get("says", ""),
+            "actually": a.get("actually", ""),
+            "observed": a.get("observed", "unlinked"),
+            "detail": boardagents.describe(a),
+            "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
+                       if a["id"] else [],
+        }
+
     @Slot()
     def refresh(self):
         self._rewatch()
         try:
-            rows = []
-            for a in boardagents.agents():
-                rows.append({
-                    "id": a["id"], "kind": a["kind"], "title": a["title"],
-                    "where": a["where"], "state": a["state"],
-                    "running": a["state"] == "running",
-                    "detail": boardagents.describe(a),
-                    "waiting": [m["text"] for m in boardagents.for_agent(a["id"])],
-                })
+            rows = [self._row(a) for a in boardagents.agents()]
+            # Sectioned by the OBSERVED phase — `boardwork.groups()` is the one
+            # place that decides which card goes where, so boardctl's listing
+            # and this window cannot drift apart.
+            groups = [{"phase": g["phase"], "label": g["label"],
+                       "rows": [self._row(a) for a in g["rows"]]}
+                      for g in boardwork.groups()]
             queued = [m["text"] for m in boardagents.pending()]
         except OSError:
             return
-        if rows != self._rows or queued != self._queued:
-            self._rows, self._queued = rows, queued
+        if rows != self._rows or queued != self._queued or groups != self._groups:
+            self._rows, self._queued, self._groups = rows, queued, groups
             self.changed.emit()
 
     @Property("QVariantList", notify=changed)
     def list(self):
         return self._rows
+
+    @Property("QVariantList", notify=changed)
+    def groups(self):
+        return self._groups
+
+    @Property(int, notify=changed)
+    def cap(self):
+        return boardwork.cap()
 
     @Property("QVariantList", notify=changed)
     def queued(self):
@@ -474,8 +510,12 @@ class Agents(QObject):
         if msg["state"] == "delivered":
             return "left in its inbox - it reads that between steps"
         if agent_id:
-            return "it is not running - queued for the next agent instead"
-        return "queued - the next agent board-watch spawns gets it"
+            return "it is not running - put in the inbox instead"
+        # The top box. It says where the sentence WENT, never what will come of
+        # it: an orchestrator has to read it first, and it only runs while he is
+        # at the machine. Promising anything more would be the dishonest kind of
+        # feedback §10 is about.
+        return "in the inbox - an orchestrator works out who does what"
 
 
 class Settings(QObject):

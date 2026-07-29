@@ -53,6 +53,7 @@ Window {
     // The machine, not the store: who is running, and what he has written to
     // them that nobody has picked up yet (`boardagents.py`).
     readonly property var agents: Agents.list
+    readonly property var agentGroups: Agents.groups
     readonly property var queuedNotes: Agents.queued
 
     // A note to an agent takes the SAME path his answers take: never lost, and
@@ -217,6 +218,39 @@ Window {
             id: page
             x: win.pad
             y: win.pad
+            // ======================================== the one box he types in
+            // His control surface, in his own words: *"a single box that i
+            // could type things into, press enter, and have them sent to an
+            // inbox. then an agent figures out what agents to assign to what"*.
+            //
+            // It is FIRST, above everything, because it is the only thing on
+            // this page that starts something. Everything below it is a report.
+            //
+            // It writes down exactly one path — `boardagents.send()` with no
+            // agent named, into `inbox/queue/` — which is the same path a note
+            // to a running agent takes and the same one whose conservation the
+            // harness asserts. There is no second write, and there is nothing
+            // typed here that can end up nowhere: if the orchestrator that
+            // picks it up fails, board-watch puts his sentence itself back onto
+            // the board (`QUEUE_FAIL`).
+            //
+            // What it may NOT say is "done": nothing here fires immediately,
+            // and the gate is that he is at the machine. So the footer says
+            // where it went, never what will come of it (§10).
+            InputBox {
+                id: askBox
+                width: page.width
+                fgAccent: win.fgAccent
+                fgText: win.fgText
+                fgDim: win.fgDim
+                draft: win.draftOf("msg:queue")
+                placeholder: "type anything - press enter and it goes to the inbox"
+                hintText: "enter sends - shift+enter is a new line - esc keeps a draft"
+                onDraftEdited: (b) => win.setDraft("msg:queue", b)
+                onSubmitted: (b) => win.sendTo(null, b)
+            }
+
+            Item { width: 1; height: 14 }
             // The gutter is read off the bar itself: its width is a setting and
             // ranges 11-16px, and four call sites across the tree used to leave
             // content under an opaque bar by hardcoding a 10 or a 12 (§9.2).
@@ -509,52 +543,77 @@ Window {
 
                     // Nothing running is the NORMAL state, and it must read as
                     // finished rather than as broken — one dim sentence, no
-                    // empty frame, no "0 agents". The box below it still works,
-                    // which is the point: what he writes waits for the next one.
+                    // empty frame, no "0 agents". The box at the top of the
+                    // page still works, which is the point: what he writes
+                    // there waits for the next orchestrator.
                     PixelText {
                         width: agentsCol.width
-                        visible: win.agents.length === 0
+                        visible: win.agentGroups.length === 0
                         height: visible ? implicitHeight : 0
                         color: Theme.dim
                         text: "nothing is running"
                     }
 
-                    Repeater {
-                        model: win.agents
-                        delegate: AgentRow {
-                            required property var modelData
-                            width: agentsCol.width
-                            agent: modelData
-                            cellW: win.cellW
-                            fgAccent: win.fgAccent
-                            fgText: win.fgText
-                            fgDim: win.fgDim
-                            draft: win.draftOf("msg:" + modelData.id)
-                            onDraftEdited: (b) => win.setDraft("msg:" + modelData.id, b)
-                            onSend: (b) => win.sendTo(modelData, b)
-                            onContextRequested: (mx, my) =>
-                                win.rowMenu(modelData.title + "  " + modelData.detail, mx, my)
-                        }
+                    // What this section is, said once. It is the honest frame
+                    // for every card below it: a card carries what the agent
+                    // SAYS and what it is OBSERVED doing, and the phase it is
+                    // filed under is the observed one. Once, here — not
+                    // repeated per card, which would be a disclaimer where a
+                    // sentence belongs (§5.2).
+                    Para {
+                        width: agentsCol.width
+                        visible: win.agentGroups.length > 0
+                        height: visible ? implicitHeight : 0
+                        bottomPadding: 6
+                        color: Theme.dim
+                        text: "grouped by what each agent is observed doing. "
+                              + "`says` is its own account of itself; `doing` is "
+                              + "read from its tool calls."
                     }
 
-                    // With nobody running there is no row to type into, so the
-                    // section grows its own box. Same component, no target:
-                    // `boardagents.send()` files it in the queue and the next
-                    // agent board-watch spawns is handed it.
-                    AgentRow {
-                        width: agentsCol.width
-                        visible: win.agents.length === 0
-                        height: visible ? implicitHeight : 0
-                        agent: ({ id: "", kind: "", title: "", where: "",
-                                  running: false, waiting: [],
-                                  detail: "board-watch spawns one when you answer a decision" })
-                        cellW: win.cellW
-                        fgAccent: win.fgAccent
-                        fgText: win.fgText
-                        fgDim: win.fgDim
-                        draft: win.draftOf("msg:queue")
-                        onDraftEdited: (b) => win.setDraft("msg:queue", b)
-                        onSend: (b) => win.sendTo(null, b)
+                    // ---- the phases ----
+                    // planning / researching / coding / testing / finishing
+                    // touches, plus the three states that are real and are not
+                    // any of his five: nothing observed yet, not started yet
+                    // (above the concurrency cap), and stopped. `boardwork.py`
+                    // owns the list and the order; an EMPTY phase is not drawn
+                    // at all, so an idle board is one dim sentence and not a
+                    // column of empty headings (§5.2).
+                    Repeater {
+                        model: win.agentGroups
+                        delegate: Column {
+                            id: grp
+                            required property var modelData
+                            width: agentsCol.width
+
+                            PixelText {
+                                width: parent.width
+                                topPadding: 8
+                                bottomPadding: 2
+                                color: win.fgDim
+                                text: grp.modelData.label
+                            }
+
+                            Repeater {
+                                model: grp.modelData.rows
+                                delegate: AgentRow {
+                                    required property var modelData
+                                    width: agentsCol.width
+                                    agent: modelData
+                                    cellW: win.cellW
+                                    fgAccent: win.fgAccent
+                                    fgText: win.fgText
+                                    fgDim: win.fgDim
+                                    draft: win.draftOf("msg:" + modelData.id)
+                                    onDraftEdited: (b) =>
+                                        win.setDraft("msg:" + modelData.id, b)
+                                    onSend: (b) => win.sendTo(modelData, b)
+                                    onContextRequested: (mx, my) =>
+                                        win.rowMenu(modelData.title + "  "
+                                                    + modelData.actually, mx, my)
+                                }
+                            }
+                        }
                     }
 
                     // Notes waiting for the NEXT agent — either he wrote them

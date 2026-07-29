@@ -41,9 +41,29 @@ running agent, because he asked to be able to send "commands / new ideas /
 fixes" to one mid-flight. An agent's stdin is closed, so a message is a FILE:
 the prompt below tells every agent to run `boardctl.py inbox take` between
 steps, `BOARD_AGENT_ID` names its inbox, and anything nobody reads is swept into
-a queue that a run of this script works on its own (`work_the_queue`, using
-`NOTE_PROMPT`). The mechanism, and the argument that nothing he types can be
-lost, are in `apps/board/boardagents.py`'s docstring.
+a queue that a run of this script works on its own (`work_the_queue`). The
+mechanism, and the argument that nothing he types can be lost, are in
+`apps/board/boardagents.py`'s docstring.
+
+AND IT ORCHESTRATES. The board app now opens with ONE box — free text, enter,
+into that same inbox — because he asked for a control surface: *"a single box
+that i could type things into, press enter, and have them sent to an inbox. then
+an agent figures out what agents to assign to what"*. So `work_the_queue` no
+longer spawns an agent that does the job; it spawns an ORCHESTRATOR that splits
+the input up and either `dispatch`es workers or `ask`s him a question in NEEDS
+YOU. `apps/board/boardwork.py` owns the verbs, the concurrency cap and the
+prompt; read its docstring before changing any of it. Three consequences here:
+
+  * **This run is waited on; the workers it starts are not.** A worker is
+    detached, so four 45-minute runs cannot hold this script's flock — a
+    decision he answers five minutes later still fires on time. The orchestrator
+    IS waited on, at a much shorter timeout, because its failure has to put his
+    own sentence back on the board and there is nobody else left to do it.
+  * **A tick also PROMOTES work dispatched above the cap.** Same shape and same
+    guarantee as `reconcile()` and `sweep()`: worst case one timer interval.
+  * **Every spawn passes `--session-id`.** It is how his board says what an
+    agent is actually doing rather than only that it is alive — see
+    `apps/board/boardphase.py`. Losing that flag degrades every card silently.
 
 THE THREE HAZARDS, and how each is defended:
 
@@ -76,6 +96,9 @@ filter, the queue and the dedupe can be exercised without spawning anything:
                             on stdin and $BOARD_WATCH_KEY names the decision
     BOARD_WATCH_GATE        force the at-the-machine gate: `open` or `closed`
     BOARD_WATCH_REPO        the checkout the agent works in (default ~/nix)
+    BOARD_ORCH_TIMEOUT      seconds an orchestrator run may take (default 900)
+    BOARD_WORK_SPAWN        command run INSTEAD of `claude` for a WORKER
+    BOARD_MAX_WORKERS       the concurrency cap, overriding the file
 
 `tools/board-watch-test.py` drives all of them against a throwaway copy.
 """
@@ -86,6 +109,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
@@ -110,6 +134,7 @@ sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", 
 import boardagents as ba                                         # noqa: E402
 import boardmove as bm                                           # noqa: E402
 import boardparse as bp                                          # noqa: E402
+import boardwork as bw                                           # noqa: E402
 
 
 # ------------------------------------------------------------------------ log
@@ -414,70 +439,33 @@ what you did with them.
 There is nobody to ask. Finish, or write down why you did not.
 """
 
-# The same job, for a note he wrote when nothing was running (or when the agent
-# it was addressed to never read it). `boardagents.py` guarantees such a message
-# reaches SOMEBODY; this is the somebody.
-NOTE_PROMPT = """You are running headless, with no human watching, on the \
-machine `top` (x86_64 NixOS, flake attribute `top`). Work in `{repo}`.
-
-He typed this into the agents section of his board (the `board` app) for an \
-agent to pick up. Nothing was running at the time, or whatever was running \
-never read it, so it is yours. It is the whole job.
-
---- what he wrote ---
-{notes}
---- end ---
-
-RULES, in force for this session: exactly the ones a decision run gets, and \
-they are not negotiable.
-
-1. **NEVER rebuild and never change the running machine.** No `sudo \
-rebuild-top`, `nixos-rebuild`, `hyprctl`, `qs ipc`, `systemctl`, `loginctl`. \
-`apps/` runs live source, so a `.py`/`.qml` change is picked up when he next \
-relaunches. If the work cannot land without a rebuild or a reload: **stop, \
-leave that part undone**, and say so on the board.
-2. **Never open a window on his screen and never drive his running apps.** \
-Offscreen harnesses and `tools/sandbox.sh` only; he does every visual check.
-3. **The git index here is SHARED.** `git commit -m "msg" -- <explicit> \
-<paths>`, always. `git add -N` for new files. Never a destructive or reverting \
-git command.
-4. **Push to `main`** when it works. No branch, no PR.
-5. Read `AGENTS.md` at the repo root, then the nested one closest to what you \
-are editing, then `docs/DESIGN.md` if you put pixels on a screen.
-6. **Record what you did on the board, with the tool, never by hand** - from \
-`{repo}`:
-
-       python3 apps/board/tools/boardctl.py note '**<what he asked for>** - \
-<what you did, what you did not, and whether a rebuild is now pending and why>'
-
-   `docs/` is its own git repo inside this checkout, so commit the result from \
-inside `docs/`.
-7. If what he wrote is ambiguous, do the smallest honest thing and write what \
-you found onto the board instead of guessing big. If it is not a task at all \
-(a thought, a note to himself), put it on the board as a bullet and stop.
-
-There is nobody to ask. Finish, or write down why you did not.
-"""
-
 # Allow the tools a working agent needs; deny the ones that change the machine
-# out from under him. The prompt is the primary defence and this is the
+# out from under him. ONE copy, in `apps/board/boardwork.py`, because workers are
+# now spawned from there too and a hole opened in one spawner and not the other
+# would be invisible. The prompt is the primary defence and this is the
 # mechanical one — belt and braces, because rule 1 is the whole point of the
 # feature and a model that forgets it costs him his session.
-ALLOW = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task", "TodoWrite",
-         "NotebookEdit", "WebFetch", "WebSearch"]
-DENY = ["Bash(sudo:*)", "Bash(rebuild-top:*)", "Bash(nixos-rebuild:*)",
-        "Bash(rbsys:*)", "Bash(rbhome:*)", "Bash(update:*)",
-        "Bash(hyprctl:*)", "Bash(qs:*)", "Bash(systemctl:*)", "Bash(loginctl:*)",
-        "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
-        "Bash(git stash:*)", "Bash(git clean:*)"]
+ALLOW = bw.ALLOW
+DENY = bw.DENY
 
 
-def spawn(prompt, agent_id, label):
-    """Run the agent. Returns (exit code, how it ended, seconds).
+def spawn(prompt, agent_id, label, session=None, timeout=None):
+    """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
 
     `BOARD_AGENT_ID` is what makes his mid-flight notes reachable: it is the
     inbox `boardctl.py inbox take` reads with no argument, and the same id the
     board app addresses the box on this agent's row to.
+
+    `session` is the `--session-id` uuid, and it is what lets his board say what
+    this agent is actually doing rather than only that it is alive: the
+    transcript at `~/.claude/projects/*/<uuid>.jsonl` is written live and
+    `apps/board/boardphase.py` tails it. Chosen here, never guessed at.
+
+    Contrast `boardwork._spawn_worker`, which does NOT wait: a worker is
+    detached so a tick cannot be held open by it. The two runs this function
+    starts — a decision and an orchestrator — are waited on deliberately,
+    because a failure has to be reported onto the board in his own words and
+    there is nobody else left to do it.
     """
     stub = os.environ.get("BOARD_WATCH_SPAWN")
     env = dict(os.environ, BOARD_WATCH_KEY=agent_id, BOARD_AGENT_ID=agent_id)
@@ -490,14 +478,16 @@ def spawn(prompt, agent_id, label):
                "--disallowedTools", *DENY,
                "--output-format", "text",
                "-n", label]
+        if session:
+            cmd[3:3] = ["--session-id", session]
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, cwd=REPO, env=env, timeout=AGENT_TIMEOUT_S,
+        p = subprocess.run(cmd, cwd=REPO, env=env, timeout=timeout or AGENT_TIMEOUT_S,
                            input=prompt if stub else None,
                            capture_output=True, text=True)
     except subprocess.TimeoutExpired:
-        return 124, "after %d minutes without finishing" % (AGENT_TIMEOUT_S // 60), \
-            time.time() - t0
+        return 124, "after %d minutes without finishing" \
+            % ((timeout or AGENT_TIMEOUT_S) // 60), time.time() - t0
     except OSError as e:
         return 127, "without starting at all (%s)" % e, time.time() - t0
     if p.stdout:
@@ -508,38 +498,66 @@ def spawn(prompt, agent_id, label):
 
 
 QUEUE_FAIL = (
-    "- **an agent could not finish the note you sent from the board** - it "
-    "exited {how}. Nothing was committed on its behalf. What you wrote, so it "
-    "is not lost: \"{text}\" Log: `~/.cache/board-watch.log`\n")
+    "- **nobody could work out what to do with what you typed into the board** "
+    "- the orchestrator exited {how}. Nothing was dispatched and nothing was "
+    "committed. What you wrote, so it is not lost: \"{text}\" Log: "
+    "`~/.cache/board-watch.log`\n")
+
+
+#: The orchestrator plans and dispatches; it does not do the work. So it is
+#: capped far below a worker — fifteen minutes of reading and splitting, not
+#: forty-five of building. That number is also how long a tick may hold the
+#: flock, so it is the latency floor for a decision he answers meanwhile.
+#: Overrunning it costs him nothing but the wait: the failure path below still
+#: puts his own sentence back on the board, verbatim.
+ORCH_TIMEOUT_S = int(os.environ.get("BOARD_ORCH_TIMEOUT", "900"))
 
 
 def work_the_queue():
-    """Spawn ONE agent for the notes he typed that nobody picked up.
+    """Spawn ONE ORCHESTRATOR for the sentences he typed into the board's box.
 
-    This is the other half of `boardagents.py`'s promise. The box on the board's
-    agents section files a message either in a running agent's inbox or in the
-    queue; the queue has to be somebody's job or the promise is a lie, and this
-    is the somebody. Returns True if a run happened.
+    This is the other half of `boardagents.py`'s promise. The box files what he
+    typed either in a running agent's inbox or in the queue; the queue has to be
+    somebody's job or the promise is a lie, and this is the somebody.
+
+    What changed when he asked for the control surface — *"an agent figures out
+    what agents to assign to what (like how you used to orchestrate)"* — is what
+    that somebody DOES. It used to be one agent that did the work itself. It is
+    now an orchestrator that reads the input, works out what it implies, and
+    either `dispatch`es workers (detached, capped, drawn as cards) or `ask`s him
+    (a question in NEEDS YOU, answered at his leisure). `boardwork.py` owns both
+    verbs and the prompt.
+
+    THIS RUN IS WAITED ON, and the workers it starts are not. That is the whole
+    concurrency design: the tick blocks only for the short planning run, so its
+    flock is released long before the workers finish — a decision he answers
+    five minutes from now still fires on time.
+
+    Returns True if a run happened.
     """
     msgs = ba.drain()          # BEFORE the spawn: see boardagents.drain()
     if not msgs:
         return False
     notes = "\n\n".join(m["text"] for m in msgs)
-    aid = "note-%d" % os.getpid()
+    aid = "orch-%d" % os.getpid()
+    session = str(uuid.uuid4())
     # Registered so it shows up on his board as a running agent with his own
-    # words as its title — the same row, the same box, so he can add to it.
-    ba.register(aid, msgs[0]["text"][:70], os.getpid(), kind="note",
-                where="board-watch")
-    log("firing on %d queued note(s)" % len(msgs))
+    # words as its title — the same card, the same box, so he can add to it
+    # while it is still deciding.
+    ba.register(aid, msgs[0]["text"][:70], os.getpid(), kind="orchestrator",
+                where="board-watch", session=session)
+    log("orchestrating %d thing(s) he typed" % len(msgs))
     try:
-        rc, how, secs = spawn(NOTE_PROMPT.format(repo=REPO, notes=notes), aid,
-                              "board: a note from him")
+        rc, how, secs = spawn(
+            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, notes=notes, rules=bw.RULES,
+                                          cap=bw.cap()),
+            aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S)
     finally:
         ba.unregister(aid)
     if rc == 0:
-        log("the queued note finished in %dm%02ds" % (secs // 60, secs % 60))
+        log("the orchestrator finished in %dm%02ds" % (secs // 60, secs % 60))
         return True
-    log("the queued note FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
+    log("the orchestrator FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
     # The last stop. He must never have to wonder where a sentence he typed
     # went, so the failure carries the text itself onto the board.
     note_on_board(QUEUE_FAIL.format(how=how, text=" ".join(notes.split())[:300]))
@@ -589,6 +607,17 @@ def main():
                 % rec.get("title"))
     except OSError as e:
         log("could not sweep the inbox: %s" % e)
+
+    # AND NO DISPATCHED WORK SITS QUEUED ONCE THERE IS ROOM FOR IT. Work above
+    # the concurrency cap is a file in `work/pending/`, not a dropped task
+    # (`apps/board/boardwork.py`); this is what starts it when a slot frees.
+    # Same shape as the two guarantees above, same worst case: one tick.
+    try:
+        for rec in bw.promote():
+            log("started queued work now that a slot is free: %s"
+                % rec.get("task", "")[:80])
+    except OSError as e:
+        log("could not start queued work: %s" % e)
 
     try:
         src = bp.read(BOARD)
@@ -689,9 +718,10 @@ def main():
     # killed outright, the next tick's reconcile() sees a dead owner and hands
     # the item back on its own.
     moved = False
+    session = str(uuid.uuid4())
     try:
         rec = bm.start(item["key"], where="board-watch", pid=os.getpid(),
-                       path=BOARD)
+                       path=BOARD, session=session)
         moved = True
         log("moved decision %s into IN FLIGHT" % (item["num"] or "?"))
     except (bm.BoardError, OSError) as e:
@@ -700,7 +730,8 @@ def main():
             % (item["num"] or "?", e))
 
     rc, how, secs = spawn(prompt, item["key"],
-                          "board: decision %s" % (item["num"] or item["key"]))
+                          "board: decision %s" % (item["num"] or item["key"]),
+                          session=session)
     state = load_state()
     state["runs"] = (state["runs"] + [{
         "key": item["key"], "num": item["num"], "rc": rc,

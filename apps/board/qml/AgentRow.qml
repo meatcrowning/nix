@@ -1,25 +1,42 @@
 import QtQuick
 
-// One agent that is running right now, and the box he types into to reach it.
+// One agent's card: what it was asked to do, WHAT IT SAYS it is doing, WHAT IT
+// IS OBSERVED DOING, and the box he types into to reach it.
 //
-// WHAT THIS ROW MAY AND MAY NOT SAY (docs/DESIGN.md §10, and `boardagents.py`'s
-// docstring, which is the authority on all of it):
+// THE TWO LINES ARE THE POINT, and they are his call — *"i want both. i want
+// what its saying its doing and what its actually doing"*:
+//
+//   says:   the agent's own words (`boardctl.py phase`). Carries the OBJECT —
+//           "the vtbclient parser" — which watching tool calls can never give.
+//           Absent until it says something; absence is drawn as absence.
+//   doing:  derived from the tool calls in its live transcript
+//           (`boardphase.py`). Carries the VERB — "editing Main.qml" — and
+//           cannot be faked, forgotten or left stale.
+//
+// **Neither is ever shown as the other, and neither is ever filled in from the
+// other.** The card is filed under the section its OBSERVED phase names, so an
+// agent claiming `testing` while it edits appears under *coding*, saying
+// *testing*. That divergence is information he asked to be able to see: it is
+// not an error, so there is no warning, no badge and nothing from the warn/crit
+// ramp — which on this desktop means a machine fault (§8.1, §9.3), not an agent
+// being optimistic about itself. Two true statements, drawn plainly.
+//
+// The ladder does the rest (§3.3): `doing` is the load-bearing fact and takes
+// the ordinary secondary tone; `says` sits a rung quieter, because it is
+// somebody's account of themselves.
+//
+// WHAT THIS CARD STILL MAY NOT SAY (docs/DESIGN.md §10, and `boardagents.py`'s
+// docstring):
 //
 //   * **It never claims delivery it cannot prove.** A note he sends sits under
-//     the row saying `waiting in its inbox` until the agent actually takes it,
-//     because an agent's stdin is closed and the only honest statement is
-//     "the file is there".
-//   * **A finished agent is gone from the list; a failed one says so in
-//     WORDS.** `exited without finishing` is the label, in the dim rung — never
-//     the warn/crit ramp, which on this desktop means a machine fault (§8.1,
-//     §9.3) and not a subprocess that died.
+//     the card saying `waiting in its inbox` until the agent actually takes it.
+//   * **A failed agent says so in WORDS**, never in a colour.
 //   * **Nothing counts and nothing ages.** No elapsed time, no "started at", no
-//     number of steps. Same requirement as the rest of this app: a running
-//     agent is just running.
+//     step count — including on the quiet line, which says "nothing recently"
+//     and never how long ago.
 //
 // The one mark is §9.1's 2px accent gutter, for the same thing it means on an
-// answered decision — this row is current. An exited one loses it, which is the
-// second half of §3.5's "say the state twice".
+// answered decision: this row is current.
 Item {
     id: row
 
@@ -37,15 +54,30 @@ Item {
 
     readonly property bool running: agent && agent.running === true
     readonly property var waiting: agent && agent.waiting ? agent.waiting : []
+    readonly property string says: agent && agent.says ? agent.says : ""
+    readonly property string actually: agent && agent.actually ? agent.actually : ""
+    // A card with no id is not an agent — it is a task waiting for a slot, or
+    // the section's own box. It gets no inbox, because there is nothing running
+    // to put a message in front of.
+    readonly property bool addressable: agent && agent.id !== undefined
+                                        && String(agent.id) !== ""
+    // The process-level sentence earns its line only when it has something to
+    // say. For an ordinary running agent the group heading and the two lines
+    // above have already said everything, and a third dim line repeating "it
+    // reads its inbox between steps" under every card is the noise §5.2 calls a
+    // defect.
+    readonly property bool showDetail: agent && (!running || waiting.length > 0
+                                                 || agent.kind === "pending")
+    // Something was genuinely seen in its transcript. When nothing was AND the
+    // agent has stopped, the observed line is dropped rather than drawn in the
+    // past tense about a thing that never happened.
+    readonly property bool seen: agent && (agent.observed === "ok"
+                                           || agent.observed === "quiet")
 
     implicitHeight: col.implicitHeight + 8
     height: implicitHeight
 
-    function beginEdit() {
-        row.editing = true;
-        editor.forceActiveFocus();
-        editor.cursorPosition = editor.length;
-    }
+    function beginEdit() { msgBox.beginEdit(); }
 
     Rectangle {
         width: 2
@@ -101,10 +133,67 @@ Item {
             }
         }
 
-        // What is actually known about it, in words. This is the whole
-        // running/failed distinction.
+        // ---- what it SAYS ----
+        // Its own words. Drawn only when there are some: an agent that has not
+        // said anything is silent, and manufacturing a claim out of the
+        // observation below would make the two agree by construction and throw
+        // away the only thing having two of them buys.
+        Item {
+            width: col.width
+            visible: row.says !== ""
+            implicitHeight: visible ? saysT.implicitHeight : 0
+            height: implicitHeight
+            PixelText {
+                id: saysLabel
+                x: 0
+                color: Theme.dim
+                text: "says"
+            }
+            Para {
+                id: saysT
+                x: 7 * row.cellW
+                width: parent.width - x
+                color: Theme.dim
+                text: row.says
+            }
+        }
+
+        // ---- what it is ACTUALLY doing ----
+        // Observed, never the claim. When it cannot be observed it says that
+        // ("cannot read its transcript", "nothing recently") rather than
+        // quietly falling back to the line above — §10's rule, and the reason
+        // there are two lines at all.
+        Item {
+            width: col.width
+            visible: row.actually !== "" && (row.running || row.seen)
+            implicitHeight: visible ? doingT.implicitHeight : 0
+            height: implicitHeight
+            PixelText {
+                id: doingLabel
+                x: 0
+                color: row.fgDim
+                // Present tense only while the process is there. A stopped
+                // agent's last observed action is evidence, not activity, and
+                // saying `doing` over it would be this card's one dishonest
+                // word.
+                text: row.running ? "doing" : "last"
+            }
+            Para {
+                id: doingT
+                x: 7 * row.cellW
+                width: parent.width - x
+                color: row.fgDim
+                text: row.actually
+            }
+        }
+
+        // The process-level fact, in words: gone, hand-started, or holding an
+        // unread note. This is the running/failed distinction, and it is words
+        // and not colour (§3.5).
         Para {
             width: col.width
+            visible: row.showDetail && row.agent && row.agent.detail !== ""
+            height: visible ? implicitHeight : 0
             color: Theme.dim
             text: row.agent ? row.agent.detail : ""
         }
@@ -122,107 +211,24 @@ Item {
             }
         }
 
-        Item { width: 1; height: 4 }
+        Item { width: 1; height: 4; visible: row.addressable }
 
         // ---- the box ----
-        // Same idiom as a decision's answer editor: a resting invitation that
-        // is not a demand, and an inset bgAlt field with a 1px accent border
-        // when it is open (§7.2).
-        Item {
+        // §10 again: a task that has not started has no process to put a
+        // message in front of, so it is not offered one.
+        InputBox {
+            id: msgBox
             width: col.width
-            implicitHeight: row.editing ? editBox.height : shown.height
-            height: implicitHeight
-
-            Item {
-                id: shown
-                width: parent.width
-                visible: !row.editing
-                implicitHeight: Math.max(Theme.fontSize + 6, msgText.implicitHeight + 6)
-                height: implicitHeight
-
-                Rectangle {
-                    anchors.fill: parent
-                    color: sma.containsMouse ? Theme.highlight : "transparent"
-                }
-                PixelText {
-                    id: caret
-                    x: 0
-                    y: 3
-                    color: row.fgDim
-                    text: ">"
-                }
-                Para {
-                    id: msgText
-                    x: caret.width + 8
-                    y: 3
-                    width: parent.width - x
-                    color: row.fgDim
-                    text: row.draft !== "" ? row.draft
-                        : row.running ? "send it a command, an idea or a fix"
-                                      : "leave a note - it goes to the next agent"
-                }
-                MouseArea {
-                    id: sma
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.IBeamCursor
-                    onClicked: row.beginEdit()
-                }
-            }
-
-            Rectangle {
-                id: editBox
-                width: parent.width
-                visible: row.editing
-                height: editor.implicitHeight + hint.height + 14
-                color: Theme.bgAlt
-                border.width: 1
-                border.color: row.fgAccent
-
-                TextEdit {
-                    id: editor
-                    x: 6
-                    y: 5
-                    width: parent.width - 12
-                    // No lineHeight/lineHeightMode: they are Text-only and
-                    // assigning them to a TextEdit is a component-creation
-                    // ERROR, not a no-op (§19.1). Same recorded exception the
-                    // decision editor carries.
-                    font.family: Theme.font
-                    font.pixelSize: Theme.fontSize
-                    font.hintingPreference: Font.PreferFullHinting
-                    renderType: Text.NativeRendering
-                    color: row.fgText
-                    selectionColor: Theme.highlight
-                    selectedTextColor: Theme.accent
-                    selectByMouse: true
-                    wrapMode: TextEdit.Wrap
-                    text: row.draft
-                    onTextChanged: row.draftEdited(text)
-                    Keys.onPressed: (e) => {
-                        if (e.key === Qt.Key_Escape) {
-                            // Keeps what he typed, exactly like the answer
-                            // editor. Nothing in this app throws away a
-                            // sentence he wrote.
-                            row.editing = false;
-                            e.accepted = true;
-                        } else if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
-                                   && !(e.modifiers & Qt.ShiftModifier)) {
-                            row.send(editor.text);
-                            row.editing = false;
-                            e.accepted = true;
-                        }
-                    }
-                }
-                PixelText {
-                    id: hint
-                    x: 6
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 4
-                    color: row.fgDim
-                    text: "enter sends - shift+enter is a new line - esc keeps a draft"
-                }
-            }
+            visible: row.addressable
+            height: visible ? implicitHeight : 0
+            draft: row.draft
+            fgAccent: row.fgAccent
+            fgText: row.fgText
+            fgDim: row.fgDim
+            placeholder: row.running ? "send it a command, an idea or a fix"
+                                     : "leave a note - it goes to the next agent"
+            onDraftEdited: (b) => row.draftEdited(b)
+            onSubmitted: (b) => row.send(b)
         }
     }
 }

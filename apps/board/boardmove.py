@@ -75,24 +75,45 @@ def stash_file(key):
     return os.path.join(stash_dir(), re.sub(r"[^a-z0-9-]", "_", key) + ".json")
 
 
-def _proc_start(pid):
-    """The kernel's start time for a pid, so a recycled one is not mistaken for
-    the process we spawned. None if it cannot be read."""
+def _stat_fields(pid):
+    """`/proc/<pid>/stat` after the comm, which can itself contain spaces and
+    brackets — hence the rsplit on `)`. Fields are 0-based from `state`."""
     try:
         with open("/proc/%d/stat" % pid) as f:
-            return f.read().rsplit(")", 1)[1].split()[19]
+            return f.read().rsplit(")", 1)[1].split()
     except (OSError, IndexError, ValueError):
         return None
 
 
+def _proc_start(pid):
+    """The kernel's start time for a pid, so a recycled one is not mistaken for
+    the process we spawned. None if it cannot be read."""
+    f = _stat_fields(pid)
+    return f[19] if f and len(f) > 19 else None
+
+
 def _alive(rec):
+    """THE liveness rule for this whole tree. pid, kernel start time, and not a
+    zombie.
+
+    The zombie clause is not pedantry. Workers are spawned DETACHED and nobody
+    waits on them (`boardwork._spawn_worker`), so between a worker exiting and
+    its spawner exiting it sits as `Z` — `/proc/<pid>` still exists and the
+    start time still matches, so without this a finished worker held a slot
+    against the concurrency cap and kept a card on his board. Measured: two stub
+    workers that ran for one second were still counted as running two and a half
+    seconds later, and `promote()` refused to start the queued ones.
+    """
     pid = rec.get("pid")
     if not pid:
         return True          # no owner recorded: not ours to reclaim
-    if not os.path.isdir("/proc/%d" % pid):
+    f = _stat_fields(pid)
+    if not f:
+        return False
+    if f[0] == "Z":
         return False
     want = rec.get("pidStart")
-    return want is None or _proc_start(pid) == want
+    return want is None or (len(f) > 19 and f[19] == want)
 
 
 def _stashes():
@@ -177,7 +198,7 @@ def said(lines, item):
 
 # ---------------------------------------------------------------- the moves
 def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
-          force=False):
+          force=False, session=""):
     """NEEDS YOU -> IN FLIGHT, keeping his answer on the row and his words in
     the stash. Returns the stash record."""
     rec = {}
@@ -198,6 +219,10 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
                     # the heading it sat above, so a hand-back is byte-exact
                     "before": after if after.startswith("###") else "",
                     "pid": pid, "pidStart": _proc_start(pid) if pid else None,
+                    # The agent's `--session-id`, so its card can say what it is
+                    # actually doing and not only that it is alive
+                    # (`boardphase.py`). Empty for a hand-started item.
+                    "session": session or "",
                     "host": socket.gethostname(),
                     "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                     "board": os.path.abspath(path)})
@@ -281,6 +306,65 @@ def give_back(sel, why=None, path=bp.BOARD_PATH):
     bp.edit(path, go)
     forget(rec["key"])
     return rec
+
+
+def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
+        path=bp.BOARD_PATH):
+    """An agent asking him something: one new decision at the end of NEEDS YOU.
+
+    THIS IS THE SAME MECHANISM AS EVERY OTHER QUESTION ON THE BOARD, and that is
+    the point. He asked for "a section where questions for me to answer would be
+    easily reachable in a list" — NEEDS YOU already is that list, so an
+    agent-authored question is written as the same `### n. title` block, with the
+    same options, the same `>` answer line and the same `*If unanswered:*`
+    sentence. It draws identically, it is answered identically, and answering it
+    fires board-watch identically. There is deliberately no second channel and
+    no "asked by a robot" flag to sort on.
+
+    `if_unanswered` is REQUIRED and the caller is refused without it. That
+    sentence is what makes it safe for him to walk away from a question — the
+    app draws it on every item, always, and an item that arrived without one
+    would be the first thing on this board that quietly demands an answer.
+
+    Returns the new item's key, so the caller can seed board-watch with it
+    (`boardwork.seed_watch_state`) — see that function for why that matters.
+    """
+    q = " ".join((question or "").split())
+    if not q:
+        raise BoardError("a question needs a question in it")
+    if not (if_unanswered or "").strip():
+        raise BoardError(
+            "every question needs --if-unanswered: what happens if he never "
+            "answers. It is drawn on the item and it is what makes the question "
+            "safe to ignore")
+    key = {}
+
+    def go(doc):
+        # The numbering is the file's, so it continues the file's own sequence
+        # rather than restarting. Items that have landed took their numbers with
+        # them; reusing one is harmless (nothing selects on a number outside
+        # NEEDS YOU) and is what he would have written by hand.
+        nums = [int(it["num"]) for it in doc["needs"] if it["num"].isdigit()]
+        num = (max(nums) + 1) if nums else 1
+        title = "%d. %s" % (num, q)
+        key["key"] = bp.slug(title)
+        block = ["### %s\n" % title, "\n"]
+        for para in [p for p in (context or []) if (p or "").strip()]:
+            block += [" ".join(para.split()) + "\n", "\n"]
+        if asked_by:
+            block += ["Asked by an agent while working on: %s\n"
+                      % " ".join(str(asked_by).split()), "\n"]
+        for opt in [o for o in (options or []) if (o or "").strip()]:
+            block.append("- [ ] %s\n" % " ".join(opt.split()))
+        if options:
+            block.append("\n")
+        block += [">\n", "\n",
+                  "*If unanswered:* %s\n" % " ".join(if_unanswered.split()), "\n"]
+        return bp.add_needs_item(doc["lines"], block)
+
+    if not bp.edit(path, go):
+        raise BoardError("nothing was written")
+    return key.get("key", "")
 
 
 def note(text, path=bp.BOARD_PATH):

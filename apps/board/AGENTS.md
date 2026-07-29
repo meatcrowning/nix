@@ -1,7 +1,7 @@
 # `board` — what needs him, what is moving, what landed
 
 Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
-`boardagents.py` and `qml/`.
+`boardagents.py`, `boardwork.py`, `boardphase.py` and `qml/`.
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 (including the `air` system-python split) and runs the **live** source at
 `/home/lam/nix/apps/board/main.py`, so `.py`/`.qml` edits need no rebuild. See
@@ -107,6 +107,15 @@ apps/board/tools/boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> I
 apps/board/tools/boardctl.py land 4 --commit a3c2aac --what 'player: dim the art'
 apps/board/tools/boardctl.py back 4 --why 'blocked on the FOCUS signal'
 apps/board/tools/boardctl.py note '**Relaunch `player`** - live source.'
+
+# ...and the orchestrator's half (`boardwork.py`)
+apps/board/tools/boardctl.py dispatch 'wire FOCUS through vtbclient' --where 'apps/pylib/**'
+apps/board/tools/boardctl.py ask 'How far should the fade reach?' \
+    --option 'apps only' --option 'apps and panel' \
+    --if-unanswered 'the apps get it and nothing else does'
+apps/board/tools/boardctl.py cap 6          # workers allowed at once
+apps/board/tools/boardctl.py phase coding --doing 'the vtbclient parser'
+apps/board/tools/boardctl.py agents         # who is running, by phase
 ```
 
 Rules that fall out of it, all of them load-bearing:
@@ -141,6 +150,90 @@ Rules that fall out of it, all of them load-bearing:
 - **An empty NEEDS YOU is now the resting state**, not a parse failure. Nothing
   in this app or its harness may treat "no decisions" as a regression.
 
+## The box at the top: this window STARTS things now
+
+He asked for a control surface, in one sentence:
+
+> *"i was imagining more of a single box that i could type things into, press
+> enter, and have them sent to an inbox. then an agent figures out what agents
+> to assign to what (like how you used to orchestrate) and as agents spawned,
+> theyd show up as a little visual box that indicated what they were doing, and
+> each agent would be placed in sections based on what they were doing;
+> planning, researching, coding, testing, finishing touches, etc. and there'd be
+> another section where questions for me to answer would be easily reachable in
+> a list and i could answer them at my leasure."*
+
+So the page opens with ONE box, above every section, because it is the only
+thing on the page that starts something — everything below it is a report. The
+whole pipeline, and what each piece is allowed to claim:
+
+| | what happens | where it lives |
+| --- | --- | --- |
+| he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
+| board-watch's next run | drains the queue and spawns ONE **orchestrator**, and WAITS for it | `board-watch.py:work_the_queue` |
+| the orchestrator | splits the input up; `dispatch`es workers or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
+| each worker | detached, capped, works/tests/commits/pushes, **never rebuilds** | `boardwork._spawn_worker` |
+| a card per worker | grouped by phase, saying what it claims AND what it is observed doing | `boardwork.groups()` + `qml/AgentRow.qml` |
+| a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
+
+Rules that fall out of it, all load-bearing:
+
+- **The box writes down the path that already existed.** `boardagents.send()`
+  with no agent named — the same one a note to a running agent takes, with the
+  same conservation property (a message is in exactly one of `to/`, `queue/`,
+  `taken/` at every instant, moved only by `os.replace()`). There is no second
+  write and there must never be one; the harness asserts conservation after the
+  GUI path as well as the CLI one.
+- **The footer says where it WENT, never what will come of it.** `in the inbox -
+  an orchestrator works out who does what`. Nothing fires immediately: the
+  at-the-machine gate still applies, and promising more would be exactly §10's
+  dishonest feedback.
+- **A question an agent asks is not a second mechanism.** `boardctl.py ask`
+  writes the same `### n. title` block, with options, a `>` line and an
+  `*If unanswered:*` sentence, at the end of NEEDS YOU. It draws, answers and
+  fires identically, and it carries **no "asked by a robot" flag** — the
+  generalisation was the requirement, not a parallel list.
+- **`ask` REFUSES without `--if-unanswered`,** and writes nothing. That sentence
+  is what makes a question safe to walk away from; a question that arrived
+  without one would be the first thing on this board that quietly demands an
+  answer.
+- **A new question is seeded into board-watch's fingerprints as it is written**
+  (`boardwork.seed_watch_state`). board-watch deliberately does not fire on a
+  key it has never seen, so without this an answer he gave inside the
+  five-minute window between the question and the next tick would be recorded
+  and never worked. This is the one thing outside board-watch that writes its
+  state file.
+
+### The concurrency cap, and what is above it
+
+**Four workers at once by default,** and it is a FILE
+(`~/.local/state/board/cap`, `boardctl.py cap 6`), not a nix option — same
+reasoning as board-watch's kill switch: he can change it at 2am with no rebuild.
+Every worker is a full model session with a shell in a **shared** git checkout,
+so an unbounded fan-out is a real cost and a real risk.
+
+**Work above the cap is queued, never dropped**, in `work/pending/` by the same
+`os.replace()` discipline as the inbox, and it is **drawn** on his board in the
+`not started yet` group — work that exists and is not running is the last thing
+a control surface may hide. `boardwork.promote()` runs at the top of every
+board-watch tick, so the worst case for a queued task is one timer interval,
+exactly like `reconcile()` and `sweep()`.
+
+### The one thing that could hold the whole system up, and does not
+
+board-watch is a `oneshot` holding a flock, so **anything it waits for blocks
+every other trigger**. Hence the split: the orchestrator run is *waited on* (it
+is short — capped at 15 min — and a failure has to be reported onto the board in
+his own words, and there is nobody else left to do that), while **workers are
+spawned detached** and reparented to init. Four 45-minute workers therefore do
+not stop a decision he answers five minutes later from firing on time.
+
+Consequence, and it was a real bug: a detached child is a **zombie** until its
+spawner exits, and `/proc/<pid>` still exists for one. `boardmove._alive` now
+treats state `Z` as dead — measured, two stub workers that ran for one second
+were still counted as running two and a half seconds later, holding slots
+against the cap and keeping cards on his board.
+
 ## The `agents` section: the only part of this window that is NOT the store
 
 He asked for *"a display on the board of currently active systemd claude agents
@@ -156,9 +249,64 @@ new ideas / fixes to an agent"*. That section is `boardagents.py` plus
 
 Rules, all of them load-bearing:
 
-- **There is ONE liveness rule and it is `boardmove._alive`** — pid plus kernel
-  start time, so a recycled pid cannot make a dead agent look alive. Do not add
-  a second definition of "running" anywhere in this tree.
+- **There is ONE liveness rule and it is `boardmove._alive`** — pid, kernel
+  start time, and not a zombie. A recycled pid cannot make a dead agent look
+  alive and neither can an unreaped one. Do not add a second definition of
+  "running" anywhere in this tree.
+
+### A card says what the agent CLAIMS and what it is OBSERVED doing — both
+
+His call, in one sentence: *"i want both. i want what its saying its doing and
+what its actually doing"*. `boardphase.py` is the whole mechanism and its
+docstring is the authority. The short version, and every line of it is a rule:
+
+- **`says` is the agent's own words** (`boardctl.py phase coding --doing '...'`).
+  It carries the OBJECT — *"the vtbclient parser"* — which watching tool calls
+  can never give you.
+- **`doing` is derived from the agent's live transcript**,
+  `~/.claude/projects/*/<session-uuid>.jsonl`, which Claude Code appends to as
+  the agent works. It carries the VERB — *"editing vtbclient.py"* — and cannot
+  be faked, forgotten or left stale.
+- **The linkage is CHOSEN, not guessed.** Every spawn passes
+  `claude --session-id <uuid>`, so the transcript is found by globbing that uuid
+  and the project-slug rule is never reimplemented here. That flag is
+  load-bearing: lose it and every card silently degrades to *"cannot see what it
+  is doing"* with no error anywhere. `tools/board-watch-test.py` asserts the
+  spawn passes it.
+- **The card is filed under the OBSERVED phase, never the claim.** An agent
+  saying `testing` while every recent call is an `Edit` appears under *coding*,
+  saying *testing* — and **that divergence is a feature, not an error**. Nothing
+  hides it, reconciles it, warns about it or colours it: the warn/crit ramp on
+  this desktop means a machine fault (§8.1, §9.3), not an agent being optimistic
+  about itself.
+- **Each side may be missing, and says so on its own terms.** No claim is
+  silence — a claim is never manufactured out of the observation, which would
+  make the two agree by construction and throw away the only thing having two of
+  them buys. No transcript, or nothing in it yet, is stated plainly rather than
+  falling back to the claim and passing it off as observation.
+- **A stalled agent is visible, without a clock.** No tool call for a while sets
+  the observed side to `nothing recently` — words, no number. The threshold is
+  machine business exactly like `ESCALATE_AFTER_S`; the no-pressure rule is not
+  suspended because the subject is a robot.
+- **Present tense only while the process is there.** A stopped agent's last
+  observed action is labelled `last`, not `doing`.
+- **Transcripts reach megabytes** (a long session's is ~1.8 MB), so nothing ever
+  reads one whole: each agent's record keeps a byte offset and a poll reads only
+  the delta, advancing past complete lines only — a transcript is appended to
+  while it is being read.
+- **The classifier is meant to be tuned**, and it lives in exactly one place:
+  `TOOL_PHASE` and `BASH_PHASE` at the top of `boardphase.py`. Reading is the
+  background noise of every phase, so `researching` is what an agent is doing
+  when reading is *all* it is doing; a plain `Bash` command claims no phase at
+  all.
+
+**Why the transcript and not `--output-format stream-json`.** stream-json is
+real and would work, but a worker is detached on purpose — there is no parent
+left alive to read its stdout, so the stream would have to be redirected to a
+file and tailed, which is this same problem in a format we would then own. The
+transcript is already on disk, already structured, already written by the
+platform, and it works for agents this system did not spawn. One spawn flag buys
+all of it.
 - **It writes nothing to the store.** Everything it persists is under
   `~/.local/state/board/` (`inbox/`, `agents/`). `board.md`'s writers are still
   exactly three, all through `boardparse.edit()`.
@@ -170,6 +318,9 @@ Rules, all of them load-bearing:
   success and on failure alike — and **a failed one is told apart in WORDS**
   (`exited without finishing`), with §9.1's accent gutter present only on a
   running row. Colour says nothing here; §8.1's ramp means a machine fault.
+- **Nothing in the phase groups is a count or an ordering by urgency**, and an
+  EMPTY phase is not drawn at all — an idle board is one dim sentence, not a
+  column of eight empty headings (§5.2).
 - **The interactive session is not faked.** It is not a systemd unit, so it is
   listed as what can actually be observed — a process — and described as
   `running - board sees the process, not what it is doing`. Nothing invents a
@@ -197,7 +348,7 @@ of the filesystem here and not of anybody's diligence, and it is what
 move an agent performs. Anything nobody takes is escalated to the queue by
 `sweep()` (its agent went, or it has sat unread past `ESCALATE_AFTER_S`, which
 is machine business and never drawn), and the queue is drained by a board-watch
-run of its own (`work_the_queue`, `NOTE_PROMPT`). If that run fails, the bullet
+run of its own (`work_the_queue`, spawning an ORCHESTRATOR - see below). If that run fails, the bullet
 it leaves in WAITING ON YOU TO DO **quotes what he wrote**. There is no path
 where a sentence he typed reaches nobody and says nothing.
 
@@ -300,7 +451,25 @@ W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 ```
 
-`tools/board-test.py`, offscreen, five layers: **the round trip** (pure Python
+`tools/board-test.py`, offscreen, seven layers (156 checks). Two of them are
+new and are the ones to read first if the fan-out misbehaves:
+
+- **what an agent says vs what it does** (`test_phase`) — the classifier per
+  tool, that reading is not a phase of its own, tailing by byte offset, half a
+  line at the end of a live transcript, an agent with no session saying so
+  rather than guessing, a stalled one saying `nothing recently` **with no
+  elapsed time in it**, and the divergence itself: a claim is recorded, drawn,
+  and does **not** move the card.
+- **the fan-out** (`test_work`) — dispatch runs up to the cap and queues the
+  rest; every dispatched task is on disk exactly once in exactly one directory;
+  queued work is drawn rather than hidden and is not offered an inbox it has no
+  process for; a killed worker stops holding a slot and `promote()` starts the
+  queue oldest-first; a dead agent is filed under `stopped` **whatever it last
+  claimed** and the sweep then drops its record; `ask` refuses without
+  `--if-unanswered` and writes nothing, then lands as an ordinary numbered
+  decision with all four parts and no robot flag; and the board-watch seed.
+
+The other five: **the round trip** (pure Python
 — byte-identity, one-line edits, the radio, the `> ` marker preserved on a
 clear, the atomic write), **the moves** (start/land/back/note/reconcile: every
 decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
@@ -318,11 +487,17 @@ appearing without a relaunch, **all three sections redrawing when an item moves
 between them — with his scroll position and his half-typed draft kept**, a store
 replaced by rename (a sync, a `git checkout`) still reloading, a section
 emptying out completely, **a running agent and a failed one drawn differently
-and a finished one leaving the list**, and `grabWindow()` PNGs with `--shots`:
+and a finished one leaving the list**, **the one box at the top being the only
+un-attached one on the page and what he types into it landing in the queue
+exactly once**, **cards grouped by what each agent is OBSERVED doing, carrying
+both statements, with no time, age or count anywhere on them**, and
+`grabWindow()` PNGs with `--shots`:
 the real store, the fixture populated, a decision answered, an EMPTY `NEEDS
 YOU`, an EMPTY agents section (with `/proc` stubbed away, since the process
 running the harness is itself under a Claude session), the agents section
-populated, a 420x600 window, and an unreadable store. It redirects `XDG_STATE_HOME` into a
+populated, a 420x600 window, and an unreadable store. It redirects
+`BOARD_TRANSCRIPTS` at a synthetic transcript tree — a harness here must **never**
+write into `~/.claude`, which syncs to book — and `XDG_STATE_HOME` into a
 scratch dir (a harness here **must**, or it rewrites his own app's state), works
 on a COPY of the store for every write, and stubs the Titlebar, because the real
 one registers buttons against the harness's pid in the live compositor.

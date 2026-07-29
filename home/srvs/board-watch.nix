@@ -26,6 +26,24 @@
 # below: the timer interval is also the worst case for a note he typed while
 # nothing was running, since the queue is only looked at on a tick.
 #
+# AND IT IS NOW THE ORCHESTRATOR. The board app grew ONE box at the top of the
+# window — free text, enter, into that same inbox — because he asked for a
+# control surface rather than a per-agent chat: "a single box that i could type
+# things into, press enter, and have them sent to an inbox. then an agent
+# figures out what agents to assign to what". The run this unit starts for that
+# input no longer does the work itself. It PLANS: it splits the input up and
+# either dispatches worker agents (detached, capped, drawn as cards on his
+# board) or asks him a question in NEEDS YOU. apps/board/boardwork.py is the
+# mechanism, the cap and both prompts.
+#
+# Two consequences for this file, and they are why it changed:
+#   - a third trigger, `board-inbox.path` below, so typing into that box does
+#     not wait up to five minutes for the timer;
+#   - a tick now also PROMOTES work that was dispatched above the concurrency
+#     cap, so the timer interval is the worst case for a queued task starting
+#     once a slot frees — the same guarantee reconcile() and sweep() already
+#     gave stranded items and unread notes.
+#
 # TOP ONLY, on purpose. `home/` is shared verbatim with `air`/book and docs/
 # syncs both ways every five minutes, so deploying this to both machines would
 # have the same answer picked up twice, by two agents, on two checkouts of the
@@ -94,6 +112,28 @@ config = lib.mkIf (host == "top") {
   systemd.user.paths.board-watch = {
     Unit.Description = "Watch ~/nix/docs/board.md for a newly-answered decision";
     Path.PathChanged = "%h/nix/docs/board.md";
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  # ...AND the box at the top of the board app. He types a sentence, presses
+  # enter, and it becomes a file in `inbox/queue/` (apps/board/boardagents.py) —
+  # nothing about board.md changes, so the path unit above cannot see it and the
+  # only thing that would pick it up is the five-minute timer. That is the wrong
+  # latency for the one control on this desktop that is supposed to feel like
+  # typing at somebody.
+  #
+  # `PathExistsGlob`, not `PathChanged`: the queue is a DIRECTORY OF FILES and
+  # what matters is that one exists at all. It is also level-triggered rather
+  # than edge-triggered, which is the property that matters here — a message
+  # written while the service is already running (the case the docstring records
+  # the path unit LOSING for board.md) still fires the moment the run ends,
+  # because the file is still sitting there. The queue is drained before a spawn,
+  # so this cannot loop: once `orchestrate()` has taken the messages the glob
+  # matches nothing.
+  systemd.user.paths.board-inbox = {
+    Unit.Description = "Watch the board app's inbox for something he typed";
+    Path.PathExistsGlob = "%h/.local/state/board/inbox/queue/*.json";
+    Path.Unit = "board-watch.service";
     Install.WantedBy = [ "default.target" ];
   };
 
