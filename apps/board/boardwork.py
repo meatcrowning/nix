@@ -707,7 +707,19 @@ def _task_name():
 
 
 def _log_path(agent_id):
-    d = os.path.join(os.path.expanduser("~/.cache"), "board-work")
+    """`$XDG_CACHE_HOME/board-work/<id>.log`, and the variable is the point.
+
+    This was a hardcoded `~/.cache` while every harness in the tree redirects
+    `XDG_STATE_HOME` into a scratch dir — so a harness's fixture workers (`task
+    one`, `task two`, ...) wrote their logs into HIS real cache and their units
+    into his real journal. Measured 2026-07-29: 682 of the 714 files in
+    `~/.cache/board-work/` were empty test debris from harness workers killed at
+    teardown, and a dozen of them were mistaken for real dispatches that had
+    silently produced nothing. A harness must never write outside its rig, and
+    an agent reading that directory as evidence must be able to trust it.
+    """
+    d = os.path.join(os.environ.get("XDG_CACHE_HOME")
+                     or os.path.expanduser("~/.cache"), "board-work")
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, ba.clean_id(agent_id) + ".log")
 

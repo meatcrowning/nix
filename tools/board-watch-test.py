@@ -226,6 +226,14 @@ class Rig:
                  # HIS live `~/.local/state/board`, where the app reads it — a
                  # harness here must redirect it, exactly as board-test.py does.
                  XDG_STATE_HOME=os.path.join(self.d, "xdgstate"),
+                 # ...and the same for the WORKER LOGS (`boardwork._log_path`).
+                 # Without it every fixture worker this harness spawns — `task
+                 # one`, `task two`, ... — wrote an empty log into his real
+                 # `~/.cache/board-work/`, where an agent reads that directory
+                 # as evidence of what ran. 682 of the 714 files there were this
+                 # harness's debris, and a dozen of them were read as real
+                 # dispatches that had produced nothing (2026-07-29).
+                 XDG_CACHE_HOME=os.path.join(self.d, "xdgcache"),
                  BOARD_WATCH_SPAWN=spawn if spawn is not None
                  else 'echo "$BOARD_WATCH_KEY" >> ' + self.fired)
         return e
@@ -303,18 +311,27 @@ class Rig:
         os.replace(tmp, self.board)
 
     def state_home(self, fn):
-        """Run `fn` against the RIG's state dir, not his. `boardagents` reads
-        XDG_STATE_HOME on every call, so swapping it round the call is enough
-        and there is no module state to reset."""
-        old = os.environ.get("XDG_STATE_HOME")
+        """Run `fn` against the RIG's state and cache dirs, not his.
+
+        `boardagents` reads XDG_STATE_HOME and `boardwork._log_path` reads
+        XDG_CACHE_HOME on every call, so swapping them round the call is enough
+        and there is no module state to reset. **Both**, because `fn` here is
+        sometimes `bw.dispatch`, which spawns a real worker: with the cache dir
+        left alone that worker's log landed in his live `~/.cache/board-work/`
+        even though everything else about the run was contained.
+        """
+        old = {k: os.environ.get(k)
+               for k in ("XDG_STATE_HOME", "XDG_CACHE_HOME")}
         os.environ["XDG_STATE_HOME"] = os.path.join(self.d, "xdgstate")
+        os.environ["XDG_CACHE_HOME"] = os.path.join(self.d, "xdgcache")
         try:
             return fn()
         finally:
-            if old is None:
-                del os.environ["XDG_STATE_HOME"]
-            else:
-                os.environ["XDG_STATE_HOME"] = old
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     def note(self, text):
         """What the board app's box does when nothing is running."""
