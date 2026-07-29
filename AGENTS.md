@@ -358,6 +358,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   takeover — re-answer on the other machine to hand an item over. Kill switch:
   `touch ~/.local/state/board-watch/off`. Log `~/.cache/board-watch.log`;
   harness `tools/board-watch-test.py`; runbook `docs/agents/board-watch.md`.
+- `home/srvs/lid.nix` + `lid-files/lid-close.sh` — **what closing the lid does,
+  on `book` only** (`top` is a desktop; the module is gated on `host == "air"`).
+  The setting is `lidClose` in `~/.config/quickshell/settings.json`
+  (`suspend` | `lock` | `blank` | `nothing`, default `suspend`), drawn on the
+  Settings window's Lock & Power page and re-read on every lid event, so a
+  change applies to the next close with nothing restarted. **logind is kept out
+  of the lid by a user service holding a `handle-lid-switch` block inhibitor**
+  rather than by `/etc/systemd/logind.conf`, which on book is Fedora system
+  state this repo cannot write and a reinstall would lose — no root, nothing to
+  redo by hand. Hyprland's own `switch:on/off:` binds (`hyprland.lua`, gated on
+  `host.laptop`) call the script. The trade: while that unit runs, a lid closed
+  outside a Hyprland session does nothing; `systemctl --user stop
+  lid-inhibit.service` gives Fedora's default suspend-on-close back.
 - `home/srvs/claude-state.nix` + `claude-state-files/` — two-way sync of **the
   whole of `~/.claude`** between `top` and `book` via the PRIVATE repo
   `github.com/meatcrowning/claude-state`: memories, `orchestrator-briefing.md`,

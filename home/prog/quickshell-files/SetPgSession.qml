@@ -1,12 +1,26 @@
 import QtQuick
+import Quickshell.Io
 
-// Lock & Power — the lock screen, idle behaviour, and the power-menu commands.
+// Lock & Power — the lock screen, idle behaviour, the power-menu commands, and
+// (on a machine with a lid) what closing it does.
 Column {
     id: page
     width: parent ? parent.width : 480
     spacing: 4
 
     property var d: SettingsStore.d
+
+    // The lid section is drawn ONLY on book, the one machine here that has a
+    // lid — top is a desktop, and a picker for a switch that does not exist is
+    // exactly the inert control docs/DESIGN.md §10 forbids. Read via `hostname`
+    // for the same reason SetPgSystem.qml does: no dependency on a generated
+    // file. Absent until the answer arrives, never wrongly present.
+    property bool hasLid: false
+    Process {
+        running: true
+        command: ["hostname"]
+        stdout: StdioCollector { onStreamFinished: page.hasLid = (this.text || "").trim() === "book" }
+    }
 
     SetSection {
         title: "lock screen"
@@ -80,12 +94,23 @@ Column {
         }
     }
 
-    // NO "power behaviour / lid close" section. Nothing in this desktop can
-    // honour it: lid handling belongs to logind, top has no lid at all, and the
-    // one machine that does (book) gets home-manager only from this repo — its
-    // logind config is Fedora system state we cannot write. hypridle, which
-    // owns the idle side above, has no lid event either. Implementing it would
-    // mean the panel taking a systemd-inhibit lock and watching
-    // /proc/acpi/button/lid — a feature, and one that cannot be tested from
-    // here. Removed rather than left drawn; ask and it can be built on book.
+    // Lid close — book only (see `hasLid`). It IS honoured: the lid-inhibit
+    // user service holds logind's handle-lid-switch, and Hyprland's own switch
+    // bind runs ~/.config/scripts/lid-close.sh, which re-reads this key on
+    // every event — so a change here applies to the very next close, with
+    // nothing to restart. Whole mechanism: home/srvs/lid.nix.
+    SetSection {
+        title: "laptop lid"
+        visible: page.hasLid
+        SetRow {
+            label: "when the lid closes"
+            desc: "blank turns the display off without locking; nothing leaves it running"
+            SetSelect {
+                options: ["suspend", "lock", "blank", "nothing"]
+                labels: ({ suspend: "sleep", lock: "lock", blank: "screen off", nothing: "nothing" })
+                value: page.d.lidClose
+                onChanged: (v) => { page.d.lidClose = v; SettingsStore.save(); }
+            }
+        }
+    }
 }

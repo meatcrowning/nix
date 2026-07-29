@@ -670,6 +670,24 @@ hl.bind("XF86AudioPause", hl.dsp.exec_cmd("playerctl play-pause"), { locked = tr
 hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd("playerctl play-pause"), { locked = true })
 hl.bind("XF86AudioPrev",  hl.dsp.exec_cmd("playerctl previous"),   { locked = true })
 
+-- Lid switch — laptops only (host.laptop, i.e. air/book; top is a desktop and
+-- has no lid device to bind to). WHAT it does is a user setting, `lidClose` in
+-- ~/.config/quickshell/settings.json (suspend | lock | blank | nothing) — the
+-- script re-reads it on every event, so changing it applies at once. logind is
+-- kept out of the lid by the lid-inhibit user service; the whole mechanism is
+-- documented in home/srvs/lid.nix.
+--
+-- `locked = true` is not optional here: without it the bind is dead exactly
+-- when it matters most, on a lid closed over a locked session.
+if host.laptop then
+    hl.bind("switch:on:Apple SMC power/lid events",
+            hl.dsp.exec_cmd("$HOME/.config/scripts/lid-close.sh close"),
+            { locked = true, description = "Lid closed" })
+    hl.bind("switch:off:Apple SMC power/lid events",
+            hl.dsp.exec_cmd("$HOME/.config/scripts/lid-close.sh open"),
+            { locked = true, description = "Lid opened" })
+end
+
 
 --------------------------------
 ---- WINDOWS AND WORKSPACES ----

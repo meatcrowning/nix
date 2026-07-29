@@ -246,6 +246,11 @@ Singleton {
             property string cmdSleep: "systemctl suspend"
             property string cmdReboot: "systemctl reboot"
             property string cmdPoweroff: "systemctl poweroff"
+            // What closing the laptop lid does: suspend | lock | blank | nothing.
+            // Read by ~/.config/scripts/lid-close.sh on every lid event (so a
+            // change applies at once), and drawn only on a machine with a lid —
+            // book. Mechanism and the logind trade-off: home/srvs/lid.nix.
+            property string lidClose: "suspend"
         
             // ---- Input & System ----
             property int    keyRepeatDelay: 300
@@ -325,6 +330,7 @@ Singleton {
         lockClock24h: false, lockPamService: "quickshell-lock", autoLockMin: 5, lockOnSuspend: true,
         cmdLogout: "pkill Hyprland", cmdSleep: "systemctl suspend",
         cmdReboot: "systemctl reboot", cmdPoweroff: "systemctl poweroff",
+        lidClose: "suspend",
         keyRepeatDelay: 300, keyRepeatRate: 40, pointerSpeed: 0.0, naturalScroll: false,
         tapToClick: true, clock24h: false, weekStartsMonday: false, clockFace: "analog",
         weatherLat: 58.30,
