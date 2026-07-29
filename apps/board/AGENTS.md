@@ -723,8 +723,9 @@ all of it.
 
 **You cannot type into a running agent.** `claude -p` is headless with stdin
 closed, and the interactive session's stdin is his terminal's. So a message is a
-FILE, and a message is in exactly one of three directories at every instant —
-`inbox/to/<agent>/`, `inbox/queue/`, `inbox/taken/` — only ever moved between
+FILE, and a message is in exactly one directory at every instant —
+`inbox/to/<agent>/`, `inbox/queue/`, `inbox/taken/`, plus `inbox/dropped/` and
+`inbox/editing/` below — only ever moved between
 them by `os.replace()`. That is why "nothing he types can be lost" is a property
 of the filesystem here and not of anybody's diligence, and it is what
 `tools/board-test.py` asserts after every path.
@@ -750,6 +751,29 @@ is machine business and never drawn), and the queue is drained by a board-watch
 run of its own (`work_the_queue`, spawning an ORCHESTRATOR - see below). If that run fails, the bullet
 it leaves in WAITING ON YOU TO DO **quotes what he wrote**. There is no path
 where a sentence he typed reaches nobody and says nothing.
+
+### Second thoughts about something still queued
+
+*"allow the user to remove queued `waiting for next agent` items or edit them in
+place"*. Right-click a `waiting for the next agent` row: **edit what it says**
+opens the same `InputBox` every other typed sentence here uses, seeded with the
+current wording; **remove it from the queue** is last behind a separator (§7.2)
+and moves the message to `inbox/dropped/` — removed from the queue is not the
+same as never written, and this app deletes no prose. `QueuedNote.qml`,
+`boardagents.remove_queued`/`edit_queued`, `Agents.removeQueued`/`editQueued`.
+
+**Both can lose a race with `board-watch`, and both say so.** The queue is
+drained on the watcher's clock, so a message can leave between the menu opening
+and the click landing. So neither writes the queue path in place: each **claims**
+the file with `os.replace` first — the removal straight into `dropped/`, the
+edit into `inbox/editing/` for the length of three syscalls and then back under
+its own name. Either the claim wins, or it raises and the operation reports the
+message **gone** (`None` → *"that one has already gone to an agent"*), which is
+§10.2's refuse-visibly. An in-place rewrite of the queue path would have done
+the one unforgivable thing instead: recreate a message a drain had just taken,
+so the run already working it would find it queued again and do it twice.
+`sweep()` returns anything stranded in `editing/` (a process that died
+mid-edit, older than `EDIT_RESCUE_AFTER_S`) to the queue.
 
 **Agents reach their side with `boardctl.py inbox take`** — `BOARD_AGENT_ID`
 names the inbox, board-watch's prompt tells every agent it spawns to check it
