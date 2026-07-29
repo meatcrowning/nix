@@ -131,6 +131,11 @@ filter, the queue and the dedupe can be exercised without spawning anything:
     BOARD_WATCH_GATE        force the at-the-machine gate: `open` or `closed`
     BOARD_WATCH_REPO        the checkout the agent works in (default ~/nix)
     BOARD_ORCH_TIMEOUT      seconds an orchestrator run may take (default 900)
+    BOARD_ORCH_MODEL        `--model` for the orchestrator (default
+    BOARD_ORCH_EFFORT       claude-fable-5 / high); the WORKER_ and DECISION_
+                            pair default to empty, i.e. no flag at all. Empty
+                            means inherit ~/.claude/settings.json — see
+                            `boardwork.ROLES`.
     BOARD_WORK_SPAWN        command run INSTEAD of `claude` for a WORKER
     BOARD_MAX_WORKERS       the concurrency cap, overriding the file
     BOARD_WATCH_SPIN_LIMIT  undrained runs in a row before the backoff (8)
@@ -580,7 +585,7 @@ ALLOW = bw.ALLOW
 DENY = bw.DENY
 
 
-def spawn(prompt, agent_id, label, session=None, timeout=None):
+def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision"):
     """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
 
     `BOARD_AGENT_ID` is what makes his mid-flight notes reachable: it is the
@@ -614,13 +619,16 @@ def spawn(prompt, agent_id, label, session=None, timeout=None):
         cmd = ["/bin/sh", "-c", stub]
     else:
         cmd = ["claude", "-p", prompt,
+               *(["--session-id", session] if session else []),
+               # WHICH MODEL, and how hard it thinks, is per role: see
+               # `boardwork.ROLES`. A decision agent inherits his settings.json
+               # default; the orchestrator does not, because it only plans.
+               *bw.role_flags(role),
                "--permission-mode", "acceptEdits",
                "--allowedTools", *ALLOW,
                "--disallowedTools", *DENY,
                "--output-format", "text",
                "-n", label]
-        if session:
-            cmd[3:3] = ["--session-id", session]
     t0 = time.time()
     try:
         p = subprocess.run(cmd, cwd=REPO, env=env, timeout=timeout or AGENT_TIMEOUT_S,
@@ -693,7 +701,8 @@ def work_the_queue():
             bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
                                           notes=notes, rules=bw.RULES,
                                           cap=bw.cap()),
-            aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S)
+            aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
+            role="orchestrator")
     finally:
         ba.unregister(aid)
     if rc == 0:

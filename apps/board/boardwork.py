@@ -594,6 +594,57 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
         "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
 
+# ------------------------------------------------ what model does which job
+#: Per-ROLE model and reasoning effort, the one table for both spawners
+#: (`_spawn_worker` below and `board-watch.py`'s `spawn`, which imports it from
+#: here for the same reason it imports ALLOW/DENY: a knob set in one spawner and
+#: not the other is invisible until it matters).
+#:
+#: `""` means SAY NOTHING — pass no flag and inherit whatever
+#: `~/.claude/settings.json` is set to. That is the deliberate default for the
+#: two roles that DO the work; nobody asked for them to change, and pinning a
+#: model here would silently outrank the setting he edits by hand.
+#:
+#: The ORCHESTRATOR is the exception he asked for. Its session is short and it
+#: writes no code — read what he typed, work out how many jobs it is, run
+#: `boardctl dispatch`/`ask`, write one note — so the cost of a bigger model and
+#: more thinking is bounded by a run that is capped at fifteen minutes anyway,
+#: while the mistakes it can make (splitting one job into three conflicting
+#: workers, dispatching what should have been a question) each cost a worker, a
+#: commit and something he has to notice and undo. Judgement is the entire job;
+#: buy it.
+#:
+#: Flags verified against the installed CLI (`claude --help`, 2026-07-29):
+#: `--model <model>` takes an alias or a full name, `--effort <level>` takes
+#: low|medium|high|xhigh|max.
+ROLES = {
+    "orchestrator": ("claude-fable-5", "high"),
+    "worker": ("", ""),
+    "decision": ("", ""),
+}
+
+
+def role_flags(role):
+    """argv fragment selecting the model and effort for `role`.
+
+    Overridable per role by environment, following the `BOARD_*` convention the
+    spawn stubs already use, so a harness can re-point or neutralise it:
+    `BOARD_ORCH_MODEL` / `BOARD_ORCH_EFFORT`, `BOARD_WORKER_MODEL` /
+    `BOARD_WORKER_EFFORT`, `BOARD_DECISION_MODEL` / `BOARD_DECISION_EFFORT`.
+    Set one to the empty string to drop the flag and inherit the default.
+    """
+    model, effort = ROLES.get(role, ("", ""))
+    prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
+    model = os.environ.get(prefix + "_MODEL", model).strip()
+    effort = os.environ.get(prefix + "_EFFORT", effort).strip()
+    argv = []
+    if model:
+        argv += ["--model", model]
+    if effort:
+        argv += ["--effort", effort]
+    return argv
+
+
 
 def _task_name():
     return "%s-%s.json" % (time.strftime("%Y%m%dT%H%M%S"), os.urandom(3).hex())
@@ -792,6 +843,7 @@ def _spawn_worker(rec):
     else:
         cmd = ["claude", "-p", prompt,
                "--session-id", session,
+               *role_flags("worker"),
                "--permission-mode", "acceptEdits",
                "--allowedTools", *ALLOW,
                "--disallowedTools", *DENY,
