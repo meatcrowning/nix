@@ -957,7 +957,7 @@ def test_agents(tmp):
 
     def where_is(text):
         found = []
-        for name in ("to", "queue", "taken"):
+        for name in ("to", "queue", "taken", "dropped", "editing"):
             for p in glob.glob(os.path.join(ba._root(), "inbox", name, "**", "*.json"),
                                recursive=True):
                 if text in open(p).read():
@@ -1056,6 +1056,77 @@ def test_agents(tmp):
           [m["text"] for m in drained] == before and ba.pending() == [], before)
     check("...and every message is still on disk, exactly once",
           total() == 5 and all(where_is(t) == ["taken"] for t in before), total())
+    # ---- ...and he can change his mind while it is still queued ----
+    # *"allow the user to remove queued waiting for next agent items or edit
+    # them in place"*. Both act on a message board-watch may be draining at
+    # this instant, so both are `os.replace` claims like every other move here:
+    # they win, or they report the message gone. The conservation check is the
+    # same one — after each path it is on disk exactly once.
+    was = total()
+    ba.send("rename the buttons")
+    ba.send("look again at the fan curve")
+    mid = ba.msg_id([m for m in ba.pending() if m["text"] == "rename the buttons"][0])
+    edited = ba.edit_queued(mid, "rename the buttons, and the tooltips")
+    check("he can rewrite a queued message in place",
+          edited["text"] == "rename the buttons, and the tooltips"
+          and [m["text"] for m in ba.pending()
+               if ba.msg_id(m) == mid] == ["rename the buttons, and the tooltips"],
+          edited)
+    check("...under its own name, so it keeps its place in the queue",
+          ba.msg_id(edited) == mid and total() == was + 2,
+          (ba.msg_id(edited), total()))
+    check("...and nothing is left claimed by the edit",
+          os.listdir(ba.inbox_dir("editing")) == [],
+          os.listdir(ba.inbox_dir("editing")))
+    check("...and the message is still on disk exactly once",
+          where_is("rename the buttons, and the tooltips") == ["queue"],
+          where_is("rename the buttons, and the tooltips"))
+
+    gone = ba.remove_queued(mid)
+    check("he can take a queued message off the queue",
+          gone is not None
+          and mid not in [ba.msg_id(m) for m in ba.pending()],
+          [ba.msg_id(m) for m in ba.pending()])
+    check("...and it is kept, not deleted - this app destroys no prose",
+          where_is("rename the buttons, and the tooltips") == ["dropped"]
+          and total() == was + 2,
+          (where_is("rename the buttons, and the tooltips"), total()))
+
+    # THE RACE, which is the whole reason these are file moves. board-watch
+    # drains the queue on its own clock; between the menu opening and his click
+    # the message can be somebody's job already.
+    other = ba.msg_id(ba.pending()[0])
+    ba.drain()
+    check("removing one board-watch has already drained REFUSES, honestly",
+          ba.remove_queued(other) is None)
+    check("...and so does editing it - the agent got the old wording",
+          ba.edit_queued(other, "too late") is None)
+    check("...and neither resurrected it into the queue",
+          ba.pending() == [] and where_is("look again at the fan curve") == ["taken"],
+          where_is("look again at the fan curve"))
+    check("...and an id that was never in the queue is refused the same way",
+          ba.remove_queued("no-such-message") is None
+          and ba.edit_queued("no-such-message", "hello") is None)
+    check("...as is an id that tries to walk out of the queue directory",
+          ba._queued_file("../agents/w1") is None
+          and ba._queued_file("") is None and ba._queued_file(".hidden") is None)
+    check("an edit to nothing at all is refused rather than blanking a message",
+          ba.edit_queued(other, "   ") is None)
+
+    # ...and a message stranded by a process that died mid-edit comes back.
+    ba.send("stranded by a crash")
+    sid = ba.msg_id([m for m in ba.pending()
+                     if m["text"] == "stranded by a crash"][0])
+    held = os.path.join(ba.inbox_dir("editing"), sid + ".json")
+    os.replace(os.path.join(ba.inbox_dir("queue"), sid + ".json"), held)
+    os.utime(held, (0, 0))
+    ba.sweep()
+    check("a message stranded by an interrupted edit is put back on the queue",
+          [m["text"] for m in ba.pending()] == ["stranded by a crash"]
+          and os.listdir(ba.inbox_dir("editing")) == [],
+          ([m["text"] for m in ba.pending()], os.listdir(ba.inbox_dir("editing"))))
+    ba.drain()
+
 
     # ---- a dead registration does not sit there claiming to work ----
     ba.register("note-x", "a note you sent", dead, kind="note")
@@ -1891,8 +1962,15 @@ def test_window(app, tmp):
     said = agents.send("drawn-dead", "Widen the clock", "decision", "never mind")
     agents.refresh()
     spin(250)
+    # The queued rows carry an id as well as the text now — he can right-click
+    # one to rewrite or remove it, and neither the text (two identical
+    # sentences are two messages) nor the position (the next drain shifts every
+    # index) is a name for the message it acts on.
+    def queued_texts():
+        return [q["text"] for q in prop(win, "queuedNotes")]
+
     check("a note to an agent that has finished goes to the inbox instead",
-          "inbox" in said and "never mind" in prop(win, "queuedNotes"),
+          "inbox" in said and "never mind" in queued_texts(),
           (said, prop(win, "queuedNotes")))
     # ---- THE ONE BOX, and the conservation of what he types into it ----
     # It is the control surface: free text, enter, into the inbox. The claim it
@@ -1915,6 +1993,7 @@ def test_window(app, tmp):
           all("reply to this one" in str(b.property("placeholder"))
               or "send it a command" in str(b.property("placeholder"))
               or "leave a note" in str(b.property("placeholder"))
+              or "rewrite this queued note" in str(b.property("placeholder"))
               for b in boxes if b not in unattached),
           [str(b.property("placeholder")) for b in boxes])
     typed = "the scrollbar arrows feel sluggish"
@@ -1929,7 +2008,48 @@ def test_window(app, tmp):
     check("...and it is on disk exactly once, in exactly one directory",
           len(where) == 1 and where[0][0] == "queue", where)
     check("...and appears on the board as waiting, so it is never invisible",
-          typed in prop(win, "queuedNotes"), prop(win, "queuedNotes"))
+          typed in queued_texts(), prop(win, "queuedNotes"))
+    # ---- ...and he can change his mind about one that is still queued ----
+    # *"allow the user to remove queued waiting for next agent items or edit
+    # them in place"*. Both go through the same `Agents` bridge his messages do,
+    # and both have to say what happened — including when the answer is that
+    # board-watch got there first.
+    qrows = [it for it in descendants(win.contentItem())
+             if it.property("note") is not None]
+    qrows[0].openMenu(20, 20)
+    spin(150)
+    qmenus = [it for it in descendants(win.contentItem())
+              if it.property("items") is not None and it.isVisible()]
+    qlabels = [str(i.get("label", ""))
+               for i in qmenus[0].property("items").toVariant()] if qmenus else []
+    check("a queued note offers both second thoughts, editing first",
+          qlabels[:2] == ["edit what it says", "copy line"], qlabels)
+    check("...and the one he cannot take back is LAST, behind a separator",
+          qlabels[-1] == "remove it from the queue" and qlabels[-2] == "", qlabels)
+    if qmenus:
+        qmenus[0].close()
+    spin(100)
+
+    qid = [q["id"] for q in prop(win, "queuedNotes") if q["text"] == typed][0]
+    said = keep[5].editQueued(qid, "the scrollbar arrows feel too slow")
+    spin(200)
+    check("he can rewrite a queued note in place, and the row shows the new text",
+          "rewritten" in said
+          and "the scrollbar arrows feel too slow" in queued_texts()
+          and typed not in queued_texts(), (said, queued_texts()))
+    said = keep[5].removeQueued(qid)
+    spin(200)
+    check("...and he can take one off the queue entirely",
+          "kept" in said
+          and "the scrollbar arrows feel too slow" not in queued_texts(),
+          (said, queued_texts()))
+    said = keep[5].removeQueued(qid)
+    check("...and a second removal SAYS it is gone rather than looking like it worked",
+          "already gone" in said, said)
+    said = keep[5].editQueued(qid, "too late for this")
+    check("...as does an edit of one an agent has already been handed",
+          "already gone" in said and "old wording" in said, said)
+
 
     # ---- the cards: two sentences each, one flat list, oldest first ----
     import boardphase as bph
