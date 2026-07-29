@@ -796,6 +796,17 @@ def agents(procs=None):
         who = a.get("name") or ""
         a["saysLine"] = bph.says_line(obs, who)
         a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running")
+        # SOLOMON ONLY: a live orchestrator with nothing observed yet reads
+        # `Solomon is getting ready`, not `nothing yet` — [his, 2026-07-29] the
+        # placeholder should say so in those words, scoped to the orchestrator
+        # card so ordinary workers keep the honest bare placeholder. It is the
+        # same sentence shape as the idle row's `Solomon is ready`, and the
+        # same argument: this is a placeholder for the absence of observation,
+        # every word written here, promoted from nothing — never a claim
+        # derived from an observation, which stays forbidden (§10.6).
+        if (a["kind"] == ORCHESTRATOR_KIND and a["state"] == "running"
+                and (obs.get("observed") or "") == "none"):
+            a["doingLine"] = "%s is getting ready" % (who or ORCHESTRATOR_NAME)
         # `ok` / `quiet` / `none` / `unlinked` — which of the four honest
         # outcomes the observation is, so the card can label the line correctly
         # (`doing` while it runs, `last` once it has stopped) without
@@ -805,10 +816,12 @@ def agents(procs=None):
         # `usage` stamps, and "" when nothing was measured. Formatted in
         # `boardphase` beside the two sentences, for the same reason they are.
         a["contextLine"] = bph.context_line(obs)
-        # WHEN IT WAS SPAWNED, beside that tally — his, 2026-07-29. An absolute
-        # clock time and never an age; `boardphase.born_line` says why that
-        # distinction is what keeps `born` off the no-time rule.
-        a["bornLine"] = bph.born_line(a.get("born"))
+        # HOW LONG IT HAS BEEN WORKING, beside that tally — his, 2026-07-29,
+        # replacing the absolute spawn stamp he asked for that morning. The one
+        # elapsed time this app draws; `boardphase.worked_line` carries the
+        # whole argument. Recomputed here on every poll, which is what keeps it
+        # current on screen.
+        a["workedLine"] = bph.worked_line(a.get("born"), a["state"] == "running")
     # A STABLE order, so a row does not move under his cursor between two polls
     # — and it is not an urgency ordering (there is none in this app): the ones
     # that are working come first, the ones that have stopped last, and inside a
