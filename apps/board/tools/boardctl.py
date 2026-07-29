@@ -245,6 +245,19 @@ def cmd_agents(a):
     return 0
 
 
+def _warn_overlaps(rec):
+    """WARN ONLY, never refuse: the dispatch already happened, exactly as
+    asked. This is `boardwork.overlaps()` firing — the mechanical half of the
+    prompt's `run agents first` rule — and the honest response to it is a
+    handoff, which is why the line names the command. A near-miss must not
+    block real work, so the exit code is untouched."""
+    for w in rec.get("overlaps") or []:
+        who = w.get("name") or w["id"]
+        print("warning: %s (%s) is already working in `%s` - if this is the "
+              "same files, `inbox send --to %s` beats a second worker"
+              % (who, w["id"], w.get("where") or "?", who))
+
+
 def cmd_dispatch(a):
     rec = bw.dispatch(" ".join(a.task), where=a.where, context=a.context)
     if rec is None:
@@ -253,6 +266,7 @@ def cmd_dispatch(a):
     if rec["state"] == "queued":
         print("queued (%d already running, the cap is %d) - a later tick starts it: %s"
               % (len(bw.live_workers()), bw.cap(), rec["task"][:70]))
+        _warn_overlaps(rec)
         return 0
     if rec["state"] == "failed":
         print("boardctl: could not start a worker - " + rec.get("why", "?"),
@@ -267,6 +281,7 @@ def cmd_dispatch(a):
     print("started as %s - id %s, unit %s%s - nothing has landed yet: %s"
           % (rec.get("name") or rec["id"], rec["id"], bw.UNIT_PREFIX, rec["id"],
              rec["task"][:70]))
+    _warn_overlaps(rec)
     return 0
 
 

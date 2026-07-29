@@ -2311,6 +2311,170 @@ def test_work(tmp):
     del os.environ["BOARD_WORK_SPAWN"]
 
 
+def test_overlap(tmp):
+    """`dispatch` WARNS on a --where that overlaps a live worker's — the
+    mechanical half of the prompt's `run agents first` rule. Warn only: a
+    near-miss must not block real work, so the dispatch itself is untouched."""
+    import subprocess
+    import boardagents as ba
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "2"
+
+    first = bw.dispatch("hold the board files", where="apps/board/**")
+    check("(setup) a worker is live in apps/board/**",
+          first["state"] == "running", first)
+
+    hits = bw.overlaps("apps/board/qml/Main.qml")
+    check("a --where inside a live worker's glob is flagged",
+          [a["id"] for a in hits] == [first["id"]],
+          [(a["id"], a.get("where")) for a in hits])
+    check("...and the wider glob is flagged from the other side too",
+          [a["id"] for a in bw.overlaps("apps/**")] == [first["id"]])
+    check("a --where in different files is not",
+          bw.overlaps("home/prog/quickshell-files/**") == [])
+    check("...case-sensitively, since paths here are",
+          bw.overlaps("APPS/board/**") == [])
+    check("an empty or all-glob --where flags nobody rather than everybody",
+          bw.overlaps("") == [] and bw.overlaps("*") == [])
+    check("a multi-token --where overlaps on any of its tokens",
+          [a["id"] for a in bw.overlaps("tools/x.sh apps/board/boardwork.py")]
+          == [first["id"]])
+
+    second = bw.dispatch("also in the board files", where="apps/board/tools/**")
+    check("the overlap rides on the dispatch record, naming the live worker",
+          [w["id"] for w in second.get("overlaps") or []] == [first["id"]],
+          second.get("overlaps"))
+    check("...and WARN ONLY: the dispatch still happened, exactly as asked",
+          second["state"] == "running", second["state"])
+
+    cli = os.path.join(BOARD, "tools", "boardctl.py")
+    p = subprocess.run([sys.executable, cli, "dispatch", "a third task in the",
+                        "same files", "--where", "apps/board/boardagents.py"],
+                       capture_output=True, text=True)
+    check("boardctl dispatch prints the warning, naming the worker",
+          p.returncode == 0 and "warning:" in p.stdout
+          and (first.get("name") or first["id"]) in p.stdout, p.stdout[-200:])
+    check("...suggesting the handoff, not refusing the dispatch",
+          "inbox send --to" in p.stdout
+          and ("queued" in p.stdout or "started as" in p.stdout),
+          p.stdout[-200:])
+    q = subprocess.run([sys.executable, cli, "dispatch", "unrelated work",
+                        "--where", "sys/net/**"],
+                       capture_output=True, text=True)
+    check("...and a disjoint --where draws no warning at all",
+          q.returncode == 0 and "warning:" not in q.stdout, q.stdout[-200:])
+
+    check("the orchestrator is told the tool itself warns on overlap...",
+          "`dispatch` itself warns when the" in bw.ORCHESTRATOR_PROMPT
+          and "never a refusal" in bw.ORCHESTRATOR_PROMPT)
+    check("...while `run agents first` is still the instruction",
+          "Run `agents` before you dispatch" in bw.ORCHESTRATOR_PROMPT)
+    check("rule 1 sends the rebuild through the host wrapper, which takes the "
+          "shared lock itself...",
+          "use the host's own" in bw.RULES and "rebuild-air" in bw.RULES
+          and "runs preflight itself" in bw.RULES)
+    check("...and keeps the manual flock for a RAW switch, same lock path",
+          "/tmp/claude-1000/-home-lam-nix/rebuild.lock" in bw.RULES
+          and "RAW switch" in bw.RULES)
+
+    for a in bw.live_workers():
+        os.kill(a["pid"], 9)
+    time.sleep(0.4)
+    ba.sweep()          # drop the dead registrations, as the real tick would
+    del os.environ["BOARD_WORK_SPAWN"]
+
+
+def test_dead_worker_notes(tmp):
+    """A dead worker's TAKEN inbox notes go back to the queue.
+
+    `sweep()` already rescued a note nobody READ; a note a worker `inbox
+    take`-d used to die with the worker — 2026-07-29, a handed-over item taken
+    at 11:27 by a worker that then died on an API 500, and nothing flagged it.
+    Now `reap()` sends a failed or transiently-requeued worker's taken notes
+    back through `boardagents.requeue_taken`, and the conservation property
+    holds across it: one file, one directory, at every instant."""
+    import boardagents as ba
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "3"
+    bw.reap()          # clear earlier fixtures' dead tasks out of work/taken
+
+    def places(text):
+        out = []
+        for sub in ("queue", "taken", "dropped", "editing"):
+            for m in ba._list(ba.inbox_dir(sub)):
+                if m["text"] == text:
+                    out.append((sub, m.get("state")))
+        root = ba.inbox_dir("to")
+        for name in sorted(os.listdir(root)):
+            d = os.path.join(root, name)
+            if os.path.isdir(d):
+                out += [("to/" + name, m.get("state"))
+                        for m in ba._list(d) if m["text"] == text]
+        return out
+
+    # ---- a FAILED worker: its taken note goes back to the queue ----
+    rec = bw.dispatch("die holding a note", where="apps/board/**")
+    aid = rec["id"]
+    msg = ba.send("the handed-over item, in full", to=aid)
+    check("(setup) the handoff is delivered to the live worker",
+          msg["state"] == "delivered", msg)
+    took = ba.take(aid)
+    check("(setup) the worker took it", len(took) == 1
+          and places(msg["text"]) == [("taken", "taken")], places(msg["text"]))
+    os.kill(rec["pid"], 9)
+    time.sleep(0.4)
+    done, failed, requeued = bw.reap()
+    mine = [t for t in failed if t["task"] == "die holding a note"]
+    check("the stampless worker is reaped as FAILED, tuple shape unchanged",
+          len(mine) == 1, [t["task"] for t in failed])
+    check("...its taken note is back in the queue, saying who dropped it",
+          places(msg["text"]) == [("queue", "requeued-from-dead-worker")],
+          places(msg["text"]))
+    check("...riding on the reaped record for the tick to count",
+          mine and [m["text"] for m in mine[0].get("notesBack") or []]
+          == [msg["text"]], mine and mine[0].get("notesBack"))
+    check("...exactly once - nothing lost, nothing doubled",
+          len(places(msg["text"])) == 1, places(msg["text"]))
+
+    # ---- a worker requeued on a TRANSIENT death: same rescue ----
+    rec2 = bw.dispatch("die transiently holding a note", where="apps/x/**")
+    msg2 = ba.send("the second handed-over item", to=rec2["id"])
+    ba.take(rec2["id"])
+    with open(bw._log_path(rec2["id"]), "w") as f:
+        f.write("API Error: 500\n")
+    os.kill(rec2["pid"], 9)
+    time.sleep(0.4)
+    done, failed, requeued = bw.reap()
+    check("the transiently-dead worker's task is requeued, not failed",
+          [t["task"] for t in requeued] == ["die transiently holding a note"],
+          ([t["task"] for t in requeued], [t["task"] for t in failed]))
+    check("...and its taken note went back to the queue with it",
+          places(msg2["text"]) == [("queue", "requeued-from-dead-worker")],
+          places(msg2["text"]))
+
+    # ---- a DONE worker keeps its taken notes: it reported ----
+    rec3 = bw.dispatch("finish after taking a note", where="apps/y/**")
+    msg3 = ba.send("a note the worker handled", to=rec3["id"])
+    ba.take(rec3["id"])
+    bw.mark_reported(rec3["id"], what="did the thing")
+    os.kill(rec3["pid"], 9)
+    time.sleep(0.4)
+    done, failed, requeued = bw.reap()
+    check("a worker that REPORTED is reaped as done",
+          [t["task"] for t in done] == ["finish after taking a note"],
+          [t["task"] for t in done])
+    check("...and its taken note stays taken: it is presumed handled",
+          places(msg3["text"]) == [("taken", "taken")], places(msg3["text"]))
+
+    ba.sweep()          # drop the dead registrations, as the real tick would
+    del os.environ["BOARD_WORK_SPAWN"]
+    os.environ["BOARD_MAX_WORKERS"] = "2"
+
+
 # ----------------------------------------------------------------- 2. the store
 def test_real_store():
     import boardparse as B
@@ -3615,6 +3779,8 @@ def main():
         test_phase(tmp)
         os.makedirs(os.path.join(tmp, "work"))
         test_work(os.path.join(tmp, "work"))
+        test_overlap(os.path.join(tmp, "work"))
+        test_dead_worker_notes(os.path.join(tmp, "work"))
         app = QGuiApplication(sys.argv)
         test_real_store()
         test_real_window(app)
