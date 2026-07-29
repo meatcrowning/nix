@@ -448,8 +448,11 @@ def stall(sel, path=bp.BOARD_PATH):
         cells += [""] * (3 - len(cells))
         what, where, notes = (c.strip() for c in cells[:3])
         lines = bp.remove_row(doc["lines"], row["line"])
+        # INFORMATION: the row moved and nothing was lost. It is not a FAILED —
+        # nothing was attempted and dropped here; a row this host cannot account
+        # for may well have finished on the other machine.
         return bp.add_todo_bullet(lines, bp.parse("".join(lines)),
-                                  "- **%s** - was sitting in IN FLIGHT with "
+                                  "- INFORMATION: **%s** - was sitting in IN FLIGHT with "
                                   "nothing working on it%s, so it is here "
                                   "instead of claiming to be handled.%s"
                                   % (what, (" (%s)" % where) if where else "",
@@ -520,12 +523,34 @@ def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
 
 
 def note(text, path=bp.BOARD_PATH):
-    """One bullet into WAITING ON YOU TO DO."""
+    """One bullet into WAITING ON YOU TO DO.
+
+    It must start with one of `boardparse.TODO_TAGS` — `QUESTION:`,
+    `INFORMATION:`, `COMPLETION:`, `PARTIAL:`, `FAILED:` — then a short
+    description, then whatever background it needs. `add_todo_bullet` refuses an
+    untagged one and this deliberately does not paper over that with a default:
+    the writer knows which of the five it is and nothing downstream can work it
+    out afterwards.
+
+    The `- ` is added PER LINE, not once for the whole string. The orchestrator
+    writes one line per task in one call, and prefixing only the first left the
+    second as a bare paragraph glued onto the bullet above it — which is how
+    *"**default handlers for every app we wrote** - handed to Sam"* came to be
+    drawn as part of somebody else's message on 2026-07-29. An INDENTED line is
+    a wrapped continuation and is left alone.
+    """
     if not text.strip():
         return False
-    body = text.strip()
-    return bp.edit(path, lambda doc: bp.add_todo_bullet(
-        doc["lines"], doc, body if body.startswith("- ") else "- " + body))
+    out = []
+    for line in text.strip().split("\n"):
+        if not line.strip():
+            continue
+        if line[:1].isspace() or line.lstrip().startswith("- "):
+            out.append(line)
+        else:
+            out.append("- " + line)
+    body = "\n".join(out)
+    return bp.edit(path, lambda doc: bp.add_todo_bullet(doc["lines"], doc, body))
 
 
 def forget(key):
@@ -558,7 +583,7 @@ def reconcile(path=bp.BOARD_PATH):
             continue
         try:
             give_back(rec["key"], why=(
-                "- **the agent working \"%s\" is gone** - it exited without "
+                "- FAILED: **the agent working \"%s\" is gone** - it exited without "
                 "finishing or saying so, so the decision is back above with "
                 "your answer intact. Nothing was committed on its behalf. "
                 "Log: `~/.cache/board-watch.log`" % rec.get("title", rec["key"])),

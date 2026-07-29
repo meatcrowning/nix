@@ -393,7 +393,7 @@ def test_moves(tmp):
 
     # ---- a bullet for him ----
     src = B.read(path)
-    bm.note("**Relaunch `thing`** - live source.", path=path)
+    bm.note("PARTIAL: **Relaunch `thing`** - live source.", path=path)
     doc5 = B.parse(B.read(path))
     check("a note lands as one bullet in WAITING ON YOU TO DO",
           len(doc5["todo"]) == 2
@@ -477,13 +477,14 @@ def test_moves(tmp):
         hits["n"] += 1
         if hits["n"] == 1:                    # somebody else writes mid-edit
             open(path, "a").write("\nan agent appended this.\n")
-        return B.add_todo_bullet(doc["lines"], doc, "- late\n")
+        return B.add_todo_bullet(doc["lines"], doc, "- INFORMATION: late\n")
 
     B.edit(path, racer)
     txt = B.read(path)
     check("an edit computed from stale bytes is retried, not landed",
           hits["n"] == 2 and "an agent appended this." in txt
-          and txt.count("- late") == 1, (hits["n"], txt.count("- late")))
+          and txt.count("- INFORMATION: late") == 1,
+          (hits["n"], txt.count("- INFORMATION: late")))
 
     # ---- the CLI itself runs ----
     import subprocess
@@ -596,6 +597,146 @@ def test_landed(tmp):
     check("...but a selector that matches nothing and no --what is refused",
           p.returncode == 1 and "no line to record" in p.stderr,
           p.stderr.strip()[:160])
+
+
+# ------------------------- 1b1a. every WAITING bullet says WHAT IT IS, in a word
+def test_todo_tags(tmp):
+    """*"messages in the to do section should start with either QUESTION:
+    INFORMATION: COMPLETION: or something like those [...] so that the user can
+    easily know what that message is about. any sort of elaboration or background
+    should go after the short description"*.
+
+    Three claims, and the first is the one that keeps it true a month from now:
+
+      * **a writer that emits an untagged bullet FAILS.** Not "is defaulted to
+        INFORMATION:" — a failure quietly filed as information is exactly what
+        the tag exists to prevent — and not "is caught in review": the check is
+        in `add_todo_bullet`, the one function every writer of this section goes
+        through, so a new writer cannot be added that forgets.
+      * **every tag has a writer.** A vocabulary with a word nothing can say is
+        a vocabulary he has to learn twice.
+      * **READING is untouched.** The store is full of untagged bullets written
+        before this existed, and it is HIS file: they parse, they draw, and
+        nothing rewrites them.
+    """
+    import boardmove as bm
+    import boardparse as B
+
+    path = os.path.join(tmp, "board.md")
+    open(path, "w").write(FIXTURE)
+
+    check("the tag set is short and is his three plus the two the machine needs",
+          B.TODO_TAGS == ("QUESTION", "INFORMATION", "COMPLETION", "PARTIAL",
+                          "FAILED"), B.TODO_TAGS)
+
+    # ---- an untagged bullet is REFUSED, and nothing is written ----
+    before = B.read(path)
+    for bad in ("**Relaunch `board`** - live source.",
+                "- **Relaunch `board`** - live source.",
+                "- relaunch: it is live source",        # not one of the tags
+                "- completion: **it** - lowercase is not a tag",
+                "- COMPLETION:**it** - no space after the tag",
+                "- COMPLETION:"):                       # tag and nothing else
+        try:
+            bm.note(bad, path=path)
+            wrote = B.read(path) != before
+            check("an untagged bullet is refused: %r" % bad[:34], False,
+                  "it was written" if wrote else "it returned quietly")
+        except B.BoardError as e:
+            check("an untagged bullet is refused: %r" % bad[:34],
+                  B.read(path) == before, str(e)[:90])
+
+    check("an empty note writes nothing and says so",
+          bm.note("", path=path) is False and B.read(path) == before)
+
+    # ...and a TAGGED one lands, with his ordering intact: tag, short
+    # description, then the elaboration.
+    check("a tagged bullet lands",
+          bm.note("COMPLETION: **the tag rule** - every writer emits one now, "
+                  "and this sentence is the background that comes after.",
+                  path=path))
+    doc = B.parse(B.read(path))
+    check("...and it reads tag first, description second",
+          doc["todo"][-1]["text"].startswith("COMPLETION: the tag rule - "),
+          doc["todo"][-1]["text"][:60])
+
+    # ---- the orchestrator writes one line per task IN ONE CALL ----
+    # Its note is several bullets in one string, and on 2026-07-29 the second
+    # line went in without its `- ` and was drawn as part of the bullet above it.
+    # Every line is checked, so that shape is refused rather than landed.
+    before = B.read(path)
+    try:
+        bm.note("INFORMATION: **one** - handed out.\n"
+                "**two** - handed out.", path=path)
+        check("a multi-line note with an untagged second line is refused", False,
+              "it was written")
+    except B.BoardError:
+        check("a multi-line note with an untagged second line is refused",
+              B.read(path) == before)
+    check("...while every line tagged is fine, and lands as separate bullets",
+          bm.note("INFORMATION: **one** - handed to Rosa, nothing landed yet.\n"
+                  "INFORMATION: **two** - handed to Sam, nothing landed yet.",
+                  path=path)
+          and len(B.parse(B.read(path))["todo"]) == 4,
+          [t["text"] for t in B.parse(B.read(path))["todo"]])
+    check("...and an INDENTED continuation line needs no tag of its own",
+          bm.note("PARTIAL: **a wrapped one** - the first line,\n"
+                  "  and the background wrapped onto a second.", path=path))
+
+    # ---- READING an old bullet is untouched ----
+    d = B.parse(FIXTURE)
+    old = d["todo"]
+    check("an untagged bullet written before this still parses and draws",
+          len(old) == 1 and old[0]["text"].startswith("Relaunch reader - live"),
+          [t["text"] for t in old])
+    # ...and the two paths that handle an OLD bullet do not run the new check:
+    # removing one and putting it back are a restore, not a write, and validating
+    # them would make his own untagged lines unremovable and unrestorable.
+    block = d["lines"][old[0]["line"]:old[0]["endLine"] + 1]
+    gone = B.remove_todo(d["lines"], old[0])
+    back = "".join(B.add_todo_block(gone, B.parse("".join(gone)), block))
+    check("...and it can still be removed, and put back verbatim",
+          not [l for l in gone if "Relaunch `reader`" in l]
+          and back.count(block[0]) == 1
+          and sorted(back.splitlines()) == sorted(FIXTURE.splitlines()),
+          block[0].strip())
+
+    # ---- every MECHANICAL writer emits one ----
+    open(path, "w").write(FIXTURE)
+    got = bm.stall("A thing being built", path=path)
+    check("stall's bullet carries a tag",
+          B.parse(B.read(path))["todo"][-1]["text"].startswith("INFORMATION: "),
+          [t["text"][:40] for t in B.parse(B.read(path))["todo"]])
+    check("...and it is the row it says it is", got["what"] == "A thing being built")
+
+    open(path, "w").write(FIXTURE)
+    d = B.parse(B.read(path))
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
+    dead = os.fork()
+    if dead == 0:
+        os._exit(0)
+    os.waitpid(dead, 0)
+    bm.start("1", pid=dead, path=path)
+    bm.reconcile(path=path)
+    check("reconcile's dead-agent bullet carries a tag, and it is FAILED",
+          B.parse(B.read(path))["todo"][-1]["text"].startswith("FAILED: "),
+          [t["text"][:40] for t in B.parse(B.read(path))["todo"]])
+
+    # board-watch is DEPLOYED by home-manager, so it is checked as SOURCE rather
+    # than imported: on `book` the copy that runs is the last one a rebuild put
+    # in the store, and this harness must fail on the source it can see.
+    watch = os.path.join(os.path.dirname(APPS), "home", "srvs",
+                         "board-watch-files", "board-watch.py")
+    src = open(watch).read() if os.path.exists(watch) else ""
+    tmpl = re.findall(r'^\s*"- (.*?)\*\*', src, re.M)
+    check("every board-watch failure template starts with FAILED:",
+          bool(tmpl) and all(t.strip() == "FAILED:" for t in tmpl), tmpl)
+
+    # ---- and every tag in the set has a writer that can emit it ----
+    prompts = src + open(os.path.join(BOARD, "boardwork.py")).read() \
+        + open(os.path.join(BOARD, "boardmove.py")).read()
+    missing = [t for t in B.TODO_TAGS if ("%s:" % t) not in prompts]
+    check("no tag exists that no writer can emit", not missing, missing)
 
 
 # ------------------------------------- 1b2. clearing a chore off the TO DO list
@@ -714,10 +855,11 @@ def test_todo_remove(tmp):
     # ...and an agent can still add one afterwards, into a section with no
     # bullets left to append after.
     d = B.parse(cur)
-    again = "".join(B.add_todo_bullet(d["lines"], d, "- something new\n"))
+    again = "".join(B.add_todo_bullet(d["lines"], d,
+                                      "- INFORMATION: something new\n"))
     check("...and a new chore still lands inside the section",
-          B.parse(again)["todo"][0]["text"] == "something new"
-          and again.index("- something new")
+          B.parse(again)["todo"][0]["text"] == "INFORMATION: something new"
+          and again.index("- INFORMATION: something new")
           > again.index("## WAITING ON YOU TO DO"),
           [t["text"] for t in B.parse(again)["todo"]])
 
@@ -1924,6 +2066,8 @@ def main():
         test_moves(os.path.join(tmp, "mv"))
         os.makedirs(os.path.join(tmp, "ld"))
         test_landed(os.path.join(tmp, "ld"))
+        os.makedirs(os.path.join(tmp, "tg"))
+        test_todo_tags(os.path.join(tmp, "tg"))
         os.makedirs(os.path.join(tmp, "td"))
         test_todo_remove(os.path.join(tmp, "td"))
         test_agents(tmp)

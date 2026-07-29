@@ -29,7 +29,13 @@ parser keys on):
                               board-watch runs on both and only fires for its
                               own host. `set_answer_host()` is its only writer
         *If unanswered:* ...  what happens if he never answers
-    ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions
+    ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions. Each one
+                              starts with a TAG (`QUESTION:`, `INFORMATION:`,
+                              `COMPLETION:`, `PARTIAL:`, `FAILED:`) and then a
+                              short description; background goes after that.
+                              `add_todo_bullet` refuses one that does not —
+                              READING is unaffected, an old untagged bullet
+                              parses and draws exactly as it always did
     ## IN FLIGHT              a | table |: what / where / notes
     ## LANDED                 `### <date>` groups of | commit | what | when |
                               tables, plus prose blocks between them. `when` is
@@ -754,8 +760,79 @@ def add_landed_row(lines, commit, what, date=None, when=""):
     return lines[:b] + [row] + lines[b:]
 
 
+# ------------------------------------------- every WAITING bullet says WHAT IT IS
+# His words: *"messages in the to do section should start with either QUESTION:
+# INFORMATION: COMPLETION: or something like those, maybe others too?, so that
+# the user can easily know what that message is about. any sort of elaboration or
+# background should go after the short description of the message"*.
+#
+# So a bullet is TAG, then a SHORT description, then anything else — and the TAG
+# is checked HERE, at the one function every writer of that section already goes
+# through (`boardmove.note`, `boardmove.stall`, the `why` of `give_back`, and
+# board-watch's four failure templates). One choke point, so a new writer cannot
+# be added that forgets.
+#
+# The set is SHORT and every tag in it has a writer that emits it; there is no
+# tag here nothing can produce. What each one claims:
+TODO_TAGS = (
+    #: it asks him something and nothing moves until he answers. NOT a decision
+    #: — a decision is an item in NEEDS YOU (`boardmove.ask`), with options and
+    #: an `*If unanswered:*` line. This is the small "say the word and X" an
+    #: agent leaves behind on its way out.
+    "QUESTION",
+    #: a fact he may want and nothing is being asked of him. The orchestrator's
+    #: "handed to Rosa, nothing landed yet" and `stall`'s moved row.
+    "INFORMATION",
+    #: the work is finished and on his machine.
+    "COMPLETION",
+    #: part of it landed and part did not — including "it needs a rebuild, which
+    #: an agent may not run". The honest tag for most of what a worker writes.
+    "PARTIAL",
+    #: it was attempted and NOTHING landed. Every mechanical failure path here
+    #: emits this one, and it is the reason the set is not just his three: the
+    #: system must never let a failure read as information.
+    "FAILED",
+)
+
+_TODO_TAG = re.compile(r"^\s*[-*+]\s+(%s):\s+\S" % "|".join(TODO_TAGS))
+
+
+def _tag_refusal(line):
+    return BoardError(
+        "a WAITING ON YOU TO DO bullet starts with one of %s, then a SHORT "
+        "description, then any background - e.g. `- COMPLETION: **the thing** - "
+        "what it does now`. Got: %s"
+        % ("/".join(t + ":" for t in TODO_TAGS), line.strip()[:80]))
+
+
+def check_todo_tag(bullet):
+    """Refuse a WAITING ON YOU TO DO bullet that does not say what it is.
+
+    A REFUSAL and not a silent default, because a wrong tag is worse than the
+    error an agent can read and fix in one retry: `INFORMATION:` in front of a
+    failure would be this system telling him nothing is wrong.
+
+    **Every line is checked, not just the first.** An orchestrator's note is one
+    line per task and it passes them in one string, so the second and later ones
+    are bullets too — and an unindented one that did not begin `- ` landed in the
+    store on 2026-07-29 as a paragraph glued to the bullet above it, drawn as
+    part of somebody else's message. A line that is INDENTED is a wrapped
+    continuation of the bullet above and carries no tag of its own; that is where
+    his "elaboration or background" goes.
+    """
+    for line in bullet.split("\n"):
+        if not line.strip() or line[:1].isspace():
+            continue                      # blank, or a wrapped continuation
+        if not _TODO_TAG.match(line):
+            raise _tag_refusal(line)
+    if not bullet.strip():
+        raise _tag_refusal(bullet)
+    return bullet
+
+
 def add_todo_bullet(lines, doc, bullet):
     """One `- ` bullet into WAITING ON YOU TO DO, after the last one there."""
+    check_todo_tag(bullet)
     if not bullet.endswith("\n"):
         bullet += "\n"
     if doc["todo"]:
