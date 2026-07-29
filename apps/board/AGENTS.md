@@ -41,11 +41,13 @@ Consequences that are rules, not preferences:
 
 ```
 ## NEEDS YOU              decisions, `### <n>. <title>` each
+    <!-- placed: ... -->  WHEN it went on the board. Drawn; see below
     prose                 what the decision is about
     - [ ] option          ALTERNATIVES; wrapped continuations are indented
     > answer              his free text. Always beats the options
     *If unanswered:* ...  what happens if he never answers
-## WAITING ON YOU TO DO   `- <TAG>: ` bullets. Actions, not decisions
+## WAITING ON YOU TO DO   `- <TAG>: ` bullets. Actions, not decisions, each
+                          followed by its own `<!-- placed: ... -->`
 ## IN FLIGHT              a | table |: what / where / notes
 ## LANDED                 `### <date>` groups of | commit | what | when |,
                           plus prose. `when` is the commit's own local time in
@@ -149,6 +151,50 @@ and every one of those paths reads the flat one.
   being empty, and an empty section draws no headings because there are no
   groups.
 
+### Everything under NEEDS YOU says WHEN it was put there
+
+*"mesages in the needs you section should all have the time they were placed on
+the board indicated on them."* Both shapes drawn under that heading carry it — a
+decision and a WAITING bullet — and it is written by the WRITER at the moment
+the item goes up, never guessed at read time.
+
+- **The store carries `<!-- placed: 2026-07-29T15:42 -->`**, a local ISO minute
+  on a line of its own. Same shape and same reasons as `answered-on` above:
+  markdown renders nothing for it, `reader` skips it, `boardparse._PLACED` owns
+  it, and it is never prose. `placed_now()` writes it, `format_placed()` turns
+  it into what is drawn, and the two are deliberately different strings — the
+  store keeps the sortable one, the screen gets the readable one.
+- **Where it sits is per shape.** A decision: the line under its `### <n>.
+  <title>` (`boardmove.ask`). A bullet: the line under the bullet's LAST line,
+  so it falls inside `todo_span()` and removal, the one-level undo and every
+  stale-line re-resolution take it with them. `boardmove.note()` writes one call
+  per message and the orchestrator routinely puts several bullets in one, so
+  **each bullet gets its own** — one stamp at the end would date the last of
+  them and leave the rest looking older than the file.
+- **It is OPTIONAL in both directions**, exactly like LANDED's `when`, and for
+  the same reason: this file syncs between `top` and `book` and either may be
+  running the older app. An item without one draws **no time at all** — not an
+  empty box, not an invented one — and an older parser carries the line through
+  untouched as it does anything else it has no case for. The store was full of
+  items written before this existed; `boardmove.backfill_placed()` is the
+  one-off that dated them from `docs/`'s own git history (blame on the item's
+  first line) and skips anything already stamped, so a second run is a no-op.
+- **It is DRAWN at the trailing edge in `Theme.dim`**, in a column 15 characters
+  wide (`jul 29 11:04 pm`, the longest it gets) — §9.1's metadata cluster, the
+  same treatment a LANDED row's `when` gets. The question text **reserves that
+  column whether or not the item has a stamp** (§5.4), so an item written before
+  this existed wraps exactly where a new one does and nothing shifts under him
+  as the list fills.
+- **It carries the DATE as well, and that is the difference from LANDED.** A
+  landed row sits under a `### <date>` heading that already says which day; an
+  item in NEEDS YOU can sit there a week with nothing around it to date it, and
+  a bare `3:42 pm` on a five-day-old question reads as this afternoon.
+- **It is an ABSOLUTE time and it must stay one.** No "3 days ago", no age, no
+  badge — that is the no-pressure requirement below, and a relative string is
+  exactly the clock it forbids. This is a fact about the past, like the hash
+  beside a LANDED row. `tools/board-test.py` asserts that `format_placed` cannot
+  see the clock at all.
+
 ## The no-pressure requirement is a design constraint
 
 He asked for this because the terminal chat log made him feel he had to answer
@@ -156,7 +202,10 @@ in the moment: *"i feel pressured to act quickly when really i dont need to"*.
 So, as binding as the parse:
 
 - **No counts, no badges, no ages, no deadlines, no sort-by-urgency.** A tally
-  of open questions is a debt; there is not one anywhere in this app.
+  of open questions is a debt; there is not one anywhere in this app. The
+  `placed` time above is not an exception to this and must not be turned into
+  one: an absolute time is a fact about the past, an elapsed one is a clock
+  running against him.
 - **Nothing is drawn in the `warn`/`crit` ramp.** Those colours mean a machine
   fault on this desktop (§8.1, §9.3); a question is not one.
 - **Every decision draws its own `if unanswered` line, always** — never behind a

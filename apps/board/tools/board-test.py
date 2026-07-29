@@ -395,10 +395,15 @@ def test_moves(tmp):
     src = B.read(path)
     bm.note("PARTIAL: **Relaunch `thing`** - live source.", path=path)
     doc5 = B.parse(B.read(path))
+    # TWO lines, not one: the bullet and the `<!-- placed: -->` stamp under it
+    # that says when it went on the board.
     check("a note lands as one bullet in WAITING ON YOU TO DO",
           len(doc5["todo"]) == 2
-          and len(B.read(path).splitlines()) == len(src.splitlines()) + 1,
+          and len(B.read(path).splitlines()) == len(src.splitlines()) + 2,
           [t["text"] for t in doc5["todo"]])
+    check("...and that bullet knows when it was placed",
+          B.parse(B.read(path))["todo"][-1]["placed"] != "",
+          [(t["text"][:24], t["placed"]) for t in doc5["todo"]])
 
     # ---- NOTHING STAYS STRANDED: a dead owner is reclaimed ----
     src = reset()
@@ -419,9 +424,13 @@ def test_moves(tmp):
     check("an item whose agent DIED is returned to NEEDS YOU",
           len(moved) == 1 and moved[0]["num"] == "1", moved)
     back = B.read(path)
+    # Verbatim, checked by taking the bullet back OUT: it costs two lines now
+    # (itself and its `placed` stamp), and `remove_todo` spans both — so if the
+    # file with that one bullet removed is the file before it was written, the
+    # reclaim touched nothing else.
+    backdoc = B.parse(back)
     check("...verbatim, with only a bullet added to say so",
-          back.replace(back.splitlines(True)[-1], "") == src
-          or len(back.splitlines()) == len(src.splitlines()) + 1,
+          "".join(B.remove_todo(backdoc["lines"], backdoc["todo"][-1])) == src,
           len(back.splitlines()) - len(src.splitlines()))
     check("...and the bullet says what happened",
           any("is gone" in t["text"] for t in B.parse(back)["todo"]),
@@ -448,7 +457,9 @@ def test_moves(tmp):
           and "with a note" in doc6["todo"][-1]["text"],
           [t["text"] for t in doc6["todo"]])
     check("...one row out, one bullet in, and nothing else touched",
-          len(B.read(path).splitlines()) == len(src.splitlines()),
+          # net +1: one table row leaves, and the bullet that replaces it costs
+          # two lines — itself and the `placed` stamp under it.
+          len(B.read(path).splitlines()) == len(src.splitlines()) + 1,
           lines_differing(src, B.read(path)))
     check("...and it says which row it moved", got["what"] == "A thing being built")
 
@@ -597,6 +608,135 @@ def test_landed(tmp):
     check("...but a selector that matches nothing and no --what is refused",
           p.returncode == 1 and "no line to record" in p.stderr,
           p.stderr.strip()[:160])
+
+
+# ------------------- 1b1b. everything in NEEDS YOU says WHEN it was put there
+def test_placed(tmp):
+    """*"mesages in the needs you section should all have the time they were
+    placed on the board indicated on them."*
+
+    Both shapes drawn under that heading carry it — a decision and a WAITING
+    bullet — and the four claims that keep it honest are:
+
+      * the stamp is written by the WRITER, at the moment the item goes up, so
+        it is a fact and not a guess at read time;
+      * it is OPTIONAL, in both directions. The store is full of items that
+        predate it and `board.md` syncs between two machines that may be running
+        different copies of this app, so a missing one draws NO time — never an
+        empty box and never an invented one;
+      * it is inside the span the bullet is removed and restored by, so clearing
+        a chore does not leave its stamp behind as an orphan comment;
+      * it is ABSOLUTE. No age, no "3 days ago" — the no-pressure requirement
+        (`AGENTS.md`) forbids a clock running against him.
+    """
+    import boardparse as B
+    import boardmove as bm
+
+    check("an unreadable or absent stamp is no time at all, never a wrong one",
+          (B.format_placed(""), B.format_placed("   "), B.format_placed("soon"),
+           B.format_placed("2026-13-99T99:99")) == ("", "", "", ""))
+    check("...and a readable one is the clock LANDED already uses: 12-hour, lower",
+          (B.format_placed("2026-07-29T15:42"), B.format_placed("2026-07-04T09:05"),
+           B.format_placed("2026-07-04")) == ("jul 29 3:42 pm", "jul 4 9:05 am",
+                                              "jul 4"),
+          B.format_placed("2026-07-29T15:42"))
+    # The DATE is what makes it different from a LANDED row's `when`: that one
+    # sits under a `### <date>` heading and this one can sit for a week with
+    # nothing around it to say which day. And it fits the width the QML reserves.
+    check("...and it never outgrows the column the QML reserves for it",
+          max(len(B.format_placed("2026-%02d-%02dT23:04" % (m, 28)))
+              for m in range(1, 13)) <= 15,
+          sorted({B.format_placed("2026-%02d-28T23:04" % m) for m in range(1, 13)}))
+
+    path = os.path.join(tmp, "board.md")
+    B.write(path, FIXTURE)
+    doc = B.parse(B.read(path))
+    check("an item written before any of this draws no time, and parses fine",
+          [d["placed"] for d in doc["needs"]] == ["", ""]
+          and [t["placed"] for t in doc["todo"]] == [""],
+          [d["placed"] for d in doc["needs"]])
+
+    # ---- a decision: the stamp goes under its own `###` line ----
+    src = B.read(path)
+    key = bm.ask("How far should the fade reach?", options=["apps only", "both"],
+                 if_unanswered="the apps get it", path=path)
+    after = B.read(path)
+    doc = B.parse(after)
+    new = [d for d in doc["needs"] if d["key"] == key][0]
+    check("a question an agent asks says when it was asked",
+          new["placed"] != "" and new["placedLine"] == new["titleLine"] + 1,
+          (new["placedRaw"], new["placed"]))
+    check("...as an HTML comment, so the file still reads cleanly for him",
+          after.splitlines()[new["placedLine"]].startswith("<!-- placed:"),
+          after.splitlines()[new["placedLine"]])
+    check("...and it is not prose: nothing of it reaches what gets drawn",
+          "placed" not in new["title"]
+          and all("placed" not in b["text"] for b in new["body"]),
+          new["title"])
+    check("...and the file still round-trips byte for byte", "".join(doc["lines"]) == after)
+
+    # It travels with the item. A relocation cuts the decision's RAW lines, so
+    # the stamp goes into IN FLIGHT's stash with them and comes back with them.
+    d = B.parse(B.read(path))
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "the first way")))
+    src = B.read(path)
+    bm.start("1", path=path)
+    bm.give_back("1", path=path)
+    check("a stamp survives IN FLIGHT and back, like every other line of the item",
+          B.read(path) == src,
+          [ln for ln in B.read(path).splitlines() if ln not in src.splitlines()][:4])
+
+    # ---- a bullet: the stamp goes under its LAST line ----
+    B.write(path, FIXTURE)
+    bm.note("INFORMATION: one\nCOMPLETION: two", path=path)
+    doc = B.parse(B.read(path))
+    check("EVERY bullet of a multi-bullet note is stamped, not just the last",
+          [t["placed"] != "" for t in doc["todo"]] == [False, True, True],
+          [(t["text"][:14], t["placed"]) for t in doc["todo"]])
+    check("...and the stamp is not drawn as part of the message",
+          all("placed" not in t["text"] for t in doc["todo"]),
+          [t["text"][-30:] for t in doc["todo"]])
+    check("...and the bullet's span covers it, so removal takes both",
+          all(t["endLine"] == t["line"] + 1 for t in doc["todo"][1:]),
+          [(t["line"], t["endLine"]) for t in doc["todo"]])
+    stamped = doc["todo"][1]
+    block = doc["lines"][stamped["line"]:stamped["endLine"] + 1]
+    gone = B.remove_todo(doc["lines"], stamped)
+    check("...leaving no orphan comment behind",
+          "".join(gone).count("<!-- placed:")
+          == "".join(doc["lines"]).count("<!-- placed:") - 1
+          and len(B.parse("".join(gone))["todo"]) == 2,
+          [(t["text"][:14], t["placed"]) for t in B.parse("".join(gone))["todo"]])
+    back = B.parse("".join(gone))
+    check("...and the undo puts the bullet AND its time back",
+          [t["placed"] != "" for t in
+           B.parse("".join(B.add_todo_block(back["lines"], back, block)))["todo"]]
+          == [False, True, True],
+          [t["placed"] for t in
+           B.parse("".join(B.add_todo_block(back["lines"], back, block)))["todo"]])
+
+    # A bullet that wraps: the new one must land AFTER the continuation line and
+    # after the stamp, not inside either. This is what `endLine` buys.
+    B.write(path, FIXTURE.replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- **Relaunch `reader`** - live source,\n  no hot reload."))
+    bm.note("QUESTION: after the wrap, please", path=path)
+    doc = B.parse(B.read(path))
+    check("a new bullet lands after a wrapped one, never inside it",
+          [t["text"] for t in doc["todo"]]
+          == ["Relaunch reader - live source, no hot reload.",
+              "QUESTION: after the wrap, please"],
+          [t["text"] for t in doc["todo"]])
+
+    # ---- nothing here is a clock running against him ----
+    # The same stamp, read a day apart, must draw the same words: an item that
+    # aged overnight is not allowed to say so (`AGENTS.md`, the no-pressure
+    # requirement). That is what makes this an absolute time and not an age.
+    import inspect
+    body = inspect.getsource(B.format_placed).split('"""')[-1]
+    check("what draws the time cannot see the clock, so it cannot become an age",
+          "now(" not in body and "today(" not in body and "time.time" not in body,
+          [ln.strip() for ln in body.splitlines() if "now" in ln][:3])
 
 
 # ------------------------- 1b1a. every WAITING bullet says WHAT IT IS, in a word
@@ -2474,6 +2614,64 @@ def test_window(app, tmp):
     shot(win3, "05-missing-store")
 
 
+def test_placed_window(app, tmp):
+    """The time reaches the screen, on both shapes, and costs the message nothing.
+
+    Two claims the store-level test cannot make: that it is DRAWN at all, and
+    that the question text is laid out identically whether or not the item has a
+    stamp — an item written before this existed must not wrap differently from
+    one written after it (§5.4: reserve the space, drop the label).
+    """
+    import boardparse as B
+    import boardmove as bm
+
+    path = os.path.join(tmp, "board.md")
+    B.write(path, FIXTURE)
+    engine0, win0, keep0 = build(app, path)
+    spin(300)
+    def title_width(root):
+        """(the card's own width, the width its TITLE text was given).
+
+        By title, not by index: `descendants()` walks a stack and hands the
+        cards back in no particular order.
+        """
+        for it in descendants(root):
+            if it.property("decision") is None:
+                continue
+            for t in descendants(it):
+                if "1. First question?" == str(t.property("text")):
+                    return it.property("width"), t.property("width")
+        return 0, 0
+
+    bare, titles0 = title_width(win0.contentItem())
+
+    bm.note("INFORMATION: a stamped chore", path=path)
+    bm.ask("A stamped question?", if_unanswered="nothing happens", path=path)
+    doc = B.parse(B.read(path))
+    stamp = [d["placed"] for d in doc["needs"] if d["placed"]][0]
+
+    engine, win, keep = build(app, path)
+    spin(400)
+    texts = [str(it.property("text")) for it in descendants(win.contentItem())
+             if it.property("text") is not None]
+    check("a decision draws the time it was placed on the board",
+          texts.count(stamp) >= 1, [t for t in texts if ":" in t and " " in t][:6])
+    check("...and so does a `to do` bullet, in the same words",
+          texts.count(stamp) >= 2, texts.count(stamp))
+    # Exactly the two that HAVE a stamp: the fixture's own two decisions and its
+    # chore predate it, and they draw no time rather than a made-up one.
+    check("...and only the items that have one - the older ones draw nothing",
+          texts.count(stamp) == 2, [t for t in texts if t == stamp])
+
+    # The reservation is unconditional, so nothing reflows as the board fills.
+    cardW, titles = title_width(win.contentItem())
+    check("...and the question text is the same width stamped or not",
+          titles0 > 0 and titles0 == titles, (titles0, titles))
+    check("...having given up the column whether it uses it or not",
+          titles > 0 and titles < bare - 100, (titles, bare))
+    shot(win, "06-placed")
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -2492,6 +2690,8 @@ def main():
         test_landed(os.path.join(tmp, "ld"))
         os.makedirs(os.path.join(tmp, "tg"))
         test_todo_tags(os.path.join(tmp, "tg"))
+        os.makedirs(os.path.join(tmp, "pl"))
+        test_placed(os.path.join(tmp, "pl"))
         os.makedirs(os.path.join(tmp, "td"))
         test_todo_remove(os.path.join(tmp, "td"))
         test_agents(tmp)
@@ -2502,6 +2702,8 @@ def main():
         test_real_store()
         test_real_window(app)
         test_window(app, os.path.join(tmp, "win"))
+        os.makedirs(os.path.join(tmp, "plw"))
+        test_placed_window(app, os.path.join(tmp, "plw"))
     print()
     if FAILS:
         print("%d FAILED: %s" % (len(FAILS), ", ".join(FAILS)))

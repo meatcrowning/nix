@@ -81,11 +81,39 @@ Item {
         x: 10
         width: parent.width - x
 
-        Para {
+        // The title, and WHEN this went on the board — his: *"mesages in the
+        // needs you section should all have the time they were placed on the
+        // board indicated on them."*
+        //
+        // The time sits at the TRAILING EDGE in `dim` (§9.1: metadata clusters
+        // there, a rung quieter than the line it belongs to), exactly as a
+        // LANDED row's `when` does, so the question stays the thing the eye
+        // lands on. Its width is a CHARACTER COUNT, not `implicitWidth`, and
+        // the title RESERVES it whatever the item's age (§5.4) — so an item
+        // that has no stamp and an item that gains one wrap identically and the
+        // question text never moves under him.
+        //
+        // It is an absolute time and must stay one: no age, no "3 days ago",
+        // no badge. `boardparse.format_placed` is the only formatter.
+        Item {
             width: col.width
-            color: card.fgAccent
-            text: (card.decision && card.decision.num ? card.decision.num + ". " : "")
-                  + (card.decision ? card.decision.title : "")
+            implicitHeight: title.implicitHeight
+            height: implicitHeight
+
+            Para {
+                id: title
+                width: parent.width - (15 * card.cellW + 8)
+                color: card.fgAccent
+                text: (card.decision && card.decision.num ? card.decision.num + ". " : "")
+                      + (card.decision ? card.decision.title : "")
+            }
+            PixelText {
+                anchors.right: parent.right
+                width: 15 * card.cellW      // `jul 29 11:04 pm`, the longest it gets
+                horizontalAlignment: Text.AlignRight
+                color: Theme.dim
+                text: card.decision && card.decision.placed ? card.decision.placed : ""
+            }
         }
 
         Item { width: 1; height: 4 }

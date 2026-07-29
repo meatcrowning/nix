@@ -90,10 +90,79 @@ _IF_UNANS = re.compile(r"^\*If unanswered:\*\s*(.*)$", re.I)
 #: `set_answer_host()` below, and is carried through a relocation with the rest
 #: of the item's raw lines like everything else.
 _ANSWERED_ON = re.compile(r"^\s*<!--\s*answered-on:\s*([A-Za-z0-9._-]+)\s*-->\s*$")
+#: WHEN an item was put on the board — his: *"mesages in the needs you section
+#: should all have the time they were placed on the board indicated on them."*
+#:
+#: The same shape as `answered-on` above and for the same reasons: an HTML
+#: comment on a line of its own, invisible in markdown and in `reader`, owned by
+#: this parser and never prose. It is a local ISO timestamp to the minute
+#: (`2026-07-29T15:42`), which is the writer's business; what gets DRAWN is
+#: `format_placed()` below, and the two are deliberately not the same string —
+#: the store keeps the sortable one, the screen gets the readable one.
+#:
+#: It is OPTIONAL in both directions, exactly like LANDED's `when`: this file
+#: syncs between `top` and `book` and either may be running the older app, so an
+#: item without one draws no time at all rather than an empty or invented one,
+#: and an older parser carries the line through untouched as it does anything
+#: else it has no case for.
+#:
+#: WHERE it sits is per shape. A decision: on the line right under its
+#: `### <n>. <title>`. A WAITING bullet: on the line right under the bullet's
+#: last line, so it is inside the span `todo_span()` removes and restores.
+_PLACED = re.compile(r"^\s*<!--\s*placed:\s*([0-9T:+.\-]+)\s*-->\s*$")
 _TABLE_SEP = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 _HR = re.compile(r"^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$")
 
 SECTIONS = ("needs", "todo", "flight", "landed")
+
+
+def placed_now(when=None):
+    """The `<!-- placed: ... -->` line for an item being written right now.
+
+    Local time, to the minute. Seconds would be noise on a board whose whole
+    point is that nothing here is urgent, and the zone is left off because both
+    machines are in his one zone and a `Z` would make it a fact about UTC that
+    he then has to convert in his head.
+    """
+    when = when or datetime.datetime.now()
+    return "<!-- placed: %s -->\n" % when.strftime("%Y-%m-%dT%H:%M")
+
+
+def format_placed(raw):
+    """`2026-07-29T15:42` -> `jul 29 3:42 pm`. `""` for anything unreadable.
+
+    12-hour and lowercase, the same clock LANDED's `when` is written in
+    (`boardmove.commit_time`) — one way of saying a time on this board.
+
+    It carries the DATE as well, and that is the difference from LANDED: a
+    landed row sits under a `### <date>` heading that already says which day,
+    whereas an item in NEEDS YOU can sit there for a week with nothing around it
+    to date it, and a bare `3:42 pm` on a five-day-old question would read as
+    this afternoon.
+
+    **It is an absolute time and it must stay one.** No "3 days ago", no age, no
+    badge: the no-pressure requirement (`AGENTS.md`) forbids a clock running
+    against him, and a relative string is exactly that. This is a fact about the
+    past, like the commit hash beside a LANDED row.
+
+    Unreadable is a normal answer, not a failure — the store is full of items
+    written before this existed, and they draw no time rather than a wrong one.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+        # `%-d`/`%-I` are GNU extensions; strip the zeros where it is certain.
+        day = dt.strftime("%d").lstrip("0")
+        if fmt == "%Y-%m-%d":
+            return "%s %s" % (dt.strftime("%b").lower(), day)
+        clock = dt.strftime("%I:%M %p").lstrip("0").lower()
+        return "%s %s %s" % (dt.strftime("%b").lower(), day, clock)
+    return ""
 
 
 def _section_of(title):
@@ -213,7 +282,8 @@ def parse(src):
                         "titleLine": i, "body": [], "options": [],
                         "answerFrom": -1, "answerTo": -1, "answer": "",
                         "answerRaw": [], "ifUnanswered": "", "ifRaw": "",
-                        "answerHost": "", "hostLine": -1}
+                        "answerHost": "", "hostLine": -1,
+                        "placedRaw": "", "placed": "", "placedLine": -1}
             elif sec == "landed":
                 close_item()
                 date = {"date": text(m3.group(1)), "rows": [], "prose": [],
@@ -290,6 +360,26 @@ def parse(src):
             item["hostLine"] = i
             continue
 
+        # ---- when it was put on the board ----
+        # Checked for BOTH shapes, before the prose branch below would swallow
+        # it as a wrapped continuation of the bullet it belongs to. A decision
+        # takes it onto the item; a WAITING bullet takes it onto the bullet AND
+        # extends that bullet's `endLine` over it, so removing the bullet
+        # removes its stamp and the one-level undo puts both back (`todo_span`).
+        # Anywhere else it is an unrecognised line: carried through, not drawn.
+        mp = _PLACED.match(ln)
+        if mp:
+            if sec == "needs" and item is not None:
+                close_prose()
+                item["placedRaw"] = mp.group(1)
+                item["placedLine"] = i
+                continue
+            if sec == "todo" and prose is not None and prose["kind"] == "bullet":
+                prose["placedRaw"] = mp.group(1)
+                prose["endLine"] = i
+                close_prose()
+                continue
+
         # ---- what happens if he never answers: the whole point of the file ----
         mi = _IF_UNANS.match(ln) if sec == "needs" and item is not None else None
         if mi:
@@ -322,8 +412,11 @@ def parse(src):
     for it in out["needs"]:
         it["answer"] = "\n".join(it["answerRaw"]).strip()
         it["answered"] = bool(it["answer"]) or any(o["checked"] for o in it["options"])
+        it["placed"] = format_placed(it["placedRaw"])
     for t in out["todo"]:
         t["tag"] = tag_of(t["text"])
+        t["placedRaw"] = t.get("placedRaw", "")
+        t["placed"] = format_placed(t["placedRaw"])
     out["todoGroups"] = todo_groups(out["todo"])
     return out
 
@@ -893,24 +986,44 @@ def check_todo_tag(bullet):
     return bullet
 
 
-def add_todo_bullet(lines, doc, bullet):
-    """One `- ` bullet into WAITING ON YOU TO DO, after the last one there."""
+def add_todo_bullet(lines, doc, bullet, when=None):
+    """One `- ` bullet into WAITING ON YOU TO DO, after the last one there.
+
+    Each top-level bullet in `bullet` gets its own `<!-- placed: -->` line
+    under it (`placed_now`), because `boardmove.note()` writes one call per
+    MESSAGE and the orchestrator routinely puts several bullets in one — a
+    single stamp at the end of the block would time-stamp the last of them and
+    leave the rest looking older than the file itself. An indented line is a
+    wrapped continuation and keeps its place above the stamp.
+    """
     check_todo_tag(bullet)
     if not bullet.endswith("\n"):
         bullet += "\n"
+    stamp = placed_now(when)
+    block = []
+    for ln in bullet.splitlines(keepends=True):
+        if block and _BULLET.match(ln.rstrip("\n")) and not ln[:1].isspace():
+            block.append(stamp)
+        block.append(ln)
+    block.append(stamp)
     if doc["todo"]:
-        at = max(t["line"] for t in doc["todo"]) + 1
-        return lines[:at] + [bullet] + lines[at:]
+        # `endLine`, not `line`: a bullet routinely wraps onto indented
+        # continuation lines, and anchoring on the first line of the last one
+        # inserted the new bullet INTO the middle of it. Its own stamp made that
+        # certain rather than merely likely — `add_todo_block`, the undo half,
+        # has always used `endLine`.
+        at = max(t.get("endLine", t["line"]) for t in doc["todo"]) + 1
+        return lines[:at] + block + lines[at:]
     s, e = section_bounds(lines, "todo")
     if s < 0:
         # No section: put it at the end of the file rather than inventing a
         # heading. He still sees it; the store's shape is still his.
         return lines + ([] if not lines or lines[-1].endswith("\n") else ["\n"]) \
-            + ["\n", bullet]
+            + ["\n"] + block
     at = s + 1
     while at < e and not lines[at].strip():
         at += 1
-    return lines[:at] + [bullet] + lines[at:]
+    return lines[:at] + block + lines[at:]
 
 
 # ------------------------------------------------------- one edit, done safely
