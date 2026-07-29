@@ -1499,6 +1499,24 @@ def _tsc(tmp, uuid_, calls):
     return p
 
 
+def _tsc_usage(tmp, uuid_, model, usage):
+    """One assistant entry carrying only a `usage` stamp, which is where the
+    context tally is measured from. Same file the tool calls go in."""
+    d = os.path.join(tmp, "transcripts", "-proj")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, uuid_ + ".jsonl")
+    # The half-written line the live-append test leaves behind is real - the
+    # platform finishes it. Start a new line rather than gluing onto it.
+    lead = "\n" if os.path.exists(p) and open(p, "rb").read()[-1:] not in (b"\n", b"") \
+        else ""
+    with open(p, "a") as f:
+        f.write(lead
+                + json.dumps({"type": "assistant", "timestamp": "2026-07-29T00:00:00Z",
+                              "message": {"model": model, "usage": usage,
+                                          "content": []}}) + "\n")
+    return p
+
+
 def test_phase(tmp):
     """The observed half, which is the half that cannot be faked.
 
@@ -1621,6 +1639,40 @@ def test_phase(tmp):
     check("nothing seen yet is stated as itself",
           bph.doing_line({"observed": "none"}, "Marbas") == "nothing yet",
           bph.doing_line({"observed": "none"}, "Marbas"))
+
+    # ---- HOW FULL IT IS: measured out of the transcript, or ABSENT ----
+    # *"on the very right of the top row of the agent's information box it
+    # should keep a running tally of how much context that agent has vs how much
+    # it can handle"*. The claims: nothing is estimated, the cached context is
+    # counted (it is the bulk of it), the window comes from the model id rather
+    # than from an assumption, and anything unmeasured draws NOTHING - never a
+    # zero, which would be a claim that the agent is empty.
+    check("an agent whose transcript never stated a usage shows no tally",
+          bph.context_line(bph.observe("ph-a")) == "",
+          bph.context_line(bph.observe("ph-a")))
+    check("...and half a measurement is no measurement",
+          (bph.context_line({"ctxUsed": 5000}), bph.context_line({"ctxWindow": 200000}),
+           bph.context_line({"ctxUsed": 0, "ctxWindow": 0}),
+           bph.context_line({}), bph.context_line(None)) == ("", "", "", "", ""))
+    _tsc_usage(tmp, u, "claude-opus-5", {"input_tokens": 1200,
+                                         "cache_read_input_tokens": 58000,
+                                         "cache_creation_input_tokens": 2600})
+    r = bph.observe("ph-a")
+    check("a tally counts the CACHED context too, or it is an order of magnitude out",
+          bph.context_line(r) == "62k/200k",
+          (r.get("ctxUsed"), bph.context_line(r)))
+    check("...and it survives a poll that reads nothing new, rather than blinking off",
+          bph.context_line(bph.observe("ph-a")) == "62k/200k",
+          bph.context_line(bph.observe("ph-a")))
+    _tsc_usage(tmp, u, "claude-opus-5[1m]", {"input_tokens": 300000})
+    r = bph.observe("ph-a")
+    check("...and the WINDOW is read from the model id, never assumed",
+          bph.context_line(r) == "300k/1m", bph.context_line(r))
+    check("a small count is not dressed up as thousands",
+          (bph._k(812), bph._k(1500), bph._k(1_200_000)) == ("812", "2k", "1.2m"),
+          (bph._k(812), bph._k(1500), bph._k(1_200_000)))
+    check("...and the tally carries no time, no age and no percentage",
+          not re.search(r"%|ago|\bs\b", bph.context_line(r)), bph.context_line(r))
 
 
 # ------------------------------------------ 1e. the fan-out: the cap and asking
@@ -2561,6 +2613,47 @@ def test_window(app, tmp):
           bool(muteLines) and {s: t.property("color") for _, s, t in muteLines}
           .get("Fold VScroll into qmlcommon") == keep[-1].property("textDim"),
           [(s, t.property("color").name()) for _, s, t in muteLines])
+
+    # ---- HOW FULL IT IS, at the right end of the TOP row ----
+    # *"on the very right of the top row of the agent's information box it
+    # should keep a running tally of how much context that agent has vs how much
+    # it can handle"*. On screen: it is on the card's OWN top line, its right
+    # edge is the card's right edge, and a card with nothing measured draws none
+    # rather than a zero.
+    check("a card with nothing measured carries no tally at all",
+          all(r.get("contextLine", "") == "" for r in cards),
+          [(r.get("title"), r.get("contextLine")) for r in cards])
+    _tsc_usage(tmp, u, "claude-opus-5", {"input_tokens": 2000,
+                                         "cache_read_input_tokens": 60000})
+    agents.refresh()
+    spin(300)
+    tallied = {r["title"]: r.get("contextLine", "")
+               for r in prop(win, "agentCards")}
+    check("...and one whose transcript states its usage carries it, measured",
+          tallied.get("Wire FOCUS through vtbclient") == "62k/200k", tallied)
+    codeItem = None
+    for it in descendants(win.contentItem()):
+        if it.property("contextLine") is None or it.property("nameNeeded") is None:
+            continue
+        a = prop(it, "agent")
+        if isinstance(a, dict) and a.get("title") == "Wire FOCUS through vtbclient":
+            codeItem = it
+    drawn = _texts(codeItem) if codeItem is not None else []
+    tallyDrawn = [(y, s, t) for y, s, t in drawn if s == "62k/200k"]
+    check("...drawn on the card's TOP line, not on a line of its own",
+          len(tallyDrawn) == 1 and tallyDrawn[0][0] == drawn[0][0],
+          [(y, s) for y, s, _ in drawn])
+    claimDrawn = [t for _, s, t in drawn if s.startswith(card.get("name", "\0"))]
+    check("...at the RIGHT end of it, and not over the text it shares the row with",
+          bool(tallyDrawn) and bool(claimDrawn)
+          and tallyDrawn[0][2].x() >= claimDrawn[0].x() + claimDrawn[0].width()
+          and abs((tallyDrawn[0][2].x() + tallyDrawn[0][2].width())
+                  - codeItem.width()) < 16,
+          [(s, t.x(), t.width()) for _, s, t in drawn[:2]] + [codeItem.width()])
+    check("...in the quiet tone: it is standing metadata, not an alert",
+          bool(tallyDrawn)
+          and tallyDrawn[0][2].property("color") == keep[-1].property("dim"),
+          tallyDrawn and tallyDrawn[0][2].property("color").name())
 
     # ...with the store's own sections folded away, so the shot is of THIS
     # section rather than of whatever happens to be above it.
