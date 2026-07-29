@@ -131,6 +131,7 @@ nothing counting. A fact about the past is not a clock running at him.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -265,16 +266,42 @@ is APPLIED, not when it is pushed. **Read `AGENTS.md` -> "When it is okay to \
 rebuild or hot-reload" before you run one** and stay inside it — preflight \
 first, nothing staged across it, cheap reloads freely, the `hyprvtb` live \
 hot-swap only on `top` (never `hyprctl plugin load`/`unload`, on either \
-machine), and the Ask-first list still his. `apps/` is live source and needs \
+machine), and the Ask-first list still his. **Serialize the switch itself**: \
+other agents rebuild too, and two at once must not race — \
+`mkdir -p /tmp/claude-1000/-home-lam-nix && flock \
+/tmp/claude-1000/-home-lam-nix/rebuild.lock <the rebuild command>`, the same \
+lock every other agent in this checkout uses. **Getting an edit LIVE has a \
+per-area ritual**: a seed-once file (`Theme.qml`, `hyprland.lua`) is edited in \
+BOTH copies — nix source AND the live file — with `./tools/seed-drift.sh` run \
+before and after (editing one side is the single most common way a change here \
+appears to do nothing); panel QML goes live by rebuilding, then appending a \
+comment line to `~/.config/quickshell/Theme.qml` and restoring the file; \
+`hyprland.lua` needs `hyprctl reload`; hyprvtb C++ needs its `main.cpp` version \
+bump, then rebuild + `hyprctl reload`. Never run bare `qs` — it launches a \
+second panel — and never script hyprvtb Lua actions (`rollup`, \
+`minimize_active`, ...) to probe behaviour: `hl.dsp.focuswindow` is nil, so \
+they land on HIS active window. `apps/` is live source and needs \
 none of this — a `.py`/`.qml` change there is picked up when he next relaunches. \
 Whatever you do or deliberately do not, **say so in your note**; if you leave a \
 rebuild pending, say why.
-2. **Never open a window on his screen and never drive his running apps.** \
+2. **Never open a window on his screen and never drive his running apps** — no \
+screenshots, no GUI, no MPRIS, no launching a packaged app "just to check". \
 Offscreen harnesses (`QT_QPA_PLATFORM=offscreen`) and `tools/sandbox.sh` only; \
-he does every visual check himself.
+he does every visual check himself. Your EVIDENCE is IPC, logs and traces, so \
+verify with them rather than implying it works: `qs log | tail` (CUMULATIVE — \
+snapshot the line count before your change), `qs ipc call view geom` / `state \
+carried` / `wallpaper status`, `hyprctl clients|layers|plugin \
+list|configerrors`, `./tools/seed-drift.sh`. And a `home/` change is for BOTH \
+machines: say in your note what the other host must run (`sudo rebuild-top` on \
+top / `home-manager switch --flake ~/nix#air` on book) and look at the branch \
+you are not on — an x86-only package left ungated, or a path that exists on \
+only one host, fails SILENTLY on the other.
 3. **The git index here is SHARED** with him and with the other agents running \
-right now. `git commit -m "msg" -- <explicit> <paths>`, always. `git add -N` \
-for new files. Never a bare `git commit`, never `-a`, never a destructive or \
+right now. `git commit -m "msg" -- <explicit> <paths>`, always. `git add -N` a \
+NEW file the moment you create it, before any rebuild — flake eval reads the \
+working tree but does NOT see an untracked file, so the rebuild "succeeds" and \
+the panel then throws `ReferenceError` at runtime. \
+Never a bare `git commit`, never `-a`, never a destructive or \
 reverting git command (`reset --hard`, `checkout --`, `restore`, `stash`, \
 `clean`). **A pathspec is not enough when somebody else holds the same file**: \
 `git commit -- x.py` takes the WORKING TREE copy of it, their half-finished \
@@ -282,7 +309,9 @@ edits and debug probes included. `git diff` what you are about to commit and \
 confirm every hunk is yours; if it is not, narrow the pathspec or leave that \
 file alone. And commit against HEAD as it is NOW, never a copy of the tree you \
 read an hour ago — a stale pathspec silently reverts whatever landed while you \
-worked, and has.
+worked, and has. **Strip your own instrumentation** — `console.warn` probes, \
+temporary properties, debug files — before committing, and end every commit \
+message with your `Co-Authored-By: Claude ... <noreply@anthropic.com>` trailer.
 4. **Push to `main`** when it works. No branch, no PR — and **`git pull \
 --rebase` immediately before you push.** This system now runs on BOTH of his \
 machines, so another agent on the other host may have pushed since you started; \
@@ -292,7 +321,8 @@ own repo inside this checkout) are SEPARATE repos: pull and push each from its \
 own directory.
 5. Read `AGENTS.md` at the repo root, then the nested one closest to what you \
 are editing, then `docs/DESIGN.md` if you put pixels on a screen. They outrank \
-your instincts about this codebase.
+your instincts about this codebase — and when your change makes one of them \
+wrong, UPDATE it in the same pass.
 6. **Find things out cheaply: read before you measure, and read in SLICES.** \
 `docs/HARDWARE.md` is the \
 one reference for what these two machines physically are — cores, RAM, both \
@@ -531,7 +561,9 @@ it is one command.
 
 ONE MESSAGE IS OFTEN SEVERAL JOBS. Before you plan anything, read the input for \
 how many DISTINCT asks it holds — unrelated requests, two features, a bug plus \
-a feature, a knob plus a task — and treat each as its own item.
+a feature, a knob plus a task — and treat each as its own item. Expect typos: \
+infer the intent and dispatch on it, never bounce his sentence back for \
+spelling.
 
   * **One worker per independent item**, all dispatched so they run at once. A \
 worker handed two unrelated jobs half-finishes both and leaves one commit that \
@@ -1005,8 +1037,36 @@ def mark_reported(agent_id=None, what=""):
     return True
 
 
+#: What a TRANSIENT platform death looks like in a worker's log: the CLI
+#: printing an API 5xx / overload error and exiting before the first tool call.
+#: Board-watch's `spawn` matches the same pattern for the two runs it waits on.
+#: Written after 2026-07-29, when an Anthropic outage killed two workers at
+#: launch (their whole logs were one line, `API Error: 500` / `529 Overloaded`)
+#: and each was reported as FAILED with "type it again to have another go" —
+#: asking him to re-type a sentence the system still held verbatim.
+TRANSIENT_RE = re.compile(
+    r"API Error: (?:5\d\d|Connection closed)|Overloaded", re.I)
+
+
+def _died_transiently(aid):
+    """Did this worker's log END on a transient API error?
+
+    The tail only: a worker that hit a 500 mid-run and kept going died of
+    whatever it eventually died of, not of the 500.
+    """
+    try:
+        with open(_log_path(aid), "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 1000))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return False
+    return bool(TRANSIENT_RE.search(tail))
+
+
 def reap():
-    """Close out every worker whose process has gone. Returns (done, failed).
+    """Close out every worker whose process has gone.
+    Returns (done, failed, requeued).
 
     Run at the top of every board-watch tick, beside `reconcile()`, `sweep()`
     and `promote()` — same shape, same worst case of one timer interval.
@@ -1016,21 +1076,34 @@ def reap():
     one thing this system must never do is let that read as done. It is also the
     only trace such a worker leaves, since its registration is dropped by
     `sweep()` and its card leaves the list the moment it dies.
+
+    ...with ONE exception: a worker that recorded nothing AND whose log ends on
+    a transient API error is REQUEUED once instead of failed — its task goes
+    back to `pending/` carrying a `retried` mark, and `promote()` (same tick)
+    spawns a fresh worker for it. The second death is final, whatever its
+    cause, so this cannot loop; and a worker that reported anything at all is
+    `done` as before, never re-run — re-running half-landed work would commit
+    it twice.
     """
     live = {a["id"] for a in ba.agents() if a["state"] == "running"}
-    done, failed = [], []
+    done, failed, requeued = [], [], []
     for rec in ba._list(work_dir("taken")):
         aid = rec.get("agent")
         if not aid or aid in live:
             continue          # still working, or dispatched before this existed
         ok = os.path.exists(reported_file(aid))
-        moved = ba._move(rec, work_dir("done" if ok else "failed"))
-        (done if ok else failed).append(moved)
+        if not ok and not rec.get("retried") and _died_transiently(aid):
+            rec = dict(rec, retried=True, agent="", unit="")
+            requeued.append(ba._move(rec, work_dir("pending"),
+                                     state="requeued", by=aid))
+        else:
+            moved = ba._move(rec, work_dir("done" if ok else "failed"))
+            (done if ok else failed).append(moved)
         try:
             os.unlink(reported_file(aid))
         except OSError:
             pass
-    return done, failed
+    return done, failed, requeued
 
 
 def promote(cap_=None):

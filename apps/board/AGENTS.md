@@ -656,9 +656,20 @@ and the sandbox were already rule 2, and **`sudo -A` is never a test**: it puts
 a real password dialog in front of him, so it belongs to work that genuinely
 needs root and never to proving that something works.
 
-The decision agent's prompt (`board-watch.py`) keeps its own hand-written
-copy of rules 1-5 and does **not** see these; it is one item, already scoped by
-him, and it is not a dispatch target.
+The decision agent's prompt (`board-watch.py`) quotes the **same `RULES`
+block verbatim** (since 2026-07-29 — it kept a hand-written copy of rules 1-5
+before that, which drifted exactly the way the `RULES` comment warns a
+paraphrase does, and never gained rules 6-7 at all); only the board-specific
+closing rules (record with the tool, the inbox) stay its own. It is still not
+a dispatch target. Beyond what the section above lists, `RULES` also carries
+the standing constraints the old orchestrator briefing had and this system
+lost for a while: **every rebuild is serialized behind the shared flock**
+(`/tmp/claude-1000/-home-lam-nix/rebuild.lock` — up to five agents may rebuild
+here and two switches must not race), **the per-area ritual for getting an
+edit live** (seed-once files edited in BOTH copies with `seed-drift.sh` before
+and after, the `Theme.qml` bump, `hyprctl reload`, the hyprvtb version bump,
+never bare `qs`, never scripting hyprvtb Lua actions), **the IPC/log
+verification toolbox**, and **saying what the other host must run**.
 
 ### The one thing that could hold the whole system up, and does not
 
@@ -734,6 +745,18 @@ assumed.
   its card leaves the list the moment it dies.
 - A worker's prompt therefore says to run `note` **even when it finished
   nothing**, and says why.
+- **A transient platform death is REQUEUED once, not failed** (2026-07-29). A
+  worker that recorded nothing and whose log ENDS on an API 5xx/overload line
+  (`boardwork.TRANSIENT_RE`) died at the platform's hand, usually before its
+  first tool call — during the outage that motivated this, two workers' whole
+  logs were one line each (`API Error: 500` / `529 Overloaded`) and the board
+  asked him to re-type sentences the system still held verbatim. `reap()` puts
+  such a task back in `pending/` with a `retried` mark and `promote()` starts
+  it again the same tick; the second death is final whatever its cause, so it
+  cannot loop. A worker that reported *anything* is `done` as before, never
+  re-run — re-running half-landed work would commit it twice. board-watch's
+  `spawn` gives the two runs it waits on (decision, orchestrator) the same
+  one-retry on the same pattern.
 
 ## The `agents` section: the only part of this window that is NOT the store
 

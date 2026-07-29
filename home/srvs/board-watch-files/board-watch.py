@@ -502,40 +502,13 @@ file. Do not pick up any other item.
 
 His answer: {answer}
 
-RULES, in force for this session:
+RULES, in force for this session — the SAME block every board worker gets \
+(`boardwork.RULES`, quoted verbatim; a hand-written paraphrase here is how a \
+rule comes to be true nowhere):
 
-1. **You MAY rebuild and reload, at your own judgement, at any hour** — he is \
-usually at the machine and decided this deliberately, so it is standing \
-behaviour and not something to ask about: a change here is done when it is \
-APPLIED, not when it is pushed. **Read `AGENTS.md` -> "When it is okay to \
-rebuild or hot-reload" before you run one** and stay inside it — preflight \
-first, nothing staged across it, cheap reloads freely, the `hyprvtb` live \
-hot-swap only on `top` (never `hyprctl plugin load`/`unload`, on either \
-machine), and the Ask-first list still his. `apps/` runs live source and needs \
-none of it — a `.py`/`.qml` change there is picked up when he next relaunches \
-the app. Whatever you run or deliberately leave, **say so on the board** \
-(below); a rebuild left pending needs its reason.
-2. **Never open a window on his screen and never drive his running apps.** No \
-screenshots, no GUI, no MPRIS, no launching a packaged app "just to check". \
-Offscreen harnesses (`QT_QPA_PLATFORM=offscreen`) and `tools/sandbox.sh` only. \
-He does every visual check himself.
-3. **The git index in this checkout is SHARED** with him and with other \
-agents. `git commit -m "msg" -- <explicit> <paths>`, always. Never a bare \
-`git commit`, never `-a`, never `git add` on an already-tracked file. New \
-files: `git add -N` only. Never run a destructive or reverting git command \
-(`reset --hard`, `checkout --`, `restore`, `stash`, `clean`) — he leaves real \
-uncommitted work here.
-4. **Push to `main`** when it works. No branch, no PR — and **`git pull \
---rebase` immediately before you push**. This system runs on BOTH of his \
-machines now, so the other host's agents push to these same remotes; a rejected \
-push is ordinary, and the answer is `git pull --rebase` and push again. Never \
-`--force`, and never leave the work unpushed because the first attempt bounced. \
-`{repo}` (public) and `{repo}/docs` (private) are SEPARATE repos — pull and push \
-each from its own directory.
-5. Read `AGENTS.md` at the repo root, then the nested one closest to whatever \
-you are editing, then `docs/DESIGN.md` if anything you do puts pixels on a \
-screen. They outrank your instincts about this codebase.
-6. **When you are done, record it on the board — with the tool, never by \
+{rules}
+
+8. **When you are done, record it on the board — with the tool, never by \
 hand.** This decision has ALREADY been moved out of NEEDS YOU and into IN \
 FLIGHT for you, carrying your answer, so he can see it is being worked. Close \
 the loop from `{repo}` with exactly one of:
@@ -575,10 +548,10 @@ line edit under a lock with a digest re-check. A hand-written table row or a \
 reflowed section is a bug, and a half-written one syncs to the other machine. \
 `boardctl` never touches a line it was not asked to. `docs/` is its own git \
 repo inside this checkout, so commit the result from inside `docs/`.
-7. If the answer is ambiguous or the work turns out to be much larger than the \
+9. If the answer is ambiguous or the work turns out to be much larger than the \
 item implies, do the smallest honest thing and write what you found onto the \
 board instead of guessing big.
-8. **He can reach you WHILE you run. Check for it between steps:**
+10. **He can reach you WHILE you run. Check for it between steps:**
 
        python3 apps/board/tools/boardctl.py inbox take --quiet
 
@@ -603,8 +576,19 @@ ALLOW = bw.ALLOW
 DENY = bw.DENY
 
 
-def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision"):
+def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
+          retry=True):
     """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
+
+    A run that dies on a TRANSIENT platform error — the CLI printing an API
+    5xx / overload line and exiting nonzero (`boardwork.TRANSIENT_RE`, the same
+    pattern `reap()` requeues a worker on) — is retried ONCE, immediately. The
+    2026-07-29 Anthropic outage is why: an orchestrator that dies at launch
+    costs him his own sentence back as a FAILED bullet asking him to type it
+    again, when the system still holds it verbatim. The retry passes no
+    `--session-id` (the first run consumed it; the card's observed line
+    degrades for the retry, which is the honest trade), and `retry=False` on
+    the recursive call is what makes a second transient death final.
 
     `BOARD_AGENT_ID` is what makes his mid-flight notes reachable: it is the
     inbox `boardctl.py inbox take` reads with no argument, and the same id the
@@ -661,6 +645,11 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision"):
         log("agent said: " + " ".join(p.stdout.split())[:400])
     if p.returncode != 0 and p.stderr:
         log("agent stderr: " + " ".join(p.stderr.split())[:400])
+    if (p.returncode != 0 and retry and not stub
+            and bw.TRANSIENT_RE.search((p.stdout or "") + "\n" + (p.stderr or ""))):
+        log("that was a transient API error - trying the run once more")
+        return spawn(prompt, agent_id, label, session=None, timeout=timeout,
+                     role=role, retry=False)
     return p.returncode, "with status %d" % p.returncode, time.time() - t0
 
 
@@ -937,7 +926,13 @@ def tick():
     # dispatched and in hand. Nothing was ever built. This is the half of that
     # fix which does not depend on the spawn being right.
     try:
-        _, failed = bw.reap()
+        _, failed, requeued = bw.reap()
+        for rec in requeued:
+            # Died at launch on a transient API error (its whole log is the
+            # CLI printing a 5xx) — the task is back in `pending/` and
+            # promote() below starts it again. Once: a second death is final.
+            log("a worker died on a transient API error - requeued its task: %s"
+                % rec.get("task", "")[:80])
         for rec in failed:
             log("a worker stopped without recording anything: %s"
                 % rec.get("task", "")[:80])
@@ -1055,7 +1050,7 @@ def tick():
     said = ". ".join(parts) if parts else "(answered, but the text is empty)"
 
     log("firing on decision %s (%s) - %s" % (item["num"] or "?", item["key"], why))
-    prompt = PROMPT.format(repo=REPO, host=bw.host_line(),
+    prompt = PROMPT.format(repo=REPO, host=bw.host_line(), rules=bw.RULES,
                            item=item_span(doc["lines"], item),
                            answer=said, key=item["key"])
 
