@@ -11,16 +11,98 @@
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the
 #     Qt env so QtWebEngine finds its resources.
 #
+# BOTH wrappers send the app's stdio to ~/.cache/surfer.log, truncated once per
+# launch. Launched from a runner or a link click, surfer's stdout/stderr are
+# /dev/null otherwise — which silently discarded every `surfer adblock:` line
+# and the mid-session GPU/raster fallback alongside ~/.cache/surfer-gpu.log.
+# The single-instance probe must run BEFORE the redirect on either host (see
+# the air branch's comment): a link click that hands the URL to the running
+# browser must not truncate that session's log out from under its open fd.
+#
 # Both run the LIVE source at ~/nix/apps/surfer/main.py — day-to-day edits need no
 # rebuild on either machine. (Adding a Python dep like `adblock` below is the
 # exception: it needs one `rbhome` to land in pyEnv. On air the ad blocker
 # looks for `adblock` in the system python — `pip install --user adblock` to
-# get the full engine there; without it, it falls back to domain-only blocking.)
+# get the full engine there; without it, it falls back to domain-only blocking.
+# Note that PyPI only has 0.6.0, so air gets network + plain cosmetic filtering
+# but NOT procedural filtering — the engine code feature-detects, so this is a
+# degradation and not a break. See the `adblock` override below for why.)
 #
-# `adblock` is Brave's adblock-rust engine (the uBlock-Origin-class filter
-# engine) — surfer uses it for full network + cosmetic filtering.
 let
-  pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.adblock ]);
+  # `adblock` — Brave's adblock-rust engine (the uBlock-Origin-class filter
+  # engine); surfer uses it for full network + cosmetic filtering.
+  #
+  # WHY THIS IS NOT `ps.adblock`. nixpkgs ships python-adblock 0.6.0, which is
+  # upstream's LAST release: ArniDagur/python-adblock has been dead since
+  # 2023-03 and pins the Rust crate at `=0.5.6`. **Procedural cosmetic
+  # filtering — `:has()`, `:has-text()`, `:upward()`, `:remove()`, a large and
+  # growing share of every modern uBO list — landed in adblock-rust 0.9.0**, so
+  # on 0.6.0 the binding has no `procedural_actions` field at all and every one
+  # of those rules is parsed and then silently discarded. There is no newer
+  # release, on PyPI or anywhere: this is the only way to that field.
+  #
+  # jampe/python-adblock rebases the same pyo3 binding onto adblock-rust 0.12.5
+  # and exposes `procedural_actions`, `add_resources` and
+  # `hidden_class_id_selectors`. Pinned to an exact rev by hash and treated as
+  # SOURCE WE OWN, not a dependency we track — upstream is a one-author fork of
+  # a dead project, created 2026-07-20, not published to PyPI, and it will not
+  # be maintained for us. The standing cost is that this flake now carries a
+  # vendored Rust crate whose next adblock-rust bump is ours to do by hand.
+  #
+  # `owner` is meatcrowning/python-adblock, OUR FORK of jampe's tree at the same
+  # rev, and that is the point: the hash already freezes the CONTENT, so nothing
+  # can move under a rebuild, but a hash cannot fetch a repo that has been
+  # deleted. A 0-star one-author upstream can vanish, and then no machine
+  # without the store path already warm — book, or this one after a `nix-collect-
+  # garbage` — can build surfer at all. Forking costs one line and removes that
+  # single point of failure entirely. Re-point at upstream only to pick up a new
+  # rev, and fork that too.
+  #
+  # Staying at the fork's 0.12.5 rather than adblock-rust's latest (0.13.2) is
+  # deliberate: 0.13.0 removed `BlockerResult.matched` in favour of
+  # `should_block()`, which this binding's `lib.rs` and its type stubs both
+  # still use — bumping means editing the fork's Rust, for no filtering we do
+  # not already get.
+  #
+  # **The serialized cache is NOT compatible across this bump.** adblock-rust's
+  # DAT format has offered no cross-version compatibility since 0.10.0, so a
+  # `~/.cache/surfer/filters/engine.dat` written by 0.5.6 is garbage to 0.12.5.
+  # The engine code in apps/surfer/main.py must stamp the cache with the
+  # `adblock.__version__` that wrote it and rebuild on any mismatch — a one-off
+  # manual delete is not enough, since the next bump has the same problem.
+  adblock = pkgs.python3Packages.adblock.overridePythonAttrs (old: rec {
+    version = "0.7.0";
+
+    src = pkgs.fetchFromGitHub {
+      owner = "meatcrowning";
+      repo = "python-adblock";
+      rev = "f4072c0026e559649b7e571b04cf64b95a620177";
+      hash = "sha256-aZQWc7XofSKm5aCZuvTGoQa6aAEwSE7Q1khf/aP/LYY=";
+    };
+
+    # The fork is already PEP 621 and carries a real version, so nixpkgs'
+    # backport patch and its "0.0.0" substitution are both dead here.
+    patches = [ ];
+    postPatch = "";
+
+    cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+      inherit src version;
+      pname = "adblock";
+      hash = "sha256-IZkGbSWKuwzzVoJZMdwoKqczGbmr1V+8d7KGAOognI0=";
+    };
+
+    # Inherited meta still pointed at the abandoned upstream. Licence is
+    # unchanged (the binding is MIT OR Apache-2.0, both LICENSE files present in
+    # the fork; adblock-rust underneath it has been MPL-2.0 all along, at 0.5.6
+    # as much as at 0.12.5) — only the provenance moves.
+    meta = old.meta // {
+      homepage = "https://github.com/meatcrowning/python-adblock";
+      changelog = "https://github.com/meatcrowning/python-adblock/blob/${src.rev}/CHANGELOG.md";
+      maintainers = [ ];
+    };
+  });
+
+  pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 adblock ]);
 
   # Spell-check dictionaries for QtWebEngine. Chromium doesn't read Hunspell
   # .dic/.aff directly — it wants them compiled to its own .bdic format, which
@@ -95,6 +177,8 @@ let
           makeWrapper ${pyEnv}/bin/python3 $out/bin/surfer \
             --add-flags /home/lam/nix/apps/surfer/main.py \
             --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
+            --run 'if ${pyEnv}/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi' \
+            --run 'exec > "$HOME/.cache/surfer.log" 2>&1' \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
