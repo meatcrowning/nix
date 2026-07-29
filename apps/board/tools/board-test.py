@@ -718,12 +718,18 @@ def test_landed_view(tmp):
 # ------------------- 1a1b. ...and the window it derives over is BOUNDED
 def test_landed_window(tmp):
     """A repo takes ~80 commits a day. Unbounded, the section would become the
-    whole log, so the computed half reaches back `LANDED_DAYS` days and no
-    further than the oldest date group the file already has — and older groups
-    are shown exactly as the file wrote them.
+    whole log, so LANDED is **today and yesterday by local calendar date** and
+    nothing else — a date group older than that is cut from the VIEW as well,
+    the file keeping every row it ever had.
 
-    Three claims: a commit inside the window arrives, one outside it does not,
-    and a group older than the window keeps every row it had.
+    And it reads **newest first inside a day**, not only across days. It read
+    oldest-first until 2026-07-29, which is the whole of why he found the
+    section stale for the fourth time: the top row under today's date was the
+    day's FIRST commit, at 12:16 am, with eighty-seven newer ones below the
+    fold. Nothing was missing and nothing was late; he simply could not see it.
+
+    Five claims: today arrives, yesterday arrives, forty days ago does not, an
+    old group in the file is not drawn, and a day reads newest first.
     """
     import subprocess
 
@@ -743,7 +749,8 @@ def test_landed_window(tmp):
 
     git("init", "-q", "-b", "main")
     made = {}
-    for label, ago in (("ancient", 40 * 86400), ("today", 300)):
+    for label, ago in (("ancient", 40 * 86400), ("yesterday", 86400),
+                       ("earlier", 4 * 3600), ("today", 300)):
         open(os.path.join(repo, label), "w").write("x")
         git("add", "-A")
         when = "@%d +0000" % int(time.time() - ago)
@@ -753,7 +760,13 @@ def test_landed_window(tmp):
 
     path = os.path.join(tmp, "board.md")
     day = time.strftime("%Y-%m-%d")
-    open(path, "w").write(FIXTURE.replace("### 2026-07-28", "### " + day))
+    # ...and one date group from a fortnight ago, written by hand the way the
+    # real store's older groups were, to prove the cut reaches the FILE's rows
+    # and not only the ones derived from git.
+    open(path, "w").write(FIXTURE.replace(
+        "### 2026-07-28",
+        "### 2026-07-14\n\n| Commit | What |\n|---|---|\n"
+        "| `0ldc0de` | a fortnight ago |\n\n### " + day))
 
     old_repo, old_docs = bm.LANDED_REPO, bm.LANDED_DOCS_REPO
     bm.LANDED_REPO, bm.LANDED_DOCS_REPO = repo, os.path.join(repo, "nope")
@@ -767,11 +780,20 @@ def test_landed_window(tmp):
     whats = [r["what"] for g in view for r in g["rows"]]
     check("a commit inside the window is derived into the section",
           "the today one" in whats, whats)
+    check("...and so is one from yesterday: LANDED is today AND yesterday",
+          "the yesterday one" in whats, whats)
     check("...and one from forty days ago is NOT: the window is what keeps "
-          "eighty commits a day from becoming the section", 
+          "eighty commits a day from becoming the section",
           "the ancient one" not in whats, whats)
-    check("...while the rows the file already had are untouched",
+    check("...nor is a date group the FILE holds from a fortnight ago - the "
+          "cut is on what is DRAWN, and the file keeps its rows",
+          "a fortnight ago" not in whats and "0ldc0de" in B.read(path), whats)
+    check("...while the rows the file already had for today are untouched",
           "did a thing" in whats and "did another thing" in whats, whats)
+    check("a day reads NEWEST FIRST, which is the whole of why he read the "
+          "section as stale: the newest row was below the fold",
+          whats.index("the today one") < whats.index("the earlier one")
+          < whats.index("the yesterday one"), whats)
 
 
 # ------------------- 1a1d. ...and `land` upgrades the row the sweep beat it to

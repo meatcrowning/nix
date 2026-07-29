@@ -371,10 +371,22 @@ Rules that fall out of it, all of them load-bearing:
       the only place to keep it. A row naming no commit at all (`no change`, a
       decision settled) is carried through verbatim. **The file is never the
       reason a commit does or does not appear.**
-    - **The computed half is BOUNDED** — `LANDED_DAYS` (2) back, and no further
-      than the oldest date group the file already has; older groups are shown
-      exactly as written. This repo takes ~80 commits a day, so without that
+    - **It is TODAY AND YESTERDAY, and nothing older** — `LANDED_DAYS` (1),
+      counted in **local calendar days**, not as a rolling 48 hours: his words
+      were *"today and yesterdays commit log"*, so at midnight the section
+      loses the day before last. The cut is on what is DRAWN and reaches the
+      file's own older date groups too; nothing is ever deleted, the file keeps
+      every row it has. This repo takes ~80 commits a day, so without that
       bound the section would become the whole log.
+    - **NEWEST FIRST inside a day, not only across days**, and that was the
+      fourth staleness report and the one that was not staleness at all
+      (2026-07-29). The view was derived correctly and complete to the minute —
+      the rows were sorted OLDEST-first within a group, so the top row under
+      today's date was the day's *first* commit, at 12:16 am, with 87 newer
+      ones below the fold under a heading that says "Newest first." He read the
+      section as hours behind and he was reading it correctly. **A derived view
+      still has to be ordered the way it is read**: computing the right rows is
+      only half of not being stale.
     - **It is a pure read.** No lock, no write, `landed_tips()` (a `rev-parse`,
       about a millisecond) gates the expensive `git log` so it can be called on
       every repaint. `Board._poll_git` re-derives on a 10 s timer only when a

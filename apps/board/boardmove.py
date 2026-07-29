@@ -773,12 +773,17 @@ LANDED_DOCS_REPO = os.path.join(LANDED_REPO, "docs")
 #: not a dependency.
 LANDED_REFS = ("HEAD", "origin/main")
 
-#: How far back the computed half reaches. Older than this, the section is
-#: exactly the rows the file holds and nothing is added — so a board whose
-#: history goes back a fortnight keeps that history verbatim, and the last two
-#: days are complete. Without a bound this would grow without limit against a
-#: repo that takes ~80 commits a day.
-LANDED_DAYS = 2
+#: How far back LANDED reaches, in whole LOCAL CALENDAR days back from today —
+#: so 1 is *today and yesterday*, and not a rolling 48 hours. His words,
+#: 2026-07-29: LANDED is "today and yesterdays commit log". At midnight the
+#: section loses the day before last; that is the intent, not drift.
+#:
+#: The bound is on the WHOLE section now, not only on the half derived from git:
+#: an older date group in the file is dropped from the view as well. Nothing is
+#: deleted — the file keeps every row it ever had, this is a view — and without
+#: a bound the section grows without limit against a repo that takes ~80
+#: commits a day.
+LANDED_DAYS = 1
 
 #: Ask git for at most this much. The window above is always well inside it;
 #: this only bounds the cost of the call.
@@ -1025,10 +1030,19 @@ def landed_view(doc, repos=None, now=None, days=LANDED_DAYS, log=None,
       * **A row naming no commit is carried through verbatim** — `no change`, a
         decision settled, a hand-written line. Git has nothing to say about it
         and nothing here may drop it.
-      * **The computed half reaches back `days` days, and no further than the
-        oldest date group the file already has.** Older groups are shown exactly
-        as written. That bound is what keeps a repo at eighty commits a day from
-        turning the section into the whole log.
+      * **It is TODAY AND YESTERDAY, by local calendar date** (`days`, 1).
+        Older date groups are cut from the view, cached rows included — the
+        file keeps them, this is only what is drawn. That bound is what keeps a
+        repo at eighty commits a day from turning the section into the whole
+        log.
+
+    And rows come back **NEWEST FIRST, within a day as well as across days**,
+    which is what the section's own standing line has always claimed. It read
+    oldest-first inside a day until 2026-07-29, so the top of the section — all
+    he can see without scrolling — was the FIRST commit of the day, and eleven
+    hours and eighty-seven newer rows sat underneath it. He read that as the
+    section being stale again, and he was reading it correctly: the newest thing
+    it showed him was from 12:16 am.
     """
     now = time.time() if now is None else now
     if fetch:
@@ -1059,10 +1073,15 @@ def landed_view(doc, repos=None, now=None, days=LANDED_DAYS, log=None,
     by_date = {g.get("date", "").strip(): g for g in groups}
     have = landed_commits(doc)
 
-    dates = [d for d in by_date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)]
+    # LOCAL calendar dates, both sides: the floor is a date subtraction, never
+    # `now - days*86400`, so "yesterday" means yesterday however long ago
+    # midnight was. A group with a date this cannot read is kept — the cut is
+    # only ever applied to a date we can prove is old.
     floor = (_local(now).date() - datetime.timedelta(days=days)).isoformat()
-    if dates:
-        floor = max(floor, min(dates))
+    groups = [g for g in groups
+              if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", g.get("date", "").strip())
+              or g.get("date", "").strip() >= floor]
+    by_date = {g.get("date", "").strip(): g for g in groups}
 
     fresh = []
     for full, ts, subject in log:
@@ -1084,11 +1103,14 @@ def landed_view(doc, repos=None, now=None, days=LANDED_DAYS, log=None,
         g["rows"].append((r["ts"], {"commit": r["commit"], "what": r["what"],
                                     "when": r["when"], "line": -1}))
 
-    # Oldest first WITHIN a day, newest day first — which is how the file has
-    # always read, and a stable sort so two rows sharing a second keep the order
-    # they were written in.
+    # NEWEST FIRST, within a day exactly as across days — "Newest first." is the
+    # section's own standing line and it was only ever true of the date groups.
+    # Inside a day it read oldest-first, so the top of the section was the first
+    # commit of the day and the newest was eighty rows below the fold: he read
+    # the section as stale, correctly. A stable sort, so two rows sharing a
+    # second keep the order they were written in.
     for g in groups:
-        g["rows"].sort(key=lambda tr: tr[0])
+        g["rows"].sort(key=lambda tr: -tr[0])
         g["rows"] = [row for _ts, row in g["rows"]]
     groups.sort(key=lambda g: g.get("date", ""), reverse=True)
     return groups
