@@ -57,6 +57,17 @@ in
 
   # Desktop entry so player shows up in the runner. MPRIS DesktopEntry points
   # here too (the panel widget reads Identity from it).
+  #
+  # MimeType= is every shared-mime-info type that globs one of the fourteen
+  # extensions in player's own AUDIO_EXTS (apps/player/main.py) — keep the two
+  # in step, and mirror any change into home/prog/mime-defaults.nix, which is
+  # what makes player the *default* rather than merely eligible.
+  #
+  # `%F` is honoured for real since 2026-07-29: main.py's `paths_from_argv`
+  # takes the paths, hands them to a player that is already running over the
+  # queue socket's OPEN verb if there is one, and otherwise plays them at
+  # startup. Before that it dropped them, which is why this list held nine
+  # types and not twenty (docs/agents/mime-defaults-audit.md).
   home.file.".local/share/applications/player.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -68,6 +79,6 @@ in
     Terminal=false
     Categories=AudioVideo;Audio;Player;
     Keywords=bespoke;
-    MimeType=audio/flac;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/opus;audio/x-dsf;audio/x-wavpack;audio/x-ape;
+    MimeType=audio/flac;audio/mpeg;audio/mp4;audio/x-m4a;audio/ogg;audio/opus;audio/x-dsf;audio/x-wavpack;audio/x-ape;audio/x-aiff;audio/vnd.wave;audio/x-wav;audio/wav;audio/x-musepack;audio/x-tta;audio/x-dff;audio/x-vorbis+ogg;audio/x-opus+ogg;audio/x-flac+ogg;audio/x-speex+ogg;
   '';
 }

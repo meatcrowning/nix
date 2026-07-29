@@ -40,16 +40,14 @@ at all and board is a GUI over one fixed file, so neither declares a
 `MimeType=` and neither appears in `mime-defaults.nix`. An app with no honest
 file type gets no association.
 
-**player's list is deliberately SHORT of its `AUDIO_EXTS`**, and the reason is
-a bug in player, not in the list: its `Exec=` carries `%F` but
-`apps/player/main.py` never reads a path out of `sys.argv`, so a double-clicked
-track opens the library and does not play. The nine types it already answers
-for on `book` are pinned because they were already the live answer (by
-`mimeinfo.cache` ordering, not by any setting); the remaining six extensions —
-`.aiff`/`.aif`, `.wav`, `.mpc`, `.tta`, `.dff` — plus the glob-only ogg
-subtypes go to `mpv`/`elisa` there, and those *do* play what they are handed.
-Taking them would be trading a working handler for one that isn't. See
-`mime-defaults.nix` and the question on `docs/board.md`.
+**player covers ALL of its `AUDIO_EXTS`** since 2026-07-29 — every
+shared-mime-info type that globs one of its fourteen extensions, aliases and
+ogg subtypes included. It was held to nine of them for a while because its
+`Exec=` carried `%F` and `main.py` threw the argument away; **an app may only
+claim a type it can honour**, and that rule is the whole reason the list was
+short. It is honoured now (`player/AGENTS.md` → "Opening a file by path"), so
+the list is full. See `mime-defaults.nix` and
+`docs/agents/mime-defaults-audit.md`.
 
 Each app's `.desktop` entry — with its `MimeType=` and its `Exec=` field code —
 is written by its own `home/prog/<app>.nix`, because only that file knows the

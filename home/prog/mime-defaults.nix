@@ -45,32 +45,43 @@ let
   ];
 
   # Audio, to `player`. Derived from player's own AUDIO_EXTS (apps/player/main.py)
-  # through shared-mime-info's globs — NOT invented — and then cut down to the
-  # ones player can genuinely honour today.
+  # through shared-mime-info's globs — NOT invented — and now covering ALL
+  # FOURTEEN of them, his call on docs/board.md, 2026-07-29.
   #
-  # These nine were ALREADY what the live database answers on book, with nothing
-  # in this file saying so: `update-desktop-database` writes player.desktop into
-  # mimeinfo.cache from its own MimeType= line, and with no [Default
-  # Applications] key `xdg-mime query default` falls back to cache order. Measured
-  # on book 2026-07-29 — every one of them returned player.desktop already. That
-  # is an accident, not a setting: it is decided by which .desktop files happen to
-  # claim the type, so installing any other audio app rearranges it silently.
-  # Pinning them changes no behaviour on book; it makes the behaviour survive.
+  # The first nine were ALREADY what the live database answers on book, with
+  # nothing in this file saying so: `update-desktop-database` writes
+  # player.desktop into mimeinfo.cache from its own MimeType= line, and with no
+  # [Default Applications] key `xdg-mime query default` falls back to cache
+  # order. Measured on book 2026-07-29 — every one of them returned
+  # player.desktop already. That is an accident, not a setting: it is decided by
+  # which .desktop files happen to claim the type, so installing any other audio
+  # app rearranges it silently. Pinning them makes the behaviour survive.
   #
-  # DELIBERATELY NOT HERE — the other six extensions in AUDIO_EXTS
-  # (.aiff/.aif -> audio/x-aiff, .wav -> audio/vnd.wave, .mpc -> audio/x-musepack,
-  # .tta -> audio/x-tta, .dff -> audio/x-dff) and the glob-only ogg subtypes
-  # (audio/x-opus+ogg, audio/x-vorbis+ogg, audio/x-flac+ogg). On book those go to
-  # mpv or elisa today, and both of those PLAY the file they are handed.
-  # player's Exec= carries %F but apps/player/main.py never reads a path out of
-  # sys.argv — it opens the library and ignores the argument entirely — so
-  # claiming them would be trading a handler that plays the track for one that
-  # does not, i.e. exactly the promise this file is not allowed to make. The nine
-  # above have the same defect and are grandfathered because they are already the
-  # live answer; widening it is on docs/board.md as a question.
+  # The rest were held back because player could not keep the promise: its Exec=
+  # carries %F and `apps/player/main.py` never read a path out of sys.argv, so a
+  # double-clicked track opened the library and played nothing, while the mpv and
+  # elisa entries they went to instead did play what they were handed. That is
+  # fixed — `paths_from_argv` / `Player.playPaths` / the queue socket's OPEN verb,
+  # tested by `apps/player/tools/open-path-test.py` — so the promise is now good
+  # for every extension player claims, including files OUTSIDE the library
+  # (they play from a transient row that no rating or play-count write can touch).
+  #
+  # `audio/x-wav` and `audio/wav` are shared-mime-info ALIASES of audio/vnd.wave
+  # and are listed anyway: an alias is resolved by the detector, not by
+  # mimeapps.list, and `xdg-mime query default audio/x-wav` answered on book as
+  # its own key. `audio/x-speex+ogg` joins the other three ogg subtypes for the
+  # same reason the extension is registered at all — leaving one out would send
+  # a `.ogg` to player or to mpv depending on what is inside it.
+  #
+  # Deliberately still absent: video/ogg and video/x-theora+ogg, which also glob
+  # `.ogg`. Those are viewer's, and viewer already claims video/ogg.
   playerTypes = [
     "audio/flac" "audio/mpeg" "audio/mp4" "audio/x-m4a" "audio/ogg"
     "audio/opus" "audio/x-dsf" "audio/x-wavpack" "audio/x-ape"
+    "audio/x-aiff" "audio/vnd.wave" "audio/x-wav" "audio/wav"
+    "audio/x-musepack" "audio/x-tta" "audio/x-dff"
+    "audio/x-vorbis+ogg" "audio/x-opus+ogg" "audio/x-flac+ogg"
+    "audio/x-speex+ogg"
   ];
 
   # painter and board get NOTHING, on purpose. painter generates images from a
@@ -116,6 +127,18 @@ in
   # agrees with gio on both machines. Same measurement with it on PATH:
   # text/markdown -> reader.desktop. It fixes every glob-only type at once, not
   # just markdown (.svg, .csv were also wrong under `file`).
+  #
+  # THIS LINE ALONE ONLY FIXES A SHELL. It installs into the home-manager
+  # profile bin dir, and on book nothing puts that on the graphical session's
+  # PATH: Hyprland there is Fedora's `/usr/bin/start-hyprland`, whose PATH is
+  # /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin and nothing
+  # else (measured on book 2026-07-29 from /proc/<hyprland>/environ; the same
+  # `xdg-mime query filetype README.md` under that PATH still says text/plain).
+  # An app launched from the desktop inherits it, so the apps that shell out to
+  # `xdg-open` carry `mimetype` in their own wrapper PATH — filer.nix and
+  # reader.nix, on both hosts, which is the half that actually reaches him.
+  # (`top` gets it for free too, its per-user profile being on the session PATH,
+  # so the wrapper prefix is belt-and-braces there rather than a per-host fix.)
   home.packages = [ pkgs.perlPackages.FileMimeInfo ];
 
   home.activation.desktopDefaults =

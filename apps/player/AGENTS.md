@@ -209,6 +209,66 @@ tools/queue-ops-test.py   # headless; a Player built without __init__ (so no
                           # playlist. The LIVE player is never touched.
 ```
 
+## Opening a file by path (`%F`)
+
+`player /path/to/track.flac` plays that track, and so does double-clicking one
+in filer — `home/prog/player.nix` writes `Exec=…/bin/player %F` and player is
+now the registered default for **all fourteen** extensions in `AUDIO_EXTS`.
+Until 2026-07-29 it was the default for nine and dropped the argument on the
+floor; `home/prog/mime-defaults.nix` and `docs/agents/mime-defaults-audit.md`
+carry the reason the other five were withheld, which was exactly this defect.
+
+Three pieces, each with a rule:
+
+- **`paths_from_argv`** takes plain paths and `file://` URIs, skips anything
+  starting with `-` (QGuiApplication owns the option namespace), and filters on
+  `AUDIO_EXTS`. Honouring a `.pdf` dropped on the icon would be the app acting
+  on a type it never registered.
+- **`Library.ids_for_paths`** resolves a path inside the library to its **real
+  row**, so a double-clicked track behaves exactly like the same track clicked
+  in the queue — rating, play count, lyrics and its album all key on the id
+  because it *is* that id. A path the library has never scanned gets a
+  **transient row under a NEGATIVE id**, held in memory only and returned by
+  `tracks_by_ids` alongside the DB rows. That is what lets a download outside
+  `aud/` play at all, and the sign is load-bearing: every write path
+  (`setRating`, `setFavorite`, `bump_playcount`, `LyricsProvider._resolve_one`)
+  is `… WHERE id=?` followed by a guard on having found a row, so all of them
+  miss and **nothing is ever written to a file this library does not own**.
+  `save_state` stores the id and the next launch's `tracks_by_ids` cannot
+  resolve it, so a one-off file does not come back — which is the wanted
+  behaviour, not a leak.
+- **The queue socket's `OPEN` verb** is the singleton. A second launch calls
+  `handoff_paths`, which connects to `$XDG_RUNTIME_DIR/player-queue.sock` with
+  a plain stdlib socket (before Qt starts — the whole point is not to start it),
+  sends the percent-encoded paths and exits when the server answers. Two players
+  must never run at once: they would fight over the MPRIS name, the socket and
+  the audio device, and both would be audible. The module's docstring used to
+  claim a *library lock* prevented that; there is no such lock — sqlite's WAL
+  lets a second writer in after a 60s wait — so before this a second launch
+  really did start a second player.
+
+Opening REPLACES the queue (what every player does with a file handed to it
+from a file manager), and an open whose arguments were all unreadable is a
+no-op rather than a stop. With paths on the command line, `restore_state` is
+called with `resume=False`: it brings back the session's shuffle/loop and queue
+but does not re-sync mpv or post the delayed position seek, which would land
+300 ms later on the queue that has since been replaced.
+
+```bash
+QT_QPA_PLATFORM=offscreen python3 apps/player/tools/open-path-test.py
+```
+
+Headless, on a scratch DB under an isolated `XDG_DATA_HOME`/`XDG_RUNTIME_DIR`;
+the live player's socket, database and audio device are never touched. It covers
+all three pieces, including a filename with a space and a `%` in it (the reason
+`OPEN` is encoded at all — the protocol splits on whitespace) and the proof that
+writing to a transient id creates no DB row. 37/37, 2026-07-29.
+
+**Known gap:** a handoff cannot raise the running window — hyprvtb has no
+"activate this window" verb the app can reach, and MPRIS `Raise` is declared
+unsupported here. Double-clicking a track while player is minimized starts it
+playing without bringing it forward.
+
 ## The queue socket (`start_queue_server`)
 
 The desktop panel's media widget draws a queue drawer, and MPRIS cannot carry
