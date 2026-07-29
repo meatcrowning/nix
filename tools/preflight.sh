@@ -54,5 +54,21 @@ if ! "$REPO/tools/seed-drift.sh" --quiet; then
   fail=1
 fi
 
+# 5. The systemd user manager's compositor identity. Hyprland imports its own
+#    HYPRLAND_INSTANCE_SIGNATURE/WAYLAND_DISPLAY into that manager-global store
+#    at every startup, so a nested test compositor claims it — and, SIGKILLed by
+#    the harnesses, never gives it back. A user unit then talks to a dead socket
+#    and exits 0, which is invisible: wal-set.service would change the wallpaper
+#    and silently not recolour anything. Warning only — it is a state-of-the-
+#    machine fault, not a fault in the tree being built, and it is absent
+#    entirely from a TTY or a non-Hyprland session (exit 3).
+ENVCHK="$HOME/.config/scripts/hypr-session-env.sh"
+if [ -x "$ENVCHK" ]; then
+  out=$("$ENVCHK" --check 2>&1); rc=$?
+  if [ "$rc" -eq 1 ]; then
+    echo "WARN: $out"
+  fi
+fi
+
 [ "$fail" -eq 0 ] && echo "preflight OK"
 exit "$fail"

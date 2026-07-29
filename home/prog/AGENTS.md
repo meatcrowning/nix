@@ -230,6 +230,30 @@ first read either way, so nothing leaks into a fresh login. Note the fix cannot
 show on the first reload *from* an older build — the outgoing instance is the
 half that has to write the file.
 
+### A nested compositor HIJACKS the systemd user environment
+
+**Every Hyprland process — including a nested one — repoints the whole systemd
+user manager at itself.** Hyprland runs `systemctl --user import-environment
+DISPLAY WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP
+QT_QPA_PLATFORMTHEME PATH XDG_DATA_DIRS` at startup (the string is in the
+binary) plus `dbus-update-activation-environment --systemd`, and the mirror
+`unset-environment` at clean exit. One slot per variable, no owner, last writer
+wins. `nested-smoke.sh` / `hotswap-test.sh` / `kinetic-test.sh` all tear down
+with `pkill -9`, so the exit hook never runs and the **dead** nested signature
+stays in the manager for the rest of the login — found on `top` 2026-07-28,
+pointing at an instance dead for an hour while the session ran on `wayland-1`.
+A user unit that shells out to `hyprctl` under it cannot connect **and still
+exits 0.**
+
+All three harnesses now call `~/.config/scripts/hypr-session-env.sh --restore`
+in `cleanup()`. Keep that in any new one, and wrap the ExecStart of any user
+unit that needs the compositor in the same script — `home/srvs/hypr-env.nix`
+has the full story. `tools/preflight.sh` warns when the manager and reality
+disagree.
+
+`tools/sandbox.sh` is NOT implicated: it creates a headless output on the live
+compositor and starts no second Hyprland.
+
 ### Test a swap without gambling the session
 
 ```bash

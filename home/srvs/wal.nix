@@ -92,6 +92,15 @@ in
     [ -e "$HOME/.config/wall.png" ] || install -D -m644 ${./wal-files/wall.png} "$HOME/.config/wall.png"
   '';
 
+  # wal-set.sh drives the live compositor (`hyprctl eval hl.config{…}` for the
+  # border colours, `hyprctl setcursor` inside cursor-recolor.sh), so it is the
+  # one unit here that must NOT inherit the systemd user manager's
+  # HYPRLAND_INSTANCE_SIGNATURE / WAYLAND_DISPLAY: every Hyprland process on the
+  # machine overwrites that store, and a SIGKILLed nested test compositor leaves
+  # its dead signature there for the rest of the login (see hypr-env.nix). Under
+  # a stale signature every hyprctl call fails to connect and the unit still
+  # exits 0 — the wallpaper changes, the theme does not, nothing is logged.
+  # hypr-session-env.sh resolves the instance that is actually alive.
   systemd.user.services.wal-set = {
     Unit = {
       Description = "Re-tile the wallpaper and recolour the desktop from ~/.config/wall.png";
@@ -99,7 +108,7 @@ in
     };
     Service = {
       Type = "oneshot";
-      ExecStart = "%h/.config/scripts/wal-set.sh";
+      ExecStart = "%h/.config/scripts/hypr-session-env.sh %h/.config/scripts/wal-set.sh";
     };
   };
 
