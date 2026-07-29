@@ -26,9 +26,12 @@
         rbhome = "sudo rebuild-top";
         trash = "sudo nix-collect-garbage";
       } else {
-        update = "nix flake update --flake /home/lam/nix && home-manager switch --flake /home/lam/nix#air";
-        rbsys = "home-manager switch --flake /home/lam/nix#air";
-        rbhome = "home-manager switch --flake /home/lam/nix#air";
+        # rebuild-air (home/prog/rebuild-air.nix) wraps `home-manager switch
+        # --flake /home/lam/nix#air` with preflight + the shared rebuild lock,
+        # mirroring what rebuild-top does on top.
+        update = "nix flake update --flake /home/lam/nix && rebuild-air";
+        rbsys = "rebuild-air";
+        rbhome = "rebuild-air";
         trash = "nix-collect-garbage";
       }) // {
         ll = "ls -l";

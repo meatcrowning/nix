@@ -35,7 +35,16 @@ cd ~/nix
 sudo rebuild-top            # = nixos-rebuild switch --flake /home/lam/nix#top   (aliases: rbsys/rbhome)
 sudo rebuild-top --upgrade  # = `update`; bumps flake inputs first
 nixos-rebuild build --flake /home/lam/nix#top   # optional, no sudo at all, warms the store
+rebuild-air                 # book's wrapper for `home-manager switch --flake /home/lam/nix#air`
 ```
+
+**Both wrappers run preflight and take the shared rebuild lock themselves**
+(`/tmp/claude-1000/-home-lam-nix/rebuild.lock`, `flock -w 600`), so a rebuild
+via `sudo rebuild-top` on `top` or `rebuild-air` on `book` needs no manual
+`flock` and cannot race a concurrent agent's rebuild. Running preflight by
+hand first is still fine — and still what you do before non-wrapper work
+(`nixos-rebuild build`, a bare `home-manager switch`). `REBUILD_NO_PREFLIGHT=1`
+skips the built-in preflight; a failing preflight aborts the switch.
 
 `rbsys`, `rbhome` and `update` are all the same command here (`home/prog/zsh.nix`)
 — home-manager is a NixOS module on `top`, so there is no standalone
