@@ -401,6 +401,11 @@ def unowned(path=bp.BOARD_PATH):
     the other machine, so nothing acts on this list automatically; `stall()`
     below is the manual exit, and `boardctl reconcile` prints it so the next
     thing to look at the board can see what has silted up.
+
+    It lists **every** table under `## IN FLIGHT`, the store's `**Queued**` one
+    included — `parse` has no case for a second table there and never has, so
+    `find_flight` and `land` see those rows too. A queued row is unowned by
+    design and is not something to stall; read the list, do not sweep it.
     """
     doc = bp.parse(bp.read(path))
     owned = {_norm(r.get("title")) for r in _stashes()}
