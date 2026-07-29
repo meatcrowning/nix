@@ -316,6 +316,47 @@ Rules that fall out of it, all of them load-bearing:
   above applies to IN FLIGHT exactly as it does to NEEDS YOU, and a start time is
   an elapsed time the moment he reads it. The stash records one because
   reclaiming a dead agent's item is machine business; it never reaches the file.
+- **LANDED RECONCILES ITSELF AGAINST GIT, and a worker still calls `land`.**
+  `land` is something an agent has to *remember*, and the record of what reached
+  his machine cannot rest on that: a worker dies, or lands under a pathspec and
+  never comes back, or is never told. It failed that way twice — the second time
+  he said *"the landed page it still is stuck with commits from an hour ago not
+  updated"* with three commits on `origin/main` and no row for any of them. So
+  `boardmove.reconcile_landed()` diffs `git log origin/main` against the hashes
+  already in the section and appends the rest: subject as What, the commit's own
+  12-hour local time as When, under that commit's own `### <date>` group. It is
+  the LANDED half of what `reconcile()` does for IN FLIGHT — one section
+  reconciles against `/proc`, the other against git.
+    - **A worker's own `land` is still the primary path and still required.**
+      The sweep writes the commit SUBJECT; `land --what` writes the sentence the
+      agent chose, which is usually the better line, and it writes it
+      immediately. The sweep is the floor, not the plan.
+    - **Three bounds, each stopping it doing something nobody asked for.** It
+      never reaches below the OLDEST commit LANDED already names (a fixed window
+      would have appended 96 rows of pre-board history on its first run, and an
+      empty section has no floor and so sweeps nothing at all); it leaves a
+      commit alone until `LANDED_MIN_AGE`, because the worker that made it is
+      usually still running and about to record it itself; and a commit only
+      joins a date group that exists or opens one newer than every group there,
+      never one wedged into the middle.
+    - **It runs in the BOARD APP**, `Board._catch_up` on a 60 s timer and at
+      launch, throttled to `LANDED_SWEEP_EVERY` inside `boardmove`. That is the
+      one place the section is actually drawn — so what he is looking at has
+      just been reconciled — and `apps/` is live source, so it needed no rebuild
+      on either machine. `board-watch.py` was the other candidate and is a
+      home-manager file: a deploy on both hosts before it does anything, and it
+      only runs while he is at the machine anyway.
+    - **`docs/` is deliberately NOT swept.** Its history is mostly the 5-minute
+      sync timer's own commits and they would bury the section. A docs commit
+      worth recording is recorded by hand, as it always was.
+    - **The two hosts are staggered, because `board.md` syncs and there is no
+      lock across it.** `top` fills a hole after 10 minutes, any other host
+      after 45, so book sees top's row with ~30 minutes of headroom and still
+      catches up by itself if top is off. Nothing here reorders or rewrites, so
+      the worst case of a lost race is one duplicate row, not a damaged file.
+    - `tools/board-test.py` → `test_landed_sweep` builds a throwaway repo with
+      committer dates it chose and asserts all of it, including that a second
+      run leaves the file byte-identical.
 - **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
   Only a decision agent has a row (`start()` made it); a WORKER dispatched out
   of the box never did, so every commit the fan-out produced was unrecordable —
