@@ -23,19 +23,17 @@ Item {
     // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1)
     // and passed straight on to the queue, the lyrics pane and the stars.
     //
-    // THE COVER ART IS NOT FADED. It is an image, not a foreground tone: there
-    // is no `Theme.inactive` version of a photograph, only an opacity or a
-    // desaturation, and neither is anything the design language asks for —
-    // §3.1.1 fades "the things drawn *in* a foreground tone". filer is the
-    // precedent that already had to decide this: PreviewTile greys its filename
-    // and its selection frame when the window is unfocused and leaves the
-    // thumbnail itself untouched, and viewer never dims the image it exists to
-    // show. Dimming a full-bleed album cover would also be by far the loudest
-    // thing on the page — a focus change would read as the artwork loading
-    // rather than as the window going quiet.
+    // THE COVER ART FADES TOO, via `fgArt` — his explicit call (2026-07-28),
+    // reversing the earlier reading that an image is content and stays lit:
+    // *"dim it with everything else — the window reads as one unfocused
+    // surface"*. On this page the cover IS the page, so leaving it lit was the
+    // one place where the two-step fade was most visible. It has no
+    // `Theme.inactive` version, so it composites toward the `Theme.bgAlt` fill
+    // behind it instead; Main.qml owns the multiplier and the measurement.
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
+    property real fgArt: 1.0
 
     // Which name the cover's menu acts on: the ALBUM artist, since that's the
     // tag the gallery filter matches — except on a compilation, where it names
@@ -122,6 +120,7 @@ Item {
                 sourceSize.width: 1024
                 sourceSize.height: 1024
                 visible: status === Image.Ready
+                opacity: root.fgArt   // fades with the foreground, onto artBox's bgAlt
             }
             PixelText {
                 anchors.centerIn: parent

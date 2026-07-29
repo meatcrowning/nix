@@ -22,13 +22,15 @@ Item {
     // row (qmlcommon/Motion.qml).
     Motion { id: motion }
     // The three foreground tones, handed in already faded by Main
-    // (docs/DESIGN.md §3.1.1). The COVER ART is deliberately not among them:
-    // an image is content, not a foreground tone, and filer's PreviewTile
-    // leaves its thumbnails at full brightness while fading the filename and
-    // the selection frame over them. Same reading here.
+    // (docs/DESIGN.md §3.1.1) — and `fgArt`, the opacity the COVER THUMBNAILS
+    // fade to with them. The gallery is nothing but artwork, so leaving it lit
+    // would grey the labels and nothing else; his call is that the window reads
+    // as ONE unfocused surface. Multiplier, not a tone, and its value and the
+    // reasoning behind it are in Main.qml.
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
+    property real fgArt: 1.0
 
     // The album to expand; 0 collapses. Owned by Main (so the mouse
     // back/forward history can restore it), toggled through `opened`.
@@ -227,6 +229,9 @@ Item {
                             sourceSize.width: 256
                             sourceSize.height: 256
                             visible: status === Image.Ready
+                            // Fades with the rest of the foreground; the tile's
+                            // own `Theme.bgAlt` fill is what it composites onto.
+                            opacity: root.fgArt
                         }
                         PixelText {
                             anchors.centerIn: parent
@@ -346,6 +351,7 @@ Item {
                             fgText: root.fgText
                             fgDim: root.fgDim
                             fgAccent: root.fgAccent
+                            fgArt: root.fgArt
                             onClosed: root.opened(0)
                             onOpenAlbumRequested: function(aid) { root.opened(aid); }
                             onBrowseArtistRequested: function(a) { root.searchArtist(a); }

@@ -20,10 +20,12 @@ Item {
     property int albumId: 0
     property var info: ({})
     // Foreground tones, handed in already faded by the gallery
-    // (docs/DESIGN.md §3.1.1). The album art is not one of them — see AlbumGrid.
+    // (docs/DESIGN.md §3.1.1), plus `fgArt` — the opacity this section's cover
+    // fades to alongside them. See AlbumGrid, and Main.qml for the value.
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
+    property real fgArt: 1.0
     signal closed()
     // Relayed out of the track list's right-click menu (AlbumGrid passes them
     // on to the window, which owns navigation).
@@ -101,6 +103,7 @@ Item {
             sourceSize.width: 1024
             sourceSize.height: 1024
             visible: status === Image.Ready
+            opacity: root.fgArt      // fades with the foreground, onto artBox's bgAlt
         }
         PixelText {
             anchors.centerIn: parent
