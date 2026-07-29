@@ -414,6 +414,45 @@ def test_chrome(engine, cellw):
     item.deleteLater()
 
 
+def test_focus_fade(win, pane, theme):
+    """An unfocused window fades its WHOLE foreground (docs/DESIGN.md §3.1.1).
+
+    reader wired `winActive` all the way to `DocPane` and then hardcoded
+    `fg: Theme.text` on the block delegate, so the titlebar greyed and the
+    document — the only thing the user was actually reading — stayed lit.
+
+    The assertion is on the colour a real Block delegate ENDED UP WITH, not on
+    the pane's own property, because the bug lived in the propagation. Note the
+    ternary must stay at the pane: reader draws one Text per word, so a per-leaf
+    binding would re-evaluate thousands of times on a focus change."""
+    inactive = theme.property("inactive")
+    text = theme.property("text")
+
+    def block_fg():
+        for it in descendants(pane):
+            fg = it.property("fg")
+            if fg is not None and it.property("btype") is not None:
+                return fg
+        return None
+
+    pane.setProperty("winActive", True)
+    spin(80)
+    check("a focused pane draws its body text in Theme.text",
+          block_fg() == text, (block_fg(), text))
+    pane.setProperty("winActive", False)
+    spin(80)
+    check("an UNFOCUSED pane fades the document to Theme.inactive (S3.1.1)",
+          pane.property("fg") == inactive and block_fg() == inactive,
+          (pane.property("fg"), block_fg(), inactive))
+    check("...its secondary tone and its accent rules go with it",
+          pane.property("fgDim") == inactive and pane.property("fgAccent") == inactive,
+          (pane.property("fgDim"), pane.property("fgAccent")))
+    # The assignments above BROKE the binding to `win.active`; leave the pane
+    # lit so the checks after this one see ordinary colours.
+    pane.setProperty("winActive", True)
+    spin(80)
+
+
 def test_window(app, tmp):
     from PySide6.QtCore import Qt
 
@@ -444,6 +483,7 @@ def test_window(app, tmp):
     check("a monospace advance was MEASURED, not assumed",
           2 < win.property("cellW") < 40, win.property("cellW"))
     test_wrap(engine, win.property("cellW"))
+    test_focus_fade(win, pane, _keep[-1])
 
     # the files index feeds the browse pane
     check("the browse pane indexed both documents",

@@ -16,6 +16,20 @@ Item {
     property bool winActive: true
     property string query: ""
 
+    // The document's foreground, faded with the window (docs/DESIGN.md §3.1.1).
+    // Body text IS the accent (§3.1) and hyprvtb greys the titlebar to
+    // `Theme.inactive` the moment the window loses focus — so the text under it
+    // has to go the same way, or the one thing the user is actually reading is
+    // the one thing still lit.
+    //
+    // Computed ONCE per pane and handed down. The Block delegate propagates it
+    // into RichText, which already gives every word a single `color: root.color`
+    // binding — so this costs no new binding per word, and a focus change
+    // re-evaluates three expressions rather than one per segment of prose.
+    readonly property color fg:       winActive ? Theme.text    : Theme.inactive
+    readonly property color fgDim:    winActive ? Theme.textDim : Theme.inactive
+    readonly property color fgAccent: winActive ? Theme.accent  : Theme.inactive
+
     // ---- the loaded document ----
     property var doc: ({})
     readonly property var blocks: doc.blocks || []
@@ -191,7 +205,9 @@ Item {
             cellW: pane.cellW
             query: pane.query
             current: pane.matchAt >= 0 && pane.matches[pane.matchAt] === index
-            fg: Theme.text
+            fg: pane.fg
+            fgDim: pane.fgDim
+            fgAccent: pane.fgAccent
             // A blank line between blocks — the one the source has — and two
             // before a heading. Consecutive list items are ROWS and get none
             // (§2.1: zero inter-row gap).
@@ -209,7 +225,7 @@ Item {
     PixelText {
         anchors.centerIn: parent
         visible: !pane.ok
-        color: Theme.textDim
+        color: pane.fgDim
         text: pane.problem === "no document"
                 ? "no document - open one from the files pane, or drop a .md file here"
                 : (pane.docName + ": " + pane.problem)

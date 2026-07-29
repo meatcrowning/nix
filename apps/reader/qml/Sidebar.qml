@@ -111,7 +111,7 @@ Item {
                 width: 2
                 height: parent.height
                 visible: row.isCurrent
-                color: Theme.accent
+                color: side.winActive ? Theme.accent : Theme.inactive
             }
 
             PixelText {

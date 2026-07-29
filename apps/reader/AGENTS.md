@@ -55,6 +55,13 @@ rounded 8), so it stays right if the desktop font family is ever changed.
   lays chrome and prose out together, which is what makes it exact.
 - **Emphasis markers are stripped and carry nothing.** §2.2's "bold emphasis is
   a deliberately accepted loss", applied.
+- **No block reads a foreground colour off `Theme`.** `DocPane` derives
+  `fg`/`fgDim`/`fgAccent` once from `winActive` and hands them down; `Block`
+  passes them into `RichText`, which already gives each word a single
+  `color: root.color` binding. §3.1.1 — an unfocused window fades its whole
+  foreground, and the delegate is drawn per *word*, so the ternary lives at the
+  pane and not at the leaf. `Block.qml` hardcoding `Theme.text` here is what
+  left the document lit under a greyed titlebar.
 - **Inline code takes `Theme.bgAlt`**, the inset background every other inset
   surface on this desktop takes. A fenced block is that fill inside the 1px
   `Theme.border` hairline. No radius, no new colour (§4, §3.1).
@@ -195,13 +202,15 @@ W=$(readlink -f "$(which reader)"); sed '$d' "$W" > /tmp/rdrenv.sh
     apps/reader/tools/reader-test.py )
 ```
 
-`tools/reader-test.py`, 47 checks, offscreen, three layers: the parse (pure
+`tools/reader-test.py`, 74 checks, offscreen, three layers: the parse (pure
 Python), **the font** (every drawable string this repo's markdown produces, put
 to `QRawFont.glyphIndexesForString` — the only audit that does not lie), and the
 real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen` — wrapping, the outline,
 both searches, real `QMouseEvent`s for buttons 275/276 walking document history,
-the split's toggle/re-orient semantics, the zero-size guard, and the reload
-keeping its place. It redirects `XDG_STATE_HOME` into a scratch dir, which any
+the split's toggle/re-orient semantics, the zero-size guard, the reload keeping
+its place, and the body text fading to `Theme.inactive` with the window
+(§3.1.1 — asserted on a real Block delegate, since the bug was in the
+propagation and not in the pane's own property). It redirects `XDG_STATE_HOME` into a scratch dir, which any
 harness here **must** do or it rewrites where the user's own reader reopens, and
 it stubs the Titlebar, because the real one registers buttons against the
 harness's pid in the live compositor.
