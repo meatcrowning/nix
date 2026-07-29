@@ -645,6 +645,36 @@ def _k(n):
     return str(int(n))
 
 
+def born_line(ts):
+    """WHEN the agent was spawned — `10:26 am`, or "" if nothing recorded one.
+
+    [his, 2026-07-29] *"agent cards should show, perhaps next to token count,
+    when they began on a task - or perhaps when they were spawned, or perhaps
+    both"*. It is ONE stamp, because the two are not two facts here: a worker is
+    spawned to do the task it was dispatched with and begins on it immediately,
+    and a task waiting for a slot has no worker at all — its card already says
+    `not started yet` in words, which is truer than a time would be.
+
+    **ABSOLUTE, and it must stay absolute.** No age, no `4m`, no `ago`, nothing
+    counting. The no-pressure requirement (`AGENTS.md`) is why this board draws
+    no elapsed times anywhere, and a relative stamp on a running agent is a
+    clock ticking at him. This is a fact about the past, in the same 12-hour
+    lowercase clock a LANDED row's `when` and a NEEDS YOU item's `placed` use —
+    one way of saying a time on this board.
+
+    That is also why `boardagents.born` can now reach the screen without
+    bending its own "ordering is not an age" rule: what is drawn is the instant,
+    never the difference between it and now.
+    """
+    try:
+        ts = float(ts or 0)
+    except (TypeError, ValueError):
+        return ""
+    if ts <= 0:
+        return ""
+    return time.strftime("%I:%M %p", time.localtime(ts)).lstrip("0").lower()
+
+
 def context_line(rec):
     """`62k/200k`, or "" when nothing was measured. Both halves or neither.
 
