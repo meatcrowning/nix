@@ -78,41 +78,30 @@ Item {
         id: spec
         readonly property int nbars: SettingsStore.d.mediaSpectrumBars
         readonly property real gamma: 0.55
-        // The measuring grid: `gridRows` equal bands from the top of the
-        // spectrum to the bottom, each with a hairline along its top edge and
-        // every other one filled, so the rows can be counted at a glance. No
-        // labels, by request — this is a scale to read a level against, not a
-        // table.
+        // The measuring grid: `gridRows` hairlines dividing the spectrum into
+        // equal rows, top to bottom, in `Theme.border` — the hairline the volume
+        // column and the tile frames already use, so the grid arrives without a
+        // new colour in it. No labels and no shading, both by request: rules on
+        // the plain background, nothing else. (Alternating a subtle fill was
+        // tried twice, once on every other BAR and once on every other grid ROW,
+        // and rejected both times. Don't re-add either.)
         //
-        // EVENLY SPACED IN PIXELS, top to bottom, [his] — and that is a
-        // deliberate reversal worth recording so it does not get "fixed" back.
-        // It was briefly a gamma-mapped ladder (100/75/50/25/12.5/6.25 of cava's
-        // scale, i.e. -0 to -24 dB, each rule landing where that amplitude
-        // actually draws) on the reasoning that an evenly-spaced rule measures
-        // nothing in particular once `gamma` has bent the axis. True, but it
-        // bought a numeric honesty nothing labelled and cost the thing a grid is
-        // FOR: rules bunched into the top half, uncountable, most of them dark.
-        // He asked for even spacing over the full height, twice. Even spacing it
-        // is; the dB reading is not coming back without labels to carry it.
+        // EVENLY SPACED IN PIXELS, [his] — a deliberate reversal worth recording
+        // so it does not get "fixed" back. It was briefly a gamma-mapped ladder
+        // (100/75/50/25/12.5/6.25 of cava's scale, i.e. -0 to -24 dB, each rule
+        // landing where that amplitude actually draws) on the reasoning that an
+        // evenly-spaced rule measures nothing in particular once `gamma` has
+        // bent the axis. True, but it bought a numeric honesty nothing labelled
+        // and cost the thing a grid is FOR: rules bunched into the top half,
+        // uncountable, most of them dark. Even spacing it is; the dB reading is
+        // not coming back without labels to carry it.
         //
         // Eight rows because it halves cleanly — the midpoint, the quarters and
         // the eighths are all rules, so the eye can bisect its way to a level
         // without counting from the bottom — and because it is comfortably more
         // than the "3 or 4" that read as too few.
-        //
-        // The BANDS are `Theme.bgAlt` on the panel's pure-black `bg`, which is
-        // the desktop's existing banding treatment reused, not a new pattern:
-        // `WeatherContent.qml` shades every second forecast slot in exactly that
-        // colour to make its two-per-day structure legible. Same problem, same
-        // answer. The RULES are `Theme.border`, the hairline the volume column
-        // and the tile frames already use, so the grid arrives without a new
-        // colour in it.
-        //
-        // Bands are gapless for the same reason the bars are: round each edge
-        // once and let one band's bottom BE the next one's top, or a fractional
-        // row height leaves seams.
         readonly property int gridRows: 8
-        // Minimum legible band height. Derived from the row COUNT rather than
+        // Minimum legible row height. Derived from the row COUNT rather than
         // written as a height literal, so changing `gridRows` moves the
         // threshold by itself — below it the grid is a smear rather than
         // something countable, and it also keeps these out of the degenerate
@@ -122,18 +111,11 @@ Item {
             model: spec.gridRows
             Rectangle {
                 required property int index
-                readonly property int y0: Math.round(spec.height * index / spec.gridRows)
                 anchors { left: parent.left; right: parent.right }
-                y: y0
-                height: Math.max(1,
-                    Math.round(spec.height * (index + 1) / spec.gridRows) - y0)
-                color: index % 2 ? "transparent" : Theme.bgAlt
+                y: Math.round(spec.height * index / spec.gridRows)
+                height: 1
+                color: Theme.border
                 visible: spec.height >= spec.gridRows * spec.minGridPx
-                Rectangle {
-                    anchors { left: parent.left; right: parent.right; top: parent.top }
-                    height: 1
-                    color: Theme.border
-                }
             }
         }
 
@@ -616,7 +598,7 @@ Item {
     // this one is Quickshell's, and the panel cannot import `apps/qmlcommon`.
     // Same rule as `PixelText` and the `Kinetic*` types — retune both or the
     // desktop stops feeling like one thing. What is deliberately NOT copied is
-    // that pane's `lyrics · <source>` header (DESIGN.md 5.4 — the content
+    // that pane's `lyrics · <source>` header (docs/DESIGN.md 5.4 — the content
     // identifies itself, and a header would cost a line out of five) and its
     // "mark instrumental" control, which needs a library the panel does not
     // have.
@@ -634,7 +616,7 @@ Item {
     // only thing in the log. Observed once, live.
     readonly property bool showLyrics: Media.hasLyrics === true
     // A FRACTION of the drawer, not a pixel budget standing in for a character
-    // count (DESIGN.md 2.7): the panel is 14-33% of the screen and the font size
+    // count (docs/DESIGN.md 2.7): the panel is 14-33% of the screen and the font size
     // is a user setting, so the only honest split here is a proportional one.
     // 0.42 is the artist column's old third plus the duration column that now
     // sits inside the queue's own width.
@@ -823,7 +805,7 @@ Item {
                     required property int index
                     width: lyricsList.width
                     // A wrapped line is N font cells tall and nothing more —
-                    // PixelText pins its line height to the cell (DESIGN.md
+                    // PixelText pins its line height to the cell (docs/DESIGN.md
                     // 2.1), so this is kitty-tight at any font size.
                     height: Math.max(Theme.fontSize, lineText.implicitHeight)
 
@@ -838,7 +820,7 @@ Item {
                                                                : Theme.textDim
                     }
                     // Click a line to seek to it, like the player's pane. Drawn
-                    // only when it would actually do something (DESIGN.md 10) —
+                    // only when it would actually do something (docs/DESIGN.md 10) —
                     // a source with no SetPosition gets plain text.
                     MouseArea {
                         anchors.fill: parent
