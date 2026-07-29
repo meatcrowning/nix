@@ -32,7 +32,7 @@ STRANDING, and why an item cannot
 ---------------------------------
 An item in IN FLIGHT with nothing working on it is worse than one still in NEEDS
 YOU: it says "handled" and nothing is. So `start()` STASHES the decision's raw
-lines outside the store, and there are three ways back:
+lines outside the store, and there are four ways back:
 
   1. the agent finished       -> `land()`, and the stash is dropped
   2. the agent exited badly   -> `give_back()` from the watcher, same run: the
@@ -42,16 +42,31 @@ lines outside the store, and there are three ways back:
                                  board-watch tick (so, within five minutes),
                                  finds stashes whose owning process is gone and
                                  does 2 for them
+  4. there is no stash at all -> `stall()`, by hand. The row becomes one bullet
+                                 in WAITING ON YOU TO DO
 
 Case 3 checks the pid AND its kernel start time, so a recycled pid cannot make a
 dead agent look alive. A stash with no owner pid (an interactive session started
 it) is never reclaimed automatically — nothing here can tell whether that
 session is still thinking.
+
+**Case 4 is the one the first three do not cover, and it is bigger than it
+sounds.** 1-3 are all keyed on the stash, and the stash is MACHINE-LOCAL state
+while `board.md` syncs between the two machines — so from `book`, a row `top`
+started is indistinguishable from a row nobody started, and vice versa. Add the
+rows written before the stash existed and the rows added by hand, and the honest
+statement is: **`reconcile()` covers only what this host started, and everything
+else in IN FLIGHT can never leave it.** That is what he was looking at when he
+said the section *"doesnt update at all"* — five rows, four of which no
+mechanism here could remove. `unowned()` reports them and `stall()` is their
+exit; neither is automatic, because a row this host does not own may be alive on
+the other one.
 """
 import json
 import os
 import re
 import socket
+import subprocess
 import sys
 import time
 
@@ -248,21 +263,84 @@ def _stash_for(sel):
     return None
 
 
-def land(sel, commit, what=None, date=None, path=bp.BOARD_PATH):
-    """IN FLIGHT -> LANDED, under today's date, carrying the commit."""
+#: Where a commit hash might be. `~/nix` is the public repo and `docs/` is the
+#: private one living inside it; a landed change is in one or the other, and
+#: which one is not worth asking the caller for.
+COMMIT_REPOS = (os.path.expanduser("~/nix"), os.path.expanduser("~/nix/docs"))
+
+
+def commit_time(commit, repos=COMMIT_REPOS):
+    """A commit's OWN local time, `3:42 pm`. Empty if the hash resolves nowhere.
+
+    His words: *"each commit should include the time it happend"* — so it is
+    read from git's committer date in the machine's local zone, and never from
+    when the row happened to be written. Those two are minutes apart for an
+    agent that tested before it recorded, and hours apart for a backfill.
+
+    Empty is a normal answer, not a failure: half the rows in LANDED name no
+    commit at all (`no change`, a decision settled), and a row with no time is
+    written with two cells exactly as it always was.
+    """
+    c = (commit or "").strip().strip("`")
+    if not re.fullmatch(r"[0-9a-fA-F]{4,40}", c):
+        return ""
+    for repo in repos:
+        try:
+            p = subprocess.run(
+                ["git", "-C", repo, "show", "-s", "--format=%cd",
+                 "--date=format:%I:%M %p", c + "^{commit}"],
+                capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        out = p.stdout.strip()
+        if p.returncode == 0 and out:
+            # `%-I` is a GNU extension git's own strftime may not honour, so the
+            # leading zero is stripped here where it can be relied on.
+            return out.lstrip("0").lower()
+    return ""
+
+
+def land(sel, commit, what=None, date=None, when=None, path=bp.BOARD_PATH):
+    """IN FLIGHT -> LANDED, under today's date, carrying the commit and its time.
+
+    **The IN FLIGHT row is optional, and that is the whole point of the
+    section.** A decision agent has a row (`start()` made one); a WORKER
+    dispatched out of the box never did, and for a day that meant every commit
+    the fan-out produced was invisible here — `land` needed a row it could not
+    have, so a worker could only leave a bullet and LANDED silently stopped
+    growing while the repo did not. So: a selector that matches a row moves it,
+    and no selector (or one that matches nothing) simply records the commit.
+    `what` is then required, because there is no row to take it from.
+    """
     got = {}
-    rec = _stash_for(sel)
+    rec = _stash_for(sel) if sel else None
     row_sel = rec["title"] if rec else sel
+    when = commit_time(commit) if when is None else when
 
     def go(doc):
-        row = find_flight(doc, row_sel)
-        got.update(row)
-        lines = bp.remove_row(doc["lines"], row["line"])
-        return bp.add_landed_row(lines, commit, what or row["what"], date)
+        row = None
+        if row_sel:
+            try:
+                row = find_flight(doc, row_sel)
+            except BoardError:
+                if not what:
+                    raise BoardError(
+                        "nothing in IN FLIGHT matches '%s' and no --what was "
+                        "given - there is no line to record" % sel)
+        lines = doc["lines"]
+        if row is not None:
+            got.update(row)
+            lines = bp.remove_row(lines, row["line"])
+        elif not what:
+            raise BoardError(
+                "nothing in IN FLIGHT matches '%s' and no --what was given - "
+                "there is no line to record" % sel)
+        return bp.add_landed_row(lines, commit, what or row["what"], date, when)
 
     if not bp.edit(path, go):
         raise BoardError("nothing was written")
-    forget(sel)
+    if sel:
+        forget(sel)
     if got.get("what"):
         forget_by_title(got["what"])
     return got
@@ -306,6 +384,75 @@ def give_back(sel, why=None, path=bp.BOARD_PATH):
     bp.edit(path, go)
     forget(rec["key"])
     return rec
+
+
+def unowned(path=bp.BOARD_PATH):
+    """The IN FLIGHT rows no stash on THIS host accounts for.
+
+    These are the rows `reconcile()` structurally cannot see, and there are more
+    of them than the design assumed: every row written before the stash existed,
+    every row an agent on the other machine started (the stash is machine-local
+    state and `board.md` is not), and every row somebody added by hand. Nothing
+    ages them out, so the section only ever grew — his words, reading it:
+    *"it just seems like that section doesnt update at all its still got old
+    stuff in it"*.
+
+    It is a REPORT and not a rule. A row unowned here may be perfectly alive on
+    the other machine, so nothing acts on this list automatically; `stall()`
+    below is the manual exit, and `boardctl reconcile` prints it so the next
+    thing to look at the board can see what has silted up.
+    """
+    doc = bp.parse(bp.read(path))
+    owned = {_norm(r.get("title")) for r in _stashes()}
+    return [r for r in doc["flight"] if _norm(r["what"]) not in owned]
+
+
+def stall(sel, path=bp.BOARD_PATH):
+    """IN FLIGHT -> a bullet in WAITING ON YOU TO DO. The fourth way out.
+
+    `land` needs a commit, `back` needs the stash it cannot have, and until this
+    existed a row with no stash had no exit at all: the only way to remove one
+    was to hand-edit the store, which nothing here is allowed to do. So a row
+    that has outlived whatever was working on it sat there claiming to be
+    handled, forever.
+
+    **It moves the row, it does not delete it.** The three cells become one
+    bullet under WAITING ON YOU TO DO — restarting it is his call, and a row
+    quietly vanishing off the board would be the worse of the two failures. One
+    edit, so the row is never gone while the bullet is not yet there.
+
+    It REFUSES a row that a stash owns: that decision's own text is recoverable,
+    so `give_back` is the honest move for it and would put his question back
+    rather than flatten it into a to-do.
+    """
+    got = {}
+
+    def go(doc):
+        row = find_flight(doc, sel)
+        titles = {_norm(r.get("title")) for r in _stashes()}
+        if _norm(row["what"]) in titles or _stash_for(sel):
+            raise BoardError(
+                "'%s' is a decision this machine stashed - use `back` (which "
+                "returns your question intact) or `land`" % row["what"])
+        got.update(row)
+        # The cells AS THEY ARE SPELLED IN THE FILE. `row["what"]` has been
+        # through `text()` at ingest and putting that back would rewrite his
+        # em dashes and backticks into ASCII, one move at a time — the same
+        # trap `raw_title` exists for.
+        cells = bp._table_cells(doc["lines"][row["line"]].rstrip("\n"))
+        cells += [""] * (3 - len(cells))
+        what, where, notes = (c.strip() for c in cells[:3])
+        lines = bp.remove_row(doc["lines"], row["line"])
+        return bp.add_todo_bullet(lines, bp.parse("".join(lines)),
+                                  "- **%s** - was sitting in IN FLIGHT with "
+                                  "nothing working on it%s, so it is here "
+                                  "instead of claiming to be handled.%s"
+                                  % (what, (" (%s)" % where) if where else "",
+                                     (" " + notes) if notes else ""))
+
+    if not bp.edit(path, go):
+        raise BoardError("nothing was written")
+    return got
 
 
 def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,

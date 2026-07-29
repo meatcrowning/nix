@@ -47,7 +47,9 @@ Consequences that are rules, not preferences:
     *If unanswered:* ...  what happens if he never answers
 ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions
 ## IN FLIGHT              a | table |: what / where / notes
-## LANDED                 `### <date>` groups of | commit | what |, plus prose
+## LANDED                 `### <date>` groups of | commit | what | when |,
+                          plus prose. `when` is the commit's own local time in
+                          12-hour form and is OPTIONAL in both directions
 ```
 
 Everything else — the `# Board` preamble, the `---` rules — is preserved and not
@@ -121,6 +123,7 @@ its docstring is the authoritative statement; the short version:
 ```bash
 apps/board/tools/boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> IN FLIGHT
 apps/board/tools/boardctl.py land 4 --commit a3c2aac --what 'player: dim the art'
+apps/board/tools/boardctl.py land --commit a3c2aac --what 'board: no row needed'
 apps/board/tools/boardctl.py back 4 --why 'blocked on the FOCUS signal'
 apps/board/tools/boardctl.py note '**Relaunch `player`** - live source.'
 
@@ -150,6 +153,27 @@ Rules that fall out of it, all of them load-bearing:
   above applies to IN FLIGHT exactly as it does to NEEDS YOU, and a start time is
   an elapsed time the moment he reads it. The stash records one because
   reclaiming a dead agent's item is machine business; it never reaches the file.
+- **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
+  Only a decision agent has a row (`start()` made it); a WORKER dispatched out
+  of the box never did, so every commit the fan-out produced was unrecordable —
+  `land` refused, `note` was all a worker could reach, and LANDED sat at
+  2026-07-28 while a run of board commits went in over the next day. He noticed:
+  *"are you sure the landed section functions? it's showing what look like older
+  commits"*. So a selector is optional: one that matches a row moves it, and none
+  at all simply records the commit (`--what` is then required, there being no row
+  to take it from). The worker prompt says to call it once per commit.
+- **A LANDED row carries WHEN its commit happened** — `| commit | what | when |`,
+  the commit's own committer date in local time, 12-hour (`3:42 pm`), read from
+  git by `boardmove.commit_time()` and never from when the row was written. That
+  is not the no-pressure rule being bent: it is a fact about the past, like the
+  hash beside it, and not a clock running against him. It is **optional in both
+  directions** because this file syncs between the machines and either may be
+  running the older app: a two-cell row parses with an empty time, and a
+  three-cell row read by an older parser just loses the cell. A row with no
+  commit to read one from (`no change`) is written with two cells, not an empty
+  third. A group that gains its first timed row gains the `When` header in the
+  same edit — a markdown row with more cells than its header drops the extras in
+  every renderer, and this file is read in `reader` and on GitHub too.
 - **An item cannot be stranded.** Three ways back out of IN FLIGHT: the agent
   lands it, the watcher hands it back when the agent exits badly, or
   `boardmove.reconcile()` — run at the top of every board-watch tick — sees the
@@ -490,7 +514,11 @@ the gutter is reserved from its own `barW`, never a literal.
   **They can be REMOVED, though** — see below.
 - **LANDED is drawn entirely in the secondary tone**, commits in `dim`. It is
   the answer to "what did that session actually do to my machine", not something
-  that wants attention.
+  that wants attention. The **time sits at the trailing edge** in `dim` (§9.1 —
+  metadata clusters with its kin at the end of the row), so the reading order
+  stays hash, what, when and the time never competes with the sentence. Its
+  width is a character count like the commit's, and it is `0` for a row that has
+  no time, so the older rows give the space back to the `what`.
 - **The `where` column drops widest-first** as the window narrows (§9.1), at
   `width: 0`. Its width comes from a CHARACTER COUNT, not from `implicitWidth`:
   `width: Math.min(implicitWidth, …)` on an elided `Text` is self-referential and
@@ -590,13 +618,26 @@ each separately leaves both markers on screen (it did).
 ## Verify
 
 ```bash
+# on `top`, where the wrapper carries the Qt env:
 W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
 ( . /tmp/brdenv.sh; "$(tail -1 "$W" | grep -o '/nix/store/[^"]*/bin/python3')" \
     apps/board/tools/board-test.py --shots /tmp/board-shots )
+
+# on `book`, where it does NOT — run the harness under the system python
+# directly. **Do not source the wrapper there**: its `air` split is two lines,
+# a shebang and an `exec`, so `sed '$d'` leaves the exec and sourcing it
+# LAUNCHES BOARD on his screen. It has happened.
+/usr/bin/python3 apps/board/tools/board-test.py --shots /tmp/board-shots
 ```
 
-`tools/board-test.py`, offscreen, eight layers (202 checks). Two of them are
+`tools/board-test.py`, offscreen, nine layers (220 checks). Three of them are
 new and are the ones to read first if the fan-out misbehaves:
+
+- **LANDED** (`test_landed`) — a commit records with NO IN FLIGHT row (the bug
+  that made the section look frozen), the time comes from git rather than from
+  now, a hash that resolves nowhere is simply timeless, a two-cell row still
+  parses, and the header widens exactly once when an old group gains its first
+  timed row.
 
 - **what an agent says vs what it does** (`test_phase`) — the classifier per
   tool, that reading is not a phase of its own, tailing by byte offset, half a

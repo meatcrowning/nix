@@ -427,6 +427,48 @@ def test_moves(tmp):
           any("is gone" in t["text"] for t in B.parse(back)["todo"]),
           [t["text"] for t in B.parse(back)["todo"]])
 
+    # ---- THE ROWS NOTHING OWNS: the section has to be able to shrink ----
+    # `reconcile` only ever sees this host's stashes, so a row written by hand,
+    # or by the other machine, or before the stash existed, had no exit at all
+    # and IN FLIGHT could only grow. His words: it "doesnt update at all".
+    src = reset()
+    rows = [r["what"] for r in bm.unowned(path=path)]
+    check("a row no stash on this host owns is reported",
+          rows == ["A thing being built", "Another thing"], rows)
+
+    got = bm.stall("A thing being built", path=path)
+    doc6 = B.parse(B.read(path))
+    check("stall takes the row out of IN FLIGHT",
+          [r["what"] for r in doc6["flight"]] == ["Another thing"],
+          [r["what"] for r in doc6["flight"]])
+    check("...and it is MOVED, not dropped: the cells become one bullet",
+          len(doc6["todo"]) == 2
+          and "A thing being built" in doc6["todo"][-1]["text"]
+          and "apps/thing/**" in doc6["todo"][-1]["text"]
+          and "with a note" in doc6["todo"][-1]["text"],
+          [t["text"] for t in doc6["todo"]])
+    check("...one row out, one bullet in, and nothing else touched",
+          len(B.read(path).splitlines()) == len(src.splitlines()),
+          lines_differing(src, B.read(path)))
+    check("...and it says which row it moved", got["what"] == "A thing being built")
+
+    # a row this host DOES own keeps its real exit: `back` restores his question
+    src = reset()
+    d = B.parse(src)
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
+    bm.start("1", path=path)
+    check("a stashed decision is NOT reported as unowned",
+          "First question?" not in [r["what"] for r in bm.unowned(path=path)],
+          [r["what"] for r in bm.unowned(path=path)])
+    before = B.read(path)
+    try:
+        bm.stall("First question?", path=path)
+        check("stall refuses a row whose decision is recoverable", False)
+    except bm.BoardError as e:
+        check("stall refuses a row whose decision is recoverable", "back" in str(e),
+              str(e))
+    check("...and the refusal wrote nothing", B.read(path) == before)
+
     # ---- the write is guarded against a racing writer ----
     reset()
     hits = {"n": 0}
@@ -454,6 +496,106 @@ def test_moves(tmp):
                        capture_output=True, text=True)
     check("boardctl refuses a selector that matches nothing, and says so",
           p.returncode == 1 and "no decision" in p.stderr, p.stderr.strip()[:200])
+
+
+# --------------------------------- 1b1. LANDED: recording a commit, and its time
+def test_landed(tmp):
+    """The section that stopped growing, and why.
+
+    `land` used to need an IN FLIGHT row, and a WORKER dispatched out of the box
+    never has one — only a decision agent does. So every commit the fan-out
+    produced was unrecordable, `note` was all a worker could reach, and LANDED
+    sat at the last day a decision agent had finished something while the repo
+    ran on. Both halves are asserted here: a commit lands with no row at all, and
+    it carries the commit's OWN time.
+
+    The time is backward compatible IN BOTH DIRECTIONS, which is a real
+    constraint and not a nicety: this file syncs between `top` and `book` and
+    either machine may be running the older app. A two-cell row parses with no
+    time; a three-cell row read by the old parser simply loses the third cell.
+    """
+    import subprocess
+
+    import boardmove as bm
+    import boardparse as B
+
+    path = os.path.join(tmp, "board.md")
+
+    def reset():
+        open(path, "w").write(FIXTURE)
+        return FIXTURE
+
+    # ---- the old shape still parses, and gains nothing it was not given ----
+    reset()
+    doc = B.parse(B.read(path))
+    check("a LANDED row written before `when` existed still parses",
+          [r["commit"] for r in doc["landed"][0]["rows"]] == ["abc1234", "def5678"],
+          [r["commit"] for r in doc["landed"][0]["rows"]])
+    check("...with an empty time, invented for nobody",
+          all(r["when"] == "" for r in doc["landed"][0]["rows"]))
+
+    # ---- a commit with NO IN FLIGHT row: the whole point of the fix ----
+    before = B.read(path)
+    # ...into the group the fixture already has, which is the two-column shape
+    # every existing group in the real store is in.
+    got = bm.land("", "0badc0d", what="board: land with no row", when="3:42 pm",
+                  date="2026-07-28", path=path)
+    doc = B.parse(B.read(path))
+    row = [r for g in doc["landed"] for r in g["rows"] if r["commit"] == "0badc0d"]
+    check("a worker with no IN FLIGHT row can still record its commit",
+          len(row) == 1 and row[0]["what"] == "board: land with no row",
+          [(g["date"], [r["commit"] for r in g["rows"]]) for g in doc["landed"]])
+    check("...and nothing was moved out of IN FLIGHT for it",
+          got == {} and len(doc["flight"]) == len(B.parse(before)["flight"]))
+    check("...carrying the time, 12-hour, on its own row",
+          row and row[0]["when"] == "3:42 pm", row and row[0]["when"])
+
+    # ---- ...and it is still a targeted line edit ----
+    after = B.read(path)
+    kept = [ln for ln in before.splitlines(True) if ln not in after.splitlines(True)]
+    check("...leaving every line it did not name alone, except the widened head",
+          all(ln.startswith("| Commit |") or ln.startswith("|---|") for ln in kept),
+          kept[:3])
+    check("a group that gains a timed row gains the `When` header with it",
+          "| Commit | What | When |\n" in after and "| Commit | What |\n" not in after)
+    check("...and the old rows in it are untouched",
+          "| `abc1234` | did a thing |\n" in after)
+
+    # ---- a row with no commit to read a time from stays two cells ----
+    bm.land("", "no change", what="decision settled: nothing to build", when="",
+            path=path)
+    txt = B.read(path)
+    check("a row with no time is written the old way, not with an empty cell",
+          "| `no change` | decision settled: nothing to build |\n" in txt,
+          [ln for ln in txt.splitlines() if "no change" in ln])
+
+    # ---- the time comes from GIT, not from now ----
+    head = subprocess.run(["git", "-C", os.path.expanduser("~/nix"),
+                           "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    want = subprocess.run(["git", "-C", os.path.expanduser("~/nix"), "show", "-s",
+                           "--format=%cd", "--date=format:%I:%M %p", head],
+                          capture_output=True, text=True).stdout.strip()
+    check("a commit's time is read from git, in local 12-hour form",
+          bm.commit_time(head) == want.lstrip("0").lower(),
+          (bm.commit_time(head), want))
+    check("...and a hash that resolves nowhere is simply timeless",
+          bm.commit_time("0000000") == "" and bm.commit_time("no change") == "")
+
+    # ---- and the CLI reaches it with no selector at all ----
+    reset()
+    cli = os.path.join(BOARD, "tools", "boardctl.py")
+    p = subprocess.run([sys.executable, cli, "--board", path, "land",
+                        "--commit", "feedbee", "--what", "board: via the CLI"],
+                       capture_output=True, text=True)
+    check("boardctl land takes no selector",
+          p.returncode == 0 and "nothing was moved" in p.stdout,
+          (p.stdout.strip()[:120], p.stderr.strip()[:120]))
+    p = subprocess.run([sys.executable, cli, "--board", path, "land", "nothing-here",
+                        "--commit", "feedbee"], capture_output=True, text=True)
+    check("...but a selector that matches nothing and no --what is refused",
+          p.returncode == 1 and "no line to record" in p.stderr,
+          p.stderr.strip()[:160])
 
 
 # ------------------------------------- 1b2. clearing a chore off the TO DO list
@@ -933,6 +1075,35 @@ def test_work(tmp):
           all(r["id"] == "" for x in bw.groups() if x["phase"] == "queued"
               for r in x["rows"]))
 
+    # ---- the names: shown everywhere, keyed on nowhere ----
+    # *"can you give the workers regular human names?"* — the id goes on being
+    # the key (the unit, the log, the sidecar, the inbox), so what is asserted
+    # here is that the name is STABLE and UNIQUE among the living, not that
+    # anything on disk moved to it.
+    live = bw.live_workers()
+    check("every worker gets an ordinary first name beside its coded id",
+          live and all(a.get("name") in ba.NAMES for a in live),
+          [(a["id"], a.get("name")) for a in live])
+    check("...no two LIVE workers answer to the same name",
+          len({a["name"] for a in live}) == len(live), [a["name"] for a in live])
+    check("...and it is the same name on the next read, not a new one per poll",
+          [(a["id"], a["name"]) for a in bw.live_workers()]
+          == [(a["id"], a["name"]) for a in live])
+    rec = json.load(open(os.path.join(ba.agents_dir(), live[0]["id"] + ".json")))
+    check("...persisted in the record, so a board reload does not rename anybody",
+          rec.get("name") == live[0]["name"], rec)
+    check("...derived from the id when a record predates names, and derived the "
+          "same way in every process",
+          ba.name_for("w1a2b3c") == ba.name_for("w1a2b3c")
+          and ba.name_for("w1a2b3c") in ba.NAMES)
+    check("...a name a live agent already answers to is moved along, not reused",
+          ba.pick_name("wcollide", taken=set(ba.NAMES[:-1])) == ba.NAMES[-1])
+    check("...and every drawn name is ASCII, which the font can draw (2.3)",
+          all(n.isascii() and n.isalpha() for n in ba.NAMES), ba.NAMES)
+    check("a task queued above the cap is given no name, having nobody on it",
+          all(r["name"] == "" for x in bw.groups() if x["phase"] == "queued"
+              for r in x["rows"]))
+
     for a in bw.live_workers():
         os.kill(a["pid"], 9)
     time.sleep(0.4)
@@ -1341,12 +1512,22 @@ def test_window(app, tmp):
     # LANDED is the third section, and it is live too
     before_landed = len(prop(win, "landed"))
     bm.land("Second question?", "aa11bb2", what="thing: went on", date="2026-09-09",
-            path=path)
+            when="3:42 pm", path=path)
     spin(500)
     check("landing redraws IN FLIGHT and LANDED together",
           len(prop(win, "flight")) == before_flight
           and len(prop(win, "landed")) == before_landed + 1,
           (len(prop(win, "flight")), len(prop(win, "landed"))))
+    # ...and the time reaches the row, while the rows that never had one carry
+    # an empty string rather than an invented time or an undefined.
+    groups = prop(win, "landed")
+    check("a landed row carries WHEN it happened to the window",
+          any(r["commit"] == "aa11bb2" and r["when"] == "3:42 pm"
+              for g in groups for r in g["rows"]),
+          [[(r["commit"], r["when"]) for r in g["rows"]] for g in groups])
+    check("...and an older row has an empty one, not a made-up one",
+          all(isinstance(r["when"], str) for g in groups for r in g["rows"])
+          and any(r["when"] == "" for g in groups for r in g["rows"]))
 
     # ---- the file REPLACED wholesale, the way a git checkout or a sync does ----
     # An atomic save swaps the inode, so a watch on the file alone stops firing.
@@ -1484,6 +1665,8 @@ def test_window(app, tmp):
           card.get("says") == "testing - the vtbclient parser"
           and card.get("actually") == "editing vtbclient.py",
           (card.get("says"), card.get("actually")))
+    check("...and it is drawn as a PERSON: the card carries a first name",
+          card.get("name") in ba.NAMES, card.get("name"))
     check("an agent that has said nothing shows no claim at all",
           rows.get("Find where focus is decided", {}).get("says") == "",
           rows.get("Find where focus is decided"))
@@ -1681,6 +1864,8 @@ def main():
         os.makedirs(os.path.join(tmp, "win"))
         test_roundtrip(os.path.join(tmp, "rt"))
         test_moves(os.path.join(tmp, "mv"))
+        os.makedirs(os.path.join(tmp, "ld"))
+        test_landed(os.path.join(tmp, "ld"))
         os.makedirs(os.path.join(tmp, "td"))
         test_todo_remove(os.path.join(tmp, "td"))
         test_agents(tmp)
