@@ -442,17 +442,48 @@ def _list(d):
         if rec:
             rec["file"] = os.path.join(d, name)
             out.append(rec)
+    # OLDEST FIRST, by the stamp `send()` wrote and not by the filename. The
+    # name is second-resolution plus three random bytes, so two things he typed
+    # inside the same second sorted by coin toss — which is the order they are
+    # then handed to an agent in, and the order the queue is joined in for the
+    # orchestrator. His second thought arriving before his first is a real
+    # misreading, and it costs one key to remove.
+    out.sort(key=lambda r: (float(r.get("sent") or 0), os.path.basename(r["file"])))
     return out
 
 
-def _move(msg, dest_dir):
+def _move(msg, dest_dir, state=None, by=None):
     """The only way a message ever changes state. A rename inside one
     filesystem, so it is in exactly one directory at every instant — that is the
-    whole "nothing he typed is lost" argument."""
+    whole "nothing he typed is lost" argument.
+
+    The rename happens FIRST and alone; `state`/`by` are then written back into
+    the file at its new home, best effort. That order is deliberate — the
+    "exactly one directory" invariant must not depend on a second write
+    succeeding, so a failed stamp costs a provenance line and nothing else.
+
+    Why stamp at all: `taken/` is the resting place of BOTH "its agent read it"
+    and "nobody read it, sweep escalated it and some later run drained it", and
+    for its first months the two were indistinguishable on disk — `send()`
+    computed a `state` and never persisted it, and `_move` recorded nothing. So
+    the one question actually asked of this store — *why did my worker never act
+    on the note I sent it?* — could only be answered by reading `ctime` and
+    guessing. Now the file says who moved it, when, and out of which state.
+    """
     dest = os.path.join(dest_dir, os.path.basename(msg["file"]))
     os.replace(msg["file"], dest)
     msg = dict(msg)
     msg["file"] = dest
+    if state:
+        msg["state"] = state
+        msg["movedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        if by:
+            msg["movedBy"] = clean_id(by)
+        try:
+            rec = {k: v for k, v in msg.items() if k != "file"}
+            _write_json(dest, rec)
+        except OSError:
+            pass
     return msg
 
 
@@ -473,12 +504,15 @@ def send(text, to=None, to_title="", to_kind=""):
     delivered = bool(tid and tid in live)
     msg = {"to": tid or "", "toTitle": to_title, "toKind": to_kind,
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
-           "text": text, "host": os.uname().nodename}
+           "text": text, "host": os.uname().nodename,
+           # Persisted, not only returned: the state is the one thing anybody
+           # asks this file afterwards, and a value that lives only in the
+           # caller's return value is a value nobody can look up. See `_move`.
+           "state": "delivered" if delivered else "queued"}
     d = inbox_dir("to", tid) if delivered else inbox_dir("queue")
     path = os.path.join(d, _msg_name())
     _write_json(path, msg)
     msg["file"] = path
-    msg["state"] = "delivered" if delivered else "queued"
     return msg
 
 
@@ -603,7 +637,7 @@ def take(agent_id=None, include_queue=False):
     msgs = for_agent(aid) if aid else []
     if include_queue:
         msgs += pending()
-    return [_move(m, inbox_dir("taken")) for m in msgs]
+    return [_move(m, inbox_dir("taken"), state="taken", by=aid) for m in msgs]
 
 
 def drain():
@@ -614,7 +648,9 @@ def drain():
     message deleted after a crash would be worked never. Moving first and
     reporting the failure onto the board is the trade that loses nothing.
     """
-    return [_move(m, inbox_dir("taken")) for m in pending()]
+    return [_move(m, inbox_dir("taken"), state="drained",
+                  by=os.environ.get("BOARD_AGENT_ID") or "board-watch")
+            for m in pending()]
 
 
 def sweep():
@@ -638,7 +674,9 @@ def sweep():
             stale = (time.time() - float(msg.get("sent") or 0)) > ESCALATE_AFTER_S
             if name in live and not stale:
                 continue
-            moved.append(_move(msg, inbox_dir("queue")))
+            moved.append(_move(msg, inbox_dir("queue"),
+                               state="unread-its-agent-went" if name not in live
+                               else "unread-too-long", by=name))
         try:
             os.rmdir(d)          # empty and its agent is gone: nothing to keep
         except OSError:
@@ -652,7 +690,7 @@ def sweep():
         except OSError:
             continue
         if age > EDIT_RESCUE_AFTER_S:
-            moved.append(_move(msg, inbox_dir("queue")))
+            moved.append(_move(msg, inbox_dir("queue"), state="rescued-from-edit"))
     dropped = []
     for rec in _registrations():
         if not bm._alive(rec):
