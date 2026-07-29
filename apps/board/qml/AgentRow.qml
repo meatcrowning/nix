@@ -1,4 +1,7 @@
 import QtQuick
+// `Motion` — the desktop's one duration and curve, for the tick on the observed
+// line. Nothing here writes a duration of its own (§6.2).
+import "../../qmlcommon"
 
 // One agent's card: WHAT IT SAYS it is doing, WHAT IT IS OBSERVED DOING, what
 // it was asked to do, and the box he types into to reach it.
@@ -30,7 +33,9 @@ import QtQuick
 //   <the description>  derived from the tool calls in its live transcript
 //                      (`boardphase.py`). Carries the VERB — "editing
 //                      Main.qml" — and cannot be faked, forgotten or left
-//                      stale. No subject, no opener.
+//                      stale. No subject, no opener, and a ticking `...` on
+//                      the end of it while that is happening NOW (`liveDots`
+//                      below, which is the only moving thing on the card).
 //
 // **Both lines are built in `boardphase.py` (`says_line`/`doing_line`), not
 // here**, because the joining is a judgement about the real strings rather than
@@ -109,6 +114,10 @@ Item {
     // nothing honest to say, and empty is then drawn as nothing at all.
     readonly property string saysLine: agent && agent.saysLine ? agent.saysLine : ""
     readonly property string doingLine: agent && agent.doingLine ? agent.doingLine : ""
+    // Which of `boardphase.observe`'s four outcomes the line above came from.
+    // Only `ok` is something actually happening right now, which is what the
+    // ticking dots below are allowed to claim.
+    readonly property string observed: agent && agent.observed ? agent.observed : ""
     // A card with no id is not an agent — it is a task waiting for a slot, or
     // the section's own box. It gets no inbox, because there is nothing running
     // to put a message in front of.
@@ -142,6 +151,47 @@ Item {
     // said "this one is over", and it is one rung, not a colour (§3.5's job is
     // done by the words in the detail line).
     readonly property color leadTone: running ? fgText : fgDim
+
+    // ---- the tick on the end of the observed line ----
+    // His: *"at the end of the second row of an agents information, it should
+    // have an animated elipsies to show its currently happening"*. So the
+    // observed line ends in `.`, `..`, `...`, cycling, and the card reads as
+    // live without a number anywhere on it.
+    //
+    // **It is drawn HERE and not in `doing_line()`**, which builds prose: an
+    // animated suffix is not prose, it is presentation, and putting it in the
+    // Python would mean the sentence a test asserts on changed four times a
+    // second and the model re-emitted on a timer.
+    //
+    // **It claims only what is true.** `ok` is the one observed state that
+    // means a tool call happened recently; `nothing recently`, `nothing yet`
+    // and the unlinked line are the states where something is NOT happening, so
+    // they get no tick — an animation over those would be the dishonest
+    // affordance §10 forbids, and a stopped agent's past-tense line likewise.
+    //
+    // ASCII dots, never U+2026 (§2.3), and the field is **always three cells
+    // wide** — the trailing spaces are what stop the line reflowing under a
+    // wrap as the dots cycle, exact because the font is monospace (§2.7).
+    readonly property bool ticking: running && observed === "ok" && doingLine !== ""
+    property int dotPhase: 0
+    readonly property string liveDots: {
+        if (!ticking)
+            return ""
+        // Reduced motion still says the line is live; it just stops moving.
+        if (motion.reduceMotion)
+            return "..."
+        return [".  ", ".. ", "..."][dotPhase % 3]
+    }
+    // One step per desktop slide (§6.2's own number, through `ms()` so the
+    // panel's motion settings reach it) — about a second for the full cycle,
+    // which is quiet enough to sit on every running card at once.
+    Motion { id: motion }
+    Timer {
+        interval: Math.max(60, motion.ms(motion.slideMs))
+        running: row.ticking && !motion.reduceMotion && row.visible
+        repeat: true
+        onTriggered: row.dotPhase = (row.dotPhase + 1) % 3
+    }
 
     // Cut a string to `cells` characters, marking the cut with ASCII "..." —
     // never the unicode ellipsis, which is a hardcoded UI string and therefore
@@ -215,7 +265,7 @@ Item {
             visible: row.doingLine !== ""
             height: visible ? implicitHeight : 0
             color: row.saysLine === "" ? row.leadTone : row.fgDim
-            text: row.doingLine
+            text: row.doingLine + row.liveDots
         }
 
         // ---- THIRD LINE ----
