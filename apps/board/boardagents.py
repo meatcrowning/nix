@@ -424,14 +424,22 @@ def agents(procs=None):
                     "session": rec.get("session") or "",
                     "state": "running" if bm._alive(rec) else "exited"})
 
-    # Interactive sessions: the honest half. A `claude` process that descends
-    # from one of the agents above IS that agent (board-watch's own child), and
-    # is already listed; anything else is a session nobody here spawned.
+    # Interactive sessions: the honest half. A `claude` process that IS one of
+    # the agents above, or that descends from one, is already listed; anything
+    # else is a session nobody here spawned and is listed as the process it is.
+    #
+    # BOTH halves are needed, and which one catches an agent depends on how it
+    # was spawned. A decision/note agent's registered pid is board-watch's own
+    # tick process and the `claude` is its CHILD — ancestry catches that. But a
+    # worker gets its own systemd unit now, so the pid registered for it is the
+    # `claude` process itself, which is in nobody's ancestor list but its own
+    # — and it was being drawn a second time as an anonymous session until the
+    # `pid in owners` half was added.
     owners = {a["pid"] for a in out if a["pid"]}
     for pid, (ppid, comm, cmd) in sorted(procs.items()):
         if not _is_claude(comm, cmd):
             continue
-        if owners & set(_ancestors(pid, procs)):
+        if pid in owners or owners & set(_ancestors(pid, procs)):
             continue
         out.append({"id": "s%d" % pid, "kind": "session",
                     "title": "an interactive Claude Code session",
