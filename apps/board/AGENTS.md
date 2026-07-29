@@ -355,10 +355,18 @@ Rules that fall out of it, all of them load-bearing:
       never reaches below the OLDEST commit LANDED already names (a fixed window
       would have appended 96 rows of pre-board history on its first run, and an
       empty section has no floor and so sweeps nothing at all); it leaves a
-      commit alone until `LANDED_MIN_AGE`, because the worker that made it is
-      usually still running and about to record it itself; and a commit only
-      joins a date group that exists or opens one newer than every group there,
-      never one wedged into the middle.
+      commit alone until `LANDED_MIN_AGE`, which is ONE TICK — 60 s, not the ten
+      minutes it was; and a commit only joins a date group that exists or opens
+      one newer than every group there, never one wedged into the middle.
+    - **THE WAIT IS ONE TICK, because `land` no longer loses the race.** He
+      asked *"why is the wait time so absurdly high? it should just -"*, and the
+      answer was that every delay here was bought to keep two writers from
+      appending one hash: ten minutes for the worker's own `land`, a further
+      stagger for the other host, a ten-minute fetch throttle on top. All three
+      are gone, and what replaces them is that a collision is now UNDONE rather
+      than avoided — `land` upgrades a sweep-written row in place, and the sweep
+      heals a duplicate row. End to end a push shows up in about two ticks: one
+      to fetch, one to read it.
     - **It runs in the BOARD APP**, `Board._catch_up` on a 60 s timer and at
       launch, throttled to `LANDED_SWEEP_EVERY` inside `boardmove`. That is the
       one place the section is actually drawn — so what he is looking at has
@@ -375,18 +383,31 @@ Rules that fall out of it, all of them load-bearing:
       looked like it worked at all. Every commit the OTHER host pushed was
       invisible until somebody happened to pull — on a freshly booted machine,
       never, and he said so: *"you say that but landed still didnt update even
-      after i rebooted"*. So `_fetch_origin()` runs first, throttled to
-      `LANDED_FETCH_EVERY`, **detached and unwaited** because `_catch_up` is on
-      the GUI thread and a fetch off-LAN blocks until DNS gives up — the ref it
-      lands is read by the next sweep two minutes later, well inside the delays
-      below. A repo with no `origin` is never dialled.
-    - **The two hosts are staggered, because `board.md` syncs and there is no
-      lock across it.** `top` fills a hole after 10 minutes, any other host once
-      the row `top` would have written could have REACHED it: the lead's 10,
-      plus 5 minutes for the docs sync to push and 5 to pull. That is 20, and it
-      was 45 — a guess, and one that made the sweep useless on `book`, which is
-      where he actually sits. Nothing here reorders or rewrites, so the worst
-      case of a lost race is one duplicate row, not a damaged file.
+      after i rebooted"*. So `_fetch_origin()` runs first, on EVERY tick
+      (`LANDED_FETCH_EVERY` = the sweep's own period), **detached and unwaited**
+      because `_catch_up` is on the GUI thread and a fetch off-LAN blocks until
+      DNS gives up — the ref it lands is read by the next sweep one tick later.
+      It is the only thing that decides whether the other host's commit is
+      visible at all, so a tick it skips is a tick the hole stays; throttling it
+      to ten times the period only ever bought a ten-minute hole. A repo with no
+      `origin` is never dialled.
+    - **A DUPLICATE IS HEALED, NOT AVOIDED — that is the whole cross-host
+      answer.** `board.md` syncs and there is no lock across it, so both hosts
+      can look at the same hole in the same second. There used to be a stagger
+      (`top` after 10 minutes, anyone else after 20, the docs sync's round trip)
+      and it was 20 minutes of waiting to prevent something 20 lines of code can
+      remove. `landed_duplicates()` drops a second row for a hash the section
+      already names — one line edit, and ONLY if the row it drops says just what
+      the sweep itself would have written. Strictly better than the stagger:
+      that only made the race unlikely, and a duplicate that got through stayed
+      on his board for good. Two DIFFERENT sentences for one hash are both left
+      alone on purpose — deleting a line a person wrote is not this function's
+      to do.
+    - **`land` UPGRADES a row the sweep beat it to**, rather than dropping the
+      call on the floor. Same commit, same time, the agent's own sentence
+      replacing the raw subject, one targeted line edit; a `land` that would
+      write the identical row succeeds and writes nothing. That is what buys the
+      one-tick `LANDED_MIN_AGE` above.
     - **What is missing is decided twice, the second time inside the lock.**
       `bp.edit` re-runs the edit on a fresh read whenever the file moved under
       it, and that is exactly when a worker's own `land` arrives; the retry used
@@ -396,7 +417,10 @@ Rules that fall out of it, all of them load-bearing:
       committer dates it chose and asserts all of it, including that a second
       run leaves the file byte-identical; `test_landed_fetch` clones one repo
       from another to prove the stale-ref blindness, that the fetch clears it,
-      and that a racing hash is skipped rather than duplicated.
+      that it rides the sweep's own tick, and that a racing hash is skipped
+      rather than duplicated; `test_landed_dedupe` asserts a two-minute-old
+      commit is a hole on every host and that the repeat row is the one removed;
+      `test_landed_upgrade` asserts `land` rewrites in place and adds no row.
 - **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
   Only a decision agent has a row (`start()` made it); a WORKER dispatched out
   of the box never did, so every commit the fan-out produced was unrecordable —

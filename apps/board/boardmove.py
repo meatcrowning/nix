@@ -329,13 +329,37 @@ def land(sel, commit, what=None, date=None, when=None, path=bp.BOARD_PATH):
     growing while the repo did not. So: a selector that matches a row moves it,
     and no selector (or one that matches nothing) simply records the commit.
     `what` is then required, because there is no row to take it from.
+
+    **If LANDED already names this commit, the row is UPGRADED in place rather
+    than added.** The sweep (`reconcile_landed`) fills a hole about two minutes
+    after the push now, so a worker that takes longer than that to come back and
+    `land` will regularly find its own commit already there under the raw commit
+    subject. Dropping the call on the floor — which is what "skip a hash the doc
+    already names" amounted to — threw away the sentence the agent chose, and
+    that sentence is the whole reason `land` is still the primary path. So the
+    What cell is rewritten: ONE line, in place, same commit and same time, which
+    is a targeted line edit like every other write here and not a re-serialise.
+    A `land` that would write the identical row changes nothing.
     """
     got = {}
+    upgraded = []
     rec = _stash_for(sel) if sel else None
     row_sel = rec["title"] if rec else sel
     when = commit_time(commit) if when is None else when
 
+    def existing(doc):
+        c = (commit or "").strip().strip("`").lower()
+        if not re.fullmatch(r"[0-9a-f]{4,40}", c):
+            return None
+        for grp in doc.get("landed") or []:
+            for row in grp.get("rows") or []:
+                h = (row.get("commit") or "").strip().strip("`").lower()
+                if h and (h.startswith(c) or c.startswith(h)):
+                    return row
+        return None
+
     def go(doc):
+        del upgraded[:]
         row = None
         if row_sel:
             try:
@@ -346,16 +370,30 @@ def land(sel, commit, what=None, date=None, when=None, path=bp.BOARD_PATH):
                         "nothing in IN FLIGHT matches '%s' and no --what was "
                         "given - there is no line to record" % sel)
         lines = doc["lines"]
-        if row is not None:
-            got.update(row)
-            lines = bp.remove_row(lines, row["line"])
-        elif not what:
+        if row is None and not what:
             raise BoardError(
                 "nothing in IN FLIGHT matches '%s' and no --what was given - "
                 "there is no line to record" % sel)
-        return bp.add_landed_row(lines, commit, what or row["what"], date, when)
+        said = what or row["what"]
+        # The upgrade goes FIRST and replaces exactly one line, so the IN FLIGHT
+        # row's index — measured on this same doc, and above LANDED — is still
+        # the line it was.
+        have = existing(doc)
+        if have is not None:
+            new = bp.landed_row(have["commit"], said, have["when"] or when)
+            lines = lines[:have["line"]] + [new] + lines[have["line"] + 1:]
+        if row is not None:
+            got.update(row)
+            lines = bp.remove_row(lines, row["line"])
+        if have is not None:
+            upgraded.append(True)
+            return lines
+        return bp.add_landed_row(lines, commit, said, date, when)
 
-    if not bp.edit(path, go):
+    # A `land` that re-states a row already reading exactly that way writes
+    # nothing, and that is a SUCCESS: `bp.edit` returns False for "the bytes
+    # would not change", which here means the record is already right.
+    if not bp.edit(path, go) and not upgraded:
         raise BoardError("nothing was written")
     if sel:
         forget(sel)
@@ -710,37 +748,55 @@ LANDED_REPO = os.path.expanduser("~/nix")
 #: time it ran. An empty LANDED has no floor and so sweeps nothing, which is the
 #: safe answer rather than the whole repo.
 
-#: A commit is left alone until it is this old, because the worker that made it
-#: is very often still running and about to `land` it itself — and two writers
-#: appending the same hash is exactly the duplicate this must not create.
-LANDED_MIN_AGE = 600                # 10 minutes
-
-#: ...and `board.md` SYNCS between the machines, so both hosts can be looking at
-#: the same hole with no lock between them. The stagger is the whole answer:
-#: `top` fills a hole after 10 minutes, any other host waits until the row `top`
-#: would have written could have REACHED it — the lead's own 10, plus the docs
-#: sync's 5 minutes to push and 5 to pull. That is 20, and it was 45: a guess,
-#: and one that made the sweep useless on `book`, which is where he actually
-#: sits and where every commit in this stretch was made. He reboots, looks, and
-#: a hole he can see stays a hole for three quarters of an hour. Nothing here
-#: reorders or rewrites, so the worst case of a lost race is one duplicate row,
-#: not a damaged file.
-LANDED_LEAD_HOST = "top"
-LANDED_OTHER_MIN_AGE = 1200         # 20 minutes
+#: A commit is left alone until it is this old — one sweep tick, no more. His
+#: words: *"why is the wait time so absurdly high? it should just notice when a
+#: new commit is added and append it to the list"*. It used to be 10 minutes,
+#: bought as a courtesy to the worker that made the commit and is usually still
+#: running and about to `land` it with its own better sentence; if the sweep got
+#: there first, `land` wrote nothing at all. **That courtesy is bought a
+#: different way now: `land` UPGRADES a sweep-written row's What cell in place**
+#: (one targeted line edit, see `land`), so losing the race costs the agent's
+#: sentence nothing and there is no reason left to wait ten minutes for it. What
+#: this minute still buys is the ordinary case looking tidy — the worker's own
+#: sentence usually arrives first and no row is ever rewritten.
+LANDED_MIN_AGE = 60
 
 #: `git log origin/main` reads a REMOTE-TRACKING ref, and nothing moves that ref
 #: but a fetch. Pushing from this machine moves it as a side effect, so the
 #: sweep saw this host's own commits and was blind to the other host's for as
 #: long as nobody happened to pull — which on a freshly booted machine is
-#: forever. So the sweep fetches. DETACHED and unwaited, because `_catch_up`
-#: runs on the GUI thread and a fetch off-LAN blocks until DNS gives up; the ref
-#: it lands is read by the NEXT sweep, two minutes later, which is well inside
-#: the delays above.
-LANDED_FETCH_EVERY = 600            # 10 minutes
+#: forever. So the sweep fetches, on EVERY tick: it is one detached process and
+#: it is what decides whether the other host's commit is visible at all, so
+#: throttling it to ten times the sweep's own period only ever bought a ten
+#: minute hole. DETACHED and unwaited still, because `_catch_up` runs on the GUI
+#: thread and a fetch off-LAN blocks until DNS gives up; the ref it lands is
+#: read by the NEXT sweep, one tick later.
+LANDED_FETCH_EVERY = 60
 
 #: Don't shell out to git on every repaint. The board app refreshes on every
-#: inotify event on the file, and agents write to it constantly.
-LANDED_SWEEP_EVERY = 120
+#: inotify event on the file, and agents write to it constantly — but its own
+#: `_catch_up` timer is 60 s, so this is the floor that matters and a commit
+#: shows up about two ticks after it is pushed (one to fetch, one to read).
+LANDED_SWEEP_EVERY = 60
+
+#: ...and `board.md` SYNCS between the machines, so both hosts can be looking at
+#: the same hole at the same second with no lock between them. There WAS a
+#: stagger here — `top` after 10 minutes, any other host after 20, the docs
+#: sync's round trip — and it is gone, because it was 20 minutes of waiting to
+#: prevent a duplicate row rather than 20 lines of code to remove one. **The
+#: sweep now HEALS a duplicate instead of avoiding it**: it already reads every
+#: hash in the section, so a second row for a hash the section already names is
+#: dropped, ONE line edit, provided the row it drops says only what the sweep
+#: itself would have written (`landed_duplicates`). That is the whole of the
+#: cross-host answer, and it is strictly better than the stagger was: the
+#: stagger only made the race unlikely, and a duplicate that did get through
+#: stayed on his board for good.
+#:
+#: What it deliberately does NOT do is dedupe two DIFFERENT sentences for one
+#: hash. Deleting a line a person or an agent wrote is not this function's to
+#: do — union-merged prose is the one case a human should look at — so those
+#: are left alone and only the mechanical repeat goes.
+LANDED_HEAL_DUPLICATES = True
 
 #: How much history to ask git for. The floor above is always inside this on any
 #: board that is being used; it only bounds the cost of the call.
@@ -792,9 +848,11 @@ def _fetch_origin(repo=LANDED_REPO, now=None, every=LANDED_FETCH_EVERY):
 
     Unwaited because `Board._catch_up` calls this on the GUI thread and a fetch
     off-LAN blocks until DNS gives up; `book` is off-LAN often. The ref it lands
-    is read by the NEXT sweep two minutes later, which is well inside the delays
-    the sweep already waits out. A repo with no `origin` is left alone entirely,
-    so a test repo never reaches the network.
+    is read by the NEXT sweep, one tick later — which is why the throttle is the
+    sweep's own period and not ten times it: this call is the only thing that
+    decides whether the other host's commit is visible, so every tick it skips
+    is a tick the hole stays. A repo with no `origin` is left alone entirely, so
+    a test repo never reaches the network.
     """
     now = time.time() if now is None else now
     try:
@@ -868,7 +926,63 @@ def landed_when(ts):
     return _local(ts).strftime("%I:%M %p").lstrip("0").lower()
 
 
-def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None):
+def landed_subjects(log):
+    """`{full hash: the What cell the sweep would write for it}`.
+
+    Through `bp.cell` and back through `bp.text`, because that is what the
+    subject looks like once it has been a row: comparing a raw `git log`
+    subject against a parsed cell would read a round trip as a difference and
+    call an ordinary sweep row somebody's sentence.
+    """
+    return {full: bp.text(bp.cell(subject)) for full, _ts, subject in log}
+
+
+def landed_duplicates(doc, log):
+    """Line indices of LANDED rows that repeat a hash the section already names
+    AND say nothing that would be lost. Oldest-first order, safe to remove.
+
+    This is the whole of the cross-host answer (see `LANDED_HEAL_DUPLICATES`):
+    two hosts sweeping the same hole with no lock between them used to be
+    prevented by making the second one wait twenty minutes, and is now simply
+    undone. One row per hash survives, and it is chosen so that the surviving
+    row is the one carrying the most:
+
+      * a repeat whose What is exactly the commit SUBJECT is a sweep row and
+        goes — the sweep can write it again from git any time;
+      * a repeat identical to the row above it goes, for the same reason;
+      * if the FIRST row is the sweep row and the later one is not, the first
+        one goes instead and the sentence somebody chose stays.
+
+    Two different sentences for one hash are left alone, both of them. Nothing
+    here may delete a line a person wrote, and that case is a union merge of
+    two people's prose — the one thing a human should look at.
+    """
+    subjects = landed_subjects(log)
+    seen = {}
+    drop = []
+    for grp in doc.get("landed") or []:
+        for row in grp.get("rows") or []:
+            c = (row.get("commit") or "").strip().strip("`").lower()
+            if not re.fullmatch(r"[0-9a-f]{4,40}", c):
+                continue
+            full = next((f for f in subjects
+                         if f.startswith(c) or c.startswith(f)), None)
+            key = full or c
+            first = seen.get(key)
+            if first is None:
+                seen[key] = row
+                continue
+            subj = subjects.get(full)
+            if row["what"] == first["what"] or (subj and row["what"] == subj):
+                drop.append(row["line"])
+            elif subj and first["what"] == subj:
+                drop.append(first["line"])
+                seen[key] = row
+    return sorted(drop)
+
+
+def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None,
+                   log=None):
     """What is on `origin/main` and not in LANDED. Oldest first, ready to append.
 
     Three bounds, and each one exists to stop this doing something he did not
@@ -876,18 +990,22 @@ def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None)
 
       * the FLOOR — nothing older than the oldest commit LANDED already names.
       * the AGE — nothing younger than `min_age`, so a live worker gets to
-        record its own commit first.
+        record its own commit first. One tick now, not ten minutes: `land`
+        upgrades a row the sweep beat it to, so the wait no longer has to cover
+        the worker's whole run.
       * the DATE — a commit only joins a `### <date>` group that already exists,
         or opens a new one if its date is newer than every group there. Never
         one wedged in the middle: LANDED is newest-group-first and this must not
         invent that structure from a commit's date.
+
+    There is no longer a per-host bound. `log` is the `_git_log()` the caller
+    already took, so one sweep shells out to git once.
     """
     now = time.time() if now is None else now
     if min_age is None:
-        min_age = (LANDED_MIN_AGE if socket.gethostname() == LANDED_LEAD_HOST
-                   else LANDED_OTHER_MIN_AGE)
+        min_age = LANDED_MIN_AGE
     doc = bp.parse(bp.read(path))
-    log = _git_log(repo)
+    log = _git_log(repo) if log is None else log
     if not log:
         return []
     have = landed_commits(doc)
@@ -920,41 +1038,52 @@ def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None)
 
 def reconcile_landed(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None,
                      now=None, force=False, fetch=True):
-    """Append every missing commit to LANDED. Returns the rows it wrote.
+    """Append every missing commit to LANDED, and heal any duplicate row it
+    finds on the way. Returns the rows it APPENDED (a heal is silent).
 
     Idempotent by construction: the second run finds those hashes in the file
-    and has nothing to do. One `bp.edit`, so the whole catch-up is one atomic
-    write under the same lock every other writer takes, and a run with nothing
-    to append does not write at all.
+    and has nothing to do, and the row it removed is not there to remove twice.
+    One `bp.edit`, so the whole catch-up is one atomic write under the same lock
+    every other writer takes, and a run with nothing to do does not write at
+    all. Removals go FIRST and in descending line order, so no removal moves the
+    line another one was measured against; the appends after them re-find their
+    group in the mutated lines, as they always did.
 
-    Which hashes are missing is decided TWICE — once out here, to know whether
-    there is anything to do at all, and again inside `go`, against the very doc
-    the rows are being written into. `bp.edit` re-runs `go` on a fresh read
-    whenever the file moved under it, and that is exactly the moment a worker's
-    own `land` lands: without the second check the retry appended a row that had
-    just appeared, which is the one duplicate this must never create.
+    What there is to do is decided TWICE — once out here, to know whether to
+    open the file for writing at all, and again inside `go`, against the very
+    doc it is writing into. `bp.edit` re-runs `go` on a fresh read whenever the
+    file moved under it, and that is exactly the moment a worker's own `land`
+    lands: without the second check the retry appended a row that had just
+    appeared, which is the one duplicate this must never create.
     """
     now = time.time() if now is None else now
     if not force and not _sweep_due(now):
         return []
     if fetch:
         _fetch_origin(repo, now=now)
-    rows = landed_missing(path=path, repo=repo, min_age=min_age, now=now)
-    if not rows:
+    log = _git_log(repo)
+    rows = landed_missing(path=path, repo=repo, min_age=min_age, now=now, log=log)
+
+    def dups(doc):
+        return landed_duplicates(doc, log) if LANDED_HEAL_DUPLICATES else []
+
+    if not rows and not dups(bp.parse(bp.read(path))):
         return []
     wrote = []
 
     def go(doc):
         del wrote[:]
-        have = landed_commits(doc)
         lines = doc["lines"]
+        for i in sorted(dups(doc), reverse=True):
+            lines = bp.remove_row(lines, i)
+        have = landed_commits(doc)
         for r in rows:
             c = r["commit"]
             if any(c.startswith(h) or h.startswith(c) for h in have):
                 continue
             lines = bp.add_landed_row(lines, c, r["what"], r["date"], r["when"])
             wrote.append(r)
-        return lines if wrote else None
+        return lines if lines is not doc["lines"] else None
 
     if not bp.edit(path, go):
         return []
