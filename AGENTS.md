@@ -30,7 +30,8 @@ no tty: **just run it, don't ask, don't hand it back to the user.**
 ```bash
 cd ~/nix
 ./tools/preflight.sh        # THE pre-rebuild gate: untracked .nix/.qml/.lua/.sh, staged-index
-                            # warning, rootless eval, seed drift (~10s)
+                            # warning, rootless eval, seed drift, stale compositor
+                            # env in the systemd user manager (~10s)
 sudo rebuild-top            # = nixos-rebuild switch --flake /home/lam/nix#top   (aliases: rbsys/rbhome)
 sudo rebuild-top --upgrade  # = `update`; bumps flake inputs first
 nixos-rebuild build --flake /home/lam/nix#top   # optional, no sudo at all, warms the store
@@ -272,6 +273,27 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `.gitignore`, whose exclusions mean nothing in another tree while that tree's
   own secrets go unguarded. `DESIGN.md` and `HARDWARE.md` live in here;
   a few docs stay outside on purpose and `docs/README.md` says which and why.
+- `home/srvs/hypr-env.nix` + `hypr-env-files/hypr-session-env.sh` — **a user
+  unit must never inherit the systemd user manager's
+  `HYPRLAND_INSTANCE_SIGNATURE` / `WAYLAND_DISPLAY`.** Hyprland *itself* (not
+  our config) runs `systemctl --user import-environment DISPLAY WAYLAND_DISPLAY
+  HYPRLAND_INSTANCE_SIGNATURE …` at every startup and the matching
+  `unset-environment` at clean exit. That store is manager-global and has no
+  owner, so **every** Hyprland on the box writes over the last one — including
+  every nested test compositor an agent starts, which the harnesses tear down
+  with `SIGKILL`, so it never gives the values back. Measured on `top`
+  2026-07-28: the manager named a compositor dead for an hour, on `wayland-2`,
+  while the session ran on `wayland-1`. A unit that shells out to `hyprctl`
+  under that env fails to connect **and still exits 0** — a service that
+  silently does nothing. Wrap the ExecStart of any unit that needs the
+  compositor: `%h/.config/scripts/hypr-session-env.sh %h/.config/scripts/x.sh`
+  (`wal-set.service` is the only one so far). It resolves the live instance from
+  `$XDG_RUNTIME_DIR/hypr/*/hyprland.lock` — alive PID + live socket, preferring
+  the compositor that is not itself a Wayland client — instead of believing what
+  it was handed. `--check` is preflight's detector, `--restore` repairs the
+  manager *and* the D-Bus activation store (what an activated
+  `xdg-desktop-portal-hyprland` reads, which unit wrapping cannot reach) and is
+  called by all three nested harnesses on teardown.
 - `home/srvs/board-watch.nix` + `board-watch-files/` — **acts on his answers to
   `docs/board.md` without waiting to be told about them.** A `path` unit on the
   file plus a 5-minute timer; when a decision becomes *newly answered* it spawns

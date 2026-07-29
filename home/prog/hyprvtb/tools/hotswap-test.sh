@@ -60,6 +60,13 @@ cleanup() {
   [ -n "${HYPRPID:-}" ] && kill -9 "$HYPRPID" 2>/dev/null
   sleep 0.5
   rm -rf "$RUN"
+  # Hyprland ITSELF runs `systemctl --user import-environment … WAYLAND_DISPLAY
+  # HYPRLAND_INSTANCE_SIGNATURE …` at startup, so the nested instance pointed
+  # the whole user manager (and the D-Bus activation store) at itself — and a
+  # SIGKILL means it never ran the matching unset-environment. Left alone, every
+  # user unit that shells out to hyprctl talks to a dead socket for the rest of
+  # the login and still exits 0. See home/srvs/hypr-env.nix.
+  "$HOME/.config/scripts/hypr-session-env.sh" --restore >/dev/null 2>&1 || true
   G="$HOME/.local/state/hyprvtb/geometry.tsv"
   if [ -f "$G" ] && grep -q '^aquamarine	' "$G"; then
     grep -v '^aquamarine	' "$G" > "$G.tmp" && mv "$G.tmp" "$G"
