@@ -735,12 +735,27 @@ def reconcile(path=bp.BOARD_PATH):
 # So the section reconciles against git the same way IN FLIGHT reconciles
 # against `/proc`: whatever is on `origin/main` and not in LANDED is a hole, and
 # a hole gets filled. Append-only, in commit order, never a rewrite.
+#
+# **TWO callers, and the second one is why he had to report this four times.**
+# `Board._catch_up` (the app) was the only one, and it can only sweep while the
+# window is OPEN — and `apps/` being live source, an app started before a fix
+# goes on running the code from before it, so both earlier fixes were correct
+# and neither could reach the window he was looking at. `board-watch.py`'s tick
+# now calls this too: a systemd unit, on both hosts, headless, running whether
+# or not the board is on screen, and it logs what it appended so the next report
+# has a trace to read. It passes `fetch_wait=True` — see `_fetch_origin`.
 
 #: The repo LANDED is a record of. `docs/` is deliberately NOT swept: its
 #: history is mostly the 5-minute sync timer's own commits, and a sweep over it
 #: would bury his board in them. A docs commit worth recording is recorded by
 #: hand, with `land`, exactly as it always was.
-LANDED_REPO = os.path.expanduser("~/nix")
+#:
+#: `BOARD_LANDED_REPO` overrides it, and NOTHING in the running system sets it:
+#: it exists so `tools/board-watch-test.py` can point a tick at a throwaway git
+#: repo and watch a commit arrive in a throwaway board, which is the only way to
+#: test the watcher's sweep end to end without appending this repo's real
+#: history to a fixture.
+LANDED_REPO = os.path.expanduser(os.environ.get("BOARD_LANDED_REPO") or "~/nix")
 
 #: How far back the sweep may reach: never before the OLDEST commit LANDED
 #: already names. Everything earlier predates the board and was never meant to
@@ -838,21 +853,29 @@ def _sweep_due(now, every=LANDED_SWEEP_EVERY):
     return _stamp_due("landed-sweep.json", now, every)
 
 
-def _fetch_origin(repo=LANDED_REPO, now=None, every=LANDED_FETCH_EVERY):
-    """Ask git to move `origin/main`, and DO NOT WAIT for it. True if asked.
+def _fetch_origin(repo=LANDED_REPO, now=None, every=LANDED_FETCH_EVERY,
+                  wait=False):
+    """Ask git to move `origin/main`. True if asked.
 
     The sweep reads a remote-tracking ref, and nothing moves one but a fetch.
     A push from this machine moves it as a side effect, so the sweep could see
     this host's own commits and was blind to the other host's until somebody
     happened to pull — on a freshly booted machine, never.
 
-    Unwaited because `Board._catch_up` calls this on the GUI thread and a fetch
-    off-LAN blocks until DNS gives up; `book` is off-LAN often. The ref it lands
-    is read by the NEXT sweep, one tick later — which is why the throttle is the
-    sweep's own period and not ten times it: this call is the only thing that
-    decides whether the other host's commit is visible, so every tick it skips
-    is a tick the hole stays. A repo with no `origin` is left alone entirely, so
-    a test repo never reaches the network.
+    Unwaited BY DEFAULT because `Board._catch_up` calls this on the GUI thread
+    and a fetch off-LAN blocks until DNS gives up; `book` is off-LAN often. The
+    ref it lands is read by the NEXT sweep, one tick later — which is why the
+    throttle is the sweep's own period and not ten times it: this call is the
+    only thing that decides whether the other host's commit is visible, so every
+    tick it skips is a tick the hole stays. A repo with no `origin` is left
+    alone entirely, so a test repo never reaches the network.
+
+    `wait=True` for a HEADLESS caller, and `board-watch.py` is one. It has no
+    GUI thread to block, so it can read the ref it just fetched in the SAME
+    tick instead of the next one — and it must not detach, because it is a
+    systemd `oneshot`: a `start_new_session` child stays in the unit's cgroup
+    and is killed the moment the tick returns, so an unwaited fetch there is a
+    fetch that mostly does not happen.
     """
     now = time.time() if now is None else now
     try:
@@ -865,10 +888,16 @@ def _fetch_origin(repo=LANDED_REPO, now=None, every=LANDED_FETCH_EVERY):
         return False
     if not _stamp_due("landed-fetch.json", now, every):
         return False
+    cmd = ["git", "-C", repo, "fetch", "--quiet", "origin", "main"]
     try:
-        subprocess.Popen(["git", "-C", repo, "fetch", "--quiet", "origin", "main"],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+        if wait:
+            subprocess.run(cmd, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=30)
+        else:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
     except (OSError, subprocess.SubprocessError):
         return False
     return True
@@ -1037,7 +1066,7 @@ def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None,
 
 
 def reconcile_landed(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None,
-                     now=None, force=False, fetch=True):
+                     now=None, force=False, fetch=True, fetch_wait=False):
     """Append every missing commit to LANDED, and heal any duplicate row it
     finds on the way. Returns the rows it APPENDED (a heal is silent).
 
@@ -1060,7 +1089,7 @@ def reconcile_landed(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None,
     if not force and not _sweep_due(now):
         return []
     if fetch:
-        _fetch_origin(repo, now=now)
+        _fetch_origin(repo, now=now, wait=fetch_wait)
     log = _git_log(repo)
     rows = landed_missing(path=path, repo=repo, min_age=min_age, now=now, log=log)
 

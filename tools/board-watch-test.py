@@ -696,6 +696,86 @@ def test_host_affinity():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_landed_sweep_runs_on_a_tick():
+    """A commit on `origin/main` reaches LANDED with the board window CLOSED.
+
+    He reported the same hole four times. Both earlier fixes were correct and
+    neither could reach him, because the sweep only ever ran in `Board._catch_up`
+    — inside the app, so only while the window was open, and `apps/` being live
+    source, an app opened before a fix goes on running the code from before it.
+    So the tick sweeps too, and this is the check that says so: a real watcher
+    process, no GUI anywhere, a commit that no worker ever landed.
+
+    `BOARD_LANDED_REPO` is what makes it testable — it points the sweep at a
+    throwaway repo, and the tick's own guard (board must live INSIDE that repo)
+    is what keeps every OTHER test in this file from having ~/nix's real history
+    appended to its fixture.
+    """
+    print("\nLANDED catches up on a tick, with no app running")
+    d = tempfile.mkdtemp(prefix="board-watch-landed-")
+    try:
+        repo = os.path.join(d, "repo")
+        os.makedirs(os.path.join(repo, "docs"))
+        base = dict(os.environ, GIT_CONFIG_GLOBAL=os.path.join(d, "gitconfig"),
+                    GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t",
+                    GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                    GIT_COMMITTER_EMAIL="t@t")
+
+        def git(*a):
+            return subprocess.run(["git", "-C", repo] + list(a), env=base,
+                                  capture_output=True, text=True)
+
+        git("init", "-q", "-b", "main")
+        made = []
+        # Backdated, because the sweep leaves a commit younger than
+        # `LANDED_MIN_AGE` to the worker that is probably still running and
+        # about to land it. Minutes, not hours: both must fall on TODAY, which
+        # is the date group the fixture below opens.
+        for age, subject in ((240, "the one LANDED already names"),
+                             (120, "the one nobody landed")):
+            open(os.path.join(repo, str(age)), "w").write("x")
+            git("add", "-A")
+            when = "@%d +0000" % int(time.time() - age)
+            base["GIT_AUTHOR_DATE"] = base["GIT_COMMITTER_DATE"] = when
+            git("commit", "-q", "-m", subject)
+            made.append(git("rev-parse", "--short", "HEAD").stdout.strip())
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+        # The board lives inside that repo, the way the real one lives in ~/nix,
+        # and LANDED names the FIRST commit only — which is both the floor the
+        # sweep works down to and the proof it is not inventing history.
+        r = Rig(d)
+        r.board = os.path.join(repo, "docs", "board.md")
+        day = time.strftime("%Y-%m-%d")
+        with open(r.board, "w") as f:
+            f.write(FIXTURE.replace("### 2026-07-28", "### " + day)
+                           .replace("| `abc1234` | did a thing |",
+                                    "| `%s` | the one LANDED already names |"
+                                    % made[0]))
+        env = dict(BOARD_LANDED_REPO=repo)
+        p = subprocess.run([sys.executable, WATCHER], env=r.env(**env),
+                           capture_output=True, text=True, timeout=120)
+        if VERBOSE:
+            print("    rc=%d %s" % (p.returncode, p.stderr.strip()[:300]))
+        text = open(r.board).read()
+        check("a commit nobody landed is in LANDED after ONE tick, no app open",
+              ("| `%s` | the one nobody landed |" % made[1]) in text
+              or ("| `%s` | the one nobody landed " % made[1]) in text,
+              text[text.index("## LANDED"):][:400])
+        check("...and the tick says so in the log, so a report has a trace",
+              any("LANDED: recorded %s" % made[1] in l for l in open(r.log)),
+              "".join(open(r.log)))
+        check("...and the commit the section already named is not repeated",
+              text.count("`%s`" % made[0]) == 1)
+        n = text.count("| `")
+        subprocess.run([sys.executable, WATCHER], env=r.env(**env),
+                       capture_output=True, text=True, timeout=120)
+        check("...and a second tick appends nothing: the sweep is idempotent",
+              open(r.board).read().count("| `") == n)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     d = tempfile.mkdtemp(prefix="board-watch-test-")
     try:
@@ -965,6 +1045,7 @@ def main():
     test_worker_outlives_the_tick()
     test_the_loop()
     test_host_affinity()
+    test_landed_sweep_runs_on_a_tick()
 
     print()
     if fails:
