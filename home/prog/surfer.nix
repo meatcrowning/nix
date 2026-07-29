@@ -192,6 +192,12 @@ in
   # kdeglobals BrowserApplication key and $BROWSER, is set centrally in
   # home/prog/mime-defaults.nix. `%U` is load-bearing for that: main.py takes
   # the first non-flag argv as the start URL.
+  #
+  # application/xhtml+xml and x-scheme-handler/about are in that file's
+  # surferTypes and were NOT in this MimeType= line, so surfer was the default
+  # for two types it never declared: the association held, but surfer was absent
+  # from the "Open with" list for them (that menu is built from mimeinfo.cache,
+  # which is built from MimeType=). Declared now so all three agree.
   home.file.".local/share/applications/surfer.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -203,6 +209,6 @@ in
     Terminal=false
     Categories=Network;WebBrowser;
     Keywords=bespoke;
-    MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+    MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/about;
   '';
 }
