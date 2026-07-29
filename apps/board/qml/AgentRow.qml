@@ -4,40 +4,44 @@ import QtQuick
 // it was asked to do, and the box he types into to reach it.
 //
 // THE TWO LINES ARE THE POINT, and they are his call — *"i want both. i want
-// what its saying its doing and what its actually doing"*. They are two plain
-// SENTENCES, led by the agent's own name, because that is how he asked to read
-// them: *"[agent name] is [what the agent says its doing] and then the line
-// below should be the [agent name] is actually [what it is actualy doing]"*.
-// The bare words `says` and `doing` in a label column beside the two texts are
-// what that replaced.
+// what its saying its doing and what its actually doing"*. The first is a plain
+// SENTENCE led by the agent's own name, because that is how he asked to read it:
+// *"[agent name] is [what the agent says its doing]"*. The bare words `says`
+// and `doing` in a label column beside the two texts are what that replaced.
 //
-// **The two sentences come FIRST, and the title row is the THIRD line** — his
-// call again, in as many words: *"the very first line of an agent in the agent
+// **The second line is the description ALONE** — his call, 2026-07-29:
+// *"actually just take out the [agent] is actually and just display the text
+// after it"*. So it reads `editing Main.qml`, not *"Marbas is actually editing
+// Main.qml"*. The name is already the subject of the line above it, and a card
+// that said it twice was the repeated metadata docs/DESIGN.md §9.1 rules out.
+//
+// **The two lines come FIRST, and the title row is the THIRD** — his call
+// again, in as many words: *"the very first line of an agent in the agent
 // section should be the [name] is [what the agent says theyre doing]. the
 // second line should be [name] is actually doing XYZ. the third line should be
 // what the current first line is"*. What a card is FOR is the live pair; the
 // brief it was handed and the `where` it works in never change for the life of
 // the agent, so they sit UNDER the two lines that do.
 //
-//   ...is...           the agent's own words (`boardctl.py phase`). Carries the
+//   <name> is ...      the agent's own words (`boardctl.py phase`). Carries the
 //                      OBJECT — "the vtbclient parser" — which watching tool
 //                      calls can never give. Absent until it says something;
 //                      absence is drawn as absence.
-//   ...is actually...  derived from the tool calls in its live transcript
+//   <the description>  derived from the tool calls in its live transcript
 //                      (`boardphase.py`). Carries the VERB — "editing
 //                      Main.qml" — and cannot be faked, forgotten or left
-//                      stale.
+//                      stale. No subject, no opener.
 //
-// **Both sentences are built in `boardphase.py` (`says_line`/`doing_line`), not
+// **Both lines are built in `boardphase.py` (`says_line`/`doing_line`), not
 // here**, because the joining is a judgement about the real strings rather than
 // string concatenation: an agent that named no phase is quoted instead of
-// forced after "is", and a STOPPED agent goes into the past tense — *"Marbas is
-// actually ..."* is false about a process that is gone, and *"was last seen
-// ..."* is the honest form of the same fact.
+// forced after "is", and a STOPPED agent goes into the past tense — with no
+// subject on the line there is nowhere else for the tense to live, so *"last
+// seen editing Main.qml"* is the honest form of the same fact.
 //
 // **Neither is ever shown as the other, and neither is ever filled in from the
-// other.** The second sentence is the OBSERVED one, so an agent claiming
-// *testing* while it edits says *testing* on one line and *is actually editing
+// other.** The second line is the OBSERVED one, so an agent claiming
+// *testing* while it edits says *testing* on one line and *editing
 // Main.qml* on the next. That divergence is information he asked to be able to
 // see: it is not an error, so there is no warning, no badge and nothing from
 // the warn/crit ramp — which on this desktop means a machine fault (§8.1,
@@ -123,16 +127,33 @@ Item {
     // above it to be third to. Both the name column and the tone ladder hang
     // off that one condition.
     readonly property bool titleFirst: saysLine === "" && doingLine === ""
-    // The name gets a cell of its own ONLY when neither sentence ABOVE it is
-    // going to say it — a stopped agent nothing was ever seen doing, or a
-    // queued task with no name at all. Otherwise it would be drawn three times
-    // in four lines. (`boardagents.NAMES`' width rule is this column's.)
-    readonly property bool nameNeeded: name !== "" && titleFirst
+    // The name gets a cell of its own ONLY when no line ABOVE it is going to
+    // say it — otherwise it would be drawn three times in four lines.
+    // (`boardagents.NAMES`' width rule is this column's.)
+    //
+    // That is now the CLAIM alone: since the observed line dropped its
+    // *"<name> is actually"* opener it names nobody, so a card whose agent has
+    // said nothing would be anonymous without this — which is the one thing
+    // this list may never be. It is drawn on the title row either way; the
+    // title row just is not always that card's top line any more.
+    readonly property bool nameNeeded: name !== "" && saysLine === ""
     // The lead tone, for whichever line is drawn first. A stopped agent leads
     // at `fgDim` rather than `fgText` — that was already how the title row
     // said "this one is over", and it is one rung, not a colour (§3.5's job is
     // done by the words in the detail line).
     readonly property color leadTone: running ? fgText : fgDim
+
+    // Cut a string to `cells` characters, marking the cut with ASCII "..." —
+    // never the unicode ellipsis, which is a hardcoded UI string and therefore
+    // ASCII by rule (docs/DESIGN.md §2.3). A width in characters is exact here
+    // because the font is monospace (§2.7). Under about a dozen cells there is
+    // no honest truncation left to draw, so it gives back the marker alone
+    // rather than one letter and a stub.
+    function clipTo(s, cells) {
+        if (cells < 4)
+            return "..."
+        return s.length <= cells ? s : s.slice(0, cells - 3) + "..."
+    }
 
     implicitHeight: col.implicitHeight + 8
     height: implicitHeight
@@ -179,9 +200,10 @@ Item {
             text: row.saysLine
         }
 
-        // ---- SECOND LINE: "<name> is actually <what it is observed doing>" ----
-        // Observed, never the claim. When it cannot be observed it says that
-        // ("board cannot see what it is doing", "has actually done nothing
+        // ---- SECOND LINE: what it is observed doing, and nothing else ----
+        // No subject and no *"is actually"* opener: the description alone, his
+        // call. Observed, never the claim. When it cannot be observed it says
+        // that ("board cannot see what it is doing", "nothing
         // recently") rather than quietly falling back to the line above —
         // §10's rule, and the reason there are two lines at all. Past tense
         // once the process is gone, and nothing at all when a stopped agent
@@ -228,7 +250,9 @@ Item {
                 x: 0
                 y: 0
                 visible: row.nameNeeded
-                color: row.leadTone
+                // Same rung as the rest of its row: lead tone when the title
+                // row IS the top line, the quiet one when it is the third.
+                color: row.titleFirst ? row.leadTone : Theme.dim
                 text: row.name
             }
 
@@ -266,13 +290,29 @@ Item {
         // Anything he has already sent that has NOT been read yet. It stays on
         // screen until the agent takes it or the watcher moves it to the queue,
         // so a note can never quietly disappear between the two.
+        //
+        // ONE LINE EACH, and the message is cut to fit it. He types whole
+        // paragraphs into that box; wrapped in full they buried the three lines
+        // the card is actually for under somebody's own words (§5.2 — the card
+        // is a status readout, not a transcript). The label stays whole, so
+        // what is cut is only the body, and nothing is lost: `boardctl.py inbox
+        // take` hands the agent the untouched text.
         Repeater {
             model: row.waiting
-            delegate: Para {
+            delegate: PixelText {
                 required property var modelData
+                readonly property string label: "  waiting in its inbox: "
                 width: col.width
+                // No wrap and no `elide`: Qt elides with U+2026, and a
+                // hardcoded marker on this desktop is ASCII (§2.3). The font is
+                // monospace, so a character count is an exact width (§2.7) —
+                // the same reasoning the `where` columns size themselves by.
+                wrapMode: Text.NoWrap
+                clip: true
                 color: row.fgDim
-                text: "  waiting in its inbox: " + modelData
+                text: label + row.clipTo(String(modelData),
+                                         Math.floor(width / row.cellW)
+                                         - label.length)
             }
         }
 
