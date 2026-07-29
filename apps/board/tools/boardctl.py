@@ -286,8 +286,23 @@ def cmd_cap(a):
 def cmd_inbox(a):
     if a.what == "take":
         msgs = ba.take(a.id, include_queue=a.queue)
-        for m in msgs:
+        # SEPARATE them, because two notes are two asks. `send()` collapses each
+        # message to a single line, so N of them printed bare are N adjacent
+        # lines of his prose with nothing between: an agent that polls after a
+        # long step and finds two waiting reads one paragraph and answers the
+        # first ask in it. Measured on 2026-07-29 — Purson (`w88cd31`) took two
+        # in one call at 11:01 and Usiel (`w7a3ff2`) two at 10:20 — and it is
+        # exactly the shape of *"all the queued messages after its initial
+        # request were swallowed"*. One note still prints bare: the framing
+        # exists to answer "how many", and with one there is no question.
+        for i, m in enumerate(msgs, 1):
+            if len(msgs) > 1:
+                print("--- %d of %d, sent %s ---"
+                      % (i, len(msgs), (m.get("at") or "")[11:16]))
             print(m["text"])
+        if len(msgs) > 1:
+            print("--- end of %d notes. EACH ONE is a separate ask; do them "
+                  "all, and record each as it finishes ---" % len(msgs))
         if not msgs and not a.quiet:
             print("(nothing in your inbox)")
         return 0
