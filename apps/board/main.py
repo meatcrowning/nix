@@ -211,12 +211,15 @@ class Board(QObject):
     #: something worth saying in the titlebar footer. Never an exception dialog:
     #: §10's rule is that a failure is REPORTED, not swallowed and not fatal.
     status = Signal(str)
+    #: a removed TO DO bullet is now recoverable, or is no longer
+    undoChanged = Signal()
 
     def __init__(self, path=None, parent=None):
         super().__init__(parent)
         self._path = os.path.abspath(os.path.expanduser(path or boardparse.BOARD_PATH))
         self._doc = {}
         self._err = ""
+        self._undo = None
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_change)
         self._watcher.directoryChanged.connect(self._on_change)
@@ -345,6 +348,76 @@ class Board(QObject):
     def answerOf(self, key):
         it = self._item(key)
         return it["answer"] if it else ""
+
+    # ---- clearing a chore off WAITING ON YOU TO DO ----
+    # *"i should be able to clear the 'to do, when you feel like it' stuff if i
+    # wish. currently i cannot remove it via board program"*. Agents put bullets
+    # there and nothing ever took one away.
+    #
+    # Two deliberate acts (docs/DESIGN.md §10.3), and NO confirmation dialog —
+    # the same reading `ProcMenu`'s `force quit` settled: the right-click that
+    # opens the menu is the first act, the entry (last, behind a separator) is
+    # the second. What this has instead is an UNDO, because unlike a signal to a
+    # process a deleted line can be put back byte-for-byte, and offering the
+    # thing that actually repairs the mistake beats asking him to predict one.
+    # One level, this session only: the older removals are in `docs/`'s git
+    # history, which a timer commits every five minutes, and the risk this
+    # guards is the misclick he notices immediately.
+
+    def _todo(self, line):
+        for t in self._doc.get("todo", []):
+            if t.get("line") == line:
+                return t
+        return None
+
+    @Slot(int, result=bool)
+    def removeTodo(self, line):
+        it = self._todo(line)
+        if it is None:
+            self.status.emit("that line is no longer there - reloaded")
+            self._load()
+            return False
+        lines = self._doc["lines"]
+        try:
+            a, b = boardparse.todo_span(lines, it)
+            out = boardparse.remove_todo(lines, it)
+        except boardparse.BoardError as e:
+            self.status.emit(str(e) + " - reloaded")
+            self._load()
+            return False
+        block = list(lines[a:b])
+        after = lines[b] if b < len(lines) else ""
+        if not self._commit(out):
+            return False
+        self._undo = {"block": block, "before": after, "text": it.get("text", "")}
+        self.undoChanged.emit()
+        self.status.emit("removed - `put it back` is in the right-click menu")
+        return True
+
+    @Slot(result=bool)
+    def undoRemove(self):
+        u = self._undo
+        if not u:
+            return False
+        try:
+            out = boardparse.add_todo_block(self._doc["lines"], self._doc,
+                                            u["block"], u["before"])
+        except boardparse.BoardError as e:
+            self.status.emit(str(e))
+            return False
+        if not self._commit(out):
+            return False
+        self._undo = None
+        self.undoChanged.emit()
+        self.status.emit("put back")
+        return True
+
+    @Property(str, notify=undoChanged)
+    def undoText(self):
+        """What `put it back` would put back, or "" when there is nothing. The
+        menu entry is ABSENT rather than greyed when this is empty (§10): an
+        undo with nothing behind it is not a control."""
+        return (self._undo or {}).get("text", "")
 
     # ---- things that are not this file ----
 
