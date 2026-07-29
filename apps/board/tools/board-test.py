@@ -1804,6 +1804,25 @@ def test_phase(tmp):
     check("...and the tally carries no time, no age and no percentage",
           not re.search(r"%|ago|\bs\b", bph.context_line(r)), bph.context_line(r))
 
+    # ---- ...and WHEN IT WAS SPAWNED, beside that tally ----
+    # *"agent cards should show, perhaps next to token count, when they began on
+    # a task - or perhaps when they were spawned, or perhaps both"*. ONE stamp:
+    # a worker begins on the task it was spawned with, and a task still waiting
+    # for a slot has no worker and says `not started yet` in words instead.
+    #
+    # The claim that matters is that it is an INSTANT and never a DIFFERENCE.
+    # This app draws no elapsed times anywhere — the no-pressure requirement —
+    # and an age on a running agent is exactly the clock that rule forbids.
+    born = bph.born_line(time.mktime((2026, 7, 29, 10, 26, 0, 0, 0, -1)))
+    check("a card says WHEN its agent was spawned, on the board's own clock",
+          born == "10:26 am", born)
+    check("...as an absolute instant, never an age or a countdown",
+          not re.search(r"ago|\bin\b|-|\d+[smhd]\b", born), born)
+    check("...and nothing is invented for a record that carries no stamp",
+          (bph.born_line(0), bph.born_line(None), bph.born_line("x"))
+          == ("", "", ""),
+          (bph.born_line(0), bph.born_line(None), bph.born_line("x")))
+
     # ---- ANY ONE WORD, not the classic five ----
     # *"allow agents more freedom to indicate what they are doing, but it should
     # still only be a single word - and still actually related to what they say
@@ -3030,6 +3049,24 @@ def test_window(app, tmp):
           bool(tallyDrawn)
           and tallyDrawn[0][2].property("color") == keep[-1].property("dim"),
           tallyDrawn and tallyDrawn[0][2].property("color").name())
+    # ...and the spawn stamp beside it, on the same row and the same rung.
+    # From the DRAWN card's own agent, not from a snapshot taken elsewhere in
+    # this test — the stamp is per-record and only that item's is being checked.
+    codeAgent = prop(codeItem, "agent") if codeItem is not None else {}
+    bornStr = codeAgent.get("bornLine", "") if isinstance(codeAgent, dict) else ""
+    bornDrawn = [(y, s, t) for y, s, t in drawn if bornStr and s == bornStr]
+    check("a card says when its agent was spawned, next to the token count",
+          bool(bornStr) and len(bornDrawn) == 1
+          and bornDrawn[0][0] == drawn[0][0], (bornStr, [s for _, s, _ in drawn]))
+    check("...immediately LEFT of the tally, not stacked or overlapping it",
+          bool(bornDrawn) and bool(tallyDrawn)
+          and bornDrawn[0][2].x() + bornDrawn[0][2].width()
+          <= tallyDrawn[0][2].x(),
+          [(s, t.x(), t.width()) for _, s, t in bornDrawn + tallyDrawn])
+    check("...and in the same quiet tone, both being standing metadata",
+          bool(bornDrawn)
+          and bornDrawn[0][2].property("color") == keep[-1].property("dim"),
+          bornDrawn and bornDrawn[0][2].property("color").name())
 
     # ...with the store's own sections folded away, so the shot is of THIS
     # section rather than of whatever happens to be above it.

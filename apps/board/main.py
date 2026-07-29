@@ -625,6 +625,12 @@ class Agents(QObject):
             # How much context it is standing in, against what it can hold —
             # already formatted, and "" when nothing could be measured.
             "contextLine": a.get("contextLine", ""),
+            # ...and WHEN it was spawned, drawn beside that tally. An absolute
+            # clock time, never an age — `boardphase.born_line`. The raw `born`
+            # epoch deliberately does NOT cross: it is an ordering key, and a
+            # number QML could subtract from `now` is the elapsed time this app
+            # does not draw.
+            "bornLine": a.get("bornLine", ""),
             "detail": boardagents.describe(a),
             "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
                        if a["id"] else [],

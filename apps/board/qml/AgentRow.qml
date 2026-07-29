@@ -130,6 +130,9 @@ Item {
     // empty means nothing could be measured, and empty is drawn as nothing.
     readonly property string contextLine: agent && agent.contextLine
                                           ? agent.contextLine : ""
+    // WHEN it was spawned - `10:26 am`, absolute, never an age (see below).
+    readonly property string bornLine: agent && agent.bornLine
+                                       ? agent.bornLine : ""
     // A card with no id is not an agent — it is a task waiting for a slot, or
     // the section's own box. It gets no inbox, because there is nothing running
     // to put a message in front of.
@@ -261,6 +264,37 @@ Item {
         text: row.contextLine
     }
 
+    // How much of the top line the trailing metadata takes, tally and spawn
+    // stamp together. One number, so the two lines that may carry it reserve
+    // the same space whichever of the pair is drawn.
+    readonly property real trailW: (tallyT.visible ? tallyT.width + 8 : 0)
+                                   + (bornT.visible ? bornT.width + 8 : 0)
+
+    // ---- ...and WHEN IT WAS SPAWNED, immediately left of that tally ----
+    // [his, 2026-07-29] *"agent cards should show, perhaps next to token count,
+    // when they began on a task"* — so it sits next to the token count, in the
+    // same trailing metadata cluster (§9.1) and the same `dim` rung, because it
+    // is standing metadata about the process exactly as the tally is.
+    //
+    // **It is an ABSOLUTE clock time and it must stay one.** No age, no `4m`,
+    // no `ago`: this app draws no elapsed times anywhere, and one on a RUNNING
+    // agent would be the clock the no-pressure requirement exists to forbid.
+    // `boardphase.born_line` is the only formatter.
+    //
+    // It rides the same line as the tally, on the same condition — a card whose
+    // top line IS the title row gets neither, that corner already belonging to
+    // `where`.
+    PixelText {
+        id: bornT
+        visible: row.bornLine !== ""
+                 && (row.saysLine !== "" || row.doingLine !== "")
+        anchors.right: tallyT.visible ? tallyT.left : col.right
+        anchors.rightMargin: tallyT.visible ? 8 : 0
+        y: 0
+        color: Theme.dim
+        text: row.bornLine
+    }
+
     Column {
         id: col
         x: 10
@@ -278,8 +312,7 @@ Item {
         // the line under it.
         Para {
             id: saysT
-            width: col.width - (tallyT.visible && !tallyT.onDoing
-                                ? tallyT.width + 8 : 0)
+            width: col.width - (!tallyT.onDoing ? row.trailW : 0)
             visible: row.saysLine !== ""
             height: visible ? implicitHeight : 0
             color: row.leadTone
@@ -297,8 +330,7 @@ Item {
         // and hands this an empty string to say so.
         Para {
             id: doingT
-            width: col.width - (tallyT.visible && tallyT.onDoing
-                                ? tallyT.width + 8 : 0)
+            width: col.width - (tallyT.onDoing ? row.trailW : 0)
             visible: row.doingLine !== ""
             height: visible ? implicitHeight : 0
             color: row.saysLine === "" ? row.leadTone : row.fgDim

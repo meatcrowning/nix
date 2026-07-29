@@ -118,9 +118,16 @@ is `failed` AND SAYS SO ON HIS BOARD. The orchestrator's prompt is the other
 half: it may say what it handed out, never that anything landed.
 
 NO TIME PRESSURE. Nothing here hands the UI an elapsed time, an age, a count or
-an ordering by urgency. `at` stamps exist so `promote()` can take the oldest
-pending task first; they never reach the screen. Same rule as the rest of the
-app, and it is the app's founding requirement.
+an ordering by urgency. Same rule as the rest of the app, and it is the app's
+founding requirement.
+
+**An INSTANT is not an elapsed time, and that is the whole of the exception.**
+Since 2026-07-29 a card draws when its agent was spawned — *"agent cards should
+show, perhaps next to token count, when they began on a task"* —
+`boardphase.born_line`, an absolute 12-hour clock time, the same one a LANDED
+row's `when` and a NEEDS YOU item's `placed` are written in. What stays banned
+is the DIFFERENCE between that instant and now: no age, no `4m`, no `ago`,
+nothing counting. A fact about the past is not a clock running at him.
 """
 import json
 import os
@@ -1035,7 +1042,9 @@ def _queued_row(t):
         # A task with no process has nothing to observe and says so, rather
         # than borrowing the sentence a running card would use.
         "actually": "not started - a worker starts when a slot frees",
-        "doingLine": "",
+        # No spawn time either: nothing has been spawned. The sentence above
+        # says so in words, which is truer than a stamp would be.
+        "doingLine": "", "bornLine": "",
         "detail": "not started - a worker starts when a slot frees"}
 
 
@@ -1080,7 +1089,8 @@ def _idle_orchestrator_row():
         "phase": "ready", "says": "ready",
         "saysLine": "%s is ready" % ba.ORCHESTRATOR_NAME,
         "actually": "", "doingLine": "", "observed": "unlinked",
-        "contextLine": "", "unread": 0, "waiting": [], "born": 0.0,
+        "contextLine": "", "bornLine": "", "unread": 0, "waiting": [],
+        "born": 0.0,
         # The detail line no longer repeats `ready` — the line above it says so
         # now, and §9.1 suppresses metadata a card has already stated.
         "detail": "what you type at the top of this window goes to him"}

@@ -767,6 +767,10 @@ def agents(procs=None):
         # `usage` stamps, and "" when nothing was measured. Formatted in
         # `boardphase` beside the two sentences, for the same reason they are.
         a["contextLine"] = bph.context_line(obs)
+        # WHEN IT WAS SPAWNED, beside that tally — his, 2026-07-29. An absolute
+        # clock time and never an age; `boardphase.born_line` says why that
+        # distinction is what keeps `born` off the no-time rule.
+        a["bornLine"] = bph.born_line(a.get("born"))
     # A STABLE order, so a row does not move under his cursor between two polls
     # — and it is not an urgency ordering (there is none in this app): the ones
     # that are working come first, the ones that have stopped last, and inside a
