@@ -31,6 +31,13 @@ moves between them by `os.replace()` again:
                         was running when he wrote it)
     inbox/taken/        an agent read it. Kept, because "it was delivered" is a
                         claim the UI makes and a claim needs evidence.
+    inbox/dropped/      HE took it back off the queue (`remove_queued`). Kept
+                        for the same reason: removed from the queue is not the
+                        same as never written, and this app deletes no prose.
+    inbox/editing/      transient, and only ever for the length of three
+                        syscalls: `edit_queued` claims a message here so a
+                        concurrent drain cannot read it half-rewritten, then
+                        puts it back. `sweep()` rescues anything stranded.
 
 That is what makes "the box never loses what he typed" a property of the
 filesystem rather than of anybody's care, and it is what `tools/board-test.py`
@@ -75,6 +82,12 @@ import boardmove as bm
 # it sits under board-watch's own 45-minute agent cap so a run that is going to
 # read its inbox has already had every chance to.
 ESCALATE_AFTER_S = int(os.environ.get("BOARD_INBOX_ESCALATE", "1800"))
+
+# How long a message may sit CLAIMED by an in-place edit (`edit_queued`) before
+# `sweep()` decides the process doing the editing is gone and puts it back in
+# the queue. An edit is three syscalls, so anything this old is wreckage — and
+# generous enough that a live edit is never yanked out from under itself.
+EDIT_RESCUE_AFTER_S = 60
 
 CLAUDE_COMMS = ("claude", ".claude-wrapped")
 
@@ -458,6 +471,98 @@ def taken():
     return _list(inbox_dir("taken"))
 
 
+# ---- his second thoughts about a queued message -------------------------
+# *"allow the user to remove queued waiting for next agent items or edit them
+# in place"*. Both act on a message that a board-watch tick may be draining at
+# this exact instant, so neither is allowed to invent a second way of moving a
+# file: the claim is always `os.replace`, which either wins or raises, and a
+# message that has already gone is REPORTED gone rather than quietly recreated.
+# Recreating it is the failure that matters — an in-place rewrite of the queue
+# path would resurrect a message the drain had just taken, so the agent already
+# working it would find it queued again and do it twice.
+
+def msg_id(msg):
+    """The handle the UI holds a queued message by: its file's stem.
+
+    Not the text — two identical sentences are two messages — and not an index,
+    which the next drain would shift out from under his cursor.
+    """
+    return os.path.splitext(os.path.basename(msg.get("file") or ""))[0]
+
+
+def _queued_file(mid):
+    """The queue path for an id, or None if the id is not one we wrote.
+
+    A name, never a path: an id that walks out of the queue directory is
+    refused rather than sanitised into something else's file.
+    """
+    name = str(mid or "")
+    if not name or name != os.path.basename(name) or name.startswith("."):
+        return None
+    if not re.fullmatch(r"[0-9A-Za-z._-]+", name):
+        return None
+    return os.path.join(inbox_dir("queue"), name + ".json")
+
+
+def remove_queued(mid):
+    """He takes a queued message back. Returns it, or None if it has gone.
+
+    Gone means a board-watch tick drained it between the menu opening and his
+    click, and the honest answer is that nothing was removed — the run that
+    took it is already working the sentence.
+
+    It is not unlinked. `dropped/` is a fourth resting place, and the
+    conservation property holds across it: the message is in exactly one
+    directory at every instant, and what he wrote is still on disk.
+    """
+    path = _queued_file(mid)
+    if path is None:
+        return None
+    rec = _read_json(path) or {}
+    dest = os.path.join(inbox_dir("dropped"), os.path.basename(path))
+    try:
+        os.replace(path, dest)
+    except OSError:
+        return None            # drained (or never there): nothing was removed
+    rec["file"] = dest
+    return rec
+
+
+def edit_queued(mid, text):
+    """Rewrite a queued message's body. Returns it, or None if it has gone.
+
+    CLAIM, WRITE, PUT BACK — in that order, and the claim is the same
+    `os.replace` every other move here is. Moving it out of `queue/` first is
+    what makes this safe against a concurrent drain: either we get the file and
+    the drain does not see it, or the drain got it and our claim raises. The
+    alternative — writing the queue path in place — would either be read torn
+    by a drain mid-write or recreate a message that had just been taken.
+
+    While it is claimed the message sits in `editing/`, so it is still in
+    exactly one directory. `sweep()` puts back anything left there by a process
+    that died mid-edit.
+    """
+    text = " ".join((text or "").split("\n")).strip()
+    if not text:
+        return None
+    path = _queued_file(mid)
+    if path is None:
+        return None
+    name = os.path.basename(path)
+    held = os.path.join(inbox_dir("editing"), name)
+    try:
+        os.replace(path, held)
+    except OSError:
+        return None            # drained: the old text is what the agent got
+    rec = _read_json(held) or {}
+    rec["text"] = text
+    rec["editedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    _write_json(held, rec)
+    os.replace(held, path)     # back into the queue, under its own name
+    rec["file"] = path
+    return rec
+
+
 def take(agent_id=None, include_queue=False):
     """Consume this agent's messages. Returns them; they move to `taken/`.
 
@@ -508,6 +613,16 @@ def sweep():
             os.rmdir(d)          # empty and its agent is gone: nothing to keep
         except OSError:
             pass
+    # A message claimed by an in-place edit whose process died before it could
+    # put it back. It is not lost — it is in `editing/` — but nobody is coming
+    # for it there, so the queue gets it back with whatever text it holds.
+    for msg in _list(inbox_dir("editing")):
+        try:
+            age = time.time() - os.path.getmtime(msg["file"])
+        except OSError:
+            continue
+        if age > EDIT_RESCUE_AFTER_S:
+            moved.append(_move(msg, inbox_dir("queue")))
     dropped = []
     for rec in _registrations():
         if not bm._alive(rec):

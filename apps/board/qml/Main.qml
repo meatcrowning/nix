@@ -723,13 +723,25 @@ Window {
                     // with nothing running, or an agent went away without
                     // reading them. Drawn because a message he cannot see is a
                     // message he has to assume was lost.
+                    // ...and one he has changed his mind about can be rewritten
+                    // or taken back, up until the moment board-watch drains it
+                    // (`QueuedNote.qml` carries what that race costs him).
                     Repeater {
                         model: win.queuedNotes
-                        delegate: Para {
+                        delegate: QueuedNote {
                             required property var modelData
                             width: agentsCol.width
-                            color: win.fgDim
-                            text: "  waiting for the next agent: " + modelData
+                            note: modelData
+                            fgDim: win.fgDim
+                            fgText: win.fgText
+                            fgAccent: win.fgAccent
+                            draft: win.draftOf("queued:" + modelData.id)
+                            onDraftEdited: (b) => win.setDraft("queued:" + modelData.id, b)
+                            onStatusMessage: (t) => { if (t !== "") win.status = t; }
+                            onMenuRequested: (mx, my, head, tail) =>
+                                menu.open(mx, my, head.concat(win.fileItems())
+                                                      .concat(win.undoItems())
+                                                      .concat(tail))
                         }
                     }
 

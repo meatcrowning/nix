@@ -575,7 +575,12 @@ class Agents(QObject):
             # or stops. Queued tasks come after the live ones; they have no
             # birth yet.
             cards = [self._row(a) for a in boardwork.cards()]
-            queued = [m["text"] for m in boardagents.pending()]
+            # id AND text: the row he right-clicks has to name the message it
+            # is acting on, and its text is not a name (two identical sentences
+            # are two messages) while its position is not one either — the next
+            # drain shifts every index.
+            queued = [{"id": boardagents.msg_id(m), "text": m["text"]}
+                      for m in boardagents.pending()]
         except OSError:
             return
         if rows != self._rows or queued != self._queued or cards != self._cards:
@@ -635,6 +640,40 @@ class Agents(QObject):
         # at the machine. Promising anything more would be the dishonest kind of
         # feedback §10 is about.
         return "in the inbox - an orchestrator works out who does what"
+
+    # ---- his second thoughts about something already queued ----
+    # Same shape as `send`: the string IS what the footer says, and the failure
+    # case has its own sentence rather than an empty one (§10.2 — refuse
+    # visibly). Both can honestly fail: `board-watch` may have drained the
+    # queue between the menu opening and the click, and then the run working
+    # that sentence already exists and neither a removal nor an edit can reach
+    # it. Saying "gone" is the only true thing left to say.
+
+    @Slot(str, result=str)
+    def removeQueued(self, msg_id):
+        try:
+            msg = boardagents.remove_queued(msg_id)
+        except OSError as e:
+            return "could not remove that - " + (e.strerror or "?")
+        self.refresh()
+        if msg is None:
+            return ("that one has already gone to an agent - "
+                    "nothing removed")
+        return "taken off the queue - the text is kept, not deleted"
+
+    @Slot(str, str, result=str)
+    def editQueued(self, msg_id, text):
+        if not (text or "").strip():
+            return ""
+        try:
+            msg = boardagents.edit_queued(msg_id, text)
+        except OSError as e:
+            return "could not save that edit - " + (e.strerror or "?")
+        self.refresh()
+        if msg is None:
+            return ("that one has already gone to an agent - "
+                    "it got the old wording")
+        return "queued note rewritten - the next agent reads this"
 
 
 class Settings(QObject):
