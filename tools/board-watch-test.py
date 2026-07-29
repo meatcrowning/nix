@@ -30,6 +30,26 @@ What it asserts, in order:
   kill        the off switch stops everything
   fail        a non-zero agent leaves a note in WAITING ON YOU TO DO, and the
               rest of the file is byte-identical
+  prompt      what the spawned agent is actually told, including that his notes
+              can arrive mid-flight
+  notes       a note he typed into the board's agents section with nothing
+              running: queued, held while the screen is locked, worked by ONE
+              agent when the gate opens, drained so it cannot run twice, and —
+              if that run fails — quoted verbatim onto the board
+
+TWO THINGS THIS HARNESS DOES ON HIS BEHALF, both of them the difference between
+a green run and a lie:
+
+  * **`XDG_STATE_HOME` is redirected into the rig.** `boardmove`'s stash and
+    `boardagents`' inbox both live under it, and without this the run under test
+    writes into his live `~/.local/state/board`, where the board app reads it.
+  * **The relocation is undone after every run** (`Rig._unmove`). Since
+    `boardmove.py`, firing MOVES the decision out of NEEDS YOU, and a stub agent
+    that "succeeds" leaves it there — so every later step of this script, which
+    goes on editing that decision where he wrote it, silently had nothing to
+    edit. It crashed a third of the way in for exactly that reason. The move
+    itself is not this file's subject: `apps/board/tools/board-test.py` owns it
+    and asserts it byte-for-byte in both directions.
 """
 import json
 import os
@@ -43,6 +63,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 WATCHER = os.path.join(REPO, "home", "srvs", "board-watch-files", "board-watch.py")
 VERBOSE = "-v" in sys.argv
+
+sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", "pylib")]
+import boardagents as ba                                          # noqa: E402
+import boardmove as bm                                            # noqa: E402
+import boardparse as bp                                           # noqa: E402
 
 FIXTURE = """# Board
 
@@ -120,16 +145,60 @@ class Rig:
         e.update(BOARD_WATCH_BOARD=self.board, BOARD_WATCH_STATE=self.state,
                  BOARD_WATCH_LOG=self.log, BOARD_WATCH_GATE=gate,
                  BOARD_WATCH_REPO=REPO,
+                 # boardmove's stash and boardagents' inbox both live under
+                 # XDG_STATE_HOME. Without this the run under test writes into
+                 # HIS live `~/.local/state/board`, where the app reads it — a
+                 # harness here must redirect it, exactly as board-test.py does.
+                 XDG_STATE_HOME=os.path.join(self.d, "xdgstate"),
                  BOARD_WATCH_SPAWN=spawn if spawn is not None
                  else 'echo "$BOARD_WATCH_KEY" >> ' + self.fired)
         return e
 
     def run(self, gate="open", spawn=None):
+        before = self.text()
         p = subprocess.run([sys.executable, WATCHER], env=self.env(gate, spawn),
                            capture_output=True, text=True, timeout=120)
         if VERBOSE:
             print("    rc=%d %s" % (p.returncode, p.stderr.strip()[:200]))
+        self._unmove(before)
         return p
+
+    def _unmove(self, before):
+        """Undo the watcher's RELOCATION of the decision it fired on.
+
+        Since `boardmove.py`, firing moves the decision out of NEEDS YOU and
+        into IN FLIGHT, and a stub agent that "succeeds" leaves it there — so
+        every later step of this script, which goes on editing that decision
+        where he wrote it, found nothing to edit and the whole file below this
+        point stopped being exercised. THIS harness is about the trigger, the
+        filter, the queue and the lock; `apps/board/tools/board-test.py` owns
+        the move and asserts it byte-for-byte in both directions. So put the
+        decision back the way `give_back()` does, and carry on.
+        """
+        after = self.text()
+        db, da = bp.parse(before), bp.parse(after)
+        keys = {it["key"] for it in da["needs"]}
+        gone = [it for it in db["needs"] if it["key"] not in keys]
+        if not gone:
+            return
+        lines = da["lines"]
+        for it in gone:
+            a, b = bp.item_span(db["lines"], it)
+            block = db["lines"][a:b]
+            below = db["lines"][b].rstrip("\n") if b < len(db["lines"]) else ""
+            title = bp.raw_title(db["lines"], it)
+            doc = bp.parse("".join(lines))
+            for row in doc["flight"]:
+                if bm._norm(row["what"]) == bm._norm(title):
+                    lines = bp.remove_row(doc["lines"], row["line"])
+                    break
+            lines = bp.add_needs_item(lines, block,
+                                      below if below.startswith("###") else "")
+            # ...in the RIG's state dir. `bm` reads XDG_STATE_HOME on every
+            # call, and an unwrapped forget() here would delete a stash out of
+            # his live `~/.local/state/board` whenever a key happened to match.
+            self.state_home(lambda k=it["key"]: bm.forget(k))
+        bp.write(self.board, "".join(lines))
 
     def fires(self):
         try:
@@ -155,6 +224,27 @@ class Rig:
         with os.fdopen(fd, "w") as f:
             f.write(src)
         os.replace(tmp, self.board)
+
+    def state_home(self, fn):
+        """Run `fn` against the RIG's state dir, not his. `boardagents` reads
+        XDG_STATE_HOME on every call, so swapping it round the call is enough
+        and there is no module state to reset."""
+        old = os.environ.get("XDG_STATE_HOME")
+        os.environ["XDG_STATE_HOME"] = os.path.join(self.d, "xdgstate")
+        try:
+            return fn()
+        finally:
+            if old is None:
+                del os.environ["XDG_STATE_HOME"]
+            else:
+                os.environ["XDG_STATE_HOME"] = old
+
+    def note(self, text):
+        """What the board app's box does when nothing is running."""
+        return self.state_home(lambda: ba.send(text))
+
+    def queued(self):
+        return self.state_home(lambda: [m["text"] for m in ba.pending()])
 
     def tail(self, n=1):
         with open(self.log) as f:
@@ -327,6 +417,53 @@ def main():
             check("prompt carries %r" % want, want in prompt)
         check("prompt names only the answered decision",
               "Second question" not in prompt)
+        check("prompt tells the agent his notes can arrive mid-flight",
+              "inbox take" in prompt, prompt[-400:])
+
+        print("a note he typed into the board's agents section")
+        # Settle the store so nothing is newly answered: the queue is worked on
+        # a quiet tick, and a decision always outranks a note.
+        r.edit("- [x] Do it the short way (chosen)", "- [ ] Do it the short way (chosen)")
+        r.run()
+        r.clear()
+
+        m = r.note("have another look at the panel spacing")
+        check("with nothing running, the box queues it", m["state"] == "queued", m)
+        r.run(gate="closed")
+        check("a locked screen does not work it", r.fires() == [], str(r.fires()))
+        check("...and it is still queued, not lost",
+              r.queued() == ["have another look at the panel spacing"], r.queued())
+
+        r.run(spawn="cat > " + os.path.join(d, "note.txt")
+              + '; echo "$BOARD_WATCH_KEY" >> ' + r.fired)
+        note_prompt = open(os.path.join(d, "note.txt")).read()
+        check("an open gate spawns ONE agent for it",
+              len(r.fires()) == 1 and r.fires()[0].startswith("note-"), str(r.fires()))
+        check("...carrying what he wrote, verbatim",
+              "have another look at the panel spacing" in note_prompt)
+        check("...under the same rules a decision run gets",
+              "NEVER rebuild" in note_prompt and "-- <explicit> <paths>" in note_prompt
+              and "Push to `main`" in note_prompt)
+        check("...and the queue is drained, so it cannot run twice",
+              r.queued() == [], r.queued())
+        r.clear()
+        r.run()
+        check("a drained queue fires nothing on the next tick", r.fires() == [],
+              str(r.fires()))
+
+        print("...and a note whose agent fails still reaches him")
+        before = r.text()
+        r.note("check whether the clock is off by a pixel")
+        r.run(spawn="exit 3")
+        after = r.text()
+        bullet = [l for l in after.splitlines() if "note you sent" in l]
+        check("a failed note run leaves a bullet on the board", len(bullet) == 1,
+              str(bullet))
+        check("...quoting what he wrote, so it is not lost with the run",
+              bool(bullet) and "off by a pixel" in bullet[0], str(bullet))
+        check("...and moves nothing else in the file",
+              "\n".join(l for l in after.splitlines() if "note you sent" not in l
+                        ).rstrip("\n") == before.rstrip("\n"))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """board's regression harness — offscreen, no window on anyone's screen.
 
-Three layers, in the order a failure is cheapest to read:
+Four layers, in the order a failure is cheapest to read:
 
   1. THE ROUND TRIP (pure Python, and the reason this file exists). His store is
      a markdown file he also edits by hand, so the contract is byte-level:
@@ -9,12 +9,19 @@ Three layers, in the order a failure is cheapest to read:
      box -> **exactly one line differs**, and it differs only inside its `[ ]`.
      Clearing an answer that was never given must also leave the file untouched,
      because the store ships `> ` with a trailing space.
-  2. THE PARSE against the real `~/nix/docs/board.md`, so a change to the file's
+  2. WHO IS RUNNING, AND THE BOX (`boardagents.py`). A running agent, a dead
+     one and a hand-moved one are told apart by `boardmove`'s liveness rule and
+     by nothing else. The box's claim is not "the message was sent" — an
+     agent's stdin is closed — but that **a message he typed is never lost**, so
+     every check is a CONSERVATION check: after each path it is on disk exactly
+     once, in exactly one of `to/`, `queue/`, `taken/`.
+  3. THE PARSE against the real `~/nix/docs/board.md`, so a change to the file's
      shape shows up here rather than as an empty section on screen.
-  3. THE WINDOW: the real `qml/Main.qml` under QT_QPA_PLATFORM=offscreen, plus
-     `grabWindow()` PNGs of the three states worth looking at — everything
-     populated, a decision with a chosen option and a typed answer, and an EMPTY
-     `NEEDS YOU`, which is the state he will see most often.
+  4. THE WINDOW: the real `qml/Main.qml` under QT_QPA_PLATFORM=offscreen, plus
+     `grabWindow()` PNGs of the states worth looking at — everything populated,
+     a decision with a chosen option and a typed answer, an EMPTY `NEEDS YOU`
+     and an EMPTY agents section, which are the two states he will see most
+     often, and the agents section with a running agent and a failed one in it.
 
 Run it with board's own Qt env, not the bare system python:
 
@@ -414,6 +421,173 @@ def test_moves(tmp):
           p.returncode == 1 and "no decision" in p.stderr, p.stderr.strip()[:200])
 
 
+# ------------------------------------------------- 1c. who is running, and the box
+def _stash(bm, key, title, pid, pid_start=None, where="apps/x/**"):
+    """A stash exactly as `boardmove.start()` writes one. The harness fakes the
+    RECORD, never the liveness rule: `_alive()` still decides, off a real pid and
+    a real /proc start time."""
+    import json
+    rec = {"key": key, "num": "1", "title": title, "where": where, "row": "",
+           "block": [], "before": "", "pid": pid,
+           "pidStart": pid_start if pid_start is not None
+           else (bm._proc_start(pid) if pid else None),
+           "host": "top", "started": "now", "board": "/tmp/nowhere.md"}
+    with open(bm.stash_file(key), "w") as f:
+        json.dump(rec, f)
+    return rec
+
+
+def test_agents(tmp):
+    """The agents display and the box he types into it.
+
+    The claim under test is not "a message is sent" — there is nothing to send
+    to, an agent's stdin is closed — but **a message he typed is never lost**.
+    So every check here is a conservation check: after each path, the message is
+    in exactly ONE of the three directories, and the count never drops.
+    """
+    import glob
+    import boardagents as ba
+    import boardmove as bm
+
+    def where_is(text):
+        found = []
+        for name in ("to", "queue", "taken"):
+            for p in glob.glob(os.path.join(ba._root(), "inbox", name, "**", "*.json"),
+                               recursive=True):
+                if text in open(p).read():
+                    found.append(name)
+        return found
+
+    def total():
+        return len(glob.glob(os.path.join(ba._root(), "inbox", "**", "*.json"),
+                             recursive=True))
+
+    for n in os.listdir(bm.stash_dir()):
+        os.unlink(os.path.join(bm.stash_dir(), n))
+
+    # a pid that is certainly gone, and one that certainly is not
+    dead = os.fork()
+    if dead == 0:
+        os._exit(0)
+    os.waitpid(dead, 0)
+    _stash(bm, "live-one", "A decision being worked", os.getpid())
+    _stash(bm, "dead-one", "A decision whose agent died", dead, pid_start="1")
+    _stash(bm, "hand-one", "A decision moved by hand", None)
+
+    seen = {a["id"]: a for a in ba.agents() if a["kind"] != "session"}
+    check("a running agent is listed as running",
+          seen.get("live-one", {}).get("state") == "running", seen.get("live-one"))
+    check("...and a dead one is listed as EXITED, not as running",
+          seen.get("dead-one", {}).get("state") == "exited", seen.get("dead-one"))
+    check("...and says so in words, not in a colour",
+          "exited" in ba.describe(seen["dead-one"])
+          and "running" in ba.describe(seen["live-one"]),
+          (ba.describe(seen["dead-one"]), ba.describe(seen["live-one"])))
+    check("...and an item moved by hand admits it cannot be known",
+          seen.get("hand-one", {}).get("state") == "unowned"
+          and "cannot tell" in ba.describe(seen["hand-one"]),
+          seen.get("hand-one"))
+    check("a recycled pid cannot fake a live agent",
+          bm._alive({"pid": os.getpid(), "pidStart": "1"}) is False)
+    check("nothing in the display is an age, a count or a time",
+          not any(k in seen["live-one"] for k in ("started", "at", "seconds", "age")),
+          sorted(seen["live-one"]))
+
+    # ---- the box: a LIVE agent ----
+    m = ba.send("also fix the tooltip", to="live-one", to_title="A decision")
+    check("a note to a running agent is DELIVERED to its inbox",
+          m["state"] == "delivered" and where_is("also fix the tooltip") == ["to"],
+          (m["state"], where_is("also fix the tooltip")))
+    check("...and shows on its row until it is read, not before",
+          [x["text"] for x in ba.for_agent("live-one")] == ["also fix the tooltip"])
+    os.environ["BOARD_AGENT_ID"] = "live-one"
+    got = ba.take()
+    del os.environ["BOARD_AGENT_ID"]
+    check("...and `inbox take` is what actually reads it",
+          [g["text"] for g in got] == ["also fix the tooltip"]
+          and where_is("also fix the tooltip") == ["taken"],
+          where_is("also fix the tooltip"))
+    check("...leaving nothing unread on that row", ba.for_agent("live-one") == [])
+
+    # ---- the box: an agent that has ALREADY FINISHED ----
+    m = ba.send("try the other approach", to="dead-one")
+    check("a note to an agent that has gone is QUEUED, never dropped",
+          m["state"] == "queued" and where_is("try the other approach") == ["queue"],
+          (m["state"], where_is("try the other approach")))
+
+    # ---- the box: NOTHING running at all ----
+    m = ba.send("look at the panel spacing")
+    check("a note with no agent named is queued for the next one",
+          m["state"] == "queued" and where_is("look at the panel spacing") == ["queue"],
+          m["state"])
+
+    # ---- an agent that never reads it: the guarantee ----
+    ba.send("this one is never read", to="live-one")
+    check("a note left for a live agent waits in its inbox",
+          where_is("this one is never read") == ["to"])
+    _stash(bm, "live-one", "A decision being worked", os.getpid(), pid_start="1")
+    moved, dropped = ba.sweep()
+    check("...and is escalated to the queue when that agent goes",
+          [m["text"] for m in moved] == ["this one is never read"]
+          and where_is("this one is never read") == ["queue"],
+          (moved, where_is("this one is never read")))
+
+    # ...and the same happens on time alone, so a silent agent cannot sit on it
+    _stash(bm, "live-one", "A decision being worked", os.getpid())
+    ba.send("this one is sat on", to="live-one")
+    old = ba.ESCALATE_AFTER_S
+    ba.ESCALATE_AFTER_S = -1
+    moved, _ = ba.sweep()
+    ba.ESCALATE_AFTER_S = old
+    check("a note a LIVE agent never picks up is escalated too",
+          [m["text"] for m in moved] == ["this one is sat on"]
+          and where_is("this one is sat on") == ["queue"], moved)
+
+    # ---- the queue is somebody's job ----
+    before = [m["text"] for m in ba.pending()]
+    drained = ba.drain()
+    check("board-watch drains the whole queue before it spawns",
+          [m["text"] for m in drained] == before and ba.pending() == [], before)
+    check("...and every message is still on disk, exactly once",
+          total() == 5 and all(where_is(t) == ["taken"] for t in before), total())
+
+    # ---- a dead registration does not sit there claiming to work ----
+    ba.register("note-x", "a note you sent", dead, kind="note")
+    check("a registered run is listed while its process lives",
+          any(a["id"] == "note-x" for a in ba.agents()))
+    moved, gone = ba.sweep()
+    check("...and is dropped by the sweep once it is not",
+          [g["id"] for g in gone] == ["note-x"]
+          and not any(a["id"] == "note-x" for a in ba.agents()), gone)
+
+    # ---- the watcher's own state, said honestly ----
+    check("an unaskable watcher says so rather than looking healthy",
+          "could not be asked" in ba.watcher_state("")["text"])
+    check("a failed watcher is reported as failed",
+          "failed" in ba.watcher_state("ActiveState=failed\n")["text"])
+    check("an idle watcher reads as armed, not as broken",
+          "armed" in ba.watcher_state("ActiveState=inactive\n")["text"])
+
+    # ---- and the CLI half an agent actually uses ----
+    import subprocess
+    cli = os.path.join(BOARD, "tools", "boardctl.py")
+    env = dict(os.environ, BOARD_AGENT_ID="live-one")
+    p = subprocess.run([sys.executable, cli, "inbox", "send", "from the cli",
+                        "--to", "live-one"], capture_output=True, text=True, env=env)
+    q = subprocess.run([sys.executable, cli, "inbox", "take"],
+                       capture_output=True, text=True, env=env)
+    check("boardctl inbox send/take is the agent's half of the box",
+          p.returncode == 0 and q.returncode == 0 and "from the cli" in q.stdout,
+          (p.stderr.strip()[:120], q.stdout.strip()[:120]))
+    p = subprocess.run([sys.executable, cli, "agents"], capture_output=True, text=True)
+    check("boardctl agents lists who is running",
+          p.returncode == 0 and "A decision being worked" in p.stdout,
+          p.stderr.strip()[:200])
+
+    for n in os.listdir(bm.stash_dir()):
+        os.unlink(os.path.join(bm.stash_dir(), n))
+
+
 # ----------------------------------------------------------------- 2. the store
 def test_real_store():
     import boardparse as B
@@ -505,12 +679,13 @@ def build(app, path):
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     keep = (brd.Palette(brd.PANEL_THEME), DeskStyle(parent=engine), StubTitlebar(),
-            brd.Board(path), brd.Settings())
+            brd.Board(path), brd.Settings(), brd.Agents())
     ctx.setContextProperty("WalPalette", keep[0])
     ctx.setContextProperty("DeskStyle", keep[1])
     ctx.setContextProperty("Titlebar", keep[2])
     ctx.setContextProperty("Board", keep[3])
     ctx.setContextProperty("Settings", keep[4])
+    ctx.setContextProperty("Agents", keep[5])
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(BOARD, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
@@ -743,6 +918,69 @@ def test_window(app, tmp):
           len(prop(win, "flight")) > 0 and len(prop(win, "landed")) > 0,
           (len(prop(win, "flight")), len(prop(win, "landed"))))
 
+    # ---- the agents section: the machine, drawn beside the store ----
+    # It is not part of board.md, so it is checked through the same window but
+    # against `boardagents`' own state. What matters on screen: a running agent
+    # is there, a dead one is TOLD APART, a finished one leaves, and a note he
+    # types is visible in whichever of the two places it went.
+    import boardagents as ba
+    agents = keep[5]
+    for n in os.listdir(bm.stash_dir()):
+        os.unlink(os.path.join(bm.stash_dir(), n))
+    # A pid that is certainly gone. `subprocess`, not `os.fork()`: by here the
+    # Qt application object exists and forking a multi-threaded process is a
+    # deadlock waiting to be flaky.
+    import subprocess
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    dead = dead.pid
+    _stash(bm, "drawn-live", "Dim the cover art when unfocused", os.getpid(),
+           where="apps/player/qml/**")
+    _stash(bm, "drawn-dead", "Widen the panel's clock", dead, pid_start="1",
+           where="panel")
+    agents.refresh()
+    spin(250)
+    rows = {a["id"]: a for a in prop(win, "agents") if a["kind"] != "session"}
+    check("the agents section draws what is running",
+          rows.get("drawn-live", {}).get("running") is True, rows.get("drawn-live"))
+    check("...and draws a failed agent differently, in words",
+          rows.get("drawn-dead", {}).get("running") is False
+          and "exited" in rows.get("drawn-dead", {}).get("detail", ""),
+          rows.get("drawn-dead"))
+    said = agents.send("drawn-live", "Dim the cover art", "decision",
+                       "also dim the tracklist")
+    agents.refresh()
+    spin(250)
+    rows = {a["id"]: a for a in prop(win, "agents")}
+    check("a note to a running agent reports delivery honestly",
+          "inbox" in said and "read" in said, said)
+    check("...and stays visible on its row until it is read",
+          rows.get("drawn-live", {}).get("waiting") == ["also dim the tracklist"],
+          rows.get("drawn-live", {}).get("waiting"))
+    said = agents.send("drawn-dead", "Widen the clock", "decision", "never mind")
+    agents.refresh()
+    spin(250)
+    check("a note to an agent that has finished says it was queued instead",
+          "queued" in said and "never mind" in prop(win, "queuedNotes"),
+          (said, prop(win, "queuedNotes")))
+    # ...with the store's own sections folded away, so the shot is of THIS
+    # section rather than of whatever happens to be above it.
+    win.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
+    spin(300)
+    shot(win, "06-agents")
+    win.setProperty("collapsed", {})
+    spin(200)
+    # ...and a finished agent leaves the list rather than rotting in it
+    os.unlink(bm.stash_file("drawn-dead"))
+    os.unlink(bm.stash_file("drawn-live"))
+    agents.refresh()
+    spin(250)
+    check("an agent that is done leaves the list",
+          not [a for a in prop(win, "agents") if a["kind"] != "session"],
+          prop(win, "agents"))
+    check("...and what he wrote is still on the board's queue, not lost",
+          len(prop(win, "queuedNotes")) >= 1, prop(win, "queuedNotes"))
+
     # ---- the empty NEEDS YOU state, the one he will see most often ----
     empty = os.path.join(tmp, "empty.md")
     open(empty, "w").write(EMPTY_FIXTURE)
@@ -753,6 +991,26 @@ def test_window(app, tmp):
     check("...and still shows what is moving and what landed",
           len(prop(win2, "flight")) == 1 and len(prop(win2, "landed")) == 1)
     shot(win2, "03-empty-needs-you")
+
+    # NOTHING RUNNING is the resting state of the agents section, and the one he
+    # will see most often — it has to read as finished, not as broken. The
+    # harness stubs /proc away entirely (a machine with no agent and no session
+    # on it), because the process that runs this test is itself under a Claude
+    # session and would otherwise be in the list.
+    real_procs = ba._procs
+    ba._procs = lambda: {}
+    try:
+        keep2[5].refresh()
+        spin(250)
+        check("with nothing running the agents section is empty, not broken",
+              prop(win2, "agents") == [], prop(win2, "agents"))
+        win2.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
+        spin(300)
+        shot(win2, "03b-agents-empty")
+        win2.setProperty("collapsed", {})
+        spin(200)
+    finally:
+        ba._procs = real_procs
 
     # ---- it survives the small screen (§5.6) ----
     win2.setWidth(420)
@@ -784,6 +1042,7 @@ def main():
         os.makedirs(os.path.join(tmp, "win"))
         test_roundtrip(os.path.join(tmp, "rt"))
         test_moves(os.path.join(tmp, "mv"))
+        test_agents(tmp)
         app = QGuiApplication(sys.argv)
         test_real_store()
         test_real_window(app)
