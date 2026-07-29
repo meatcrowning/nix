@@ -724,100 +724,98 @@ def reconcile(path=bp.BOARD_PATH):
     return moved
 
 
-# ------------------------------------------------- LANDED catches up by itself
-# `land()` is a thing a worker has to REMEMBER, and the record of what reached
-# his machine cannot rest on that. It already failed twice the same way: a
-# worker that lands a commit under a pathspec and never comes back, one that is
-# killed mid-run, one that simply is not told. He read the section on 2026-07-29
-# and said *"the landed page it still is stuck with commits from an hour ago"* —
-# three commits were on `origin/main` and none of them was in the file.
+# ---------------------------------------------------- LANDED IS READ FROM GIT
+# **The section is COMPUTED, every time it is drawn, from the commit log.**
+# Nothing has to remember, nothing has to sweep, nothing has to be deployed for
+# it to be current — which is the whole of his verdict on 2026-07-29, after the
+# third time he found it hours stale: *"it should just read from the commit log
+# of the repo itself. it shouldnt need an agent to do that"*.
 #
-# So the section reconciles against git the same way IN FLIGHT reconciles
-# against `/proc`: whatever is on `origin/main` and not in LANDED is a hole, and
-# a hole gets filled. Append-only, in commit order, never a rewrite.
+# He was right about the shape of the bug, not just the bug. Twice the fix was
+# to have SOMETHING WRITE the missing rows — `Board._catch_up` first, then
+# `board-watch.py`'s tick — and both were correct code that could not reach him:
 #
-# **TWO callers, and the second one is why he had to report this four times.**
-# `Board._catch_up` (the app) was the only one, and it can only sweep while the
-# window is OPEN — and `apps/` being live source, an app started before a fix
-# goes on running the code from before it, so both earlier fixes were correct
-# and neither could reach the window he was looking at. `board-watch.py`'s tick
-# now calls this too: a systemd unit, on both hosts, headless, running whether
-# or not the board is on screen, and it logs what it appended so the next report
-# has a trace to read. It passes `fetch_wait=True` — see `_fetch_origin`.
+#   * `apps/` is live source with no hot reload, so the board window he had open
+#     went on running the code from before the fix, for as long as he left it
+#     open. Two correct fixes, one process that had never seen either.
+#   * the watcher is a home-manager unit, so on `top` it needed a
+#     `sudo rebuild-top` before the second fix existed at all on that machine.
+#
+# A derived view has neither failure mode, and that is the point: whichever
+# build of this file is running, the answer it gives is read out of git at the
+# moment of the read. There is no stamped state to be stale, so a stale writer
+# cannot make it wrong.
+#
+# WHAT REMAINS OF THE FILE'S ROWS: a CACHE, and an override. `land --what` still
+# writes a row, because the sentence an agent chose is usually better than the
+# raw commit subject and there is nowhere else to keep it. A row whose hash git
+# also knows supplies the What cell and nothing else; a row naming no commit at
+# all (`no change`, a decision settled) is carried through verbatim, git having
+# nothing to say about it. **The file is never the reason a commit does or does
+# not appear.**
 
-#: The repo LANDED is a record of. `docs/` is deliberately NOT swept: its
-#: history is mostly the 5-minute sync timer's own commits, and a sweep over it
-#: would bury his board in them. A docs commit worth recording is recorded by
-#: hand, with `land`, exactly as it always was.
+#: The repos LANDED is a record of. Both, because a change lands in one or the
+#: other: `~/nix` is the public repo, `docs/` is the private one living inside
+#: it, and he should not have to know which when he reads what happened.
 #:
-#: `BOARD_LANDED_REPO` overrides it, and NOTHING in the running system sets it:
-#: it exists so `tools/board-watch-test.py` can point a tick at a throwaway git
-#: repo and watch a commit arrive in a throwaway board, which is the only way to
-#: test the watcher's sweep end to end without appending this repo's real
-#: history to a fixture.
+#: `BOARD_LANDED_REPO` replaces the pair with one repo, and NOTHING in the
+#: running system sets it: it exists so a harness can point the view at a
+#: throwaway git repo instead of this one's real history.
 LANDED_REPO = os.path.expanduser(os.environ.get("BOARD_LANDED_REPO") or "~/nix")
+LANDED_DOCS_REPO = os.path.join(LANDED_REPO, "docs")
 
-#: How far back the sweep may reach: never before the OLDEST commit LANDED
-#: already names. Everything earlier predates the board and was never meant to
-#: be in it — a fixed window would have appended 96 rows of history the first
-#: time it ran. An empty LANDED has no floor and so sweeps nothing, which is the
-#: safe answer rather than the whole repo.
+#: Both refs, unioned. `HEAD` is what is actually on this machine and needs no
+#: network at all — the old sweep read `origin/main` alone, so a commit made
+#: here was invisible until a push moved the remote-tracking ref and the other
+#: host's was invisible until somebody fetched. `origin/main` stays in the union
+#: because the other machine's work has landed too, as soon as this one has
+#: heard of it; hearing of it is `_fetch_origin` below, and it is a courtesy,
+#: not a dependency.
+LANDED_REFS = ("HEAD", "origin/main")
 
-#: A commit is left alone until it is this old — one sweep tick, no more. His
-#: words: *"why is the wait time so absurdly high? it should just notice when a
-#: new commit is added and append it to the list"*. It used to be 10 minutes,
-#: bought as a courtesy to the worker that made the commit and is usually still
-#: running and about to `land` it with its own better sentence; if the sweep got
-#: there first, `land` wrote nothing at all. **That courtesy is bought a
-#: different way now: `land` UPGRADES a sweep-written row's What cell in place**
-#: (one targeted line edit, see `land`), so losing the race costs the agent's
-#: sentence nothing and there is no reason left to wait ten minutes for it. What
-#: this minute still buys is the ordinary case looking tidy — the worker's own
-#: sentence usually arrives first and no row is ever rewritten.
-LANDED_MIN_AGE = 60
+#: How far back the computed half reaches. Older than this, the section is
+#: exactly the rows the file holds and nothing is added — so a board whose
+#: history goes back a fortnight keeps that history verbatim, and the last two
+#: days are complete. Without a bound this would grow without limit against a
+#: repo that takes ~80 commits a day.
+LANDED_DAYS = 2
 
-#: `git log origin/main` reads a REMOTE-TRACKING ref, and nothing moves that ref
-#: but a fetch. Pushing from this machine moves it as a side effect, so the
-#: sweep saw this host's own commits and was blind to the other host's for as
-#: long as nobody happened to pull — which on a freshly booted machine is
-#: forever. So the sweep fetches, on EVERY tick: it is one detached process and
-#: it is what decides whether the other host's commit is visible at all, so
-#: throttling it to ten times the sweep's own period only ever bought a ten
-#: minute hole. DETACHED and unwaited still, because `_catch_up` runs on the GUI
-#: thread and a fetch off-LAN blocks until DNS gives up; the ref it lands is
-#: read by the NEXT sweep, one tick later.
+#: Ask git for at most this much. The window above is always well inside it;
+#: this only bounds the cost of the call.
+LANDED_LOG_LIMIT = 800
+
+#: `git log` is asked again only when a ref has actually moved, so the view can
+#: be recomputed on every repaint without shelling out on every repaint. This is
+#: the floor under `landed_tips()` — the cheap question — not under the log.
+LANDED_TIP_EVERY = 2.0
+
+#: A fetch is the only thing that moves `origin/main`, and it is what decides
+#: whether the OTHER host's commits are visible yet. Detached and unwaited: this
+#: is called from the GUI thread and a fetch off-LAN blocks until DNS gives up.
+#: Nothing waits for it — the view is already correct about this machine, and
+#: gains the other one's commits whenever the ref arrives.
 LANDED_FETCH_EVERY = 60
 
-#: Don't shell out to git on every repaint. The board app refreshes on every
-#: inotify event on the file, and agents write to it constantly — but its own
-#: `_catch_up` timer is 60 s, so this is the floor that matters and a commit
-#: shows up about two ticks after it is pushed (one to fetch, one to read).
-LANDED_SWEEP_EVERY = 60
-
-#: ...and `board.md` SYNCS between the machines, so both hosts can be looking at
-#: the same hole at the same second with no lock between them. There WAS a
-#: stagger here — `top` after 10 minutes, any other host after 20, the docs
-#: sync's round trip — and it is gone, because it was 20 minutes of waiting to
-#: prevent a duplicate row rather than 20 lines of code to remove one. **The
-#: sweep now HEALS a duplicate instead of avoiding it**: it already reads every
-#: hash in the section, so a second row for a hash the section already names is
-#: dropped, ONE line edit, provided the row it drops says only what the sweep
-#: itself would have written (`landed_duplicates`). That is the whole of the
-#: cross-host answer, and it is strictly better than the stagger was: the
-#: stagger only made the race unlikely, and a duplicate that did get through
-#: stayed on his board for good.
-#:
-#: What it deliberately does NOT do is dedupe two DIFFERENT sentences for one
-#: hash. Deleting a line a person or an agent wrote is not this function's to
-#: do — union-merged prose is the one case a human should look at — so those
-#: are left alone and only the mechanical repeat goes.
-LANDED_HEAL_DUPLICATES = True
-
-#: How much history to ask git for. The floor above is always inside this on any
-#: board that is being used; it only bounds the cost of the call.
-LANDED_LOG_LIMIT = 500
+#: The docs repo commits itself every five minutes from the sync timer, ~40 a
+#: day saying `sync(book): 1 doc(s)`. Those are the machinery moving the file
+#: this board lives in, not work that landed, and they would bury the section.
+_SYNC_SUBJECT = re.compile(r"^sync\([^)]*\)\s*:")
 
 _LOG_FMT = "%H\x1f%ct\x1f%s"
+
+_tip_cache = {"at": 0.0, "key": None, "tips": ""}
+_log_cache = {"tips": None, "log": []}
+
+
+def landed_repos():
+    """The repos to read, existing ones only. One when `BOARD_LANDED_REPO` is
+    set to something with no `docs/` inside it, which is every harness."""
+    out = []
+    for r in (LANDED_REPO, LANDED_DOCS_REPO):
+        if os.path.isdir(os.path.join(r, ".git")) or os.path.isfile(
+                os.path.join(r, ".git")):
+            out.append(r)
+    return tuple(out)
 
 
 def _stamp_due(name, now, every):
@@ -825,9 +823,8 @@ def _stamp_due(name, now, every):
 
     `state_dir()`, NOT `stash_dir()`: these are throttles, not items that are in
     flight, and `_stashes()` reads every `.json` under the stash dir as one.
-    Parked there the sweep's stamp was drawn on his board as an unowned agent
-    titled "a decision" — a card for a timestamp — on any machine where the
-    sweep had ever run.
+    Parked there the fetch's stamp was drawn on his board as an unowned agent
+    titled "a decision" — a card for a timestamp.
     """
     p = os.path.join(state_dir(), name)
     try:
@@ -845,77 +842,100 @@ def _stamp_due(name, now, every):
     return True
 
 
-def _sweep_stamp():
-    return os.path.join(state_dir(), "landed-sweep.json")
+def _fetch_origin(repos=None, now=None, every=LANDED_FETCH_EVERY, wait=False):
+    """Ask git to move `origin/main`, in the background. True if asked.
 
+    Pure freshness: the view is already complete about what is on THIS machine
+    without it, and this is what eventually adds the other machine's. So it may
+    fail, be throttled away or never finish, and the only consequence is that
+    the other host's commits show up a little later — never that this host's do
+    not show up at all, which is what the old `origin/main`-only sweep risked.
 
-def _sweep_due(now, every=LANDED_SWEEP_EVERY):
-    return _stamp_due("landed-sweep.json", now, every)
-
-
-def _fetch_origin(repo=LANDED_REPO, now=None, every=LANDED_FETCH_EVERY,
-                  wait=False):
-    """Ask git to move `origin/main`. True if asked.
-
-    The sweep reads a remote-tracking ref, and nothing moves one but a fetch.
-    A push from this machine moves it as a side effect, so the sweep could see
-    this host's own commits and was blind to the other host's until somebody
-    happened to pull — on a freshly booted machine, never.
-
-    Unwaited BY DEFAULT because `Board._catch_up` calls this on the GUI thread
-    and a fetch off-LAN blocks until DNS gives up; `book` is off-LAN often. The
-    ref it lands is read by the NEXT sweep, one tick later — which is why the
-    throttle is the sweep's own period and not ten times it: this call is the
-    only thing that decides whether the other host's commit is visible, so every
-    tick it skips is a tick the hole stays. A repo with no `origin` is left
-    alone entirely, so a test repo never reaches the network.
-
-    `wait=True` for a HEADLESS caller, and `board-watch.py` is one. It has no
-    GUI thread to block, so it can read the ref it just fetched in the SAME
-    tick instead of the next one — and it must not detach, because it is a
-    systemd `oneshot`: a `start_new_session` child stays in the unit's cgroup
-    and is killed the moment the tick returns, so an unwaited fetch there is a
-    fetch that mostly does not happen.
+    Unwaited by default because the caller is usually the GUI thread. A repo
+    with no `origin` is never dialled, so a harness repo never reaches the net.
     """
     now = time.time() if now is None else now
-    try:
-        p = subprocess.run(["git", "-C", repo, "config", "--get",
-                            "remote.origin.url"],
-                           capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    if p.returncode != 0 or not p.stdout.strip():
-        return False
     if not _stamp_due("landed-fetch.json", now, every):
         return False
-    cmd = ["git", "-C", repo, "fetch", "--quiet", "origin", "main"]
-    try:
-        if wait:
-            subprocess.run(cmd, stdin=subprocess.DEVNULL,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=30)
-        else:
-            subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return True
+    asked = False
+    for repo in (landed_repos() if repos is None else repos):
+        try:
+            p = subprocess.run(["git", "-C", repo, "config", "--get",
+                                "remote.origin.url"],
+                               capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if p.returncode != 0 or not p.stdout.strip():
+            continue
+        cmd = ["git", "-C", repo, "fetch", "--quiet", "origin", "main"]
+        try:
+            if wait:
+                subprocess.run(cmd, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=30)
+            else:
+                subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            asked = True
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return asked
 
 
-def _git_log(repo=LANDED_REPO, ref="origin/main", limit=LANDED_LOG_LIMIT):
-    """`[(full hash, committer epoch, subject)]`, newest first. Empty on any
-    failure — a missing repo, no `origin/main`, git not on PATH — because a
-    sweep that cannot read git must do nothing, not guess."""
+def landed_tips(repos=None):
+    """A cheap token that changes when any watched ref moves. `""` on failure.
+
+    This is what makes a computed section affordable: the board re-reads its
+    file on every inotify event and agents write to it constantly, so the
+    expensive question (`git log`) is asked only when this answer differs from
+    the last one. `rev-parse` over two repos is about a millisecond.
+    """
+    now = time.time()
+    repos = landed_repos() if repos is None else tuple(repos)
+    if _tip_cache["key"] == repos and now - _tip_cache["at"] < LANDED_TIP_EVERY:
+        return _tip_cache["tips"]
+    out = []
+    for repo in repos:
+        try:
+            p = subprocess.run(["git", "-C", repo, "rev-parse"] + list(LANDED_REFS),
+                               capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        # `--` nothing: an unknown ref makes rev-parse exit non-zero while still
+        # printing the ones it did resolve, and a repo with no `origin/main`
+        # (every fresh harness repo) is the ordinary case, not a failure.
+        for ln in p.stdout.split():
+            if re.fullmatch(r"[0-9a-f]{40}", ln.strip()):
+                out.append(ln.strip())
+    _tip_cache["at"] = now
+    _tip_cache["key"] = repos
+    _tip_cache["tips"] = "|".join(out)
+    return _tip_cache["tips"]
+
+
+def _git_log(repo, refs=LANDED_REFS, limit=LANDED_LOG_LIMIT):
+    """`[(full hash, committer epoch, subject)]` over the union of `refs`.
+
+    Empty on any failure — a missing repo, git not on PATH, no ref that exists —
+    because a view that cannot read git shows the file's rows, which is the
+    honest answer rather than a guess.
+    """
     try:
         p = subprocess.run(
-            ["git", "-C", repo, "log", ref, "--no-merges",
-             "--format=" + _LOG_FMT, "-n", str(int(limit))],
+            ["git", "-C", repo, "log", "--no-merges", "--format=" + _LOG_FMT,
+             "-n", str(int(limit))] + list(refs) + ["--"],
             capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return []
-    if p.returncode != 0:
-        return []
+    if p.returncode != 0 and not p.stdout:
+        # One of the refs does not exist here (a repo that has never fetched has
+        # no `origin/main`). Ask again for each ref alone and keep what answers.
+        out = []
+        for ref in refs:
+            out += _git_log(repo, (ref,), limit) if len(refs) > 1 else []
+        return _dedupe_log(out)
     out = []
     for line in p.stdout.splitlines():
         parts = line.split("\x1f", 2)
@@ -928,12 +948,44 @@ def _git_log(repo=LANDED_REPO, ref="origin/main", limit=LANDED_LOG_LIMIT):
     return out
 
 
+def _dedupe_log(log):
+    seen, out = set(), []
+    for full, ts, subject in sorted(log, key=lambda r: -r[1]):
+        if full in seen:
+            continue
+        seen.add(full)
+        out.append((full, ts, subject))
+    return out
+
+
+def landed_log(repos=None, limit=LANDED_LOG_LIMIT):
+    """Every commit in every watched repo, newest first, sync commits dropped.
+
+    Cached against `landed_tips()`, so calling this on every repaint costs one
+    `rev-parse` unless something actually moved.
+    """
+    repos = landed_repos() if repos is None else tuple(repos)
+    tips = landed_tips(repos)
+    key = (tips, repos, limit)
+    if _log_cache["tips"] == key:
+        return _log_cache["log"]
+    out = []
+    for repo in repos:
+        for full, ts, subject in _git_log(repo, limit=limit):
+            if _SYNC_SUBJECT.match(subject):
+                continue
+            out.append((full, ts, subject))
+    out = _dedupe_log(out)
+    _log_cache["tips"] = key
+    _log_cache["log"] = out
+    return out
+
+
 def landed_commits(doc):
-    """Every commit hash LANDED already names, lowercased and unfenced.
+    """Every commit hash LANDED's cached rows already name, lowercased.
 
     They are SHORT hashes in the file, so matching is by prefix against a full
-    one. A row with no commit (`no change`, a decision settled) contributes
-    nothing.
+    one. A row with no commit (`no change`) contributes nothing.
     """
     out = []
     for grp in doc.get("landed") or []:
@@ -950,173 +1002,96 @@ def _local(ts):
 
 def landed_when(ts):
     """A commit's own local time in LANDED's form — `1:28 am`. Same clock
-    `commit_time()` writes, derived here from the epoch we already have rather
-    than by asking git a second time per commit."""
+    `commit_time()` writes, derived from the epoch we already have rather than
+    by asking git a second time per commit."""
     return _local(ts).strftime("%I:%M %p").lstrip("0").lower()
 
 
-def landed_subjects(log):
-    """`{full hash: the What cell the sweep would write for it}`.
+def landed_view(doc, repos=None, now=None, days=LANDED_DAYS, log=None,
+                fetch=True):
+    """**LANDED as it should be DRAWN** — the file's rows, plus every commit git
+    knows about that none of them names. Newest date group first.
 
-    Through `bp.cell` and back through `bp.text`, because that is what the
-    subject looks like once it has been a row: comparing a raw `git log`
-    subject against a parsed cell would read a round trip as a difference and
-    call an ordinary sweep row somebody's sentence.
-    """
-    return {full: bp.text(bp.cell(subject)) for full, _ts, subject in log}
+    The same shape `bp.parse()` puts in `doc["landed"]`, so nothing downstream
+    of it changes: a list of `{"date", "rows", "prose"}` with rows of
+    `{"commit", "what", "when"}`. It is a pure read — it writes nothing, takes
+    no lock, and can be called as often as the view is drawn.
 
+    Three rules decide what it contains:
 
-def landed_duplicates(doc, log):
-    """Line indices of LANDED rows that repeat a hash the section already names
-    AND say nothing that would be lost. Oldest-first order, safe to remove.
-
-    This is the whole of the cross-host answer (see `LANDED_HEAL_DUPLICATES`):
-    two hosts sweeping the same hole with no lock between them used to be
-    prevented by making the second one wait twenty minutes, and is now simply
-    undone. One row per hash survives, and it is chosen so that the surviving
-    row is the one carrying the most:
-
-      * a repeat whose What is exactly the commit SUBJECT is a sweep row and
-        goes — the sweep can write it again from git any time;
-      * a repeat identical to the row above it goes, for the same reason;
-      * if the FIRST row is the sweep row and the later one is not, the first
-        one goes instead and the sentence somebody chose stays.
-
-    Two different sentences for one hash are left alone, both of them. Nothing
-    here may delete a line a person wrote, and that case is a union merge of
-    two people's prose — the one thing a human should look at.
-    """
-    subjects = landed_subjects(log)
-    seen = {}
-    drop = []
-    for grp in doc.get("landed") or []:
-        for row in grp.get("rows") or []:
-            c = (row.get("commit") or "").strip().strip("`").lower()
-            if not re.fullmatch(r"[0-9a-f]{4,40}", c):
-                continue
-            full = next((f for f in subjects
-                         if f.startswith(c) or c.startswith(f)), None)
-            key = full or c
-            first = seen.get(key)
-            if first is None:
-                seen[key] = row
-                continue
-            subj = subjects.get(full)
-            if row["what"] == first["what"] or (subj and row["what"] == subj):
-                drop.append(row["line"])
-            elif subj and first["what"] == subj:
-                drop.append(first["line"])
-                seen[key] = row
-    return sorted(drop)
-
-
-def landed_missing(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None, now=None,
-                   log=None):
-    """What is on `origin/main` and not in LANDED. Oldest first, ready to append.
-
-    Three bounds, and each one exists to stop this doing something he did not
-    ask for:
-
-      * the FLOOR — nothing older than the oldest commit LANDED already names.
-      * the AGE — nothing younger than `min_age`, so a live worker gets to
-        record its own commit first. One tick now, not ten minutes: `land`
-        upgrades a row the sweep beat it to, so the wait no longer has to cover
-        the worker's whole run.
-      * the DATE — a commit only joins a `### <date>` group that already exists,
-        or opens a new one if its date is newer than every group there. Never
-        one wedged in the middle: LANDED is newest-group-first and this must not
-        invent that structure from a commit's date.
-
-    There is no longer a per-host bound. `log` is the `_git_log()` the caller
-    already took, so one sweep shells out to git once.
+      * **A cached row wins on WORDING, never on existence.** If the file names
+        a hash, its What cell is used (that is the sentence `land --what`
+        chose); the commit is in the section either way.
+      * **A row naming no commit is carried through verbatim** — `no change`, a
+        decision settled, a hand-written line. Git has nothing to say about it
+        and nothing here may drop it.
+      * **The computed half reaches back `days` days, and no further than the
+        oldest date group the file already has.** Older groups are shown exactly
+        as written. That bound is what keeps a repo at eighty commits a day from
+        turning the section into the whole log.
     """
     now = time.time() if now is None else now
-    if min_age is None:
-        min_age = LANDED_MIN_AGE
-    doc = bp.parse(bp.read(path))
-    log = _git_log(repo) if log is None else log
-    if not log:
-        return []
-    have = landed_commits(doc)
-    if not have:
-        return []
-
-    def recorded(full):
-        return any(full.startswith(h) for h in have)
-
-    floor = min((ts for full, ts, _s in log if recorded(full)), default=None)
-    if floor is None:
-        return []                    # LANDED names nothing this repo knows
-
-    dates = [g.get("date", "").strip() for g in doc.get("landed") or []]
-    dates = [d for d in dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)]
-    newest = max(dates) if dates else ""
-
-    out = []
-    for full, ts, subject in log:
-        if ts <= floor or ts > now - min_age or recorded(full):
-            continue
-        date = _local(ts).date().isoformat()
-        if dates and date not in dates and date < newest:
-            continue
-        out.append({"commit": full[:7], "what": subject, "date": date,
-                    "when": landed_when(ts), "ts": ts})
-    out.sort(key=lambda r: r["ts"])
-    return out
-
-
-def reconcile_landed(path=bp.BOARD_PATH, repo=LANDED_REPO, min_age=None,
-                     now=None, force=False, fetch=True, fetch_wait=False):
-    """Append every missing commit to LANDED, and heal any duplicate row it
-    finds on the way. Returns the rows it APPENDED (a heal is silent).
-
-    Idempotent by construction: the second run finds those hashes in the file
-    and has nothing to do, and the row it removed is not there to remove twice.
-    One `bp.edit`, so the whole catch-up is one atomic write under the same lock
-    every other writer takes, and a run with nothing to do does not write at
-    all. Removals go FIRST and in descending line order, so no removal moves the
-    line another one was measured against; the appends after them re-find their
-    group in the mutated lines, as they always did.
-
-    What there is to do is decided TWICE — once out here, to know whether to
-    open the file for writing at all, and again inside `go`, against the very
-    doc it is writing into. `bp.edit` re-runs `go` on a fresh read whenever the
-    file moved under it, and that is exactly the moment a worker's own `land`
-    lands: without the second check the retry appended a row that had just
-    appeared, which is the one duplicate this must never create.
-    """
-    now = time.time() if now is None else now
-    if not force and not _sweep_due(now):
-        return []
     if fetch:
-        _fetch_origin(repo, now=now, wait=fetch_wait)
-    log = _git_log(repo)
-    rows = landed_missing(path=path, repo=repo, min_age=min_age, now=now, log=log)
+        _fetch_origin(repos, now=now)
+    log = landed_log(repos) if log is None else log
 
-    def dups(doc):
-        return landed_duplicates(doc, log) if LANDED_HEAL_DUPLICATES else []
+    when_of = {full: ts for full, ts, _s in log}
 
-    if not rows and not dups(bp.parse(bp.read(path))):
-        return []
-    wrote = []
+    def timed(rows):
+        """Every cached row with the commit time git gives its hash, and a row
+        git cannot time carried at its predecessor's — so it keeps its written
+        position instead of falling to the top of the group. Without this a
+        commit an agent DID `land` sorted above a newer one it did not, the
+        cached half being appended in a different pass from the computed one."""
+        out, last = [], 0
+        for row in rows:
+            c = (row.get("commit") or "").strip().strip("`").lower()
+            ts = next((t for f, t in when_of.items() if f.startswith(c)), None) \
+                if re.fullmatch(r"[0-9a-f]{4,40}", c) else None
+            last = last if ts is None else ts
+            out.append((last, dict(row)))
+        return out
 
-    def go(doc):
-        del wrote[:]
-        lines = doc["lines"]
-        for i in sorted(dups(doc), reverse=True):
-            lines = bp.remove_row(lines, i)
-        have = landed_commits(doc)
-        for r in rows:
-            c = r["commit"]
-            if any(c.startswith(h) or h.startswith(c) for h in have):
-                continue
-            lines = bp.add_landed_row(lines, c, r["what"], r["date"], r["when"])
-            wrote.append(r)
-        return lines if lines is not doc["lines"] else None
+    groups = [dict(g) for g in (doc.get("landed") or [])]
+    for g in groups:
+        g["rows"] = timed(g.get("rows") or [])
+        g["prose"] = list(g.get("prose") or [])
+    by_date = {g.get("date", "").strip(): g for g in groups}
+    have = landed_commits(doc)
 
-    if not bp.edit(path, go):
-        return []
-    return list(wrote)
+    dates = [d for d in by_date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)]
+    floor = (_local(now).date() - datetime.timedelta(days=days)).isoformat()
+    if dates:
+        floor = max(floor, min(dates))
+
+    fresh = []
+    for full, ts, subject in log:
+        date = _local(ts).date().isoformat()
+        if date < floor:
+            continue
+        if any(full.startswith(h) for h in have):
+            continue
+        fresh.append({"commit": full[:7], "what": bp.text(bp.cell(subject)),
+                      "when": landed_when(ts), "date": date, "ts": ts})
+    fresh.sort(key=lambda r: r["ts"])
+
+    for r in fresh:
+        g = by_date.get(r["date"])
+        if g is None:
+            g = {"date": r["date"], "rows": [], "prose": [], "line": -1}
+            by_date[r["date"]] = g
+            groups.append(g)
+        g["rows"].append((r["ts"], {"commit": r["commit"], "what": r["what"],
+                                    "when": r["when"], "line": -1}))
+
+    # Oldest first WITHIN a day, newest day first — which is how the file has
+    # always read, and a stable sort so two rows sharing a second keep the order
+    # they were written in.
+    for g in groups:
+        g["rows"].sort(key=lambda tr: tr[0])
+        g["rows"] = [row for _ts, row in g["rows"]]
+    groups.sort(key=lambda g: g.get("date", ""), reverse=True)
+    return groups
 
 
 def status(path=bp.BOARD_PATH):

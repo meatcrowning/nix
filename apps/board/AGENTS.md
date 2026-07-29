@@ -336,106 +336,61 @@ Rules that fall out of it, all of them load-bearing:
   above applies to IN FLIGHT exactly as it does to NEEDS YOU, and a start time is
   an elapsed time the moment he reads it. The stash records one because
   reclaiming a dead agent's item is machine business; it never reaches the file.
-- **LANDED RECONCILES ITSELF AGAINST GIT, and a worker still calls `land`.**
-  `land` is something an agent has to *remember*, and the record of what reached
-  his machine cannot rest on that: a worker dies, or lands under a pathspec and
-  never comes back, or is never told. It failed that way twice — the second time
-  he said *"the landed page it still is stuck with commits from an hour ago not
-  updated"* with three commits on `origin/main` and no row for any of them. So
-  `boardmove.reconcile_landed()` diffs `git log origin/main` against the hashes
-  already in the section and appends the rest: subject as What, the commit's own
-  12-hour local time as When, under that commit's own `### <date>` group. It is
-  the LANDED half of what `reconcile()` does for IN FLIGHT — one section
-  reconciles against `/proc`, the other against git.
-    - **A worker's own `land` is still the primary path and still required.**
-      The sweep writes the commit SUBJECT; `land --what` writes the sentence the
-      agent chose, which is usually the better line, and it writes it
-      immediately. The sweep is the floor, not the plan.
-    - **Three bounds, each stopping it doing something nobody asked for.** It
-      never reaches below the OLDEST commit LANDED already names (a fixed window
-      would have appended 96 rows of pre-board history on its first run, and an
-      empty section has no floor and so sweeps nothing at all); it leaves a
-      commit alone until `LANDED_MIN_AGE`, which is ONE TICK — 60 s, not the ten
-      minutes it was; and a commit only joins a date group that exists or opens
-      one newer than every group there, never one wedged into the middle.
-    - **THE WAIT IS ONE TICK, because `land` no longer loses the race.** He
-      asked *"why is the wait time so absurdly high? it should just -"*, and the
-      answer was that every delay here was bought to keep two writers from
-      appending one hash: ten minutes for the worker's own `land`, a further
-      stagger for the other host, a ten-minute fetch throttle on top. All three
-      are gone, and what replaces them is that a collision is now UNDONE rather
-      than avoided — `land` upgrades a sweep-written row in place, and the sweep
-      heals a duplicate row. End to end a push shows up in about two ticks: one
-      to fetch, one to read it.
-    - **TWO callers, and the second one is why he reported this four times.**
-      `Board._catch_up` (the app) on a 60 s timer and at launch, throttled to
-      `LANDED_SWEEP_EVERY` inside `boardmove`; that is where the section is
-      drawn, so what he is looking at has just been reconciled. But the app is
-      the WRONG place to be the only caller, twice over: it sweeps only while
-      the window is open, and `apps/` being live source, a window opened before
-      a fix goes on running the code from before it — so both earlier fixes were
-      correct and neither could reach the process he had on screen. So
-      `board-watch.py`'s `tick()` calls it too: a systemd unit on `top` and on
-      `book`, headless, running whether or not the board is drawn, logging what
-      it appended to `~/.cache/board-watch.log` so the next report has a trace
-      instead of an argument. It passes `fetch_wait=True` — it has no GUI thread
-      to block, and a detached fetch would be killed with the oneshot's cgroup
-      on the way out, so it reads the ref it fetched in the SAME tick. It sweeps
-      only a board that lives INSIDE `LANDED_REPO`, which is what keeps a
-      harness's `BOARD_WATCH_BOARD` fixture from being handed this repo's real
-      history. Being a home-manager file it needs one deploy per host
-      (`home-manager switch --flake ~/nix#air` on `book`).
-    - **`docs/` is deliberately NOT swept.** Its history is mostly the 5-minute
-      sync timer's own commits and they would bury the section. A docs commit
-      worth recording is recorded by hand, as it always was.
-    - **IT FETCHES, or it only ever sees the commits this host pushed itself.**
-      `git log origin/main` reads a remote-tracking ref and nothing moves one
-      but a fetch; a push moves it as a side effect, which is why the sweep
-      looked like it worked at all. Every commit the OTHER host pushed was
-      invisible until somebody happened to pull — on a freshly booted machine,
-      never, and he said so: *"you say that but landed still didnt update even
-      after i rebooted"*. So `_fetch_origin()` runs first, on EVERY tick
-      (`LANDED_FETCH_EVERY` = the sweep's own period), **detached and unwaited**
-      because `_catch_up` is on the GUI thread and a fetch off-LAN blocks until
-      DNS gives up — the ref it lands is read by the next sweep one tick later.
-      It is the only thing that decides whether the other host's commit is
-      visible at all, so a tick it skips is a tick the hole stays; throttling it
-      to ten times the period only ever bought a ten-minute hole. A repo with no
-      `origin` is never dialled.
-    - **A DUPLICATE IS HEALED, NOT AVOIDED — that is the whole cross-host
-      answer.** `board.md` syncs and there is no lock across it, so both hosts
-      can look at the same hole in the same second. There used to be a stagger
-      (`top` after 10 minutes, anyone else after 20, the docs sync's round trip)
-      and it was 20 minutes of waiting to prevent something 20 lines of code can
-      remove. `landed_duplicates()` drops a second row for a hash the section
-      already names — one line edit, and ONLY if the row it drops says just what
-      the sweep itself would have written. Strictly better than the stagger:
-      that only made the race unlikely, and a duplicate that got through stayed
-      on his board for good. Two DIFFERENT sentences for one hash are both left
-      alone on purpose — deleting a line a person wrote is not this function's
-      to do.
-    - **`land` UPGRADES a row the sweep beat it to**, rather than dropping the
-      call on the floor. Same commit, same time, the agent's own sentence
-      replacing the raw subject, one targeted line edit; a `land` that would
-      write the identical row succeeds and writes nothing. That is what buys the
-      one-tick `LANDED_MIN_AGE` above.
-    - **What is missing is decided twice, the second time inside the lock.**
-      `bp.edit` re-runs the edit on a fresh read whenever the file moved under
-      it, and that is exactly when a worker's own `land` arrives; the retry used
-      to re-append a row that had just appeared. `go()` now drops any hash the
-      doc it is writing into already names.
-    - `tools/board-test.py` → `test_landed_sweep` builds a throwaway repo with
-      committer dates it chose and asserts all of it, including that a second
-      run leaves the file byte-identical; `test_landed_fetch` clones one repo
-      from another to prove the stale-ref blindness, that the fetch clears it,
-      that it rides the sweep's own tick, and that a racing hash is skipped
-      rather than duplicated; `test_landed_dedupe` asserts a two-minute-old
-      commit is a hole on every host and that the repeat row is the one removed;
-      `test_landed_upgrade` asserts `land` rewrites in place and adds no row.
-      `tools/board-watch-test.py` → `test_landed_sweep_runs_on_a_tick` is the
-      one that covers the app being SHUT: a real watcher process, a backdated
-      commit nobody landed, `BOARD_LANDED_REPO` pointing both at a throwaway
-      repo, and the row plus its log line after ONE tick.
+- **LANDED IS READ FROM THE COMMIT LOG, every time it is drawn.**
+  `boardmove.landed_view()` derives the section from `git log`: the file's rows
+  supply the WORDING and git supplies what exists. Nothing sweeps, nothing
+  appends, nothing has to have remembered — so the section cannot be stale
+  unless git is. His verdict, 2026-07-29, after the third time he found it hours
+  behind: *"it should just read from the commit log of the repo itself. it
+  shouldnt need an agent to do that"*.
+    - **He was right about the SHAPE of the bug, not just the bug.** Twice the
+      fix was to have something WRITE the missing rows — `Board._catch_up`
+      first, then `board-watch.py`'s tick — and both were correct code that
+      could not reach him. `apps/` is live source with no hot reload, so the
+      board window he had open went on running the code from before the first
+      fix for as long as he left it open; the watcher is a home-manager unit, so
+      on `top` the second fix needed a `sudo rebuild-top` before it existed
+      there at all. **A derived view has no deployment**: whichever build of
+      `boardmove.py` is running reads git at the moment of the read, so a stale
+      watcher and a stale window are both harmless.
+    - **BOTH repos.** `~/nix` (public) and `docs/` (private, its own repo inside
+      the checkout) — a change lands in one or the other and he should not have
+      to know which. The docs sync timer's own `sync(host): n doc(s)` commits
+      are dropped, or forty a day of them would bury the section.
+    - **BOTH refs, `HEAD` and `origin/main`, unioned.** `HEAD` is what is
+      actually on this machine and needs no network at all; the old sweep read
+      `origin/main` alone, so a commit made here was invisible until a push
+      moved the remote-tracking ref and the other host's was invisible until
+      somebody fetched — *"you say that but landed still didnt update even after
+      i rebooted"*. `_fetch_origin()` still runs, detached and throttled, but it
+      is a COURTESY now: it decides how soon the other machine's commits show
+      up, never whether this machine's do.
+    - **A cached row wins on wording, never on existence.** `land --what` is
+      still the primary path and still required of a worker — the sentence an
+      agent chose is usually better than the raw commit subject, and the file is
+      the only place to keep it. A row naming no commit at all (`no change`, a
+      decision settled) is carried through verbatim. **The file is never the
+      reason a commit does or does not appear.**
+    - **The computed half is BOUNDED** — `LANDED_DAYS` (2) back, and no further
+      than the oldest date group the file already has; older groups are shown
+      exactly as written. This repo takes ~80 commits a day, so without that
+      bound the section would become the whole log.
+    - **It is a pure read.** No lock, no write, `landed_tips()` (a `rev-parse`,
+      about a millisecond) gates the expensive `git log` so it can be called on
+      every repaint. `Board._poll_git` re-derives on a 10 s timer only when a
+      ref has actually moved — that is for the case where nothing else wakes the
+      app, a commit made in another terminal.
+    - **Only a board INSIDE the repo it is a record of** (`Board._derives`).
+      `--board` and every harness point this app at a throwaway file, and
+      handing that one ~/nix's real history would invent a hundred rows.
+    - `tools/board-test.py` → `test_landed_view` asserts a commit nobody
+      recorded appears from local HEAD with no fetch and no `origin/main`, that
+      the `docs/` repo is read, that sync commits are dropped, that the cached
+      sentence survives without duplicating its hash, and that **nothing is
+      written**; `test_landed_window` asserts the bound.
+      `tools/board-watch-test.py` → `test_landed_needs_no_tick` asserts the
+      inverse of what it used to: a tick appends nothing, and the commit is in
+      the section anyway.
 - **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
   Only a decision agent has a row (`start()` made it); a WORKER dispatched out
   of the box never did, so every commit the fan-out produced was unrecordable —

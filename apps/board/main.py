@@ -67,6 +67,7 @@ timer while this window is open:
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -221,6 +222,7 @@ class Board(QObject):
         super().__init__(parent)
         self._path = os.path.abspath(os.path.expanduser(path or boardparse.BOARD_PATH))
         self._doc = {}
+        self._landedFile = []
         self._err = ""
         self._undo = None
         self._watcher = QFileSystemWatcher(self)
@@ -235,34 +237,63 @@ class Board(QObject):
         self._settle.setSingleShot(True)
         self._settle.setInterval(120)
         self._settle.timeout.connect(self._reload)
-        # LANDED CATCHES UP BY ITSELF. `boardmove.land()` is something a worker
-        # has to remember, and a record of what reached his machine cannot rest
-        # on that — a worker that dies, or is never told, leaves a commit on
-        # `origin/main` that the section never mentions. He read it stuck an
-        # hour behind on 2026-07-29. So the sweep runs HERE, where the section
-        # is drawn: whatever he is looking at has just been reconciled against
-        # git, whether or not the watcher is up and with no rebuild to deploy
-        # it (this is live source; `board-watch.py` is not). It is throttled to
-        # `boardmove.LANDED_SWEEP_EVERY` inside, so this cadence costs nothing
-        # most times it fires, and it is append-only — a run with nothing to
-        # add does not write, so it cannot loop through our own file watcher.
-        self._sweep = QTimer(self)
-        self._sweep.setInterval(60000)
-        self._sweep.timeout.connect(self._catch_up)
-        self._sweep.start()
+        # LANDED IS READ OUT OF GIT, HERE, every time the section is built —
+        # `boardmove.landed_view()`, a pure read. Nothing sweeps, nothing
+        # appends, nothing has to have remembered: what he is looking at is the
+        # commit log, so the section cannot be stale unless git is.
+        #
+        # That is his verdict and it is also what fixes the way the two previous
+        # fixes could not reach him: both of them made something WRITE the
+        # missing rows, and a writer has to be deployed. This window is live
+        # source with no hot reload, so the one he had open never ran either
+        # fix; the watcher is a home-manager unit, so on `top` the second one
+        # needed a rebuild before it existed. A derived view has no deployment
+        # at all — whichever build of this file is running reads git at the
+        # moment of the read.
+        #
+        # The timer is only for the case where NOTHING ELSE moves: no file
+        # event, no window activation, and a commit made in another terminal.
+        # It asks `git rev-parse` (about a millisecond) and rebuilds only if a
+        # ref actually moved, so it never writes and never wakes the parser.
+        self._tips = ""
+        self._poll = QTimer(self)
+        self._poll.setInterval(10000)
+        self._poll.timeout.connect(self._poll_git)
+        self._poll.start()
         self._load()
-        self._catch_up()
 
     # ---- reading ----
 
-    def _catch_up(self):
+    def _derives(self):
+        """Only a board that lives INSIDE the repo it is a record of. A harness
+        (or `--board`) points this app at a throwaway file, and handing that one
+        ~/nix's real history would be inventing a hundred rows it never had."""
+        return os.path.abspath(self._path).startswith(
+            os.path.abspath(boardmove.LANDED_REPO) + os.sep)
+
+    def _landed(self):
+        """The LANDED section as it should be DRAWN: the file's rows are the
+        cache and the wording, git is the record of what exists. Never fatal —
+        §10 — so a repo that cannot be read leaves the file's own rows."""
+        if not self._derives():
+            return self._landedFile
         try:
-            rows = boardmove.reconcile_landed(path=self._path)
-        except (boardparse.BoardError, OSError, ValueError):
-            return                    # §10: never fatal, and never a dialog
-        if rows:
-            self.status.emit("LANDED: recorded %d commit%s nobody had"
-                             % (len(rows), "" if len(rows) == 1 else "s"))
+            self._tips = boardmove.landed_tips()
+            return boardmove.landed_view({"landed": self._landedFile})
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return self._landedFile
+
+    def _poll_git(self):
+        if not self._derives():
+            return
+        try:
+            tips = boardmove.landed_tips()
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return
+        if tips == self._tips:
+            return
+        self._doc["landed"] = self._landed()
+        self.docChanged.emit()
 
     def _rewatch(self):
         if os.path.isfile(self._path) and self._path not in self._watcher.files():
@@ -278,12 +309,18 @@ class Board(QObject):
             src = boardparse.read(self._path)
         except OSError as e:
             self._err = e.strerror or "cannot read"
+            self._landedFile = []
             self._doc = {"needs": [], "todo": [], "flight": [], "landed": [],
                          "intro": {}, "lines": [], "digest": ""}
             self.docChanged.emit()
             return False
         self._err = ""
         self._doc = boardparse.parse(src)
+        # The file's rows are kept APART from what is drawn: `landed_view` reads
+        # them as its cache, so feeding it its own output would let the derived
+        # half accumulate as if it had been written down.
+        self._landedFile = self._doc["landed"]
+        self._doc["landed"] = self._landed()
         self.docChanged.emit()
         return True
 
