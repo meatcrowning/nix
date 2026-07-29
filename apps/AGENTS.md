@@ -1,10 +1,10 @@
 # `apps/` — the vendored desktop apps
 
-Seven standalone Qt/QML apps that ship with this config, plus the shared Python
+Eight standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
 **Read `~/nix/docs/DESIGN.md` before you draw anything in here.** These apps are not
-seven programs that happen to share a repo — they are one desktop, alongside the
+eight programs that happen to share a repo — they are one desktop, alongside the
 panel and the compositor plugin, and the user's standing requirement is that a
 new app or a new feature *looks like the rest without him having to say so*.
 Type, palette, spacing, corners, motion timing, titlebar button glyphs, menus,
@@ -21,6 +21,7 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`surfer/`](surfer/AGENTS.md) | QtWebEngine browser | `home/prog/surfer.nix` |
 | [`askpass/`](askpass/AGENTS.md) | the `sudo -A` password dialog | `home/prog/askpass.nix` |
 | [`reader/`](reader/AGENTS.md) | markdown reader (browse + read `.md`) | `home/prog/reader.nix` |
+| [`board/`](board/AGENTS.md) | decision board over `docs/board.md` | `home/prog/board.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
@@ -58,7 +59,7 @@ travels with the repo so a `git pull` carries the apps to every machine.
 (This is why they sat at the repo *root* historically; the constraint was only
 ever "outside `home/`/`sys/`", so `apps/` satisfies it just as well.)
 
-## The live-source pattern — all six work this way
+## The live-source pattern — all eight work this way
 
 `home/prog/<app>.nix` builds a wrapper that runs the **live** source at the
 absolute path `/home/lam/nix/apps/<app>/main.py` — valid on both `top` and
