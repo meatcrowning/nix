@@ -66,6 +66,23 @@ let
   setDefaults = "${pkgs.python3}/bin/python3 ${./mime-files/set-defaults.py}";
 in
 {
+  # A default is only reached if the type is DETECTED. `xdg-open` picks a
+  # detector by desktop environment, and under Hyprland it selects `generic`,
+  # whose `info_generic()` is `mimetype` if that command exists and otherwise
+  # `file --brief --mime-type`. `file` reads CONTENT — it has no globs — so on
+  # book (Fedora's /usr/bin/xdg-open, with no `mimetype` on PATH) a `.md`
+  # resolved to `text/plain`, whose default is libreoffice-writer, and
+  # `text/markdown=reader.desktop` was never consulted. Measured on book
+  # 2026-07-29: `xdg-mime query filetype README.md` -> text/plain, while
+  # `gio info` on the same file said text/markdown.
+  #
+  # `mimetype` (perl File::MimeInfo) is the glob-aware detector that branch
+  # wants, and it reads the shared-mime-info database from XDG_DATA_DIRS, so it
+  # agrees with gio on both machines. Same measurement with it on PATH:
+  # text/markdown -> reader.desktop. It fixes every glob-only type at once, not
+  # just markdown (.svg, .csv were also wrong under `file`).
+  home.packages = [ pkgs.perlPackages.FileMimeInfo ];
+
   home.activation.desktopDefaults =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       run ${setDefaults} ${lib.escapeShellArgs assoc}
