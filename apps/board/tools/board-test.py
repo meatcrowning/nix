@@ -2324,16 +2324,51 @@ def test_window(app, tmp):
     check("the card's FIRST line is what the agent SAYS it is doing",
           bool(lines) and lines[0][1] == card.get("saysLine"),
           [(y, s) for y, s, _ in lines])
+    # The observed line is drawn with the live tick on the end of it, so it is
+    # found by its opening rather than by an exact match.
+    doingY = min([y for y, s, _ in lines
+                  if s.startswith(card.get("doingLine", "\0"))] or [1e9])
     check("...its SECOND is what it is OBSERVED doing, still under the claim",
-          ys.get(card.get("doingLine"), -1) > ys.get(card.get("saysLine"), 1e9),
+          doingY > ys.get(card.get("saysLine"), 1e9),
           [(y, s) for y, s, _ in lines])
     check("...and the title row it used to open with is now the THIRD",
-          ys.get("Wire FOCUS through vtbclient", -1)
-          > ys.get(card.get("doingLine"), 1e9),
+          ys.get("Wire FOCUS through vtbclient", -1) > doingY,
           [(y, s) for y, s, _ in lines])
     check("...with `where` still on the title's own line, right-aligned",
           ys.get("apps/pylib/**") == ys.get("Wire FOCUS through vtbclient"),
           [(y, s) for y, s, _ in lines])
+    # ---- the tick on the end of the observed line ----
+    # *"at the end of the second row of an agents information, it should have an
+    # animated elipsies to show its currently happening"*. Three claims: it is
+    # ASCII (§2.3), it does not reflow the line as it cycles (a fixed three
+    # cells), and it appears ONLY where something is actually happening — a
+    # stopped agent's past-tense line and the states that say nothing is
+    # happening get none, which is §10's honesty rule about a moving thing.
+    doingText = [s for y, s, _ in lines if y == doingY]
+    check("the observed line ends in a ticking ASCII ellipsis while it is live",
+          cardItem is not None and cardItem.property("ticking") is True
+          and bool(doingText) and doingText[0].rstrip() .endswith(".")
+          and "…" not in doingText[0],
+          doingText)
+    # Sampled while it runs rather than by driving the phase by hand: the timer
+    # is what is under test, and setting the property underneath it raced.
+    seen = set()
+    for _ in range(20):
+        seen.add(str(cardItem.property("liveDots")))
+        spin(100)
+    check("...three cells wide whatever the phase, so the line cannot reflow",
+          {len(v) for v in seen} == {3}
+          and {v.rstrip() for v in seen} <= {".", "..", "..."},
+          sorted(seen))
+    check("...and it actually cycles, so the card reads as live",
+          len(seen) > 1, sorted(seen))
+    stoppedCards = [drawnCards.get(c.get("title")) for c in cards
+                    if not c.get("running")]
+    check("...and NOTHING that has stopped ticks - a gone agent is not happening",
+          all(it is None or it.property("ticking") is False
+              for it in stoppedCards),
+          [(c.get("title"), c.get("running")) for c in cards])
+
     # The tone ladder, retuned for the new order (docs/DESIGN.md §10.6): the
     # LEAD tone goes to whichever line is drawn first, so a card never opens on
     # its quietest text. It is position, not trust, that picks it.
