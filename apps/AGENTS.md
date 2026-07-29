@@ -27,12 +27,29 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 
 ## They are the system defaults
 
-Four of them are what the rest of the desktop opens things with: **filer** for
+Five of them are what the rest of the desktop opens things with: **filer** for
 `inode/directory`, **viewer** for every image and video type in its
 `IMAGE_EXTS`/`VIDEO_EXTS`, **reader** for `text/markdown`, **surfer** for
-`text/html` and `x-scheme-handler/
-http(s)` (plus Plasma's separate `kdeglobals` `BrowserApplication` key and
-`$BROWSER`).
+`text/html`, `application/xhtml+xml` and `x-scheme-handler/
+http(s)`/`about` (plus Plasma's separate `kdeglobals` `BrowserApplication` key
+and `$BROWSER`), and **player** for nine of the audio types its `AUDIO_EXTS`
+covers.
+
+**painter and board are the deliberate none.** painter has no open-a-file path
+at all and board is a GUI over one fixed file, so neither declares a
+`MimeType=` and neither appears in `mime-defaults.nix`. An app with no honest
+file type gets no association.
+
+**player's list is deliberately SHORT of its `AUDIO_EXTS`**, and the reason is
+a bug in player, not in the list: its `Exec=` carries `%F` but
+`apps/player/main.py` never reads a path out of `sys.argv`, so a double-clicked
+track opens the library and does not play. The nine types it already answers
+for on `book` are pinned because they were already the live answer (by
+`mimeinfo.cache` ordering, not by any setting); the remaining six extensions —
+`.aiff`/`.aif`, `.wav`, `.mpc`, `.tta`, `.dff` — plus the glob-only ogg
+subtypes go to `mpv`/`elisa` there, and those *do* play what they are handed.
+Taking them would be trading a working handler for one that isn't. See
+`mime-defaults.nix` and the question on `docs/board.md`.
 
 Each app's `.desktop` entry — with its `MimeType=` and its `Exec=` field code —
 is written by its own `home/prog/<app>.nix`, because only that file knows the

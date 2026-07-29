@@ -44,6 +44,40 @@ let
     "video/mp2t" "video/ogg" "video/3gpp"
   ];
 
+  # Audio, to `player`. Derived from player's own AUDIO_EXTS (apps/player/main.py)
+  # through shared-mime-info's globs — NOT invented — and then cut down to the
+  # ones player can genuinely honour today.
+  #
+  # These nine were ALREADY what the live database answers on book, with nothing
+  # in this file saying so: `update-desktop-database` writes player.desktop into
+  # mimeinfo.cache from its own MimeType= line, and with no [Default
+  # Applications] key `xdg-mime query default` falls back to cache order. Measured
+  # on book 2026-07-29 — every one of them returned player.desktop already. That
+  # is an accident, not a setting: it is decided by which .desktop files happen to
+  # claim the type, so installing any other audio app rearranges it silently.
+  # Pinning them changes no behaviour on book; it makes the behaviour survive.
+  #
+  # DELIBERATELY NOT HERE — the other six extensions in AUDIO_EXTS
+  # (.aiff/.aif -> audio/x-aiff, .wav -> audio/vnd.wave, .mpc -> audio/x-musepack,
+  # .tta -> audio/x-tta, .dff -> audio/x-dff) and the glob-only ogg subtypes
+  # (audio/x-opus+ogg, audio/x-vorbis+ogg, audio/x-flac+ogg). On book those go to
+  # mpv or elisa today, and both of those PLAY the file they are handed.
+  # player's Exec= carries %F but apps/player/main.py never reads a path out of
+  # sys.argv — it opens the library and ignores the argument entirely — so
+  # claiming them would be trading a handler that plays the track for one that
+  # does not, i.e. exactly the promise this file is not allowed to make. The nine
+  # above have the same defect and are grandfathered because they are already the
+  # live answer; widening it is on docs/board.md as a question.
+  playerTypes = [
+    "audio/flac" "audio/mpeg" "audio/mp4" "audio/x-m4a" "audio/ogg"
+    "audio/opus" "audio/x-dsf" "audio/x-wavpack" "audio/x-ape"
+  ];
+
+  # painter and board get NOTHING, on purpose. painter generates images from a
+  # prompt and has no open-a-file path at all; board is a GUI over the one file
+  # ~/nix/docs/board.md and is not a markdown viewer (that is reader). An app
+  # with no honest file type gets no association — see board.nix's own comment.
+
   surferTypes = [
     "text/html" "application/xhtml+xml"
     "x-scheme-handler/http" "x-scheme-handler/https" "x-scheme-handler/about"
@@ -60,6 +94,7 @@ let
   assoc =
     (map (t: "${t}=filer.desktop") filerTypes)
     ++ (map (t: "${t}=viewer.desktop") viewerTypes)
+    ++ (map (t: "${t}=player.desktop") playerTypes)
     ++ (map (t: "${t}=surfer.desktop") surferTypes)
     ++ (map (t: "${t}=reader.desktop") readerTypes);
 
