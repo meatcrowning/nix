@@ -94,6 +94,13 @@ Each app also carries an **`air` split** in its `.nix`: on book (Fedora Asahi)
 the wrapper `exec`s the system `/usr/bin/python3` rather than a nix-built
 interpreter.
 
+**So a new dependency has two homes, and the rule is both** (root `AGENTS.md`
+→ Conventions, "Both machines by default"). Adding a package to the `pyEnv`
+does nothing on book — that branch never sees it, and the app fails there at
+`import` time, on his laptop, with nothing failing at build. Either the module
+is in Fedora's `python3-*` set as well, or the app degrades gracefully without
+it; if neither, that is a machine-specific change and he needs telling.
+
 ## `pylib/` — shared, resolved relatively
 
 Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
