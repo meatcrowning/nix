@@ -870,6 +870,15 @@ The short version, and every line of it is a rule:
   — a menu retyped beside the constant is a menu that drifts from what the code
   takes, and `tools/board-test.py` asserts both that every word survives
   `clean_phase_word` and that the block comes from the list.
+- **Solomon DELEGATES, he does not scope** — [his, 2026-07-29] *"it seems like
+  solomon does a ton of work himself"*. His run is waited on and holds the tick
+  (`ORCH_TIMEOUT_S`), so a minute spent reading `AGENTS.md` to plan is a minute
+  the next thing he types waits. `ORCHESTRATOR_PROMPT` tells him to read only
+  enough to name a plausible `--where`, to put what he does not know into the
+  task text as words, and never to open the guides to plan — the worker's own
+  rules already send it there. What stayed slow on purpose is the `agents`
+  check: handing an item to somebody already in those files is the one mistake
+  that costs a merge.
 - **Solomon claims a phase like everybody else, and that is what puts his name
   on his own top line.** A card with no claim leads with the OBSERVED line,
   which names nobody by design, so the orchestrator's card named him nowhere on

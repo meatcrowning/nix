@@ -2244,6 +2244,19 @@ def test_work(tmp):
     # no claim, `says_line` is "" and the top line becomes the OBSERVED one,
     # which names nobody by design. The fix is not to manufacture a claim for
     # him — it is to tell him to make one, the way every worker is told.
+    # ...and he is told to DELEGATE rather than scope. [his, 2026-07-29] *"it
+    # seems like solomon does a ton of work himself"*. His run is waited on and
+    # holds the tick, so reading the repo to plan delays every later item.
+    check("the orchestrator is told to delegate fast, not to scope the work",
+          "DELEGATE FAST" in bw.ORCHESTRATOR_PROMPT
+          and "goes into the TASK TEXT" in bw.ORCHESTRATOR_PROMPT)
+    check("...while the checks that prevent a real mistake are still in it",
+          all(s in bw.ORCHESTRATOR_PROMPT for s in (
+              "Run `agents` before you dispatch",
+              "touch the same files are ONE dispatch",
+              "DISPATCH OR ASK",
+              "At most two questions",
+              "MUST carry `--if-unanswered`")))
     check("the orchestrator is told to claim a phase, or his card names nobody",
           "boardctl.py phase " in bw.ORCHESTRATOR_PROMPT
           and "SAY WHAT YOU ARE DOING" in bw.ORCHESTRATOR_PROMPT)
