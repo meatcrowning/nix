@@ -323,25 +323,10 @@ Rectangle {
     // so a dir with only a few images shows a snug panel, not empty space.
     property int gridPanelH: startGridPanelH
 
-    // Reusable slim vertical scrollbar (the list and the preview grid share
-    // it): only visible when its Flickable overflows (size < 1) — the handle
-    // stays put at rest, brightening on hover/drag; accent while pressed.
-    component VScroll: ScrollBar {
-        id: vb
-        policy: ScrollBar.AsNeeded
-        width: 9
-        contentItem: Rectangle {
-            implicitWidth: 9
-            color: vb.pressed ? Theme.accent : Theme.textDim
-            opacity: vb.size < 1 ? (vb.active ? 0.9 : 0.5) : 0
-            Behavior on opacity { NumberAnimation { duration: 120 } }
-        }
-        background: Rectangle {
-            color: Theme.bgAlt
-            opacity: vb.size < 1 && vb.active ? 0.4 : 0
-            Behavior on opacity { NumberAnimation { duration: 120 } }
-        }
-    }
+    // The scrollbar is `qmlcommon/VScroll.qml` (imported above), not an inline
+    // component here: docs/DESIGN.md 9.2 is one idiom for the whole desktop and
+    // 19.1 listed this copy as a real divergence. Folded in 2026-07-28 with the
+    // rewrite to the three pixel-era variants.
 
     // Open a file with the right thing for its kind: images go to `viewer`
     // (the standalone image/media viewer), the rest to xdg-open. (Dirs → go().)

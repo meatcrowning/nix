@@ -188,7 +188,7 @@ Item {
         clip: true
         model: pane.blocks
         cacheBuffer: 2000
-        ScrollBar.vertical: VScroll {}      // qmlcommon/, docs/DESIGN.md 9.2
+        ScrollBar.vertical: VScroll { id: vscroll }   // qmlcommon/, docs/DESIGN.md 9.2
 
         // Which block the top of the viewport is in. Read from the view rather
         // than counted, so it stays right through a reflow.
@@ -200,7 +200,11 @@ Item {
         delegate: Block {
             required property var modelData
             required property int index
-            width: view.width - 10
+            // Reserve the scrollbar's OWN width, never a literal: it is a
+            // desktop-wide setting now (docs/DESIGN.md 9.2) and ranges 11-16px,
+            // so the 10 this used to be left the last characters of every line
+            // under an opaque win31 bar.
+            width: view.width - vscroll.barW
             block: modelData
             cellW: pane.cellW
             query: pane.query

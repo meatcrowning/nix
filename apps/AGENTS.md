@@ -94,8 +94,13 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 - **`trackmatch.py`** — the one artist/title normaliser. Any new "are these two
   tag strings the same song?" code must use it rather than grow a second copy;
   see `player/AGENTS.md`.
-- **`deskstyle.py`** — the desktop-wide `fontFamily` / `fontSize` plus the two
-  motion settings `reduceMotion` / `animSpeed` (see Motion, below), read live
+- **`deskstyle.py`** — **THE channel for every desktop-wide appearance setting
+  that has to reach the apps. Add a key here; never build a second pipe.**
+  Today: `fontFamily` / `fontSize`, the two motion settings `reduceMotion` /
+  `animSpeed` (see Motion, below), and `scrollbarStyle` (see `VScroll.qml`).
+  That last one has no panel consumer at all — the panel draws no scrollbar —
+  and lives here anyway, because one channel with a key the writer ignores
+  beats two channels. Read live
   from the panel's own `~/.config/quickshell/settings.json` (the file
   `SettingsStore` persists). Install it as the `DeskStyle` context property
   BEFORE creating the app's `Theme.qml`, exactly like `WalPalette`, and keep a
@@ -175,8 +180,10 @@ the slider's 0.5-2.0 here would mean a hand-edited `settings.json` scaled the
 panel and the apps by different amounts.
 
 A duration that is deliberately *not* the slide keeps its number and gets a
-comment saying why — scrollbar and hover fades stay at 120ms, take the house
-curve, and still go through `ms()`. See §6.2.1's non-participants table.
+comment saying why — hover and crossfades stay at 120/140ms, take the house
+curve, and still go through `ms()`. See §6.2.1's non-participants table. (The
+scrollbar used to be on that list; it has no animation at all now — see
+`VScroll.qml` below.)
 
 ### Scrolling: every scrollable view is kinetic BY CONSTRUCTION
 
@@ -235,13 +242,37 @@ copy at all. `apps/pylib/kinetic.py` is the only Python one (`DETENT`,
 
 ### `VScroll.qml` — the one scrollbar
 
-`ScrollBar.vertical: VScroll {}` on every scrollable view. docs/DESIGN.md §9.2 is one
-idiom for the whole desktop (visible only on overflow, brighter on hover, accent
-while pressed, a 120 ms opacity fade), and it existed as four separate copies —
-player's, painter's, and an inline `component VScroll` in filer's pane and in
-reader's — before this file. §19.1 lists that as a real divergence. reader uses
-the shared one; **the three older copies are byte-identical to it and should
-come here as each of those files is next touched.**
+`ScrollBar.vertical: VScroll {}` on every scrollable view, and **the call site
+never chooses how it looks.** docs/DESIGN.md §9.2 is one idiom for the whole
+desktop, and since 2026-07-28 it is a pixel-era one in three variants — `win31`
+(default, 16px, stepper arrows), `beveled` (14px, no arrows), `flat` (11px, no
+bevel) — selected by the user in Settings > Appearance. `VScroll` reads the
+choice itself off `DeskStyle.scrollbarStyle` (below), behind the same `typeof`
+guard `Motion.qml` uses, so a harness with no `DeskStyle` still renders.
+
+Three properties of it are rules, not details:
+
+- **`policy: AlwaysOn`, full opacity, no `Behavior` anywhere.** The old 120 ms
+  fade is gone and §6.2.1's non-participants table no longer lists a scrollbar
+  duration. Always-on is what stops content reflowing when a view starts to
+  overflow.
+- **Arrows are drawn as GEOMETRY** (five 1px `Rectangle` rows), never as a
+  glyph — the font has no `↑`/`▲` and a missing one clips the line (§2.3) — and
+  they genuinely step, 48px per click via a `stepSize` derived from the
+  flickable's `contentHeight`. An arrow that cannot move the view goes `dim` and
+  refuses the click.
+- **The thumb is pixel-snapped** against the fractional offset `ScrollBar`
+  computes for it, or every 1px bevel shimmers for the length of a drag.
+
+**A call site that reserves a gutter must read `VScroll.barW`**, never a
+literal: the width is a setting now and ranges 11-16px. reader's `DocPane`,
+painter's `Main`, player's `LyricsView`/`TrackList` and the album grid's cell
+arithmetic all had a hardcoded 8/10/12 fitted to the old 9px bar, and all four
+left content under an opaque one until they were changed.
+
+It used to exist as four copies — player's, painter's, and an inline `component
+VScroll` in each of filer's and reader's panes. **All folded in** in the same
+pass; `qmlcommon/` is the only copy, and §19.1's entry for it is closed.
 
 **A control that STEPS a value is not a scroller.** `qmlcommon/WheelNotch.qml`
 is for those — painter's numeric `Spin` boxes today — and it is the apps-side

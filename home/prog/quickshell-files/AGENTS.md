@@ -487,6 +487,15 @@ chose: the clock's face, the sort column, and the local repeat toggle.
 Transient state — a hover index, a list's scroll position — stays local. The
 test is whether the user would notice it reverting.
 
+**`settings.json` is also the desktop's ONE settings channel into `apps/`**, and
+that is why it holds keys nothing in this directory reads. `apps/pylib/
+deskstyle.py` watches the file and publishes it to the apps as the `DeskStyle`
+context property; `scrollbarStyle` (docs/DESIGN.md §9.2) is the first key with
+**no panel consumer at all** — the panel draws no scrollbar anywhere — and it
+still lives here, because one channel with an unused key beats a second channel.
+Put the next desktop-wide appearance setting in the same place, and add its
+control to `SetPgAppearance.qml` beside the font and motion ones.
+
 ### One widget, two places: `*Content.qml` + a data singleton
 
 A widget is drawn by a **content component** and its data belongs to a

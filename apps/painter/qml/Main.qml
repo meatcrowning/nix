@@ -109,11 +109,13 @@ Window {
                 anchors.margins: 10
                 contentHeight: leftCol.implicitHeight
                 clip: true
-                ScrollBar.vertical: VScroll {}
+                ScrollBar.vertical: VScroll { id: vscroll }
 
                 Column {
                     id: leftCol
-                    width: leftFlick.width - 12
+                    // The scrollbar's own width, never a literal — it is a
+                    // desktop-wide setting (docs/DESIGN.md 9.2), 11-16px.
+                    width: leftFlick.width - vscroll.barW
                     spacing: 10
 
                     ModelPicker { width: parent.width }

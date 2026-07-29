@@ -92,6 +92,22 @@ Column {
             }
         }
         SetRow {
+            // Desktop-wide: it reaches all seven apps through settings.json ->
+            // pylib/deskstyle.py -> apps/qmlcommon/VScroll.qml. It sits under
+            // Appearance beside the font and the motion controls because those
+            // are the other two settings that cross the app boundary the same
+            // way; the panel draws no scrollbar of its own.
+            // Labels rather than raw keys: "win 3.1" is what he called it.
+            label: "scrollbars"
+            desc: "win 3.1 = arrows + bevel; beveled = no arrows; flat = plain pixel block"
+            SetSelect {
+                options: ["win31", "beveled", "flat"]
+                labels: ({ win31: "win 3.1", beveled: "beveled", flat: "flat" })
+                value: page.d.scrollbarStyle
+                onChanged: (v) => { page.d.scrollbarStyle = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             label: "tint tray icons"
             desc: "recolour system-tray icons to the accent"
             SetToggle {
