@@ -653,6 +653,34 @@ def drain():
             for m in pending()]
 
 
+def requeue_taken(agent_id):
+    """A dead worker's TAKEN notes, back to the queue.
+
+    `sweep()` rescues a note nobody READ; this is its twin for the note a
+    worker `take`-d and then died holding. `taken/` is a resting place only
+    because "an agent read it" normally becomes "an agent acted on it" — a
+    worker reaped as FAILED reported nothing, so whatever it took died with it
+    (2026-07-29: worker Vual took a handed-over item at 11:27, died on an API
+    500, and the item sat in `taken/` with nothing flagging it). Back in
+    `queue/` the next tick drains it into a fresh orchestrator, dispatched
+    from its own words — which is why a handoff is written in full. The move
+    is the same `os.replace` every other one is: exactly one directory at
+    every instant, nothing lost, nothing doubled.
+
+    Called by `boardwork.reap()` for every worker it files as FAILED and every
+    one whose task it requeues on a transient death — deliberately NOT for a
+    worker reaped as done, which is presumed to have handled what it took.
+    (The residual gap that leaves — report, then take, then die — is stated in
+    `AGENTS.md` rather than papered over.)
+    """
+    aid = clean_id(agent_id)
+    if not aid or aid == "agent":
+        return []
+    return [_move(m, inbox_dir("queue"), state="requeued-from-dead-worker",
+                  by=aid)
+            for m in taken() if m.get("movedBy") == aid]
+
+
 def sweep():
     """The guarantee, run at the top of every board-watch tick.
 

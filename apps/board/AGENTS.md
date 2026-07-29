@@ -644,6 +644,18 @@ The neighbouring rule is the same one read from the other end: two items in ONE
 message that touch the same files are one `dispatch`, not a dispatch and a
 handoff.
 
+- **And the tool itself notices a missed handoff: `dispatch` WARNS on `--where`
+  overlap with a live worker.** `boardwork.overlaps()` cuts each whitespace
+  token of both globs at its first glob character and flags any pair of cleaned
+  prefixes where one startswith the other; `dispatch()` attaches the matching
+  live workers to the record (`rec["overlaps"]`) and `boardctl dispatch` prints
+  a warning line naming the worker and suggesting `inbox send --to <Name>`.
+  **WARN ONLY, never a refusal, and dispatch behaviour is unchanged** — a
+  prefix match is a heuristic and a near-miss must not block real work. The
+  prose rule (run `agents` first, hand over what is genuinely the same work)
+  still binds; the orchestrator's prompt says the warning is that check firing
+  after the fact. `tools/board-test.py` → `test_overlap` covers both halves.
+
 ### What the orchestrator and its workers are told, beyond the board
 
 `boardwork.RULES` is quoted verbatim into both prompts, and it is the board's
@@ -763,6 +775,24 @@ assumed.
   re-run — re-running half-landed work would commit it twice. board-watch's
   `spawn` gives the two runs it waits on (decision, orchestrator) the same
   one-retry on the same pattern.
+- **A dead worker's TAKEN inbox notes go back to the queue** (2026-07-29).
+  `sweep()` rescues a note nobody READ; a note a worker `inbox take`-d used to
+  die with the worker — worker Vual took a handed-over item at 11:27, died on
+  an API 500, and nothing flagged the loss. `reap()` now calls
+  `boardagents.requeue_taken()` for every worker it files as FAILED and every
+  one whose task it requeues on a transient death: the messages sitting in
+  `taken/` whose `movedBy` is that worker move back to `queue/` (state
+  `requeued-from-dead-worker`, same `os.replace`, exactly-one-directory
+  invariant intact), so the next tick drains them into a fresh orchestrator.
+  The rescued notes ride on the reaped record as `notesBack` — the tuple
+  `reap()` returns keeps its three-value shape, so a board-watch deployed
+  before this change does not crash unpacking it — and board-watch's tick logs
+  how many went back. A worker reaped as DONE keeps its taken notes: it
+  reported, so it is presumed to have handled what it took. **The residual
+  gap, stated honestly: a worker that reports something, THEN takes a note,
+  then dies is reaped as done, and that note is presumed handled when it may
+  not have been.** Nothing covers that ordering; watch for it before trusting
+  a `done` worker with an unacted-on handoff.
 
 ## The `agents` section: the only part of this window that is NOT the store
 

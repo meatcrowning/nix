@@ -927,6 +927,14 @@ def tick():
     # fix which does not depend on the spawn being right.
     try:
         _, failed, requeued = bw.reap()
+        # A note the dead worker had TAKEN went back to the queue with it
+        # (`boardagents.requeue_taken`, riding on the record as `notesBack` so
+        # the tuple above keeps its shape) — the handed-over item worker Vual
+        # took at 11:27 on 2026-07-29 and died holding, generalized.
+        back = sum(len(r.get("notesBack") or []) for r in failed + requeued)
+        if back:
+            log("%d note(s) a dead worker had taken went back to the queue"
+                % back)
         for rec in requeued:
             # Died at launch on a transient API error (its whole log is the
             # CLI printing a 5xx) — the task is back in `pending/` and

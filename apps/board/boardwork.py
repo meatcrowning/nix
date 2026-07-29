@@ -269,10 +269,11 @@ rebuild or hot-reload" before you run one** and stay inside it — preflight \
 first, nothing staged across it, cheap reloads freely, the `hyprvtb` live \
 hot-swap only on `top` (never `hyprctl plugin load`/`unload`, on either \
 machine), and the Ask-first list still his. **Serialize the switch itself**: \
-other agents rebuild too, and two at once must not race — \
-`mkdir -p /tmp/claude-1000/-home-lam-nix && flock \
-/tmp/claude-1000/-home-lam-nix/rebuild.lock <the rebuild command>`, the same \
-lock every other agent in this checkout uses. **Getting an edit LIVE has a \
+other agents rebuild too, and two at once must not race — use the host's own \
+wrapper (`sudo rebuild-top` on top, `rebuild-air` on book), which takes the \
+shared rebuild lock and runs preflight itself; only a RAW switch run outside \
+the wrappers still needs the manual `mkdir -p /tmp/claude-1000/-home-lam-nix \
+&& flock /tmp/claude-1000/-home-lam-nix/rebuild.lock <the rebuild command>`. **Getting an edit LIVE has a \
 per-area ritual**: a seed-once file (`Theme.qml`, `hyprland.lua`) is edited in \
 BOTH copies — nix source AND the live file — with `./tools/seed-drift.sh` run \
 before and after (editing one side is the single most common way a change here \
@@ -585,7 +586,10 @@ anything. It lists what is running right now, each with the task it was given \
 and the files it was dispatched against. When an item you are about to hand out \
 is the same job as one already in flight, or lands in the same files, HAND IT \
 TO THAT AGENT instead of starting a second one: two workers editing one file is \
-the thing this system is built not to do.
+the thing this system is built not to do. `dispatch` itself warns when the \
+`--where` you pass overlaps a live worker's — that warning is this same check \
+firing after the fact, never a refusal — so still run `agents` first rather \
+than waiting to be warned.
 
   * **Only a WORKER may be handed anything.** In that listing a worker is a row \
 with a NAME in front of its id and a path or glob in its last column. A row \
@@ -809,12 +813,55 @@ def pending():
                   key=lambda t: (float(t.get("sent") or 0), t.get("file", "")))
 
 
+def _where_prefixes(where):
+    """A `--where` glob as the literal path prefixes it names: split on
+    whitespace, each token cut at its first glob character, empties dropped.
+    `apps/board/** tools/board-watch-test.py` -> `apps/board/`, `tools/...`."""
+    out = []
+    for tok in str(where or "").split():
+        for ch in "*?[":
+            i = tok.find(ch)
+            if i != -1:
+                tok = tok[:i]
+        if tok:
+            out.append(tok)
+    return out
+
+
+def overlaps(where, workers=None):
+    """The LIVE workers whose `--where` plausibly reaches the same files.
+
+    Two prefixes overlap when one startswith the other, case-sensitively —
+    `apps/board/` is inside `apps/**` and the other way around. It is a
+    heuristic for a WARNING, never a gate: the orchestrator's prose rule
+    (run `agents`, hand overlapping work to the worker already in those
+    files) existed before this and still binds; this is the tool itself
+    noticing, so a miss on the human step no longer passes silently. A
+    near-miss must not block real work, so nothing reads this to refuse.
+    """
+    mine = _where_prefixes(where)
+    if not mine:
+        return []
+    hits = []
+    for a in (live_workers() if workers is None else workers):
+        theirs = _where_prefixes(a.get("where"))
+        if any(m.startswith(t) or t.startswith(m)
+               for m in mine for t in theirs):
+            hits.append(a)
+    return hits
+
+
 def dispatch(task, phase="", where="", context="", cap_=None):
     """One piece of work -> one worker, or -> the pending queue if we are full.
 
     Returns the task record with `state` in `running` / `queued`. It never
     raises on a full board and never silently drops: the two outcomes are the
     two directories, and `promote()` is what moves between them.
+
+    `rec["overlaps"]` carries the live workers whose `--where` overlaps this
+    one (`overlaps()` above) — computed before the spawn, so the new worker
+    is never its own hit. WARN ONLY: it changes nothing about what was
+    dispatched; `boardctl dispatch` prints it and the caller decides.
     """
     task = " ".join((task or "").split())
     if not task:
@@ -823,12 +870,15 @@ def dispatch(task, phase="", where="", context="", cap_=None):
            "where": (where or "").strip(), "context": (context or "").strip(),
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
            "host": os.uname().nodename}
+    over = [{"id": a["id"], "name": a.get("name") or "",
+             "where": a.get("where") or ""} for a in overlaps(rec["where"])]
     limit = cap() if cap_ is None else cap_
     if len(live_workers()) >= limit:
         path = os.path.join(work_dir("pending"), _task_name())
         ba._write_json(path, rec)
         rec["file"] = path
         rec["state"] = "queued"
+        rec["overlaps"] = over
         return rec
     # Written to `taken/` BEFORE the spawn, exactly as `boardagents.drain()` is:
     # a task file still in `pending/` when the process dies would be worked
@@ -837,6 +887,7 @@ def dispatch(task, phase="", where="", context="", cap_=None):
     ba._write_json(path, rec)
     rec["file"] = path
     rec.update(_spawn_worker(rec))
+    rec["overlaps"] = over
     return rec
 
 
@@ -1086,6 +1137,15 @@ def reap():
     cause, so this cannot loop; and a worker that reported anything at all is
     `done` as before, never re-run — re-running half-landed work would commit
     it twice.
+
+    A dead worker's TAKEN inbox notes go back to the queue too
+    (`boardagents.requeue_taken`), for every worker filed as failed and every
+    one requeued on a transient death — a note it `take`-d would otherwise die
+    with it, exactly as one did on 2026-07-29. The rescued notes ride on the
+    moved record as `rec["notesBack"]` rather than widening the return tuple:
+    a board-watch deployed before this change still unpacks three values.
+    A worker reaped as DONE keeps its taken notes, on purpose: it reported,
+    so it is presumed to have handled what it took.
     """
     live = {a["id"] for a in ba.agents() if a["state"] == "running"}
     done, failed, requeued = [], [], []
@@ -1096,10 +1156,14 @@ def reap():
         ok = os.path.exists(reported_file(aid))
         if not ok and not rec.get("retried") and _died_transiently(aid):
             rec = dict(rec, retried=True, agent="", unit="")
-            requeued.append(ba._move(rec, work_dir("pending"),
-                                     state="requeued", by=aid))
+            moved = ba._move(rec, work_dir("pending"),
+                             state="requeued", by=aid)
+            moved["notesBack"] = ba.requeue_taken(aid)
+            requeued.append(moved)
         else:
             moved = ba._move(rec, work_dir("done" if ok else "failed"))
+            if not ok:
+                moved["notesBack"] = ba.requeue_taken(aid)
             (done if ok else failed).append(moved)
         try:
             os.unlink(reported_file(aid))
