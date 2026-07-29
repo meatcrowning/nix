@@ -645,34 +645,48 @@ def _k(n):
     return str(int(n))
 
 
-def born_line(ts):
-    """WHEN the agent was spawned — `10:26 am`, or "" if nothing recorded one.
+def worked_line(ts, running=True):
+    """HOW LONG the agent has been working — `working for 4 minutes` — or "".
 
-    [his, 2026-07-29] *"agent cards should show, perhaps next to token count,
-    when they began on a task - or perhaps when they were spawned, or perhaps
-    both"*. It is ONE stamp, because the two are not two facts here: a worker is
-    spawned to do the task it was dispatched with and begins on it immediately,
-    and a task waiting for a slot has no worker at all — its card already says
-    `not started yet` in words, which is truer than a time would be.
+    This REPLACED the absolute spawn stamp `born_line` drew (`10:26 am`,
+    itself his 2026-07-29 ask), by his own later words the same day: the card
+    should show *"how long the agent has been working: 'has been working for X
+    minutes'"* — a duration, not an instant. That makes it the ONE elapsed
+    time this app draws, a deliberate exception to the no-pressure
+    requirement, granted by the person the requirement protects: a running
+    agent's clock counts against the AGENT, not against him. Nothing else may
+    cite this as precedent — `placed`, LANDED's `when` and the quiet-agent
+    threshold stay absolute or unsaid.
 
-    **ABSOLUTE, and it must stay absolute.** No age, no `4m`, no `ago`, nothing
-    counting. The no-pressure requirement (`AGENTS.md`) is why this board draws
-    no elapsed times anywhere, and a relative stamp on a running agent is a
-    clock ticking at him. This is a fact about the past, in the same 12-hour
-    lowercase clock a LANDED row's `when` and a NEEDS YOU item's `placed` use —
-    one way of saying a time on this board.
+    It reads naturally at every age: under a minute in words (never seconds —
+    a ticking seconds counter is exactly the pressure the rule forbids
+    elsewhere), then minutes, then hours with the minute remainder, then days.
+    Recomputed on every read, so the app's ordinary agent poll keeps it
+    current; nothing extra refreshes it.
 
-    That is also why `boardagents.born` can now reach the screen without
-    bending its own "ordering is not an age" rule: what is drawn is the instant,
-    never the difference between it and now.
+    "" for a STOPPED agent, deliberately: `born` to now is not how long a dead
+    process worked, and the card's own `exited ...` line already carries the
+    past tense. "" too when nothing recorded a birth — nothing is invented.
     """
     try:
         ts = float(ts or 0)
     except (TypeError, ValueError):
         return ""
-    if ts <= 0:
+    if ts <= 0 or not running:
         return ""
-    return time.strftime("%I:%M %p", time.localtime(ts)).lstrip("0").lower()
+    m = max(0, int(time.time() - ts)) // 60
+    if m < 1:
+        return "working for under a minute"
+    if m < 60:
+        return "working for %d minute%s" % (m, "" if m == 1 else "s")
+    h, m = m // 60, m % 60
+    if h < 24:
+        who = "%d hour%s" % (h, "" if h == 1 else "s")
+        if m:
+            who += " %d minute%s" % (m, "" if m == 1 else "s")
+        return "working for " + who
+    d = h // 24
+    return "working for %d day%s" % (d, "" if d == 1 else "s")
 
 
 def context_line(rec):

@@ -1919,24 +1919,29 @@ def test_phase(tmp):
     check("...and the tally carries no time, no age and no percentage",
           not re.search(r"%|ago|\bs\b", bph.context_line(r)), bph.context_line(r))
 
-    # ---- ...and WHEN IT WAS SPAWNED, beside that tally ----
-    # *"agent cards should show, perhaps next to token count, when they began on
-    # a task - or perhaps when they were spawned, or perhaps both"*. ONE stamp:
-    # a worker begins on the task it was spawned with, and a task still waiting
-    # for a slot has no worker and says `not started yet` in words instead.
-    #
-    # The claim that matters is that it is an INSTANT and never a DIFFERENCE.
-    # This app draws no elapsed times anywhere — the no-pressure requirement —
-    # and an age on a running agent is exactly the clock that rule forbids.
-    born = bph.born_line(time.mktime((2026, 7, 29, 10, 26, 0, 0, 0, -1)))
-    check("a card says WHEN its agent was spawned, on the board's own clock",
-          born == "10:26 am", born)
-    check("...as an absolute instant, never an age or a countdown",
-          not re.search(r"ago|\bin\b|-|\d+[smhd]\b", born), born)
+    # ---- ...and HOW LONG IT HAS BEEN WORKING, beside that tally ----
+    # His, 2026-07-29, replacing the absolute spawn stamp he asked for that
+    # morning: the card shows *"how long the agent has been working"* — the ONE
+    # elapsed time this app draws, his own deliberate exception to the
+    # no-pressure rule. `boardphase.worked_line` carries the whole argument.
+    now = time.time()
+    check("a card says how long its agent has been working, in words",
+          bph.worked_line(now - 4 * 60) == "working for 4 minutes",
+          bph.worked_line(now - 4 * 60))
+    check("...reading naturally at every age, never as a seconds counter",
+          (bph.worked_line(now - 5), bph.worked_line(now - 61),
+           bph.worked_line(now - 3600), bph.worked_line(now - 3900))
+          == ("working for under a minute", "working for 1 minute",
+              "working for 1 hour", "working for 1 hour 5 minutes"),
+          (bph.worked_line(now - 5), bph.worked_line(now - 3900)))
+    check("...and a STOPPED agent counts nothing - born-to-now is not how long "
+          "a dead process worked",
+          bph.worked_line(now - 300, running=False) == "",
+          bph.worked_line(now - 300, running=False))
     check("...and nothing is invented for a record that carries no stamp",
-          (bph.born_line(0), bph.born_line(None), bph.born_line("x"))
+          (bph.worked_line(0), bph.worked_line(None), bph.worked_line("x"))
           == ("", "", ""),
-          (bph.born_line(0), bph.born_line(None), bph.born_line("x")))
+          (bph.worked_line(0), bph.worked_line(None), bph.worked_line("x")))
 
     # ---- ANY ONE WORD, not the classic five ----
     # *"allow agents more freedom to indicate what they are doing, but it should
@@ -3164,13 +3169,13 @@ def test_window(app, tmp):
           bool(tallyDrawn)
           and tallyDrawn[0][2].property("color") == keep[-1].property("dim"),
           tallyDrawn and tallyDrawn[0][2].property("color").name())
-    # ...and the spawn stamp beside it, on the same row and the same rung.
+    # ...and the working duration beside it, on the same row and the same rung.
     # From the DRAWN card's own agent, not from a snapshot taken elsewhere in
-    # this test — the stamp is per-record and only that item's is being checked.
+    # this test — the line is per-record and only that item's is being checked.
     codeAgent = prop(codeItem, "agent") if codeItem is not None else {}
-    bornStr = codeAgent.get("bornLine", "") if isinstance(codeAgent, dict) else ""
+    bornStr = codeAgent.get("workedLine", "") if isinstance(codeAgent, dict) else ""
     bornDrawn = [(y, s, t) for y, s, t in drawn if bornStr and s == bornStr]
-    check("a card says when its agent was spawned, next to the token count",
+    check("a card says how long its agent has been working, next to the tally",
           bool(bornStr) and len(bornDrawn) == 1
           and bornDrawn[0][0] == drawn[0][0], (bornStr, [s for _, s, _ in drawn]))
     check("...immediately LEFT of the tally, not stacked or overlapping it",

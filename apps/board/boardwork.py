@@ -121,13 +121,15 @@ NO TIME PRESSURE. Nothing here hands the UI an elapsed time, an age, a count or
 an ordering by urgency. Same rule as the rest of the app, and it is the app's
 founding requirement.
 
-**An INSTANT is not an elapsed time, and that is the whole of the exception.**
-Since 2026-07-29 a card draws when its agent was spawned — *"agent cards should
-show, perhaps next to token count, when they began on a task"* —
-`boardphase.born_line`, an absolute 12-hour clock time, the same one a LANDED
-row's `when` and a NEEDS YOU item's `placed` are written in. What stays banned
-is the DIFFERENCE between that instant and now: no age, no `4m`, no `ago`,
-nothing counting. A fact about the past is not a clock running at him.
+**The ONE exception is the working duration on an agent card, and it is his.**
+A card first drew when its agent was spawned (an absolute `10:26 am`), then he
+asked for the opposite the same day, 2026-07-29: show *"how long the agent has
+been working"* — `boardphase.worked_line`, `working for 4 minutes`, live. An
+elapsed time, granted deliberately by the person the no-pressure rule
+protects, because a running agent's clock counts against the AGENT and not
+against him. It is scoped to exactly that: nothing else here may count —
+`placed`, LANDED's `when`, the queue and the quiet threshold stay absolute or
+stay words, and nothing may cite this exception as precedent for a second one.
 """
 import json
 import os
@@ -1140,9 +1142,10 @@ def _queued_row(t):
         # A task with no process has nothing to observe and says so, rather
         # than borrowing the sentence a running card would use.
         "actually": "not started - a worker starts when a slot frees",
-        # No spawn time either: nothing has been spawned. The sentence above
-        # says so in words, which is truer than a stamp would be.
-        "doingLine": "", "bornLine": "",
+        # No working duration either: nothing has been spawned, so nothing is
+        # working. The sentence above says so in words, which is truer than a
+        # counter at zero would be.
+        "doingLine": "", "workedLine": "",
         "detail": "not started - a worker starts when a slot frees"}
 
 
@@ -1187,7 +1190,7 @@ def _idle_orchestrator_row():
         "phase": "ready", "says": "ready",
         "saysLine": "%s is ready" % ba.ORCHESTRATOR_NAME,
         "actually": "", "doingLine": "", "observed": "unlinked",
-        "contextLine": "", "bornLine": "", "unread": 0, "waiting": [],
+        "contextLine": "", "workedLine": "", "unread": 0, "waiting": [],
         "born": 0.0,
         # The detail line no longer repeats `ready` — the line above it says so
         # now, and §9.1 suppresses metadata a card has already stated.

@@ -130,9 +130,9 @@ Item {
     // empty means nothing could be measured, and empty is drawn as nothing.
     readonly property string contextLine: agent && agent.contextLine
                                           ? agent.contextLine : ""
-    // WHEN it was spawned - `10:26 am`, absolute, never an age (see below).
-    readonly property string bornLine: agent && agent.bornLine
-                                       ? agent.bornLine : ""
+    // HOW LONG it has been working - `working for 4 minutes` (see below).
+    readonly property string workedLine: agent && agent.workedLine
+                                         ? agent.workedLine : ""
     // A card with no id is not an agent — it is a task waiting for a slot, or
     // the section's own box. It gets no inbox, because there is nothing running
     // to put a message in front of.
@@ -270,29 +270,30 @@ Item {
     readonly property real trailW: (tallyT.visible ? tallyT.width + 8 : 0)
                                    + (bornT.visible ? bornT.width + 8 : 0)
 
-    // ---- ...and WHEN IT WAS SPAWNED, immediately left of that tally ----
-    // [his, 2026-07-29] *"agent cards should show, perhaps next to token count,
-    // when they began on a task"* — so it sits next to the token count, in the
-    // same trailing metadata cluster (§9.1) and the same `dim` rung, because it
-    // is standing metadata about the process exactly as the tally is.
+    // ---- ...and HOW LONG IT HAS BEEN WORKING, left of that tally ----
+    // [his, 2026-07-29] the spawn stamp this drew for a few hours became a
+    // duration at his own ask the same day: *"how long the agent has been
+    // working"*. It sits in the same trailing metadata cluster (§9.1), same
+    // `dim` rung — standing metadata about the process, like the tally.
     //
-    // **It is an ABSOLUTE clock time and it must stay one.** No age, no `4m`,
-    // no `ago`: this app draws no elapsed times anywhere, and one on a RUNNING
-    // agent would be the clock the no-pressure requirement exists to forbid.
-    // `boardphase.born_line` is the only formatter.
+    // **It is the ONE elapsed time in this app**, his deliberate exception to
+    // the no-pressure rule (`boardphase.worked_line` carries the argument and
+    // is the only formatter; the model re-reads agents every poll, which is
+    // what keeps it counting on screen). Do not cite it as precedent — every
+    // other time here stays absolute, and a stopped agent draws none at all.
     //
     // It rides the same line as the tally, on the same condition — a card whose
     // top line IS the title row gets neither, that corner already belonging to
     // `where`.
     PixelText {
         id: bornT
-        visible: row.bornLine !== ""
+        visible: row.workedLine !== ""
                  && (row.saysLine !== "" || row.doingLine !== "")
         anchors.right: tallyT.visible ? tallyT.left : col.right
         anchors.rightMargin: tallyT.visible ? 8 : 0
         y: 0
         color: Theme.dim
-        text: row.bornLine
+        text: row.workedLine
     }
 
     Column {
