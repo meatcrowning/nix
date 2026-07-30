@@ -2794,12 +2794,18 @@ def test_window(app, tmp):
     from PySide6.QtCore import QPointF                                  # noqa: E402
     import boardwork as bwm                                             # noqa: E402
     agents_obj = keep[5]
-    picks = [it for it in descendants(win.contentItem())
+    # Two dropdowns in that column now — which model, and how many agents — so
+    # they are told apart by the label, which is the only thing about either of
+    # them he can see. A control drawing the wrong model, or the wrong cap, is
+    # the whole failure mode worth catching.
+    drops = [it for it in descendants(win.contentItem())
              if (it.property("text") or "").endswith("  v")]
+    picks = [it for it in drops
+             if it.property("text").startswith(agents_obj.modelLabel)]
+    caps = [it for it in drops
+            if it.property("text").startswith(agents_obj.capLabel)]
     check("there is exactly one model chooser, and it says which model",
-          len(picks) == 1
-          and picks[0].property("text").startswith(agents_obj.modelLabel),
-          [p.property("text") for p in picks])
+          len(picks) == 1, [p.property("text") for p in drops])
     if picks:
         # The TOP box specifically — every agent card and decision carries an
         # InputBox too, and they are wider, so a max() over all of them compares
@@ -2824,6 +2830,58 @@ def test_window(app, tmp):
     check("...whose label is prose, never the raw wire name",
           "claude-" not in agents_obj.modelLabel, agents_obj.modelLabel)
 
+    # ---- ...and BETWEEN it and the meters, how many may run at once ----
+    # [his, 2026-07-29] *"between the model selector and the indicators, add
+    # another drop down for the max number of agents available."* Same idiom
+    # (one component, `PickBox.qml`), his order, and ONE store: the file
+    # `boardctl.py cap` writes. A second copy of the number is the failure.
+    check("there is a second dropdown, and it says how many agents",
+          len(caps) == 1 and str(bwm.cap()) in caps[0].property("text"),
+          [d.property("text") for d in drops])
+    check("...offering a range, with exactly one marked current",
+          [c["n"] for c in agents_obj.caps][:len(bwm.CAP_CHOICES)]
+          == list(bwm.CAP_CHOICES)
+          and sum(1 for c in agents_obj.caps if c["current"]) == 1,
+          [(c["label"], c["current"]) for c in agents_obj.caps])
+    if caps and picks:
+        cp = caps[0].parentItem().mapToItem(win.contentItem(), QPointF(0, 0))
+        mp = picks[0].parentItem().mapToItem(win.contentItem(), QPointF(0, 0))
+        check("...UNDER the model chooser (the meters come after it, below)",
+              cp.y() > mp.y(), (mp.y(), cp.y()))
+        check("...and flush with the chooser, one edge for the whole column",
+              abs(cp.x() - mp.x()) < 1
+              and abs(caps[0].parentItem().width()
+                      - picks[0].parentItem().width()) < 1,
+              (cp.x(), mp.x(), caps[0].parentItem().width(),
+               picks[0].parentItem().width()))
+    # Picking one writes THAT store — the file, checked as bytes. The env
+    # override goes away for the duration, or `cap()` reports `2` back at us
+    # whatever was written and the check would pass on a control that wrote
+    # nowhere.
+    env_cap = os.environ.pop("BOARD_MAX_WORKERS", None)
+    was = open(bwm.cap_file()).read() if os.path.exists(bwm.cap_file()) else ""
+    try:
+        check("picking a cap writes the one store boardctl writes",
+              agents_obj.chooseCap(7)
+              and open(bwm.cap_file()).read().strip() == "7"
+              and agents_obj.capLabel == "7 agents",
+              (bwm.cap_file(), agents_obj.capLabel))
+        agents_obj.chooseCap(9)
+        check("...and a cap of his that is off the range is drawn, and ticked",
+              any(c["n"] == 9 and c["current"] for c in agents_obj.caps)
+              and len(agents_obj.caps) == len(bwm.CAP_CHOICES) + 1,
+              [(c["n"], c["current"]) for c in agents_obj.caps])
+        check("...and 1 is the floor, since 0 agents is not a cap",
+              agents_obj.chooseCap(0) and bwm.cap() == 1, bwm.cap())
+        check("...and one agent is singular, because he reads it",
+              agents_obj.capLabel == "1 agent", agents_obj.capLabel)
+    finally:
+        with open(bwm.cap_file(), "w") as f:
+            f.write(was or "%d\n" % bwm.DEFAULT_CAP)
+        if env_cap is not None:
+            os.environ["BOARD_MAX_WORKERS"] = env_cap
+        agents_obj.capChanged.emit()
+
     # ---- ...and the two usage bars sit UNDER it ----
     # His words placed these too: "directly under the orchestrator
     # model-selection box". Found by their labels, which are the whole of what
@@ -2846,6 +2904,13 @@ def test_window(app, tmp):
         by = min(it.mapToItem(win.contentItem(), QPointF(0, 0)).y() for it in bars)
         check("...UNDER the model chooser, not beside it", by > pt.y(),
               (pt.y(), by))
+        # ...and under the CAP dropdown too, which is between the two of them:
+        # his order for that column is model -> how many -> what they cost.
+        check("...and under the cap dropdown, which sits between the two",
+              caps and by > caps[0].mapToItem(win.contentItem(),
+                                              QPointF(0, 0)).y(),
+              (by, [c.mapToItem(win.contentItem(), QPointF(0, 0)).y()
+                    for c in caps]))
         # ...and flush with it: his words were "exactly as wide as the model
         # selection box above it", which is both edges, so both are checked.
         # A width bound to the chooser cannot drift when a longer model name

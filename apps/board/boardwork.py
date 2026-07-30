@@ -152,6 +152,20 @@ REPO = os.environ.get("BOARD_WATCH_REPO", os.path.expanduser("~/nix"))
 #: changed. `BOARD_MAX_WORKERS` is for the harness; the file is for him.
 DEFAULT_CAP = 4
 
+#: What the dropdown beside the model chooser OFFERS, in the order it draws
+#: them. [his, 2026-07-29] *"between the model selector and the indicators, add
+#: another drop down for the max number of agents available."*
+#:
+#: It lives here for the reason `ORCH_MODELS` does: `set_cap()` is the one
+#: store, and a range written into the QML would be a second answer to "what
+#: may he pick". It is not a ceiling — `boardctl.py cap <n>` still takes any
+#: number ≥ 1, the way every typed selector here is more forgiving than the
+#: control (`resolve_model`); this is the range a CONTROL can honestly offer on
+#: a 16-thread desktop with one shared git index. A value of his that is off
+#: the list is still drawn and still ticked as current, so the control cannot
+#: disagree with the store.
+CAP_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8]
+
 #: A worker is capped like a decision agent is — the same 45 minutes, so one
 #: wedged run cannot hold a slot for the rest of the day.
 WORKER_TIMEOUT_S = int(os.environ.get("BOARD_WORK_TIMEOUT", "2700"))
