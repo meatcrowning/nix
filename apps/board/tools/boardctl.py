@@ -27,6 +27,7 @@ The orchestrator's verbs — how one sentence he typed becomes several agents
     boardctl.py ask 'How far should the fade reach?' --option 'apps only' \\
         --option 'apps and panel' --if-unanswered 'the apps get it, nothing else'
     boardctl.py cap 6                              # workers allowed at once
+    boardctl.py model opus                         # which model orchestrates
     boardctl.py phase coding --doing 'the vtbclient parser'
 
 **`phase` records what you SAY you are doing and does not set the phase your
@@ -322,6 +323,22 @@ def cmd_cap(a):
     return 0
 
 
+def cmd_model(a):
+    """Which model orchestrates. The dropdown beside his box writes the same
+    file; this is the scriptable half, and what a harness drives."""
+    if a.name is None:
+        cur = bw.orch_model()
+        for flag, label in bw.ORCH_MODELS:
+            print("%s %-28s %s" % ("*" if flag == cur else " ", flag, label))
+        return 0
+    try:
+        print("the next orchestrator runs on %s" % bw.set_orch_model(a.name))
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_inbox(a):
     if a.what == "take":
         msgs = ba.take(a.id, include_queue=a.queue)
@@ -465,6 +482,10 @@ def main(argv=None):
     s = sub.add_parser("cap", help="how many workers may run at once")
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_cap)
+
+    s = sub.add_parser("model", help="which model the next orchestrator runs on")
+    s.add_argument("name", nargs="?", default=None)
+    s.set_defaults(fn=cmd_model)
 
     s = sub.add_parser("inbox", help="his mid-flight notes to a running agent")
     s.add_argument("what", nargs="?", default="list",

@@ -2334,6 +2334,46 @@ def test_work(tmp):
           bw.set_cap(6) == 6 and open(bw.cap_file()).read().strip() == "6")
     os.environ["BOARD_MAX_WORKERS"] = "2"
 
+    # ---- which model orchestrates: his choice, read at every spawn ----
+    check("with nothing chosen, the default orchestrates",
+          not os.path.exists(bw.orch_model_file())
+          and bw.orch_model() == bw.DEFAULT_ORCH_MODEL, bw.orch_model())
+    check("a name he half-remembers resolves, ambiguity does not",
+          bw.resolve_model("opus") == "claude-opus-5"
+          and bw.resolve_model("haiku") == "claude-haiku-4-5-20251001")
+    for bad in ("5", "gpt", ""):
+        try:
+            bw.resolve_model(bad)
+            check("...%r is refused rather than guessed" % bad, False)
+        except ValueError:
+            check("...%r is refused rather than guessed" % bad, True)
+    check("choosing one writes it, and it is what the next spawn reads",
+          bw.set_orch_model("sonnet") == "claude-sonnet-5"
+          and bw.orch_model() == "claude-sonnet-5"
+          and bw.role_flags("orchestrator")[:2] == ["--model", "claude-sonnet-5"],
+          bw.role_flags("orchestrator"))
+    # The whole of "changing it mid-run applies to the NEXT prompt" is that this
+    # is a file read per spawn, with nothing cached and nothing signalled.
+    bw.set_orch_model("opus")
+    check("...and changing it again changes the next spawn, with no restart",
+          bw.role_flags("orchestrator")[:2] == ["--model", "claude-opus-5"],
+          bw.role_flags("orchestrator"))
+    check("...while its EFFORT stays pinned - he chose a model, not a budget",
+          bw.role_flags("orchestrator")[2:] == ["--effort", "high"],
+          bw.role_flags("orchestrator"))
+    with open(bw.orch_model_file(), "w") as fh:
+        fh.write("something-that-was-retired\n")
+    check("a stale or hand-edited choice falls back, never reaching --model",
+          bw.orch_model() == bw.DEFAULT_ORCH_MODEL, bw.orch_model())
+    os.unlink(bw.orch_model_file())
+    # [his, 2026-07-29] "the other agents should all be opus 5 medium thinking"
+    for role in ("worker", "decision"):
+        check("a %s is opus 5, medium, whatever he picked for the orchestrator"
+              % role,
+              bw.role_flags(role) == ["--model", "claude-opus-5",
+                                      "--effort", "medium"],
+              bw.role_flags(role))
+
     # ---- asking him something: the SAME list his own questions are in ----
     path = os.path.join(tmp, "ask.md")
     open(path, "w").write(FIXTURE)
@@ -2737,6 +2777,44 @@ def test_window(app, tmp):
           (len(prop(win, "needs")), len(prop(win, "flight")), len(prop(win, "landed"))))
     check("the to-do list is drawn with the things that need him",
           len(prop(win, "todo")) == 1, prop(win, "todo"))
+
+    # ---- the model chooser sits to the RIGHT of the box he types in ----
+    # His words placed it: "a drop down to the right of the top prompt box".
+    # Found by its label rather than an id, because that label is the one thing
+    # about it he can see, and a control that draws the wrong model is the whole
+    # failure mode worth catching.
+    from PySide6.QtCore import QPointF                                  # noqa: E402
+    import boardwork as bwm                                             # noqa: E402
+    agents_obj = keep[5]
+    picks = [it for it in descendants(win.contentItem())
+             if (it.property("text") or "").endswith("  v")]
+    check("there is exactly one model chooser, and it says which model",
+          len(picks) == 1
+          and picks[0].property("text").startswith(agents_obj.modelLabel),
+          [p.property("text") for p in picks])
+    if picks:
+        # The TOP box specifically — every agent card and decision carries an
+        # InputBox too, and they are wider, so a max() over all of them compares
+        # the chooser against a box on the other side of the window.
+        boxes = sorted((it.mapToItem(win.contentItem(), QPointF(0, 0)).y(), it)
+                       for it in descendants(win.contentItem())
+                       if it.property("hintText") is not None)
+        pt = picks[0].mapToItem(win.contentItem(), QPointF(0, 0))
+        top = boxes[0][1] if boxes else None
+        bx = top.mapToItem(win.contentItem(), QPointF(0, 0)).x() + top.width() \
+            if top else 0
+        check("...to the RIGHT of the box, not over it or under it",
+              top is not None and pt.x() >= bx - 1
+              and abs(pt.y() - boxes[0][0]) < 20, (pt.x(), pt.y(), bx))
+    # It offers every model and marks the live one — the tick comes from
+    # boardwork, so the control cannot disagree with what will actually spawn.
+    listed = agents_obj.models
+    check("...and offers every model, with exactly one marked current",
+          len(listed) == len(bwm.ORCH_MODELS)
+          and sum(1 for m in listed if m["current"]) == 1,
+          [(m["label"], m["current"]) for m in listed])
+    check("...whose label is prose, never the raw wire name",
+          "claude-" not in agents_obj.modelLabel, agents_obj.modelLabel)
     shot(win, "01-populated")
 
     # ---- ...in sub-sections, one per tag that HAS bullets ----

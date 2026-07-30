@@ -296,17 +296,84 @@ Window {
             // What it may NOT say is "done": nothing here fires immediately,
             // and the gate is that he is at the machine. So the footer says
             // where it went, never what will come of it (§10).
-            InputBox {
-                id: askBox
+            // The box, and to its right the one thing about the box that is a
+            // SETTING rather than a sentence: which model reads what he types.
+            // [his, 2026-07-29] *"add a drop down to the right of the top prompt
+            // box that allows the user to select which model they wish the
+            // orchestrator to be."*
+            //
+            // An Item rather than a Row because the box GROWS when he opens it
+            // (one line at rest, an editor once he types) and the chooser must
+            // stay put against the box's TOP rather than re-centring itself
+            // every keystroke. The box takes the remaining width; the chooser
+            // measures itself off its own text.
+            Item {
                 width: page.width
-                fgAccent: win.fgAccent
-                fgText: win.fgText
-                fgDim: win.fgDim
-                draft: win.draftOf("msg:queue")
-                placeholder: "type anything - press enter and it goes to the inbox"
-                hintText: "enter sends - shift+enter is a new line - esc keeps a draft"
-                onDraftEdited: (b) => win.setDraft("msg:queue", b)
-                onSubmitted: (b) => win.sendTo(null, b)
+                height: askBox.height
+
+                InputBox {
+                    id: askBox
+                    width: parent.width - modelPick.width - 10
+                    fgAccent: win.fgAccent
+                    fgText: win.fgText
+                    fgDim: win.fgDim
+                    draft: win.draftOf("msg:queue")
+                    placeholder: "type anything - press enter and it goes to the inbox"
+                    hintText: "enter sends - shift+enter is a new line - esc keeps a draft"
+                    onDraftEdited: (b) => win.setDraft("msg:queue", b)
+                    onSubmitted: (b) => win.sendTo(null, b)
+                }
+
+                // It is a MENU, not a combo box: §7.2 says menus on this desktop
+                // are ours and are `CtxMenu`, and a chooser with four entries is
+                // that menu with a resting label. No second popup implementation,
+                // and the tick beside the live one comes from `boardwork`, so the
+                // control cannot disagree with what will actually spawn.
+                Item {
+                    id: modelPick
+                    anchors.right: parent.right
+                    y: 3
+                    width: pickText.implicitWidth + 16
+                    height: Theme.fontSize + 6
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 3
+                        color: pickMa.containsMouse ? Theme.highlight : "transparent"
+                        border.width: 1
+                        border.color: pickMa.containsMouse ? Theme.accent : Theme.border
+                    }
+                    PixelText {
+                        id: pickText
+                        anchors.centerIn: parent
+                        // `v` is the one glyph this font does have for "opens
+                        // downward" - §2.3 rules out the triangles, and the
+                        // section bands already use this ASCII vocabulary.
+                        text: Agents.modelLabel + "  v"
+                        color: pickMa.containsMouse ? win.fgAccent : win.fgDim
+                    }
+                    MouseArea {
+                        id: pickMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            // Under the control's bottom-left, in window
+                            // coordinates - the menu fills the window and
+                            // clamps itself back into view.
+                            var p = mapToItem(null, 0, height);
+                            menu.open(p.x, p.y, win.modelItems());
+                        }
+                    }
+                    HoverHandler {
+                        // What it changes, and WHEN it takes effect. The second
+                        // half is the whole of the promise: a running
+                        // orchestrator is not restarted and not re-pointed.
+                        onHoveredChanged: win.status = hovered
+                            ? "which model reads what you type - the one running now keeps its own"
+                            : ""
+                    }
+                }
             }
 
             Item { width: 1; height: 14 }
@@ -1125,6 +1192,21 @@ Window {
     CtxMenu {
         id: menu
         anchors.fill: parent
+    }
+
+    // The model chooser's rows. A tick marks the live one rather than the row
+    // being disabled — picking what is already picked is a no-op he can see the
+    // result of, and a greyed row would read as "unavailable" (§10).
+    function modelItems() {
+        return Agents.models.map((m) => ({
+            label: (m.current ? "* " : "  ") + m.label,
+            trigger: () => {
+                if (!Agents.chooseModel(m.flag))
+                    win.status = "could not save that choice";
+                else
+                    win.status = m.label + " orchestrates from the next prompt on";
+            }
+        }));
     }
 
     // ---- the menus (§7.1: every list ships with one; §7.2: ours, lowercase,
