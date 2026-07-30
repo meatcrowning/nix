@@ -3269,6 +3269,23 @@ def test_window(app, tmp):
     check("the to-do list is drawn with the things that need him",
           len(prop(win, "todo")) == 1, prop(win, "todo"))
 
+    # ---- the line under the section rule does not depend on the contents ----
+    # [his, 2026-07-30] it read one way with decisions on the board and another
+    # way without, and the EMPTY wording is the one that stays. So a POPULATED
+    # section draws that same sentence and not the store's own framing
+    # paragraph; the empty side of the pair is checked further down.
+    def _drawn(w):
+        return [t.property("text").strip() for t in descendants(w.contentItem())
+                if isinstance(t.property("text"), str)
+                and t.property("text").strip() and t.isVisible()]
+
+    full = _drawn(win)
+    check("a populated NEEDS YOU draws the same one sentence as an empty one",
+          "decisions brought to you from Solomon." in full, full[:12])
+    check("...and not the store's framing paragraph, which varied with it",
+          not any(s.startswith("Decisions only you can make") for s in full),
+          [s for s in full if s.startswith("Decisions")])
+
     # ---- what the titlebar is told FIRST, before he has touched anything ----
     # The very first REGISTER used to light `if` — the LAST section — because
     # before the Column has laid out, every section is at y 0 and

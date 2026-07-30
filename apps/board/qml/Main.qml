@@ -713,27 +713,34 @@ Window {
                     id: needsCol
                     width: parent.width
 
-                    //: EMPTY is the state he sees most often, and when the
-                    //: section is empty this ONE sentence is the whole of it —
+                    //: The line under the section rule is a CONSTANT — [his,
+                    //: 2026-07-30] it must not change with what is in the
+                    //: section, and the EMPTY wording is the one that stays:
                     //: [his, 2026-07-29] *"decisions brought to you from
-                    //: Solomon."*, and every other line that used to be down
-                    //: here is gone.
+                    //: Solomon."*. So the store's own framing paragraph is
+                    //: never drawn here — it was already suppressed while the
+                    //: section was empty, and drawing it once there was
+                    //: something to frame made the same line say two different
+                    //: things depending on the board's contents. One sentence,
+                    //: one place, both states (§5.2).
+                    readonly property string framing:
+                        "decisions brought to you from Solomon."
+
+                    //: EMPTY is the state he sees most often, and there this ONE
+                    //: sentence is the whole of the section.
                     readonly property bool empty:
                         win.needs.length === 0 && win.todo.length === 0
 
-                    // the section's own framing sentence, from the file — and
-                    // only while there is something for it to frame. Empty, the
-                    // sentence below IS the framing, and drawing both would be
-                    // two introductions to nothing (§5.2).
-                    Repeater {
-                        model: needsCol.empty || !win.intro.needs ? [] : win.intro.needs
-                        delegate: Para {
-                            required property var modelData
-                            width: needsCol.width
-                            color: win.fgDim
-                            text: modelData.text
-                            bottomPadding: 8
-                        }
+                    // Populated, the same sentence frames the cards: the
+                    // paragraph treatment the store's intro used to have, in the
+                    // empty state's own token so the line itself is unchanged.
+                    Para {
+                        width: needsCol.width
+                        visible: !needsCol.empty
+                        height: visible ? implicitHeight : 0
+                        color: Theme.dim
+                        text: needsCol.framing
+                        bottomPadding: 8
                     }
 
                     // It must read as finished rather than as broken: no empty
@@ -752,7 +759,7 @@ Window {
                             width: parent.width
                             horizontalAlignment: Text.AlignHCenter
                             color: Theme.dim
-                            text: "decisions brought to you from Solomon."
+                            text: needsCol.framing
                         }
                     }
 
