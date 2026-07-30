@@ -2589,7 +2589,7 @@ def test_work(tmp):
           idle.get("name") == ba.ORCHESTRATOR_NAME
           and idle.get("state") == "idle", idle)
     check("...leading with his NAME, the way every other card does",
-          idle.get("saysLine") == "%s is ready" % ba.ORCHESTRATOR_NAME,
+          idle.get("saysLine") == "%s awaits" % ba.ORCHESTRATOR_NAME,
           idle.get("saysLine"))
     check("...and never as work in flight: nothing pretends to observe him",
           idle.get("doingLine") == "" and idle.get("running") is False
@@ -3894,8 +3894,8 @@ def test_window(app, tmp):
           all(c.get("name") != ba.ORCHESTRATOR_NAME for c in cards)
           and all(c.get("kind") != "orchestrator" for c in cards),
           [(c.get("name"), c.get("kind")) for c in cards])
-    check("...leading with `Solomon is ready`, the way every card leads",
-          summoner[0].get("saysLine") == "%s is ready" % ba.ORCHESTRATOR_NAME,
+    check("...leading with `Solomon awaits`, the way every card leads",
+          summoner[0].get("saysLine") == "%s awaits" % ba.ORCHESTRATOR_NAME,
           summoner[0].get("saysLine"))
     check("...with no observation on him: nothing claims to have SEEN him",
           summoner[0].get("doingLine") == ""
@@ -4083,7 +4083,7 @@ def test_window(app, tmp):
     # [his, 2026-07-29] the orchestrator's card should read *"Solomon is ..."*
     # like everybody else's, and he said so twice. The first answer put the name
     # in the name column on the title row, which is not what he asked for; the
-    # standing row now carries `Solomon is ready` as its top line
+    # standing row now carries `Solomon awaits` as its top line
     # (`boardwork._idle_orchestrator_row`), so `nameNeeded` is false on it and
     # the name column is not what is being measured here any more.
     #
@@ -4102,7 +4102,7 @@ def test_window(app, tmp):
     cols = [c for c in (descendants(solItem) if solItem is not None else [])
             if c.property("nameW") is not None]
     cellW = solItem.property("cellW") if solItem is not None else 0
-    lead = "%s is ready" % ba.ORCHESTRATOR_NAME
+    lead = "%s awaits" % ba.ORCHESTRATOR_NAME
     check("Solomon's row LEADS with his name, like every other card",
           bool(solLines) and solLines[0][1] == lead,
           [(y, s) for y, s, _ in solLines])
