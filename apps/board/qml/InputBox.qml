@@ -34,6 +34,18 @@ Item {
     signal submitted(string body)
     signal draftEdited(string body)
 
+    //: HE HAS THE CARET IN HERE, at `pos` — or he has just left it. The window
+    //  keeps that, not this box: a reload that ADDS or REMOVES a row has no
+    //  delegate to keep, so the box he was typing in is destroyed and built
+    //  again, and `openCaret` is how it comes back open with his caret where he
+    //  left it. Reported only while the editor genuinely has focus, and `left`
+    //  only when HE leaves it (escape, enter, or the caret going somewhere
+    //  else) — never on destruction, which would erase the one thing this is
+    //  for. Read once, at creation; a later change to it does nothing.
+    signal caretHeld(int pos)
+    signal caretLeft()
+    property int openCaret: -1
+
     //: a RESTING height, never a cap — the box is at least this tall in both
     //  states, and still grows past it line by line as he types. The top box
     //  sets it from the chooser column beside it; every other call site leaves
@@ -49,11 +61,14 @@ Item {
     implicitHeight: Math.max(minHeight, contentHeight)
     height: implicitHeight
 
-    function beginEdit() {
+    function beginEdit(at) {
         box.editing = true;
         editor.forceActiveFocus();
-        editor.cursorPosition = editor.length;
+        editor.cursorPosition = (at === undefined || at < 0)
+                                ? editor.length : Math.min(at, editor.length);
     }
+
+    Component.onCompleted: if (box.openCaret >= 0) box.beginEdit(box.openCaret);
 
     Item {
         id: shown
@@ -125,14 +140,18 @@ Item {
             wrapMode: TextEdit.Wrap
             text: box.draft
             onTextChanged: box.draftEdited(text)
+            onActiveFocusChanged: if (activeFocus) box.caretHeld(cursorPosition);
+            onCursorPositionChanged: if (activeFocus) box.caretHeld(cursorPosition);
             Keys.onPressed: (e) => {
                 if (e.key === Qt.Key_Escape) {
                     box.editing = false;
+                    box.caretLeft();
                     e.accepted = true;
                 } else if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                            && !(e.modifiers & Qt.ShiftModifier)) {
                     box.submitted(editor.text);
                     box.editing = false;
+                    box.caretLeft();
                     e.accepted = true;
                 }
             }

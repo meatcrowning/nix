@@ -1528,7 +1528,7 @@ process ancestry. **Only agents spawned after this landed have that line in
 their prompt**; an older one will never look, which is exactly what the
 escalation exists for.
 
-## Never clobber him — three defences
+## Never clobber him — four defences
 
 The store is edited by agents and by a sync timer **while this window is open**.
 
@@ -1536,6 +1536,25 @@ The store is edited by agents and by a sync timer **while this window is open**.
    directory (an atomic save replaces the inode), coalesced by a 120 ms settle
    timer. The QML puts the scroll position back afterwards, so a reload is
    invisible (§6.1).
+1b. **A reload does not rebuild the world.** **Every Repeater on this page takes
+   a list of KEYS as its model, never the rows** — a decision's `key`, a chore's
+   `line`, an agent's `id` — and the delegate reads its own row back out by
+   `index`, the two lists being parallel. A Repeater over a JS array of rows has
+   no diff at all: one character changing in one row destroyed and rebuilt every
+   delegate on the page, which took the focus and the caret out of the editor he
+   was typing in. An equal key list is not a change, so a row whose text moved
+   now updates *through* the delegate's binding and the delegate is never
+   touched. **Keep `modelData` meaning the row** (a `readonly property var
+   modelData: <rows>[index]` shadowing the injected key) — the harness probes it,
+   and every reader in `Main.qml` reads it that way.
+   A row genuinely appearing or leaving still rebuilds that one list, and there
+   the second half applies: `win.caretIn`/`caretPos` hold WHICH editor has his
+   caret and WHERE, every editor on the page reports into it (`InputBox`'s and
+   `Decision`'s `caretHeld`/`caretLeft` + `openCaret`), and a rebuilt row comes
+   back open with the caret where he left it. It is reported only while an editor
+   actually has focus and cleared only when *he* leaves one — **never on
+   destruction**, which would erase the very thing it exists to restore, and
+   never by a row appearing under a box that already holds the caret.
 2. **A write refuses on a race.** `Board._commit` re-reads the file and compares
    its sha256 against the parse the edit was computed from. Different means
    somebody else moved the lines: it reloads, says

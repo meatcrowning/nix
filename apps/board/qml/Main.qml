@@ -154,6 +154,49 @@ Window {
         return s.length <= cells ? s : s.slice(0, cells - 3) + "...";
     }
 
+    // ---- a reload must not rebuild the world (§6.1) ----
+    // Every list on this page used to hand its Repeater the ROWS themselves,
+    // and a Repeater over a JS array has no diff: change one character in one
+    // row and every delegate on the page is destroyed and built again. That is
+    // invisible for a paragraph and ruinous for the one thing on this page he is
+    // ever half-way through — an open editor, which loses its focus, its caret
+    // and the keystroke he was in the middle of typing. `board.md` is rewritten
+    // under this window by an unattended watcher AND by the five-minute docs
+    // sync, so a reload lands mid-word as a matter of routine.
+    //
+    // So the model is the list of KEYS instead. Qt compares the value written
+    // to `model`: an equal list is not a change, so a row whose text moved
+    // updates THROUGH the delegate's own binding and the delegate itself is
+    // never touched. Only a row appearing, leaving or changing place rebuilds
+    // anything, which is the one case where there is no delegate to keep.
+    //
+    // The keys are the ones the rest of this app already addresses a row by — a
+    // decision's `key`, a chore's `line`, an agent's `id` — so nothing here
+    // invents an identity the store does not have. The delegate gets its row
+    // back by INDEX, the key list being built from the row list in order: the
+    // two are parallel, and a delegate still alive is one whose key did not
+    // move. `modelData` therefore still means what it always meant — the row.
+    function keysOf(rows, field) {
+        var out = [];
+        for (var i = 0; i < rows.length; i++)
+            out.push(String(rows[i][field]));
+        return out;
+    }
+
+    // ---- ...and where his caret is, for the reload that CANNOT keep a row ----
+    // A row appearing or leaving changes the key list, so that one list is built
+    // again and the box he was typing in goes with it. One key and one offset,
+    // held here rather than in the delegate — the delegate is the thing that
+    // goes away — and every editor on the page reports into it, so there is
+    // exactly one holder and a rebuilt row cannot take the caret off another box
+    // that has it. Cleared only when HE leaves an editor: a destruction must
+    // never clear it, or the rebuild would erase what this exists to restore.
+    property string caretIn: ""
+    property int caretPos: -1
+    function caretHeld(k, pos) { caretIn = k; caretPos = pos; }
+    function caretLeft(k) { if (caretIn === k) { caretIn = ""; caretPos = -1; } }
+    function caretOf(k) { return caretIn === k ? caretPos : -1; }
+
     function draftOf(k) { return drafts[k] !== undefined ? String(drafts[k]) : ""; }
     function setDraft(k, v) {
         var d = {};
@@ -399,8 +442,13 @@ Window {
                     draft: win.draftOf("msg:queue")
                     placeholder: "type anything - press enter and it goes to the inbox"
                     hintText: "enter sends - shift+enter is a new line - esc keeps a draft"
+                    // This box is never a delegate and is never rebuilt, so it
+                    // takes no `openCaret` — it reports only, which is what
+                    // stops a row appearing below it from stealing his caret.
                     onDraftEdited: (b) => win.setDraft("msg:queue", b)
                     onSubmitted: (b) => win.sendTo(null, b)
+                    onCaretHeld: (p) => win.caretHeld("msg:queue", p)
+                    onCaretLeft: () => win.caretLeft("msg:queue")
                 }
 
                 // Both of these are MENUS, not combo boxes: §7.2 says menus on
@@ -595,24 +643,35 @@ Window {
                         }
                     }
 
+                    // Keyed on the decision's own `key`, so an agent editing the
+                    // paragraph of one question does not take the answer editor
+                    // out from under him on another (see `keysOf`).
                     Repeater {
-                        model: win.needs
+                        model: win.keysOf(win.needs, "key")
                         delegate: Decision {
-                            required property var modelData
+                            id: decCard
+                            required property int index
+                            readonly property var modelData: win.needs[decCard.index]
+                            readonly property string dkey:
+                                modelData ? String(modelData.key) : ""
                             width: needsCol.width
-                            decision: modelData
+                            decision: decCard.modelData
                             cellW: win.cellW
                             fgAccent: win.fgAccent
                             fgText: win.fgText
                             fgDim: win.fgDim
-                            draft: win.draftOf(modelData.key)
-                            onChoose: (i, on) => Board.choose(modelData.key, i, on)
-                            onDraftEdited: (body) => win.setDraft(modelData.key, body)
+                            draft: win.draftOf(decCard.dkey)
+                            openCaret: win.caretOf(decCard.dkey)
+                            onCaretHeld: (p) => win.caretHeld(decCard.dkey, p)
+                            onCaretLeft: () => win.caretLeft(decCard.dkey)
+                            onChoose: (i, on) => Board.choose(decCard.dkey, i, on)
+                            onDraftEdited: (body) => win.setDraft(decCard.dkey, body)
                             onCommit: (body) => {
-                                if (Board.answer(modelData.key, body))
-                                    win.setDraft(modelData.key, "");
+                                if (Board.answer(decCard.dkey, body))
+                                    win.setDraft(decCard.dkey, "");
                             }
-                            onContextRequested: (mx, my) => win.decisionMenu(modelData, mx, my)
+                            onContextRequested: (mx, my) =>
+                                win.decisionMenu(decCard.modelData, mx, my)
                         }
                     }
 
@@ -643,11 +702,17 @@ Window {
                     // none (AGENTS.md, and §8.1's ramp means a machine fault).
                     // A tag with no bullets has no heading at all; the order and
                     // why it is that order live in `boardparse.TODO_ORDER`.
+                    // Keyed twice over — the group by its tag, the bullets in it
+                    // by their line — so a note arriving under one tag leaves
+                    // every other bullet's reply box exactly as he left it.
                     Repeater {
-                        model: win.todoGroups
+                        model: win.keysOf(win.todoGroups, "tag")
                         delegate: Column {
                             id: todoGroup
-                            required property var modelData
+                            required property int index
+                            readonly property var modelData:
+                                win.todoGroups[todoGroup.index]
+                                || ({ label: "", items: [] })
                             width: needsCol.width
 
                             Item {
@@ -663,20 +728,22 @@ Window {
                             }
 
                             Repeater {
-                                model: todoGroup.modelData.items
+                                model: win.keysOf(todoGroup.modelData.items, "line")
                                 delegate: Item {
                                     id: todoRow
-                                    required property var modelData
+                                    required property int index
+                                    readonly property var modelData:
+                                        todoGroup.modelData.items[todoRow.index] || ({})
                                     // The reply box is opened from the row's own menu
                                     // and stays open until he sends or clears it, like
                                     // every other editor here — a draft is never thrown
                                     // away by a click somewhere else.
-                                    property bool replying: win.draftOf("todo:" + modelData.line) !== ""
+                                    property bool replying: win.draftOf("todo:" + todoRow.modelData.line) !== ""
                                     // Folded to its one summary line, by his
                                     // click on the mark. `win.todoFolded` says
                                     // what the key is and why it is the text.
                                     readonly property bool folded:
-                                        win.isTodoFolded(modelData.text)
+                                        win.isTodoFolded(todoRow.modelData.text)
                                     width: needsCol.width
                                     implicitHeight: bar.implicitHeight
                                                     + (replying ? replyBox.height + 4 : 0)
@@ -868,6 +935,11 @@ Window {
                                         visible: todoRow.replying
                                         height: visible ? implicitHeight : 0
                                         draft: win.draftOf("todo:" + todoRow.modelData.line)
+                                        openCaret: win.caretOf("todo:" + todoRow.modelData.line)
+                                        onCaretHeld: (p) => win.caretHeld(
+                                            "todo:" + todoRow.modelData.line, p)
+                                        onCaretLeft: () => win.caretLeft(
+                                            "todo:" + todoRow.modelData.line)
                                         fgAccent: win.fgAccent
                                         fgText: win.fgText
                                         fgDim: win.fgDim
@@ -952,11 +1024,14 @@ Window {
                     width: parent.width
 
                     Repeater {
-                        model: win.summonerCards
+                        model: win.keysOf(win.summonerCards, "id")
                         delegate: AgentRow {
-                            required property var modelData
+                            id: sumRow
+                            required property int index
+                            readonly property var modelData:
+                                win.summonerCards[sumRow.index] || ({})
                             width: summonerCol.width
-                            agent: modelData
+                            agent: sumRow.modelData
                             cellW: win.cellW
                             // HIS TEXT NEVER FADES — [his, 2026-07-29] *"his
                             // text should never become the unfocused colors"*.
@@ -971,17 +1046,20 @@ Window {
                             fgAccent: Theme.accent
                             fgText: Theme.text
                             fgDim: Theme.textDim
-                            draft: win.draftOf("msg:" + modelData.id)
+                            draft: win.draftOf("msg:" + sumRow.modelData.id)
+                            openCaret: win.caretOf("msg:" + sumRow.modelData.id)
+                            onCaretHeld: (p) => win.caretHeld("msg:" + sumRow.modelData.id, p)
+                            onCaretLeft: () => win.caretLeft("msg:" + sumRow.modelData.id)
                             onDraftEdited: (b) =>
-                                win.setDraft("msg:" + modelData.id, b)
-                            onSend: (b) => win.sendTo(modelData, b)
+                                win.setDraft("msg:" + sumRow.modelData.id, b)
+                            onSend: (b) => win.sendTo(sumRow.modelData, b)
                             onContextRequested: (mx, my) =>
-                                win.rowMenu((modelData.doingLine !== ""
-                                             ? modelData.doingLine
-                                             : (modelData.name
-                                                ? modelData.name + " - " : "")
-                                               + modelData.detail)
-                                            + "  (" + modelData.title + ")",
+                                win.rowMenu((sumRow.modelData.doingLine !== ""
+                                             ? sumRow.modelData.doingLine
+                                             : (sumRow.modelData.name
+                                                ? sumRow.modelData.name + " - " : "")
+                                               + sumRow.modelData.detail)
+                                            + "  (" + sumRow.modelData.title + ")",
                                             mx, my)
                         }
                     }
@@ -1059,20 +1137,29 @@ Window {
                     // headings rather than phases — a task queued above the cap
                     // and an agent that has stopped — say so in words on the
                     // card itself.
+                    // Keyed on the agent's id: a card's two sentences change
+                    // every time its agent picks up a different tool, and that
+                    // must not close the inbox box on the card beside it.
                     Repeater {
-                        model: win.agentCards
+                        model: win.keysOf(win.agentCards, "id")
                         delegate: AgentRow {
-                            required property var modelData
+                            id: agRow
+                            required property int index
+                            readonly property var modelData:
+                                win.agentCards[agRow.index] || ({})
                             width: agentsCol.width
-                            agent: modelData
+                            agent: agRow.modelData
                             cellW: win.cellW
                             fgAccent: win.fgAccent
                             fgText: win.fgText
                             fgDim: win.fgDim
-                            draft: win.draftOf("msg:" + modelData.id)
+                            draft: win.draftOf("msg:" + agRow.modelData.id)
+                            openCaret: win.caretOf("msg:" + agRow.modelData.id)
+                            onCaretHeld: (p) => win.caretHeld("msg:" + agRow.modelData.id, p)
+                            onCaretLeft: () => win.caretLeft("msg:" + agRow.modelData.id)
                             onDraftEdited: (b) =>
-                                win.setDraft("msg:" + modelData.id, b)
-                            onSend: (b) => win.sendTo(modelData, b)
+                                win.setDraft("msg:" + agRow.modelData.id, b)
+                            onSend: (b) => win.sendTo(agRow.modelData, b)
                             // `copy line` gives him the whole row as a
                             // sentence, and the observed one already leads with
                             // WHO — that is the half he would otherwise have to
@@ -1081,12 +1168,12 @@ Window {
                             // unseen) falls back to the line that says what it
                             // is instead.
                             onContextRequested: (mx, my) =>
-                                win.rowMenu((modelData.doingLine !== ""
-                                             ? modelData.doingLine
-                                             : (modelData.name
-                                                ? modelData.name + " - " : "")
-                                               + modelData.detail)
-                                            + "  (" + modelData.title + ")",
+                                win.rowMenu((agRow.modelData.doingLine !== ""
+                                             ? agRow.modelData.doingLine
+                                             : (agRow.modelData.name
+                                                ? agRow.modelData.name + " - " : "")
+                                               + agRow.modelData.detail)
+                                            + "  (" + agRow.modelData.title + ")",
                                             mx, my)
                         }
                     }
@@ -1099,16 +1186,22 @@ Window {
                     // or taken back, up until the moment board-watch drains it
                     // (`QueuedNote.qml` carries what that race costs him).
                     Repeater {
-                        model: win.queuedNotes
+                        model: win.keysOf(win.queuedNotes, "id")
                         delegate: QueuedNote {
-                            required property var modelData
+                            id: qNote
+                            required property int index
+                            readonly property var modelData:
+                                win.queuedNotes[qNote.index] || ({})
                             width: agentsCol.width
-                            note: modelData
+                            note: qNote.modelData
                             fgDim: win.fgDim
                             fgText: win.fgText
                             fgAccent: win.fgAccent
-                            draft: win.draftOf("queued:" + modelData.id)
-                            onDraftEdited: (b) => win.setDraft("queued:" + modelData.id, b)
+                            draft: win.draftOf("queued:" + qNote.modelData.id)
+                            openCaret: win.caretOf("queued:" + qNote.modelData.id)
+                            onCaretHeld: (p) => win.caretHeld("queued:" + qNote.modelData.id, p)
+                            onCaretLeft: () => win.caretLeft("queued:" + qNote.modelData.id)
+                            onDraftEdited: (b) => win.setDraft("queued:" + qNote.modelData.id, b)
                             onStatusMessage: (t) => { if (t !== "") win.status = t; }
                             onMenuRequested: (mx, my, head, tail) =>
                                 menu.open(mx, my, head.concat(win.fileItems())

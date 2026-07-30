@@ -102,6 +102,12 @@ Item {
 
     signal send(string body)
     signal draftEdited(string body)
+    //: passed straight through to the box — see `InputBox.qml`. A card is
+    //  rebuilt when an agent joins or leaves the list, and his half-typed
+    //  command must come back with the caret in it.
+    signal caretHeld(int pos)
+    signal caretLeft()
+    property int openCaret: -1
     signal contextRequested(real mx, real my)
 
     readonly property bool running: agent && agent.running === true
@@ -514,8 +520,11 @@ Item {
                 ? "send " + (row.name !== "" ? row.name : "it")
                   + " a command, an idea or a fix"
                 : "leave a note - it goes to the next agent"
+            openCaret: row.openCaret
             onDraftEdited: (b) => row.draftEdited(b)
             onSubmitted: (b) => row.send(b)
+            onCaretHeld: (p) => row.caretHeld(p)
+            onCaretLeft: () => row.caretLeft()
         }
     }
 }
