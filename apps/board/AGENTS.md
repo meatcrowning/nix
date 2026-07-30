@@ -1151,6 +1151,46 @@ run of its own (`work_the_queue`, spawning an ORCHESTRATOR - see below). If that
 it leaves in WAITING ON YOU TO DO **quotes what he wrote**. There is no path
 where a sentence he typed reaches nobody and says nothing.
 
+### The dropdown beside the box: which model orchestrates
+
+[his, 2026-07-29] *"add a drop down to the right of the top prompt box that
+allows the user to select which model they wish the orchestrator to be. if this
+changes in the middle of the orchestrator working, simply change it to the
+defined model on the next prompt it recieves."*
+
+- **The list and the choice live in `boardwork`** — `ORCH_MODELS`,
+  `orch_model()`, `set_orch_model()` — because `boardctl.py model`, both
+  spawners and the control all read the same two functions. A copy of the list
+  in the QML would be a second answer to "what may he pick".
+- **Full model names, never the `opus`/`sonnet` aliases.** An alias means *the
+  latest of that family* and would silently re-point his choice the day a new
+  one ships, which is the exact thing a chooser exists to stop. What he TYPES at
+  `boardctl.py model` is forgiving in the way this tool's selectors are
+  (`resolve_model`: exact, or one unambiguous substring — ambiguity is an error,
+  never a guess); what is STORED is always the full name.
+- **His rule for a mid-run change is the mechanism, not a rule layered on one.**
+  `role_flags("orchestrator")` reads the file on every spawn and caches nothing,
+  so a session already running keeps the model it started with — nothing can
+  re-point it from outside — and the next prompt off the queue reads the file
+  again. There is no signal to plumb and nothing to reconcile.
+- **A stale or hand-edited value falls back to the default** rather than
+  reaching `--model`, where the failure would be a spawn dying on a CLI usage
+  error and a `FAILED:` bullet he has to decode.
+- **It is a `CtxMenu`, not a combo box** (§7.2 — menus here are ours), with a
+  resting label and a `*` beside the live one. The label is prose (`opus 5`),
+  never the wire name; the tick is computed from `boardwork`, so the control
+  cannot disagree with what will actually spawn.
+- **The choice is machine-local**, same as `cap` and for the same reason: it is
+  a file under `~/.local/state/board/`, which does not sync. `top` and `book`
+  can orchestrate on different models, and neither surprises the other.
+- **Effort is NOT in the dropdown.** He chose a model, not a thinking budget;
+  the orchestrator stays pinned at `high` for the reason `ROLES` gives.
+
+**Workers and decision agents are `claude-opus-5` at `medium`** — [his, same
+message] *"the other agents should all be opus 5 medium thinking"*. That
+replaces the earlier `("", "")`, which meant "inherit `~/.claude/settings.json`"
+on the reading that nobody had asked for them to be pinned. Somebody has.
+
 ### Second thoughts about something still queued
 
 *"allow the user to remove queued `waiting for next agent` items or edit them in

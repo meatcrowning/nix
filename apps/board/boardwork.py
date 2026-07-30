@@ -221,6 +221,93 @@ def set_cap(n):
     return n
 
 
+# ------------------------------------------------- which model orchestrates
+#: The models the dropdown beside the box offers, in the order it draws them.
+#: [his, 2026-07-29] *"add a drop down to the right of the top prompt box that
+#: allows the user to select which model they wish the orchestrator to be."*
+#:
+#: `(flag, label)`. The flag is what `--model` gets; the label is what he reads,
+#: lowercase like every other string this desktop authors (docs/DESIGN.md §7.2).
+#: **Full names, not the `opus`/`sonnet` aliases** — an alias means "the latest
+#: of that family" and would silently re-point his choice the day a new one
+#: ships, which is exactly the thing a chooser exists to stop.
+ORCH_MODELS = [
+    ("claude-fable-5", "fable 5"),
+    ("claude-opus-5", "opus 5"),
+    ("claude-sonnet-5", "sonnet 5"),
+    ("claude-haiku-4-5-20251001", "haiku 4.5"),
+]
+
+#: What orchestrates when he has never chosen. Unchanged from the value that was
+#: hardcoded in `ROLES` before the chooser existed, so adding the control moved
+#: no behaviour on its own.
+DEFAULT_ORCH_MODEL = "claude-fable-5"
+
+
+def orch_model_file():
+    return os.path.join(_root(), "orch-model")
+
+
+def orch_model():
+    """The model the NEXT orchestrator spawns with.
+
+    Read at spawn time, never cached, which is the whole of his rule for a
+    change made mid-run: *"if this changes in the middle of the orchestrator
+    working, simply change it to the defined model on the next prompt it
+    recieves."* A running session keeps the model it started with — nothing can
+    change that from outside — and the next prompt off the queue reads this file
+    again. No signal to plumb, no restart, and nothing to reconcile.
+
+    An unreadable or unrecognised file falls back to the default rather than
+    passing an unknown string to `--model`, where the failure would be a spawn
+    that dies with a CLI usage error and a FAILED bullet he has to decode.
+    """
+    try:
+        with open(orch_model_file()) as f:
+            got = f.read().strip()
+    except OSError:
+        return DEFAULT_ORCH_MODEL
+    return got if got in {m for m, _ in ORCH_MODELS} else DEFAULT_ORCH_MODEL
+
+
+def resolve_model(name):
+    """A model from what somebody typed. Exact flag, exact label, or one
+    unambiguous case-insensitive substring of either — the same forgiveness
+    `boardctl`'s selectors give for the same reason (the caller is a person at a
+    terminal or a language model holding a half-remembered name), and the same
+    refusal: ambiguity is an error, never a guess.
+    """
+    want = (name or "").strip().lower()
+    if not want:
+        raise ValueError("no model named")
+    for flag, label in ORCH_MODELS:
+        if want in (flag.lower(), label.lower()):
+            return flag
+    hits = [f for f, lab in ORCH_MODELS
+            if want in f.lower() or want in lab.lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        raise ValueError("%r matches %s - be more specific"
+                         % (name, ", ".join(hits)))
+    raise ValueError("not a model this board offers: %r (have: %s)"
+                     % (name, ", ".join(f for f, _ in ORCH_MODELS)))
+
+
+def set_orch_model(flag):
+    """Choose it. Same atomic write as `set_cap`: this file is read by a spawner
+    that may fire at any moment, so a half-written one must be impossible."""
+    flag = resolve_model(flag)
+    os.makedirs(_root(), exist_ok=True)
+    tmp = orch_model_file() + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(flag + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, orch_model_file())
+    return flag
+
+
 # ------------------------------------------------------------------ dispatch
 # ------------------------------------------------------------- which machine
 #: This system runs on BOTH machines now (`home/srvs/board-watch.nix`), so an
@@ -715,9 +802,12 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 #: not the other is invisible until it matters).
 #:
 #: `""` means SAY NOTHING — pass no flag and inherit whatever
-#: `~/.claude/settings.json` is set to. That is the deliberate default for the
-#: two roles that DO the work; nobody asked for them to change, and pinning a
-#: model here would silently outrank the setting he edits by hand.
+#: `~/.claude/settings.json` is set to. That used to be the default for the two
+#: roles that DO the work, on the reading that nobody had asked for them to
+#: change and that pinning a model would silently outrank the setting he edits
+#: by hand. **He asked, on 2026-07-29**: *"the other agents should all be opus 5
+#: medium thinking"* — so both are pinned now, and the argument above is kept
+#: only to say what changed and why it is no longer the reason.
 #:
 #: The ORCHESTRATOR is the exception he asked for. Its session is short and it
 #: writes no code — read what he typed, work out how many jobs it is, run
@@ -731,10 +821,16 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 #: Flags verified against the installed CLI (`claude --help`, 2026-07-29):
 #: `--model <model>` takes an alias or a full name, `--effort <level>` takes
 #: low|medium|high|xhigh|max.
+#: The orchestrator's model is HIS, chosen in the dropdown beside the box and
+#: read out of `orch_model()` at spawn — the `""` here is not "inherit", it is
+#: "ask the file", and `role_flags` does. Its EFFORT stays pinned high: he chose
+#: a model, not a thinking budget, and the argument above for buying the
+#: orchestrator's judgement is about the run's shape, not about which family it
+#: belongs to.
 ROLES = {
-    "orchestrator": ("claude-fable-5", "high"),
-    "worker": ("", ""),
-    "decision": ("", ""),
+    "orchestrator": ("", "high"),
+    "worker": ("claude-opus-5", "medium"),
+    "decision": ("claude-opus-5", "medium"),
 }
 
 
@@ -748,6 +844,8 @@ def role_flags(role):
     Set one to the empty string to drop the flag and inherit the default.
     """
     model, effort = ROLES.get(role, ("", ""))
+    if role == "orchestrator":
+        model = orch_model()          # his choice, re-read on every spawn
     prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
     model = os.environ.get(prefix + "_MODEL", model).strip()
     effort = os.environ.get(prefix + "_EFFORT", effort).strip()

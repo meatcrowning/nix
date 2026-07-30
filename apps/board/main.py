@@ -671,6 +671,40 @@ class Agents(QObject):
     def cap(self):
         return boardwork.cap()
 
+    # ---- which model orchestrates -------------------------------------------
+    # The dropdown beside the box. Both halves are thin on purpose: the list and
+    # the choice live in `boardwork`, because `boardctl.py model` and the
+    # spawners read the same two functions and a second copy of the list here
+    # would be a second answer to "what may he pick".
+    modelChanged = Signal()
+
+    @Property("QVariantList", notify=modelChanged)
+    def models(self):
+        """`[{flag, label, current}]`, in the order the menu draws them."""
+        cur = boardwork.orch_model()
+        return [{"flag": f, "label": lab, "current": f == cur}
+                for f, lab in boardwork.ORCH_MODELS]
+
+    @Property(str, notify=modelChanged)
+    def modelLabel(self):
+        """What the closed control reads. Never the raw flag: `claude-opus-5` is
+        a wire value and this is a line of his desktop's prose (§2)."""
+        cur = boardwork.orch_model()
+        return next((lab for f, lab in boardwork.ORCH_MODELS if f == cur), cur)
+
+    @Slot(str, result=bool)
+    def chooseModel(self, flag):
+        """Write his choice. It reaches the NEXT orchestrator and no other: a
+        session already running keeps the model it started with, which is his
+        rule for a change made mid-run stated as the mechanism rather than
+        enforced on top of one."""
+        try:
+            boardwork.set_orch_model(flag)
+        except (ValueError, OSError):
+            return False
+        self.modelChanged.emit()
+        return True
+
     @Property("QVariantList", notify=changed)
     def queued(self):
         return self._queued
