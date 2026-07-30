@@ -3964,7 +3964,7 @@ def test_window(app, tmp):
     said = keep[5].send("", "", "", typed)
     spin(200)
     check("what he types with nothing named goes to the inbox, and says only that",
-          "inbox" in said and "orchestrator" in said, said)
+          "inbox" in said and "summoner" in said, said)
     where = [(d, n) for d in ("queue", "taken")
              for n in os.listdir(ba.inbox_dir(d))
              if n.endswith(".json") and typed in open(
