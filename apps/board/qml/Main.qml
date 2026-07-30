@@ -188,6 +188,27 @@ Window {
         todoFolded = f;          // reassigned: a mutated object notifies nothing
     }
 
+    // ---- ...and which cards have their output drawer open ----
+    // [his, 2026-07-30] clicking a minister card slides a drawer out from under
+    // it with what that minister is actually saying. Held HERE and keyed by the
+    // AGENT'S ID, for the reason the caret below is: a card is destroyed and
+    // rebuilt whenever the key list changes — one agent finishing is enough —
+    // so a drawer remembered in the delegate, or by list index, would shut
+    // itself on the next poll or reopen under a different agent's card. Several
+    // at once is the point, hence a map.
+    //
+    // Session-only, like `todoFolded`: an id names one process that no longer
+    // exists next time this window opens, so there is nothing there to remember.
+    property var outputOpen: ({})
+    function isOutputOpen(id) { return outputOpen[String(id)] === true; }
+    function toggleOutputOpen(id) {
+        var o = {};
+        for (var i in outputOpen) o[i] = outputOpen[i];
+        var k = String(id);
+        if (o[k] === true) delete o[k]; else o[k] = true;
+        outputOpen = o;          // reassigned: a mutated object notifies nothing
+    }
+
     // Cut a string to `cells` characters, marking the cut with ASCII "...".
     // NEVER the unicode ellipsis and never `Text.ElideRight`, which draws one:
     // the font has no U+2026 and a missing glyph clips the row it is on
@@ -1166,6 +1187,9 @@ Window {
                             fgAccent: Theme.accent
                             fgText: Theme.text
                             fgDim: Theme.textDim
+                            outputOpen: win.isOutputOpen(sumRow.modelData.id)
+                            onOutputToggled: () =>
+                                win.toggleOutputOpen(sumRow.modelData.id)
                             draft: win.draftOf("msg:" + sumRow.modelData.id)
                             openCaret: win.caretOf("msg:" + sumRow.modelData.id)
                             onCaretHeld: (p) => win.caretHeld("msg:" + sumRow.modelData.id, p)
@@ -1292,6 +1316,9 @@ Window {
                             fgAccent: win.fgAccent
                             fgText: win.fgText
                             fgDim: win.fgDim
+                            outputOpen: win.isOutputOpen(agRow.modelData.id)
+                            onOutputToggled: () =>
+                                win.toggleOutputOpen(agRow.modelData.id)
                             draft: win.draftOf("msg:" + agRow.modelData.id)
                             openCaret: win.caretOf("msg:" + agRow.modelData.id)
                             onCaretHeld: (p) => win.caretHeld("msg:" + agRow.modelData.id, p)

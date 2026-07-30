@@ -1467,6 +1467,43 @@ all of it.
   state is `inactive` whether or not the path unit exists, so the old sentence
   claimed armed for a watcher that could never fire.
 
+### ...and clicking the card opens what it is ACTUALLY SAYING
+
+[his, 2026-07-30] *"a minister card should expand to show what that minister is
+actually saying"* — a drawer slides down out from under the card with the last
+couple of lines that agent logged, and clicking the card again slides it back up.
+The card's three lines are this app's account of the agent; the drawer is the
+agent's own voice, uncut except for width.
+
+- **The whole card is the hit target, and the BOX is the one exemption.** A left
+  click anywhere on it toggles; `AgentRow`'s toggle `MouseArea` is declared
+  BEFORE the column, so everything the card draws sits above it and only the
+  parts that accept no click of their own fall through. The editor keeps its
+  clicks — a caret placed in it must not open a drawer over what he is writing —
+  and the card lights on hover, which is what says it can be clicked at all
+  (§10). The right-click menu is untouched: that `MouseArea` takes
+  `RightButton` only, which is why a left button reached nothing here before.
+- **The state is the WINDOW's, keyed by the agent's id** (`Main.qml`'s
+  `outputOpen` map, session-only). A card is destroyed and rebuilt whenever the
+  key list changes — one agent finishing is enough — so a drawer remembered in
+  the delegate, or by list index, would shut itself on the next 2.5s poll or
+  reopen under somebody else's card. Several open at once is the point.
+- **The text is read in PYTHON, and it is `boardwork._log_path`'s file**
+  (`~/.cache/board-work/<id>.log`, through that helper so a harness's
+  `XDG_CACHE_HOME` is honoured — a test must never read his real cache).
+  `Agents.output()` takes the last 64k, drops ANSI/C0 junk and blank lines,
+  keeps only what a `\r`-rewritten progress line settled on, and maps glyphs
+  with `px()` because §2.3 says to map at INGEST. Three lines, and only the
+  width-dependent elide is the drawer's (§2.7 — the font is monospace).
+- **Nothing logged says so in words** — `nothing logged yet`, not an empty box
+  and not an error colour (§10; a worker that has not written yet is not a
+  machine fault). A missing file, an unreadable one and one holding only control
+  junk are the same honest answer.
+- **It follows the poll while it is open** and reads no file at all while it is
+  shut. The look is §6.2's clipped growth from the card's bottom edge and §9.1's
+  indented block with a `Theme.border` spine — never `accent`, which two pixels
+  to its left already means *current*.
+
 ### The box, and the promise it can honestly make
 
 **You cannot type into a running agent.** `claude -p` is headless with stdin
