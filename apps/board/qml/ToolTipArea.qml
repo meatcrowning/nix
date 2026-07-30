@@ -1,0 +1,127 @@
+import QtQuick
+
+// Hover explanation for one thing in the window, per docs/DESIGN.md §8: a dwell,
+// then a 220ms clipped slide out of a FIXED edge, in theme colours and
+// `PixelText`. Retraction is immediate. Never a `QtQuick.Controls` `ToolTip` —
+// that draws in the SYSTEM font and palette, the one way a non-pixel-font
+// surface can appear on this desktop (§2.1).
+//
+// Behaviourally identical to `apps/painter/qml/ToolTipArea.qml`, deliberately as
+// a second copy: `qmlcommon/` cannot hold this one, because the chip is
+// `PixelText` and that type is resolved per app directory — a shared version
+// would have to re-implement the font rules every app's own `PixelText` states.
+// §19.1 already tracks the tooltip as living in more than one place; retune the
+// dwell and the slide in both.
+//
+// The chip is reparented into the window's `contentItem`: goetia draws inside a
+// `clip: true` flickable, so a tooltip drawn in place would be cut off by the
+// viewport edge and would scroll away with the row it belongs to.
+MouseArea {
+    id: area
+    property string text: ""
+    hoverEnabled: enabled && text !== ""
+    acceptedButtons: Qt.NoButton
+
+    property bool open: false
+
+    onContainsMouseChanged: {
+        if (containsMouse && text !== "") {
+            dwell.restart();
+        } else {
+            dwell.stop();
+            area.close();
+        }
+    }
+    onEnabledChanged: if (!enabled) { dwell.stop(); area.close(); }
+
+    // The retraction has to SNAP (§8), and the flag is cleared BEFORE the
+    // assignment for a reason: `Behavior { enabled: area.open }` is a second
+    // binding over the same property, and QML gives no ordering between the two
+    // — painter's copy has it that way and animates its retraction anyway
+    // (measured offscreen: 240 -> 143 -> 42 -> 0 over ~200ms). Setting the gate
+    // imperatively first cannot lose that race.
+    function close() {
+        chip.animate = false;
+        chip.slide = 0;
+        area.open = false;
+    }
+
+    // 350ms, the panel's `Tooltip.qml` dwell (§8's known divergence is hyprvtb's
+    // 450, not a third number here).
+    Timer {
+        id: dwell
+        interval: 350
+        onTriggered: {
+            chip.place();
+            chip.animate = true;
+            chip.slide = 1;
+            area.open = true;
+        }
+    }
+
+    Item {
+        id: chip
+        parent: area.Window.contentItem
+        z: 5000
+        clip: true
+        visible: slide > 0.001
+
+        // Recomputed on every open: a plain `mapToItem` binding captures the
+        // ancestor positions once, at creation, and this window scrolls.
+        property real originX: 0
+        property real originY: 0
+        function place() {
+            if (!area.Window.contentItem)
+                return;
+            var p = area.mapToItem(area.Window.contentItem, area.width, area.height / 2);
+            chip.originX = p.x + 8;
+            chip.originY = p.y;
+        }
+
+        // The reveal is the CLIP growing rightward from a fixed left edge; the
+        // card inside is full size the whole time, so nothing reflows. `slide` is
+        // DRIVEN (by the dwell and by `area.close()`), not bound to `open` —
+        // see the note on that function.
+        property bool animate: false
+        property real slide: 0
+        Behavior on slide {
+            enabled: chip.animate   // out over 220ms; back in one frame
+            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
+
+        readonly property real fullW: Math.min(metrics.implicitWidth + 16, 360)
+        readonly property real fullH: label.implicitHeight + 10
+
+        width: fullW * slide
+        height: fullH
+        x: Math.max(4, Math.min(originX, (parent ? parent.width : 0) - fullW - 4))
+        y: Math.max(4, Math.min(originY - fullH / 2,
+                                (parent ? parent.height : 0) - fullH - 4))
+
+        // Natural (unwrapped) width of the string, so `fullW` is not defined in
+        // terms of the wrapped label's own width — that is the §8 binding loop.
+        PixelText {
+            id: metrics
+            visible: false
+            text: area.text
+        }
+
+        Rectangle {
+            width: chip.fullW
+            height: chip.fullH
+            anchors.left: parent.left   // revealed from the left as the clip grows
+            color: Theme.bgAlt
+            border.color: Theme.border
+            border.width: 1
+            PixelText {
+                id: label
+                x: 7
+                y: 5
+                width: chip.fullW - 14
+                wrapMode: Text.Wrap
+                text: area.text
+                color: Theme.text
+            }
+        }
+    }
+}

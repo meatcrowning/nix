@@ -1620,6 +1620,27 @@ the rename exists to keep off screen — and the taskbar and alt-tab would lose 
 window's name too. One `false` to put the title back; that is what *"for now"*
 buys.
 
+### The usage meters hover TWICE, and each channel answers a different question
+
+`UsageMeter.qml` + `boardusage.readings()`. Pointing at a meter puts its
+`detail` sentence in the titlebar footer (what this window is, and how old the
+reading is) **and** slides out a tooltip carrying its `reset` sentence — [his,
+2026-07-29] *"add a tooltip to each usage indicator that says when that limit
+next resets"*.
+
+- **Both sentences are `boardusage.py`'s**, like the figures and the `5h`/`7d`
+  labels (§2). The QML picks which field to draw and never composes prose.
+- **`reset` is never empty**: a payload with no `resets_at`, or no reading at
+  all, says that instead of showing an empty chip (§10). It names its own
+  window, because a chip is read away from the label it grew out of.
+- The tooltip is `qml/ToolTipArea.qml`, a second copy of painter's (§8, §19.1) —
+  `qmlcommon/` cannot hold it, since the chip is `PixelText` and that type
+  resolves per app directory. **This copy snaps its retraction and painter's does
+  not**: `Behavior { enabled: area.open }` is a second binding over the same
+  property with no ordering guarantee, and painter's animates the close anyway
+  (measured offscreen, 240 -> 143 -> 42 -> 0 over ~200ms). Ours sets the gate
+  imperatively first. Retune the dwell in both.
+
 ## Recorded limit: the store quotes glyphs the font lacks
 
 `board.md`'s open font decision literally lists the characters More Perfect DOS

@@ -108,4 +108,21 @@ Item {
     readonly property bool hovering: hov.hovered
 
     HoverHandler { id: hov }
+
+    // ...and WHEN THIS LIMIT COMES BACK is the row's own tooltip. [his,
+    // 2026-07-29] *"add a tooltip to each usage indicator that says when that
+    // limit next resets"*. The sentence is `boardusage.readings()`'s (§2 — his
+    // prose lives with the numbers, not here), it names its own window because a
+    // chip is read away from the label it grew out of, and it is never empty: a
+    // payload with no `resets_at` says that instead of showing nothing (§10).
+    //
+    // It covers the whole row rather than the bar alone: the label and the
+    // percentage are as much "this limit" as the track is (§5.3). Both hover
+    // channels are live at once and that is deliberate — the chip answers *when
+    // does it reset*, the footer sentence answers *what is this number and how
+    // old*. A `HoverHandler` is passive, so the two do not fight.
+    ToolTipArea {
+        anchors.fill: parent
+        text: meter.row && meter.row.reset ? meter.row.reset : ""
+    }
 }
