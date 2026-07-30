@@ -34,7 +34,19 @@ Item {
     signal submitted(string body)
     signal draftEdited(string body)
 
-    implicitHeight: editing ? editBox.height : shown.height
+    //: a RESTING height, never a cap — the box is at least this tall in both
+    //  states, and still grows past it line by line as he types. The top box
+    //  sets it from the chooser column beside it; every other call site leaves
+    //  it 0 and is one line tall as before.
+    property real minHeight: 0
+
+    //: what the content alone needs. Derived from the two states' own
+    //  implicitHeight and NEVER from `height` — that is the binding loop §5.2
+    //  warns about, and here it would also make `minHeight` self-referential.
+    readonly property real contentHeight: editing ? editBox.implicitHeight
+                                                  : shown.implicitHeight
+
+    implicitHeight: Math.max(minHeight, contentHeight)
     height: implicitHeight
 
     function beginEdit() {
@@ -48,7 +60,10 @@ Item {
         width: parent.width
         visible: !box.editing
         implicitHeight: Math.max(Theme.fontSize + 6, msgText.implicitHeight + 6)
-        height: implicitHeight
+        // Fills the box, so a `minHeight` taller than the invitation gives the
+        // whole of that area to the hover fill and the click target (§5.3 —
+        // the target is the region, not the line of text in it).
+        height: box.height
 
         Rectangle {
             anchors.fill: parent
@@ -84,7 +99,8 @@ Item {
         id: editBox
         width: parent.width
         visible: box.editing
-        height: editor.implicitHeight + hint.height + 14
+        implicitHeight: editor.implicitHeight + hint.height + 14
+        height: box.height
         color: Theme.bgAlt
         border.width: 1
         border.color: box.fgAccent

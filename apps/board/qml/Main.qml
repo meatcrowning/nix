@@ -303,17 +303,48 @@ Window {
             // orchestrator to be."*
             //
             // An Item rather than a Row because the box GROWS when he opens it
-            // (one line at rest, an editor once he types) and the chooser must
-            // stay put against the box's TOP rather than re-centring itself
-            // every keystroke. The box takes the remaining width; the chooser
-            // measures itself off its own text.
+            // and the chooser must stay put against the box's TOP rather than
+            // re-centring itself every keystroke. The box takes the remaining
+            // width; the chooser measures itself off its own text.
+            //
+            // ONE Item, and the chooser column is the reference. [his,
+            // 2026-07-29] *"the prompt box should extend so that it is not a
+            // single line but rather multiple lines so that it is the same
+            // height as from the top of the model selector box to the bottom of
+            // the indicators. the indicators should be anchored to the model
+            // selector box not the prompt box as they are now."* So:
+            //
+            //   * `modelPick` sits at y 0 and the meters hang off ITS bottom —
+            //     the two are one column, and nothing in it looks at the box.
+            //   * `askBox.minHeight` is that column's span, so the box is as
+            //     tall as chooser + gap + meters and both edges line up. It is
+            //     read off their real geometry, never a number: a longer model
+            //     label, a second line on a stale meter or a font-size change
+            //     moves box and column together (§2.7).
+            //   * the dependency is ONE-DIRECTIONAL on purpose. Column -> box.
+            //     Anchoring the meters to the box while the box sizes itself
+            //     off the meters is a binding loop, which is the §5.2 trap and
+            //     what the arrangement this replaces would have become.
+            //
+            // The slack it fills was dead space (§5.2): a one-line box left the
+            // whole area beside the meters empty, and what fills it is the
+            // thing he types into — more of his sentence visible at once, and a
+            // click target that is the region rather than the line (§5.3).
+            // He still extends it past the resting height by typing: `minHeight`
+            // is a floor, not a cap.
             Item {
                 width: page.width
-                height: askBox.height
+                height: Math.max(askBox.height, pickCol) + (usageCol.visible ? 4 : 0)
+
+                // Top of the chooser to the bottom of the last meter. The 4 is
+                // the lead-in below, stated once here and once there.
+                readonly property real pickCol: modelPick.y + modelPick.height
+                    + (usageCol.visible ? 4 + usageCol.height : 0)
 
                 InputBox {
                     id: askBox
                     width: parent.width - modelPick.width - 10
+                    minHeight: parent.pickCol - modelPick.y
                     fgAccent: win.fgAccent
                     fgText: win.fgText
                     fgDim: win.fgDim
@@ -332,7 +363,11 @@ Window {
                 Item {
                     id: modelPick
                     anchors.right: parent.right
-                    y: 3
+                    // Flush with the box's own top, not inset by the 3px the
+                    // box pads its first line by: the box is now as tall as
+                    // this column, so the two are only "the same height" if
+                    // they start and end on the same rows.
+                    y: 0
                     width: pickText.implicitWidth + 16
                     height: Theme.fontSize + 6
 
@@ -374,48 +409,50 @@ Window {
                             : ""
                     }
                 }
-            }
 
-            // ============================ what is left of the usage, under it
-            // [his, 2026-07-29] *"add usage indicators directly under the
-            // orchestrator model-selection box: how much of his daily usage and
-            // how much of his weekly usage has been consumed"* — and no Fable
-            // figure, which is a real entry in the payload and is dropped in
-            // `boardusage.py` rather than here.
-            //
-            // It sits UNDER the chooser and is EXACTLY AS WIDE as it, one
-            // readout per line, because it is about the same thing: what
-            // spending that model costs him. [his, 2026-07-29] *"each usage
-            // indicator should be exactly as wide as the model selection box
-            // above it … stacked vertically"*. The width is bound to
-            // `modelPick`, not to a number, so the box and the bars stay flush
-            // when a longer model name widens it.
-            //
-            // Two readouts of one quantity, sharing one denominator each
-            // (§10.5) — both are "% of that window's limit", the CLI's own
-            // arithmetic against the real plan, never tokens over a ceiling we
-            // guessed.
-            //
-            // The short window is FIVE HOURS and says so. There is no daily
-            // bucket on this account, and a number under the wrong word is the
-            // §10.5 failure with a nicer label. `5h` is the top line because
-            // that is the one that stops him mid-afternoon.
-            Item {
-                width: page.width
-                height: usageCol.y + usageCol.height + 4
-                visible: Usage.rows.length > 0
-
+                // ======================== what is left of the usage, under it
+                // [his, 2026-07-29] *"add usage indicators directly under the
+                // orchestrator model-selection box: how much of his daily usage
+                // and how much of his weekly usage has been consumed"* — and no
+                // Fable figure, which is a real entry in the payload and is
+                // dropped in `boardusage.py` rather than here.
+                //
+                // It sits UNDER the chooser and is EXACTLY AS WIDE as it, one
+                // readout per line, because it is about the same thing: what
+                // spending that model costs him. [his, 2026-07-29] *"each usage
+                // indicator should be exactly as wide as the model selection box
+                // above it … stacked vertically"*. The width is bound to
+                // `modelPick`, not to a number, so the box and the bars stay
+                // flush when a longer model name widens it.
+                //
+                // ANCHORED TO THE CHOOSER, not to the box he types in [his,
+                // 2026-07-29] — so the two of them are one column, the box
+                // measures itself against that column, and the dependency
+                // cannot close into a loop. It is a sibling of the box for that
+                // reason and not a row below it.
+                //
+                // Two readouts of one quantity, sharing one denominator each
+                // (§10.5) — both are "% of that window's limit", the CLI's own
+                // arithmetic against the real plan, never tokens over a ceiling
+                // we guessed.
+                //
+                // The short window is FIVE HOURS and says so. There is no daily
+                // bucket on this account, and a number under the wrong word is
+                // the §10.5 failure with a nicer label. `5h` is the top line
+                // because that is the one that stops him mid-afternoon.
                 Column {
                     id: usageCol
                     // [his, 2026-07-29] *"there should be just a little more
                     // space between the top of the indicators and the bottom of
                     // the model selector"* — one rung of §4.1's in-widget scale,
-                    // and the same 4 this block already leaves under itself, so
-                    // the card keeps one gap and not three. The 5h/7d rows still
-                    // butt together; only the lead-in moved.
-                    y: 4
-                    anchors.right: parent.right
+                    // and the same 4 this block leaves under itself, so the card
+                    // keeps one gap and not three. The 5h/7d rows still butt
+                    // together; only the lead-in moved.
+                    anchors.top: modelPick.bottom
+                    anchors.topMargin: 4
+                    anchors.right: modelPick.right
                     width: modelPick.width
+                    visible: Usage.rows.length > 0
                     // Zero: each meter already carries its own line box (§4.1),
                     // and stacked readouts butt together like every other tiled
                     // thing here (§5.1). Nothing invents a gap.

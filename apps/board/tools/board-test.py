@@ -2870,6 +2870,48 @@ def test_window(app, tmp):
         check("...one directly above the other, not beside it",
               len(ys) == 2 and 0 < ys[1] - ys[0] <= bars[0].height() + 4,
               (ys, bars[0].height()))
+
+        # ---- and the BOX is as tall as that whole column ----
+        # [his, 2026-07-29] *"the prompt box should extend so that it is not a
+        # single line but rather multiple lines so that it is the same height as
+        # from the top of the model selector box to the bottom of the
+        # indicators"*. Measured against the real items, because the point of
+        # the change is that the height is DERIVED: a hardcoded one would pass
+        # today and drift the moment a longer model label or a bigger font size
+        # moved the column.
+        box = picks[0].parentItem()
+        bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
+        colBottom = max(it.mapToItem(win.contentItem(), QPointF(0, 0)).y()
+                        + it.height() for it in bars)
+        ap = top.mapToItem(win.contentItem(), QPointF(0, 0))
+        check("the box he types in is as tall as chooser + meters, top flush",
+              abs(ap.y() - bp.y()) < 1
+              and abs(top.height() - (colBottom - bp.y())) < 1,
+              (ap.y(), bp.y(), top.height(), colBottom - bp.y()))
+        check("...and it is a RESTING height, not the content's own",
+              top.property("minHeight") > top.property("contentHeight"),
+              (top.property("minHeight"), top.property("contentHeight")))
+        # It is a FLOOR: typing past it still extends the box downward, which is
+        # the half of his sentence a `height:` binding would have broken.
+        resting = top.height()
+        top.setProperty("editing", True)
+        spin(80)
+        eds = [it for it in descendants(top)
+               if it.property("cursorPosition") is not None]
+        check("...whose editor opens at exactly that height, not one line",
+              len(eds) == 1 and abs(top.height() - resting) < 1,
+              (len(eds), top.height(), resting))
+        if eds:
+            eds[0].setProperty("text", "wrap me " * 80)
+            spin(120)
+            check("...and typing more lines than it fits GROWS it past that",
+                  top.height() > resting + 20, (top.height(), resting))
+            eds[0].setProperty("text", "")
+            spin(120)
+            check("...back to the resting height when the lines go away",
+                  abs(top.height() - resting) < 1, (top.height(), resting))
+        top.setProperty("editing", False)
+        spin(80)
     shot(win, "01-populated")
 
     # ---- ...in sub-sections, one per tag that HAS bullets ----

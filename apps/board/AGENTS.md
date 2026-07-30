@@ -1159,6 +1159,26 @@ run of its own (`work_the_queue`, spawning an ORCHESTRATOR - see below). If that
 it leaves in WAITING ON YOU TO DO **quotes what he wrote**. There is no path
 where a sentence he typed reaches nobody and says nothing.
 
+**The box is as TALL as the column beside it, and that is one-directional.**
+[his, 2026-07-29] *"the prompt box should extend so that it is not a single line
+but rather multiple lines so that it is the same height as from the top of the
+model selector box to the bottom of the indicators. the indicators should be
+anchored to the model selector box not the prompt box as they are now"*. So
+`modelPick` sits at y 0, the meters anchor to **its** bottom, and
+`askBox.minHeight` is that column's whole span — chooser + the 4px lead-in +
+both meters — read off their real geometry, never a number, so a longer model
+label or a bigger font size moves box and column together (§2.7). The
+dependency runs column -> box and only that way: anchoring the meters to the box
+while the box measures itself off the meters is a **binding loop**, and it is
+the one thing to re-check if this arrangement is ever rearranged (`InputBox`
+derives its own `contentHeight` from the two states' `implicitHeight` for the
+same reason — never from `height`). `minHeight` is a FLOOR, not a cap: typing
+past it still extends the box downward, which is the rest of his sentence.
+The slack it fills was dead space (docs/DESIGN.md §5.2) — a one-line box left
+the area beside the meters empty — and the whole tall region is the hover fill
+and the click target (§5.3), in both the resting and the open state.
+Regression layer: four checks in `test_window`, measured against the real items.
+
 ### The dropdown beside the box: which model orchestrates
 
 [his, 2026-07-29] *"add a drop down to the right of the top prompt box that
