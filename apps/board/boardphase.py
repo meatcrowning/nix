@@ -106,6 +106,24 @@ WINDOW = 12
 #: it never reaches the screen as a number (see the docstring).
 QUIET_AFTER_S = int(os.environ.get("BOARD_QUIET_AFTER", "180"))
 
+#: A session id is recorded but its transcript file has not appeared yet. For
+#: this long that is STARTING UP, not "cannot see it" — the CLI writes the file
+#: on its first turn, a second or two after the process exists.
+#:
+#: [his, 2026-07-29] *"when solomon first takes a request, his section very
+#: briefly shows 'cannot see what solomon is doing' and then changes to 'Solomon
+#: is getting ready' - it shouldnt show that breif initial 'dont know' text"*.
+#: The two cases were collapsing into `unlinked`: no session id EVER recorded
+#: (an interactive session this system did not spawn — the true unknown) and a
+#: spawn of ours whose transcript is seconds away. Only the first is a thing the
+#: board cannot see; the second it is simply early for.
+#:
+#: It is a GRACE, not a synonym: past it, a spawn whose transcript never
+#: appeared is `unlinked` again and says so, because that is a real failure and
+#: hiding it behind "nothing yet" forever is the §10 lie this app exists not to
+#: tell.
+START_GRACE_S = int(os.environ.get("BOARD_START_GRACE", "120"))
+
 #: The context window an agent is assumed to have, in tokens, when nothing in
 #: its transcript says otherwise. 200k is Claude Code's standing window for the
 #: Claude models this desktop runs; the long-context variant is 1m. Nothing
@@ -448,7 +466,11 @@ def actually(rec):
         # here would be an elapsed time the moment he read it.
         last = rec.get("doing")
         return ("nothing recently - last seen " + last) if last else "nothing recently"
-    if state == "none":
+    # `starting` reads the same as `none`, and means the same thing: it is
+    # linked, or about to be, and it has not acted. The difference between the
+    # two is machine business (whether the transcript file exists yet) and never
+    # reaches the screen.
+    if state in ("none", "starting"):
         return "nothing yet"
     # Unlinked: no session id was ever recorded, so there is no transcript to
     # find. One sentence that is both halves of the truth — we cannot see the
@@ -535,7 +557,12 @@ def doing_line(rec, who="", running=True):
         # Words, never a duration — the threshold is machine business.
         return ("nothing recently - last seen %s" % last) if last else \
             "nothing recently"
-    if state == "none":
+    # Same line for both, for the reason `actually()` gives: a spawn whose
+    # transcript is seconds away has not done anything yet, which is exactly
+    # what `none` says. It is the branch below — the true unknown — that his
+    # complaint was about, and it must not be reached by a run that is two
+    # seconds old.
+    if state in ("none", "starting"):
         return "nothing yet"
     return "board cannot see what %s is doing - only that the process is there" \
         % subj
@@ -742,11 +769,22 @@ def observe(agent_id, session=None):
             path = transcript(rec.get("session"))
             rec["path"] = path
         if not path:
-            # Nothing to observe: no session id was ever recorded for this
-            # agent (an interactive session this system did not spawn), or its
-            # transcript is not where the platform puts one. SAY THAT. Falling
-            # back to the claim here is the one thing this module must not do.
-            rec["observed"] = "unlinked"
+            # Nothing to observe — but WHICH nothing. No session id was ever
+            # recorded (an interactive session this system did not spawn) is the
+            # real unknown; a session id we chose ourselves whose transcript has
+            # not been written yet is a spawn that is a second old. `linkedAt`
+            # is stamped the first time the id is seen so the second cannot
+            # quietly become the first: past `START_GRACE_S` it is `unlinked`
+            # again. Falling back to the CLAIM in either case stays the one
+            # thing this module must not do.
+            if str(rec.get("session") or ""):
+                if not rec.get("linkedAt"):
+                    rec["linkedAt"] = time.time()
+                young = time.time() - float(rec.get("linkedAt") or 0) \
+                    <= START_GRACE_S
+                rec["observed"] = "starting" if young else "unlinked"
+            else:
+                rec["observed"] = "unlinked"
             rec["phase"] = "unreported"
             rec.setdefault("recent", [])
             ba._write_json(sidecar(aid), rec)

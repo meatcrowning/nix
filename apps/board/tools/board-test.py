@@ -1836,6 +1836,33 @@ def test_phase(tmp):
           r["observed"] == "unlinked" and "cannot see what it is doing"
           in bph.actually(r), bph.actually(r))
 
+    # ---- a spawn of ours whose transcript is seconds away is STARTING ----
+    # [his, 2026-07-29] *"when solomon first takes a request, his section very
+    # briefly shows 'cannot see what solomon is doing' and then changes to
+    # 'Solomon is getting ready' - it shouldnt show that breif initial 'dont
+    # know' text"*. The two used to collapse into `unlinked`, and the young case
+    # picked the wrong sentence for as long as the CLI took to write its file.
+    r = bph.observe("ph-young", session="99999999-8888-7777-6666-555555555555")
+    check("a session id with no transcript YET is starting, not unobservable",
+          r["observed"] == "starting" and bph.actually(r) == "nothing yet",
+          (r["observed"], bph.actually(r)))
+    check("...and its card line never says the board cannot see it",
+          bph.doing_line(r, "Solomon") == "nothing yet",
+          bph.doing_line(r, "Solomon"))
+    check("...and it is not filed under a phase it has not reached",
+          r["phase"] == "unreported", r["phase"])
+    # ...and it is a GRACE, not a synonym: a spawn whose transcript never turns
+    # up is a real failure and goes back to saying so.
+    p = bph.sidecar("ph-young")
+    rec = json.load(open(p))
+    rec["linkedAt"] = time.time() - bph.START_GRACE_S - 5
+    with open(p, "w") as f:
+        json.dump(rec, f)
+    r = bph.observe("ph-young")
+    check("...but past the grace it is unobservable again, and says so",
+          r["observed"] == "unlinked" and "cannot see what it is doing"
+          in bph.actually(r), (r["observed"], bph.actually(r)))
+
     _tsc(tmp, u, [("Read", {"file_path": "/x/boardparse.py"}),
                   ("Grep", {"pattern": "edit"})])
     r = bph.observe("ph-a")
@@ -2217,6 +2244,27 @@ def test_work(tmp):
                         kind="orchestrator", name="Marbas")
     check("...and a caller cannot name one anything else",
           orec2["name"] == ba.ORCHESTRATOR_NAME, orec2)
+    # ---- and the FIRST thing his card says is `getting ready` ----
+    # [his, 2026-07-29] *"when solomon first takes a request, his section very
+    # briefly shows 'cannot see what solomon is doing' and then changes to
+    # 'Solomon is getting ready' - it shouldnt show that breif initial 'dont
+    # know' text"*. A spawn's transcript does not exist for a second or two, and
+    # that used to reach `unlinked` — the same branch an unobservable interactive
+    # session takes. Registered here exactly as a spawn is: a session id we
+    # chose, and no file at it yet.
+    ba.register("orch-fresh", "what he just typed", os.getpid(),
+                kind="orchestrator", where="board-watch",
+                session="deadbeef-0000-1111-2222-333344445555")
+    fresh = [a for a in ba.agents() if a["id"] == "orch-fresh"]
+    check("a freshly spawned Solomon reads `getting ready`, never `cannot see`",
+          len(fresh) == 1
+          and fresh[0]["doingLine"] == "%s is getting ready" % ba.ORCHESTRATOR_NAME,
+          [a.get("doingLine") for a in fresh])
+    check("...and that is the ONLY thing it says, in either sentence",
+          fresh and "cannot see" not in (fresh[0]["doingLine"]
+                                        + fresh[0]["saysLine"]),
+          [(a.get("saysLine"), a.get("doingLine")) for a in fresh])
+    ba.unregister("orch-fresh")   # the checks below count the live ones
     ocards = bw.cards()
     check("two overlapping orchestrators are both Solomon, and both on top",
           [c["kind"] for c in ocards[:2]] == ["orchestrator"] * 2
