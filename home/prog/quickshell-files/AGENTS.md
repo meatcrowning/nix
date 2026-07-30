@@ -1470,6 +1470,24 @@ minimized ones, parked off-screen deliberately.
   titlebar covered, the bug reported on 2026-07-26. Reconstruct the frame from
   `plugin:hyprvtb:{enabled,bar_width}` + `general:border_size` via
   `hyprctl getoption -j` (`enabled` is a global bool, not per-window).
+- **`bar_width` is ONE column of two, and that is the trap.** The bar is
+  double-wide — `totalBarW() = bar_width * 2`, the inner column the app's own
+  buttons and the outer one the system controls — so a reconstruction that adds
+  `bar_width` covers half of it and looks almost right. `Screenshot.qml`'s
+  "window" mode shipped with a hardcoded `+ 32` and cut the outer bar off every
+  window shot (reported 2026-07-29). **Every consumer of the frame rect reads
+  those three keys** — there are two now, this script and that one — and no
+  consumer writes a pixel literal.
+
+  The two other things a captured frame needs, in `Screenshot.qml`: it is
+  CLIPPED to the output (a frame may reach past the screen edge, where `grim -g`
+  captures nothing) and a degenerate result is refused outright rather than
+  handed to `grim`. The bottom-left drop shadow is deliberately **out** — it
+  falls ON the desktop, so including it would put a strip of whatever is behind
+  into the shot. Measured, not reasoned: a kitty at `718x805` in
+  `tools/sandbox.sh` drew ink out to local column 783 = `718 + 64 + 2` (diff
+  the sandbox monitor with and without the window, and read the column
+  profile), with the top edge at `client.y - 2`.
 
 ---
 

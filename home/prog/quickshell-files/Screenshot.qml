@@ -39,7 +39,33 @@ PanelWindow {
     property bool recording: false        // true while wf-recorder is running
     property string mode: "region" // "region" | "window" | "fullscreen"
     property int delaySec: 0       // cycles 0 -> 3 -> 5 (screenshot only)
-    property var clients: []       // visible window rects (global coords)
+    property var rawClients: []    // client rects straight from hyprctl (global)
+
+    // How far the visible FRAME reaches past the client rect, read live from the
+    // compositor — never a pixel literal. hyprvtb's titlebar is VERTICAL on the
+    // window's RIGHT edge and is DOUBLE-wide: two columns of `bar_width`
+    // (vtbDeco.cpp totalBarW() = bar_width * 2), the inner one carrying the
+    // app's own buttons and the outer one the system controls. Hyprland's border
+    // then wraps window + bar as a single frame (the deco's priority is above
+    // the border's), so `border_size` is added on every side.
+    //
+    // This was `+ 32` — ONE column — so "window" mode cut the outer bar off the
+    // shot, which is the whole reason these are read from `hyprctl getoption`
+    // now. Same reconstruction as scripts/push-windows.py's frame_extents().
+    property int vtbBarPx: 64  // fallbacks = the plugin's own defaults
+    property int borderPx: 2
+    property bool vtbEnabled: true
+    readonly property int barPx: vtbEnabled ? vtbBarPx : 0
+
+    // Visible window frames (global coords): the client rect grown by the border
+    // on all four sides and by the bar on the right, for the windows that have
+    // one. The bottom-left drop shadow is deliberately NOT included — it is cast
+    // ON the desktop rather than part of the window, so a shot containing it
+    // would carry a strip of whatever is behind.
+    readonly property var clients: rawClients.map(c => Qt.rect(
+        c.x - borderPx, c.y - borderPx,
+        c.width + 2 * borderPx + (c.bar ? barPx : 0),
+        c.height + 2 * borderPx))
 
     // Focused monitor's refresh rate + name, read from hyprctl on open — the
     // recording framerate (-r) and fullscreen output (-o) come from here.
@@ -85,6 +111,7 @@ PanelWindow {
             hoverRect = Qt.rect(0, 0, 0, 0);
             pickedRect = Qt.rect(0, 0, 0, 0);
             clientsProc.running = true;
+            optsProc.running = true;     // frame extents for window mode
             monitorsProc.running = true; // refresh rate + output for recording
             grab.forceActiveFocus();
         }
@@ -113,17 +140,51 @@ PanelWindow {
             onStreamFinished: {
                 try {
                     const all = JSON.parse(this.text);
-                    // Expand the client rect to the full visual frame: 2px
-                    // border all around plus the 32px hyprvtb titlebar on the
-                    // right (the scratchpad has no titlebar).
-                    root.clients = all
+                    // The client rect, plus which classes carry a titlebar; the
+                    // chrome itself is added by the `clients` binding, so the
+                    // two can land in either order. A FULLSCREEN window has no
+                    // bar drawn either, and its client rect already fills the
+                    // output.
+                    root.rawClients = all
                         .filter(c => c.mapped && !c.hidden && c.size[0] > 0)
-                        .map(c => {
-                            const bar = c.class === "hyprvtb-scratch" ? 0 : 32;
-                            return Qt.rect(c.at[0] - 2, c.at[1] - 2, c.size[0] + 4 + bar, c.size[1] + 4);
-                        });
+                        .map(c => ({
+                            x: c.at[0], y: c.at[1],
+                            width: c.size[0], height: c.size[1],
+                            // hyprvtb decorates everything except its own
+                            // scratchpad, the askpass dialog (vtbNeverDecorates)
+                            // and a fullscreen window.
+                            bar: c.class !== "hyprvtb-scratch"
+                              && c.class !== "vista-askpass"
+                              && !c.fullscreen
+                        }));
                 } catch (e) {
-                    root.clients = [];
+                    root.rawClients = [];
+                }
+            }
+        }
+    }
+
+    // The frame extents, from the compositor rather than from a literal. Three
+    // separate `getoption` calls because it takes one key at a time; each line
+    // of output is its own JSON object, so they can be parsed in any order.
+    Process {
+        id: optsProc
+        command: ["sh", "-c",
+            "hyprctl getoption -j general:border_size; " +
+            "hyprctl getoption -j plugin:hyprvtb:enabled; " +
+            "hyprctl getoption -j plugin:hyprvtb:bar_width"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const lines = this.text.trim().split("\n");
+                for (let i = 0; i < lines.length; i++) {
+                    let o;
+                    try { o = JSON.parse(lines[i]); } catch (e) { continue; }
+                    if (o.option === "general:border_size" && o.int >= 0)
+                        root.borderPx = o.int;
+                    else if (o.option === "plugin:hyprvtb:bar_width" && o.int > 0)
+                        root.vtbBarPx = o.int * 2; // totalBarW(): inner + outer column
+                    else if (o.option === "plugin:hyprvtb:enabled")
+                        root.vtbEnabled = o.bool === true;
                 }
             }
         }
@@ -225,6 +286,13 @@ PanelWindow {
 
     // Smallest visible window under a local point (smallest = the one on
     // top in the common overlap case of a dialog over its parent).
+    //
+    // The result is CLIPPED to this output. A frame can legitimately reach past
+    // the screen edge — a window dragged half off it, or a fullscreen window
+    // whose reserved extents were not applied — and `grim -g` outside the output
+    // captures nothing there, so the honest region is the intersection. Clipping
+    // the returned rect (rather than the ones we hit-test against) keeps the
+    // pick itself unaffected, and the dim hole shows exactly what will be shot.
     function windowAt(lx, ly) {
         const gx = screenX + lx, gy = screenY + ly;
         let best = Qt.rect(0, 0, 0, 0), bestArea = -1;
@@ -233,7 +301,15 @@ PanelWindow {
             if (gx >= c.x && gx <= c.x + c.width && gy >= c.y && gy <= c.y + c.height) {
                 const area = c.width * c.height;
                 if (bestArea < 0 || area < bestArea) {
-                    best = Qt.rect(c.x - screenX, c.y - screenY, c.width, c.height);
+                    const l = Math.max(0, c.x - screenX);
+                    const t = Math.max(0, c.y - screenY);
+                    const r = Math.min(root.width, c.x - screenX + c.width);
+                    const b = Math.min(root.height, c.y - screenY + c.height);
+                    // A degenerate box is a Wayland protocol error to grim and a
+                    // renderRect abort to the compositor: never return one.
+                    if (r - l < 1 || b - t < 1)
+                        continue;
+                    best = Qt.rect(l, t, r - l, b - t);
                     bestArea = area;
                 }
             }
