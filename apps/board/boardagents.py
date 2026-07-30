@@ -814,6 +814,17 @@ def agents(procs=None):
     # WHAT IT SAYS, AND WHAT IT IS DOING. Imported here rather than at the top:
     # `boardphase` imports this module, and the pair would not load otherwise.
     import boardphase as bph
+    # WHO SOLOMON IS WAITING ON, for his own card's `awaits` line — [his,
+    # 2026-07-29] *"Solomon awaits <agent>..."*, and it NAMES the agent. Only
+    # this function can see the other cards, so the name is resolved here and
+    # handed to `boardphase.orch_says_line`; a running worker with a name is the
+    # only thing he can honestly be said to be waiting on. Two or more and there
+    # is no single one to name, none and there is nobody — both get a wording
+    # that names nobody rather than an empty cell or the literal word "agent".
+    peers = [a.get("name") or "" for a in out
+             if a.get("kind") != ORCHESTRATOR_KIND and a.get("state") == "running"]
+    peers = [p for p in peers if p]
+    awaits = peers[0] if len(peers) == 1 else ("his workers" if peers else "")
     for a in out:
         a["unread"] = len(for_agent(a["id"]))
         obs = bph.observe(a["id"], session=a.get("session"))
@@ -829,24 +840,29 @@ def agents(procs=None):
         # into the past tense, a claim with no phase word is quoted), and one
         # place to get that right beats one per surface.
         who = a.get("name") or ""
-        a["saysLine"] = bph.says_line(obs, who)
+        orch = a["kind"] == ORCHESTRATOR_KIND
+        # SOLOMON SPEAKS IN HIS OWN VOICE for the two words he actually uses —
+        # `dispatching` -> *"Solomon summons"*, `waiting` -> *"Solomon awaits
+        # <agent>..."*, both his exact wordings. Everything else, his card
+        # included, goes through the one shared table (`PHASE_PREDICATE`), so the
+        # verb form and the animated `...` cannot drift between his card and a
+        # worker's.
+        a["saysLine"] = bph.orch_says_line(obs, who, awaits) if orch \
+            else bph.says_line(obs, who)
         a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running")
-        # SOLOMON ONLY: a live orchestrator with nothing observed yet reads
-        # `Solomon is getting ready`, not `nothing yet` — [his, 2026-07-29] the
-        # placeholder should say so in those words, scoped to the orchestrator
-        # card so ordinary workers keep the honest bare placeholder. It is the
-        # same sentence shape as the idle row's `Solomon is ready`, and the
-        # same argument: this is a placeholder for the absence of observation,
-        # every word written here, promoted from nothing — never a claim
-        # derived from an observation, which stays forbidden (§10.6).
-        # `starting` counts as nothing-observed-yet: it is a spawn of ours whose
-        # transcript file is a second or two away, and it used to fall through
-        # to `unlinked` and flash *"board cannot see what Solomon is doing"* for
-        # those two seconds before this line took over ([his, 2026-07-29] — the
-        # split is `boardphase.START_GRACE_S`).
-        if (a["kind"] == ORCHESTRATOR_KIND and a["state"] == "running"
-                and (obs.get("observed") or "") in ("none", "starting")):
-            a["doingLine"] = "%s is getting ready" % (who or ORCHESTRATOR_NAME)
+        # SOLOMON ONLY: a live orchestrator with nothing observed yet gets his
+        # own two-line startup pair instead of the bare `nothing yet` — [his,
+        # 2026-07-29] *"Solomon wields the ring..."* while his transcript is
+        # still a second away (`starting`), then *"Solomon etches the
+        # triangle..."* once it is there and nothing has happened in it yet
+        # (`none`). Scoped to the orchestrator card so ordinary workers keep the
+        # honest bare placeholder; the wordings and the ORDER are
+        # `boardphase.orch_doing_line`, which carries the argument for both.
+        if orch and a["state"] == "running":
+            line = bph.orch_doing_line(obs.get("observed") or "",
+                                       who or ORCHESTRATOR_NAME)
+            if line:
+                a["doingLine"] = line
         # `ok` / `quiet` / `none` / `starting` / `unlinked` — which of the honest
         # outcomes the observation is, so the card can label the line correctly
         # (`doing` while it runs, `last` once it has stopped) without

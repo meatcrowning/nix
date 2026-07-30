@@ -346,9 +346,9 @@ CLAIMABLE = ["planning", "researching", "coding", "testing", "finishing"]
 #: itself off to `coding` — the five were a menu by accident, and a menu of five
 #: makes every card say one of five things.
 #:
-#: Every word FOLLOWS "is" as English, because that is the sentence the card
-#: builds (`says_line`) — gerunds throughout bar `blocked`, which is the one
-#: state a gerund cannot say; every word passes `clean_phase_word`
+#: Every word has an entry in `PHASE_PREDICATE`, because that is what the card's
+#: sentence is built from (`says_line`) — gerunds throughout bar `blocked`, which
+#: is the one state a gerund cannot say; every word passes `clean_phase_word`
 #: (lowercase letters, one word, at most `CLAIM_WORD_MAX`), which
 #: `tools/board-test.py` asserts rather than trusting.
 PHASE_WORDS = [
@@ -367,6 +367,61 @@ PHASE_WORDS = [
     # neither, and honest
     "waiting", "blocked",
 ]
+
+#: THE ONE PLACE A PHASE WORD BECOMES WORDS ON A CARD — phase word -> the whole
+#: PREDICATE that follows the agent's name.
+#:
+#: [his, 2026-07-29] *"instead of the agent verb-part being 'is researching' or
+#: 'is coding' etc it should just say 'researches...' or 'codes...' with animated
+#: elipsies"*. So the card reads *"Marbas researches..."*, simple present, third
+#: person, no auxiliary — and the trailing `...` is ANIMATED by `AgentRow.qml`
+#: (see `TICKLESS` below for the ones that do not get it).
+#:
+#: **It is a PREDICATE and not a verb**, which is what lets `blocked` stay
+#: `is blocked`: it is the one word in `PHASE_WORDS` that is not a gerund, and
+#: `blocks` would say the opposite of what it means. One table, so the verb form
+#: cannot drift between the worker cards and Solomon's.
+#:
+#: An off-list word is legal (`clean_phase_word` takes any single word) and gets
+#: `is <word>` — an auxiliary is a worse sentence than the rest of this table,
+#: and mangling an unknown word into a conjugation it may not have is worse than
+#: either.
+PHASE_PREDICATE = {
+    "planning": "plans", "researching": "researches", "coding": "codes",
+    "testing": "tests", "finishing": "finishes",
+    "reading": "reads", "exploring": "explores",
+    "investigating": "investigates", "debugging": "debugs",
+    "bisecting": "bisects", "profiling": "profiles", "measuring": "measures",
+    "benchmarking": "benchmarks", "tracing": "traces", "auditing": "audits",
+    "designing": "designs", "drafting": "drafts",
+    "implementing": "implements", "refactoring": "refactors",
+    "porting": "ports", "packaging": "packages",
+    "documenting": "documents", "cleaning": "cleans",
+    "verifying": "verifies", "reviewing": "reviews",
+    "reproducing": "reproduces",
+    "building": "builds", "rebuilding": "rebuilds",
+    "committing": "commits", "merging": "merges", "rebasing": "rebases",
+    "waiting": "waits", "blocked": "is blocked",
+    # Solomon's, and not on the menu the workers are shown. His card overrides
+    # this one in his own voice (`orch_says_line`); a worker that claimed it
+    # would read as English rather than as him.
+    "dispatching": "dispatches",
+}
+
+#: The predicates that do NOT end in an animated `...`. A stall is not motion:
+#: an animation over a state where nothing is happening is the dishonest
+#: affordance docs/DESIGN.md §10 forbids, and it is the same reason the observed
+#: line's own tick is scoped to `observed == "ok"`.
+TICKLESS = ("blocked",)
+
+
+def predicate(word):
+    """A phase word -> the predicate the card draws after the agent's name."""
+    w = " ".join(str(word or "").split()).lower()
+    if not w:
+        return ""
+    return PHASE_PREDICATE.get(w) or "is %s" % w
+
 
 #: A claimed word is drawn inside a sentence on a card that is one line high.
 #: Long enough for `investigating`; short enough that nothing can shove the rest
@@ -492,12 +547,12 @@ def actually(rec):
 # above it, and saying it twice was the redundancy §9.1 rules out.
 #
 # **The joining is chosen for the REAL strings, not assumed.** `says()` is
-# `"<phase> - <words>"` and every phase word is a gerund (`planning`,
-# `researching`, `coding`, `testing`, `finishing`), so it follows "is" as
-# English. The words on their own may be a noun phrase — `boardctl.py phase`
-# takes the phase as OPTIONAL and its `--doing` is *"one short line"*, so
-# *"the vtbclient parser"* is a legal claim — and *"Marbas is the vtbclient
-# parser"* is not a sentence. That case gets `says:` instead of `is`.
+# `"<phase> - <words>"`, and the phase word reaches the card through
+# `PHASE_PREDICATE` as a simple-present predicate — *"Marbas researches..."*, his
+# call, no auxiliary. The words on their own may be a noun phrase —
+# `boardctl.py phase` takes the phase as OPTIONAL and its `--doing` is *"one
+# short line"*, so *"the vtbclient parser"* is a legal claim — and *"Marbas the
+# vtbclient parser"* is not a sentence. That case gets `says:` instead.
 #
 # The observation still needs a shape per state, for the same reason: only the
 # `ok` state is a bare verb phrase. `nothing recently`, `nothing yet` and the
@@ -519,15 +574,93 @@ def says_line(rec, who=""):
     rec = rec or {}
     phase, doing = rec.get("claimPhase") or "", rec.get("claimDoing") or ""
     subj = _subject(who)
-    if phase and doing:
-        return "%s is %s - %s" % (subj, phase, doing)
     if phase:
-        return "%s is %s" % (subj, phase)
+        # SIMPLE PRESENT, from the one table (`PHASE_PREDICATE`), plus the
+        # animated `...` — and the dots go at the END of the whole line rather
+        # than straight after the verb, so what he said he is doing is not cut
+        # in half by three cells that change four times a second. Three ASCII
+        # periods, never U+2026 (§2.3); `AgentRow.qml` cycles them.
+        line = "%s %s" % (subj, predicate(phase))
+        if doing:
+            line += " - " + doing
+        return line if phase.lower() in TICKLESS else line + "..."
     if doing:
         # No phase word to lean on, so the words are quoted rather than forced
         # into a sentence they may not fit.
         return "%s says: %s" % (subj, doing)
     return ""
+
+
+# ------------------------------------------------- SOLOMON'S OWN VOCABULARY
+# The orchestrator's card is the one that speaks in his own voice — [his,
+# 2026-07-29] *"Solomon wields the ring..."*, *"Solomon etches the triangle..."*,
+# *"Solomon summons"*, *"Solomon awaits <agent>..."*. His exact wordings, so do
+# not smooth them into the generic `<subj> is <word>` shape the workers use.
+#
+# **Two of them are the STARTUP pair, and the order is the point.** `starting`
+# (his spawn exists, its transcript is a second away) leads, then `none` (the
+# transcript is there and nothing has been done in it yet) follows. That
+# ordering is what 481b524 flattened: it collapsed the two states onto one
+# sentence, so the brief initial line stopped LEADING and only reappeared past
+# `START_GRACE_S`, i.e. AFTER the getting-ready line. Restored here [his,
+# 2026-07-29] with the initial line first and worded as he wants it.
+#
+# His original complaint that produced 481b524 is unaffected: what he objected
+# to was a *"dont know"* text flashing first, and `starting` no longer reaches
+# the unlinked sentence at all — it has a line of its own that says he is
+# starting. The unlinked branch (no session id EVER recorded) still says it
+# cannot see, because that is a real failure.
+#
+# **They stay §10.6-honest for the same reason the idle row is.** Every word is
+# written HERE, promoted from nothing, as the placeholder for an absence of
+# observation — never derived from an observation, which stays forbidden.
+#
+# The trailing `...` is three ASCII periods, never U+2026: the font has no
+# single-glyph ellipsis and a fallback glyph drops the whole line ~5px and clips
+# it (docs/DESIGN.md §2.3). `AgentRow.qml` ANIMATES those three cells (they cycle
+# `.`, `..`, `...` on the desktop's own slide duration) — presentation, so it is
+# QML's, and the sentence a test asserts on does not change four times a second.
+def orch_doing_line(state, who=""):
+    """Solomon's placeholder for the absence of observation, or "" if the state
+    is one where something has actually been seen. `state` is
+    `observe()`'s outcome."""
+    subj = who or ba.ORCHESTRATOR_NAME
+    if state == "starting":
+        return "%s wields the ring..." % subj
+    if state == "none":
+        return "%s etches the triangle..." % subj
+    return ""
+
+
+def orch_says_line(rec, who="", awaits=""):
+    """His CLAIM as a sentence, in his own voice for the words he actually uses.
+
+    `awaits` is who he is waiting on, and the caller supplies it because only
+    the caller can see the other cards (`boardagents.agents()`). Empty means no
+    single agent is identifiable, and the line then names nobody rather than
+    printing a blank or the literal word "agent".
+
+    Anything outside his vocabulary falls through to the ordinary `says_line`:
+    this is a translation of three words, not a second sentence builder.
+    """
+    rec = rec or {}
+    phase = rec.get("claimPhase") or ""
+    doing = " ".join((rec.get("claimDoing") or "").split())
+    subj = _subject(who) if who else ba.ORCHESTRATOR_NAME
+    if phase == "dispatching":
+        # No ellipsis on this one — his wording, and it is an act rather than a
+        # wait, so there is nothing for the dots to say is still going on.
+        head, tail = "%s summons" % subj, ""
+    elif phase == "waiting":
+        head = ("%s awaits %s" % (subj, awaits)) if awaits else "%s awaits" % subj
+        tail = "..."
+    else:
+        return says_line(rec, who)
+    # His own words still get their line: the phrase replaces the *"is <word>"*
+    # head, and what he said he is doing follows it exactly as it does for a
+    # worker. The animated dots stay at the END of the whole line, so they
+    # cannot land mid-sentence.
+    return ("%s - %s%s" % (head, doing, tail)) if doing else head + tail
 
 
 def doing_line(rec, who="", running=True):
