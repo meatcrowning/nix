@@ -1229,17 +1229,30 @@ module docstring is authoritative and this is the summary.
 - **Unknown is a state, not a zero** — missing file, missing key, a percentage
   that is not a number all draw the empty track and the word `unknown`. A bar at
   zero would be the claim "you have used none of it".
-- **A stale cache still reports, and says its age in the ROW** (`73% (9h old)`),
-  not only on hover: the difference between "he has used 73%" and "he had, nine
-  hours ago" is exactly the sort of thing colour alone loses (§3.5).
+- **A stale cache still reports, and says its age in the ROW**, not only on
+  hover: the difference between "he has used 73%" and "he had, nine hours ago"
+  is exactly the sort of thing colour alone loses (§3.5). It is the row's
+  SECOND LINE, under the percentage it qualifies, because the row is only as
+  wide as the chooser and `73%` plus `(9h old)` is wider than that on its own.
+- **Both meters are exactly as wide as the model chooser, stacked, `5h` on
+  top** [his, 2026-07-29]. The width is *bound* to `modelPick`, never a number,
+  so a longer model label widens box and bars together; the stack takes its
+  order from `boardusage.WINDOWS` and its spacing from nothing (each meter is
+  its own line box, §4.1/§5.1). Inside a meter the window name goes hard left
+  and the reading hard right (§5.4) and the **bar is what flexes** into what is
+  left (§5.2) — under `minBarW` it is not drawn at all, which happens only for
+  `unknown`, a word about as wide as the chooser and the whole reading in that
+  state anyway.
 - Machine-local by construction: `~/.claude.json` is **not** inside the
   `~/.claude` tree that syncs between `top` and `book`, so each host draws what
   its own CLI last fetched. Same account, different freshness.
 - Regression layer: `test_usage` in `tools/board-test.py` (the scoped entry is
   never drawn, a scoped-only weekly reads `unknown` rather than being promoted,
   every broken shape reads `unknown`, an old cache carries its age), plus the
-  window checks that there are two meters and that they sit **under** the
-  chooser. **Every context property `main.py` installs must also be installed in
+  window checks that there are two meters, that they sit **under** the chooser
+  in `WINDOWS` order top-to-bottom, and that both edges are flush with the
+  chooser's — a hardcoded width would pass the first three and silently drift on
+  the fourth. **Every context property `main.py` installs must also be installed in
   the harness's `build()`** — a missing one is a `ReferenceError` the harness
   cannot see and a section simply absent on his screen.
 

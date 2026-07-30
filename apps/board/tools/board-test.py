@@ -2831,7 +2831,9 @@ def test_window(app, tmp):
     check("there are exactly two usage meters, one per window",
           len(bars) == len(labels), len(bars))
     if bars and picks:
-        texts = sorted((it.mapToItem(win.contentItem(), QPointF(0, 0)).x(),
+        # Top to bottom now, not left to right: they are STACKED, so every
+        # meter has the same x and only y orders them. 5h is the top line.
+        texts = sorted((it.mapToItem(win.contentItem(), QPointF(0, 0)).y(),
                         (it.property("row") or {}).get("label", ""))
                        for it in bars)
         check("...labelled by the window each one measures, in order",
@@ -2840,6 +2842,30 @@ def test_window(app, tmp):
         by = min(it.mapToItem(win.contentItem(), QPointF(0, 0)).y() for it in bars)
         check("...UNDER the model chooser, not beside it", by > pt.y(),
               (pt.y(), by))
+        # ...and flush with it: his words were "exactly as wide as the model
+        # selection box above it", which is both edges, so both are checked.
+        # A width bound to the chooser cannot drift when a longer model name
+        # widens it; a hardcoded one silently could.
+        # Against the BOX, not against its label: the chooser's text is centred
+        # inside it, so comparing edges with `picks[0]` measures the inset.
+        box = picks[0].parentItem()
+        bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
+        xs = set(round(it.mapToItem(win.contentItem(), QPointF(0, 0)).x())
+                 for it in bars)
+        ws = set(round(it.width()) for it in bars)
+        check("...exactly as WIDE as the chooser, flush at both edges",
+              len(xs) == 1 and len(ws) == 1
+              and abs(xs.pop() - bp.x()) < 1
+              and abs(ws.pop() - box.width()) < 1,
+              (bp.x(), box.width(),
+               [(round(it.mapToItem(win.contentItem(), QPointF(0, 0)).x()),
+                 round(it.width())) for it in bars]))
+        # Stacked means stacked: one directly on top of the other, with no
+        # third element wedged between them and no side-by-side fallback.
+        ys = sorted(t[0] for t in texts)
+        check("...one directly above the other, not beside it",
+              len(ys) == 2 and 0 < ys[1] - ys[0] <= bars[0].height() + 4,
+              (ys, bars[0].height()))
     shot(win, "01-populated")
 
     # ---- ...in sub-sections, one per tag that HAS bullets ----

@@ -383,29 +383,45 @@ Window {
             // figure, which is a real entry in the payload and is dropped in
             // `boardusage.py` rather than here.
             //
-            // It sits UNDER the chooser and right-aligned with it because it is
-            // about the same thing: what spending that model costs him. Two
-            // readouts of one quantity, sharing one denominator each (§10.5) —
-            // both are "% of that window's limit", the CLI's own arithmetic
-            // against the real plan, never tokens over a ceiling we guessed.
+            // It sits UNDER the chooser and is EXACTLY AS WIDE as it, one
+            // readout per line, because it is about the same thing: what
+            // spending that model costs him. [his, 2026-07-29] *"each usage
+            // indicator should be exactly as wide as the model selection box
+            // above it … stacked vertically"*. The width is bound to
+            // `modelPick`, not to a number, so the box and the bars stay flush
+            // when a longer model name widens it.
+            //
+            // Two readouts of one quantity, sharing one denominator each
+            // (§10.5) — both are "% of that window's limit", the CLI's own
+            // arithmetic against the real plan, never tokens over a ceiling we
+            // guessed.
             //
             // The short window is FIVE HOURS and says so. There is no daily
             // bucket on this account, and a number under the wrong word is the
-            // §10.5 failure with a nicer label.
+            // §10.5 failure with a nicer label. `5h` is the top line because
+            // that is the one that stops him mid-afternoon.
             Item {
                 width: page.width
-                height: usageRow.height + 4
+                height: usageCol.height + 4
                 visible: Usage.rows.length > 0
 
-                Row {
-                    id: usageRow
+                Column {
+                    id: usageCol
                     anchors.right: parent.right
-                    spacing: 14
+                    width: modelPick.width
+                    // Zero: each meter already carries its own line box (§4.1),
+                    // and stacked readouts butt together like every other tiled
+                    // thing here (§5.1). Nothing invents a gap.
+                    spacing: 0
 
                     Repeater {
+                        // `Usage.rows` is in `boardusage.WINDOWS` order, which
+                        // is 5h then 7d — the stack takes its order from there
+                        // rather than restating it.
                         model: Usage.rows
                         delegate: UsageMeter {
                             required property var modelData
+                            width: usageCol.width
                             row: modelData
                             fgDim: win.fgDim
                             fgText: win.fgText

@@ -15,6 +15,17 @@ import QtQuick
 // bar that would read as "nothing used" (§10). The bar is not clickable and
 // nothing here opens anything: it is a readout, and a control that is drawn is
 // a control that works.
+//
+// The WIDTH is the caller's, not the content's ([his, 2026-07-29] the meters are
+// exactly as wide as the model chooser above them and stack under it). So the
+// window name goes hard left and the percentage hard right — paired values at
+// opposite edges of one line, §5.4 — and the TRACK is what flexes into whatever
+// is left, the way a text column consumes its slack (§5.2). Nothing here is a
+// literal bar width any more.
+//
+// At that width the age cannot share the line — `73%` plus `(2h old)` is wider
+// than the chooser on its own — so it takes a second line under the row rather
+// than being dropped: §3.5 wants it read, not hovered for.
 Item {
     id: meter
 
@@ -22,17 +33,20 @@ Item {
     property var row: null
     property color fgDim: Theme.textDim
     property color fgText: Theme.text
-    property int barW: 56
 
-    implicitWidth: name.width + 6 + track.width + 6 + value.width
-                   + (age.visible ? age.width + 5 : 0)
-    implicitHeight: Theme.fontSize + 4
+    //: the narrowest the bar may get before the row stops being a bar at all
+    property int minBarW: 24
+
+    readonly property int lineH: Theme.fontSize + 4
+
+    implicitWidth: name.width + 6 + minBarW + 6 + value.width
+    implicitHeight: lineH + (age.visible ? lineH : 0)
     width: implicitWidth
     height: implicitHeight
 
     PixelText {
         id: name
-        anchors.verticalCenter: parent.verticalCenter
+        y: Math.round((meter.lineH - height) / 2)
         color: meter.fgDim
         text: meter.row ? meter.row.label : ""
     }
@@ -40,8 +54,12 @@ Item {
     Rectangle {
         id: track
         x: name.width + 6
-        anchors.verticalCenter: parent.verticalCenter
-        width: meter.barW
+        y: Math.round((meter.lineH - height) / 2)
+        width: Math.max(0, value.x - 6 - x)
+        // A 3px stub of a bar is not a bar; the word beside it is the whole
+        // reading in that state anyway (`unknown` is nearly as wide as the
+        // chooser). Nothing is dropped that carries a number.
+        visible: width >= meter.minBarW
         height: Math.max(6, Math.round(Theme.fontSize / 2))
         color: Theme.bgAlt
         border.width: 1
@@ -65,8 +83,10 @@ Item {
 
     PixelText {
         id: value
-        x: track.x + track.width + 6
-        anchors.verticalCenter: parent.verticalCenter
+        // Right edge, but never back over the window name if the caller hands
+        // this a width narrower than the two words together.
+        x: Math.max(name.width + 6, meter.width - width)
+        y: Math.round((meter.lineH - height) / 2)
         color: (meter.row && meter.row.known) ? meter.fgText : meter.fgDim
         text: meter.row ? meter.row.text : ""
     }
@@ -74,9 +94,10 @@ Item {
     PixelText {
         // §3.5: an old reading says so in the row, not only on hover — the age
         // is the difference between "he has used 73%" and "he had, an hour ago".
+        // Under the percentage it qualifies, against the same right edge.
         id: age
-        x: value.x + value.width + 5
-        anchors.verticalCenter: parent.verticalCenter
+        x: meter.width - width
+        y: meter.lineH + Math.round((meter.lineH - height) / 2)
         color: meter.fgDim
         text: meter.row && meter.row.note ? "(" + meter.row.note + ")" : ""
         visible: text !== ""
