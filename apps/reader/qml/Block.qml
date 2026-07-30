@@ -250,8 +250,21 @@ Item {
                         width: parent.width
                         height: Theme.fontSize + (index === 0 ? 1 : 0)
 
+                        // `cellText` takes a CELL — a list of runs — and this
+                        // delegate's modelData is a ROW, a list of cells. Handed
+                        // one, it read `.t` off each cell and joined the word
+                        // "undefined" once per column: a table row lit up for
+                        // the query `undefined` and for NOTHING else, so a match
+                        // inside a table was the one hit with no mark at all
+                        // (measured offscreen). The row's text is its cells'.
+                        readonly property string rowText: {
+                            var s = "";
+                            for (var i = 0; i < modelData.length; i++)
+                                s += tbl.cellText(modelData[i]) + " ";
+                            return s;
+                        }
                         readonly property bool hit: root.query.length > 1
-                            && tbl.cellText(modelData).toLowerCase()
+                            && rowText.toLowerCase()
                                   .indexOf(root.query.toLowerCase()) >= 0
 
                         Rectangle {

@@ -163,6 +163,12 @@ dropped 2026-07-29), slides a chip out of the right edge — the canonical revea
 - A row highlight rather than a per-character one is deliberate: a match can
   straddle two runs and two `Text` items, and highlighting characters would
   mean re-implementing the layout it is drawn over.
+- **A table row's text is its CELLS' text.** `Block.qml`'s `cellText()` takes a
+  cell (a list of runs) and the row delegate's `modelData` is a row (a list of
+  cells), so handing it one joined the word `undefined` once per column: a table
+  row lit up for the query `undefined` and for nothing else, and a real hit
+  inside a table was the one match with no mark at all. Both directions are
+  asserted in `tools/reader-test.py`.
 
 ## Split view — two documents, filer's geometry
 

@@ -562,6 +562,19 @@ def test_find_marks(win, pane, theme):
           (before, after, bands2))
     check("...and the match it left is still marked",
           [b[0] for b in bands2].count("dim") >= 1, bands2)
+    # A match inside a TABLE gets a mark like any other. Its `hit` used to be
+    # computed by handing a ROW to a function that takes a CELL, which joined the
+    # word "undefined" once per column — so a table row lit up for that query and
+    # for nothing else, and a real hit in a table was marked nowhere.
+    pane.setProperty("query", "widget")
+    spin(200)
+    tb = find_bands(win.grabWindow(), theme, x0, x1)
+    check("a match inside a table row is marked, and is the current one",
+          [b[0] for b in tb] == ["accent"], tb)
+    pane.setProperty("query", "undefined")
+    spin(200)
+    check("...and a word the document does not contain marks nothing",
+          not find_bands(win.grabWindow(), theme, x0, x1))
     pane.setProperty("query", "")
     spin(150)
     check("clearing the query drops every mark",
@@ -579,7 +592,8 @@ def test_window(app, tmp):
                          "over in any sensible window width " * 6) +
         "\n\nneedle in a haystack\n\n"
         # two blocks holding one word, for the find marks' pixel check
-        "found me once\n\nfound me twice\n\n## Beta\n\n"
+        "found me once\n\nfound me twice\n\n"
+        "| widget | col |\n|---|----|\n| x | y |\n\n## Beta\n\n"
         "```sh\necho beta\n```\n\nsee [b](sub/b.md)\n")
     open(b, "w").write("# Bravo\n\nneedle again\n\n## Charlie\n\nplain\n")
 
