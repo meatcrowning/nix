@@ -494,8 +494,8 @@ def test_worker_outlives_the_tick():
             time.sleep(0.1)
         subprocess.run(run, capture_output=True, text=True, timeout=180)
         bullets = [l for l in r.text().splitlines()
-                   if "a worker stopped without finishing" in l]
-        check("a worker that records nothing is reported as a FAILURE, in words",
+                   if "a minister stopped without finishing" in l]
+        check("a minister that records nothing is reported as a FAILURE, in words",
               len(bullets) == 1, str(bullets))
         check("...quoting the task, since its card has already left the board",
               bool(bullets) and "outlive the tick" in bullets[0], str(bullets))
@@ -963,7 +963,7 @@ def main():
                                      "- [x] Do it the short way")
         check("...and nothing else in the file moved",
               unmoved(after, rest_before, "board-watch did not finish",
-                      "the agent exited"),
+                      "the minister exited"),
               "%d vs %d chars" % (len(after), len(rest_before)))
         r.clear()
         r.run()

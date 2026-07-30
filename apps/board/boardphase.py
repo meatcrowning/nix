@@ -209,9 +209,9 @@ def describe_call(name, inp):
         # tool's own `description`, which the agent writes and could word any way
         # it liked — this is the observed line, so the machine picks the words.
         if "boardctl.py dispatch" in cmd0:
-            return "summoning a worker"
+            return "summoning a minister"
         if "boardctl.py inbox send" in cmd0:
-            return "commanding a worker already in those files"
+            return "commanding a minister already in those files"
         d = " ".join(str(inp.get("description") or "").split())
         if d:
             return d[0].lower() + d[1:] if d[:1].isupper() else d

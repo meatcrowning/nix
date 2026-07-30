@@ -21,6 +21,30 @@ goetia                      # ~/nix/docs/board.md
 goetia /path/to/other.md    # any file with the same shape
 ```
 
+## The word he reads for an agent is MINISTER
+
+[his, 2026-07-29] *"ANYTHING that could refer to an agent where the user can see
+should use minister instead"*. So every string he can read — goetia's own labels,
+placeholders and framing prose, the cap dropdown (`4 ministers`), everything
+`boardctl.py` prints back at him, and every template that writes a line into
+`docs/board.md`, `board-watch.py`'s included — says **minister** / **ministers**,
+never *agent* or *worker*.
+
+**Identifiers do not move.** `kind="worker"`, `board-worker-*.service`,
+`boardctl.py agents`, the `agents` section id, `~/.cache/board-work/`, the socket
+keys and every log line stay exactly as they are: renaming running state buys
+nothing and breaks what is already on disk — the same rule that kept every path
+`board*` when the app itself became `goetia`.
+
+The section they sit in is drawn as **the triangle** (id still `agents`), under
+Solomon's own **summoner** section: the magician stands in the circle and the
+spirits are bound in the triangle.
+
+**A length is not free.** These templates are wrapped when they are written, and
+*minister* is three characters longer than *agent* — `board-watch.py`'s
+`FAIL_TEMPLATE` had to give three characters back elsewhere in the sentence or
+the write re-wrapped lines around it (`tools/board-watch-test.py` catches that).
+
 ## It is a GUI over ONE file, and that file is not this app's to redesign
 
 **The store is `~/nix/docs/board.md`** — plain markdown, in the private `docs/`

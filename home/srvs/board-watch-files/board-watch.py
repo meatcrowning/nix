@@ -455,8 +455,8 @@ def save_state(d):
 FAIL_TEMPLATE = (
     "- FAILED: **board-watch did not finish decision {num}** - nothing was "
     "committed.\n"
-    "    It was `{title}`; the agent exited {how}. The answer is still on "
-    "record above. Log: `~/.cache/board-watch.log`\n")
+    "    It was `{title}`; the minister exited {how}. The answer is still "
+    "above. Log: `~/.cache/board-watch.log`\n")
 
 
 #: A worker's process is gone and it never used `note`, `land` or `ask`. It did
@@ -471,7 +471,7 @@ FAIL_TEMPLATE = (
 #: saying a worker died would be refused, which is the one failure this file
 #: exists to prevent. Same for `{title}` and `{text}` below.
 WORKER_FAIL = (
-    "- FAILED: **a worker stopped without finishing** - it was working on "
+    "- FAILED: **a minister stopped without finishing** - it was working on "
     "`{task}`.\n"
     "    Dispatched from something you typed into the box; it recorded "
     "nothing on this board, so nothing landed for it. Answer or type it "

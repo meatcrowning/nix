@@ -507,7 +507,7 @@ Window {
                     anchors.right: modelPick.right
                     width: parent.colW
                     label: Agents.capLabel
-                    hint: "the most agents allowed to work at once - the next tick honours it"
+                    hint: "the most ministers allowed to work at once - the next tick honours it"
                     items: () => win.capItems()
                     popup: menu
                     fgDim: win.fgDim
@@ -1129,7 +1129,7 @@ Window {
                         height: visible ? implicitHeight : 0
                         bottomPadding: 6
                         color: Theme.dim
-                        text: "each agent says what it is doing, and the line "
+                        text: "each minister says what it is doing, and the line "
                               + "under it is what it is actually doing, read "
                               + "from its tool calls. oldest first."
                     }
