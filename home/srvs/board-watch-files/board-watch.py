@@ -891,8 +891,14 @@ def tick():
     # gone, before deciding what to fire on. Worst case is one timer interval.
     try:
         for rec in bm.reconcile(path=BOARD):
-            log("returned decision %s to NEEDS YOU: its agent is gone"
-                % (rec.get("num") or rec.get("key")))
+            # Say which of reconcile's two cases it was. A pid-less stash never
+            # had an agent to lose, and the bullet it writes on his board is
+            # careful about that — the log must not be the one place that
+            # invents a death to explain a row.
+            log("returned decision %s to NEEDS YOU: %s"
+                % (rec.get("num") or rec.get("key"),
+                   "its agent is gone" if rec.get("pid")
+                   else "nothing was ever working it"))
     except (bm.BoardError, OSError) as e:
         log("could not reconcile stranded items: %s" % e)
 
