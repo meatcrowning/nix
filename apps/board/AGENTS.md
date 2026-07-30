@@ -1243,6 +1243,16 @@ module docstring is authoritative and this is the summary.
   left (§5.2) — under `minBarW` it is not drawn at all, which happens only for
   `unknown`, a word about as wide as the chooser and the whole reading in that
   state anyway.
+- **The 60s poll is the fallback; the trigger is an agent's LIFE changing.**
+  [his, 2026-07-29] *"ensure the usage indicators update every time an agent is
+  killed / finishes their job / etc."* `Agents.lives` fires when the set of
+  `(id, state)` pairs changes — born, finished, killed, failed, reclaimed,
+  gone — and `Usage.follow()` re-reads on it. It is deliberately **not**
+  `Agents.changed`, which also fires for per-poll churn (a worked-for line
+  ticking over, a context tally, a new unread note): hanging the re-read off
+  that would silently make it a 2.5s poll of a 60KB JSON file. The figure is
+  still only as fresh as the CLI's own cache — an agent that exits before its
+  own CLI writes one is picked up on the next tick, as before.
 - Machine-local by construction: `~/.claude.json` is **not** inside the
   `~/.claude` tree that syncs between `top` and `book`, so each host draws what
   its own CLI last fetched. Same account, different freshness.
@@ -1252,7 +1262,8 @@ module docstring is authoritative and this is the summary.
   window checks that there are two meters, that they sit **under** the chooser
   in `WINDOWS` order top-to-bottom, and that both edges are flush with the
   chooser's — a hardcoded width would pass the first three and silently drift on
-  the fourth. **Every context property `main.py` installs must also be installed in
+  the fourth — plus `test_usage_follows_agents`, which asserts the lifecycle
+  re-read fires on all four transitions and **not** on a card merely redrawing. **Every context property `main.py` installs must also be installed in
   the harness's `build()`** — a missing one is a `ReferenceError` the harness
   cannot see and a section simply absent on his screen.
 

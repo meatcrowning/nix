@@ -2693,6 +2693,10 @@ def build(app, path):
     # window loads with a ReferenceError the harness cannot see and the section
     # is simply missing on his screen.
     ctx.setContextProperty("Usage", keep[6])
+    # ...and every WIRE between them, for the same reason: the usage bars follow
+    # the agent list's lifecycle transitions, and a harness that skipped this
+    # would report an app that does not.
+    keep[6].follow(keep[5])
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(BOARD, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
@@ -4061,6 +4065,76 @@ def test_usage(tmp):
     check("reading his config never writes to it", sorted(os.listdir(tmp)) == before)
 
 
+def test_usage_follows_agents(app):
+    """The bars move when an agent's life does, not only on their own clock.
+
+    [his, 2026-07-29] *"ensure the usage indicators update every time an agent is
+    killed / finishes their job / etc."* Two halves, and the second is the one
+    that can regress quietly: it must fire on a LIFECYCLE transition and NOT on
+    the churn every 2.5s poll brings, or the 60s fallback has been replaced by a
+    2.5s poll of `~/.claude.json`.
+    """
+    import boardagents as ba
+    import boardusage as bu
+    import boardwork as bw
+    import main as brd
+    print("\n=== usage follows the agents ===")
+
+    def card(cid, state, worked="working for 2 minutes", ctx=""):
+        return {"id": cid, "name": "", "kind": "decision", "title": "T",
+                "where": "apps/x/**", "pid": 1, "session": "", "state": state,
+                "born": 1785380450.0, "unread": 0, "phase": "unreported",
+                "says": "", "actually": "", "saysLine": "", "doingLine": "",
+                "observed": "unlinked", "contextLine": ctx,
+                "workedLine": worked}
+
+    live = [card("w-one", "running")]
+    real_cards, real_agents, real_pending = bw.cards, ba.agents, ba.pending
+    real_readings = bu.readings
+    reads = []
+    bw.cards = lambda: list(live)
+    ba.agents = lambda: list(live)
+    ba.pending = lambda: []
+    try:
+        agents = brd.Agents()
+        usage = brd.Usage()
+        usage.follow(agents)
+        fired = []
+        agents.lives.connect(lambda: fired.append(1))
+        bu.readings = lambda *a, **k: reads.append(1) or real_readings(*a, **k)
+
+        # The churn: the same agent, two minutes older, with a context tally it
+        # did not have. The card redraws; nothing was born and nothing died.
+        live[:] = [card("w-one", "running", "working for 4 minutes", "12% of 200k")]
+        agents.refresh()
+        check("a card merely redrawing does NOT re-read his usage",
+              fired == [] and reads == [], (fired, reads))
+
+        # ...and the four transitions he named, one at a time.
+        for label, cards in (("a new agent starting",
+                              [card("w-one", "running"), card("w-two", "running")]),
+                             ("one of them finishing",
+                              [card("w-one", "running"), card("w-two", "done")]),
+                             ("one being killed",
+                              [card("w-one", "failed"), card("w-two", "done")]),
+                             ("one leaving the list entirely",
+                              [card("w-two", "done")])):
+            fired[:] = []
+            reads[:] = []
+            live[:] = cards
+            agents.refresh()
+            check("...%s re-reads it, at that moment" % label,
+                  len(fired) == 1 and len(reads) == 1, (fired, reads))
+
+        # The poll is the FALLBACK and stays the fallback: the fix must not have
+        # turned into "read it more often".
+        check("...and the periodic re-read is still the 60s one, untouched",
+              usage._poll.interval() == 60000, usage._poll.interval())
+    finally:
+        bw.cards, ba.agents, ba.pending = real_cards, real_agents, real_pending
+        bu.readings = real_readings
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -4104,6 +4178,7 @@ def main():
         os.makedirs(os.path.join(tmp, "use"))
         test_usage(os.path.join(tmp, "use"))
         app = QGuiApplication(sys.argv)
+        test_usage_follows_agents(app)
         test_real_store()
         test_real_window(app)
         test_window(app, os.path.join(tmp, "win"))
