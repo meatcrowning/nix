@@ -1039,6 +1039,42 @@ Rules, all of them load-bearing:
   alive and neither can an unreaped one. Do not add a second definition of
   "running" anywhere in this tree.
 
+### A SUMMON IS NOT A CARD until the agent is really up
+
+[his, 2026-07-30] *a card should appear only once the summon has actually
+completed* — a minister's card was showing while Solomon was still summoning it.
+`_spawn_worker` registers the instant the spawn call returns, and that return is
+an `execve`, not a running agent: `systemd-run --service-type=exec` came back in
+**19 ms** (measured, book, 2026-07-30). A `claude` that then died on an API 500
+— which is exactly what the 2026-07-29 outage did — left a card behind for an
+agent that never started. Same bug, both ends.
+
+- **The record is written UNCONFIRMED** (`boardagents.register(confirmed=False)`,
+  set only by `boardwork._spawn_worker`). Every other caller knows its own
+  process is up and leaves the default, and a record written before this
+  existed reads as confirmed — so nothing that was on his board disappears.
+- **The proof is the agent's OWN TRANSCRIPT.** `boardagents._confirmed()`
+  publishes the row once `boardphase.transcript()` finds the session file we
+  named ourselves; only a running agent writes one. Confirmation is **sticky** —
+  a transcript that rotates away must not un-draw a live card.
+- **`CONFIRM_GRACE_S` is a bound, not a gate.** Past it (20s) a still-LIVE
+  record is drawn whatever the transcript says: hiding work that genuinely
+  exists is the worse failure, and the observed line already says `unlinked`
+  honestly. Well under `boardphase.START_GRACE_S`.
+- **Only the DRAWING skips it** — `boardwork._drawable()`, used by `cards()` and
+  `groups()`. `boardagents.agents()` returns every record, so the concurrency
+  cap, `reap()`, `sweep()` and `--to` resolution all see a worker that is
+  starting up. Filtering in `agents()` instead would double-start it and reap
+  it as dead in the same tick.
+- **A spawn that never started registers nothing** and stamps its own id onto
+  the task file anyway. Without that stamp `reap()` skips a `taken/` record with
+  no `agent` and the task sat there forever, unworked and unreported; with it,
+  the next tick files it under `failed/` and his board gets the `FAILED:`
+  bullet quoting his task. A death between the two steps is the same path.
+- Harness: `test_summon_confirmed` in `tools/board-test.py`. The rest of that
+  file sets `BOARD_CONFIRM_GRACE=-1`, since a stubbed worker writes no
+  transcript to be confirmed by.
+
 ### A worker has a name, and the name is what he reads
 
 *"can you give the workers regular human names? you can still keep the coded

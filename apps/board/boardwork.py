@@ -1517,10 +1517,32 @@ def _spawn_worker(rec):
         pid = _start_detached(cmd, env, logpath)
         how = "detached"
     if pid is None:
+        # NOTHING STARTED, so no card is registered — and the task must not be
+        # left orphaned either. It is already in `taken/` (`dispatch()` writes
+        # it there before the spawn, so a crash cannot lose it), and `reap()`
+        # skips a `taken/` record with no `agent`: it would have sat there
+        # forever, unworked and unreported. Stamping the id we minted is enough
+        # for the next tick to file it under `failed/` and put a `FAILED:`
+        # bullet quoting his task on the board.
+        if rec.get("file"):
+            try:
+                ba._write_json(rec["file"],
+                               {k: v for k, v in dict(rec, agent=aid,
+                                                      unit="").items()
+                                if k != "file"})
+            except OSError:
+                pass
         return {"id": aid, "name": name, "pid": 0, "state": "failed",
                 "why": "neither systemd-run nor a plain spawn would start it"}
+    # UNCONFIRMED: `systemd-run --service-type=exec` returns at the `execve` and
+    # not at a running agent (19 ms, measured on book 2026-07-30), so this is a
+    # record of a summon in progress and not yet a card. `boardagents._confirmed`
+    # publishes it once the agent's own transcript proves it is up; everything
+    # that counts workers sees it immediately, which is what stops a starting
+    # worker being double-started or reaped as dead.
     ba.register(aid, rec["task"][:70], pid, kind="worker",
-                where=rec.get("where") or "", session=session, name=name)
+                where=rec.get("where") or "", session=session, name=name,
+                confirmed=False)
     # The task file learns which agent owns it, so `reap()` can tell a worker
     # that finished and said so from one that vanished mid-sentence. Written
     # after the spawn: before it there is no id, and a task with an id but no
@@ -1751,6 +1773,20 @@ def _is_orchestrator(a):
     return (a.get("kind") or "") == ba.ORCHESTRATOR_KIND
 
 
+def _drawable(rows):
+    """The rows that may be DRAWN, i.e. everything whose summon has completed.
+
+    [his, 2026-07-30] A minister's card was appearing while Solomon was still
+    summoning it, because the registration is written the instant the spawn
+    call returns and that is an `execve`, not a running agent. So the filter
+    lives HERE, at the one point that draws — `boardagents.agents()` goes on
+    returning every record, which is what keeps the concurrency cap, `reap()`,
+    `sweep()` and the inbox seeing a worker that is starting up.
+    `boardagents.CONFIRM_GRACE_S` carries the rest of the argument.
+    """
+    return [a for a in rows if a.get("confirmed", True)]
+
+
 def cards(agents=None, pend=None):
     """Every card the window draws, ONE FLAT LIST, oldest first.
 
@@ -1780,7 +1816,7 @@ def cards(agents=None, pend=None):
     live ones because they have no birth yet — not because they are less
     urgent. There is no urgency in this app.
     """
-    rows = ba.agents() if agents is None else agents
+    rows = _drawable(ba.agents() if agents is None else agents)
     pend = pending() if pend is None else pend
     out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
     orch = [a for a in out if _is_orchestrator(a)]
@@ -1800,7 +1836,7 @@ def groups(agents=None, pend=None):
     so the phase sections are still the useful shape there. Empty phases are
     not returned.
     """
-    rows = ba.agents() if agents is None else agents
+    rows = _drawable(ba.agents() if agents is None else agents)
     pend = pending() if pend is None else pend
     buckets = {p: [] for p in PHASES}
     for a in rows:

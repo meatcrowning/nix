@@ -91,6 +91,28 @@ EDIT_RESCUE_AFTER_S = 60
 
 CLAUDE_COMMS = ("claude", ".claude-wrapped")
 
+# ------------------------------------------------------- a summon is not a card
+# HOW LONG A SPAWN MAY GO UNCONFIRMED before its card is drawn anyway. [his,
+# 2026-07-30] *"a card should appear only once the summon has actually
+# completed"* — a registration written the instant `systemd-run` returns is a
+# claim that a minister is working when all that has happened is an `execve`,
+# and a `claude` that dies two seconds later on an API 500 left a card behind
+# for an agent that never started. Measured on book 2026-07-30: `systemd-run
+# --service-type=exec` returns 19 ms after the call, i.e. at the exec and not at
+# the agent.
+#
+# So a worker's record is written UNCONFIRMED and the card is withheld until
+# there is evidence the process is really up — its transcript, which only the
+# running agent writes (`boardphase.transcript`). Confirmation is STICKY: a
+# transcript that later rotates away does not un-draw a live card.
+#
+# ...and this is a bound, not a gate. Past it a live registration is drawn
+# whatever the transcript says, because hiding work that genuinely exists is the
+# worse failure of the two and the observed line already says honestly that it
+# cannot see the agent (`unlinked`). Well under `boardphase.START_GRACE_S`,
+# which is how long the CARD is allowed to say `starting`.
+CONFIRM_GRACE_S = float(os.environ.get("BOARD_CONFIRM_GRACE", "20"))
+
 
 # ------------------------------------------------------------ when it was born
 # ORDERING ONLY, AND IT NEVER REACHES THE SCREEN. The cards are drawn oldest
@@ -357,7 +379,7 @@ def self_id():
 # same pid and the same start time, and a second record would be a second
 # definition of "running".
 def register(agent_id, title, pid, kind="note", where="board-watch", session="",
-             name=""):
+             name="", confirmed=True):
     """`session` is the `--session-id` the spawner chose, and it is what makes
     the card able to say what the agent is really doing: `boardphase.py` finds
     `~/.claude/projects/*/<session>.jsonl` by it. An agent registered without
@@ -371,8 +393,16 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     The one name that is NOT picked is the orchestrator's: `kind` decides it,
     here, so every path that registers one — board-watch, a test, a hand call —
     gets `Solomon` without having to know to ask for it.
+
+    `confirmed=False` says THE SUMMON IS NOT FINISHED YET: the record exists so
+    that `reap()`, `sweep()` and the concurrency cap can all see the work, and
+    `boardwork.cards()` withholds its card until `_confirmed()` below finds
+    evidence the agent is really running. A caller that knows its process is up
+    — board-watch registering itself, a stash, a test — leaves it True and
+    nothing changes for it.
     """
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
+           "confirmed": bool(confirmed),
            "name": (ORCHESTRATOR_NAME if kind == ORCHESTRATOR_KIND
                     else name or pick_name(agent_id)),
            "pidStart": bm._proc_start(pid) if pid else None, "kind": kind,
@@ -397,6 +427,41 @@ def unregister(agent_id):
         return True
     except OSError:
         return False
+
+
+def _confirmed(rec, alive):
+    """Has this registration's summon actually completed? Promotes and PERSISTS.
+
+    Three answers, and each of them is a fact rather than a guess:
+
+    - a record written without the flag at all is confirmed — every caller that
+      does not opt in knows its own process is up, and a record written before
+      this existed must not vanish off his board;
+    - a transcript at the session id WE chose is proof the agent process exists
+      and got as far as opening its session (`boardphase.transcript`);
+    - otherwise `CONFIRM_GRACE_S` from the registration, after which a LIVE
+      record is drawn regardless — the bound, not a gate.
+
+    A record that is dead and still unconfirmed is never confirmed, so a spawn
+    that execed and immediately died leaves no card at any point. What it does
+    leave is its task file, which `boardwork.reap()` files as FAILED — the loss
+    is reported, never silent.
+    """
+    if rec.get("confirmed", True):
+        return True
+    import boardphase as bph
+    if rec.get("session") and bph.transcript(rec.get("session")):
+        pass
+    elif alive and time.time() - born(rec, rec.get("pid") or 0) > CONFIRM_GRACE_S:
+        pass
+    else:
+        return False
+    try:                     # sticky: never re-derived, never withdrawn
+        _write_json(os.path.join(agents_dir(), clean_id(rec["id"]) + ".json"),
+                    dict(rec, confirmed=True))
+    except OSError:
+        pass
+    return True
 
 
 def _registrations():
@@ -764,7 +829,10 @@ def _stash_agents():
         # No human name: a decision agent is not a worker out of the box, its
         # card is headed by the decision he answered, and giving that a first
         # name would be this app inventing a person for one of HIS items.
-        out.append({"id": clean_id(rec.get("key")), "kind": "decision", "name": "",
+        # Confirmed by construction: `boardmove.start()` stashes a pid whose
+        # process the caller already has in hand — there is no summon to wait on.
+        out.append({"id": clean_id(rec.get("key")), "kind": "decision",
+                    "name": "", "confirmed": True,
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
                     "session": rec.get("session") or "", "state": state,
@@ -779,6 +847,7 @@ def agents(procs=None):
     procs = procs if procs is not None else _procs()
     out = _stash_agents()
     for rec in _registrations():
+        alive = bm._alive(rec)
         out.append({"id": clean_id(rec.get("id")), "kind": rec.get("kind") or "note",
                     "title": rec.get("title") or "an agent",
                     # Persisted at registration; derived only for a record
@@ -787,7 +856,13 @@ def agents(procs=None):
                     "name": rec.get("name") or name_for(rec.get("id") or ""),
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
                     "session": rec.get("session") or "",
-                    "state": "running" if bm._alive(rec) else "exited",
+                    "state": "running" if alive else "exited",
+                    # A SUMMON IS NOT A CARD until it is confirmed. Everything
+                    # here still SEES the row — the cap, `reap()`, `sweep()`,
+                    # the inbox — and only `boardwork.cards()`/`groups()` skip
+                    # it, so a worker cannot be double-started or reaped early
+                    # while it is starting up.
+                    "confirmed": _confirmed(rec, alive),
                     "born": born(rec, rec.get("pid") or 0)})
 
     # Interactive sessions: the honest half. A `claude` process that IS one of
@@ -810,6 +885,8 @@ def agents(procs=None):
         out.append({"id": "s%d" % pid, "kind": "session", "name": "",
                     "title": "an interactive Claude Code session",
                     "where": "", "pid": pid, "session": "", "state": "running",
+                    # Nothing to confirm: this row IS the process, observed.
+                    "confirmed": True,
                     "born": _pid_born(pid)})
     # WHAT IT SAYS, AND WHAT IT IS DOING. Imported here rather than at the top:
     # `boardphase` imports this module, and the pair would not load otherwise.
@@ -821,8 +898,11 @@ def agents(procs=None):
     # only thing he can honestly be said to be waiting on. Two or more and there
     # is no single one to name, none and there is nobody — both get a wording
     # that names nobody rather than an empty cell or the literal word "agent".
+    # ...and it is one of the CARDS, so an unconfirmed summon does not put a
+    # name in Solomon's mouth for a minister that is not on the board yet.
     peers = [a.get("name") or "" for a in out
-             if a.get("kind") != ORCHESTRATOR_KIND and a.get("state") == "running"]
+             if a.get("kind") != ORCHESTRATOR_KIND and a.get("state") == "running"
+             and a.get("confirmed", True)]
     peers = [p for p in peers if p]
     awaits = peers[0] if len(peers) == 1 else ("his ministers" if peers else "")
     for a in out:
