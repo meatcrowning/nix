@@ -1,4 +1,12 @@
-# `board` — what needs him, what is moving, what landed
+# `goetia` — what needs him, what is moving, what landed
+
+**The program is called Goetia** (lowercase `goetia` in the window title, the
+desktop entry and the binary, like every other app here). Only the presentation
+carries the name: the store it reads and writes is still `docs/board.md`, and
+every path and identifier is still `board*` — this directory, `boardctl.py`,
+`board.nix`, `board-watch`, `~/.local/state/board/`, the `Board` context
+property. Renamed 2026-07-29, his call; the prose here goes on calling the FILE
+"the board", because that is what it is.
 
 Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
 `boardagents.py`, `boardwork.py`, `boardphase.py`, `boardusage.py` and `qml/`.
@@ -9,8 +17,8 @@ Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 `~/nix/docs/DESIGN.md` before you draw anything.
 
 ```bash
-board                       # ~/nix/docs/board.md
-board /path/to/other.md     # any file with the same shape
+goetia                      # ~/nix/docs/board.md
+goetia /path/to/other.md    # any file with the same shape
 ```
 
 ## It is a GUI over ONE file, and that file is not this app's to redesign

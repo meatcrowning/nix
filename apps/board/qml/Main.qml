@@ -99,7 +99,7 @@ Window {
     minimumHeight: 240
     visible: true
     color: Theme.bg
-    title: "board"
+    title: "goetia"
 
     // ---- state he would notice reverting (§14) ----
     property var collapsed: ({})
@@ -238,7 +238,7 @@ Window {
     ]
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
-    readonly property string footerStr: status !== "" ? status : "board"
+    readonly property string footerStr: status !== "" ? status : "goetia"
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
     function jump(item) {

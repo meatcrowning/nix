@@ -23,9 +23,9 @@ Four layers, in the order a failure is cheapest to read:
      and an EMPTY agents section, which are the two states he will see most
      often, and the agents section with a running agent and a failed one in it.
 
-Run it with board's own Qt env, not the bare system python:
+Run it with goetia's own Qt env, not the bare system python:
 
-    W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
+    W=$(readlink -f "$(which goetia)"); sed '$d' "$W" > /tmp/brdenv.sh
     ( . /tmp/brdenv.sh; "$(tail -1 "$W" | grep -o '/nix/store/[^"]*/bin/python3')" \\
         apps/board/tools/board-test.py --shots /tmp/board-shots )
 

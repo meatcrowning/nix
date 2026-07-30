@@ -21,7 +21,7 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`surfer/`](surfer/AGENTS.md) | QtWebEngine browser | `home/prog/surfer.nix` |
 | [`askpass/`](askpass/AGENTS.md) | the `sudo -A` password dialog | `home/prog/askpass.nix` |
 | [`reader/`](reader/AGENTS.md) | markdown reader (browse + read `.md`) | `home/prog/reader.nix` |
-| [`board/`](board/AGENTS.md) | decision board over `docs/board.md` | `home/prog/board.nix` |
+| [`board/`](board/AGENTS.md) | **goetia** — decision board over `docs/board.md` | `home/prog/board.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
@@ -35,8 +35,8 @@ http(s)`/`about` (plus Plasma's separate `kdeglobals` `BrowserApplication` key
 and `$BROWSER`), and **player** for nine of the audio types its `AUDIO_EXTS`
 covers.
 
-**painter and board are the deliberate none.** painter has no open-a-file path
-at all and board is a GUI over one fixed file, so neither declares a
+**painter and goetia are the deliberate none.** painter has no open-a-file path
+at all and goetia is a GUI over one fixed file, so neither declares a
 `MimeType=` and neither appears in `mime-defaults.nix`. An app with no honest
 file type gets no association.
 
