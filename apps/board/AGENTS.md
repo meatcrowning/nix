@@ -633,6 +633,32 @@ Rules that fall out of it, all load-bearing:
   DISPATCH-OR-ASK then applies **per item**, so one message can yield two
   dispatches, or a dispatch plus one question, while the *at most two questions
   for one input* ceiling goes on binding the whole message rather than each item.
+- **...AND ONE ASK IS OFTEN SEVERAL JOBS TOO** [his, 2026-07-29]. The rule above
+  counted his sentences; this one says not to stop there. Solomon now reads each
+  item for the AREAS it lands in — panel QML, plugin C++, an app's Python, the
+  window config, a doc — and gives **each area that does not share files with
+  another its own worker**, one sentence or not, "same feature" or not.
+
+  It is a COST rule, and the cost does not look like one: a session's input grows
+  with the SQUARE of its turns, because everything already said is re-read on
+  every turn after it and a worker's own output is ~85% thinking. Measured on
+  book 2026-07-29 — a 200-turn worker cost ~50M input tokens; four 50-turn
+  workers doing the same total work cost about a quarter of that, and finish in a
+  quarter of the wall-clock. **Fanning out costs nothing at startup**: the floor
+  is paid once per turn, so 4 x 50 turns and 1 x 200 turns pay the identical
+  startup bill. That symmetry is what makes "one worker, it will get there" the
+  wrong instinct even when it is true, and it is why the prompt spells the
+  arithmetic out instead of just saying to split more.
+
+  **The axis is DISJOINT FILES and the sentence above outranks this one.** Two
+  agents in one file is still the thing this system is built not to do, so the
+  split goes where the file sets do not intersect and `--where` carries a
+  non-overlapping glob per worker. Sequential pieces are still two workers — B's
+  task text says to pull Marbas's commit first, and B queues behind the cap
+  meanwhile. Three guards against over-shredding: a one-file change is one
+  worker and always was; the cap queues rather than fails, so a spare dispatch
+  costs latency and not correctness; and the prompt says in as many words not to
+  manufacture areas to split on.
 - **The box writes down the path that already existed.** `boardagents.send()`
   with no agent named — the same one a note to a running agent takes, with the
   same conservation property (a message is in exactly one of `to/`, `queue/`,

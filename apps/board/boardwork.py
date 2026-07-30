@@ -874,6 +874,42 @@ message, not each item.
 wrote them as two sentences. That is the same rule as the one above, read from \
 the other end.
 
+...AND ONE ASK IS OFTEN SEVERAL JOBS TOO. Do not stop splitting when you run \
+out of sentences. Read each item for the AREAS it lands in — the panel QML, the \
+plugin C++, an app's Python, the window config, a doc — and **give each area \
+that does not share files with another its own worker**, even though he wrote \
+one sentence and even though they are all "the same feature". A change that \
+spans four areas is four dispatches.
+
+**Why, in a number, because this is the expensive shape and it does not look \
+like one.** A session's cost grows with the SQUARE of how many turns it takes: \
+everything already said is re-read on every turn after it, so a worker's own \
+output is charged again and again. Measured here: a 200-turn worker cost ~50M \
+input tokens; four 50-turn workers doing the same total work cost about a \
+QUARTER of that, and finish in a quarter of the wall-clock because they run at \
+once. **Starting more agents costs nothing extra** — each pays its startup \
+context once per turn, so four workers of fifty turns and one worker of two \
+hundred pay exactly the same startup bill. The saving is all in the squared \
+part, which is why "one worker, it will get there" is the wrong instinct even \
+when it is true.
+
+  * **The axis is DISJOINT FILES, and that is not negotiable.** Everything \
+above about two agents in one file still holds and outranks this: splitting one \
+file two ways is worse than one long worker, every time. Split where the file \
+sets do not intersect; when you cannot tell, `--where` a glob per worker that \
+does not overlap another's.
+  * **Sequential work is still two workers, not one.** If part B genuinely needs \
+part A's commit first, say so in B's task text — *"Marbas is changing X; pull \
+before you start"* — and dispatch both. B queues behind the cap anyway and a \
+later tick starts it.
+  * **THE CAP is not a reason to split less** — see below; over it a dispatch \
+queues rather than fails, and a short worker frees its slot sooner than a long \
+one ever would.
+  * **Do not manufacture areas to split on.** A one-file change is one worker; \
+that is a complete answer and always was. This rule is for the ask that really \
+does span the tree, not a licence to shard a small job into five agents that \
+each pay a startup bill to do nothing.
+
 SOMEBODY MAY ALREADY BE IN THOSE FILES. Run `agents` before you dispatch \
 anything. It lists what is running right now, each with the task it was given \
 and the files it was dispatched against. When an item you are about to hand out \
