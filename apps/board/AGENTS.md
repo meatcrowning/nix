@@ -1014,9 +1014,27 @@ The short version, and every line of it is a rule:
   getting ready`** rather than the bare `nothing yet` — [his, 2026-07-29,
   relayed through Vual's inbox and lost to an API outage before it was built].
   Scoped in `boardagents.agents()` to `kind == orchestrator`, running, observed
-  `none`, so worker cards keep the honest bare placeholder; same sentence shape
-  and same §10.6 argument as the idle row — a placeholder for the absence of
-  observation, promoted from nothing, never a claim derived from one.
+  `none` **or `starting`**, so worker cards keep the honest bare placeholder;
+  same sentence shape and same §10.6 argument as the idle row — a placeholder
+  for the absence of observation, promoted from nothing, never a claim derived
+  from one.
+- **`starting` exists because "not yet" and "cannot see" were the same branch.**
+  [his, 2026-07-29] *"when solomon first takes a request, his section very
+  briefly shows 'cannot see what solomon is doing' and then changes to 'Solomon
+  is getting ready' - it shouldnt show that breif initial 'dont know' text"*.
+  Measured cause: `observe()` returned `unlinked` for BOTH "no session id was
+  ever recorded" (an interactive session this system did not spawn — the real
+  unknown) and "a session id we chose, whose transcript the CLI has not written
+  yet", which is every spawn for its first second or two. They are now two
+  states; `actually()` and `doing_line()` read `starting` exactly as they read
+  `none` (`nothing yet`), so the difference never reaches the screen. It is a
+  **grace, not a synonym**: `boardphase.START_GRACE_S` (120s, stamped as
+  `linkedAt` the first time the id is seen), past which a spawn whose transcript
+  never appeared is `unlinked` again and says so — that one is a real failure
+  and hiding it forever would be the §10 lie. Checks: four in `test_phase`
+  (young, its card line, its phase, and the grace expiring) and two in
+  `test_agents` (a freshly registered Solomon reads `getting ready`, and neither
+  of his sentences says `cannot see`).
 - **`doing` is derived from the agent's live transcript**,
   `~/.claude/projects/*/<session-uuid>.jsonl`, which Claude Code appends to as
   the agent works. It carries the VERB — *"editing vtbclient.py"* — and cannot

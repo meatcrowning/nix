@@ -839,10 +839,15 @@ def agents(procs=None):
         # same argument: this is a placeholder for the absence of observation,
         # every word written here, promoted from nothing — never a claim
         # derived from an observation, which stays forbidden (§10.6).
+        # `starting` counts as nothing-observed-yet: it is a spawn of ours whose
+        # transcript file is a second or two away, and it used to fall through
+        # to `unlinked` and flash *"board cannot see what Solomon is doing"* for
+        # those two seconds before this line took over ([his, 2026-07-29] — the
+        # split is `boardphase.START_GRACE_S`).
         if (a["kind"] == ORCHESTRATOR_KIND and a["state"] == "running"
-                and (obs.get("observed") or "") == "none"):
+                and (obs.get("observed") or "") in ("none", "starting")):
             a["doingLine"] = "%s is getting ready" % (who or ORCHESTRATOR_NAME)
-        # `ok` / `quiet` / `none` / `unlinked` — which of the four honest
+        # `ok` / `quiet` / `none` / `starting` / `unlinked` — which of the honest
         # outcomes the observation is, so the card can label the line correctly
         # (`doing` while it runs, `last` once it has stopped) without
         # re-deriving it from the sentence.
