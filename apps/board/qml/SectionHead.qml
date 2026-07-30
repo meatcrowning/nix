@@ -50,9 +50,12 @@ Item {
 
     // The rule runs from the label to the far edge, so the band reads as one
     // line of type with a hairline finishing it rather than as a boxed header.
+    // A band with NO label (`needs you`, [his, 2026-07-29] *"just have the line
+    // and collapse toggle"*) keeps ONE 8px gutter after the toggle rather than
+    // the two an empty label would leave behind it.
     Rectangle {
         anchors.verticalCenter: parent.verticalCenter
-        x: name.x + name.width + 8
+        x: head.label === "" ? name.x : name.x + name.width + 8
         width: Math.max(0, parent.width - x)
         height: 1
         color: head.accented ? head.fgAccent : Theme.border

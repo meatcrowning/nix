@@ -568,6 +568,7 @@ class Agents(QObject):
         self._cards = []
         self._queued = []
         self._watcher = ""
+        self._armed = None
         self._lives = None
         # The registry, the stashes and the inboxes are all files, so watch
         # them — but /proc is not, so poll as well. 2.5s is well under "prompt"
@@ -606,15 +607,20 @@ class Agents(QObject):
     def _ask_systemd(self):
         if self._proc.state() != QProcess.NotRunning:
             return
+        # BOTH units, service first — `watcher_state` reads them positionally.
+        # The service alone cannot answer "armed": it is `inactive` between
+        # ticks whether or not the path unit that starts it is running.
         self._proc.start(Agents.SYSTEMCTL,
                          ["--user", "show", "board-watch.service",
+                          "board-watch.path",
                           "-p", "ActiveState", "-p", "SubState", "-p", "Result"])
 
     def _on_systemctl(self, *_a):
         raw = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
-        text = boardagents.watcher_state(raw)["text"]
-        if text != self._watcher:
-            self._watcher = text
+        st = boardagents.watcher_state(raw)
+        if st["text"] != self._watcher or st["armed"] != self._armed:
+            self._watcher = st["text"]
+            self._armed = st["armed"]
             self.changed.emit()
 
     def _row(self, a):
@@ -881,6 +887,15 @@ class Agents(QObject):
     @Property(str, notify=changed)
     def watcher(self):
         return self._watcher
+
+    #: Is anything going to pick his answers up? THREE-valued, and QML reads it
+    #: as `=== true` / `=== false`: `undefined` is "we could not ask systemctl",
+    #: which §10 does not let the triangle's empty state turn into a claim
+    #: either way. Refreshed on the ten-second unit poll with the rest — never
+    #: on a repaint, and nothing here forks.
+    @Property("QVariant", notify=changed)
+    def armed(self):
+        return self._armed
 
     # ---- writing ----
     @Slot(str, str, str, str, result=str)

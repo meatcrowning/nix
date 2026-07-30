@@ -1599,8 +1599,10 @@ def _idle_orchestrator_row():
         # [his, 2026-07-29] `hands` is gone from his card: an item goes to a NEW
         # agent as `summoned` and to one already running as `commanded`, the same
         # pair his notes carry. This line used to say "hands out what you type".
-        "title": "summons a minister for what you type, or commands one already "
-                 "running - and does none of the work himself",
+        # Then, verbatim and with the full stop, *"summons a minister to do your
+        # bidding."* — the whole card is now TWO lines, and the clause about who
+        # does the work went with the third one.
+        "title": "summons a minister to do your bidding.",
         "where": "", "state": "idle", "running": False,
         # NO observation, deliberately — this row is not a process and there is
         # nothing to observe. The top line is the ONE sentence that is true of
@@ -1616,9 +1618,11 @@ def _idle_orchestrator_row():
         "actually": "", "doingLine": "", "observed": "unlinked",
         "contextLine": "", "workedLine": "", "unread": 0, "waiting": [],
         "born": 0.0,
-        # The detail line no longer repeats `ready` — the line above it says so
-        # now, and §9.1 suppresses metadata a card has already stated.
-        "detail": "what you type at the top of this window goes to him"}
+        # NO detail line at all — [his, 2026-07-29] the resting card is two
+        # lines and that is all of them. `boardagents.describe()` is what the
+        # window actually draws here and it returns "" for `idle`; this stays
+        # empty so the two cannot disagree.
+        "detail": ""}
 
 
 def _is_orchestrator(a):

@@ -892,24 +892,70 @@ def agents(procs=None):
 
 
 # ---------------------------------------------------------------- the watcher
+def watch_kill_switch():
+    """The watcher's own kill switch file. Resolved the way `board-watch.py`
+    resolves it and not the way THIS module resolves its own state — that one
+    honours `$XDG_STATE_HOME` and the watcher does not, so copying `_root()`
+    here would make the app report on a file the watcher never reads. Makes no
+    directory: its absence is the answer."""
+    base = os.environ.get("BOARD_WATCH_STATE",
+                          os.path.join(os.path.expanduser("~"),
+                                       ".local", "state", "board-watch"))
+    return os.path.join(base, "off")
+
+
 def watcher_state(raw=None):
-    """What `systemctl --user show board-watch.service` said, as one honest
-    sentence. `raw` is the command's output; the caller runs it (the app does it
-    off the GUI thread), because this module forks nothing."""
-    d = {}
+    """What `systemctl --user show` said about the watcher, as one honest
+    sentence plus an `armed` verdict. `raw` is the command's output; the caller
+    runs it (the app does it off the GUI thread), because this module forks
+    nothing.
+
+    Two units, in this order: `board-watch.service` (is a tick running, did the
+    last one fail) and `board-watch.path` (is anything going to START one).
+    `systemctl show` prints one property block per unit, separated by a blank
+    line. Asking only the service was not enough to say "armed": its resting
+    ActiveState is `inactive`, which is indistinguishable from a path unit that
+    is stopped, so the sentence used to claim armed for a watcher that could
+    never fire.
+
+    **`armed` is a THREE-valued answer** — True, False, or None for "could not
+    be asked". §10: an unknown is not a no, and the caller must not draw a claim
+    about his machine out of a systemctl we never got to run.
+
+    The kill switch (`~/.local/state/board-watch/off`) is a file and this module
+    forks nothing, so it is the one thing checked here directly; it is read on
+    the caller's ten-second unit poll, never per repaint.
+    """
+    blocks, d = [], {}
     for line in (raw or "").splitlines():
         if "=" in line:
             k, v = line.split("=", 1)
             d[k.strip()] = v.strip()
-    active = d.get("ActiveState")
+        elif not line.strip() and d:
+            blocks.append(d)
+            d = {}
+    if d:
+        blocks.append(d)
+    svc = blocks[0] if blocks else {}
+    pathu = blocks[1] if len(blocks) > 1 else {}
+
+    if os.path.exists(watch_kill_switch()):
+        return {"state": "off", "armed": False,
+                "text": "board-watch is switched off - its kill switch file exists"}
+    active = svc.get("ActiveState")
     if not active:
-        return {"state": "", "text": "board-watch could not be asked"}
+        return {"state": "", "armed": None, "text": "board-watch could not be asked"}
     if active == "failed":
-        return {"state": active,
+        return {"state": active, "armed": False,
                 "text": "board-watch failed its last run - see ~/.cache/board-watch.log"}
     if active in ("activating", "active", "reloading"):
-        return {"state": active, "text": "board-watch is running a tick now"}
-    return {"state": active,
+        return {"state": active, "armed": True,
+                "text": "board-watch is running a tick now"}
+    parmed = pathu.get("ActiveState")
+    if parmed and parmed != "active":
+        return {"state": active, "armed": False,
+                "text": "board-watch is not armed - its path unit is " + parmed}
+    return {"state": active, "armed": True,
             "text": "board-watch is armed - it picks up the box and your answers"}
 
 
@@ -927,12 +973,13 @@ def describe(a):
     """
     if a["state"] == "queued":
         return "not started yet - a minister starts when a slot frees"
-    # The one row on this list that is not a process: Solomon standing by. His
-    # words — *"should basically indicate like he's there and ready to go at all
-    # times when hes not doing something"* — and the sentence has to be true, so
-    # it says what actually happens next rather than claiming anyone is working.
+    # The one row on this list that is not a process: Solomon standing by, and
+    # he gets NO detail line. [his, 2026-07-29] his resting card is two lines —
+    # `Solomon awaits` and `summons a minister to do your bidding.` — and the
+    # third, which said what you type at the top of the window goes to him, is
+    # gone. The box it described is directly above the card and says so itself.
     if a["state"] == "idle":
-        return "what you type at the top of this window goes to him"
+        return ""
     if a["state"] == "running":
         if a["kind"] == "session":
             return "running - board sees the process, not what it is doing"
