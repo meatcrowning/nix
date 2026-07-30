@@ -436,6 +436,51 @@ def test_moves(tmp):
           any("is gone" in t["text"] for t in B.parse(back)["todo"]),
           [t["text"] for t in B.parse(back)["todo"]])
 
+    # ---- ...AND SO IS AN OWNER THAT WAS NEVER RECORDED AT ALL ----
+    # `boardctl start` with no --pid (a human, or an orchestrating session).
+    # `_alive` says True for it forever — correctly, as liveness — so with no age
+    # bound the stash was IMMORTAL and `boardagents` drew an `unowned` card that
+    # nothing could collect. Two of them survived a day on `top` before he
+    # noticed: "some residual agents left that should've been swept up".
+    src = reset()
+    d = B.parse(src)
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
+    src = B.read(path)
+    bm.start("1", path=path)                  # no pid at all
+    check("a pid-less item is left alone while it is still young",
+          bm.reconcile(path=path) == [])
+    check("...and it is NOT reported dead - liveness has one definition",
+          all(bm._alive(r) for r in bm._stashes()),
+          [(r["key"], r.get("pid")) for r in bm._stashes()])
+
+    # Age its own stamp, which is what `_stash_age` reads first — `start()`
+    # writes `started`, and only a stash carrying neither falls back to mtime.
+    old = time.strftime("%Y-%m-%dT%H:%M:%S%z",
+                        time.localtime(time.time() - bm.UNOWNED_STRAND_S - 60))
+    for rec in bm._stashes():                 # keyed by the item's key, not "1"
+        f = bm.stash_file(rec["key"])
+        rec["started"] = old
+        with open(f, "w") as fh:
+            json.dump(rec, fh)
+    check("...but past the bound it counts as abandoned",
+          [bm._abandoned(r) for r in bm._stashes()] == [True],
+          [(r["key"], round(bm._stash_age(r))) for r in bm._stashes()])
+    moved = bm.reconcile(path=path)
+    check("...and reconcile gives it back like any other stranded item",
+          len(moved) == 1 and moved[0]["num"] == "1", moved)
+    back = B.parse(B.read(path))
+    # It never had an agent, so it must not be told one died: an invented death
+    # to explain a row is exactly the confident lie this tree refuses elsewhere.
+    check("...saying nothing was working it, NOT that an agent is gone",
+          any("nothing was working" in t["text"] for t in back["todo"])
+          and not any("is gone" in t["text"] for t in back["todo"]),
+          [t["text"][:70] for t in back["todo"]])
+    new = [t for t in back["todo"] if "nothing was working" in t["text"]][0]
+    check("...and that bullet passes the same short-summary cap as any other",
+          new["tag"] == "FAILED"
+          and len(new["summary"].split()) <= B.SUMMARY_MAX_WORDS,
+          (new["tag"], len(new["summary"].split()), new["summary"]))
+
     # ---- THE ROWS NOTHING OWNS: the section has to be able to shrink ----
     # `reconcile` only ever sees this host's stashes, so a row written by hand,
     # or by the other machine, or before the stash existed, had no exit at all
