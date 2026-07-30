@@ -42,7 +42,9 @@
 
   security.rtkit.enable = true;
 
-  programs.kdeconnect.enable = true;
+  # No `programs.kdeconnect.enable` on purpose: it opens 1714-1764 on every
+  # interface with no opt-out. sys/net/kdeconnect.nix opens the same range
+  # scoped to the LAN; the package comes from home/pkgs/desktop/kde.nix.
 
   fonts = {
     packages = with pkgs; [
