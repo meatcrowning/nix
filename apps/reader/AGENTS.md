@@ -130,8 +130,15 @@ generated rather than maintained.
 
 ## Search: in the document, and across the corpus, at once
 
-`fs` (or `/`, or `Ctrl+F`) slides a chip out of the right edge — the canonical
-reveal, §6.2.1, at `motion.slideMs`. It never reflows the text underneath.
+`fs`, or **`Ctrl+F` and only `Ctrl+F`** (docs/DESIGN.md §11.2 — the bare `/` was
+dropped 2026-07-29), slides a chip out of the right edge — the canonical reveal,
+§6.2.1, at `motion.slideMs`. It never reflows the text underneath.
+
+- The key is a **window-scoped `Shortcut`**, not a case in `stage`'s
+  `Keys.onPressed` where it used to live: find has to work while the focus is in
+  a pane, the sidebar or the chip itself, and a `Keys` handler only fires while
+  its own item holds the keyboard. Pressing it again re-selects the query
+  (`openSearch()`), which is the find-again gesture.
 
 - **In-document** matching is live per keystroke and free: matching ROWS take
   `Theme.highlight` and the match you are ON keeps the 2px accent gutter §9.1

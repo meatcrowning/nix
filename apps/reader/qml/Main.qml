@@ -119,6 +119,14 @@ Window {
             results = [];
         }
     }
+    // Ctrl+F is the desktop's find key (docs/DESIGN.md §11.2), so pressing it
+    // again while the bar is already open re-selects the query rather than
+    // doing nothing — the find-again gesture every other program has.
+    function openSearch() {
+        searchOpen = true;
+        searchField.forceActiveFocus();
+        searchField.selectAll();
+    }
     function closeSearch() {
         searchOpen = false;
         query = "";
@@ -176,7 +184,7 @@ Window {
           tip: "browse .md files" },
         { id: "outline", label: "ol", state: sideOpen && sideMode === "outline" ? 1 : 0,
           tip: "this document's headings" },
-        { id: "search",  label: "fs", state: searchOpen ? 1 : 0, tip: "find" },
+        { id: "search",  label: "fs", state: searchOpen ? 1 : 0, tip: "find (Ctrl+F)" },
         "-",
         { id: "vsplit",  label: "|",  state: splitOn && splitVertical ? 1 : 0,
           tip: "split right" },
@@ -204,9 +212,8 @@ Window {
             case "files":   win.setSide("files");  break;
             case "outline": win.setSide("outline"); break;
             case "search":
-                win.searchOpen = !win.searchOpen;
-                if (win.searchOpen) searchField.forceActiveFocus();
-                else win.closeSearch();
+                if (win.searchOpen) win.closeSearch();
+                else win.openSearch();
                 break;
             case "vsplit":  win.setSplit(true);    break;
             case "hsplit":  win.setSplit(false);   break;
@@ -252,15 +259,8 @@ Window {
         focus: true
 
         Keys.onPressed: (e) => {
-            const ctrl = (e.modifiers & Qt.ControlModifier) !== 0;
             const alt = (e.modifiers & Qt.AltModifier) !== 0;
             switch (e.key) {
-            case Qt.Key_Slash:
-                if (!ctrl) { win.searchOpen = true; searchField.forceActiveFocus(); e.accepted = true; }
-                break;
-            case Qt.Key_F:
-                if (ctrl) { win.searchOpen = true; searchField.forceActiveFocus(); e.accepted = true; }
-                break;
             case Qt.Key_Escape:
                 if (win.searchOpen) { win.closeSearch(); e.accepted = true; }
                 break;
@@ -533,6 +533,12 @@ Window {
                      trigger: () => { if (!Docs.openFolder(p.path)) win.status = "could not run filer"; } });
         menu.open(x, y, items);
     }
+
+    // ---- global keys ----
+    // A window-scoped Shortcut, not a case in stage's Keys handler: find has to
+    // work while the focus is in a pane, the sidebar or the search field itself
+    // (docs/DESIGN.md §11.2).
+    Shortcut { sequence: "Ctrl+F"; onActivated: win.openSearch() }
 
     // A status line is a report, not a permanent label: it clears itself so the
     // footer goes back to saying what is open.
