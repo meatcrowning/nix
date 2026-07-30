@@ -39,14 +39,40 @@ rediscovered:
   `findText("")` is what drops a highlight.
 - Chromium **resumes** a re-issued query near the match it was last on, not at
   the first one — so an absolute `n/m` assertion after a re-search is a race.
+- **The marks on the page are OURS, not Chromium's, and that is not a
+  preference.** Chromium does light every match (`#ffff00`) and the one you are
+  on (`#ff9632`) — and dark mode's whole-page invert filter runs over its
+  markers too, so on a filtered page they land as `#252500` and `#b44b00`:
+  measured offscreen, the first of those is invisible on a near-black page and
+  reads exactly like a find that only scrolls. Dark mode is on globally with a
+  per-site exception list, so that is nearly every page he opens. `FindBar.qml`
+  therefore paints its own, via the **CSS Custom Highlight API** over ranges it
+  walks itself: every match is `Theme.dim` with accent text, the current one
+  inverts to `Theme.accent` with black text (docs/DESIGN.md §3.1's `dim` =
+  inactive / `accent` = active, the ladder every list here uses). Chromium's
+  `findText` still owns the count, the active index and the scrolling.
+  - **The filter is cancelled, not avoided**: `DarkMode.compensate(url, hex)`
+    returns the colour whose *image* under that page's filter is the palette
+    colour — the same inverse trick `_dark_css` already plays on media, run
+    backwards. It is the identity when the filter is off, so there is one code
+    path, and the harness asserts the palette hex lands on the glass **exactly**
+    in both states.
+  - Our walk and Chromium's can disagree (shadow DOM, a match split across a
+    block boundary). **A disagreement drops the current-match mark and leaves
+    every match lit** — marking the wrong one as current is worse than marking
+    none. Ranges with no client rects are dropped, which is what keeps the two
+    counts equal in practice.
 
 Verified offscreen by **[`tools/find-test.py`](tools/find-test.py)** (+ its
-`find-test.qml` fixture): 28 checks over the real `FindBar.qml` and a real
+`find-test.qml` fixture): 40 checks over the real `FindBar.qml` and a real
 off-the-record `WebEngineView` — which keys the filter claims, `Ctrl+F` opening
 the bar and taking the keyboard from the view, the match count and both step
 directions (buttons *and* `Enter`/`Shift+Enter`), "no matches", the empty query,
 a second `Ctrl+F` re-selecting rather than appending, and Escape closing +
-clearing + handing the focus back. It also asserts `Main.qml` still instantiates
+clearing + handing the focus back. The last block is **pixel-level**: it serves
+the page over loopback (dark mode needs a host — `isSiteEnabled` is false for a
+hostless `file://`), grabs the window and asserts the two palette hexes are on
+the glass and differ, with the filter off *and* on. It also asserts `Main.qml` still instantiates
 and connects the bar, so the fixture cannot end up testing a hotkey the browser
 has lost. It borrows the packaged wrapper's *environment* (an offscreen
 WebEngineView still needs `qtwebenginequickplugin` on the QML import path) but
