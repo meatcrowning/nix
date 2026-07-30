@@ -205,6 +205,10 @@ class Titlebar(QObject):
     def setFooter(self, text):
         self._client.set_footer(text)
 
+    @Slot(bool)
+    def setTitleText(self, on):
+        self._client.set_title_text(on)
+
 
 class Board(QObject):
     """The store, live: parse, watch, and write his answers back.

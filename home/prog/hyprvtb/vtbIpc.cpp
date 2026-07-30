@@ -145,6 +145,7 @@ namespace {
         if (auto it = g_regs.find(pid); it != g_regs.end()) {
             reg.footer       = it->second.footer;
             reg.titleEdit    = it->second.titleEdit;
+            reg.titleText    = it->second.titleText;
             reg.playbar      = it->second.playbar;
             reg.playPos      = it->second.playPos;
             reg.footerBottom = it->second.footerBottom;
@@ -187,14 +188,35 @@ namespace {
             return;
         const bool      on = (arg == "1");
         std::lock_guard lk(g_lk);
-        // the reg may not exist yet if TITLEEDIT arrives before the first
-        // REGISTER — create a bare entry so the flag isn't lost
+        // g_regs[c.pid] rather than a find(): the entry is normally already
+        // there, since `c.pid` is only learned FROM a REGISTER and this returns
+        // above without one — a verb sent before the first REGISTER is dropped,
+        // which is unreachable through `pylib/vtbclient.py` (its connect path
+        // sends REGISTER first and re-sends every flag after it).
         auto& reg = g_regs[c.pid];
         if (g_regFd.find(c.pid) == g_regFd.end())
             g_regFd[c.pid] = c.fd;
         if (reg.titleEdit == on)
             return;
         reg.titleEdit = on;
+        VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // TITLETEXT <0|1>: does this pid's title region carry text at all? Same
+    // shape as handleTitleEdit. It is declared ONCE at startup, so the thing
+    // that has to hold is handleRegister carrying it — goetia re-registers its
+    // button set every time the lit section cell changes, i.e. on every scroll.
+    void handleTitleText(SClient& c, const std::string& arg) {
+        if (c.pid <= 0)
+            return;
+        const bool      on = (arg == "1");
+        std::lock_guard lk(g_lk);
+        auto&           reg = g_regs[c.pid];
+        if (g_regFd.find(c.pid) == g_regFd.end())
+            g_regFd[c.pid] = c.fd;
+        if (reg.titleText == on)
+            return;
+        reg.titleText = on;
         VtbIpc::serial.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -246,6 +268,8 @@ namespace {
             handleFooter(c, "");
         else if (line.starts_with("TITLEEDIT "))
             handleTitleEdit(c, line.substr(10));
+        else if (line.starts_with("TITLETEXT "))
+            handleTitleText(c, line.substr(10));
         else if (line.starts_with("LOADING "))
             handleLoading(c, line.substr(8));
         else if (line.starts_with("PLAYBAR "))
@@ -517,7 +541,8 @@ std::string VtbIpc::dumpJson() {
             out += ",";
         first = false;
         out += "{\"pid\":" + std::to_string(pid) + ",\"buttons\":" + std::to_string(reg.buttons.size()) +
-            ",\"titleEdit\":" + (reg.titleEdit ? "true" : "false") + ",\"loading\":" + (reg.loading ? "true" : "false") +
+            ",\"titleEdit\":" + (reg.titleEdit ? "true" : "false") + ",\"titleText\":" + (reg.titleText ? "true" : "false") +
+            ",\"loading\":" + (reg.loading ? "true" : "false") +
             ",\"playbar\":" + (reg.playbar ? "true" : "false") + ",\"footer\":" + (reg.footer.empty() ? "false" : "true") + "}";
     }
     out += "]}";
@@ -533,6 +558,17 @@ bool VtbIpc::get(pid_t pid, SVtbAppReg& out) {
         return false;
     out = it->second;
     return true;
+}
+
+bool VtbIpc::titleTextEnabled(pid_t pid) {
+    // One flag, no copy: this is asked once per window per FRAME, and `get()`
+    // would deep-copy the whole button vector to answer it. Unregistered pids
+    // say true — the default is the bar every window has always had.
+    if (pid <= 0)
+        return true;
+    std::lock_guard lk(g_lk);
+    const auto      it = g_regs.find(pid);
+    return it == g_regs.end() || it->second.titleText;
 }
 
 namespace {

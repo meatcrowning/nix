@@ -1608,6 +1608,18 @@ page and no journey to retrace; §11.1 says a program with no genuine history ge
 nothing rather than an invented one. Add a row to DESIGN.md §11.1's table if that
 ever changes.
 
+**And the bar carries NO NAME anywhere** — neither the footer nor the stacked
+title. [his, 2026-07-29, twice within five minutes] *"remove the 'goetia' text at
+the bottom of the inner titlebar"*, then *"really for now there should be no title
+text in the left side inner bar of goetia"*. The footer is the status and nothing
+else; the title is turned off with `Titlebar.setTitleText(false)` in
+`Main.qml`'s `Component.onCompleted` → `TITLETEXT 0` on the vtb socket (hyprvtb
+≥2.95, DESIGN.md §12). **Not by blanking `Window.title`**: Qt substitutes the
+application name for an empty title, so the bar would read `board` — the one word
+the rename exists to keep off screen — and the taskbar and alt-tab would lose the
+window's name too. One `false` to put the title back; that is what *"for now"*
+buys.
+
 ## Recorded limit: the store quotes glyphs the font lacks
 
 `board.md`'s open font decision literally lists the characters More Perfect DOS
