@@ -62,8 +62,9 @@ album-grid scroll, quit), and reads prefs only at startup. `tools/set-pref.py`
 sets a key from outside, backs the file up, and refuses while `main.py` is up.
 
 **ALL chrome is hyprvtb titlebar buttons** — transport + view switcher + sort +
-search toggle + a bottom-anchored settings button whose drawer (surfer's
-`dm`-panel idiom) holds rescan and the album gallery's live column count — plus
+the `fs` search toggle (`Ctrl+F`; it was labelled `/`, a key nothing was ever
+bound to — docs/DESIGN.md §11.2, §12.1) + a bottom-anchored settings button
+whose drawer (surfer's `dm`-panel idiom) holds rescan and the album gallery's live column count — plus
 the `PLAYBAR`/`SEEK` scrub bar. The pushed playbar fraction is floored at 0.002
 because plugin builds ≤2.44 abort the compositor on a zero-height fill rect
 (fixed plugin-side in v2.45 — guard every computed rect when adding hyprvtb
