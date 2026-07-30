@@ -46,6 +46,12 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # so every fetch and nudge is a no-op here; the fetch path is exercised
 # explicitly, against a stub, in `test_usage_fetch`.
 os.environ["BOARD_USAGE_OFFLINE"] = "1"
+# A summon is only a card once it is CONFIRMED (`boardagents.CONFIRM_GRACE_S`),
+# and a stubbed worker writes no transcript to be confirmed by — so every test
+# but `test_summon_confirmed`, which sets its own, runs with the grace already
+# elapsed and sees the old behaviour. Negative rather than 0: the registration
+# stamp has one-second resolution, so an exact tie is reachable.
+os.environ["BOARD_CONFIRM_GRACE"] = "-1"
 
 BOARD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS = os.path.dirname(BOARD)
@@ -2897,6 +2903,84 @@ def test_work(tmp):
     del os.environ["BOARD_WORK_SPAWN"]
 
 
+def test_summon_confirmed(tmp):
+    """A SUMMON IS NOT A CARD until the agent is really up. [his, 2026-07-30]
+
+    Two ends of one bug: a card drawn while Solomon is still summoning, and a
+    card left behind by a summon that never produced an agent. So the checks
+    are (a) nothing is drawn between the spawn call and the confirmation,
+    (b) everything that COUNTS workers sees the row throughout, or a starting
+    worker would be double-started and reaped as dead, (c) a spawn that fails
+    outright registers nothing and still gets its task reported rather than
+    orphaned in `taken/`.
+    """
+    import boardagents as ba
+    import boardphase as bph
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "2"
+    scripts = os.path.join(tmp, "transcripts", "proj")
+    os.makedirs(scripts, exist_ok=True)
+    os.environ["BOARD_TRANSCRIPTS"] = os.path.dirname(scripts)
+    # The constant is read at import, so the grace is put back by hand rather
+    # than through the environment this file already elapsed globally.
+    ba.CONFIRM_GRACE_S = 3600.0
+
+    rec = bw.dispatch("confirmable work", where="apps/zzz/**")
+    aid = rec["id"]
+    check("a dispatch that started still reports `running` to its caller",
+          rec["state"] == "running", rec)
+    check("...and the registration is on disk, so nothing about it is lost",
+          os.path.isfile(os.path.join(ba.agents_dir(), aid + ".json")))
+    check("but NO CARD is drawn while the summon is unconfirmed",
+          aid not in [c["id"] for c in bw.cards()],
+          [c["id"] for c in bw.cards()])
+    check("...nor in the terminal listing, which draws the same rows",
+          aid not in [r["id"] for g in bw.groups() for r in g["rows"]])
+    check("...while the CAP still counts it, or it would be double-started",
+          aid in [w["id"] for w in bw.live_workers()])
+    check("...and a note can still be addressed to it",
+          any(a["id"] == aid for a in ba.agents()))
+
+    # ITS OWN TRANSCRIPT IS THE PROOF: only a running agent writes one.
+    with open(os.path.join(scripts, rec["session"] + ".jsonl"), "w") as f:
+        f.write("{}\n")
+    check("the card appears once the agent's own transcript exists",
+          aid in [c["id"] for c in bw.cards()])
+    os.unlink(os.path.join(scripts, rec["session"] + ".jsonl"))
+    check("...and confirmation is STICKY, so it cannot un-draw itself",
+          aid in [c["id"] for c in bw.cards()])
+
+    # ---- a spawn that never started leaves NO card and NO orphan ----
+    start_unit, start_detached = bw._start_unit, bw._start_detached
+    bw._start_unit = lambda *a, **k: None
+    bw._start_detached = lambda *a, **k: None
+    try:
+        dead = bw.dispatch("work nothing could start", where="apps/zzz/**")
+    finally:
+        bw._start_unit, bw._start_detached = start_unit, start_detached
+    check("a spawn that could not start says so rather than claiming a worker",
+          dead["state"] == "failed", dead)
+    check("...and registers nothing, so no card is left behind for it",
+          not os.path.isfile(os.path.join(ba.agents_dir(), dead["id"] + ".json"))
+          and dead["id"] not in [c["id"] for c in bw.cards()])
+    _, failed, _ = bw.reap()
+    check("...and its task is REPORTED as failed, not orphaned in taken/",
+          "work nothing could start" in [r["task"] for r in failed],
+          [r["task"] for r in failed])
+
+    # The stub worker outlives this function otherwise, and the window tests
+    # below assert on an EMPTY agents section.
+    os.kill(rec["pid"], 9)
+    time.sleep(0.2)
+    ba.sweep()
+    bw.reap()
+    del os.environ["BOARD_TRANSCRIPTS"]
+    del os.environ["BOARD_WORK_SPAWN"]
+    ba.CONFIRM_GRACE_S = -1.0
+
+
 def test_overlap(tmp):
     """`dispatch` WARNS on a --where that overlaps a live worker's — the
     mechanical half of the prompt's `run agents first` rule. Warn only: a
@@ -5480,6 +5564,8 @@ def main():
         test_work(os.path.join(tmp, "work"))
         test_overlap(os.path.join(tmp, "work"))
         test_dead_worker_notes(os.path.join(tmp, "work"))
+        os.makedirs(os.path.join(tmp, "conf"))
+        test_summon_confirmed(os.path.join(tmp, "conf"))
         os.makedirs(os.path.join(tmp, "use"))
         test_usage(os.path.join(tmp, "use"))
         os.makedirs(os.path.join(tmp, "usf"))
