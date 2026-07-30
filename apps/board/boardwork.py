@@ -1367,7 +1367,7 @@ def _idle_orchestrator_row():
     for exactly that reason: `AgentRow.addressable` is what draws the box, and
     an unaddressable row does not offer one.
 
-    **It leads with `Solomon is ready`**, like every other card leads with its
+    **It leads with `Solomon awaits`**, like every other card leads with its
     own name — [his, 2026-07-29] the orchestrator's card should read *"Solomon
     is ..."* like the rest, and he said so twice. Putting the name in the name
     column instead was the first answer and it was not what he asked for.
@@ -1393,7 +1393,11 @@ def _idle_orchestrator_row():
         # (The LIVE orchestrator's card gets its top line the way every worker
         # does, by claiming a phase, which `ORCHESTRATOR_PROMPT` tells him to.)
         "phase": "ready", "says": "ready",
-        "saysLine": "%s is ready" % ba.ORCHESTRATOR_NAME,
+        # [his, 2026-07-29] *"Solomon awaits"*, not *"Solomon is ready"* - the
+        # same verb his `waiting` line uses, so the standing row and the live
+        # card say the same thing about the same state. No `...`: nothing is
+        # happening on this row and §10 does not let an animation claim there is.
+        "saysLine": "%s awaits" % ba.ORCHESTRATOR_NAME,
         "actually": "", "doingLine": "", "observed": "unlinked",
         "contextLine": "", "workedLine": "", "unread": 0, "waiting": [],
         "born": 0.0,
