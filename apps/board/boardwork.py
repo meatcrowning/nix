@@ -1366,7 +1366,11 @@ def _idle_orchestrator_row():
     """
     return {
         "id": "", "name": ba.ORCHESTRATOR_NAME, "kind": ba.ORCHESTRATOR_KIND,
-        "title": "hands out what you type, and does none of the work himself",
+        # [his, 2026-07-29] `hands` is gone from his card: an item goes to a NEW
+        # agent as `summoned` and to one already running as `commanded`, the same
+        # pair his notes carry. This line used to say "hands out what you type".
+        "title": "summons a worker for what you type, or commands one already "
+                 "running - and does none of the work himself",
         "where": "", "state": "idle", "running": False,
         # NO observation, deliberately — this row is not a process and there is
         # nothing to observe. The top line is the ONE sentence that is true of

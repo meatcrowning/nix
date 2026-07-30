@@ -171,7 +171,18 @@ Item {
     // at `fgDim` rather than `fgText` — that was already how the title row
     // said "this one is over", and it is one rung, not a colour (§3.5's job is
     // done by the words in the detail line).
-    readonly property color leadTone: running ? fgText : fgDim
+    //
+    // **SOLOMON IS EXEMPT, and from both halves** — [his, 2026-07-29] *"his text
+    // should never become the unfocused colors"*. The unfocused fade is handed
+    // DOWN (docs/DESIGN.md §3.1.1: a leaf takes the tone it was given), so his
+    // exemption lives where his card is drawn — `Main.qml`'s summoner section
+    // passes the `Theme` tones rather than the window's faded ones, which covers
+    // every label on the card at once, the inbox box included. What is left here
+    // is the other rung that can quiet him: this ternary. His card is not a
+    // record of work that is over — he is always there — so it never leads at the
+    // stopped tone either.
+    readonly property bool summoner: agent && agent.kind === "orchestrator"
+    readonly property color leadTone: (running || summoner) ? fgText : fgDim
 
     // ---- the tick on the end of the observed line ----
     // His: *"at the end of the second row of an agents information, it should
@@ -220,6 +231,7 @@ Item {
     Timer {
         interval: Math.max(60, motion.ms(motion.slideMs))
         running: (row.ticking || row.saysLine.endsWith("...")
+                  || row.saysDetail.endsWith("...")
                   || row.doingLine.endsWith("...")) && !motion.reduceMotion
                  && row.visible
         repeat: true
@@ -243,10 +255,14 @@ Item {
 
     function beginEdit() { msgBox.beginEdit(); }
 
+    // §9.1's 2px accent gutter: this row is current. **Solomon has none** —
+    // [his, 2026-07-29] *"he doesnt need a line to the left of his card"*, and he
+    // is right that it says nothing there: the mark distinguishes a running card
+    // from a stopped one in a LIST of them, and his section holds one card.
     Rectangle {
         width: 2
         height: parent.height - 6
-        visible: row.running
+        visible: row.running && !row.summoner
         color: row.fgAccent
     }
 
@@ -349,7 +365,7 @@ Item {
             visible: row.saysDetail !== ""
             height: visible ? implicitHeight : 0
             color: row.fgDim
-            text: row.saysDetail
+            text: row.tick(row.saysDetail)
         }
 
         // ---- SECOND LINE: what it is observed doing, and nothing else ----
