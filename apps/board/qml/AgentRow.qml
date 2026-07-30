@@ -110,6 +110,40 @@ Item {
     property int openCaret: -1
     signal contextRequested(real mx, real my)
 
+    // ---- WHAT IT IS ACTUALLY SAYING, in its own words ----
+    // [his, 2026-07-30] *"a minister card should expand to show what that
+    // minister is actually saying"*: clicking anywhere on the card slides a
+    // drawer down out from under it with the last couple of lines the agent
+    // logged, and clicking again slides it back up.
+    //
+    // The state is NOT held here. A card is rebuilt whenever the key list
+    // changes — an agent joining or leaving is enough — so a drawer held in the
+    // delegate would shut itself on the next poll; the window keys it by the
+    // agent's ID, like the draft in the box below (`Main.qml`'s `outputOpen`).
+    // Several may be open at once, which is why it is a map and not one key.
+    property bool outputOpen: false
+    signal outputToggled()
+    //: The lines themselves, from `Agents.output()` — already cleaned and
+    //  glyph-mapped in the Python (§2.3). Empty means nothing has been logged,
+    //  and the drawer SAYS that rather than opening empty (§10).
+    property var logLines: []
+    function refreshOutput() {
+        row.logLines = (row.outputOpen && row.addressable)
+                       ? Agents.output(String(row.agent.id)) : []
+    }
+    onOutputOpenChanged: row.refreshOutput()
+    // Rebuilt already open (see above): a binding that is true at construction
+    // emits no change, so the first read has to be asked for.
+    Component.onCompleted: row.refreshOutput()
+    // ...and it follows the same poll the card's own lines do, so an open drawer
+    // keeps up with the agent instead of freezing at whatever it said when he
+    // opened it. Only while it is open: closed, it reads no files at all.
+    Connections {
+        target: Agents
+        enabled: row.outputOpen
+        function onChanged() { row.refreshOutput(); }
+    }
+
     readonly property bool running: agent && agent.running === true
     // WHO IT IS, in one short name — his call: *"i think itd be
     // interesting to have them referred to by regular names"*. The coded id is
@@ -267,6 +301,17 @@ Item {
 
     function beginEdit() { msgBox.beginEdit(); }
 
+    // The card lights on hover like every other row here, and now it has to:
+    // the whole card is the hit target for the drawer, so the fill is what says
+    // so (§10 — a control that is drawn is a control that works, and this one is
+    // drawn by being lit). FIRST of the card's children, so it is a fill and
+    // never a lid — over the text, or over the accent gutter below it.
+    Rectangle {
+        anchors.fill: parent
+        anchors.bottomMargin: 2
+        color: openArea.containsMouse ? Theme.highlight : "transparent"
+    }
+
     // §9.1's 2px accent gutter: this row is current. **Solomon has none** —
     // [his, 2026-07-29] *"he doesnt need a line to the left of his card"*, and he
     // is right that it says nothing there: the mark distinguishes a running card
@@ -285,6 +330,18 @@ Item {
             var p = mapToItem(null, m.x, m.y);
             row.contextRequested(p.x, p.y);
         }
+    }
+
+    // ...and left-clicking it opens the drawer. Declared BEFORE the column, so
+    // everything the card draws sits above it: the box he types into keeps its
+    // own clicks, and only the parts of the card that accept none — the three
+    // lines, the gutter, the drawer itself — fall through to here.
+    MouseArea {
+        id: openArea
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        hoverEnabled: true
+        onClicked: row.outputToggled()
     }
 
     // ---- HOW FULL IT IS, at the right end of the TOP row ----
@@ -541,6 +598,77 @@ Item {
             onSubmitted: (b) => row.send(b)
             onCaretHeld: (p) => row.caretHeld(p)
             onCaretLeft: () => row.caretLeft()
+        }
+
+        // ---- the drawer: the agent's own last few lines ----
+        // It slides DOWN out from under the card, INDENTED, with a rule down its
+        // left edge saying it belongs to the card above it.
+        //
+        // The motion is §6.2's canonical reveal and not a variation on it: the
+        // content is FIXED at the drawer's top edge and the CLIP grows downward,
+        // so nothing inside it moves and nothing fades in from nowhere. The
+        // duration and curve are the window roll's, through `Motion` — no
+        // literal, ever (§6.2).
+        //
+        // The spine is `Theme.border`, the hairline every non-accented rule on
+        // this desktop is drawn in: this is subordination, not attention, and the
+        // accent here means "current" (§9.1's gutter, two pixels to its left).
+        Item {
+            id: drawer
+            width: col.width
+            clip: true
+            readonly property real openH: drawerCol.implicitHeight + 8
+            height: row.outputOpen ? openH : 0
+            visible: height > 0
+            Behavior on height {
+                NumberAnimation { duration: motion.ms(motion.slideMs)
+                                  easing.type: motion.slideEasing }
+            }
+
+            Rectangle {
+                x: 8
+                y: 2
+                width: 1
+                height: drawer.openH - 4
+                color: Theme.border
+            }
+
+            Column {
+                id: drawerCol
+                x: 16
+                y: 4
+                width: col.width - x
+
+                // ONE LINE EACH, cut to fit — the same treatment the inbox line
+                // gets, and for the same reason: this is somebody else's output
+                // and a wrapped paragraph of it would bury the card it hangs off
+                // (§5.2). ASCII "..." marks the cut (§2.3), and the character
+                // count is an exact width because the font is monospace (§2.7).
+                Repeater {
+                    model: row.logLines
+                    delegate: PixelText {
+                        required property var modelData
+                        width: drawerCol.width
+                        wrapMode: Text.NoWrap
+                        clip: true
+                        color: row.fgDim
+                        text: row.clipTo(String(modelData),
+                                         Math.floor(width / row.cellW))
+                    }
+                }
+
+                // Nothing logged is a FACT about the agent, said plainly. Not an
+                // empty box, not an error, and nothing from the warn/crit ramp —
+                // a worker that has not written yet is not a machine fault
+                // (§8.1, §9.3).
+                PixelText {
+                    width: drawerCol.width
+                    visible: row.logLines.length === 0
+                    height: visible ? implicitHeight : 0
+                    color: Theme.dim
+                    text: "nothing logged yet"
+                }
+            }
         }
     }
 }

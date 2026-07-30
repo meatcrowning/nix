@@ -88,6 +88,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
+from glyphs import px  # noqa: E402  (§2.3 — map at INGEST, like boardparse does)
 
 import boardparse  # noqa: E402  (beside this file)
 import boardmove  # noqa: E402  (beside this file)
@@ -665,6 +666,62 @@ class Agents(QObject):
             "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
                        if a["id"] else [],
         }
+
+    # ---- WHAT IT IS ACTUALLY SAYING: the tail of the worker's own log ----
+    # [his, 2026-07-30] a card opens a drawer showing *"the last couple of
+    # lines"* of that minister's output. The card's three lines are this app's
+    # account of the agent; this is the agent's own voice, unedited.
+    #
+    # The file is the one `boardwork` gives the worker its stdout in
+    # (`~/.cache/board-work/<id>.log`, through its own `_log_path` so the
+    # `XDG_CACHE_HOME` a harness sets is honoured — a test must never read his
+    # real cache, which is the reason that helper exists).
+    #
+    # Read here rather than in QML because QML cannot read a file at all, and
+    # cleaned here rather than there because §2.3 says to map glyphs at INGEST:
+    # this is somebody else's text, so it goes through `px()` exactly as the
+    # store's prose does. Only the WIDTH-dependent elide is the drawer's, the
+    # font being monospace (§2.7).
+    #
+    # An EMPTY list means "nothing logged", and the drawer says that in words
+    # rather than opening empty (§10). It is never a guess: a missing file, an
+    # unreadable one and one holding nothing but control junk are all the same
+    # honest answer, and none of them is an error worth a colour.
+    #: How many of its own lines a card shows. His *"couple"*, read as the 2-3
+    #: the drawer can carry without becoming the transcript §5.2 rules out.
+    OUTPUT_LINES = 3
+    #: ...and how much of the tail is read to find them. A worker's log runs to
+    #: megabytes; only the end of it is ever drawn.
+    OUTPUT_TAIL = 64 * 1024
+    #: ANSI escapes (CSI and OSC) plus every other C0/C1 control. `claude -p`
+    #: has no tty here, but its output carries other programs' output.
+    _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+                       r"|\x1b[@-Z\\-_]")
+    _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+    @Slot(str, result="QVariantList")
+    def output(self, agent_id):
+        if not (agent_id or "").strip():
+            return []
+        try:
+            path = boardwork._log_path(agent_id)
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - Agents.OUTPUT_TAIL))
+                raw = f.read()
+        except OSError:
+            return []
+        out = []
+        # Split on \n ALONE: `splitlines()` also breaks on \r, which would turn
+        # every progress rewrite into as many lines as it had frames — and the
+        # last of those frames is the only one that was ever a line.
+        for line in raw.decode("utf-8", "replace").split("\n"):
+            # A progress line rewrites itself with \r; what it settled on is the
+            # last chunk, and the rewrites before it were never lines.
+            line = Agents._CTRL.sub("", Agents._ANSI.sub("", line.split("\r")[-1]))
+            if line.strip():
+                out.append(px(line.rstrip()))
+        return out[-Agents.OUTPUT_LINES:]
 
     @Slot()
     def refresh(self):
