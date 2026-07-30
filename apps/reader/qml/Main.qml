@@ -459,8 +459,13 @@ Window {
                         font.hintingPreference: Font.PreferFullHinting
                         renderType: Text.NativeRendering
                         color: win.fgText
-                        selectionColor: Theme.highlight
-                        selectedTextColor: Theme.accent
+                        // accent/bg, not the near-black `highlight` fill: a
+                        // second Ctrl+F re-SELECTS the query (openSearch), and
+                        // at 1.15:1 on black that gesture looked like nothing
+                        // happening. askpass, painter and surfer's own find bar
+                        // all select this way.
+                        selectionColor: Theme.accent
+                        selectedTextColor: Theme.bg
                         clip: true
                         text: win.query
                         onTextChanged: {

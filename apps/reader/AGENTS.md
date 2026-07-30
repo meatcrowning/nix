@@ -141,9 +141,22 @@ dropped 2026-07-29), slides a chip out of the right edge — the canonical revea
   (`openSearch()`), which is the find-again gesture.
 
 - **In-document** matching is live per keystroke and free: matching ROWS take
-  `Theme.highlight` and the match you are ON keeps the 2px accent gutter §9.1
-  gives the current row. Enter / Shift+Enter step; the chip and the titlebar
-  footer both read `n/m`.
+  **`Theme.dim`, and the row you are ON takes `Theme.accent` with `Theme.bg`
+  ink** (docs/DESIGN.md §3.6). Enter / Shift+Enter step; the chip and the
+  titlebar footer both read `n/m`.
+  - Those two used to be `Theme.highlight` for every match plus a 2px accent
+    gutter for the current one, and **he could barely see either**. `highlight`
+    is the selection fill: `#0f1521` on a pure-black page, **1.15:1**. And the
+    gutter drew *nothing* — at `x: -6` on a delegate that sits at x=0 in the
+    list's content item, `clip: true` ate all of it, so all three match rows
+    came back pixel-identical and find-next read as a scroll. Both measured
+    offscreen; the marks are drawn in QML here, by `RichText.qml` per wrapped
+    LINE and by `Block.qml` per code line and per table row.
+  - The current match's ink is **one binding per line**, not a ternary per word
+    (`lineItem.ink`) — this delegate is one `Text` per word and §3.1.1's fade
+    already pays that cost once. Inline code gives its `bgAlt` chrome up on the
+    accent bar, because `bgAlt` inside accent is a hole and `bg` ink on `bgAlt`
+    cannot be read.
 - **Across documents** is a filesystem walk, so it runs when the typing settles
   (220 ms) and puts its hits in the browse pane, file by file with line numbers.
   Clicking one opens that file at its first match.

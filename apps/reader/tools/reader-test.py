@@ -474,6 +474,100 @@ def test_focus_fade(win, pane, theme):
     spin(80)
 
 
+def find_bands(img, theme, x0, x1):
+    """Contiguous y-ranges of the grab whose x-strip is mostly ONE palette fill.
+
+    Pixels, because the palette is one hue and "surely that reads" has been
+    wrong twice (docs/DESIGN.md §3.6). A band shorter than 4px is chrome — an
+    h1's accent rule, a table's header hairline — not a row fill."""
+    import collections
+    want = {theme.property(k).name(): k for k in ("dim", "accent", "highlight")}
+    out, run = [], None
+    for y in range(img.height()):
+        cnt = collections.Counter(img.pixelColor(x, y).name() for x in range(x0, x1))
+        name, n = cnt.most_common(1)[0]
+        kind = want.get(name) if n > (x1 - x0) * 0.6 else None
+        if run and run[0] == kind:
+            run[2] = y
+        else:
+            if run and run[0] and run[2] - run[1] >= 3:
+                out.append(tuple(run))
+            run = [kind, y, y]
+    if run and run[0] and run[2] - run[1] >= 3:
+        out.append(tuple(run))
+    return out
+
+
+def band_ink(img, y0, y1, x0, x1):
+    """The glyph colour inside a filled band.
+
+    Sampled only BETWEEN the fill's own left and right edge on each row, and out
+    to the whole window width rather than the sniffing strip: the matched line is
+    short, so a strip taken from 45% of the window can sit entirely past the last
+    word and report whatever happens to be beside the bar instead of the ink."""
+    import collections
+    cnt = collections.Counter()
+    for y in range(y0, y1 + 1):
+        row = [img.pixelColor(x, y).name() for x in range(img.width())]
+        fill = collections.Counter(row[x0:x1]).most_common(1)[0][0]
+        if fill not in row:
+            continue
+        for x in range(row.index(fill), len(row) - row[::-1].index(fill)):
+            cnt[row[x]] += 1
+    order = [c for c, _ in cnt.most_common()]
+    return (order[0], order[1] if len(order) > 1 else None)
+
+
+def test_find_marks(win, pane, theme):
+    """The find marks, in RENDERED PIXELS (docs/DESIGN.md §3.6).
+
+    Every match is `dim` with the body accent on it; the one you are ON is
+    `accent` with `bg` ink. It was `Theme.highlight` for all of them — the
+    SELECTION fill, `#0f1521` against a pure-black page, 1.15:1 — plus a 2px
+    accent gutter for the current one that drew nothing at all, being at
+    `x: -6` on a delegate that sits at x=0 inside a `clip: true` viewport. All
+    three match rows came back identical to the pixel and find-next read as a
+    scroll, which is exactly what he reported."""
+    x0, x1 = int(win.width() * 0.45), int(win.width() - 20)
+    dim = theme.property("dim").name()
+    acc = theme.property("accent").name()
+    bg = theme.property("bg").name()
+
+    pane.setProperty("query", "found me")
+    spin(200)
+    img = win.grabWindow()
+    bands = find_bands(img, theme, x0, x1)
+    kinds = [b[0] for b in bands]
+    check("a find mark is never painted in the near-invisible selection fill",
+          "highlight" not in kinds, bands)
+    check("every match is marked, and exactly one of them is the current",
+          kinds.count("accent") == 1 and kinds.count("dim") >= 1, bands)
+    cur = [b for b in bands if b[0] == "accent"]
+    rest = [b for b in bands if b[0] == "dim"]
+    if cur:
+        fill, ink = band_ink(img, cur[0][1], cur[0][2], x0, x1)
+        check("the CURRENT match is an accent bar with bg ink",
+              (fill, ink) == (acc, bg), (fill, ink, acc, bg))
+    if rest:
+        fill, ink = band_ink(img, rest[0][1], rest[0][2], x0, x1)
+        check("another match is a dim bar with the body accent still on it",
+              (fill, ink) == (dim, acc), (fill, ink, dim, acc))
+    # stepping moves the accent bar, and leaves the one it came from lit
+    before = [b[1] for b in bands if b[0] == "accent"]
+    pane.stepMatch(1)
+    spin(250)
+    bands2 = find_bands(img := win.grabWindow(), theme, x0, x1)
+    after = [b[1] for b in bands2 if b[0] == "accent"]
+    check("find-next MOVES the accent bar", after and after != before,
+          (before, after, bands2))
+    check("...and the match it left is still marked",
+          [b[0] for b in bands2].count("dim") >= 1, bands2)
+    pane.setProperty("query", "")
+    spin(150)
+    check("clearing the query drops every mark",
+          not find_bands(win.grabWindow(), theme, x0, x1))
+
+
 def test_window(app, tmp):
     from PySide6.QtCore import Qt
 
@@ -483,7 +577,9 @@ def test_window(app, tmp):
     open(a, "w").write(
         "# Alpha\n\n" + ("a long paragraph of words that has to wrap several times "
                          "over in any sensible window width " * 6) +
-        "\n\nneedle in a haystack\n\n## Beta\n\n"
+        "\n\nneedle in a haystack\n\n"
+        # two blocks holding one word, for the find marks' pixel check
+        "found me once\n\nfound me twice\n\n## Beta\n\n"
         "```sh\necho beta\n```\n\nsee [b](sub/b.md)\n")
     open(b, "w").write("# Bravo\n\nneedle again\n\n## Charlie\n\nplain\n")
 
@@ -505,6 +601,7 @@ def test_window(app, tmp):
           2 < win.property("cellW") < 40, win.property("cellW"))
     test_wrap(engine, win.property("cellW"))
     test_focus_fade(win, pane, _keep[-1])
+    test_find_marks(win, pane, _keep[-1])
 
     # the files index feeds the browse pane
     check("the browse pane indexed both documents",
