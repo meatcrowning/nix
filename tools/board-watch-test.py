@@ -636,7 +636,8 @@ def test_the_loop():
         again = [l for l in r.text().splitlines() if "caught itself looping" in l]
         check("...once per streak, never once per run", len(again) == 1, str(again))
         check("...and nothing else in the file moved",
-              unmoved(r.text(), before, "caught itself looping"))
+              unmoved(r.text(), before, "caught itself looping",
+                      "Something typed into the board's box"))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -945,18 +946,24 @@ def main():
         p = r.run(spawn="exit 3")
         check("the watcher itself still exits 0", p.returncode == 0)
         after = r.text()
-        note = [l for l in after.splitlines() if "board-watch tried" in l]
+        note = [l for l in after.splitlines()
+                if "board-watch did not finish" in l]
         check("a failure note is on the board", len(note) == 1, str(note))
         check("...in WAITING ON YOU TO DO",
               after.index(note[0]) > after.index("## WAITING ON YOU TO DO")
               and after.index(note[0]) < after.index("## IN FLIGHT")
               if note else False)
-        check("...naming the decision", bool(note) and "First question" in note[0],
-              str(note))
+        # The decision's title is interpolated data of unknown length, so it
+        # sits on the bullet's INDENTED continuation line, not the summary.
+        lines = after.splitlines()
+        cont = lines[lines.index(note[0]) + 1] if note else ""
+        check("...naming the decision, on the continuation line under it",
+              "First question" in cont, cont[:80])
         rest_before = before.replace("- [ ] Do it the short way",
                                      "- [x] Do it the short way")
         check("...and nothing else in the file moved",
-              unmoved(after, rest_before, "board-watch tried"),
+              unmoved(after, rest_before, "board-watch did not finish",
+                      "the agent exited"),
               "%d vs %d chars" % (len(after), len(rest_before)))
         r.clear()
         r.run()
@@ -1035,13 +1042,19 @@ def main():
         r.note("check whether the clock is off by a pixel")
         r.run(spawn="exit 3")
         after = r.text()
-        bullet = [l for l in after.splitlines() if "what you typed into the board" in l]
+        bullet = [l for l in after.splitlines()
+                  if "what you typed could not be worked" in l]
         check("a failed orchestrator run leaves a bullet on the board", len(bullet) == 1,
               str(bullet))
+        # His sentence is data of unknown length, so it is quoted on the
+        # bullet's indented continuation line, under the dozen-word summary.
+        lines = after.splitlines()
+        cont = lines[lines.index(bullet[0]) + 1] if bullet else ""
         check("...quoting what he wrote, so it is not lost with the run",
-              bool(bullet) and "off by a pixel" in bullet[0], str(bullet))
+              "off by a pixel" in cont, cont[:80])
         check("...and moves nothing else in the file",
-              unmoved(after, before, "what you typed into the board"))
+              unmoved(after, before, "what you typed could not be worked",
+                      "Solomon exited"))
         print("work above the concurrency cap waits for a slot, on a tick")
         # The orchestrator fans out through `boardctl dispatch`, which refuses
         # to exceed the cap and files the rest instead. Somebody has to start

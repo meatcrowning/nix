@@ -457,9 +457,11 @@ def test_moves(tmp):
           and "with a note" in doc6["todo"][-1]["text"],
           [t["text"] for t in doc6["todo"]])
     check("...one row out, one bullet in, and nothing else touched",
-          # net +1: one table row leaves, and the bullet that replaces it costs
-          # two lines — itself and the `placed` stamp under it.
-          len(B.read(path).splitlines()) == len(src.splitlines()) + 1,
+          # net +2: one table row leaves, and the bullet that replaces it costs
+          # three lines — its summary line, the indented continuation the
+          # dozen-word first-line cap pushes the story onto, and the `placed`
+          # stamp under them.
+          len(B.read(path).splitlines()) == len(src.splitlines()) + 2,
           lines_differing(src, B.read(path)))
     check("...and it says which row it moved", got["what"] == "A thing being built")
 
@@ -1058,13 +1060,38 @@ def test_todo_tags(tmp):
     # ...and a TAGGED one lands, with his ordering intact: tag, short
     # description, then the elaboration.
     check("a tagged bullet lands",
-          bm.note("COMPLETION: **the tag rule** - every writer emits one now, "
-                  "and this sentence is the background that comes after.",
+          bm.note("COMPLETION: **the tag rule** - every writer emits one now.\n"
+                  "    This sentence is the background, on its own line.",
                   path=path))
     doc = B.parse(B.read(path))
     check("...and it reads tag first, description second",
           doc["todo"][-1]["text"].startswith("COMPLETION: the tag rule - "),
           doc["todo"][-1]["text"][:60])
+
+    # ---- the first line is AT MOST about a dozen words, mechanically ----
+    # His second complaint (2026-07-29): "still too long", after "a SHORT
+    # description" in the prompts did not hold. So the length is enforced at
+    # the same choke point as the tag, and the elaboration lives on the
+    # indented lines, which are not measured.
+    before = B.read(path)
+    try:
+        bm.note("COMPLETION: **the cap** - " + " ".join(["word"] * 13),
+                path=path)
+        check("a first line past about a dozen words is refused", False,
+              "it was written")
+    except B.BoardError as e:
+        check("a first line past about a dozen words is refused",
+              B.read(path) == before and "dozen" in str(e), str(e)[:80])
+    check("...a dozen exactly still lands (the headline's words count too)",
+          bm.note("COMPLETION: **the cap** - " + " ".join(["w"] * 10),
+                  path=path))
+    check("...a code span is ONE word, so interpolated data cannot refuse a "
+          "mechanical note",
+          bm.note("FAILED: **a worker is gone** - it was working on `%s`."
+                  % " ".join(["his", "own", "words"] * 10), path=path))
+    check("...and the INDENTED elaboration under it is not measured at all",
+          bm.note("PARTIAL: **the long story** - the summary fits.\n"
+                  "    " + " ".join(["detail"] * 40), path=path))
 
     # ---- the orchestrator writes one line per task IN ONE CALL ----
     # Its note is several bullets in one string, and on 2026-07-29 the second
@@ -1079,11 +1106,12 @@ def test_todo_tags(tmp):
     except B.BoardError:
         check("a multi-line note with an untagged second line is refused",
               B.read(path) == before)
+    n = len(B.parse(B.read(path))["todo"])
     check("...while every line tagged is fine, and lands as separate bullets",
           bm.note("INFORMATION: **one** - handed to Marbas, nothing landed yet.\n"
                   "INFORMATION: **two** - handed to Zepar, nothing landed yet.",
                   path=path)
-          and len(B.parse(B.read(path))["todo"]) == 4,
+          and len(B.parse(B.read(path))["todo"]) == n + 2,
           [t["text"] for t in B.parse(B.read(path))["todo"]])
     check("...and an INDENTED continuation line needs no tag of its own",
           bm.note("PARTIAL: **a wrapped one** - the first line,\n"
@@ -1158,8 +1186,8 @@ def test_todo_tags(tmp):
                "items while you are there")
     check("a bullet quoting his words survives every one of those",
           bm.note("FAILED: **a worker stopped without finishing** - it was "
-                  "working on %s, and recorded nothing."
-                  % B.oneline(hostile, 200, code=True), path=path))
+                  "working on %s." % B.oneline(hostile, 200, code=True),
+                  path=path))
     check("...with what he typed intact inside the code span, on one line",
           "`do the **thing** and COMPLETION: the other, plus two more items "
           "while you are there`" in B.read(path),

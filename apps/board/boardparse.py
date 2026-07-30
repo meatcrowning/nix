@@ -32,7 +32,8 @@ parser keys on):
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions. Each one
                               starts with a TAG (`QUESTION:`, `INFORMATION:`,
                               `COMPLETION:`, `PARTIAL:`, `FAILED:`) and then a
-                              short description; background goes after that.
+                              summary of about a dozen words at most; background
+                              goes on indented continuation lines under it.
                               `add_todo_bullet` refuses one that does not —
                               READING is unaffected, an old untagged bullet
                               parses and draws exactly as it always did
@@ -954,6 +955,14 @@ def add_landed_row(lines, commit, what, date=None, when=""):
 # draws them as two blocks with a gap; `text` stays the joined string every
 # other consumer already reads.
 #
+# "SHORT" got a number on 2026-07-29, because prose alone did not hold: he came
+# back with *"still too long"* after the ordering rule above landed. The first
+# line after the tag is AT MOST about a dozen words (`SUMMARY_MAX_WORDS`,
+# enforced by `check_short_summary` at the same choke point); everything past
+# that budget belongs on the indented continuation lines. A code span counts as
+# ONE word — his interpolated words are data, and a note saying a worker died
+# must never be refused for the length of the thing it died on.
+#
 # The TAG is checked HERE, at the one function every writer of that section goes
 # through (`boardmove.note`, `boardmove.stall`, the `why` of `give_back`, and
 # board-watch's four failure templates). One choke point, so a new writer cannot
@@ -1021,6 +1030,53 @@ def check_todo_tag(bullet):
             raise _tag_refusal(line)
     if not bullet.strip():
         raise _tag_refusal(bullet)
+    return bullet
+
+
+#: His limit, 2026-07-29: after the tag, the first line is a summary of "at
+#: most about a dozen words". Twelve, because that is what a dozen is; the
+#: counting is generous instead (a code span is one word, bare punctuation is
+#: none), so the slack "about" implies is in the measure, not the number.
+SUMMARY_MAX_WORDS = 12
+
+_TAG_LEAD = re.compile(r"^\s*[-*+]?\s*(?:%s):\s*" % "|".join(TODO_TAGS))
+
+
+def _summary_words(line):
+    """The countable words of a bullet's first line, after the tag.
+
+    A code span collapses to one word — it is interpolated DATA (his typed
+    task, a path) and the mechanical failure templates must stay writable
+    whatever is in it. `**` is ignored, so the headline's words count like any
+    others: a twenty-word headline is exactly the disease the cap is for.
+    A token with no letter or digit in it (the `-` separator) is not a word.
+    """
+    rest = _CODE.sub("code", _TAG_LEAD.sub("", line, count=1))
+    return [w for w in rest.replace("**", " ").split()
+            if any(c.isalnum() for c in w)]
+
+
+def check_short_summary(bullet):
+    """Refuse a bullet whose FIRST line runs past about a dozen words.
+
+    His rule, and a repeat one — the prompts said "a SHORT description" and he
+    came back with "still too long", so the length is now mechanical at the
+    same choke point as the tag. Every unindented line is a bullet of its own
+    and is measured on its own; the indented continuation lines under it are
+    where the elaboration lives and are not measured at all. A REFUSAL, like
+    the tag check: the writing agent reads it and moves its prose down a line.
+    """
+    for line in bullet.split("\n"):
+        if not line.strip() or line[:1].isspace():
+            continue
+        words = _summary_words(line)
+        if len(words) > SUMMARY_MAX_WORDS:
+            raise BoardError(
+                "the first line of a WAITING ON YOU TO DO bullet is the tag, "
+                "then a summary of at most about a dozen words (%d max, this "
+                "one has %d) - move the elaboration to INDENTED continuation "
+                "lines under it. Got: %s"
+                % (SUMMARY_MAX_WORDS, len(words), line.strip()[:80]))
     return bullet
 
 
@@ -1129,7 +1185,7 @@ def check_one_ask(bullet):
     return bullet
 
 
-def oneline(text, limit=160, code=False):
+def oneline(text, limit=160, code=False, words=None):
     """His words, or another agent's title, made safe to interpolate into a
     bullet. Collapses every run of whitespace — a newline in the middle of a
     template used to make its second line an untagged bullet, and the whole
@@ -1143,12 +1199,19 @@ def oneline(text, limit=160, code=False):
     only where the text has to sit inside a `**headline**`, and accept that it
     loses those two markers there — a glob like `apps/**/qml` is exactly why
     this is a flag and not a blanket strip.
+
+    `words=` caps the WORD count too. A span already counts as one word to
+    `check_short_summary`, so only the plain form needs this: a headline built
+    from his row title must fit the first line's dozen-word budget whatever he
+    called the row.
     """
     s = " ".join(str(text or "").split()).replace("`", "'")
     if not code:
         s = s.replace("**", "")
         for t in TODO_TAGS:
             s = re.sub(r"\b%s:" % t, t, s)
+    if words is not None and len(s.split()) > words:
+        s = " ".join(s.split()[:words]) + "..."
     if len(s) > limit:
         s = s[:limit].rstrip() + "..."
     return ("`%s`" % s) if code and s else s
@@ -1166,6 +1229,9 @@ def add_todo_bullet(lines, doc, bullet, when=None):
     """
     check_todo_tag(bullet)
     check_one_ask(bullet)
+    # After the bundling check on purpose: a message that is two asks in one is
+    # refused as THAT, not as a long line, so the retry fixes the real thing.
+    check_short_summary(bullet)
     if not bullet.endswith("\n"):
         bullet += "\n"
     stamp = placed_now(when)

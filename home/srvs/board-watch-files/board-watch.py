@@ -446,11 +446,17 @@ def save_state(d):
 #: keeps for "it was attempted and nothing landed". That is the whole reason the
 #: tag set is not just his three: these four templates exist so a failure cannot
 #: read as information, and the tag now says so in the first word.
+#: The first line of each template fits `boardparse.SUMMARY_MAX_WORDS` — about
+#: a dozen words after the tag — with the story on indented continuation lines,
+#: because these go through the same `add_todo_bullet` checks as everything
+#: else and a refused failure note is the one failure this file must not have.
+#: `{how}` and the interpolated titles stay OFF the first line for that reason:
+#: their length is not this file's to choose.
 FAIL_TEMPLATE = (
-    "- FAILED: **board-watch tried decision {num} and did not finish it** - it "
-    "was `{title}`; the agent exited {how}. Nothing was committed on its "
-    "behalf; the answer is still on record above. Log: "
-    "`~/.cache/board-watch.log`\n")
+    "- FAILED: **board-watch did not finish decision {num}** - nothing was "
+    "committed.\n"
+    "    It was `{title}`; the agent exited {how}. The answer is still on "
+    "record above. Log: `~/.cache/board-watch.log`\n")
 
 
 #: A worker's process is gone and it never used `note`, `land` or `ask`. It did
@@ -466,9 +472,10 @@ FAIL_TEMPLATE = (
 #: exists to prevent. Same for `{title}` and `{text}` below.
 WORKER_FAIL = (
     "- FAILED: **a worker stopped without finishing** - it was working on "
-    "`{task}`, dispatched from something you typed into the box, and it "
-    "recorded nothing on this board, so nothing landed for it. Answer or type "
-    "it again to have another go. Log: `~/.cache/board-work/{aid}.log`\n")
+    "`{task}`.\n"
+    "    Dispatched from something you typed into the box; it recorded "
+    "nothing on this board, so nothing landed for it. Answer or type it "
+    "again to have another go. Log: `~/.cache/board-work/{aid}.log`\n")
 
 
 def note_on_board(bullet):
@@ -518,13 +525,15 @@ the loop from `{repo}` with exactly one of:
        python3 apps/board/tools/boardctl.py note '<TAG>: **<title>** - <what \
 is done, what is not, and whether a rebuild is now pending and why>'
 
-   **A note STARTS WITH A TAG, then a short description, and only then any \
-background.** One of `COMPLETION:` (it is done and on his machine), `PARTIAL:` \
-(some of it landed, some did not — including "it needs a rebuild, which you may \
-not run"), `FAILED:` (nothing landed), `QUESTION:` (you need a word from him \
-before anything else moves) or `INFORMATION:` (a fact, nothing asked of him). \
-The tool refuses an untagged bullet; it is how he tells at a glance what a line \
-on that list is about.
+   **A note STARTS WITH A TAG, then a summary of AT MOST about a dozen words \
+on that same first line — the tool refuses more.** Every elaboration or \
+background goes on INDENTED continuation lines under it, a sentence or two, \
+not a paragraph. The tag is one of `COMPLETION:` (it is done and on his \
+machine), `PARTIAL:` (some of it landed, some did not — including "it needs a \
+rebuild, which you may not run"), `FAILED:` (nothing landed), `QUESTION:` (you \
+need a word from him before anything else moves) or `INFORMATION:` (a fact, \
+nothing asked of him). The tool refuses an untagged bullet too; tag and short \
+summary are how he tells at a glance what a line on that list is about.
 
    **ONE BOARD ITEM PER ASK.** If you have more than one thing to report, that \
 is more than one `note` call — never several folded into one message, in the \
@@ -654,10 +663,10 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
 
 
 QUEUE_FAIL = (
-    "- FAILED: **nobody could work out what to do with what you typed into the board** "
-    "- Solomon exited {how}. Nothing was dispatched and nothing was "
-    "committed. What you wrote, so it is not lost: {text} Log: "
-    "`~/.cache/board-watch.log`\n")
+    "- FAILED: **what you typed could not be worked** - nothing was "
+    "dispatched.\n"
+    "    Solomon exited {how}; nothing was committed either. What you wrote, "
+    "so it is not lost: {text} Log: `~/.cache/board-watch.log`\n")
 
 
 #: The orchestrator plans and dispatches; it does not do the work. So it is
@@ -785,12 +794,12 @@ SPIN_WINDOW_S = float(os.environ.get("BOARD_WATCH_SPIN_WINDOW", "60"))
 SPIN_BACKOFF_S = float(os.environ.get("BOARD_WATCH_SPIN_BACKOFF", "60"))
 
 SPIN_NOTE = (
-    "- FAILED: **board-watch caught itself looping and slowed down** - something he "
-    "typed into the board's box could not be worked, so the inbox queue never "
-    "emptied and the watcher was re-triggered over and over. It is now backing "
-    "off to one run a minute and will pick the work up by itself once the cause "
-    "is fixed. Nothing was lost: it is still in `~/.local/state/board/inbox/"
-    "queue/`. Log: `~/.cache/board-watch.log`\n")
+    "- FAILED: **board-watch caught itself looping and slowed down**\n"
+    "    Something typed into the board's box could not be worked, so the "
+    "inbox queue never emptied and the watcher was re-triggered over and "
+    "over. It is now backing off to one run a minute and will pick the work "
+    "up by itself once the cause is fixed. Nothing was lost: it is still in "
+    "`~/.local/state/board/inbox/queue/`. Log: `~/.cache/board-watch.log`\n")
 
 
 def spin_guard(state):

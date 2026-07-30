@@ -71,7 +71,14 @@ binds every writer, `boardmove.note` and both prompts included.
 INFORMATION whatever text, then a single line summarizing, a new line, and THEN
 the elaboration if needed. it shouldnt really elaborate that much though"*. So:
 
-- **ONE line of summary**, on the bullet's own line, after the tag. Not two.
+- **ONE line of summary, AT MOST about a dozen words**, on the bullet's own
+  line, after the tag. Not two lines, and not a long one: "a SHORT description"
+  alone did not hold — he came back with *"still too long"* (2026-07-29) — so
+  the length is mechanical now. `boardparse.check_short_summary` refuses a
+  first line past `SUMMARY_MAX_WORDS` (12), counting a code span as ONE word
+  (interpolated data must not make a mechanical note refusable) and counting
+  the `**headline**`'s words like any others (a twenty-word headline is the
+  disease, not an exemption).
 - **The elaboration, if there has to be one, goes on INDENTED continuation lines
   under it — and it is a sentence or two, not a paragraph.** "it shouldnt really
   elaborate that much" is the instruction to the writers, not a layout note: a
@@ -127,11 +134,16 @@ Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 - **`QUESTION:` is not a decision.** A decision is a numbered item in NEEDS YOU
   with options and an `*If unanswered:*` line (`boardmove.ask`). This tag is the
   small "say the word and X" an agent leaves on its way out.
-- **The check is in `boardparse.add_todo_bullet`** — the one function every
+- **The checks are in `boardparse.add_todo_bullet`** — the one function every
   writer of that section already goes through — so a new writer cannot be added
-  that forgets, and an untagged bullet is **REFUSED**, not defaulted. A
-  refusal is an error the writing agent reads and fixes in one retry; a default
-  would put a wrong word in front of his message.
+  that forgets, and an untagged bullet or an over-long first line is
+  **REFUSED**, not defaulted or truncated. A refusal is an error the writing
+  agent reads and fixes in one retry; a default would put a wrong word in
+  front of his message, and a truncation would cut a summary he never wrote.
+  The mechanical writers obey the same cap: `stall`'s and `reconcile`'s
+  bullets and board-watch's four failure templates all keep their first line
+  inside the budget and put the story on indented continuation lines, with
+  interpolations of unknown length (`{how}`, his titles) off the first line.
 - **Every LINE is checked, not just the first.** The orchestrator writes one
   line per task in one `note` call, and `note` prefixes `- ` **per line**: doing
   it once for the whole string left the second line a bare paragraph glued onto
@@ -745,7 +757,8 @@ assumed.
   landed yet; one more line for anything it asked, tagged `QUESTION:`. The tag
   is *inside* this budget and not a second rule beside it — the line is still
   one line. The prompt states that as a
-  budget — *one line each, 25 words at the most, no second paragraph* — because "concise"
+  budget — *one line each, about a dozen words after the tag at the most, no
+  second paragraph*, the same number `check_short_summary` enforces — because "concise"
   bought a 150-word paragraph that restated his own sentence back at him
   (2026-07-29: *"it really doesnt need to elaborate that much. im not even sure
   it needed to tell me any of that"*). Four things are named there as things to
