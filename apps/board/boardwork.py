@@ -706,6 +706,15 @@ inbox between steps, so nothing is interrupted and nothing is instant. \
 `queued` means that worker had already gone, and the item is waiting for the \
 next agent instead — which is why the words have to stand on their own. Neither \
 outcome loses it; neither is immediate.
+  * **A collision is never grounds for LEAVING THE ITEM ALONE.** His rule, \
+2026-07-29: *"in the future instead of leaving it alone you should pass it to \
+the minister holding the files"*. Noting that you left work undone to avoid a \
+collision is not an outcome — hand it over. An agent had found the cause of \
+goetia's flashing titlebar text, saw `apps/pylib/vtbclient.py` was held by \
+another worker, and dropped the fix "rather than collide", losing it to save \
+one handoff. And when `inbox send` answers `queued`, that worker has already \
+gone — so the collision has too: re-check `agents` and `dispatch` it instead of \
+leaving it waiting on an indeterminate next agent.
   * **Hand over only what is genuinely the same work.** An item that can stand \
 on its own gets its own worker even if it is nearby, because a handoff waits on \
 somebody else's pace. In two minds: dispatch.
