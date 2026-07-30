@@ -1013,6 +1013,23 @@ Window {
         }
     }
 
+    // ---- find in page (Ctrl+F) ----
+    // The key is caught by main.py's window-scoped HotkeyFilter, not by a QML
+    // Shortcut: Chromium holds the keyboard whenever a view has the focus, so a
+    // Shortcut here would race the page for it — the same reason Ctrl +/-/0 go
+    // through ZoomFilter. It searches the FOCUSED pane (win.current), like every
+    // other pane-agnostic control, and docks below the permission bar while that
+    // one is up rather than under it.
+    FindBar {
+        id: findBar
+        view: win.current
+        dockY: permBar.visible ? permBar.height : 0
+    }
+    Connections {
+        target: Hotkeys
+        function onFind() { findBar.openFind(); }
+    }
+
     // ---- dark-mode config panel: a drawer that slides out from the "dm"
     // button. The hyprvtb titlebar (where the button lives) is on the window's
     // RIGHT edge, and the button sits near the top of that column, so the panel

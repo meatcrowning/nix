@@ -10,6 +10,49 @@ chrome via hyprvtb like the others.
 
 **Wheel events in this window are rescaled, and QML must undo it.** `ZoomFilter` divides every touchpad wheel event by `pylib/kinetic.py`'s `WHEEL_GAIN` (1/6) so QtWebEngine pages track the finger at the same rate the QML apps do; that is window-wide, so any scrollable QML surface here takes `wheelGain: WheelGain` (the reciprocal, published by `main.py` from the same constant) — the file picker does. Real mouse detents are passed through untouched (`is_wheel_detent`); applying the gain to them made top's wheel scroll pages at 1/6 speed twice already. The page itself is Chromium's own scroller and cannot use `WheelScroll`: parity there is the gain plus the compositor's >=300 ms withheld stop, which zeroes Chromium's 200 ms fling estimator so it adds no fling of its own. See [`../AGENTS.md`](../AGENTS.md).
 
+## Find in page — `Ctrl+F`, and the key cannot be a QML `Shortcut`
+
+`qml/FindBar.qml` + `HotkeyFilter` in `main.py`, wired in `Main.qml`. The desktop
+rule is `docs/DESIGN.md` §11.2 (search is `Ctrl+F` in every program); **surfer is
+the one program where §11.2's "bind it window-scoped with a QML `Shortcut`" does
+not hold**, and that is recorded there as a divergence rather than left to be
+rediscovered:
+
+- **Chromium owns the keyboard whenever a `WebEngineView` has the focus** — i.e.
+  almost always in this window. So the key is taken by a **window-scoped event
+  filter**, exactly where Ctrl +/-/0 are taken (`ZoomFilter`'s docstring has the
+  reasoning: the `QQuickWindow` sees platform input *before* the view item, and
+  an app-wide filter segfaults this PySide6/Py3.14 build). `HotkeyFilter`
+  consumes the event, so a page that binds `Ctrl+F` itself never sees it either.
+- **Escape is NOT in that filter, deliberately.** It only has to close the bar
+  while the bar's own field holds the keyboard, and Qt delivers it there;
+  claiming Escape window-wide would take it from every page that uses it. The
+  cost is that a bar left open while the *page* has the focus closes on its `x`,
+  not on Escape.
+- **The count comes back on `findTextFinished`, never on `findText`'s callback
+  argument.** On PySide6/QtWebEngine 6.11 that third-argument callback is
+  **never invoked at all** (measured: 0 calls, while the signal fired with the
+  right `numberOfMatches` for the same find). A find bar built on the callback
+  reads "no matches" on every query — silently, since the search itself works.
+- It searches `win.current`, the **focused pane**, like every other control here;
+  switching pane or tab clears the highlight off the view it was searching first.
+  `findText("")` is what drops a highlight.
+- Chromium **resumes** a re-issued query near the match it was last on, not at
+  the first one — so an absolute `n/m` assertion after a re-search is a race.
+
+Verified offscreen by **[`tools/find-test.py`](tools/find-test.py)** (+ its
+`find-test.qml` fixture): 28 checks over the real `FindBar.qml` and a real
+off-the-record `WebEngineView` — which keys the filter claims, `Ctrl+F` opening
+the bar and taking the keyboard from the view, the match count and both step
+directions (buttons *and* `Enter`/`Shift+Enter`), "no matches", the empty query,
+a second `Ctrl+F` re-selecting rather than appending, and Escape closing +
+clearing + handing the focus back. It also asserts `Main.qml` still instantiates
+and connects the bar, so the fixture cannot end up testing a hotkey the browser
+has lost. It borrows the packaged wrapper's *environment* (an offscreen
+WebEngineView still needs `qtwebenginequickplugin` on the QML import path) but
+never runs the wrapper — its third line would hand the arguments to the user's
+live browser.
+
 ## Ad blocking — the engine is only half of it
 
 `AdBlocker` + `Cosmetic` in `main.py`. The engine is Brave's adblock-rust (the
