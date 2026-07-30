@@ -38,6 +38,21 @@ Item {
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
 
+    //: pad the label out to this many characters, so that two of these stacked
+    //  put their `v` in the SAME COLUMN. They are centred and the font is
+    //  monospace, so a label one character shorter than its neighbour's moved
+    //  the arrow half a cell — measured offscreen at 845 against 849, which is
+    //  [his] *"the down arrows of the two dropdowns are not vertically aligned"*.
+    //  The caller knows both labels and so owns the number; 0 means no padding
+    //  and one of these on its own needs none.
+    property int padTo: 0
+    readonly property string pad: {
+        var s = "";
+        for (var i = pick.label.length; i < pick.padTo; i++)
+            s += " ";
+        return s;
+    }
+
     // One font cell plus the padding every small control here uses, so the two
     // of them stack as equal rungs.
     implicitWidth: pickText.implicitWidth + 16
@@ -65,7 +80,7 @@ Item {
         // `v` is the one glyph this font does have for "opens downward" - §2.3
         // rules out the triangles, and the section bands already use this ASCII
         // vocabulary.
-        text: pick.label + "  v"
+        text: pick.label + pick.pad + "  v"
         color: hov.hovered ? pick.fgAccent : pick.fgDim
     }
     MouseArea {
