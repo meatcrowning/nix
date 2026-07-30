@@ -844,9 +844,8 @@ def agents(procs=None):
         # SOLOMON SPEAKS IN HIS OWN VOICE for the two words he actually uses —
         # `dispatching` -> *"Solomon summons"*, `waiting` -> *"Solomon awaits
         # <agent>..."*, both his exact wordings. Everything else, his card
-        # included, goes through the one shared table (`PHASE_PREDICATE`), so the
-        # verb form and the animated `...` cannot drift between his card and a
-        # worker's.
+        # included, goes through the one shared `boardphase.predicate`, so the
+        # verb form cannot drift between his card and a worker's.
         a["saysLine"] = bph.orch_says_line(obs, who, awaits) if orch \
             else bph.says_line(obs, who)
         # ...and its SECOND line: what it said it is doing, on its own line

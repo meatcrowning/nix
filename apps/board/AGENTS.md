@@ -1096,22 +1096,21 @@ The short version, and every line of it is a rule:
   cell and never the literal word "agent". `boardphase.orch_says_line` is the
   override and it is deliberately thin: every other word of his falls through to
   the shared table below, so *his* card cannot drift from a worker's.
-- **A CLAIM IS DRAWN IN SIMPLE PRESENT, AND ITS ELLIPSIS MOVES** — [his,
-  2026-07-29] *"instead of the agent verb-part being 'is researching' or 'is
-  coding' etc it should just say 'researches...' or 'codes...' with animated
-  elipsies"*. `boardphase.PHASE_PREDICATE` is the ONE table that turns a phase
-  word into the predicate after the agent's name, every card included, so the
-  verb form cannot drift; `PHASE_WORDS` must have an entry in it (asserted).
-  Three rules in it:
-    - It maps to a **predicate**, not a verb — which is what lets `blocked` keep
-      `is blocked`, the one word in the menu that is not a gerund and whose
-      `blocks` would say the opposite.
-    - An **off-list word** (any single word is legal) gets `is <word>`. An
-      auxiliary is a worse sentence than the table; conjugating an unknown word
-      into a form it may not have is worse than either.
-    - `TICKLESS` is which predicates get **no** trailing `...`: `blocked` today.
-      A stall is not motion, which is §10 and the same reason the observed line's
-      tick is scoped to `observed == "ok"`.
+- **THE VERB LINE IS `<name> is <word>`, AND THE DOTS ARE NOT ON IT.**
+  `boardphase.predicate()` is the ONE place a phase word becomes words on a card,
+  every card included, so the verb form cannot drift between his card and a
+  worker's. **Both halves of this are his, twice.** The verb was the simple
+  present (*"it should just say 'researches...' or 'codes...'"*) for about an hour
+  on 2026-07-29 and he walked it back the same evening: *"sorry, change the top
+  line of an agents card back to 'is reading' or 'is coding' etc"*. Do not
+  "restore" the simple present. And the ticking `...` moved off this line at his
+  ask — *"take the animated elipsies out of the top line"* — onto the claim's
+  words below it, then off the THIRD line entirely: *"the third line of an agents
+  card should not have the animated elipsies or any elipsies at the end of it"*.
+  So on a worker's card exactly ONE line ticks, the claim's own words.
+  `TICKLESS` is which phase words leave even that line bare: `blocked` today,
+  because a stall is not motion (§10, the same rule that used to scope the
+  observed line's tick to `observed == "ok"`).
   **And the claim is TWO lines, not one hyphenated one** — [his, 2026-07-29] the
   card reads *"Marbas researches..."* and then *"the vtbclient parser"* under it.
   `says_line` is the verb line alone and `says_detail` is the words the agent

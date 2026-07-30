@@ -38,10 +38,9 @@ import "../../qmlcommon"
 //   <the description>  derived from the tool calls in its live transcript
 //                      (`boardphase.py`). Carries the VERB — "editing
 //                      Main.qml" — and cannot be faked, forgotten or left
-//                      stale. No subject, no opener, and a ticking `...` on
-//                      the end of it while that is happening NOW (`liveDots`
-//                      below; the dots are the only moving thing on the card,
-//                      and the claim line above ticks through the same field).
+//                      stale. No subject, no opener, and NO dots on the end of
+//                      it: the one ticking `...` on a worker's card is on the
+//                      claim's own words, the line above this one.
 //
 // **Both lines are built in `boardphase.py` (`says_line`/`doing_line`), not
 // here**, because the joining is a judgement about the real strings rather than
@@ -184,36 +183,32 @@ Item {
     readonly property bool summoner: agent && agent.kind === "orchestrator"
     readonly property color leadTone: (running || summoner) ? fgText : fgDim
 
-    // ---- the tick on the end of the observed line ----
-    // His: *"at the end of the second row of an agents information, it should
-    // have an animated elipsies to show its currently happening"*. So the
-    // observed line ends in `.`, `..`, `...`, cycling, and the card reads as
-    // live without a number anywhere on it.
+    // ---- the tick, and WHICH line carries it ----
+    // His, twice over. First: *"at the end of the second row of an agents
+    // information, it should have an animated elipsies to show its currently
+    // happening"*. Then, once the claim became two lines: *"take the animated
+    // elipsies out of the top line"* and *"the third line of an agents card
+    // should not have the animated elipsies or any elipsies at the end of it"*.
     //
-    // **It is drawn HERE and not in `doing_line()`**, which builds prose: an
-    // animated suffix is not prose, it is presentation, and putting it in the
-    // Python would mean the sentence a test asserts on changed four times a
-    // second and the model re-emitted on a timer.
+    // So the dots live on ONE line of a worker's card — the claim's own words,
+    // the second — and the OBSERVED line (the third) carries none at all. There
+    // is no `liveDots` appended to prose any more: the only thing that ticks is a
+    // line whose TEXT ends in `...`, and `boardphase.py` decides which those are
+    // (`says_detail`, and Solomon's own startup phrases, which are the first line
+    // of his card because he has claimed nothing yet).
     //
-    // **It claims only what is true.** `ok` is the one observed state that
-    // means a tool call happened recently; `nothing recently`, `nothing yet`
-    // and the unlinked line are the states where something is NOT happening, so
-    // they get no tick — an animation over those would be the dishonest
-    // affordance §10 forbids, and a stopped agent's past-tense line likewise.
+    // **The three cells are drawn HERE and not in the Python**, which builds
+    // prose: an animated suffix is presentation, and in the Python the sentence a
+    // test asserts on would change four times a second.
     //
     // ASCII dots, never U+2026 (§2.3), and the field is **always three cells
     // wide** — the trailing spaces are what stop the line reflowing under a
     // wrap as the dots cycle, exact because the font is monospace (§2.7).
-    readonly property bool ticking: running && observed === "ok" && doingLine !== ""
     property int dotPhase: 0
-    // The three cells themselves, and there is ONE of them on this card. Every
-    // line that ends in `...` animates through this same field on the same
-    // timer, so nothing on the card is a second dot cycle out of step with the
-    // first.
+    // The three cells themselves, and there is ONE of them on this card, so no
+    // two lines can tick out of step.
     readonly property string dots: motion.reduceMotion
                                    ? "..." : [".  ", ".. ", "..."][dotPhase % 3]
-    readonly property string liveDots: ticking && !doingLine.endsWith("...")
-                                       ? dots : ""
     // A SENTENCE THAT ENDS IN `...` ANIMATES THOSE THREE CELLS — [his,
     // 2026-07-29] *"it should just say 'researches...' or 'codes...' with
     // animated elipsies"*, and the same for Solomon's own lines. `boardphase.py`
@@ -230,7 +225,7 @@ Item {
     Motion { id: motion }
     Timer {
         interval: Math.max(60, motion.ms(motion.slideMs))
-        running: (row.ticking || row.saysLine.endsWith("...")
+        running: (row.saysLine.endsWith("...")
                   || row.saysDetail.endsWith("...")
                   || row.doingLine.endsWith("...")) && !motion.reduceMotion
                  && row.visible
@@ -383,7 +378,13 @@ Item {
             visible: row.doingLine !== ""
             height: visible ? implicitHeight : 0
             color: row.saysLine === "" ? row.leadTone : row.fgDim
-            text: row.tick(row.doingLine) + row.liveDots
+            // NO trailing dots here — [his, 2026-07-29] *"the third line of an
+            // agents card should not have the animated elipsies or any elipsies
+            // at the end of it"*. `tick()` still runs over it, because Solomon's
+            // startup phrases arrive on this property and end in `...` of their
+            // own; on his card they are the FIRST line drawn (he has claimed
+            // nothing yet), so this is not that third line.
+            text: row.tick(row.doingLine)
         }
 
         // ---- THIRD LINE ----
