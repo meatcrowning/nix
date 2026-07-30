@@ -1082,7 +1082,9 @@ Window {
             // the drawn word only.
             SectionHead {
                 width: page.width
-                label: "triangle"
+                // "the triangle", with the article, matching "the circle" on
+                // Solomon's own card - [his, 2026-07-29].
+                label: "the triangle"
                 collapsed: win.isCollapsed("agents")
                 fgAccent: win.fgAccent
                 fgDim: win.fgDim

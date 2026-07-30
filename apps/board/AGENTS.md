@@ -1112,18 +1112,26 @@ The short version, and every line of it is a rule:
   cell and never the literal word "agent". `boardphase.orch_says_line` is the
   override and it is deliberately thin: every other word of his falls through to
   the shared table below, so *his* card cannot drift from a worker's.
-- **THE VERB LINE IS `<name> is <word>`, AND THE DOTS ARE NOT ON IT.**
-  `boardphase.predicate()` is the ONE place a phase word becomes words on a card,
-  every card included, so the verb form cannot drift between his card and a
-  worker's. **Both halves of this are his, twice.** The verb was the simple
+- **THE VERB LINE IS `<name> is <word>`, AND THE DOTS ARE ON IT AND NOWHERE
+  ELSE.** `boardphase.predicate()` is the ONE place a phase word becomes words on
+  a card, every card included, so the verb form cannot drift between his card and
+  a worker's. **Both halves of this are his, twice.** The verb was the simple
   present (*"it should just say 'researches...' or 'codes...'"*) for about an hour
   on 2026-07-29 and he walked it back the same evening: *"sorry, change the top
   line of an agents card back to 'is reading' or 'is coding' etc"*. Do not
-  "restore" the simple present. And the ticking `...` moved off this line at his
-  ask — *"take the animated elipsies out of the top line"* — onto the claim's
-  words below it, then off the THIRD line entirely: *"the third line of an agents
-  card should not have the animated elipsies or any elipsies at the end of it"*.
-  So on a worker's card exactly ONE line ticks, the claim's own words.
+  "restore" the simple present. The ticking `...` moved around the card that same
+  evening and has SETTLED on the TOP line: it left the top line
+  (*"take the animated elipsies out of the top line"*), then left the third
+  (*"the third line ... should not have the animated elipsies or any elipsies at
+  the end of it"*), and then he said it twice more — **"the only line of an agents
+  card that should have the animated elipsies is the top line. no others"**. That
+  is the rule now, and it is the LAST word: exactly one line ticks, the card's
+  first, and every other line is drawn through `AgentRow.untick()` so a sentence
+  an agent ended in dots of its own loses them entirely rather than sitting frozen
+  at three. `says_line` is where the suffix is added; `says_detail` adds none.
+  On Solomon's card the first line is his own (`orch_says_line`), so that is the
+  one that ticks — and when a card has no claim at all, the observed line is
+  first and inherits it.
   **And the words below never repeat the verb above them** — [his, 2026-07-29]
   *"if the verb at the end of the top line is the same as the verb at the start of
   the second line, then hide the verb"*. `_drop_repeated_verb` strips a leading

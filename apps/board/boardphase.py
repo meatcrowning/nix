@@ -405,10 +405,9 @@ def predicate(word):
     return "is %s" % w if w else ""
 
 
-#: The phase words whose line does NOT end in an animated `...` — the dots are on
-#: the claim's words (`says_detail`), and a stall is not motion: an animation over
-#: a state where nothing is happening is the dishonest affordance
-#: docs/DESIGN.md §10 forbids.
+#: The phase words whose line does NOT end in an animated `...`. A stall is not
+#: motion: an animation over a state where nothing is happening is the dishonest
+#: affordance docs/DESIGN.md §10 forbids.
 TICKLESS = ("blocked",)
 
 
@@ -569,11 +568,16 @@ def says_line(rec, who=""):
         # under this one — [his, 2026-07-29] the card is two lines, the verb and
         # then the words that used to follow a hyphen on this one.
         #
-        # **The ticking `...` belongs to that lower line, not this one** — [his,
-        # 2026-07-29] *"take the animated elipsies out of the top line"*. It
-        # marks the END of what the card is saying, and with two lines the end is
-        # the second one.
-        return "%s %s" % (subj, predicate(phase))
+        # **THE TICKING `...` IS THIS LINE'S AND NO OTHER LINE'S** — [his,
+        # 2026-07-29, and it settles a reversal] *"the only line of an agents
+        # card that should have the animated elipsies is the top line. no
+        # others"*. The dots sat on `says_detail` for part of that evening (*"take
+        # the animated elipsies out of the top line"*); this is the later word and
+        # it wins. Every other line on the card ends on its own words, with no
+        # dots at all rather than three frozen ones. `AgentRow.qml` cycles the
+        # three cells; `TICKLESS` says which phases get none.
+        return "%s %s%s" % (subj, predicate(phase),
+                            "" if phase.lower() in TICKLESS else "...")
     if doing:
         # No phase word to lean on, so the words are quoted rather than forced
         # into a sentence they may not fit.
@@ -698,10 +702,10 @@ def says_detail(rec):
     [his, 2026-07-29] the card reads *"Marbas researches"* and then *"the
     vtbclient parser..."* under it, where the two used to share one hyphenated
     line. Verbatim is the point — this is his agent's own sentence, so it is split
-    off and never reformatted; the only thing added is the trailing `...`, which
-    is HERE and not on the verb line above because the dots mark the end of what
-    the card is saying ([his, 2026-07-29] *"take the animated elipsies out of the
-    top line"*). ASCII, and `AgentRow.qml` cycles the three cells.
+    off, never reformatted and never decorated: the ticking `...` is the TOP
+    line's alone — [his, 2026-07-29] *"the only line of an agents card that should
+    have the animated elipsies is the top line. no others"* — so this one ends on
+    the agent's last word.
 
     "" when it named no words, and "" when it named no PHASE either: with no verb
     line to sit under, `says_line` quotes the words itself and repeating them here
@@ -713,9 +717,7 @@ def says_detail(rec):
         return ""
     words = " ".join((rec.get("claimDoing") or "").split())
     words = _drop_repeated_verb(phase, words)
-    if not words:
-        return ""
-    return words if phase.lower() in TICKLESS else words + "..."
+    return words
 
 
 def doing_line(rec, who="", running=True):
