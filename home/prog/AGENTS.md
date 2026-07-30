@@ -480,6 +480,24 @@ window would appear in it**, and filter on the output:
 - Three headless-parent designs were tried and rejected first; `tools/sandbox.sh`'s
   header records why, so they do not get retried.
 
+### When only PIXELS can answer it: `tools/vtb-titletext-test.sh`
+
+Some of what this plugin does has no observable effect except drawn pixels, and
+`TITLETEXT <0|1>` (2.95, goetia's "my title region carries no text") is the
+worst case: the app-side send is unit-tested, `ipc_dump()` shows the flag was
+stored, and **a stored flag the render path ignores looks identical from both.**
+So that harness puts two real clients on the sandbox monitor — one declaring
+`TITLETEXT 0`, one not — and counts the ink in the title run of each bar. It
+tests the plugin that is actually LOADED, which no source read can do:
+`hyprvtb 2.95 -> 0 px with the verb, 473 px without` is what a pass looks like.
+
+Copy its shape for the next flag of this kind rather than hand-building a probe
+each time (that hunt cost a whole session on 2026-07-29). Two traps it encodes:
+`hyprctl dispatch exec` spawns from the COMPOSITOR's environment, so an on/off
+choice cannot ride in on an env var — two probe files, or you silently test the
+same case twice; and this ImageMagick reports `-metric AE` as a summed
+difference, not a pixel count, hence the absolute ink measure instead of a diff.
+
 Verification is by IPC and logs, never by looking: `hyprctl plugin list`,
 `clients`, `workspaces`, `layers`, `configerrors`, and the Hyprland log. The
 user does all visual and interaction checks.
