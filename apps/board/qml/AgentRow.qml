@@ -39,8 +39,8 @@ import "../../qmlcommon"
 //                      (`boardphase.py`). Carries the VERB — "editing
 //                      Main.qml" — and cannot be faked, forgotten or left
 //                      stale. No subject, no opener, and NO dots on the end of
-//                      it: the one ticking `...` on a worker's card is on the
-//                      claim's own words, the line above this one.
+//                      it: the one ticking `...` on a card is on its TOP line,
+//                      and no other line may have one at all.
 //
 // **Both lines are built in `boardphase.py` (`says_line`/`doing_line`), not
 // here**, because the joining is a judgement about the real strings rather than
@@ -132,7 +132,7 @@ Item {
                                         ? agent.saysDetail : ""
     // Which of `boardphase.observe`'s four outcomes the line above came from.
     // Only `ok` is something actually happening right now, which is what the
-    // ticking dots below are allowed to claim.
+    // ticking dots on the card's top line are allowed to claim.
     readonly property string observed: agent && agent.observed ? agent.observed : ""
     // HOW FULL IT IS — `62k/200k`, at the right end of the card's TOP row, his
     // call: *"on the very right of the top row of the agent's information box
@@ -190,18 +190,22 @@ Item {
     readonly property color leadTone: (running || summoner) ? fgText : fgDim
 
     // ---- the tick, and WHICH line carries it ----
-    // His, twice over. First: *"at the end of the second row of an agents
-    // information, it should have an animated elipsies to show its currently
-    // happening"*. Then, once the claim became two lines: *"take the animated
-    // elipsies out of the top line"* and *"the third line of an agents card
-    // should not have the animated elipsies or any elipsies at the end of it"*.
+    // His, three times over, and the LAST word wins. *"at the end of the second
+    // row of an agents information, it should have an animated elipsies to show
+    // its currently happening"*; then, once the claim became two lines, *"take
+    // the animated elipsies out of the top line"* and *"the third line of an
+    // agents card should not have the animated elipsies or any elipsies at the
+    // end of it"*; and then, 2026-07-29, settling it: *"the only line of an
+    // agents card that should have the animated elipsies is the top line. no
+    // others"*.
     //
-    // So the dots live on ONE line of a worker's card — the claim's own words,
-    // the second — and the OBSERVED line (the third) carries none at all. There
-    // is no `liveDots` appended to prose any more: the only thing that ticks is a
-    // line whose TEXT ends in `...`, and `boardphase.py` decides which those are
-    // (`says_detail`, and Solomon's own startup phrases, which are the first line
-    // of his card because he has claimed nothing yet).
+    // So the dots live on the card's TOP LINE and nowhere else. The only thing
+    // that ticks is a line whose TEXT ends in `...` and which is that top line;
+    // `boardphase.py` decides which strings end that way (`says_line`, and
+    // Solomon's own startup phrases, which are the first line of HIS card because
+    // he has claimed nothing yet). Every other line is drawn through `untick()`,
+    // so a sentence an agent happened to end in dots of its own loses them
+    // entirely rather than sitting there frozen at three.
     //
     // **The three cells are drawn HERE and not in the Python**, which builds
     // prose: an animated suffix is presentation, and in the Python the sentence a
@@ -225,15 +229,22 @@ Item {
     function tick(s) {
         return s.endsWith("...") ? s.slice(0, -3) + dots : s
     }
+    // ...and every line that is NOT the top one ends on its own last word.
+    function untick(s) {
+        return s.endsWith("...") ? s.slice(0, -3) : s
+    }
+    // Which Para is drawn first. An agent that has claimed nothing yields the
+    // lead - and the tick with it - to the observed line under it.
+    readonly property bool claimLeads: row.saysLine !== ""
     // One step per desktop slide (§6.2's own number, through `ms()` so the
     // panel's motion settings reach it) — about a second for the full cycle,
     // which is quiet enough to sit on every running card at once.
     Motion { id: motion }
     Timer {
         interval: Math.max(60, motion.ms(motion.slideMs))
-        running: (row.saysLine.endsWith("...")
-                  || row.saysDetail.endsWith("...")
-                  || row.doingLine.endsWith("...")) && !motion.reduceMotion
+        running: (row.claimLeads ? row.saysLine.endsWith("...")
+                                 : row.doingLine.endsWith("..."))
+                 && !motion.reduceMotion
                  && row.visible
         repeat: true
         onTriggered: row.dotPhase = (row.dotPhase + 1) % 3
@@ -366,7 +377,10 @@ Item {
             visible: row.saysDetail !== ""
             height: visible ? implicitHeight : 0
             color: row.fgDim
-            text: row.tick(row.saysDetail)
+            // NO dots, animated or frozen: they are the top line's (see the tick
+            // note above), and this is never the top line - it is only drawn at
+            // all when the verb line above it is.
+            text: row.untick(row.saysDetail)
         }
 
         // ---- SECOND LINE: what it is observed doing, and nothing else ----
@@ -384,13 +398,15 @@ Item {
             visible: row.doingLine !== ""
             height: visible ? implicitHeight : 0
             color: row.saysLine === "" ? row.leadTone : row.fgDim
-            // NO trailing dots here — [his, 2026-07-29] *"the third line of an
-            // agents card should not have the animated elipsies or any elipsies
-            // at the end of it"*. `tick()` still runs over it, because Solomon's
-            // startup phrases arrive on this property and end in `...` of their
-            // own; on his card they are the FIRST line drawn (he has claimed
-            // nothing yet), so this is not that third line.
-            text: row.tick(row.doingLine)
+            // Dots only when this IS the card's top line — Solomon's startup
+            // phrases arrive on this property and end in `...` of their own, and
+            // on his card they are the first line drawn (he has claimed nothing
+            // yet). Under a claim it is the third line and ends on its own words,
+            // his call twice: *"the third line ... should not have the animated
+            // elipsies or any elipsies at the end of it"*, and *"the only line
+            // ... is the top line. no others"*.
+            text: row.claimLeads ? row.untick(row.doingLine)
+                                 : row.tick(row.doingLine)
         }
 
         // ---- THIRD LINE ----

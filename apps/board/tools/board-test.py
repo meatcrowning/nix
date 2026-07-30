@@ -2122,10 +2122,12 @@ def test_phase(tmp):
     # described in the present tense.
     r = bph.observe("ph-a")
     # TWO LINES, not one hyphenated one — [his, 2026-07-29] *"[agent]
-    # [verb]s..."* and then the words it gave, verbatim, underneath.
+    # [verb]s..."* and then the words it gave, verbatim, underneath. The ticking
+    # dots are the TOP line's and no other line's — *"the only line of an agents
+    # card that should have the animated elipsies is the top line. no others"*.
     check("a card's first sentence is the agent's own claim, led by its name",
-          bph.says_line(r, "Marbas") == "Marbas is testing"
-          and bph.says_detail(r) == "the parser round-trips...",
+          bph.says_line(r, "Marbas") == "Marbas is testing..."
+          and bph.says_detail(r) == "the parser round-trips",
           (bph.says_line(r, "Marbas"), bph.says_detail(r)))
     check("...and its second line is the observation ALONE, with no opener",
           bph.doing_line(r, "Marbas") == "editing Main.qml",
@@ -2138,7 +2140,7 @@ def test_phase(tmp):
           bph.doing_line({"observed": "none"}, "Marbas", running=False) == "",
           bph.doing_line({"observed": "none"}, "Marbas", running=False))
     check("an agent with no name is `it` in the CLAIM, and nothing invents one",
-          bph.says_line(r) == "it is testing"
+          bph.says_line(r) == "it is testing..."
           and bph.doing_line(r) == "editing Main.qml",
           (bph.says_line(r), bph.doing_line(r)))
     # ---- SIMPLE PRESENT, and an ellipsis that MOVES ----
@@ -2150,18 +2152,20 @@ def test_phase(tmp):
     # ~5px on the fallback font (docs/DESIGN.md §2.3).
     check("the verb-part is `is <word>`, which is his wording twice over",
           bph.says_line({"claimPhase": "researching"}, "Marbas")
-          == "Marbas is researching"
+          == "Marbas is researching..."
           and bph.says_line({"claimPhase": "coding"}, "Marbas")
-          == "Marbas is coding",
+          == "Marbas is coding...",
           (bph.says_line({"claimPhase": "researching"}, "Marbas"),
            bph.says_line({"claimPhase": "coding"}, "Marbas")))
-    # The dots go on the line BELOW — [his, 2026-07-29] *"take the animated
-    # elipsies out of the top line"*. The verb line ends on the verb.
-    check("...and the ticking dots sit on the line under it, not on the verb",
-          not bph.says_line({"claimPhase": "researching"},
-                            "Marbas").endswith("...")
+    # The dots go on the TOP line and NOWHERE ELSE — [his, 2026-07-29, settling
+    # a reversal] *"the only line of an agents card that should have the animated
+    # elipsies is the top line. no others"*. He had asked for the opposite earlier
+    # the same evening; this is the later word.
+    check("...and the ticking dots sit on the verb line, and on no other",
+          bph.says_line({"claimPhase": "researching"},
+                        "Marbas").endswith("...")
           and bph.says_detail({"claimPhase": "researching",
-                               "claimDoing": "the parser"}) == "the parser...",
+                               "claimDoing": "the parser"}) == "the parser",
           (bph.says_line({"claimPhase": "researching"}, "Marbas"),
            bph.says_detail({"claimPhase": "researching",
                             "claimDoing": "the parser"})))
@@ -2188,16 +2192,16 @@ def test_phase(tmp):
            _detail("coding", "Coding: writing highlight.py"),
            _detail("coding", "coding \u2014 writing highlight.py"),
            _detail("coding", "coding writing highlight.py"))
-          == ("writing highlight.py...",) * 4,
+          == ("writing highlight.py",) * 4,
           _detail("coding", "coding - writing highlight.py"))
     check("...but a DIFFERENT verb is left exactly as the agent wrote it",
-          _detail("coding", "testing - the parser") == "testing - the parser...",
+          _detail("coding", "testing - the parser") == "testing - the parser",
           _detail("coding", "testing - the parser"))
     check("...and it is a word boundary, not a prefix match",
-          _detail("coding", "codingstyle rules") == "codingstyle rules...",
+          _detail("coding", "codingstyle rules") == "codingstyle rules",
           _detail("coding", "codingstyle rules"))
     check("...and words that are ONLY the verb stay, rather than going blank",
-          _detail("reading", "reading") == "reading...",
+          _detail("reading", "reading") == "reading",
           _detail("reading", "reading"))
     check("...but a STALL keeps `is blocked`, and does not animate",
           bph.says_line({"claimPhase": "blocked"}, "Marbas") == "Marbas is blocked"
@@ -2325,8 +2329,8 @@ def test_phase(tmp):
     bph.claim("ph-a", "bisecting", "which commit broke the harness")
     r = bph.observe("ph-a")
     check("...and a free word is drawn as the card's own first line",
-          bph.says_line(r, "Marbas") == "Marbas is bisecting"
-          and bph.says_detail(r) == "which commit broke the harness...",
+          bph.says_line(r, "Marbas") == "Marbas is bisecting..."
+          and bph.says_detail(r) == "which commit broke the harness",
           (bph.says_line(r, "Marbas"), bph.says_detail(r)))
     check("...while the card is still FILED by what it is OBSERVED doing",
           r["phase"] in bph.CLAIMABLE and r["phase"] != "bisecting", r["phase"])
@@ -2344,14 +2348,17 @@ def test_phase(tmp):
           len(set(bph.PHASE_WORDS)) == len(bph.PHASE_WORDS))
     check("...and the classic five are still on it, first",
           bph.PHASE_WORDS[:5] == bph.CLAIMABLE, str(bph.PHASE_WORDS[:5]))
+    def _says(w):
+        # every word bar the one stall ticks, and the tick is the top line's
+        return "Marbas is %s%s" % (w, "" if w in bph.TICKLESS else "...")
     check("...and each reads as English after \"is\"",
-          all(bph.says_line({"claimPhase": w}, "Marbas") == "Marbas is " + w
+          all(bph.says_line({"claimPhase": w}, "Marbas") == _says(w)
               for w in bph.PHASE_WORDS),
           [w for w in bph.PHASE_WORDS
-           if bph.says_line({"claimPhase": w}, "Marbas") != "Marbas is " + w])
+           if bph.says_line({"claimPhase": w}, "Marbas") != _says(w)])
     check("...and a word that is NOT on the menu reads the same way",
           bph.says_line({"claimPhase": "yakshaving"}, "Marbas")
-          == "Marbas is yakshaving",
+          == "Marbas is yakshaving...",
           bph.says_line({"claimPhase": "yakshaving"}, "Marbas"))
     menu = bw.phase_word_menu()
     check("the prompt's menu block is generated from the list, not retyped",
@@ -2642,7 +2649,7 @@ def test_work(tmp):
     check("...while any other word of his takes the shared table, like a worker",
           _bph.orch_says_line({"claimPhase": "reading"}, "Solomon")
           == _bph.says_line({"claimPhase": "reading"}, "Solomon")
-          == "Solomon is reading",
+          == "Solomon is reading...",
           _bph.orch_says_line({"claimPhase": "reading"}, "Solomon"))
     check("...and drawn exactly once, and in the same place on the next poll",
           [c.get("name") for c in bw.cards()].count(ba.ORCHESTRATOR_NAME) == 1
@@ -3852,8 +3859,8 @@ def test_window(app, tmp):
           all(isinstance(c, dict) and "rows" not in c for c in cards),
           [list(c)[:3] for c in cards[:2]])
     check("a card leads with the claim as a sentence, then the observation alone",
-          card.get("saysLine") == card.get("name") + " is testing"
-          and card.get("saysDetail") == "the vtbclient parser..."
+          card.get("saysLine") == card.get("name") + " is testing..."
+          and card.get("saysDetail") == "the vtbclient parser"
           and card.get("doingLine") == "editing vtbclient.py",
           (card.get("saysLine"), card.get("saysDetail"),
            card.get("doingLine")))
@@ -3994,24 +4001,27 @@ def test_window(app, tmp):
           and "…" not in doingText[0]
           and doingText[0] == card.get("doingLine"),
           (doingText, card.get("doingLine")))
-    # ...and the CLAIM's words tick through the SAME field on the SAME timer —
-    # [his, 2026-07-29] the animated dots belong at the END of a line, so with the
-    # claim split in two they are on the LOWER of the pair and not on the verb:
-    # *"take the animated elipsies out of the top line"*. One mechanism for every
-    # line that ends in them, so his card and a worker's cannot drift.
+    # ...and THE TOP LINE, AND ONLY THE TOP LINE, TICKS — [his, 2026-07-29, and he
+    # said it twice because the first pass put them one line down] *"the only line
+    # of an agents card that should have the animated elipsies is the top line. no
+    # others"*. So the verb line's last three cells cycle and the claim's words
+    # under it end on the agent's own last word, with no dots at all rather than
+    # three frozen ones. One mechanism for every line that ends in them, so his
+    # card and a worker's cannot drift.
     saysItem = [t for y, s, t in lines if s.startswith(saysStem)]
-    detailStem = (card.get("saysDetail") or "\0")[:-3]
-    detailItem = [t for y, s, t in lines if s.startswith(detailStem)]
+    detailItem = [t for y, s, t in lines
+                  if s.startswith(card.get("saysDetail") or "\0")]
     tails = set()
     for _ in range(20):
-        if detailItem:
-            tails.add(str(detailItem[0].property("text"))[-3:])
+        if saysItem:
+            tails.add(str(saysItem[0].property("text"))[-3:])
         spin(100)
-    check("the claim's words carry the ticking dots, and the verb line does not",
+    check("the verb line carries the ticking dots, and no other line does",
           len(tails) > 1 and {len(v) for v in tails} == {3}
           and all(set(v) <= {".", " "} for v in tails)
-          and not str(saysItem[0].property("text")).rstrip().endswith("."),
-          (sorted(tails), saysItem and saysItem[0].property("text")))
+          and detailItem
+          and not str(detailItem[0].property("text")).rstrip().endswith("."),
+          (sorted(tails), detailItem and detailItem[0].property("text")))
     stoppedCards = [drawnCards.get(c.get("title")) for c in cards
                     if not c.get("running")]
     check("...and NOTHING that has stopped ticks - a gone agent is not happening",
