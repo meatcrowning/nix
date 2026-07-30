@@ -278,9 +278,9 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
 - `home/` — home-manager config for `lam`, auto-imported. `home/pkgs/` package
   categories, `home/prog/` per-program config, `home/srvs/` user services.
 - `lam.nix` — the home-manager entry point; imports `home/`.
-- `apps/` — eight vendored Qt/QML apps (`filer`, `viewer`, `player`, `painter`,
-  `surfer`, `askpass`, `reader`, `board`) plus `pylib/`, the shared Python
-  helpers — most importantly
+- `apps/` — nine vendored Qt/QML apps (`filer`, `viewer`, `player`, `painter`,
+  `surfer`, `askpass`, `reader`, `board`, `editor`) plus `pylib/`, the shared
+  Python helpers — most importantly
   `vtbclient.py`, the hyprvtb titlebar-button socket bridge each app draws its
   chrome through.
     - **`apps/board/` is the program called `goetia`** — that is the only name it
@@ -458,7 +458,7 @@ how something looks, update it in the same commit.
 | The Quickshell panel (`home/prog/quickshell-files/*.qml`) | `home/prog/quickshell-files/AGENTS.md` |
 | Hyprland config, the `hyprvtb` plugin, the sandbox | `home/prog/AGENTS.md` |
 | Bumping the compositor pin / plugin ABI seam | `home/prog/hyprvtb/PORTING.md` |
-| Any of the six Qt apps | `apps/AGENTS.md`, then `apps/<name>/AGENTS.md` |
+| Any of the nine Qt apps | `apps/AGENTS.md`, then `apps/<name>/AGENTS.md` |
 
 `PORTING.md` is cited by ten referrers including `checkPhase` failure messages
 and lives inside the plugin's derivation source — moving it forces a plugin

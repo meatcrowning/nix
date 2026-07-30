@@ -1,10 +1,10 @@
 # `apps/` — the vendored desktop apps
 
-Eight standalone Qt/QML apps that ship with this config, plus the shared Python
+Nine standalone Qt/QML apps that ship with this config, plus the shared Python
 helpers they all import. Each has its own `AGENTS.md` with the detail:
 
 **Read `~/nix/docs/DESIGN.md` before you draw anything in here.** These apps are not
-eight programs that happen to share a repo — they are one desktop, alongside the
+nine programs that happen to share a repo — they are one desktop, alongside the
 panel and the compositor plugin, and the user's standing requirement is that a
 new app or a new feature *looks like the rest without him having to say so*.
 Type, palette, spacing, corners, motion timing, titlebar button glyphs, menus,
@@ -22,6 +22,7 @@ each other. This guide owns the *mechanics*; that one owns the *look*.
 | [`askpass/`](askpass/AGENTS.md) | the `sudo -A` password dialog | `home/prog/askpass.nix` |
 | [`reader/`](reader/AGENTS.md) | markdown reader (browse + read `.md`) | `home/prog/reader.nix` |
 | [`board/`](board/AGENTS.md) | **goetia** — decision board over `docs/board.md` | `home/prog/board.nix` |
+| [`editor/`](editor/AGENTS.md) | text editor with Kate's core editing | `home/prog/editor.nix` |
 | `pylib/` | shared helpers — see below | (imported, not packaged) |
 | `qmlcommon/` | shared QML components — see below | (imported, not packaged) |
 
@@ -34,6 +35,14 @@ Five of them are what the rest of the desktop opens things with: **filer** for
 http(s)`/`about` (plus Plasma's separate `kdeglobals` `BrowserApplication` key
 and `$BROWSER`), and **player** for nine of the audio types its `AUDIO_EXTS`
 covers.
+
+**editor is ELIGIBLE for the text types but DEFAULT for none of them** (yet).
+It declares `text/plain` and the source types it can honour, with `%F` because it
+genuinely opens several files as several tabs — but it is deliberately absent
+from `mime-defaults.nix`: `text/markdown` already belongs to reader and
+`text/html` to surfer, and quietly taking either would change what
+double-clicking does without him asking. One line in that file (or one
+`xdg-mime default`) is the whole change if he wants it.
 
 **painter and goetia are the deliberate none.** painter has no open-a-file path
 at all and goetia is a GUI over one fixed file, so neither declares a
@@ -74,7 +83,7 @@ travels with the repo so a `git pull` carries the apps to every machine.
 (This is why they sat at the repo *root* historically; the constraint was only
 ever "outside `home/`/`sys/`", so `apps/` satisfies it just as well.)
 
-## The live-source pattern — all eight work this way
+## The live-source pattern — all nine work this way
 
 `home/prog/<app>.nix` builds a wrapper that runs the **live** source at the
 absolute path `/home/lam/nix/apps/<app>/main.py` — valid on both `top` and
