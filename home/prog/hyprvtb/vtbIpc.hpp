@@ -26,6 +26,12 @@
 //         cells) as an editable address bar: clicking it enters an in-bar text
 //         editor (the compositor grabs the keyboard, draws a caret), and Enter
 //         sends the edited text back as ADDR. surfer's URL bar.
+//     TITLETEXT <0|1>
+//         Draw the stacked window title for this pid's windows at all? Default
+//         1. 0 leaves the title region empty — for a program whose title is
+//         only its own name, which docs/DESIGN.md 12 says the bar is not for.
+//         goetia. It does NOT touch the xdg_toplevel title: the taskbar and
+//         alt-tab still name the window.
 //     LOADING <0|1>
 //         Page loading? While 1 (and titleEdit is on), an animated | \ - /
 //         spinner is drawn in a reserved slot above the address bar. surfer.
@@ -75,6 +81,10 @@ struct SVtbAppReg {
     std::vector<SVtbAppButton> buttons;
     std::string                footer;
     bool                       titleEdit = false; // title region is an editable address bar
+    // Draw the stacked title at all? Default TRUE — a client that never sends
+    // TITLETEXT keeps the bar it always had, so this cannot regress the six
+    // apps that say nothing about it.
+    bool                       titleText = true;
     bool                       loading   = false; // page loading (spinner above the address bar)
     bool                       playbar   = false; // media scrub bar shown (viewer video)
     float                      playPos   = 0.f;   // playback fraction 0..1 (fill length)
@@ -93,6 +103,11 @@ namespace VtbIpc {
 
     // Copy pid's registration (returns false if none). Safe from any thread.
     bool get(pid_t pid, SVtbAppReg& out);
+
+    // Does pid want its stacked title drawn? True for an unregistered pid.
+    // Separate from get() because the render pass asks it every frame and
+    // copying the button vector to read one bool is not free.
+    bool titleTextEnabled(pid_t pid);
 
     // Send CLICK <id> to whoever registered pid's buttons. Non-blocking; a
     // wedged client just misses clicks, it can never stall the compositor.

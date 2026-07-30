@@ -911,7 +911,15 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             }
             damageEntire(); // keep the blink ticking on a still cursor
         }
-    } else {
+    } else if (VtbIpc::titleTextEnabled(appPid())) {
+        // ...unless the app has declared its title region carries no text
+        // (TITLETEXT 0 — goetia). [his, 2026-07-29] *"really for now there
+        // should be no title text in the left side inner bar of goetia"*: its
+        // title is only the program's own name, which DESIGN.md 12 says the bar
+        // is not for. The xdg_toplevel title is untouched, so the taskbar and
+        // alt-tab still name the window; an empty Window.title would not have
+        // done this — Qt substitutes the application name and the bar would
+        // have read "board" instead (measured in the sandbox).
         if (m_szLastTitle != PWINDOW->m_title || RUNLEN != m_iLastTitleRun || m_fLastScale != SCALE || !m_pTitleTex) {
             m_szLastTitle   = PWINDOW->m_title;
             m_iLastTitleRun = RUNLEN;

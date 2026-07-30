@@ -9,6 +9,8 @@ the server side):
     -> FOOTER <text>                             stacked text at column bottom
     -> FOOTERPOS <0|1>                           footer below the scrub bar (player)
     -> TITLEEDIT <0|1>                           title region is an address bar
+    -> TITLETEXT <0|1>                           draw the stacked window title at all
+                                                 (default 1; goetia sends 0)
     -> LOADING <0|1>                             page loading (draws a spinner)
     -> PLAYBAR <0|1> <pos>                       media scrub bar + playback fraction
     <- CLICK <id>                                a button was clicked
@@ -59,6 +61,7 @@ class VtbClient:
         self._footer = ""
         self._footer_bottom = False
         self._title_edit = False
+        self._title_text = True    # the bar draws the window title unless told not to
         self._loading = False
         self._playbar = None       # (shown, pos) or None if never set
         self._stop = False
@@ -110,6 +113,20 @@ class VtbClient:
         with self._lock:
             self._title_edit = bool(on)
             self._send_title_edit_locked()
+
+    def set_title_text(self, on):
+        """Draw the stacked window title in the bar at all? Default on.
+
+        Off is for a program whose title is only its own name — the bar is for
+        document/state identity (docs/DESIGN.md 12), and goetia has none to
+        show. It leaves the xdg_toplevel title alone, so the taskbar and
+        alt-tab still name the window; blanking `Window.title` instead does
+        not work at all (Qt substitutes the application name)."""
+        with self._lock:
+            if bool(on) == self._title_text:
+                return
+            self._title_text = bool(on)
+            self._send_title_text_locked()
 
     def set_loading(self, on):
         """Page loading? The plugin draws an animated spinner above the address
@@ -189,6 +206,9 @@ class VtbClient:
     def _send_title_edit_locked(self):
         self._send_locked("TITLEEDIT " + ("1" if self._title_edit else "0"))
 
+    def _send_title_text_locked(self):
+        self._send_locked("TITLETEXT " + ("1" if self._title_text else "0"))
+
     def _send_loading_locked(self):
         self._send_locked("LOADING " + ("1" if self._loading else "0"))
 
@@ -226,6 +246,8 @@ class VtbClient:
                         self._send_footer_locked()
                     if self._title_edit:
                         self._send_title_edit_locked()
+                    if not self._title_text:
+                        self._send_title_text_locked()
                     if self._loading:
                         self._send_loading_locked()
                     if self._playbar is not None:
