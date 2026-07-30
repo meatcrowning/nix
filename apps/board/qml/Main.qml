@@ -432,6 +432,13 @@ Window {
                 readonly property real colW: Math.max(modelPick.implicitWidth,
                                                       capPick.implicitWidth)
 
+                // ...and ONE arrow column, for the same reason. Both labels are
+                // padded out to the longer of the two so the `v` on each lands
+                // on the same cell; a character count, because the font is
+                // monospace and the two controls are centred (§2.7).
+                readonly property int pickCells:
+                    Math.max(Agents.modelLabel.length, Agents.capLabel.length)
+
                 InputBox {
                     id: askBox
                     width: parent.width - parent.colW - 10
@@ -461,6 +468,7 @@ Window {
                 // with what will actually happen.
                 PickBox {
                     id: modelPick
+                    padTo: parent.pickCells
                     anchors.right: parent.right
                     // Flush with the box's own top, not inset by the 3px the
                     // box pads its first line by: the box is now as tall as
@@ -493,6 +501,7 @@ Window {
                 // (§4.1), rather than butting two 1px borders into a 2px seam.
                 PickBox {
                     id: capPick
+                    padTo: parent.pickCells
                     anchors.top: modelPick.bottom
                     anchors.topMargin: 4
                     anchors.right: modelPick.right
