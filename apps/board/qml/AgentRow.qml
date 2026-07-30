@@ -40,7 +40,8 @@ import "../../qmlcommon"
 //                      Main.qml" — and cannot be faked, forgotten or left
 //                      stale. No subject, no opener, and a ticking `...` on
 //                      the end of it while that is happening NOW (`liveDots`
-//                      below, which is the only moving thing on the card).
+//                      below; the dots are the only moving thing on the card,
+//                      and the claim line above ticks through the same field).
 //
 // **Both lines are built in `boardphase.py` (`says_line`/`doing_line`), not
 // here**, because the joining is a judgement about the real strings rather than
@@ -189,13 +190,23 @@ Item {
     // wrap as the dots cycle, exact because the font is monospace (§2.7).
     readonly property bool ticking: running && observed === "ok" && doingLine !== ""
     property int dotPhase: 0
-    readonly property string liveDots: {
-        if (!ticking)
-            return ""
-        // Reduced motion still says the line is live; it just stops moving.
-        if (motion.reduceMotion)
-            return "..."
-        return [".  ", ".. ", "..."][dotPhase % 3]
+    // The three cells themselves, and there is ONE of them on this card. Every
+    // line that ends in `...` animates through this same field on the same
+    // timer, so nothing on the card is a second dot cycle out of step with the
+    // first.
+    readonly property string dots: motion.reduceMotion
+                                   ? "..." : [".  ", ".. ", "..."][dotPhase % 3]
+    readonly property string liveDots: ticking && !doingLine.endsWith("...")
+                                       ? dots : ""
+    // A SENTENCE THAT ENDS IN `...` ANIMATES THOSE THREE CELLS — [his,
+    // 2026-07-29] *"it should just say 'researches...' or 'codes...' with
+    // animated elipsies"*, and the same for Solomon's own lines. `boardphase.py`
+    // decides WHICH lines end that way (`PHASE_PREDICATE`/`TICKLESS`, and his
+    // startup pair); this decides only how the three cells move, which is
+    // presentation and therefore QML's — putting it in the Python would mean the
+    // string a test asserts on changed four times a second.
+    function tick(s) {
+        return s.endsWith("...") ? s.slice(0, -3) + dots : s
     }
     // One step per desktop slide (§6.2's own number, through `ms()` so the
     // panel's motion settings reach it) — about a second for the full cycle,
@@ -203,7 +214,9 @@ Item {
     Motion { id: motion }
     Timer {
         interval: Math.max(60, motion.ms(motion.slideMs))
-        running: row.ticking && !motion.reduceMotion && row.visible
+        running: (row.ticking || row.saysLine.endsWith("...")
+                  || row.doingLine.endsWith("...")) && !motion.reduceMotion
+                 && row.visible
         repeat: true
         onTriggered: row.dotPhase = (row.dotPhase + 1) % 3
     }
@@ -317,7 +330,7 @@ Item {
             visible: row.saysLine !== ""
             height: visible ? implicitHeight : 0
             color: row.leadTone
-            text: row.saysLine
+            text: row.tick(row.saysLine)
         }
 
         // ---- SECOND LINE: what it is observed doing, and nothing else ----
@@ -335,7 +348,7 @@ Item {
             visible: row.doingLine !== ""
             height: visible ? implicitHeight : 0
             color: row.saysLine === "" ? row.leadTone : row.fgDim
-            text: row.doingLine + row.liveDots
+            text: row.tick(row.doingLine) + row.liveDots
         }
 
         // ---- THIRD LINE ----

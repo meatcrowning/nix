@@ -1044,14 +1044,53 @@ The short version, and every line of it is a rule:
   is never manufactured for an agent (above), so he is TOLD to make one. The
   IDLE row is a different thing and is unchanged — it is not a process, it has
   no claim and no observation, and its name comes from the 7-cell column.
-  **And before anything is observed at all, the LIVE card reads `Solomon is
-  getting ready`** rather than the bare `nothing yet` — [his, 2026-07-29,
-  relayed through Vual's inbox and lost to an API outage before it was built].
-  Scoped in `boardagents.agents()` to `kind == orchestrator`, running, observed
-  `none` **or `starting`**, so worker cards keep the honest bare placeholder;
-  same sentence shape and same §10.6 argument as the idle row — a placeholder
-  for the absence of observation, promoted from nothing, never a claim derived
-  from one.
+  **And before anything is observed at all, the LIVE card gets his own startup
+  PAIR, in his order** — [his, 2026-07-29] *"Solomon wields the ring..."* while
+  observed is `starting` (his transcript is a second away), then *"Solomon etches
+  the triangle..."* on `none` (it is there and nothing has happened in it).
+  `boardphase.orch_doing_line` owns both wordings and the ordering; scoped in
+  `boardagents.agents()` to `kind == orchestrator`, running, so worker cards keep
+  the honest bare placeholder. Same §10.6 argument as the idle row — a
+  placeholder for the absence of observation, promoted from nothing, never a
+  claim derived from one.
+  **The brief initial line LEADS, and that is the whole point.** `481b524`
+  collapsed the two states onto one sentence (`Solomon is getting ready`, which
+  is what these two replace), so the initial line stopped leading and only
+  reappeared past `START_GRACE_S` — i.e. AFTER the getting-ready one. Restored at
+  his ask; his original complaint is untouched, because what he objected to was a
+  *"dont know"* text flashing first and `starting` never reaches the unlinked
+  sentence now.
+- **SOLOMON'S OWN VOICE, for the two words he actually uses** —
+  [his, 2026-07-29] `dispatching` reads *"Solomon summons"* (no ellipsis: an act,
+  not a wait) and `waiting` reads *"Solomon awaits <agent>..."*, which NAMES
+  whoever he is waiting on. The name is resolved in `boardagents.agents()`,
+  the only place that can see the other cards: one running named worker is that
+  worker, several are `his workers`, none names nobody at all — never an empty
+  cell and never the literal word "agent". `boardphase.orch_says_line` is the
+  override and it is deliberately thin: every other word of his falls through to
+  the shared table below, so *his* card cannot drift from a worker's.
+- **A CLAIM IS DRAWN IN SIMPLE PRESENT, AND ITS ELLIPSIS MOVES** — [his,
+  2026-07-29] *"instead of the agent verb-part being 'is researching' or 'is
+  coding' etc it should just say 'researches...' or 'codes...' with animated
+  elipsies"*. `boardphase.PHASE_PREDICATE` is the ONE table that turns a phase
+  word into the predicate after the agent's name, every card included, so the
+  verb form cannot drift; `PHASE_WORDS` must have an entry in it (asserted).
+  Three rules in it:
+    - It maps to a **predicate**, not a verb — which is what lets `blocked` keep
+      `is blocked`, the one word in the menu that is not a gerund and whose
+      `blocks` would say the opposite.
+    - An **off-list word** (any single word is legal) gets `is <word>`. An
+      auxiliary is a worse sentence than the table; conjugating an unknown word
+      into a form it may not have is worse than either.
+    - `TICKLESS` is which predicates get **no** trailing `...`: `blocked` today.
+      A stall is not motion, which is §10 and the same reason the observed line's
+      tick is scoped to `observed == "ok"`.
+  The `...` is three ASCII periods in the Python — never U+2026, which drops the
+  line ~5px on the fallback font (docs/DESIGN.md §2.3) — and `AgentRow.qml`'s
+  `tick()` cycles those three cells for ANY line that ends in them, on the
+  existing `liveDots` timer (one step per desktop slide, §6.2). Animation is
+  presentation and stays in QML: in the Python the string a test asserts on would
+  change four times a second.
 - **`starting` exists because "not yet" and "cannot see" were the same branch.**
   [his, 2026-07-29] *"when solomon first takes a request, his section very
   briefly shows 'cannot see what solomon is doing' and then changes to 'Solomon
@@ -1066,9 +1105,10 @@ The short version, and every line of it is a rule:
   `linkedAt` the first time the id is seen), past which a spawn whose transcript
   never appeared is `unlinked` again and says so — that one is a real failure
   and hiding it forever would be the §10 lie. Checks: four in `test_phase`
-  (young, its card line, its phase, and the grace expiring) and two in
-  `test_agents` (a freshly registered Solomon reads `getting ready`, and neither
-  of his sentences says `cannot see`).
+  (young, its card line, its phase, and the grace expiring) and four in
+  `test_work` (a freshly registered Solomon wields the ring, neither of his
+  sentences says `cannot see`, the pair is in his order, and a WORKER in the same
+  state still reads the bare `nothing yet`).
 - **`doing` is derived from the agent's live transcript**,
   `~/.claude/projects/*/<session-uuid>.jsonl`, which Claude Code appends to as
   the agent works. It carries the VERB — *"editing vtbclient.py"* — and cannot
