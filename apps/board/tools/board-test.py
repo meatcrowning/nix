@@ -41,6 +41,11 @@ import tempfile
 import time
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# `Usage` fetches the account's live figures on a worker thread. A test must
+# neither reach the network nor write his real `~/.local/state/board/usage.json`,
+# so every fetch and nudge is a no-op here; the fetch path is exercised
+# explicitly, against a stub, in `test_usage_fetch`.
+os.environ["BOARD_USAGE_OFFLINE"] = "1"
 
 BOARD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS = os.path.dirname(BOARD)
@@ -4220,6 +4225,146 @@ def test_usage(tmp):
     check("reading his config never writes to it", sorted(os.listdir(tmp)) == before)
 
 
+def test_usage_fetch(tmp):
+    """Where the number comes FROM, now that it no longer waits for a session.
+
+    [his, 2026-07-29] *"why did it take me opening an instance of claude-code for
+    the usage indicators to update? they should always be up to date"* —
+    `~/.claude.json` advances only while a CLI session runs, so `boardusage`
+    fetches for itself. The checks are about the two ways that can go wrong:
+    reading the STALER of the two caches, and overwriting a good reading with a
+    failure.
+    """
+    import boardusage as bu
+    print("\n=== usage: the live fetch ===")
+    now = 1785379200.0
+
+    def envelope(fetched, session, weekly):
+        return {"cachedUsageUtilization": {
+            "fetchedAtMs": int(fetched * 1000),
+            "utilization": {"limits": [
+                {"kind": "session", "percent": session, "scope": None},
+                {"kind": "weekly_all", "percent": weekly, "scope": None}]}}}
+
+    def write(path, payload):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+
+    real = (bu.CLAUDE_JSON, bu.LIVE_PATH, bu.CREDS, bu.urllib.request.urlopen)
+    bu.CLAUDE_JSON = os.path.join(tmp, "claude.json")
+    bu.LIVE_PATH = os.path.join(tmp, "state", "usage.json")
+    bu.CREDS = os.path.join(tmp, "creds.json")
+    off = os.environ.pop(bu.OFFLINE_ENV, None)
+    try:
+        # ---- whichever cache is newer is the one drawn ----
+        os.makedirs(os.path.dirname(bu.LIVE_PATH), exist_ok=True)
+        write(bu.CLAUDE_JSON, envelope(now - 8 * 3600, 4, 73))
+        rows = bu.readings(None, now)
+        check("with only the CLI's cache, it is read exactly as before",
+              [r["text"] for r in rows] == ["4%", "73%"]
+              and rows[0]["note"] == "8h old", rows)
+        write(bu.LIVE_PATH, envelope(now - 30, 9, 75))
+        rows = bu.readings(None, now)
+        check("...and our own fresher reading supersedes it, age and all",
+              [r["text"] for r in rows] == ["9%", "75%"]
+              and all(r["note"] == "" for r in rows), rows)
+        write(bu.CLAUDE_JSON, envelope(now - 5, 11, 76))
+        rows = bu.readings(None, now)
+        check("...while a CLI that got there first is never thrown away",
+              [r["text"] for r in rows] == ["11%", "76%"], rows)
+        write(bu.LIVE_PATH, "not json at all")
+        rows = bu.readings(None, now)
+        check("...and one unreadable cache does not take the other down with it",
+              [r["text"] for r in rows] == ["11%", "76%"], rows)
+
+        # ---- a fetch is refused before it is attempted, when it must be ----
+        sent = []
+        check("no credentials file at all means no request, and it says so",
+              bu.fetch(now=now) == "no-token" and not sent, sent)
+        write(bu.CREDS, {"claudeAiOauth": {
+            "accessToken": "sk-ant-oat01-x",
+            "expiresAt": int((now - 60) * 1000)}})
+        check("an expired token is not spent on a round trip that can only 401",
+              bu.fetch(now=now) == "expired" and not sent, sent)
+        write(bu.CREDS, {"claudeAiOauth": {
+            "accessToken": "sk-ant-oat01-x",
+            "expiresAt": int((now + 3600) * 1000)}})
+
+        # ---- and with a usable one, the wire is the CLI's own shape ----
+        class Reply:
+            def __init__(self, body):
+                self._body = json.dumps(body).encode()
+
+            def read(self, *a):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        answer = [{"limits": [
+            {"kind": "session", "percent": 21, "resets_at": None,
+             "scope": None},
+            {"kind": "weekly_all", "percent": 80, "resets_at": None,
+             "scope": None},
+            {"kind": "weekly_scoped", "percent": 34, "resets_at": None,
+             "scope": {"model": {"display_name": "Fable"}}}]}]
+
+        def fake(req, timeout=None):
+            sent.append((req.full_url, req.get_header("Authorization"), timeout))
+            if isinstance(answer[0], Exception):
+                raise answer[0]
+            return Reply(answer[0])
+
+        bu.urllib.request.urlopen = fake
+        check("a good fetch stores the reading and reports ok",
+              bu.fetch(now=now) == "ok" and os.path.exists(bu.LIVE_PATH), sent)
+        check("...having asked the account's own endpoint, with the CLI's token",
+              len(sent) == 1 and sent[0][0] == bu.USAGE_URL
+              and sent[0][1] == "Bearer sk-ant-oat01-x"
+              and sent[0][2] == bu.FETCH_TIMEOUT, sent)
+        rows = bu.readings(None, now)
+        check("...and it is what the bars draw, with no age on it",
+              [r["text"] for r in rows] == ["21%", "80%"]
+              and all(r["note"] == "" for r in rows), rows)
+        check("...still with no Fable figure, the wire carrying one",
+              "34" not in json.dumps(rows), rows)
+
+        # A failure must cost freshness and NOTHING else: the reading above has
+        # to survive every one of these, or an endpoint having a bad afternoon
+        # would blank a bar that was working.
+        for why, reply in (("offline", bu.urllib.error.URLError("down")),
+                           ("unauthorized",
+                            bu.urllib.error.HTTPError(bu.USAGE_URL, 401, "no",
+                                                      None, None)),
+                           ("http-500",
+                            bu.urllib.error.HTTPError(bu.USAGE_URL, 500, "no",
+                                                      None, None)),
+                           ("bad-payload", {"limits": []}),
+                           ("bad-payload", ["not", "a", "dict"])):
+            answer[0] = reply
+            got = bu.fetch(now=now)
+            rows = bu.readings(None, now)
+            check("a failed fetch (%s) keeps the last reading, unblanked" % why,
+                  got == why and [r["text"] for r in rows] == ["21%", "80%"],
+                  (got, rows))
+
+        # The harness switch, which every other test in this file runs under.
+        os.environ[bu.OFFLINE_ENV] = "1"
+        before = len(sent)
+        check("BOARD_USAGE_OFFLINE reaches neither the network nor the CLI",
+              bu.fetch(now=now) == "off" and bu.nudge() is False
+              and len(sent) == before, sent)
+    finally:
+        os.environ.pop(bu.OFFLINE_ENV, None)
+        if off is not None:
+            os.environ[bu.OFFLINE_ENV] = off
+        (bu.CLAUDE_JSON, bu.LIVE_PATH, bu.CREDS,
+         bu.urllib.request.urlopen) = real
+
+
 def test_usage_follows_agents(app):
     """The bars move when an agent's life does, not only on their own clock.
 
@@ -4332,6 +4477,8 @@ def main():
         test_dead_worker_notes(os.path.join(tmp, "work"))
         os.makedirs(os.path.join(tmp, "use"))
         test_usage(os.path.join(tmp, "use"))
+        os.makedirs(os.path.join(tmp, "usf"))
+        test_usage_fetch(os.path.join(tmp, "usf"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
         test_real_store()
