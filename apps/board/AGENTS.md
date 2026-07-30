@@ -652,6 +652,14 @@ exactly like `reconcile()` and `sweep()`.
 
 ### A NEW WORKER IS NOT THE ONLY ANSWER: handing an item to one already in those files
 
+**A handoff is reported as `commanded <Name>`, a dispatch as `summoned <Name>`**
+— his rule, 2026-07-29, and the distinction is the point: he can tell off the
+board whether a new agent was started or an existing one was given more work.
+Both words are read by `boardparse._SUMMONED`, so a handoff note is retired by
+its worker's result exactly like a summon note; a wording change that skipped the
+parser would leave every handoff note sitting under the result forever, saying
+nothing landed yet.
+
 *"it should also know when to give items to existing agents who are already
 working out of the same place or doing the same or similar things"*. So the
 orchestrator's list of verbs now opens with `boardctl.py agents` — what is
@@ -854,7 +862,9 @@ that part."* [his, 2026-07-29]
 A start and a result are two bullets about one piece of work, and the start is
 only true until the result lands. So posting a `COMPLETION:`/`PARTIAL:`/`FAILED:`
 (`boardparse.RESULT_TAGS`) retires the `INFORMATION: ... summoned <Name>
-(`<id>`)` note that announced it, in the **same** read-modify-write as the
+(`<id>`)` note that announced it — **or the `commanded <Name>` one**, which is
+the same announcement for a worker that was already running — in the **same**
+read-modify-write as the
 insert — one edit under the lock, so the board is never briefly holding both and
 a `boardrecent` merge never sees a half-state.
 
@@ -1735,7 +1745,8 @@ new and are the ones to read first if the fan-out misbehaves:
 
 - **the summon note dies with its result** (`test_summon_cleared`) — a worker's
   `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `summoned <Name> (`<id>`)`
-  note with it, whole, stamp and wrapped lines included, and takes **nothing**
+  note with it — and a `commanded <Name>` handoff note the same way — whole,
+  stamp and wrapped lines included, and takes **nothing**
   else: not another worker's summon note, not a `QUESTION:`, not a plain
   `INFORMATION:` fact, not a result from a different id or from nobody. Two
   notes naming one id leave both, an id-less note falls back to the name, and

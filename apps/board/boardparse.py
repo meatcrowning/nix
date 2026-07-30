@@ -1282,6 +1282,7 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 # back; an undeleted summon note is a line he has already read. So:
 #
 #   * only a bullet whose tag is `INFORMATION` and which says `summoned <Name>`
+#     or `commanded <Name>` (a handoff to a worker already running)
 #     is a candidate. A `QUESTION:`, a decision, an ordinary `INFORMATION:` fact
 #     and the result itself are never touched.
 #   * the ID matches first and the NAME only second, and a name match is
@@ -1291,13 +1292,21 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 #     and every summon note stays exactly where it is.
 RESULT_TAGS = ("COMPLETION", "PARTIAL", "FAILED")
 
-#: `summoned Marbas`, and then the coded id if the writer put one there. The id
+#: `summoned Marbas` — or `commanded Marbas`, which is the same announcement for
+#: a worker that was already running (his rule, 2026-07-29: `summoned` is a NEW
+#: agent, `commanded` is one given more work). **Both words have to be read
+#: here.** The note is retired by the worker's own result either way, and a
+#: `commanded` line this regex did not match would sit under that result forever
+#: saying nothing landed yet — the exact two-bullets-about-one-piece-of-work this
+#: whole mechanism exists to prevent.
+#:
+#: Then the coded id if the writer put one there. The id
 #: is PARENTHESISED, immediately after the name — the shape the orchestrator's
 #: prompt gives it, and the only one read: something in parentheses further along
 #: the line is a path or a log file, not an identity. Written as a code span in
 #: the store, so the backticks are optional here and this reads the DRAWN text
 #: (`parse` pops a bullet's raw form and keeps the de-emphasised one).
-_SUMMONED = re.compile(r"\bsummoned\s+([A-Z][A-Za-z'-]*)"
+_SUMMONED = re.compile(r"\b(?:summoned|commanded)\s+([A-Z][A-Za-z'-]*)"
                        r"(?:\s*\(\s*`?([^`()\s]+)`?\s*\))?")
 
 

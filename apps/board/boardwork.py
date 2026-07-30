@@ -712,8 +712,11 @@ somebody else's pace. In two minds: dispatch.
   * A handoff takes no slot against the cap — a consequence, never a reason. Do \
 not hand work over to get under the cap; `dispatch` queues what is over it and \
 a later tick starts it.
-  * **Report it exactly like a dispatch** — one line, `INFORMATION:`, naming \
-the worker it went to: `summoned Marbas (`wd690a4`), already in those files`.
+  * **Report it with `commanded`, NEVER `summoned`** — one line, \
+`INFORMATION:`, naming the worker it went to: `commanded Marbas (`wd690a4`), \
+already in those files`. The two words are the whole difference he reads off the \
+board: `summoned` is a NEW agent, `commanded` is one already running that you \
+gave more work to.
 
 DISPATCH OR ASK — the rule, because guessing big is the expensive mistake:
 
@@ -762,6 +765,11 @@ yet — never "handed to", which is the wording this replaced — like:
 
     INFORMATION: **landed section + commit times** - summoned Marbas \
 (`wd690a4`), nothing landed yet.
+
+**`summoned` is for a `dispatch` ONLY.** An item handed to a worker that was \
+already running is **`commanded`**, in exactly the same shape — his rule, and \
+the point of it is that he can tell at a glance whether a new agent was started \
+or an existing one was given more work.
 
 Every worker has a name and `dispatch` prints it; use it. **One \
 identifier per line**: the name, and the coded id in parentheses after it only \
