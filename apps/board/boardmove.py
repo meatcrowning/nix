@@ -507,16 +507,19 @@ def stall(sel, path=bp.BOARD_PATH):
         # INFORMATION: the row moved and nothing was lost. It is not a FAILED —
         # nothing was attempted and dropped here; a row this host cannot account
         # for may well have finished on the other machine.
+        # First line inside the summary word cap; the row's cells and the rest
+        # of the story go on the indented continuation line. The cells are
+        # interpolated, so they go through `oneline`: `**`, a tag word or a
+        # newline in one of them would be read as structure by the checks in
+        # `add_todo_bullet` and this move would be refused outright — and the
+        # headline gets a word cap too, since `check_short_summary` counts its
+        # words like any others.
         return bp.add_todo_bullet(lines, bp.parse("".join(lines)),
-                                  "- INFORMATION: **%s** - was sitting in IN FLIGHT with "
-                                  "nothing working on it%s, so it is here "
-                                  "instead of claiming to be handled.%s"
-                                  # the row's own cells are interpolated, so
-                                  # they go through `oneline`: `**`, a tag word
-                                  # or a newline in one of them would be read as
-                                  # structure by the checks in `add_todo_bullet`
-                                  # and this move would be refused outright.
-                                  % (bp.oneline(what, 120),
+                                  "- INFORMATION: **%s** - idle in IN FLIGHT, "
+                                  "moved here.\n"
+                                  "    Nothing was working on it%s, so it is "
+                                  "here instead of claiming to be handled.%s"
+                                  % (bp.oneline(what, 120, words=6),
                                      (" (%s)" % bp.oneline(where, 80, code=True))
                                      if where else "",
                                      (" " + bp.oneline(notes, 120))
@@ -664,11 +667,14 @@ def note(text, path=bp.BOARD_PATH):
     """One bullet into WAITING ON YOU TO DO.
 
     It must start with one of `boardparse.TODO_TAGS` — `QUESTION:`,
-    `INFORMATION:`, `COMPLETION:`, `PARTIAL:`, `FAILED:` — then a short
-    description, then whatever background it needs. `add_todo_bullet` refuses an
-    untagged one and this deliberately does not paper over that with a default:
-    the writer knows which of the five it is and nothing downstream can work it
-    out afterwards.
+    `INFORMATION:`, `COMPLETION:`, `PARTIAL:`, `FAILED:` — then a summary of AT
+    MOST about a dozen words on that same line, then whatever background it
+    needs on INDENTED continuation lines. `add_todo_bullet` refuses an untagged
+    one, and since 2026-07-29 an over-long first line too
+    (`boardparse.check_short_summary`); this deliberately does not paper over
+    either with a default or a truncation: the writer knows which of the five
+    it is and what the summary is, and nothing downstream can work either out
+    afterwards.
 
     The `- ` is added PER LINE, not once for the whole string. The orchestrator
     writes one line per task in one call, and prefixing only the first left the
@@ -726,9 +732,10 @@ def reconcile(path=bp.BOARD_PATH):
             continue
         try:
             give_back(rec["key"], why=(
-                "- FAILED: **the agent working %s is gone** - it exited without "
-                "finishing or saying so, so the decision is back above with "
-                "your answer intact. Nothing was committed on its behalf. "
+                "- FAILED: **the agent working %s is gone** - it exited "
+                "without finishing.\n"
+                "    It never said so; the decision is back above with your "
+                "answer intact. Nothing was committed on its behalf. "
                 "Log: `~/.cache/board-watch.log`"
                 % bp.oneline(rec.get("title", rec["key"]), 120, code=True)),
                 path=path)

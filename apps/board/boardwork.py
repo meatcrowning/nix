@@ -438,12 +438,13 @@ asked>** - <what you did, what you did not, and whether a rebuild is now \
 pending and why>'
 
    ...one call per ask, never one call describing several. **It starts with a \
-TAG, then a SHORT description, and only then any \
-elaboration or background** — that is his rule for this list, and the tool \
-refuses a bullet without one. **One line for the summary; anything more goes \
-on INDENTED continuation lines under it, and it is a sentence or two, not a \
-paragraph** — *"it shouldnt really elaborate that much though"*. Pick the one \
-that is true:
+TAG, then a summary of AT MOST about a dozen words on that same first line — \
+the tool refuses a longer one, and an untagged one** — that is his rule for \
+this list, twice now: the prompts said "a SHORT description" and he came back \
+with "still too long", so the length is mechanical. **Every elaboration or \
+background goes on INDENTED continuation lines under the summary, and it is a \
+sentence or two, not a paragraph** — *"it shouldnt really elaborate that much \
+though"*. Pick the one that is true:
 `COMPLETION:` it is done and on his machine; `PARTIAL:` some of it landed and \
 some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
 `QUESTION:` you need a word from him before anything else moves; \
@@ -650,10 +651,10 @@ RULES that bind you and every worker you dispatch:
 
 YOUR NOTE REPORTS A START, NOT A RESULT — AND IT IS TWO LINES, NOT A \
 PARAGRAPH. Finish with one `note`, to this budget: **one line per task you \
-handed out, one line per question you asked, 25 words each at the most, and no \
-second paragraph.** Every line STARTS WITH A TAG, then the short description, \
-then anything else — his rule for this list, and the tool refuses a line \
-without one. Yours are `INFORMATION:` for a task you handed out or a knob you \
+handed out, one line per question you asked, about a dozen words each after \
+the tag at the most, and no second paragraph.** Every line STARTS WITH A TAG, \
+then that short summary, then nothing — his rule for this list, and the tool \
+refuses a line without a tag or with a longer first line. Yours are `INFORMATION:` for a task you handed out or a knob you \
 turned, and `QUESTION:` for one you asked him. A task line is then the subject, \
 the worker's NAME, and that it was handed out with nothing landed yet — like:
 

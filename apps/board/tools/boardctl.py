@@ -406,10 +406,12 @@ def main(argv=None):
     s.set_defaults(fn=cmd_back)
 
     s = sub.add_parser("note", help="add one bullet to WAITING ON YOU TO DO; it "
-                                    "must start with %s, then a short "
-                                    "description, then any background. ONE ASK "
-                                    "PER BULLET - pass several tagged strings, "
-                                    "or several lines, for several items"
+                                    "must start with %s, then a summary of at "
+                                    "most about a dozen words on that first "
+                                    "line; any background goes on INDENTED "
+                                    "continuation lines. ONE ASK PER BULLET - "
+                                    "pass several tagged strings, or several "
+                                    "lines, for several items"
                                     % "/".join(t + ":" for t in bp.TODO_TAGS))
     s.add_argument("text", nargs="+")
     s.set_defaults(fn=cmd_note)
