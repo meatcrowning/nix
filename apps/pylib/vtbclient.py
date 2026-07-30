@@ -69,13 +69,29 @@ class VtbClient:
 
     def set_buttons(self, buttons):
         """buttons: list of (id, label, state[, tooltip[, draggable]]) tuples or
-        "-" separators. Replaces the whole set; call again on any change."""
+        "-" separators. Replaces the whole set; call again on any change.
+
+        An UNCHANGED set is not sent — the same guard `set_loading`,
+        `set_playbar` and `set_footer_bottom` already have. REGISTER is the one
+        verb the plugin does not deduplicate itself (`vtbIpc.cpp`
+        `handleRegister` bumps `serial` unconditionally, while `handleFooter`
+        returns early on identical text), and every bump makes every window's
+        titlebar re-warm its glyphs and repaint. An app that re-sends its set on
+        a redraw was paying for that; board sent its whole set twice at startup.
+        The reconnect path calls `_send_register_locked` directly, so a
+        re-register after the plugin restarts is unaffected.
+        """
         with self._lock:
-            self._buttons = list(buttons)
+            new = list(buttons)
+            if new == self._buttons:
+                return
+            self._buttons = new
             self._send_register_locked()
 
     def set_footer(self, text):
         with self._lock:
+            if str(text) == self._footer:
+                return
             self._footer = str(text)
             self._send_footer_locked()
 
