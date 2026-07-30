@@ -2995,6 +2995,69 @@ def test_window(app, tmp):
     check("the to-do list is drawn with the things that need him",
           len(prop(win, "todo")) == 1, prop(win, "todo"))
 
+    # ---- each usage meter carries its OWN reset tooltip ----
+    # [his, 2026-07-29] *"add a tooltip to each usage indicator that says when
+    # that limit next resets"*. Both rows always exist (`readings()` returns the
+    # pair on every host, known or not), so both chips must, and each must carry
+    # ITS row's sentence rather than the other's — swapping them is the failure
+    # this catches. The chip starts closed: it is a dwell, never a thing that is
+    # already on screen (§8).
+    meters = [it for it in descendants(win.contentItem())
+              if "UsageMeter" in it.metaObject().className()]
+    tips = [(m, [c for c in descendants(m)
+                 if "ToolTipArea" in c.metaObject().className()]) for m in meters]
+    check("both usage meters have a tooltip, and it is the whole row's",
+          len(meters) == 2 and all(len(t) == 1
+                                   and round(t[0].width()) == round(m.width())
+                                   for m, t in tips),
+          [(round(m.width()), len(t)) for m, t in tips])
+    check("...saying when THAT window resets, in boardusage's own words",
+          all(t[0].property("text") == (m.property("row") or {}).get("reset")
+              and t[0].property("text") for m, t in tips),
+          [(t[0].property("text") if t else None) for m, t in tips])
+    chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
+    check("...and no chip is on screen until he dwells on one (8)",
+          len(chips) == 2 and all(c.width() == 0 and not c.isVisible() for c in chips),
+          [(c.width(), c.isVisible()) for c in chips])
+
+    # ---- ...and it slides out to the LEFT, out of a fixed right edge ----
+    # docs/DESIGN.md §8, and [his, 2026-07-29] *"it slides out to the right, it
+    # was supposed to slide out to the left"* — the first cut grew rightward,
+    # inherited from painter's copy, which diverges from §8 (§19.2). This
+    # asserts the GEOMETRY over the reveal rather than the pixels: the right
+    # edge never moves, it sits off the row's left side, and `x` walks left as
+    # the clip widens. The retraction has to SNAP (§8) — one sample after the
+    # pointer leaves, the chip is already shut.
+    from PySide6.QtCore import QPoint                                  # noqa: E402
+    from PySide6.QtTest import QTest                                   # noqa: E402
+    meter, chip = meters[0], chips[0]
+    at = meter.mapToItem(win.contentItem(),
+                         QPoint(int(meter.width() / 2), int(meter.height() / 2)))
+    QTest.mouseMove(win, QPoint(int(at.x()), int(at.y())))
+    spin(60)
+    check("...the pointer on a meter is what opens its chip, after a dwell (8)",
+          tips[0][1][0].property("containsMouse") and not tips[0][1][0].property("open"),
+          (tips[0][1][0].property("containsMouse"), tips[0][1][0].property("open")))
+    frames = []
+    for _ in range(26):
+        spin(20)
+        frames.append((round(chip.x(), 1), round(chip.width(), 1)))
+    moving = [f for f in frames if 0 < f[1] < chip.property("fullW")]
+    edges = {round(x + w, 1) for x, w in frames if w > 0}
+    left = meter.mapToItem(win.contentItem(), QPoint(0, 0)).x()
+    check("the reset chip opens at all when he dwells on the meter",
+          chip.width() > 0 and len(moving) >= 3, (frames[-1], len(moving)))
+    check("...and grows out of ONE fixed right edge, off the row's left side (8)",
+          len(edges) == 1 and edges.pop() <= left, (sorted(edges), left))
+    check("...so its left edge walks LEFTWARD as it opens, never rightward",
+          all(b[0] <= a[0] for a, b in zip(moving, moving[1:]))
+          and moving[-1][0] < moving[0][0], moving)
+    QTest.mouseMove(win, QPoint(2, 2))
+    spin(20)
+    check("...and the retraction snaps back the way it came, in one frame (8)",
+          chip.width() == 0 and not chip.isVisible(),
+          (chip.x(), chip.width(), chip.isVisible()))
+
     # ---- the model chooser sits to the RIGHT of the box he types in ----
     # His words placed it: "a drop down to the right of the top prompt box".
     # Found by its label rather than an id, because that label is the one thing
@@ -4319,6 +4382,22 @@ def test_usage(tmp):
           rows[0]["label"] == "5h" and "5 hour" in rows[0]["detail"],
           rows[0]["detail"])
 
+    # ---- the tooltip sentence: WHEN this limit comes back ----
+    # [his, 2026-07-29] *"add a tooltip to each usage indicator that says when
+    # that limit next resets"*. It is per-row and names its own window, because a
+    # chip is read on its own, away from the label it grew out of. This payload
+    # has one window with a `resets_at` and one without, which is the whole
+    # point: neither may end up with an empty chip (§10), and the one that cannot
+    # say a time must say THAT rather than nothing.
+    check("each window's tooltip says when THAT window resets, by name",
+          rows[1]["reset"] == "the 7d window resets Sat 6:59pm", rows[1]["reset"])
+    check("...and a window with no reset time in the payload says so",
+          rows[0]["reset"] == "this reading carries no reset time for the 5h window",
+          rows[0]["reset"])
+    check("...in ASCII, so the chip cannot clip on a missing glyph (2.3)",
+          all(ord(c) < 128 for c in rows[0]["reset"] + rows[1]["reset"]),
+          [rows[0]["reset"], rows[1]["reset"]])
+
     # A reading nobody has taken is UNKNOWN, never 0% — a bar at zero says "he
     # has used none of it", which is a claim (10).
     for name, payload in (("none", None),
@@ -4335,6 +4414,9 @@ def test_usage(tmp):
         check("a missing/broken reading (%s) says unknown, and draws no bar" % name,
               all(r["known"] is False and r["text"] == "unknown" for r in rows),
               rows)
+        check("...and its tooltip says why there is no reset time either (%s)" % name,
+              all(r["reset"].startswith("no usage reading yet") and r["label"] in r["reset"]
+                  for r in rows), [r["reset"] for r in rows])
 
     # The old payload shape, before `limits` existed: the two flat totals are
     # still unscoped, so they are still his.
