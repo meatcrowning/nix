@@ -45,6 +45,10 @@ The pieces, and where the rules come from:
     transcript and cannot be faked. The card's second sentence is the OBSERVED
     one, always, and a disagreement between the two is drawn rather than
     resolved.
+  * `boardusage.py` — the two bars under the model chooser: how much of the
+    5-hour and the 7-day limit is gone. Read from Claude Code's own cached
+    `/usage` figures, never derived from tokens against a guessed ceiling, and
+    never broken out per model — its docstring says why on all three counts.
   * QML draws it: pixel font at the desktop's size through `DeskStyle`, the wal
     palette parsed and watched out of the panel's `Theme.qml`, motion from
     `qmlcommon/Motion.qml`, `Kinetic*` views, `VScroll`, and the chrome in the
@@ -87,6 +91,7 @@ import boardparse  # noqa: E402  (beside this file)
 import boardmove  # noqa: E402  (beside this file)
 import boardagents  # noqa: E402  (beside this file)
 import boardwork  # noqa: E402  (beside this file)
+import boardusage  # noqa: E402  (beside this file)
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "board" / "state.json"
@@ -782,6 +787,52 @@ class Agents(QObject):
         return "queued note rewritten - the next agent reads this"
 
 
+class Usage(QObject):
+    """The two usage bars under the model chooser — the Qt skin on `boardusage`.
+
+    That module's docstring is authoritative for where the numbers come from,
+    why the short window is labelled `5h` rather than "daily", and why no Fable
+    figure is drawn. This class only re-reads and notifies.
+
+    A poll, not a `QFileSystemWatcher`: `~/.claude.json` is rewritten by the CLI
+    (often by replace, which drops a file watch on the spot) and it lives in
+    `$HOME`, where watching the directory would wake this app for every stray
+    download. The cache changes on the order of minutes, so 60s is well inside
+    "prompt" and the read is mtime-gated on top of that.
+    """
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rows = []
+        self._stamp = None
+        self._poll = QTimer(self)
+        self._poll.setInterval(60000)
+        self._poll.timeout.connect(self.refresh)
+        self._poll.start()
+        self.refresh()
+
+    @Slot()
+    def refresh(self):
+        try:
+            stamp = os.path.getmtime(boardusage.CLAUDE_JSON)
+        except OSError:
+            stamp = 0
+        # The AGE moves even when the file does not, and a stale reading is
+        # supposed to say so — so a re-read is skipped only while the rows come
+        # out identical, never merely because the mtime held still.
+        rows = boardusage.readings()
+        if rows == self._rows and stamp == self._stamp:
+            return
+        self._rows, self._stamp = rows, stamp
+        self.changed.emit()
+
+    @Property("QVariantList", notify=changed)
+    def rows(self):
+        return self._rows
+
+
 class Settings(QObject):
     """board's own persisted UI state, `~/.local/state/board/state.json`.
 
@@ -875,8 +926,10 @@ def main():
     titlebar = Titlebar()
     board = Board(args[0] if args else None)
     agents = Agents()
+    usage = Usage()
 
     ctx.setContextProperty("Agents", agents)
+    ctx.setContextProperty("Usage", usage)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)

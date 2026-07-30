@@ -2682,13 +2682,17 @@ def build(app, path):
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     keep = (brd.Palette(brd.PANEL_THEME), DeskStyle(parent=engine), StubTitlebar(),
-            brd.Board(path), brd.Settings(), brd.Agents())
+            brd.Board(path), brd.Settings(), brd.Agents(), brd.Usage())
     ctx.setContextProperty("WalPalette", keep[0])
     ctx.setContextProperty("DeskStyle", keep[1])
     ctx.setContextProperty("Titlebar", keep[2])
     ctx.setContextProperty("Board", keep[3])
     ctx.setContextProperty("Settings", keep[4])
     ctx.setContextProperty("Agents", keep[5])
+    # Every context property main.py installs is installed here too, or the
+    # window loads with a ReferenceError the harness cannot see and the section
+    # is simply missing on his screen.
+    ctx.setContextProperty("Usage", keep[6])
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(BOARD, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
@@ -2815,6 +2819,27 @@ def test_window(app, tmp):
           [(m["label"], m["current"]) for m in listed])
     check("...whose label is prose, never the raw wire name",
           "claude-" not in agents_obj.modelLabel, agents_obj.modelLabel)
+
+    # ---- ...and the two usage bars sit UNDER it ----
+    # His words placed these too: "directly under the orchestrator
+    # model-selection box". Found by their labels, which are the whole of what
+    # he reads: a bar with no window name beside it is not a readout.
+    import boardusage as bum                                            # noqa: E402
+    labels = [w[2] for w in bum.WINDOWS]
+    bars = [it for it in descendants(win.contentItem())
+            if it.property("hovering") is not None]
+    check("there are exactly two usage meters, one per window",
+          len(bars) == len(labels), len(bars))
+    if bars and picks:
+        texts = sorted((it.mapToItem(win.contentItem(), QPointF(0, 0)).x(),
+                        (it.property("row") or {}).get("label", ""))
+                       for it in bars)
+        check("...labelled by the window each one measures, in order",
+              [t[1] for t in texts] == labels, [t[1] for t in texts])
+        pt = picks[0].mapToItem(win.contentItem(), QPointF(0, 0))
+        by = min(it.mapToItem(win.contentItem(), QPointF(0, 0)).y() for it in bars)
+        check("...UNDER the model chooser, not beside it", by > pt.y(),
+              (pt.y(), by))
     shot(win, "01-populated")
 
     # ---- ...in sub-sections, one per tag that HAS bullets ----
@@ -3895,6 +3920,121 @@ def test_placed_window(app, tmp):
     shot(win, "06-placed")
 
 
+def test_usage(tmp):
+    """The two usage bars: HIS number, or none, and never a Fable one.
+
+    Every check here is about honesty rather than arithmetic — the percentages
+    are the CLI's own. What can go wrong is drawing one that is not his (the
+    scoped Fable entry), drawing a zero where there is no reading, or drawing an
+    hours-old figure as if it were now.
+    """
+    import boardusage as bu
+    print("\n=== usage ===")
+
+    def write(name, payload):
+        p = os.path.join(tmp, name)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        return p
+
+    now = 1785379200.0
+    real = write("real.json", {"cachedUsageUtilization": {
+        "fetchedAtMs": int((now - 300) * 1000),
+        "utilization": {
+            "five_hour": {"utilization": 4, "resets_at": None},
+            "seven_day": {"utilization": 73,
+                          "resets_at": "2026-08-02T02:59:59+00:00"},
+            "seven_day_opus": None,
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 4,
+                 "resets_at": None, "scope": None},
+                {"kind": "weekly_all", "group": "weekly", "percent": 73,
+                 "resets_at": "2026-08-02T02:59:59+00:00", "scope": None},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 34,
+                 "resets_at": "2026-08-02T02:59:59+00:00",
+                 "scope": {"model": {"id": None, "display_name": "Fable"}}},
+            ]}}})
+    rows = bu.readings(real, now)
+    check("both windows are read, in order, from claude code's own cache",
+          [r["key"] for r in rows] == ["session", "weekly"]
+          and [r["text"] for r in rows] == ["4%", "73%"], rows)
+    # THE constraint he stated: no Fable figure anywhere. The payload carries
+    # one (34%, `weekly_scoped`) and `weekly_all` already contains that usage,
+    # so folding it in is nothing more than never reading the scoped entry.
+    blob = json.dumps(rows).lower()
+    check("...and the per-model breakout is not drawn, in any row",
+          "fable" not in blob and "34%" not in blob, blob)
+    check("...the weekly bar being the WHOLE account, which is why",
+          rows[1]["percent"] == 73, rows[1])
+    check("...saying when it resets, in a clock this font can draw (2.3)",
+          "resets" in rows[1]["detail"]
+          and all(ord(c) < 128 for c in rows[1]["detail"]), rows[1]["detail"])
+    check("...and the short window is named for what it IS - 5 hours, not a day",
+          rows[0]["label"] == "5h" and "5 hour" in rows[0]["detail"],
+          rows[0]["detail"])
+
+    # A reading nobody has taken is UNKNOWN, never 0% — a bar at zero says "he
+    # has used none of it", which is a claim (10).
+    for name, payload in (("none", None),
+                          ("empty", {}),
+                          ("nokey", {"cachedUsageUtilization": {}}),
+                          ("junk", {"cachedUsageUtilization":
+                                    {"utilization": {"limits": "no"}}}),
+                          ("nan", {"cachedUsageUtilization": {"utilization": {
+                              "limits": [{"kind": "session", "percent": None,
+                                          "scope": None}]}}})):
+        p = os.path.join(tmp, "gone.json") if payload is None \
+            else write(name + ".json", payload)
+        rows = bu.readings(p, now)
+        check("a missing/broken reading (%s) says unknown, and draws no bar" % name,
+              all(r["known"] is False and r["text"] == "unknown" for r in rows),
+              rows)
+
+    # The old payload shape, before `limits` existed: the two flat totals are
+    # still unscoped, so they are still his.
+    flat = write("flat.json", {"cachedUsageUtilization": {
+        "fetchedAtMs": int((now - 60) * 1000),
+        "utilization": {"five_hour": {"utilization": 11, "resets_at": None},
+                        "seven_day": {"utilization": 50, "resets_at": None},
+                        "seven_day_opus": {"utilization": 99}}}})
+    rows = bu.readings(flat, now)
+    check("a payload with no `limits` list falls back to the flat totals",
+          [r["text"] for r in rows] == ["11%", "50%"], rows)
+    check("...and never to a per-model key, whatever it says",
+          "99" not in json.dumps(rows), rows)
+
+    # A weekly whose ONLY entry is the scoped one must read unknown. Silently
+    # promoting it would put Fable's number under the word "7d".
+    only = write("only.json", {"cachedUsageUtilization": {
+        "fetchedAtMs": int(now * 1000),
+        "utilization": {"limits": [
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 34,
+             "scope": {"model": {"display_name": "Fable"}}}]}}})
+    rows = bu.readings(only, now)
+    check("a scoped-only weekly is unknown, not promoted to the whole account",
+          rows[1]["known"] is False and "34" not in json.dumps(rows), rows)
+
+    # An old cache still shows its number — 73% an hour ago is not false — but
+    # carries its age in the ROW, because colour alone can be missed (3.5).
+    old = write("old.json", {"cachedUsageUtilization": {
+        "fetchedAtMs": int((now - 9 * 3600) * 1000),
+        "utilization": {"limits": [
+            {"kind": "session", "percent": 20, "scope": None},
+            {"kind": "weekly_all", "percent": 60, "scope": None}]}}})
+    rows = bu.readings(old, now)
+    check("a stale cache still reports, and says how old in the row itself",
+          all(r["stale"] and r["note"] == "9h old" for r in rows),
+          [r["note"] for r in rows])
+    fresh = bu.readings(real, now)
+    check("...while a fresh one carries no age at all",
+          all(f["note"] == "" for f in fresh), [f["note"] for f in fresh])
+
+    # It reads a file it does not own, so it may never write one.
+    before = sorted(os.listdir(tmp))
+    bu.readings(real, now)
+    check("reading his config never writes to it", sorted(os.listdir(tmp)) == before)
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -3935,6 +4075,8 @@ def main():
         test_work(os.path.join(tmp, "work"))
         test_overlap(os.path.join(tmp, "work"))
         test_dead_worker_notes(os.path.join(tmp, "work"))
+        os.makedirs(os.path.join(tmp, "use"))
+        test_usage(os.path.join(tmp, "use"))
         app = QGuiApplication(sys.argv)
         test_real_store()
         test_real_window(app)
