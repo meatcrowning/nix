@@ -19,6 +19,17 @@ the server side):
     <- SEEK <frac>                               the scrub bar was dragged/scrolled
     <- WAKE                                       the window was just un-hidden
 
+**REGISTER carries its own non-default flags, in the SAME write.** The plugin
+keeps no state for an unknown pid and `dropClient` erases the entry outright, so
+a fresh registration starts at the plugin's defaults — `titleText` on above all.
+Anything sent as a second write is therefore a window in which the bar draws
+state the app has already declared it does not want. The plugin's reader drains
+the socket and handles every complete line before returning to its poll, so one
+`sendall` of "REGISTER …\nTITLETEXT 0\n" is one wakeup and the default state is
+never on screen; no parser change was needed for this. `_flag_lines_locked()`
+emits a line only for a flag this app has moved OFF the default, so an app that
+wants the defaults sends exactly what it always did.
+
 Buttons are (id, label, state[, tooltip[, draggable[, bottom]]]) tuples —
 state 0 normal, 1 active/lit, 2 disabled — or the string "-" for a separator.
 Labels are 1-2 char glyphs drawn in the titlebar's pixel font; the optional
@@ -47,6 +58,18 @@ def _sock_path():
 
 
 class VtbClient:
+    # Reconnect backoff. A flat 3s poll was the DOMINANT cause of goetia's
+    # titlebar flashing its window title: a `hyprctl reload` plugin hot-swap
+    # takes the socket away and brings a new one back within a few hundred ms,
+    # but the client had already committed to a 3s sleep — and for every one of
+    # those seconds the pid has no registration, so the plugin falls back to its
+    # `titleText` default and the bar draws "goetia" on a mapped, visible
+    # window. Measured at a flat 3000 ms; ~50 ms now. Ramps back to the same 3s
+    # ceiling in ten attempts (~9 s), so a session with no plugin loaded at all
+    # polls exactly as sparsely as it always did.
+    _RETRY_MIN = 0.05
+    _RETRY_MAX = 3.0
+
     def __init__(self, on_click=None, pid=None, on_reorder=None, on_addr=None,
                  on_wake=None, on_seek=None):
         self._on_click = on_click
@@ -65,6 +88,7 @@ class VtbClient:
         self._loading = False
         self._playbar = None       # (shown, pos) or None if never set
         self._stop = False
+        self._retry = self._RETRY_MIN
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -161,10 +185,17 @@ class VtbClient:
     # ---- wire helpers (call with _lock held) ----
 
     def _send_locked(self, line):
-        if not self._sock:
+        self._send_lines_locked([line])
+
+    def _send_lines_locked(self, lines):
+        """ONE sendall for the whole batch — see the atomicity note in the
+        module docstring. The plugin handles every complete line it can see
+        before it polls again, so a batch sent this way cannot be observed
+        half-applied."""
+        if not self._sock or not lines:
             return
         try:
-            self._sock.sendall((line + "\n").encode())
+            self._sock.sendall("".join(ln + "\n" for ln in lines).encode())
         except OSError:
             try:
                 self._sock.close()
@@ -182,7 +213,36 @@ class VtbClient:
         return (str(s).replace("%", "%25").replace(":", "%3A").replace("|", "%7C")
                 .replace("\n", "%0A").replace("\r", "%0D"))
 
+    def _flag_lines_locked(self):
+        """Only the flags this app has moved off the plugin's defaults.
+
+        Empty for an app that wants the defaults, which is the whole safety
+        property: bundling these with REGISTER must not start asserting a flag
+        nobody asked for. Re-asserting one that is already set costs nothing
+        either — every flag handler in `vtbIpc.cpp` returns early on an
+        unchanged value WITHOUT bumping the IPC serial, so a re-register (which
+        goetia does on every scroll) triggers no extra repaint.
+        """
+        out = []
+        if not self._title_text:
+            out.append("TITLETEXT 0")   # first, so it is the least deferrable
+        if self._title_edit:
+            out.append("TITLEEDIT 1")
+        if self._footer_bottom:
+            out.append("FOOTERPOS 1")
+        if self._footer:
+            out.append("FOOTER " + self._footer)
+        if self._loading:
+            out.append("LOADING 1")
+        if self._playbar is not None:
+            shown, pos = self._playbar
+            out.append("PLAYBAR %d %.5f" % (1 if shown else 0, pos))
+        return out
+
     def _send_register_locked(self):
+        # No buttons, nothing to send: the plugin learns a connection's pid only
+        # FROM a REGISTER and drops every other verb until it has one, so the
+        # flags would be discarded on their own anyway.
         if not self._buttons:
             return
         parts = []
@@ -195,7 +255,8 @@ class VtbClient:
                 drag = 1 if (len(b) > 4 and b[4]) else 0
                 bottom = 1 if (len(b) > 5 and b[5]) else 0
                 parts.append(f"{self._enc(bid)}:{self._enc(label)}:{int(state)}:{self._enc(tip)}:{drag}:{bottom}")
-        self._send_locked(f"REGISTER {self._pid} " + "|".join(parts))
+        self._send_lines_locked([f"REGISTER {self._pid} " + "|".join(parts)]
+                                + self._flag_lines_locked())
 
     def _send_footer_locked(self):
         self._send_locked("FOOTER " + self._footer)
@@ -234,24 +295,18 @@ class VtbClient:
                         sock.close()
                     except OSError:
                         pass
-                    time.sleep(3)  # plugin not loaded (yet) — keep trying
+                    time.sleep(self._retry)  # plugin not loaded (yet) — keep trying
+                    self._retry = min(self._RETRY_MAX, self._retry * 1.6)
                     continue
                 buf = b""
+                self._retry = self._RETRY_MIN  # next outage starts fast again
                 with self._lock:
                     self._sock = sock
+                    # REGISTER *and* every non-default flag, one write. The
+                    # plugin's dropClient erased this pid's entry when the old
+                    # connection died, so a reconnect is a first registration
+                    # as far as the compositor is concerned.
                     self._send_register_locked()
-                    if self._footer_bottom:
-                        self._send_footer_pos_locked()
-                    if self._footer:
-                        self._send_footer_locked()
-                    if self._title_edit:
-                        self._send_title_edit_locked()
-                    if not self._title_text:
-                        self._send_title_text_locked()
-                    if self._loading:
-                        self._send_loading_locked()
-                    if self._playbar is not None:
-                        self._send_playbar_locked()
             try:
                 data = sock.recv(4096)
             except OSError:

@@ -123,6 +123,15 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   statement; nothing else in this tree should restate it, and a per-app guide
   that needs one corner of it should quote the docstring rather than paraphrase
   the rest. (Server side: `home/prog/hyprvtb/vtbIpc.hpp`.)
+  **A REGISTER carries its own non-default flags in the SAME write**, and every
+  reconnect replays that one write. The plugin holds no state for an unknown pid
+  and `dropClient` erases the entry, so a registration the compositor can
+  observe on its own is a registration observed at the plugin's DEFAULTS — which
+  is what made goetia's bar flash its window title. A new flag must therefore be
+  added to `_flag_lines_locked()` as well as its setter, and only when it is off
+  the default: an app that wants the defaults must keep sending nothing extra.
+  Harness: `apps/pylib/tools/vtb-register-test.py` (offscreen, mocks the
+  plugin's poll/drain loop, needs no plugin loaded).
 - **`trackmatch.py`** — the one artist/title normaliser. Any new "are these two
   tag strings the same song?" code must use it rather than grow a second copy;
   see `player/AGENTS.md`.
