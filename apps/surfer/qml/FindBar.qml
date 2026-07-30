@@ -74,6 +74,107 @@ Rectangle {
         searched = null;
         if (!v) return;
         try { v.findText(""); } catch (e) {}
+        try { v.runJavaScript(root.markJs("", 0, 0)); } catch (e) {}
+    }
+
+    // ---- the marks the eye actually reads ---------------------------------
+    //
+    // Chromium DOES light every match (yellow) and the one you are on (orange),
+    // and under dark mode it may as well not: the whole-page invert filter runs
+    // over the markers too, so #ffff00 lands as #252500 on a near-black page —
+    // invisible, i.e. exactly the "find just scrolls" complaint. Measured
+    // offscreen, and dark mode is on globally with a per-site exception list,
+    // so this is what almost every page does.
+    //
+    // So the marks are ours: the CSS Custom Highlight API over ranges we find
+    // ourselves, painted in the wal palette (docs/DESIGN.md §3.1 — `dim` is
+    // "inactive", `accent` is "active", and §16's page scrollbars are the
+    // precedent for the palette reaching inside a page). Every match is a dim
+    // box with accent text; the one you are ON inverts to an accent box with
+    // black text, which is the same current-vs-rest ladder every list on this
+    // desktop uses and reads at a glance rather than by hue.
+    //
+    // Dark mode is beaten rather than avoided: DarkMode.compensate() returns
+    // the colour whose IMAGE under the page filter is the palette colour, the
+    // same trick _dark_css already plays on media. It is the identity when the
+    // filter is off, so there is one code path.
+    function cssHex(c) {
+        function h(x) { var s = Math.round(x * 255).toString(16); return s.length < 2 ? "0" + s : s; }
+        return "#" + h(c.r) + h(c.g) + h(c.b);
+    }
+    function pageColor(c) {
+        var hex = cssHex(c);
+        if (typeof DarkMode === "undefined" || !view) return hex;
+        return DarkMode.compensate(view.url.toString(), hex);
+    }
+
+    // `expect` is Chromium's own match count: our walk and its walk can differ
+    // (shadow DOM, a match split across block boundaries), and marking the
+    // WRONG match as current is worse than marking none, so a disagreement
+    // drops the active mark and leaves every match lit.
+    function markJs(q, activeIndex, expect) {
+        var css = "::highlight(surferFind){background-color:" + pageColor(Theme.dim)
+                + ";color:" + pageColor(Theme.text) + "}"
+                + "::highlight(surferFindActive){background-color:" + pageColor(Theme.accent)
+                + ";color:" + pageColor(Theme.bg) + "}";
+        return "(function(q,act,expect,css){"
+             + "var SID='__surfer_findhl__';"
+             + "var s=document.getElementById(SID);"
+             + "if(!s){s=document.createElement('style');s.id=SID;(document.head||document.documentElement).appendChild(s);}"
+             + "s.textContent=css;"
+             + "if(!window.CSS||!CSS.highlights||!window.Highlight)return;"
+             + "CSS.highlights.delete('surferFind');CSS.highlights.delete('surferFindActive');"
+             + "window.__surferFindHl={n:0,active:-1};"
+             + "if(!q)return;"
+             + "var SKIP={SCRIPT:1,STYLE:1,NOSCRIPT:1,TEXTAREA:1,SELECT:1,TITLE:1,HEAD:1};"
+             + "var BLOCK={ADDRESS:1,ARTICLE:1,ASIDE:1,BLOCKQUOTE:1,BR:1,DD:1,DETAILS:1,DIV:1,DL:1,"
+             + "DT:1,FIELDSET:1,FIGCAPTION:1,FIGURE:1,FOOTER:1,FORM:1,H1:1,H2:1,H3:1,H4:1,H5:1,H6:1,"
+             + "HEADER:1,HR:1,LI:1,MAIN:1,NAV:1,OL:1,P:1,PRE:1,SECTION:1,TABLE:1,TD:1,TH:1,TR:1,UL:1};"
+             + "var root=document.body||document.documentElement;if(!root)return;"
+             + "var w=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT,"
+             + "{acceptNode:function(n){return (n.nodeType===1&&SKIP[n.nodeName])"
+             + "?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;}});"
+             // one flat string plus a node index, so a match may straddle the
+             // inline elements a word gets chopped into; a block boundary
+             // becomes U+0001, which no query and no \s can cross — Chromium
+             // does not match across one either
+             + "var text='',map=[],n;"
+             + "while((n=w.nextNode())){"
+             + "if(n.nodeType===1){if(BLOCK[n.nodeName])text+='\\u0001';continue;}"
+             + "var v=n.nodeValue;if(!v)continue;map.push([n,text.length]);text+=v;}"
+             // whitespace in the query matches any run of it: HTML source wraps
+             // lines, so a two-word query would otherwise miss
+             + "var pat=q.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&').replace(/\\s+/g,'\\\\s+');"
+             + "var re;try{re=new RegExp(pat,'gi');}catch(e){return;}"
+             + "function locate(off){var lo=0,hi=map.length-1,best=0;"
+             + "while(lo<=hi){var mid=(lo+hi)>>1;if(map[mid][1]<=off){best=mid;lo=mid+1;}else hi=mid-1;}"
+             + "return best;}"
+             + "var hits=[],m,guard=0;"
+             + "while((m=re.exec(text))&&guard++<2000){"
+             + "if(m[0].length===0){re.lastIndex++;continue;}"
+             + "var a=locate(m.index),b=locate(m.index+m[0].length-1);"
+             + "var r=document.createRange();"
+             + "try{r.setStart(map[a][0],m.index-map[a][1]);"
+             + "r.setEnd(map[b][0],m.index+m[0].length-map[b][1]);}catch(e){continue;}"
+             // a range with no client rects is text nobody can see, which is
+             // what Chromium skips too — dropping it keeps the two counts equal
+             + "if(!r.getClientRects().length)continue;"
+             + "hits.push(r);}"
+             + "var idx=(expect>0&&hits.length!==expect)?-1:act;"
+             + "var all=new Highlight(),cur=new Highlight();"
+             + "for(var i=0;i<hits.length;i++){(i===idx?cur:all).add(hits[i]);}"
+             + "CSS.highlights.set('surferFind',all);"
+             + "if(idx>=0)CSS.highlights.set('surferFindActive',cur);"
+             + "window.__surferFindHl={n:hits.length,active:idx};"
+             + "})(" + JSON.stringify(q) + "," + activeIndex + "," + expect + ","
+             + JSON.stringify(css) + ");";
+    }
+
+    // Chromium's activeMatch is 1-based; -1 when there is nothing to be on.
+    function applyMarks() {
+        if (!searched) return;
+        try { searched.runJavaScript(root.markJs(query, matches > 0 ? activeMatch - 1 : -1, matches)); }
+        catch (e) {}
     }
 
     // `query.length`, never `hasQuery`: this runs from onTextChanged, and the
@@ -101,6 +202,7 @@ Rectangle {
             if (!root.shown) return;
             root.matches = result.numberOfMatches;
             root.activeMatch = result.activeMatch;
+            root.applyMarks();
         }
     }
 

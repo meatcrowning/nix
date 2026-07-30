@@ -1977,6 +1977,62 @@ class DarkMode(QObject):
             "hue-rotate(180deg) invert(100%)!important}"
         )
 
+    # ---- pre-compensating a colour we draw INSIDE the filtered page ----------
+    #
+    # Anything the chrome paints into the page — the find highlight — is drawn
+    # inside `html`, so dark mode inverts it along with everything else. The
+    # find highlight is the case that made this necessary: Chromium's own
+    # marker yellow came out #252500 on a black page, i.e. invisible, which is
+    # exactly what "find only scrolls" looks like from the outside.
+    #
+    # The fix is the one _dark_css already uses for media, run backwards: the
+    # chain invert -> hue-rotate(180) -> brightness(b) -> contrast(c) is
+    # invertible, so ask for the colour whose IMAGE under it is the palette
+    # colour we wanted. Measured offscreen: the pixels that land are the
+    # palette hex exactly, at any brightness/contrast.
+    #
+    # The CSS hue-rotate(180deg) matrix (sRGB, the shorthand filter's own
+    # colour space — not a true hue rotation, which is why it is written out
+    # rather than derived).
+    _HUE180 = ((-0.574, 1.430, 0.144),
+               (0.426, 0.430, 0.144),
+               (0.426, 1.430, -0.856))
+    # its inverse, computed once (determinant 1.0)
+    _HUE180_INV = None
+
+    @classmethod
+    def _hue180_inv(cls):
+        if cls._HUE180_INV is None:
+            (a, b, c), (d, e, f), (g, h, i) = cls._HUE180
+            det = (a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g))
+            cls._HUE180_INV = (
+                ((e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det),
+                ((f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det),
+                ((d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det))
+        return cls._HUE180_INV
+
+    @Slot(str, str, result=str)
+    def compensate(self, url, color):
+        """The `#rrggbb` to paint into this page so that it RENDERS as `color`.
+
+        Identity when dark mode does not apply to this URL, so the caller has
+        one code path and never has to ask whether the filter is on."""
+        try:
+            c = str(color).lstrip("#")
+            want = [int(c[k:k + 2], 16) / 255.0 for k in (0, 2, 4)]
+        except (ValueError, IndexError):
+            return color
+        if not (self._enabled and self.isSiteEnabled(url)):
+            return color
+        b = self._brightness / 100.0
+        k = self._contrast / 100.0
+        v = [(x - 0.5) / k + 0.5 for x in want]     # undo contrast(c)
+        v = [x / b for x in v]                      # undo brightness(b)
+        m = self._hue180_inv()                      # undo hue-rotate(180deg)
+        v = [sum(m[r][j] * v[j] for j in range(3)) for r in range(3)]
+        v = [1.0 - x for x in v]                    # undo invert(100%)
+        return "#" + "".join("%02x" % max(0, min(255, round(x * 255))) for x in v)
+
     def _font_css(self):
         # Force the desktop pixel font on all page text (family only — sizes stay
         # the site's, so layout/heading hierarchy survives).

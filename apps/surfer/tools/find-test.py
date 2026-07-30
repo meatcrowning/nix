@@ -26,12 +26,16 @@ ZoomFilter's Ctrl +/-/0 already ride. Appearance is the user's visual check.
 
 Run it after touching FindBar.qml, its wiring in Main.qml, or HotkeyFilter.
 """
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -91,9 +95,10 @@ for var in ("XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
 
 sys.path.insert(0, str(HERE.parent))          # surfer's main.py
 from PySide6.QtCore import (QUrl, QEvent, Qt, QCoreApplication, QEventLoop,
-                            QTimer, QObject)  # noqa: E402
+                            QTimer, QObject, Q_ARG)  # noqa: E402
 from PySide6.QtGui import QGuiApplication, QKeyEvent                               # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent                     # noqa: E402
+from PySide6.QtQuick import QQuickWindow                                           # noqa: E402
 from PySide6.QtWebEngineQuick import QtWebEngineQuick                              # noqa: E402
 
 import main as surfer                          # noqa: E402  (import-safe: main() is guarded)
@@ -116,6 +121,12 @@ if theme is None:
     raise SystemExit("Theme.qml failed:\n" + theme_comp.errorString())
 theme.setParent(app)
 ctx.setContextProperty("Theme", theme)
+# The REAL DarkMode bridge — FindBar asks it to pre-compensate every colour it
+# paints into a page, so a fixture without it would test the wrong branch.
+# Prefs lands in the scratch XDG_STATE_HOME set above, never the user's.
+prefs = surfer.Prefs(app)
+darkmode = surfer.DarkMode(prefs, app)
+ctx.setContextProperty("DarkMode", darkmode)
 
 fixture = QQmlComponent(engine, QUrl.fromLocalFile(str(FIXTURE)))
 if fixture.isError():
@@ -261,6 +272,98 @@ check("shown", bar.property("shown"), False)
 check("matches zeroed", bar.property("matches"), 0)
 check("highlight dropped", bar.property("searched"), None)
 check("page has the focus", page.property("activeFocus"), True)
+
+
+# ---- the marks, in pixels ---------------------------------------------------
+# The reason this section exists: Chromium DOES light the matches, and under
+# surfer's dark mode its yellow lands as #252500 on a near-black page, which is
+# indistinguishable from a find that only scrolls. So the assertion is not
+# "findText ran" but "the palette colours are actually on the glass, and the
+# current match is a different one from the rest" — both with the page filter
+# off and with it on.
+print("the matches are marked in the palette, current one apart")
+
+
+def js(src):
+    page.metaObject().invokeMethod(page, "runJavaScript", Q_ARG(str, src))
+    pump(250)
+
+
+def mark_state():
+    """FindBar's JS stashes what it marked on window.__surferFindHl; relay it
+    through document.title, which PySide can read as a plain property."""
+    js("document.title=JSON.stringify(window.__surferFindHl||null)")
+    try:
+        return json.loads(page.property("title"))
+    except (TypeError, ValueError):
+        return None
+
+
+def swatch():
+    """How many pixels of each colour the page area is showing."""
+    img = QQuickWindow.grabWindow(win)
+    seen = {}
+    for y in range(0, min(90, img.height())):
+        for x in range(0, min(820, img.width())):
+            n = img.pixelColor(x, y).name()
+            seen[n] = seen.get(n, 0) + 1
+    return seen
+
+
+DIM = theme.property("dim").name()
+ACCENT = theme.property("accent").name()
+
+# dark mode needs a HOST (isSiteEnabled is false for a hostless file:// URL), so
+# this half of the check is served over loopback rather than off the disk
+srv_root = scratch / "www"
+srv_root.mkdir(exist_ok=True)
+(srv_root / "p.html").write_text(
+    "<html><body style='background:#fff;color:#000;font:20px monospace'>"
+    "<p>alpha beta alpha gamma alpha delta</p></body></html>", encoding="utf-8")
+httpd = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler,
+                                                      directory=str(srv_root)))
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+base = "http://127.0.0.1:%d/p.html" % httpd.server_address[1]
+
+for dark in (False, True):
+    darkmode.setEnabled(dark)
+    win.setProperty("loaded", False)
+    page.setProperty("url", QUrl(base))
+    if not wait_for(lambda: bool(win.property("loaded"))):
+        raise SystemExit("the loopback page never loaded")
+    pump(300)
+    js(darkmode.js(base))          # what Main.qml runs on every load
+    label = "dark on" if dark else "dark off"
+
+    bar.setProperty("query", "")
+    pump(200)
+    send_key(Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier, "\x06")
+    pump()
+    bar.setProperty("query", "alpha")
+    wait_for(lambda: bar.property("matches") == 3)
+    pump(500)
+
+    st = mark_state()
+    check("%s: every match marked" % label, (st or {}).get("n"), 3)
+    check("%s: one of them is the current one" % label,
+          (st or {}).get("active") == bar.property("activeMatch") - 1, True)
+
+    seen = swatch()
+    # the two marks are drawn at the palette hex EXACTLY — under dark mode that
+    # is DarkMode.compensate() cancelling the page filter, which is the whole
+    # point of this branch
+    check("%s: the other matches are Theme.dim" % label, seen.get(DIM, 0) > 200, True)
+    check("%s: the current match is Theme.accent" % label, seen.get(ACCENT, 0) > 100, True)
+    check("%s: the two are different colours" % label, DIM != ACCENT, True)
+
+    send_key(Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier, "\x1b")
+    pump(300)
+    seen = swatch()
+    check("%s: closing the bar unmarks them" % label,
+          seen.get(DIM, 0) + seen.get(ACCENT, 0) < 20, True)
+
+httpd.shutdown()
+darkmode.setEnabled(False)
 
 print()
 if fails:
