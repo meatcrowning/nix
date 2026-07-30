@@ -652,13 +652,21 @@ exactly like `reconcile()` and `sweep()`.
 
 ### A NEW WORKER IS NOT THE ONLY ANSWER: handing an item to one already in those files
 
-**A handoff is reported as `commanded <Name>`, a dispatch as `summoned <Name>`**
+**A handoff is reported as `COMMANDED: <Name>`, a dispatch as `SUMMONED: <Name>`**
 — his rule, 2026-07-29, and the distinction is the point: he can tell off the
 board whether a new agent was started or an existing one was given more work.
-Both words are read by `boardparse._SUMMONED`, so a handoff note is retired by
-its worker's result exactly like a summon note; a wording change that skipped the
-parser would leave every handoff note sitting under the result forever, saying
-nothing landed yet.
+The tag is uppercase, immediately before the name, and what follows the `(id)`
+is `to` or `for` plus a few words on what the worker went out for —
+`SUMMONED: Marbas (`wd690a4`) to add commit times`. **Never a "nothing landed
+yet" tail**: he does not want it written, silence says it. The dozen-word
+summary cap (`boardparse.SUMMARY_MAX_WORDS`) still binds and that tail spends
+most of what the headline leaves.
+Both words are read by `boardparse._SUMMONED` — in either case, the lowercase
+verbs `summoned`/`commanded` this replaced still match, because the store holds
+notes written that way — so a handoff note is retired by its worker's result
+exactly like a summon note; a wording change that skipped the parser would leave
+every handoff note sitting under the result forever, announcing work he has
+already been told the end of.
 
 *"it should also know when to give items to existing agents who are already
 working out of the same place or doing the same or similar things"*. So the
@@ -861,8 +869,8 @@ that part."* [his, 2026-07-29]
 
 A start and a result are two bullets about one piece of work, and the start is
 only true until the result lands. So posting a `COMPLETION:`/`PARTIAL:`/`FAILED:`
-(`boardparse.RESULT_TAGS`) retires the `INFORMATION: ... summoned <Name>
-(`<id>`)` note that announced it — **or the `commanded <Name>` one**, which is
+(`boardparse.RESULT_TAGS`) retires the `INFORMATION: ... SUMMONED: <Name>
+(`<id>`)` note that announced it — **or the `COMMANDED: <Name>` one**, which is
 the same announcement for a worker that was already running — in the **same**
 read-modify-write as the
 insert — one edit under the lock, so the board is never briefly holding both and
@@ -1057,7 +1065,15 @@ The short version, and every line of it is a rule:
   **And before anything is observed at all, the LIVE card gets his own startup
   PAIR, in his order** — [his, 2026-07-29] *"Solomon wields the ring..."* while
   observed is `starting` (his transcript is a second away), then *"Solomon etches
-  the triangle..."* on `none` (it is there and nothing has happened in it).
+  the circle..."* on `none` (it is there and nothing has happened in it).
+  **The CIRCLE is his and the TRIANGLE is theirs** — [his, 2026-07-29] the
+  magician stands in the circle and the spirit is bound in the triangle, so that
+  line named the wrong shape. `triangle` is not retired: it now names the AREA
+  THE MINISTERS RESIDE IN, the agents section under Solomon's summoner section,
+  whose `SectionHead` draws the label `triangle` (the section **id** stays
+  `agents` — it keys the collapse state, `jump()` and the `ag` titlebar cell).
+  The "no triangles in this font" lines elsewhere in this guide are about the
+  ASCII fold marker and mean something else entirely.
   `boardphase.orch_doing_line` owns both wordings and the ordering; scoped in
   `boardagents.agents()` to `kind == orchestrator`, running, so worker cards keep
   the honest bare placeholder. Same §10.6 argument as the idle row — a
@@ -1794,8 +1810,9 @@ new and are the ones to read first if the fan-out misbehaves:
   carry the rule in the words the refusal uses.
 
 - **the summon note dies with its result** (`test_summon_cleared`) — a worker's
-  `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `summoned <Name> (`<id>`)`
-  note with it — and a `commanded <Name>` handoff note the same way — whole,
+  `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `SUMMONED: <Name> (`<id>`)`
+  note with it — and a `COMMANDED: <Name>` handoff note the same way, the
+  lowercase verbs they replaced included — whole,
   stamp and wrapped lines included, and takes **nothing**
   else: not another worker's summon note, not a `QUESTION:`, not a plain
   `INFORMATION:` fact, not a result from a different id or from nobody. Two
