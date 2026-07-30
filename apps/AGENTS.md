@@ -163,6 +163,35 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
   page titles unmapped (§19.1). `is_mappable()` records what is left alone on
   purpose (CJK, Greek, the maths operators), so a harness can tell a known
   limit from a regression.
+- **`spellcheck.py`** — **THE spell checker for every text-entry surface here,
+  and the only one.** It talks to the **`hunspell` binary in pipe mode**
+  (`hunspell -a`, the ispell protocol) rather than to a Python binding: that
+  buys the real affix engine and hunspell's own suggestion ranking with nothing
+  to package on Fedora, where `python3-enchant` is not a given. Reading
+  `en_US.dic` in Python was considered and rejected — the word list is stems
+  plus affix flags, so membership alone accepts `colour` and rejects `walked`.
+  The dictionary is the same `pkgs.hunspellDicts.en_US` surfer's `.bdic` is
+  compiled from, so the browser and the apps never disagree about a word.
+  Install it as the `Spell` context property (like `DeskStyle`) and keep a
+  Python reference.
+    - **Wiring is two `--set-default`s in the app's `.nix`** —
+      `SPELL_HUNSPELL`, `SPELL_DICPATH` — and **book's branch gets neither**:
+      there the checker resolves `hunspell` from `$PATH` and
+      `/usr/share/hunspell`, i.e. it works if `hunspell` + `hunspell-en-US` are
+      dnf-installed and marks NOTHING if they are not. Nothing about either
+      package is x86-only.
+    - **A missing dictionary must be indistinguishable from no feature**
+      (docs/DESIGN.md §10): `available` goes false and every query answers
+      "fine", so no input half-underlines itself. That degraded path is the
+      first thing `apps/pylib/tools/spellcheck-test.py` checks.
+    - The tokeniser deliberately refuses four shapes — under three letters,
+      ALL CAPS, an inner capital, and anything touching `/._@:#$` or a digit —
+      because without them a code comment or a pasted log line lights up
+      entirely. Change those and re-run the harness; they are the difference
+      between a marker he keeps and one he asks to have removed.
+    - Personal words live in `$XDG_STATE_HOME/spellcheck/personal.dic`, one
+      per line, **shared by every app**: "add to dictionary" in editor is added
+      in painter too.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
 
@@ -280,6 +309,43 @@ while `filer/qml/Main.qml` merely quoted its rationale in a comment and had no
 copy at all. `apps/pylib/kinetic.py` is the only Python one (`DETENT`,
 `ANGLE_PER_PIXEL`, `WHEEL_GAIN`, `is_wheel_detent()`); anything touching
 `QWheelEvent` in Python imports from there rather than re-deriving the numbers.
+
+### `SpellMarks.qml` — the one spelling marker
+
+`pylib/spellcheck.py` decides what is wrong; **`qmlcommon/SpellMarks.qml` is the
+only thing that draws it**, and docs/DESIGN.md §3.7 owns the look (1px dashed
+`crit` underline — Qt Quick renders no wavy underline and ignores
+`setUnderlineColor`, both measured, so the marker is `QtQuick.Shapes` geometry
+and not a character format). Drop one in as a **sibling of the text item, in the
+same coordinate space**, and hand it the flickable it scrolls in:
+
+```qml
+TextEdit { id: input; ... }
+SpellMarks { id: marks; target: input; viewport: flick
+             x: input.x; y: input.y; width: input.width; height: input.height }
+```
+
+- `viewport` is not optional in practice: it limits the check to the visible
+  screenful, which is what keeps a 40k-word document cheap.
+- `menuItems(pos)` returns `CtxMenu` items for the word at a character offset —
+  suggestions, `add to dictionary`, then a separator — or **[]** when the word
+  is fine or there is no dictionary. Concatenate it onto the front of whatever
+  menu that input already opens; never build a second menu for it.
+- `replaceFn` when the host has a real edit block. editor passes
+  `Buffers.replaceOne`, so a correction is ONE Ctrl+Z; the default
+  `remove` + `insert` costs two.
+
+**Which surfaces have it, and which were left alone on purpose.** Prose gets it:
+editor (documents detected as `text`/`md` only — `highlight.py` is regex-per-line
+and cannot tell a comment from an identifier, so a source file is not checked,
+and the language menu is how you turn it on by hand) and painter's two
+`PromptBox`es. Deliberately NOT spellchecked, because none of them is prose:
+filer's inline rename/mkdir field, reader's and player's find/filter fields,
+editor's find bar and path bar, surfer's find bar and file-picker fields (its
+*pages* are Chromium's own checker — `surfer/AGENTS.md`), painter's numeric
+`Spin`/`Field`, and **askpass, which is a password box and must never send
+characters anywhere**. goetia's inbox is a separate decision; see
+`board/AGENTS.md`.
 
 ### `VScroll.qml` — the one scrollbar
 
