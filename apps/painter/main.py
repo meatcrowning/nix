@@ -43,6 +43,7 @@ try:
 except Exception:  # noqa: BLE001 - the titlebar bridge is optional
     VtbClient = None
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
 
 sys.path.insert(0, str(HERE))
 import comfy as C  # noqa: E402
@@ -912,6 +913,7 @@ def main():
     prefs = Prefs()
     ctl = Painter()
     bar = Titlebar()
+    spell = SpellCheck()
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -925,6 +927,7 @@ def main():
     ctx.setContextProperty("LoraChoices", ctl.choices)
     ctx.setContextProperty("Gallery", ctl.gallery)
     ctx.setContextProperty("Titlebar", bar)
+    ctx.setContextProperty("Spell", spell)
 
     # Theme.qml lives in qml/theme/ so it registers as a context property rather
     # than as a type that would shadow it (same arrangement as player/filer).

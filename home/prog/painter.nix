@@ -23,6 +23,13 @@
 #
 # Runs the LIVE source at ~/nix/apps/painter/main.py — .py/.qml edits need no
 # rebuild, only dep/packaging changes do.
+#
+# The prompt boxes are spellchecked (`pylib/spellcheck.py`), which talks to the
+# `hunspell` BINARY in pipe mode rather than to a Python binding — so the two
+# `SPELL_*` variables below are the whole wiring, and **book's branch gets
+# nothing**: there the checker resolves `hunspell` from `$PATH` and
+# `/usr/share/hunspell`, and marks nothing at all if Fedora has neither. See
+# `home/prog/editor.nix` for the same note at length.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
@@ -54,6 +61,8 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
+            --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
+            --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
