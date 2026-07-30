@@ -483,7 +483,9 @@ def main(argv=None):
                                     "continuation lines. ONE ASK PER BULLET - "
                                     "pass several tagged strings, or several "
                                     "lines, for several items"
-                                    % "/".join(t + ":" for t in bp.TODO_TAGS))
+                                    % "/".join(
+                                        t + ("" if t in bp.BARE_TAGS else ":")
+                                        for t in bp.TODO_TAGS))
     s.add_argument("text", nargs="+")
     s.set_defaults(fn=cmd_note)
 

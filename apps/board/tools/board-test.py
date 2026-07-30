@@ -1089,9 +1089,13 @@ def test_todo_tags(tmp):
     path = os.path.join(tmp, "board.md")
     open(path, "w").write(FIXTURE)
 
-    check("the tag set is short and is his three plus the two the machine needs",
+    check("the tag set is short and is his three plus what the machine needs",
           B.TODO_TAGS == ("QUESTION", "INFORMATION", "COMPLETION", "PARTIAL",
-                          "FAILED"), B.TODO_TAGS)
+                          "FAILED", "SUMMONED", "COMMANDED"), B.TODO_TAGS)
+    check("...and only the two summon words are written without a colon",
+          B.BARE_TAGS == ("SUMMONED", "COMMANDED"), B.BARE_TAGS)
+    check("...both of which are DRAWN under information, as he asked",
+          [B.section_of(t) for t in B.BARE_TAGS] == ["INFORMATION"] * 2)
 
     # ---- an untagged bullet is REFUSED, and nothing is written ----
     before = B.read(path)
@@ -1304,7 +1308,10 @@ def test_todo_tags(tmp):
     # ---- and every tag in the set has a writer that can emit it ----
     prompts = src + open(os.path.join(BOARD, "boardwork.py")).read() \
         + open(os.path.join(BOARD, "boardmove.py")).read()
-    missing = [t for t in B.TODO_TAGS if ("%s:" % t) not in prompts]
+    # The two summon words are written WITHOUT a colon, so that is how a prompt
+    # spells them (`boardparse.BARE_TAGS`).
+    missing = [t for t in B.TODO_TAGS
+               if (t if t in B.BARE_TAGS else "%s:" % t) not in prompts]
     check("no tag exists that no writer can emit", not missing, missing)
 
     # ...and every prompt that tells an agent to report SAYS the separation rule
@@ -1452,9 +1459,9 @@ def test_summon_cleared(tmp):
           any("SUMMONED: Zepar" in t for t in texts()), texts())
     import boardwork as bw
     check("the orchestrator is told which word is which, and never to swap them",
-          "COMMANDED: Marbas" in bw.ORCHESTRATOR_PROMPT
-          and "`SUMMONED:` is for a `dispatch` ONLY" in bw.ORCHESTRATOR_PROMPT,
-          "COMMANDED: Marbas" in bw.ORCHESTRATOR_PROMPT)
+          "COMMANDED Marbas" in bw.ORCHESTRATOR_PROMPT
+          and "`SUMMONED` is for a `dispatch` ONLY" in bw.ORCHESTRATOR_PROMPT,
+          "COMMANDED Marbas" in bw.ORCHESTRATOR_PROMPT)
     check("...and is never told to write that nothing has landed yet",
           "nothing landed yet" not in bw.ORCHESTRATOR_PROMPT,
           "nothing landed yet" in bw.ORCHESTRATOR_PROMPT)
@@ -1464,6 +1471,45 @@ def test_summon_cleared(tmp):
           B.summon_of("INFORMATION: **x** - commanded Marbas (`wd690a4`), yes.")
           == {"name": "Marbas", "id": "wd690a4"},
           B.summon_of("INFORMATION: **x** - commanded Marbas (`wd690a4`), yes."))
+
+    # ---- THE SHAPE HE ASKED FOR, 2026-07-30 ----
+    # *"the message posted to the board when a minister is summoned should read
+    # `SUMMONED [agent] [for/to] [task]` ... it should NOT say INFORMATION: at
+    # the beginning HOWEVER the summoned message should still appear in the
+    # information subsection of todo"*. So `SUMMONED` is a tag of its own, with
+    # nothing in front of it, filed under `information` by `TAG_SECTION`.
+    NEW_A = "SUMMONED Marbas (`wd690a4`) to add commit times"
+    NEW_B = "COMMANDED Zepar (`w4f82de`) for the flashing titlebar"
+    check("a bare `SUMMONED <Name> ...` line is a tagged bullet",
+          B.is_tagged(NEW_A) and B.tag_of(NEW_A) == "SUMMONED", B.tag_of(NEW_A))
+    check("...and `COMMANDED` is its sibling, in the same shape",
+          B.is_tagged(NEW_B) and B.tag_of(NEW_B) == "COMMANDED", B.tag_of(NEW_B))
+    check("...and neither needs INFORMATION: in front of it any more",
+          B.summon_of(NEW_A) == {"name": "Marbas", "id": "wd690a4"}
+          and B.summon_of(NEW_B) == {"name": "Zepar", "id": "w4f82de"},
+          (B.summon_of(NEW_A), B.summon_of(NEW_B)))
+    board(NEW_A, NEW_B)
+    groups = {g["tag"]: [i["text"] for i in g["items"]]
+              for g in B.parse(B.read(path))["todoGroups"]}
+    check("...while both are DRAWN in the information subsection, as he asked",
+          sorted(groups.get("INFORMATION", []))
+          == sorted(B.text(t) for t in (NEW_A, NEW_B)), groups)
+    check("...and no subsection is headed by either word",
+          "SUMMONED" not in groups and "COMMANDED" not in groups, list(groups))
+    bm.note("COMPLETION: **the landed section** - done.", path=path,
+            agent_id="wd690a4")
+    check("...and the new shape is retired by its worker's result too",
+          not [t for t in texts() if t.startswith("SUMMONED")], texts())
+    check("...leaving the other minister's line alone",
+          any(t.startswith("COMMANDED Zepar") for t in texts()), texts())
+
+    # An OLD line keeps rendering: the store is full of them and it is his file.
+    board(SUM_A)
+    old = B.parse(B.read(path))
+    check("a summon note written the old way still reads as INFORMATION",
+          [t["tag"] for t in old["todo"] if "SUMMONED: Marbas" in t["text"]]
+          == ["INFORMATION"],
+          [(t["tag"], t["text"][:40]) for t in old["todo"]])
 
     # PARTIAL and FAILED are results too — a rebuild left pending or a worker
     # that landed nothing is still an outcome he has read.
