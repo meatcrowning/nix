@@ -821,9 +821,12 @@ names if you'd like but i think itd be interesting to have them referred to by
 regular names"*, then: *"i want the names of agents to be taken from the names
 of demons in the lesser key of solomon"*. So every worker is `Marbas`, not
 `w1a2b3c`, on the card, in `boardctl` output, and in the bullet the
-orchestrator leaves on the board. The pool is the Lemegeton's — the Ars
-Goetia's 72, plus the short names the Theurgia-Goetia and the Ars Paulina
-supply.
+orchestrator leaves on the board. The pool is the Ars Goetia's 72 — complete,
+in the traditional order (1 Bael ... 72 Andromalius), and keeping the short
+spellings the pool already used where they overlap (`Marax`, `Haures`,
+`Glasya`) so a worker running under one still matches its own name. [his,
+2026-07-29 — it ran 56 before, padded with Theurgia-Goetia / Ars Paulina
+names, until he asked for the full seventy-two.]
 
 - **The coded id is still the only key, and nothing was renamed.** The systemd
   unit (`board-worker-<id>`), `~/.cache/board-work/<id>.log`, the observation
@@ -841,15 +844,13 @@ supply.
   ambiguous. Above `len(NAMES)` live agents a name repeats; the cap is 4.
 - **A card draws the name and never the id**, and it draws it as the SUBJECT of
   the CLAIM — `Marbas is coding - ...`. The observed line under it carries no
-  subject at all (below), so the 7-cell name column beside the title is the
-  fallback for a card whose agent has said nothing, so a name is
-  still **six ASCII characters at most** (§2.1's cell, §2.3's cmap): the column
-  is 7 cells for a pool name, and the title starts after it without eliding, so
-  a seventh character would sit against the title with no gap. That is what
-  rules out `Focalor`, `Gremory` and the other long spellings, and
-  `board-test.py` asserts it. The column itself **measures** (`AgentRow`'s
-  `nameW`) rather than assuming 7, for the one name that is not from the pool —
-  below.
+  subject at all (below), so the name column beside the title is the fallback
+  for a card whose agent has said nothing. A name is **ASCII letters only**
+  (§2.3's cmap — `Bune`, never a diacritical spelling), and the column
+  **measures** (`AgentRow`'s `nameW`, `max(7, len+1) * cellW`): the full-72
+  pool runs up to `Andromalius`'s eleven characters, and a long name costs the
+  title cells on its own card and nothing anywhere else. `board-test.py`
+  asserts the pool's shape.
 - **Nothing that has nobody on it is given a name**: a task queued above the cap,
   a decision he answered, an interactive session. Same rule as the inbox box —
   a name is a claim that somebody is on it. The one exception is Solomon, and
@@ -870,10 +871,10 @@ separable rules, and `board-test.py` asserts each of them separately.
   him and `pick_name` never shuffles onto him. The pool is the Lemegeton's
   demons and Solomon is the king who binds them — the one that hands out the
   work is the one name never drawn from the bag.
-- **He is seven characters, and he is not truncated.** That is what widened
-  `AgentRow`'s `nameW` from a hardcoded `7 * cellW` to a measured
-  `max(7, len+1) * cellW`. The pool stays at six so the titles line up down the
-  rest of the list.
+- **He is seven characters, and he is not truncated.** That is what first
+  widened `AgentRow`'s `nameW` from a hardcoded `7 * cellW` to a measured
+  `max(7, len+1) * cellW` — a measurement the pool itself now leans on, its
+  names running past six since it grew to the full 72.
 - **He is first, whatever was born when.** `boardwork.cards()` pins every
   orchestrator row above every worker; birth-order still governs everything
   below. Two overlapping orchestrators (successive things typed close together)
