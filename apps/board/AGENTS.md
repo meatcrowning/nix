@@ -21,6 +21,23 @@ agent is orchestrating and edited by hand by him. board **parses it, draws it,
 and writes his answers back into the same lines**. It does not own it, does not
 migrate it, and must never become the only way to edit it.
 
+**...and this app kicks that sync at both ends of a session** (`main.sync_now`,
+2026-07-29): `systemctl --user start --no-block nix-docs-sync.service` on
+startup, which PULLS what the other machine wrote before he reads a word, and
+again on `aboutToQuit`, which PUSHES what he just answered — *"i'd like the
+board to also sync after the program has been closed by the user."* The timer is
+untouched and is still the guarantee; these only remove the up-to-five-minute
+wait either side of the window. It starts the unit that already exists rather
+than running git here, does nothing for a board outside `docs/` (same reading as
+`Board._derives`), and **fails silently on purpose** — it is an optimisation of
+when the timer would have run anyway, so the honest report for a miss is the
+timer's, not a dialog over a board he has just closed. `BOARD_NO_SYNC=1` turns
+it off for a harness.
+
+Two-sided edits are resolved by `board.md merge=boardrecent`, not by luck: the
+real 3-way merge first, most recent side wins a genuine collision. Root
+`AGENTS.md` → the `docs/` bullet; harness `tools/board-merge-test.sh`.
+
 Consequences that are rules, not preferences:
 
 - **A write is a targeted LINE EDIT, never a re-serialisation.** `boardparse`
@@ -492,9 +509,22 @@ Rules that fall out of it, all of them load-bearing:
   `boardmove.reconcile()` — run at the top of every board-watch tick — sees the
   owning pid is gone and hands it back itself, or `boardctl stall <row>` moves a
   row nothing owns into WAITING ON YOU TO DO. The first three are worst-case one
-  timer interval. A hand-started item (`boardctl start` with no `--pid`) is
-  never reclaimed automatically; nothing can tell whether that session is still
-  thinking.
+  timer interval. A hand-started item (`boardctl start` with no `--pid`) is not
+  reclaimed on liveness — nothing can tell whether that session is still
+  thinking — **but it is reclaimed on AGE**, after `boardmove.UNOWNED_STRAND_S`
+  (4h, `BOARD_UNOWNED_STRAND`). Without that bound "not ours to reclaim" meant
+  *forever*: two pid-less stashes from 2026-07-28 were still drawing `unowned`
+  agent cards a day later with nothing in this tree able to collect them, and he
+  spotted it — *"some residual agents left that should've been swept up"*. The
+  bound lives in `_abandoned()`, deliberately **not** folded into `_alive()`:
+  that is THE liveness rule for the whole tree and there is one definition of
+  "running" on purpose, so answering "dead" for a record that merely never named
+  an owner would make every other caller lie. Its bullet says *nothing was
+  working* it rather than that an agent died — there was never an agent, and
+  inventing a death to explain a row is the confident lie this tree refuses
+  everywhere else. Hours, not minutes, because what is being waited on is a
+  person or a session at a terminal: it sits well clear of both board-watch's
+  45-minute agent cap and `ESCALATE_AFTER_S`.
 - **The first three are keyed on the STASH, and the stash is machine-local.**
   `board.md` syncs both ways; `~/.local/state/board/inflight/` does not. So from
   either machine, a row the *other* one started is indistinguishable from a row

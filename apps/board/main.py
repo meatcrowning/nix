@@ -785,6 +785,46 @@ class Settings(QObject):
             pass
 
 
+# ------------------------------------------------------------- the docs sync
+# The store syncs on a five-minute timer (`home/srvs/nix-docs.nix`), which is
+# the right cadence for an unattended writer and the wrong one for HIM: he
+# answers something on `top`, closes the window, and it is up to five minutes
+# before `book` can see it — and book's answers are just as stale here when he
+# opens it. [his, 2026-07-29] *"i'd like the board to also sync after the
+# program has been closed by the user."*
+#
+# So two kicks, at the two moments that are actually about him rather than about
+# a clock: one on START, which PULLS what the other machine wrote before he
+# reads a word of it, and one on QUIT, which PUSHES what he just answered. The
+# timer stays exactly as it was and remains the guarantee; these only remove the
+# wait either side of a session at the window.
+#
+# It is `systemctl --user start` of the unit that ALREADY EXISTS — not a second
+# sync path, no git in this process, and nothing to unwind if the unit is not
+# installed (a `book` mid-setup, a harness, a checkout somebody cloned to look
+# at). `--no-block` is not a detail on the quit side: that unit fetches, merges
+# and pushes over the network, and the window must not sit on screen waiting for
+# it. Failure is silent BY DESIGN — this is an optimisation of when the timer
+# would have run anyway, so the honest report for "it did not fire" is the one
+# the timer already gives, not a dialog over a board he just closed.
+SYNC_UNIT = "nix-docs-sync.service"
+
+
+def sync_now(path):
+    """Kick the docs sync, but only for a board that the docs sync carries.
+
+    Same reading as `Board._derives`: a harness board, or a `board /tmp/x.md`,
+    is not in that repo, and starting a unit that would commit and push an
+    unrelated tree on its behalf is not this app's business.
+    """
+    inside = os.path.abspath(path).startswith(
+        os.path.abspath(boardmove.LANDED_DOCS_REPO) + os.sep)
+    if not inside or os.environ.get("BOARD_NO_SYNC"):
+        return False
+    return QProcess.startDetached(
+        "systemctl", ["--user", "start", "--no-block", SYNC_UNIT])
+
+
 def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("board")
@@ -820,6 +860,14 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
+
+    # Pull first, push last. The pull races the window coming up on purpose:
+    # `Board` already watches the file and reloads on an atomic replace (§6.1,
+    # invisibly), so whatever the sync brings in lands in the view by itself a
+    # second or two later rather than delaying the window until the network
+    # answers.
+    sync_now(board.path)
+    app.aboutToQuit.connect(lambda: sync_now(board.path))
 
     sys.exit(app.exec())
 
