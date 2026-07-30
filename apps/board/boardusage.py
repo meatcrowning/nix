@@ -240,11 +240,19 @@ def _age(seconds):
 def readings(path=None, now=None):
     """The two rows the window draws, always both, always in `WINDOWS` order.
 
-    Each is `{key, label, known, percent, text, note, stale, detail}`:
+    Each is `{key, label, known, percent, text, note, stale, detail, reset}`:
     `percent` is 0-100 and meaningless when `known` is false, `text` is what sits
     beside the bar, `note` is the age when the cache is stale (empty otherwise),
     and `detail` is the hover sentence — which always names the window and,
     when there is nothing to show, says why rather than blaming him.
+
+    `reset` is the row's TOOLTIP: when that limit next comes back, in the same
+    clock `detail` uses. [his, 2026-07-29] *"add a tooltip to each usage
+    indicator that says when that limit next resets"* — so it is per-row, it
+    names its own window (a tooltip is read on its own, away from the label it
+    popped out of), and it is **never empty**: a payload with no `resets_at`
+    says so, which is the §10 rule that a missing reading is reported and not
+    invented. The wording lives here with the rest of his prose, not in the QML.
     """
     now = time.time() if now is None else now
     util, fetched = _cache(path)
@@ -258,14 +266,17 @@ def readings(path=None, now=None):
                 "text": "unknown", "note": "", "stale": False,
                 "detail": ("no usage reading on this host yet - it needs the "
                            "account reachable once"),
+                "reset": ("no usage reading yet, so no reset time for the %s "
+                          "window either" % label),
             })
             continue
         stale = age < 0 or age > STALE_SEC
         detail = hover
-        if resets:
-            clock = _clock(resets, now)
-            if clock:
-                detail += " - resets " + clock
+        clock = _clock(resets, now) if resets else ""
+        reset = ("the %s window resets %s" % (label, clock) if clock
+                 else "this reading carries no reset time for the %s window" % label)
+        if clock:
+            detail += " - resets " + clock
         if age >= 0:
             detail += " - read " + _age(age)
         rows.append({
@@ -273,7 +284,7 @@ def readings(path=None, now=None):
             "percent": max(0.0, min(100.0, pct)),
             "text": "%d%%" % round(pct),
             "note": _age(age) if stale and age >= 0 else ("" if age >= 0 else "age unknown"),
-            "stale": stale, "detail": detail,
+            "stale": stale, "detail": detail, "reset": reset,
         })
     return rows
 
