@@ -4366,6 +4366,114 @@ def test_window(app, tmp):
           .get("Fold VScroll into qmlcommon") == keep[-1].property("textDim"),
           [(s, t.property("color").name()) for _, s, t in muteLines])
 
+    # ---- the DRAWER: what the minister is actually saying ----
+    # [his, 2026-07-30] *"a minister card should expand to show what that
+    # minister is actually saying"* — clicking anywhere on the card slides a
+    # drawer down out from under it with the last couple of lines that agent
+    # logged, indented, with a rule down its left edge; clicking again closes it.
+    #
+    # Driven with a REAL left click on the card, because the card's own
+    # right-click MouseArea used to be the only one on it and a left button
+    # reached nothing at all — the same defect the double-click test below
+    # records. The log is written into the harness's own `XDG_CACHE_HOME`.
+    from PySide6.QtCore import QPointF, Qt                              # noqa: E402
+    from PySide6.QtTest import QTest                                    # noqa: E402
+
+    with open(bw._log_path("w-code"), "w") as f:
+        f.write("first line, scrolled off\n"
+                "\x1b[32mstill going\x1b[0m\n"
+                "\n"
+                "downloading 40%\rdownloading 100%\n"
+                "  wrote vtbclient.py\n")
+    tail = agents.output("w-code")
+    check("a card can read the tail of its own agent's log",
+          tail == ["still going", "downloading 100%", "  wrote vtbclient.py"],
+          tail)
+    check("...with the ANSI and the control junk gone, and no blank lines",
+          not any("\x1b" in s or "\r" in s or not s.strip() for s in tail), tail)
+    check("...and an agent that has logged NOTHING gets an empty answer, not junk",
+          agents.output("w-read") == [] and agents.output("") == [],
+          agents.output("w-read"))
+
+    drawers = [it for it in descendants(cardItem or win.contentItem())
+               if it.property("openH") is not None]
+    check("a card carries exactly one output drawer", len(drawers) == 1,
+          len(drawers))
+    drawer = drawers[0] if drawers else None
+    check("...and it is SHUT until he opens it, taking no height at all",
+          drawer is not None and drawer.height() == 0, drawer and drawer.height())
+
+    QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier,
+                     cardItem.mapToScene(QPointF(cardItem.width() / 2, 6))
+                     .toPoint())
+    spin(600)                                    # past the slide (§6.2's 260ms)
+    check("clicking the card opens it, keyed by the AGENT and not the row",
+          prop(win, "outputOpen").get("w-code") is True
+          and drawer is not None and drawer.height() > 0,
+          (prop(win, "outputOpen"), drawer and drawer.height()))
+    drawn = [s for _, s, _ in _texts(drawer)] if drawer is not None else []
+    check("...showing the last few lines the agent itself wrote",
+          [s for s in drawn if "wrote vtbclient.py" in s] and len(drawn) <= 3,
+          drawn)
+    check("...indented past the card's own text, under a rule of its own",
+          drawer is not None
+          and [c for c in descendants(drawer)
+               if c.property("color") is not None and c.property("width") == 1]
+          and all(t.mapToItem(cardItem, 0, 0).x() > 10
+                  for _, _, t in _texts(drawer)),
+          [(t.mapToItem(cardItem, 0, 0).x()) for _, _, t in _texts(drawer)])
+
+    # A REFRESH MUST NOT SHUT IT. The cards are rebuilt whenever the key list
+    # changes, so this is the failure a drawer held in the delegate would have.
+    agents.refresh()
+    spin(300)
+    drawers = [it for it in descendants(win.contentItem())
+               if it.property("openH") is not None and it.height() > 0]
+    check("...and it stays open across a refresh of the card list",
+          prop(win, "outputOpen").get("w-code") is True and len(drawers) == 1,
+          (prop(win, "outputOpen"), len(drawers)))
+
+    # Re-found: the refresh may have rebuilt the delegate under us.
+    cardItem = None
+    for it in descendants(win.contentItem()):
+        a = prop(it, "agent") if it.property("doingLine") is not None else None
+        if isinstance(a, dict) and a.get("title") == "Wire FOCUS through vtbclient":
+            cardItem = it
+    QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier,
+                     cardItem.mapToScene(QPointF(cardItem.width() / 2, 6))
+                     .toPoint())
+    spin(600)
+    shut = [it for it in descendants(cardItem)
+            if it.property("openH") is not None]
+    check("clicking it again slides the drawer back up and hides it",
+          not prop(win, "outputOpen").get("w-code")
+          and shut and shut[0].height() == 0,
+          (prop(win, "outputOpen"), shut and shut[0].height()))
+    # THE BOX HE TYPES INTO KEEPS ITS OWN CLICKS. Click-anywhere is the gesture,
+    # and the one thing on the card that must be exempt is the editor: putting
+    # his caret in it would otherwise open a drawer over the words he is writing.
+    box = [it for it in descendants(cardItem)
+           if it.property("placeholder") is not None]
+    if box:
+        QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier,
+                         box[0].mapToScene(QPointF(box[0].width() / 2,
+                                                   box[0].height() / 2)).toPoint())
+        spin(400)
+        check("...and clicking INTO the card's box does not open one",
+              not prop(win, "outputOpen").get("w-code"), prop(win, "outputOpen"))
+
+    # ...and it says so in WORDS when there is nothing to show (§10): an empty
+    # drawer would read as a broken one.
+    empty = drawnCards.get("Find where focus is decided")
+    if empty is not None:
+        win.setProperty("outputOpen", {"w-read": True})
+        spin(600)
+        etexts = [s for _, s, _ in _texts(empty)]
+        check("a drawer with nothing logged says so rather than opening empty",
+              "nothing logged yet" in etexts, etexts)
+        win.setProperty("outputOpen", {})
+        spin(300)
+
     # ---- ...and SOLOMON'S OWN ROW LEADS WITH HIS NAME ----
     # [his, 2026-07-29] the orchestrator's card should read *"Solomon is ..."*
     # like everybody else's, and he said so twice. The first answer put the name
