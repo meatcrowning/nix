@@ -1,13 +1,15 @@
 import QtQuick
 
-// One message waiting for the NEXT agent, and his two second thoughts about it:
-// *"allow the user to remove queued `waiting for next agent` items or edit them
-// in place"*.
+// ONE PENDING ORDER, waiting for the next summoner, and his second thoughts
+// about it: *"allow the user to remove queued `waiting for next agent` items or
+// edit them in place"*.
 //
-// It is drawn at all because a message he cannot see is a message he has to
-// assume was lost — and now that it is on screen it is a thing he can change
-// his mind about, because between writing it and an orchestrator picking it up
-// there can be a whole board-watch interval.
+// It is drawn at all because an order he cannot see is one he has to assume was
+// lost — and now that it is on screen it is a thing he can change his mind
+// about, because between writing it and a summoner picking it up there can be a
+// whole board-watch interval. **Ctrl+Z is the third way** and reaches only the
+// LAST one he sent, undoing the send itself and putting his words back in the
+// box (`boardundo.py`, `Main.qml`'s `undoSend`); this menu reaches any of them.
 //
 // THE HONESTY IT HAS TO CARRY (docs/DESIGN.md §10.2). Neither action can be
 // promised. `board-watch` drains the queue on its own clock, so a message can
@@ -62,7 +64,7 @@ Item {
              { label: "copy line",
                trigger: () => Board.copy(row.note ? row.note.text : "") }],
             [{ separator: true },
-             { label: "remove it from the queue", trigger: () => row.removeIt() }]);
+             { label: "remove it from the pending orders", trigger: () => row.removeIt() }]);
     }
 
     function removeIt() {
@@ -84,7 +86,11 @@ Item {
         id: line
         width: row.width
         color: row.fgDim
-        text: "  waiting for the next minister: "
+        // THE WORD IS ORDER — [his, 2026-07-29] this list says orders, not
+        // messages — and what it waits for is the next SUMMONER, which is who
+        // drains the queue (`board-watch.work_the_queue`). It never waits for a
+        // minister: Solomon is the one who reads it and decides who does it.
+        text: "  order waiting for the next summoner: "
               + (row.note ? row.note.text : "")
 
         MouseArea {
@@ -115,7 +121,7 @@ Item {
         fgAccent: row.fgAccent
         fgText: row.fgText
         fgDim: row.fgDim
-        placeholder: "rewrite this queued note - the next minister reads it"
+        placeholder: "rewrite this order - the next summoner reads it"
         openCaret: row.openCaret
         onDraftEdited: (b) => row.draftEdited(b)
         onSubmitted: (b) => row.commitEdit(b)

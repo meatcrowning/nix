@@ -204,6 +204,7 @@ sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", 
 import boardagents as ba                                         # noqa: E402
 import boardmove as bm                                           # noqa: E402
 import boardparse as bp                                          # noqa: E402
+import boardundo as bu                                           # noqa: E402
 import boardwork as bw                                           # noqa: E402
 
 
@@ -708,6 +709,11 @@ def _summon(notes, index, total):
     # already said it did.
     ba.register(aid, notes[0]["text"][:70], os.getpid(), kind="orchestrator",
                 where="board-watch", session=session)
+    # HE CAN TAKE IT BACK UNTIL THIS RUN ACTS. Written before the spawn, like
+    # the drain above it: `boardundo.py` is what ctrl+z reaches, and a run that
+    # exists without a record of the orders it was given is a run he cannot
+    # cancel. Removed by `end_run()` below, which also answers whether he did.
+    bu.begin_run(aid, notes)
     text = "\n\n".join(m["text"] for m in notes)
     try:
         rc, how, secs = spawn(
@@ -718,6 +724,16 @@ def _summon(notes, index, total):
             role="orchestrator")
     finally:
         ba.unregister(aid)
+        took_back = bu.end_run(aid)
+    # CTRL+Z. He stopped this one, and every verb it tried after that was refused
+    # by `boardctl` — so nothing was dispatched, nobody was handed anything and
+    # no note was written. Its exit code is therefore not a failure and must not
+    # put his own sentence back on the board as one: he has it in the prompt box,
+    # which is where he asked for it.
+    if took_back:
+        log("a summoner was cancelled with ctrl+z after %dm%02ds - nothing "
+            "dispatched" % (secs // 60, secs % 60))
+        return None
     if rc == 0:
         log("a summoner finished in %dm%02ds" % (secs // 60, secs % 60))
         return None

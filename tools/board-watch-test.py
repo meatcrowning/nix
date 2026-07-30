@@ -47,6 +47,10 @@ What it asserts, in order:
               the other machine must NOT fire here, one stamped for this machine
               must, an UNSTAMPED one (a hand edit) is worked by exactly one of
               them, and re-answering on the other machine is the hand-off
+  ctrl+z      a summoner he TOOK BACK leaves nothing behind: no dispatch, no
+              note, and — although it exits nonzero — not his own sentence
+              returned to him as a failure. `boardundo.py`; the gate that
+              refuses the run's verbs is `board-test.py`'s half
   the loop    the three defects behind 2026-07-28's 3,151 starts, kept apart
               because they are three: an EMPTY NEEDS YOU seeds once rather than
               forever (and an old state file is upgraded, not re-seeded); a
@@ -863,6 +867,53 @@ def test_landed_needs_no_tick():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_cancelled_summoner():
+    """CTRL+Z, from this side of the hand-off: a summoner he took back leaves
+    NOTHING behind — no dispatch, no note, and not his own sentence returned as
+    a failure.
+
+    [his, 2026-07-29] *"he should not send any messages he should just stop doing
+    that specific inbox item"*. The gate itself lives in `boardctl` and is
+    checked by `board-test.py`; what this covers is the half only a real tick can
+    show — a summoner that exits NONZERO after being cancelled must not take the
+    `QUEUE_FAIL` path, because it did not fail.
+    """
+    print("\nctrl+z - a summoner he took back")
+    d = tempfile.mkdtemp(prefix="board-watch-cancel-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        r.note("build the thing I have changed my mind about")
+        # The stub IS him pressing ctrl+z: it cancels the order this run was
+        # given, the way the window does, and then dies nonzero.
+        cancel = (
+            '%s -c "import os,sys;'
+            "sys.path[:0]=[os.path.join(%r,'apps','board')];"
+            "import boardundo as bu, json;"
+            "p=os.path.join(os.environ['XDG_STATE_HOME'],'board','orch',"
+            "os.environ['BOARD_WATCH_KEY']+'.json');"
+            "print(bu.cancel(json.load(open(p))['items'][0]['id']))\";"
+            'echo "$BOARD_WATCH_KEY" >> %s; exit 1'
+            % (sys.executable, REPO, r.fired))
+        r.run(spawn=cancel)
+        check("the summoner ran", len(r.fires()) == 1, str(r.fires()))
+        check("...and NOTHING about it was written on the board",
+              "changed my mind about" not in r.text(), r.text()[-400:])
+        check("...not even the failure note its exit code would normally earn",
+              "Solomon exited" not in r.text())
+        check("...the log says he took it back",
+              "cancelled with ctrl+z" in open(r.log).read(),
+              open(r.log).read()[-300:])
+        check("...and the queue is empty, so nothing re-triggers",
+              r.queued() == [], r.queued())
+        rest = os.path.join(d, "xdgstate", "board", "inbox", "cancelled")
+        check("...while his words are still on disk, cancelled, not deleted",
+              len(os.listdir(rest)) == 1, os.listdir(rest))
+        check("...and no run record is left behind for the next tick",
+              os.listdir(os.path.join(d, "xdgstate", "board", "orch")) == [])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     d = tempfile.mkdtemp(prefix="board-watch-test-")
     try:
@@ -1139,6 +1190,7 @@ def main():
 
     test_worker_outlives_the_tick()
     test_summoner_fanout()
+    test_cancelled_summoner()
     test_the_loop()
     test_host_affinity()
     test_landed_needs_no_tick()

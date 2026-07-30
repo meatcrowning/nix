@@ -94,6 +94,7 @@ import boardmove  # noqa: E402  (beside this file)
 import boardagents  # noqa: E402  (beside this file)
 import boardwork  # noqa: E402  (beside this file)
 import boardusage  # noqa: E402  (beside this file)
+import boardundo  # noqa: E402  (beside this file)
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "board" / "state.json"
@@ -567,6 +568,7 @@ class Agents(QObject):
         self._rows = []
         self._cards = []
         self._queued = []
+        self._undo = False
         self._watcher = ""
         self._armed = None
         self._lives = None
@@ -681,6 +683,12 @@ class Agents(QObject):
             # drain shifts every index.
             queued = [{"id": boardagents.msg_id(m), "text": m["text"]}
                       for m in boardagents.pending()]
+            # CAN CTRL+Z DO ANYTHING RIGHT NOW? A bool, polled with everything
+            # else, and the shortcut is enabled off it — so the key is only his
+            # while there is an order to take back, and Ctrl+Z means ordinary
+            # text undo the rest of the time. `boardundo.undoable()` reads and
+            # changes nothing; the act itself is `undoSend()` below.
+            undo = boardundo.undoable() is not None
         except OSError:
             return
         # Who exists and what state each one is in — the only thing `lives` is
@@ -688,8 +696,10 @@ class Agents(QObject):
         # pins the orchestrator and the queued tasks as well), and sorted so a
         # reordering is not a transition.
         lives = tuple(sorted((c["id"], c["state"]) for c in cards))
-        if rows != self._rows or queued != self._queued or cards != self._cards:
+        if (rows != self._rows or queued != self._queued or cards != self._cards
+                or undo != self._undo):
             self._rows, self._queued, self._cards = rows, queued, cards
+            self._undo = undo
             self.changed.emit()
         if lives != self._lives:
             was, self._lives = self._lives, lives
@@ -913,6 +923,10 @@ class Agents(QObject):
             return "could not save that note - " + (e.strerror or "?")
         if msg is None:
             return ""
+        # WHAT CTRL+Z WOULD TAKE BACK. Only an order from the top box — a note
+        # addressed to a running minister is a different act, with its own row
+        # and its own menu, and there is no summon of it to cancel.
+        boardundo.remember(msg)
         self.refresh()
         # ...and it says WHO, when the agent has a name. `left in Marbas's inbox`
         # is the same promise as before — in its inbox, not read by it — made
@@ -929,7 +943,10 @@ class Agents(QObject):
         # it: an orchestrator has to read it first, and it only runs while he is
         # at the machine. Promising anything more would be the dishonest kind of
         # feedback §10 is about.
-        return "in the inbox - an orchestrator works out who does what"
+        # ...and, since ctrl+z, that it is still HIS. Saying so here is the one
+        # honest place for it: the key is live exactly now, and the hint inside
+        # the box cannot say it (with his caret in there Ctrl+Z is text undo).
+        return "in the inbox - ctrl+z takes it back until a summoner acts"
 
     # ---- his second thoughts about something already queued ----
     # Same shape as `send`: the string IS what the footer says, and the failure
@@ -947,9 +964,9 @@ class Agents(QObject):
             return "could not remove that - " + (e.strerror or "?")
         self.refresh()
         if msg is None:
-            return ("that one has already gone to an agent - "
+            return ("that one has already gone to a summoner - "
                     "nothing removed")
-        return "taken off the queue - the text is kept, not deleted"
+        return "taken off the pending orders - the text is kept, not deleted"
 
     @Slot(str, str, result=str)
     def editQueued(self, msg_id, text):
@@ -961,9 +978,65 @@ class Agents(QObject):
             return "could not save that edit - " + (e.strerror or "?")
         self.refresh()
         if msg is None:
-            return ("that one has already gone to an agent - "
+            return ("that one has already gone to a summoner - "
                     "it got the old wording")
-        return "queued note rewritten - the next minister reads this"
+        return "that order is rewritten - the next summoner reads this"
+
+    # ---- ctrl+z: take the last order back ----
+    @Slot()
+    def notAnOrder(self):
+        """What was just sent was a REPLY to a chore, not an order from the box.
+
+        Both take `send()` — one path, deliberately — but ctrl+z is about *"the
+        last prompt"* he typed into the prompt box, and a reply also cleared a
+        bullet off his list. Undoing half of that pair (the send, not the
+        removal) and handing the words back in the WRONG box is not an undo, so
+        the key simply does not claim it; `put it back` in the row menu is that
+        act's own undo.
+        """
+        boardundo.forget()
+        self.refresh()
+
+    #: WHETHER THE KEY IS HIS AT ALL. False means Ctrl+Z is ordinary text undo,
+    #: which is what the QML shortcut binds it to — an offered undo that cannot
+    #: undo anything is exactly the §10 no-op this app is not allowed to draw.
+    @Property(bool, notify=changed)
+    def canUndo(self):
+        return self._undo
+
+    @Slot(result="QVariantMap")
+    def undoSend(self):
+        """Ctrl+Z. `boardundo.cancel()` is the mechanism and the two cases he
+        named are one call into it; this is the sentence for each answer.
+
+        `text` is his own words, and it is non-empty ONLY when something really
+        was cancelled — the window puts it back into the prompt box, so a box
+        refilled after a cancel that did not happen would be this app telling
+        him the one lie it cannot tell.
+        """
+        rec = boardundo.last() or {}
+        if not rec.get("id"):
+            return {"said": "nothing to take back - no order has been sent yet",
+                    "text": ""}
+        try:
+            out = boardundo.cancel(rec["id"])
+        except OSError as e:
+            return {"said": "could not take that back - " + (e.strerror or "?"),
+                    "text": ""}
+        self.refresh()
+        state, others = out["state"], out.get("others") or 0
+        if state == "queued":
+            said = "taken off the pending orders - it is back in the box"
+        elif state == "stopped":
+            said = "the summoner is stopped - nothing was dispatched"
+        elif state == "shared":
+            said = ("a summoner has it with %d other order(s) - nothing "
+                    "cancelled" % others)
+        elif state == "summoned":
+            said = "too late - a minister has already been summoned for it"
+        else:
+            said = "that order has already gone - nothing cancelled"
+        return {"said": said, "text": out.get("text") or ""}
 
 
 class Usage(QObject):
