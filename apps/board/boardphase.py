@@ -575,14 +575,16 @@ def says_line(rec, who=""):
     phase, doing = rec.get("claimPhase") or "", rec.get("claimDoing") or ""
     subj = _subject(who)
     if phase:
-        # SIMPLE PRESENT, from the one table (`PHASE_PREDICATE`), plus the
-        # animated `...` — and the dots go at the END of the whole line rather
-        # than straight after the verb, so what he said he is doing is not cut
-        # in half by three cells that change four times a second. Three ASCII
-        # periods, never U+2026 (§2.3); `AgentRow.qml` cycles them.
+        # SIMPLE PRESENT, from the one table (`PHASE_PREDICATE`), and the
+        # animated `...` right on the end of the verb — three ASCII periods,
+        # never U+2026 (§2.3); `AgentRow.qml` cycles them.
+        #
+        # WHAT IT SAID IT IS DOING IS NOT ON THIS LINE — it is `says_detail`,
+        # drawn under this one. [his, 2026-07-29] the card is *"[agent]
+        # [verb]s..."* and then the words that used to follow a hyphen, on their
+        # own line. That also puts the dots at the end of a line again rather
+        # than mid-sentence, which is what the hyphenated form cost.
         line = "%s %s" % (subj, predicate(phase))
-        if doing:
-            line += " - " + doing
         return line if phase.lower() in TICKLESS else line + "..."
     if doing:
         # No phase word to lean on, so the words are quoted rather than forced
@@ -645,22 +647,37 @@ def orch_says_line(rec, who="", awaits=""):
     """
     rec = rec or {}
     phase = rec.get("claimPhase") or ""
-    doing = " ".join((rec.get("claimDoing") or "").split())
     subj = _subject(who) if who else ba.ORCHESTRATOR_NAME
     if phase == "dispatching":
         # No ellipsis on this one — his wording, and it is an act rather than a
         # wait, so there is nothing for the dots to say is still going on.
-        head, tail = "%s summons" % subj, ""
-    elif phase == "waiting":
-        head = ("%s awaits %s" % (subj, awaits)) if awaits else "%s awaits" % subj
-        tail = "..."
-    else:
-        return says_line(rec, who)
-    # His own words still get their line: the phrase replaces the *"is <word>"*
-    # head, and what he said he is doing follows it exactly as it does for a
-    # worker. The animated dots stay at the END of the whole line, so they
-    # cannot land mid-sentence.
-    return ("%s - %s%s" % (head, doing, tail)) if doing else head + tail
+        return "%s summons" % subj
+    if phase == "waiting":
+        # The object here is WHOM, not what he said he is doing, so it belongs on
+        # this line: it is part of the verb phrase. His own words go under it on
+        # `says_detail`'s line, like every other card's.
+        return ("%s awaits %s..." % (subj, awaits)) if awaits \
+            else "%s awaits..." % subj
+    return says_line(rec, who)
+
+
+def says_detail(rec):
+    """The claim's SECOND line: the words the agent gave for what it is doing,
+    verbatim and on their own line.
+
+    [his, 2026-07-29] the card reads *"Marbas researches..."* and then *"the
+    vtbclient parser"* under it, where the two used to share one hyphenated line.
+    Verbatim is the point — this is his agent's own sentence, so it is split off,
+    never reformatted.
+
+    "" when it named no words, and "" when it named no PHASE either: with no verb
+    line to sit under, `says_line` quotes the words itself and repeating them here
+    would draw the same sentence twice (§9.1).
+    """
+    rec = rec or {}
+    if not (rec.get("claimPhase") or ""):
+        return ""
+    return " ".join((rec.get("claimDoing") or "").split())
 
 
 def doing_line(rec, who="", running=True):

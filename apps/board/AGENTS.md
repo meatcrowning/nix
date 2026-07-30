@@ -1095,6 +1095,13 @@ The short version, and every line of it is a rule:
     - `TICKLESS` is which predicates get **no** trailing `...`: `blocked` today.
       A stall is not motion, which is §10 and the same reason the observed line's
       tick is scoped to `observed == "ok"`.
+  **And the claim is TWO lines, not one hyphenated one** — [his, 2026-07-29] the
+  card reads *"Marbas researches..."* and then *"the vtbclient parser"* under it.
+  `says_line` is the verb line alone and `says_detail` is the words the agent
+  gave, verbatim and never reformatted; both cross into QML as their own fields
+  (`main.py`'s card dict — a new field that is not added there is silently
+  `undefined` in QML and draws as nothing). It also puts the dots back at the end
+  of a line, which the hyphenated form had cost.
   The `...` is three ASCII periods in the Python — never U+2026, which drops the
   line ~5px on the fallback font (docs/DESIGN.md §2.3) — and `AgentRow.qml`'s
   `tick()` cycles those three cells for ANY line that ends in them, on the

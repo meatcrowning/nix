@@ -120,6 +120,11 @@ Item {
     // nothing honest to say, and empty is then drawn as nothing at all.
     readonly property string saysLine: agent && agent.saysLine ? agent.saysLine : ""
     readonly property string doingLine: agent && agent.doingLine ? agent.doingLine : ""
+    // The claim's own SECOND line — the words the agent gave for what it is
+    // doing, which used to follow a hyphen on the line above. [his, 2026-07-29]
+    // the card is *"[agent] [verb]s..."* and then those words, on their own line.
+    readonly property string saysDetail: agent && agent.saysDetail
+                                        ? agent.saysDetail : ""
     // Which of `boardphase.observe`'s four outcomes the line above came from.
     // Only `ok` is something actually happening right now, which is what the
     // ticking dots below are allowed to claim.
@@ -331,6 +336,20 @@ Item {
             height: visible ? implicitHeight : 0
             color: row.leadTone
             text: row.tick(row.saysLine)
+        }
+
+        // ---- ...and the words it gave for it, on their own line ----
+        // [his, 2026-07-29] the claim is two lines now: the verb with the
+        // ticking dots, then this. Verbatim from the agent — `boardphase`
+        // splits it off and reformats nothing — and it takes the secondary
+        // tone, so the card still leads on the line above it.
+        Para {
+            id: saysDetailT
+            width: col.width
+            visible: row.saysDetail !== ""
+            height: visible ? implicitHeight : 0
+            color: row.fgDim
+            text: row.saysDetail
         }
 
         // ---- SECOND LINE: what it is observed doing, and nothing else ----

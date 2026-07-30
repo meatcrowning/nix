@@ -639,6 +639,9 @@ class Agents(QObject):
             # described in the PAST tense, and a claim with no phase word is
             # quoted rather than forced after "is".
             "saysLine": a.get("saysLine", ""),
+            # ...and the claim's own second line: the words it gave for what it
+            # is doing, which used to follow a hyphen on the line above.
+            "saysDetail": a.get("saysDetail", ""),
             "doingLine": a.get("doingLine", ""),
             "observed": a.get("observed", "unlinked"),
             # How much context it is standing in, against what it can hold —

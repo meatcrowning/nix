@@ -849,6 +849,10 @@ def agents(procs=None):
         # worker's.
         a["saysLine"] = bph.orch_says_line(obs, who, awaits) if orch \
             else bph.says_line(obs, who)
+        # ...and its SECOND line: what it said it is doing, on its own line
+        # rather than after a hyphen on the first one (his call — see
+        # `boardphase.says_detail`).
+        a["saysDetail"] = bph.says_detail(obs)
         a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running")
         # SOLOMON ONLY: a live orchestrator with nothing observed yet gets his
         # own two-line startup pair instead of the bare `nothing yet` — [his,
