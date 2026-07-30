@@ -59,11 +59,13 @@ Rectangle {
         }
         spacing: 4
 
-        // app name — the tinted header line
+        // who it is from — the tinted header line. Usually the app's own name;
+        // for a notification relayed off his phone it is the PHONE's name, since
+        // KDE Connect's appName is the same useless "KDE Connect" on every one.
+        // Notifications.sender() owns that choice and the font map with it.
         PixelText {
             width: parent.width
-            text: (card.notif && card.notif.appName)
-                  ? Glyphs.px(card.notif.appName) : "notification"
+            text: Notifications.sender(card.notif)
             color: card.tint
             font.pixelSize: Theme.fontSize
             elide: Text.ElideRight
