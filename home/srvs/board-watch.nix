@@ -36,6 +36,13 @@
 # board) or asks him a question in NEEDS YOU. apps/board/boardwork.py is the
 # mechanism, the cap and both prompts.
 #
+# HOW MANY of those planning runs a tick starts is his, in the top dropdown of
+# the four at the top of the goetia window (boardwork.summoners(); the file
+# ~/.local/state/board/summoners, machine-local like the cap). What he typed is
+# split across up to that many, run together in threads, and the tick is held
+# for the slowest rather than the sum. One is the default and is what this did
+# before the control existed.
+#
 # Two consequences for this file, and they are why it changed:
 #   - a third trigger, `board-inbox.path` below, so typing into that box does
 #     not wait up to five minutes for the timer;

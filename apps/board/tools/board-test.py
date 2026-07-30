@@ -2741,6 +2741,73 @@ def test_work(tmp):
                                       "--effort", "medium"],
               bw.role_flags(role))
 
+    # ---- what the MINISTERS run on, and the ceiling on it ----
+    # [his, 2026-07-29] "do not allow ministers to be anything higher than opus 5
+    # medium thinking." Two independent halves: a list that cannot offer more, and
+    # a spawn that cannot pass more. The second is what a hand-edited file meets.
+    check("with nothing chosen, a minister is the ceiling itself",
+          not os.path.exists(bw.minister_file())
+          and bw.minister_model() == bw.MINISTER_CEILING
+          and bw.MINISTER_CEILING == ("claude-opus-5", "medium"),
+          bw.minister_model())
+    check("nothing above the ceiling is even offered",
+          all(e in ("low", "medium") for _, e, _ in bw.MINISTER_MODELS)
+          and not any(f == "claude-fable-5" for f, _, _ in bw.MINISTER_MODELS),
+          [(f, e) for f, e, _ in bw.MINISTER_MODELS])
+    check("choosing one writes it, and it is what the next spawn reads",
+          bw.set_minister_model("sonnet 5 low") == ("claude-sonnet-5", "low")
+          and bw.role_flags("worker") == ["--model", "claude-sonnet-5",
+                                          "--effort", "low"],
+          bw.role_flags("worker"))
+    for bad in ("opus 5 high", "claude-opus-5 max", "fable 5", "opus", ""):
+        try:
+            bw.resolve_minister(bad)
+            check("...%r is refused rather than raised or guessed" % bad, False)
+        except ValueError:
+            check("...%r is refused rather than raised or guessed" % bad, True)
+    with open(bw.minister_file(), "w") as fh:
+        fh.write("claude-opus-5 max\n")
+    check("a hand-edited file ABOVE the ceiling spawns at the ceiling",
+          bw.minister_model() == bw.MINISTER_CEILING
+          and bw.role_flags("worker") == ["--model", "claude-opus-5",
+                                          "--effort", "medium"],
+          bw.role_flags("worker"))
+    with open(bw.minister_file(), "w") as fh:
+        fh.write("a-model-that-was-retired medium\n")
+    check("...and a stale one falls back too, never reaching --model",
+          bw.minister_model() == bw.MINISTER_CEILING, bw.minister_model())
+    os.unlink(bw.minister_file())
+    os.environ["BOARD_WORKER_EFFORT"] = "xhigh"
+    check("...and the environment can lower a minister, never raise one",
+          bw.role_flags("worker") == ["--model", "claude-opus-5",
+                                      "--effort", "medium"],
+          bw.role_flags("worker"))
+    os.environ["BOARD_WORKER_MODEL"] = ""
+    os.environ["BOARD_WORKER_EFFORT"] = ""
+    check("...and an emptied override cannot inherit settings.json past it",
+          bw.role_flags("worker") == ["--model", "claude-opus-5",
+                                      "--effort", "medium"],
+          bw.role_flags("worker"))
+    del os.environ["BOARD_WORKER_MODEL"], os.environ["BOARD_WORKER_EFFORT"]
+
+    # ---- how many SUMMONERS plan at once ----
+    # The count is a ceiling on the fan-out, not a quota: `board-watch` splits
+    # what he typed across up to that many runs, and `tools/board-watch-test.py`
+    # asserts the runs themselves.
+    check("with nothing chosen, one summoner plans - what it always did",
+          bw.summoners() == 1 and bw.DEFAULT_SUMMONERS == 1, bw.summoners())
+    check("choosing one writes the store the watcher reads",
+          bw.set_summoners(3) == 3
+          and open(bw.summoners_file()).read().strip() == "3"
+          and bw.summoners() == 3)
+    check("...and what he typed is split across them, contiguous and none empty",
+          bw.split_for_summoners(list(range(5))) == [[0, 1], [2, 3], [4]],
+          bw.split_for_summoners(list(range(5))))
+    check("...while one sentence is one summoner, whatever the number says",
+          bw.split_for_summoners(["only this"]) == [["only this"]])
+    check("...and 1 is the floor, since 0 summoners plans nothing",
+          bw.set_summoners(0) == 1 and bw.summoners() == 1, bw.summoners())
+
     # ---- asking him something: the SAME list his own questions are in ----
     path = os.path.join(tmp, "ask.md")
     open(path, "w").write(FIXTURE)
@@ -3224,10 +3291,10 @@ def test_window(app, tmp):
               for m, t in tips),
           [(t[0].property("text") if t else None) for m, t in tips])
     chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
-    # FOUR now: two meters and the two dropdowns, which carry their `hint` here
+    # SIX now: two meters and the four dropdowns, which carry their `hint` here
     # rather than in the footer for the same reason.
     check("...and no chip is on screen until he dwells on one (8)",
-          len(chips) == 4 and all(c.width() == 0 and not c.isVisible() for c in chips),
+          len(chips) == 6 and all(c.width() == 0 and not c.isVisible() for c in chips),
           [(c.width(), c.isVisible()) for c in chips])
 
     # ---- ...and it slides out to the LEFT, out of a fixed right edge ----
@@ -3286,6 +3353,11 @@ def test_window(app, tmp):
              if it.property("text").startswith(agents_obj.modelLabel)]
     caps = [it for it in drops
             if it.property("text").startswith(agents_obj.capLabel)]
+    # ...and the TOP of that column, which is the summoner count since his four
+    # dropdowns landed. Anything measuring the column's span reads this one and
+    # not the model chooser, which is now the second rung.
+    sums = [it for it in drops
+            if it.property("text").startswith(agents_obj.summonerLabel)]
     check("there is exactly one model chooser, and it says which model",
           len(picks) == 1, [p.property("text") for p in drops])
     if picks:
@@ -3299,9 +3371,14 @@ def test_window(app, tmp):
         top = boxes[0][1] if boxes else None
         bx = top.mapToItem(win.contentItem(), QPointF(0, 0)).x() + top.width() \
             if top else 0
+        # BESIDE the box, not over or under it — and vertically it is inside the
+        # box's own span rather than level with its first line: the chooser is
+        # the SECOND rung of the column since his four dropdowns landed, and the
+        # top-flush assertion belongs to the summoner count (below).
         check("...to the RIGHT of the box, not over it or under it",
               top is not None and pt.x() >= bx - 1
-              and abs(pt.y() - boxes[0][0]) < 20, (pt.x(), pt.y(), bx))
+              and boxes[0][0] - 1 <= pt.y() <= boxes[0][0] + top.height(),
+              (pt.x(), pt.y(), bx, boxes[0][0], top.height() if top else 0))
     # It offers every model and marks the live one — the tick comes from
     # boardwork, so the control cannot disagree with what will actually spawn.
     listed = agents_obj.models
@@ -3363,6 +3440,76 @@ def test_window(app, tmp):
         if env_cap is not None:
             os.environ["BOARD_MAX_WORKERS"] = env_cap
         agents_obj.capChanged.emit()
+
+    # ---- FOUR dropdowns, and the ORDER IS HIS ----
+    # [his, 2026-07-29] *"1. number of summoners 2. summoner model 3. number of
+    # ministers 4. minister model"*. Found by their labels, top to bottom, because
+    # the label is the only thing about any of them he can see and a column in the
+    # wrong order is the whole failure worth catching here.
+    order = sorted((round(it.parentItem()
+                          .mapToItem(win.contentItem(), QPointF(0, 0)).y(), 1),
+                    it.property("text").split("  v")[0].strip())
+                   for it in drops)
+    want = [agents_obj.summonerLabel, agents_obj.modelLabel,
+            agents_obj.capLabel, agents_obj.ministerLabel]
+    check("all four dropdowns are drawn, in his order, top to bottom",
+          [lab for _, lab in order] == want, (order, want))
+    check("...and every one of them is padded to one arrow column",
+          len({len(it.property("text")) for it in drops}) == 1,
+          [it.property("text") for it in drops])
+    # The minister chooser: what it offers is the ceiling and below, and picking
+    # one writes the store `role_flags` reads at the spawn.
+    listed = agents_obj.ministers
+    check("the minister chooser offers the capped list, one marked current",
+          [m["label"] for m in listed]
+          == [lab for _, _, lab in bwm.MINISTER_MODELS]
+          and sum(1 for m in listed if m["current"]) == 1,
+          [(m["label"], m["current"]) for m in listed])
+    check("...and stops at opus 5 medium - nothing higher is drawn at all",
+          not any(e not in ("low", "medium") for _, e, _ in bwm.MINISTER_MODELS)
+          and agents_obj.ministerLabel == "opus 5 medium",
+          agents_obj.ministerLabel)
+    was_min = open(bwm.minister_file()).read() \
+        if os.path.exists(bwm.minister_file()) else ""
+    try:
+        check("picking one writes the store the spawn reads",
+              agents_obj.chooseMinister("claude-sonnet-5 low")
+              and bwm.minister_model() == ("claude-sonnet-5", "low")
+              and agents_obj.ministerLabel == "sonnet 5 low",
+              agents_obj.ministerLabel)
+        check("...and one above the ceiling is refused rather than written",
+              not agents_obj.chooseMinister("claude-opus-5 max")
+              and bwm.minister_model() == ("claude-sonnet-5", "low"),
+              bwm.minister_model())
+    finally:
+        if was_min:
+            with open(bwm.minister_file(), "w") as f:
+                f.write(was_min)
+        elif os.path.exists(bwm.minister_file()):
+            os.unlink(bwm.minister_file())
+        agents_obj.ministerChanged.emit()
+    # ...and the summoner count, the one control that had no store before.
+    env_sum = os.environ.pop("BOARD_MAX_SUMMONERS", None)
+    was_sum = open(bwm.summoners_file()).read() \
+        if os.path.exists(bwm.summoners_file()) else ""
+    try:
+        check("picking a summoner count writes the store the watcher reads",
+              agents_obj.chooseSummoners(2)
+              and open(bwm.summoners_file()).read().strip() == "2"
+              and agents_obj.summonerLabel == "2 summoners",
+              agents_obj.summonerLabel)
+        agents_obj.chooseSummoners(1)
+        check("...and one summoner is singular, because he reads it",
+              agents_obj.summonerLabel == "1 summoner", agents_obj.summonerLabel)
+    finally:
+        if was_sum:
+            with open(bwm.summoners_file(), "w") as f:
+                f.write(was_sum)
+        elif os.path.exists(bwm.summoners_file()):
+            os.unlink(bwm.summoners_file())
+        if env_sum is not None:
+            os.environ["BOARD_MAX_SUMMONERS"] = env_sum
+        agents_obj.summonersChanged.emit()
 
     # ---- ...and the two usage bars sit UNDER it ----
     # His words placed these too: "directly under the orchestrator
@@ -3426,7 +3573,7 @@ def test_window(app, tmp):
         # the change is that the height is DERIVED: a hardcoded one would pass
         # today and drift the moment a longer model label or a bigger font size
         # moved the column.
-        box = picks[0].parentItem()
+        box = (sums or picks)[0].parentItem()
         bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
         colBottom = max(it.mapToItem(win.contentItem(), QPointF(0, 0)).y()
                         + it.height() for it in bars)
@@ -3449,7 +3596,9 @@ def test_window(app, tmp):
               len(eds) == 1 and abs(top.height() - resting) < 1,
               (len(eds), top.height(), resting))
         if eds:
-            eds[0].setProperty("text", "wrap me " * 80)
+            # Enough to overrun a column of FOUR dropdowns plus the meters:
+            # 80 of these cleared the old two-rung floor and not this one.
+            eds[0].setProperty("text", "wrap me " * 240)
             spin(120)
             check("...and typing more lines than it fits GROWS it past that",
                   top.height() > resting + 20, (top.height(), resting))

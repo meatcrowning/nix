@@ -766,6 +766,45 @@ class Agents(QObject):
         self.changed.emit()
         return True
 
+    # ---- how many SUMMONERS may plan at once ---------------------------------
+    # The top dropdown of his four. [his, 2026-07-29] *"1. number of summoners 2.
+    # summoner model 3. number of ministers 4. minister model"*. Thin for the
+    # reason the other three are: `boardwork.summoners()`/`set_summoners()` are
+    # the ONE store — the file `boardctl.py summoners` writes and
+    # `board-watch.work_the_queue` reads at the top of every tick — and
+    # `SUMMONER_CHOICES` is the one list.
+    summonersChanged = Signal()
+
+    @Property("QVariantList", notify=summonersChanged)
+    def summonerCounts(self):
+        """`[{n, label, current}]`. A number of his that is off the list is
+        appended rather than hidden, same as `caps`."""
+        cur = boardwork.summoners()
+        ns = list(boardwork.SUMMONER_CHOICES)
+        if cur not in ns:
+            ns = sorted(ns + [cur])
+        return [{"n": n, "label": self._summonerLabel(n), "current": n == cur}
+                for n in ns]
+
+    @staticmethod
+    def _summonerLabel(n):
+        return "%d summoner%s" % (n, "" if n == 1 else "s")
+
+    @Property(str, notify=summonersChanged)
+    def summonerLabel(self):
+        return Agents._summonerLabel(boardwork.summoners())
+
+    @Slot(int, result=bool)
+    def chooseSummoners(self, n):
+        """Write it. Nothing is restarted: the next tick with something in the
+        queue splits what he typed across up to this many runs."""
+        try:
+            boardwork.set_summoners(n)
+        except (ValueError, OSError):
+            return False
+        self.summonersChanged.emit()
+        return True
+
     # ---- which model orchestrates -------------------------------------------
     # The dropdown beside the box. Both halves are thin on purpose: the list and
     # the choice live in `boardwork`, because `boardctl.py model` and the
@@ -798,6 +837,41 @@ class Agents(QObject):
         except (ValueError, OSError):
             return False
         self.modelChanged.emit()
+        return True
+
+    # ---- ...and what the MINISTERS run on ------------------------------------
+    # The fourth dropdown, under the cap. [his, 2026-07-29] *"do not allow
+    # ministers to be anything higher than opus 5 medium thinking."* This half
+    # cannot OFFER more than that, because the list is `boardwork.MINISTER_MODELS`
+    # and there is no other list; `role_flags()` cannot SPAWN more than that,
+    # whatever the file ends up saying. Two independent halves of one rule, on
+    # purpose — a control that is the only guard is a guard a hand-edited file
+    # walks past.
+    ministerChanged = Signal()
+
+    @Property("QVariantList", notify=ministerChanged)
+    def ministers(self):
+        """`[{name, label, current}]`, in the order the menu draws them, ceiling
+        first. `name` is the `<flag> <effort>` pair `resolve_minister` takes."""
+        cur = boardwork.minister_model()
+        return [{"name": "%s %s" % (f, e), "label": lab, "current": (f, e) == cur}
+                for f, e, lab in boardwork.MINISTER_MODELS]
+
+    @Property(str, notify=ministerChanged)
+    def ministerLabel(self):
+        """What the closed control reads. Prose, never the wire pair (§2)."""
+        return boardwork.minister_label()
+
+    @Slot(str, result=bool)
+    def chooseMinister(self, name):
+        """Write his choice. It reaches the next minister dispatched and no
+        other — a worker already running keeps what it started with, the same
+        mechanism the summoner's chooser has."""
+        try:
+            boardwork.set_minister_model(name)
+        except (ValueError, OSError):
+            return False
+        self.ministerChanged.emit()
         return True
 
     @Property("QVariantList", notify=changed)

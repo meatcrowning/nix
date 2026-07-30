@@ -133,11 +133,13 @@ filter, the queue and the dedupe can be exercised without spawning anything:
     BOARD_ORCH_TIMEOUT      seconds an orchestrator run may take (default 900)
     BOARD_ORCH_MODEL        `--model` for the orchestrator (default
     BOARD_ORCH_EFFORT       claude-fable-5 / high); the WORKER_ and DECISION_
-                            pair default to empty, i.e. no flag at all. Empty
-                            means inherit ~/.claude/settings.json — see
-                            `boardwork.ROLES`.
+                            pair are his minister choice and are CLAMPED to
+                            `boardwork.MINISTER_CEILING` — they can lower a
+                            minister, never raise one. See `boardwork.ROLES`.
     BOARD_WORK_SPAWN        command run INSTEAD of `claude` for a WORKER
     BOARD_MAX_WORKERS       the concurrency cap, overriding the file
+    BOARD_MAX_SUMMONERS     how many orchestrators one tick may run at once,
+                            overriding the file (default 1)
     BOARD_WATCH_SPIN_LIMIT  undrained runs in a row before the backoff (8)
     BOARD_WATCH_SPIN_WINDOW seconds the streak has to have started within (60)
     BOARD_WATCH_SPIN_BACKOFF  seconds a backed-off run sleeps for (60)
@@ -153,6 +155,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -683,6 +686,47 @@ QUEUE_FAIL = (
 ORCH_TIMEOUT_S = int(os.environ.get("BOARD_ORCH_TIMEOUT", "900"))
 
 
+def _summon(notes, index, total):
+    """One summoner run: register a card, spawn, wait, unregister.
+
+    Returns the QUEUE_FAIL text for it or None. It does NOT write to the board
+    itself — several of these run in threads and `note_on_board` is a
+    read-modify-write of one file, so the caller does that part serially once
+    everybody is home.
+    """
+    # UNIQUE per run, and it used to be `orch-<pid>` alone: two summoners in one
+    # tick share a pid, so one id would have been one card, one inbox and one
+    # `unregister` racing itself.
+    aid = "orch-%d" % os.getpid() if total == 1 else "orch-%d-%d" % (os.getpid(), index)
+    session = str(uuid.uuid4())
+    # Registered so it shows up on his board as a running agent with his own
+    # words as its title — the same card, the same box, so he can add to it
+    # while it is still deciding. `kind="orchestrator"` is also what names it:
+    # `ba.register` gives that kind `Solomon`, always, and `boardwork.cards()`
+    # pins the row to the top of the list whether or not this run exists. Two
+    # of them are two Solomons, both pinned, in birth order — which `cards()`
+    # already said it did.
+    ba.register(aid, notes[0]["text"][:70], os.getpid(), kind="orchestrator",
+                where="board-watch", session=session)
+    text = "\n\n".join(m["text"] for m in notes)
+    try:
+        rc, how, secs = spawn(
+            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
+                                          notes=text, rules=bw.RULES,
+                                          cap=bw.cap()),
+            aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
+            role="orchestrator")
+    finally:
+        ba.unregister(aid)
+    if rc == 0:
+        log("a summoner finished in %dm%02ds" % (secs // 60, secs % 60))
+        return None
+    log("a summoner FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
+    # The last stop. He must never have to wonder where a sentence he typed
+    # went, so the failure carries the text itself onto the board.
+    return QUEUE_FAIL.format(how=how, text=bp.oneline(text, 300, code=True))
+
+
 def work_the_queue():
     """Spawn ONE ORCHESTRATOR for the sentences he typed into the board's box.
 
@@ -698,44 +742,50 @@ def work_the_queue():
     (a question in NEEDS YOU, answered at his leisure). `boardwork.py` owns both
     verbs and the prompt.
 
-    THIS RUN IS WAITED ON, and the workers it starts are not. That is the whole
-    concurrency design: the tick blocks only for the short planning run, so its
-    flock is released long before the workers finish — a decision he answers
+    THESE RUNS ARE WAITED ON, and the workers they start are not. That is the
+    whole concurrency design: the tick blocks only for the short planning runs, so
+    its flock is released long before the workers finish — a decision he answers
     five minutes from now still fires on time.
+
+    HOW MANY of them is his, in the top dropdown. [his, 2026-07-29] *"number of
+    summoners"* — `boardwork.summoners()`, read here and cached nowhere, so a
+    change takes effect on the next tick with nothing restarted. What he typed is
+    split across up to that many runs (`boardwork.split_for_summoners`,
+    contiguous, none empty), and one queued sentence is one summoner however high
+    the number is: the count is a ceiling on the fan-out, not a quota to fill.
+    They run TOGETHER in threads, because the point of asking for more than one is
+    that two unrelated things he typed do not have to take turns; the tick is held
+    for the slowest of them rather than the sum.
 
     Returns True if a run happened.
     """
     msgs = ba.drain()          # BEFORE the spawn: see boardagents.drain()
     if not msgs:
         return False
-    notes = "\n\n".join(m["text"] for m in msgs)
-    aid = "orch-%d" % os.getpid()
-    session = str(uuid.uuid4())
-    # Registered so it shows up on his board as a running agent with his own
-    # words as its title — the same card, the same box, so he can add to it
-    # while it is still deciding. `kind="orchestrator"` is also what names it:
-    # `ba.register` gives that kind `Solomon`, always, and `boardwork.cards()`
-    # pins the row to the top of the list whether or not this run exists.
-    ba.register(aid, msgs[0]["text"][:70], os.getpid(), kind="orchestrator",
-                where="board-watch", session=session)
-    log("orchestrating %d thing(s) he typed" % len(msgs))
-    try:
-        rc, how, secs = spawn(
-            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
-                                          notes=notes, rules=bw.RULES,
-                                          cap=bw.cap()),
-            aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
-            role="orchestrator")
-    finally:
-        ba.unregister(aid)
-    if rc == 0:
-        log("the orchestrator finished in %dm%02ds" % (secs // 60, secs % 60))
-        return True
-    log("the orchestrator FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
-    # The last stop. He must never have to wonder where a sentence he typed
-    # went, so the failure carries the text itself onto the board.
-    note_on_board(QUEUE_FAIL.format(
-        how=how, text=bp.oneline(notes, 300, code=True)))
+    groups = bw.split_for_summoners(msgs)
+    log("orchestrating %d thing(s) he typed across %d summoner(s)"
+        % (len(msgs), len(groups)))
+    if len(groups) == 1:
+        fails = [_summon(groups[0], 0, 1)]
+    else:
+        out = {}
+
+        def one(i, group):
+            out[i] = _summon(group, i, len(groups))
+
+        pool = [threading.Thread(target=one, args=(i, g), daemon=True)
+                for i, g in enumerate(groups)]
+        for t in pool:
+            t.start()
+        for t in pool:
+            t.join()
+        fails = [out.get(i) for i in range(len(groups))]
+    # Serially, and after the join: every one of these is a read-modify-write of
+    # `board.md` under its own lock, and a failed summoner's sentence has to reach
+    # him whole rather than interleaved with another's.
+    for text in fails:
+        if text:
+            note_on_board(text)
     return True
 
 
