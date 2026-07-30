@@ -52,6 +52,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (the desktop-wide font setting)
+from spellcheck import SpellCheck  # noqa: E402  (as-you-type spelling)
 
 import textops  # noqa: E402  (beside this file)
 from highlight import LANGS, Highlighter, detect  # noqa: E402
@@ -844,6 +845,10 @@ def main():
     titlebar = Titlebar()
     files = Files()
     buffers = Buffers(palette)
+    # The spelling marks under prose (`qmlcommon/SpellMarks.qml`). Like
+    # DeskStyle, it must be a context property the whole tree can see, and the
+    # Python reference must outlive this function.
+    spell = SpellCheck()
 
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
@@ -851,6 +856,7 @@ def main():
     ctx.setContextProperty("Files", files)
     ctx.setContextProperty("Buffers", buffers)
     ctx.setContextProperty("Settings", settings)
+    ctx.setContextProperty("Spell", spell)
     ctx.setContextProperty("startArgs", start_paths(sys.argv[1:], settings))
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))

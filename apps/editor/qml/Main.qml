@@ -189,8 +189,10 @@ Window {
             var lang = Buffers.detectLanguage(r.path, "");
             Buffers.setLanguage(t.tid, lang);
             tabs.setProperty(i, "lang", lang);
-            if (viewRep.itemAt(i) && viewRep.itemAt(i).view)
+            if (viewRep.itemAt(i) && viewRep.itemAt(i).view) {
                 viewRep.itemAt(i).view.lang = lang;
+                viewRep.itemAt(i).view.refreshSpell();
+            }
         }
         Buffers.markSaved(t.tid, r.mtime);
         tabs.setProperty(i, "dirty", false);
@@ -500,7 +502,7 @@ Window {
                     winActive: win.active
                     cellW: win.cellW
                     onStatusReported: (m) => win.status = m
-                    onContextRequested: (x, y) => win.showMenu(x, y)
+                    onContextRequested: (x, y, pos) => win.showMenu(x, y, pos)
 
                     Component.onCompleted: {
                         cv.loadText(slot.model.seedText || "");
@@ -626,11 +628,17 @@ Window {
     property string pendingSaveAs: ""
 
     // ---- the context menu (§7.1: everything selectable is right-clickable) --
-    function showMenu(x, y) {
+    function showMenu(x, y, pos) {
         var v = win.view;
         if (!v) return;
         var hasSel = v.selEnd > v.selStart;
-        var items = [
+        // Spelling first, when the word under the pointer is actually
+        // misspelled: it is why the menu was opened, and it comes with its own
+        // trailing separator. Empty in a code file, and empty on a machine with
+        // no dictionary — docs/DESIGN.md §10, an offered action must not be able
+        // to silently do nothing.
+        var items = v.spellItems(pos === undefined ? v.cursorPos : pos);
+        items = items.concat([
             { label: "undo", enabled: v.canUndo, trigger: () => v.undo() },
             { label: "redo", enabled: v.canRedo, trigger: () => v.redo() },
             { separator: true },
@@ -657,7 +665,7 @@ Window {
               trigger: () => Files.copy(tabs.get(win.current).path) },
             { label: "reload from disk", enabled: tabs.get(win.current).path !== "",
               trigger: () => win.reloadTab(win.current, false) }
-        ];
+        ]);
         menu.open(x, y, items);
     }
 
@@ -683,7 +691,13 @@ Window {
                          trigger: () => {
                              Buffers.setLanguage(tabs.get(win.current).tid, k);
                              tabs.setProperty(win.current, "lang", k);
-                             if (win.view) win.view.lang = k;
+                             if (win.view) {
+                                 win.view.lang = k;
+                                 // Spelling follows the language: switching a
+                                 // file to `text` is how a code file gets
+                                 // checked (CodeView -> "spelling").
+                                 win.view.refreshSpell();
+                             }
                              win.tabRev++;
                          } });
         }
