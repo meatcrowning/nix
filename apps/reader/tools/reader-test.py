@@ -193,8 +193,14 @@ def test_font():
                 out.add(ch)
         return out
 
-    check("the audit itself works (an unmapped em dash IS missing)",
-          "—" in missing("a—b"))
+    # The canary: a character the font really does lack, so a `missing()` that
+    # has silently started returning nothing cannot pass this layer vacuously.
+    # It used to be the em dash — `ffeb2d6` merged 526 codepoints in, that one
+    # included, and this assertion was left behind failing. CJK is the honest
+    # replacement: `glyphs.is_mappable()` leaves it alone on purpose, so no
+    # future merge will quietly cover it.
+    check("the audit itself works (an unmapped CJK glyph IS missing)",
+          "中" in missing("a中b"))
 
     # The corpus this app was written for. Absent (a fresh clone with no docs/
     # checkout), the layer is skipped rather than passing vacuously.
@@ -503,6 +509,17 @@ def test_window(app, tmp):
     # the files index feeds the browse pane
     check("the browse pane indexed both documents",
           len(prop(win, "fileIndex")) >= 2, prop(win, "fileIndex"))
+
+    # ---- Ctrl+F opens and focuses the find bar (docs/DESIGN.md §11.2) ----
+    # keyClick, not sendEvent: a QML Shortcut is resolved by the application's
+    # shortcut map, which only sees a key delivered through the window system.
+    from PySide6.QtTest import QTest
+    check("the find bar starts closed", win.property("searchOpen") is False)
+    QTest.keyClick(win, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+    spin(120)
+    check("Ctrl+F opens the find bar", win.property("searchOpen") is True)
+    win.closeSearch()
+    spin(80)
 
     # ---- search, in this document and across them ----
     win.setProperty("query", "needle")
