@@ -73,6 +73,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
@@ -856,57 +858,135 @@ class Usage(QObject):
     why the short window is labelled `5h` rather than "daily", and why no Fable
     figure is drawn. This class only re-reads and notifies.
 
-    A poll, not a `QFileSystemWatcher`: `~/.claude.json` is rewritten by the CLI
-    (often by replace, which drops a file watch on the spot) and it lives in
-    `$HOME`, where watching the directory would wake this app for every stray
-    download. The cache changes on the order of minutes, so 60s is well inside
-    "prompt" and the read is mtime-gated on top of that.
+    A poll, not a `QFileSystemWatcher`: both caches are rewritten by replace,
+    which drops a file watch on the spot, and `~/.claude.json` lives in `$HOME`
+    where watching the directory would wake this app for every stray download.
+    The figures change on the order of minutes, so 60s is well inside "prompt"
+    and the read is mtime-gated on top of that.
 
-    **The 60s poll is the FALLBACK, not the trigger** [his, 2026-07-29]: *"ensure
+    **Two clocks, because reading is cheap and fetching is not.**
+
+    - The 60s tick RE-READS the caches: two `stat`s and a small JSON parse.
+    - A FETCH — `boardusage.fetch()`, one ~350ms HTTPS GET — happens at most
+      every `FETCH_SEC`, on a daemon thread so the window never waits for the
+      network, and its result comes back over `_fetched` as an ordinary queued
+      signal. Exactly one is ever in flight.
+
+    The fetch is the whole answer to [his, 2026-07-29] *"why did it take me
+    opening an instance of claude-code for the usage indicators to update? they
+    should always be up to date"*: `~/.claude.json` only advances while a session
+    runs, so no polling interval here could have helped. See `boardusage`.
+
+    **The clocks are the FALLBACK, not the trigger** [his, 2026-07-29]: *"ensure
     the usage indicators update every time an agent is killed / finishes their
-    job / etc."* — so `follow()` also re-reads on every agent LIFECYCLE
-    transition, which is when the number has just moved by a visible amount. It
-    hangs off `Agents.lives`, not `Agents.changed`, because the latter fires for
-    ordinary per-poll churn and that would make this a 2.5s poll of a 60KB JSON
-    file. What it cannot do is invent a fresher figure than the CLI has cached
-    (§10.5): an agent that exits before its own CLI writes the cache is read on
-    the next tick like before.
+    job / etc."* — so `follow()` hangs `kick()` on every agent LIFECYCLE
+    transition, which now genuinely re-reads the number rather than re-reading a
+    file nobody wrote. It is `Agents.lives`, not `Agents.changed`, because the
+    latter fires for ordinary per-poll churn and that would make this a 2.5s
+    fetch; `KICK_SEC` is the floor under it either way.
     """
 
     changed = Signal()
+    #: A fetch finished, with its reason word. Emitted from the worker thread —
+    #: a queued connection is what carries it back to the GUI one.
+    _fetched = Signal(str)
+
+    #: Seconds between fetches on the idle clock, and the floor under a
+    #: lifecycle-triggered one. A percentage moves by single digits in five
+    #: minutes; twenty seconds is short enough that a finished agent shows up
+    #: while he is still looking at the card.
+    FETCH_SEC = 300.0
+    KICK_SEC = 20.0
+    #: And how often `nudge()` may be spent on an expired token.
+    NUDGE_SEC = 900.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
         self._stamp = None
+        self._busy = False
+        self._fetched_at = 0.0
+        self._nudged_at = 0.0
+        self._why = "ok"
+        self._fetched.connect(self._settled)
         self._poll = QTimer(self)
         self._poll.setInterval(60000)
-        self._poll.timeout.connect(self.refresh)
+        self._poll.timeout.connect(self.poll)
         self._poll.start()
         self.refresh()
+        self._start(0.0)
 
     def follow(self, agents):
-        """Re-read whenever an agent starts, finishes, dies or is reclaimed.
+        """Re-read AND re-fetch whenever an agent starts, finishes or dies.
 
         Called wherever these two objects are built — `main()` and the harness's
         `build()`. One line, and it is here rather than in `Agents` so that
         class keeps knowing nothing about what watches it.
         """
-        agents.lives.connect(self.refresh)
+        agents.lives.connect(self.kick)
+
+    @Slot()
+    def poll(self):
+        """The 60s tick: always re-read, and top the reading up when it is due."""
+        self._start(self.FETCH_SEC)
+        self.refresh()
+
+    @Slot()
+    def kick(self):
+        """An agent's life changed, so the number just moved. Go and look."""
+        self._start(self.KICK_SEC)
+        self.refresh()
+
+    def _start(self, min_gap):
+        """Fetch on a worker thread, unless one is running or it is too soon."""
+        now = time.time()
+        if self._busy or now - self._fetched_at < min_gap:
+            return
+        self._busy, self._fetched_at = True, now
+        threading.Thread(target=self._work, daemon=True,
+                         name="board-usage").start()
+
+    def _work(self):
+        """Off the GUI thread: fetch, and heal an expired token if that is why.
+
+        Nothing here touches Qt state except the signal — `_settled` does the
+        rest back on the GUI thread.
+        """
+        why = boardusage.fetch()
+        if why in ("expired", "unauthorized") \
+                and time.time() - self._nudged_at > self.NUDGE_SEC:
+            self._nudged_at = time.time()
+            if boardusage.nudge():
+                why = boardusage.fetch()
+        self._fetched.emit(why)
+
+    @Slot(str)
+    def _settled(self, why):
+        # Logged only when it CHANGES: a machine with no network would otherwise
+        # write a line a minute for as long as goetia is open.
+        if why != self._why:
+            self._why = why
+            if why not in ("ok", "off"):
+                print("usage: no live reading (%s) - drawing the last one, with "
+                      "its age" % why, file=sys.stderr)
+        self._busy = False
+        self.refresh()
 
     @Slot()
     def refresh(self):
-        try:
-            stamp = os.path.getmtime(boardusage.CLAUDE_JSON)
-        except OSError:
-            stamp = 0
-        # The AGE moves even when the file does not, and a stale reading is
+        stamps = []
+        for p in (boardusage.CLAUDE_JSON, boardusage.LIVE_PATH):
+            try:
+                stamps.append(os.path.getmtime(p))
+            except OSError:
+                stamps.append(0)
+        # The AGE moves even when the files do not, and a stale reading is
         # supposed to say so — so a re-read is skipped only while the rows come
-        # out identical, never merely because the mtime held still.
+        # out identical, never merely because the mtimes held still.
         rows = boardusage.readings()
-        if rows == self._rows and stamp == self._stamp:
+        if rows == self._rows and stamps == self._stamp:
             return
-        self._rows, self._stamp = rows, stamp
+        self._rows, self._stamp = rows, stamps
         self.changed.emit()
 
     @Property("QVariantList", notify=changed)
