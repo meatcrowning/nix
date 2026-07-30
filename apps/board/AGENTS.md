@@ -294,9 +294,9 @@ and every one of those paths reads the flat one.
   it is the dim label plus the border hairline. No new chrome, and **it is a
   heading and NOT a count**: no tally, no badge, no severity colour, exactly as
   the flat list had none.
-- The empty state is unchanged — `nothing needs you` still keys off the section
-  being empty, and an empty section draws no headings because there are no
-  groups.
+- The empty state still keys off the section being empty, and an empty section
+  draws no headings because there are no groups. What it SAYS is now one line —
+  see the empty state below.
 
 ### Everything under NEEDS YOU says WHEN it was put there
 
@@ -371,10 +371,18 @@ So, as binding as the parse:
   work has actually started — see *Answering here now STARTS something*, below.
   That is not this app doing it: `boardmove.py` is, on behalf of whoever is doing
   the work, and the GUI still has no move in it at all.
-- The empty state says `nothing needs you` / `nothing here expires - come back
-  whenever`, in `Theme.dim` with the section rule above it unchanged, so a board
-  with nothing on it reads as finished rather than as broken. It is the state he
-  will see most often.
+- The empty state is ONE sentence, `decisions brought to you from Solomon.`, in
+  `Theme.dim` with the section rule above it unchanged, so a board with nothing
+  on it reads as finished rather than as broken. It is the state he will see
+  most often. [his, 2026-07-29] every other line that used to be down there is
+  gone: the second placeholder (`nothing here expires - come back whenever`) and
+  — while the section is empty — the store's own framing paragraph, which would
+  be a second introduction to nothing.
+- **The header has no label.** [his, 2026-07-29] *"just have the line and
+  collapse toggle"*: `SectionHead { label: "" }`, so the band is the accent rule
+  and the `[-]` and nothing else. The whole band has always been the MouseArea,
+  so the toggle keeps its hit target; `SectionHead` drops the second 8px gutter
+  an empty label would leave behind it (docs/DESIGN.md §5.4).
 
 ## Answering here now STARTS something
 
@@ -1011,11 +1019,14 @@ separable rules, and `board-test.py` asserts each of them separately.
   — `state: "idle"`, no claim, no observed line, and **no id, so no inbox**:
   a note left for an orchestrator that does not exist would have nobody to read
   it, and the box at the top of the window already queues one for the next.
-  `describe()` gives it the only sentence that is true — *"ready - what you
-  type at the top of this window goes to him"*.
-- **So the list is never empty**, and the section's "nothing is running"
-  sentence is gated on `Main.qml`'s `nothingRunning` (any card that is not the
-  standing row) rather than on the list's length.
+  `describe()` returns `""` for it: [his, 2026-07-29] the resting card is TWO
+  lines — `Solomon awaits`, then `summons a minister to do your bidding.` — and
+  the third, which said what you type at the top of the window goes to him, is
+  gone. The row's own `detail` is `""` for the same reason, so the two things
+  that can feed that line cannot disagree.
+- **So the list is never empty**, and the triangle's empty sentence is gated on
+  `Main.qml`'s `nothingRunning` (any card that is not the standing row) rather
+  than on the list's length.
 - `boardctl.py inbox send --to` takes either the name or the id.
 
 ### A card says what the agent CLAIMS and what it is OBSERVED doing — both
@@ -1304,8 +1315,21 @@ all of it.
   listed as what can actually be observed — a process — and described as
   `running - board sees the process, not what it is doing`. Nothing invents a
   title for it.
-- **Empty is the resting state**: `nothing is running`, in `Theme.dim`, with the
-  box still there. Same reading as `nothing needs you`.
+- **Empty is the resting state**: `binds ministers.`, in `Theme.dim`, with the
+  box still there — [his, 2026-07-29] what the triangle IS, rather than a report
+  that it currently holds nobody.
+- **...and a SECOND line only when nothing will ever start.** Armed, that
+  sentence is the only text the section draws: the systemd status line at the
+  bottom of it is suppressed while the section is empty. Not armed, it reads
+  `board-watch is not armed`. The verdict is `Agents.armed`, three-valued —
+  `boardagents.watcher_state()` asks BOTH `board-watch.service` (a tick running,
+  a failed last run) and `board-watch.path` (will anything start one), checks
+  the kill switch `~/.local/state/board-watch/off` itself, and answers `None`
+  when systemctl could not be asked, which §10 does not let the window turn into
+  a claim in either direction. Polled with the units every ten seconds and never
+  on a repaint. Asking the service ALONE is what this replaces: its resting
+  state is `inactive` whether or not the path unit exists, so the old sentence
+  claimed armed for a watcher that could never fire.
 
 ### The box, and the promise it can honestly make
 

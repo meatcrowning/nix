@@ -1940,12 +1940,39 @@ def test_agents(tmp):
             os.unlink(p)
 
     # ---- the watcher's own state, said honestly ----
+    # Against a SCRATCH state dir: the kill switch is read off the filesystem
+    # and `board-watch.py` resolves it under `~` and not under `$XDG_STATE_HOME`
+    # (which is why `watch_kill_switch()` exists), so without this the answers
+    # below would depend on whether the machine running the tests has the
+    # watcher switched off.
+    wstate = os.path.join(os.path.dirname(ba.agents_dir()), "watch-scratch")
+    os.makedirs(wstate, exist_ok=True)
+    os.environ["BOARD_WATCH_STATE"] = wstate
+    #: Service block, then path block, the order `_ask_systemd` asks in.
+    ARMED = "ActiveState=inactive\n\nActiveState=active\n"
     check("an unaskable watcher says so rather than looking healthy",
           "could not be asked" in ba.watcher_state("")["text"])
+    check("...and does not claim armed OR unarmed off a systemctl we never ran",
+          ba.watcher_state("")["armed"] is None)
     check("a failed watcher is reported as failed",
-          "failed" in ba.watcher_state("ActiveState=failed\n")["text"])
+          "failed" in ba.watcher_state("ActiveState=failed\n")["text"]
+          and ba.watcher_state("ActiveState=failed\n")["armed"] is False)
     check("an idle watcher reads as armed, not as broken",
-          "armed" in ba.watcher_state("ActiveState=inactive\n")["text"])
+          "armed" in ba.watcher_state(ARMED)["text"]
+          and ba.watcher_state(ARMED)["armed"] is True)
+    # The service is `inactive` BETWEEN ticks whether or not anything will ever
+    # start one, so the service alone cannot answer this: asking it only is what
+    # used to report a dead feature as armed.
+    check("...but a stopped path unit is NOT armed, however idle the service",
+          ba.watcher_state("ActiveState=inactive\n\nActiveState=inactive\n")
+            ["armed"] is False)
+    open(ba.watch_kill_switch(), "w").close()
+    check("...and neither is one he has switched off at the kill switch",
+          ba.watcher_state(ARMED)["armed"] is False
+          and "switched off" in ba.watcher_state(ARMED)["text"])
+    os.unlink(ba.watch_kill_switch())
+    check("...which re-arms by deleting that file and nothing else",
+          ba.watcher_state(ARMED)["armed"] is True)
 
     # ---- and the CLI half an agent actually uses ----
     import subprocess
@@ -2594,9 +2621,16 @@ def test_work(tmp):
     check("...and never as work in flight: nothing pretends to observe him",
           idle.get("doingLine") == "" and idle.get("running") is False
           and idle.get("observed") == "unlinked", idle)
-    check("...with the detail line no longer repeating `ready` under it",
-          ba.describe(idle) == "what you type at the top of this window "
-                               "goes to him", ba.describe(idle))
+    # [his, 2026-07-29] the resting card is TWO lines and this is both of them:
+    # `Solomon awaits` above, his own sentence below, and nothing after it. The
+    # window draws `describe()` and not the row's own `detail`, so both are
+    # checked — a third line coming back through either one is the regression.
+    check("...the second line being his sentence, verbatim and with the stop",
+          idle.get("title") == "summons a minister to do your bidding.",
+          idle.get("title"))
+    check("...and NO third line, from either of the two things that feed one",
+          ba.describe(idle) == "" and idle.get("detail") == "",
+          (ba.describe(idle), idle.get("detail")))
     check("...offered no inbox, there being nobody there to read one",
           idle.get("id") == "", idle)
     # ...and the card of a LIVE Solomon leads with his name, which is the one
@@ -4385,6 +4419,42 @@ def test_window(app, tmp):
           len(prop(win2, "needs")) == 0 and len(prop(win2, "todo")) == 0)
     check("...and still shows what is moving and what landed",
           len(prop(win2, "flight")) == 1 and len(prop(win2, "landed")) == 1)
+
+    # ONE SENTENCE AND NO OTHER. [his, 2026-07-29] *"decisions brought to you
+    # from Solomon."* is the whole of the empty section — the second placeholder
+    # line went, and so did the store's own framing paragraph, which empty would
+    # be a second introduction to nothing. Asserted on the DRAWN text, because
+    # both of the lines this replaces were drawn from three different places.
+    def _visible_texts():
+        out = []
+        for t in descendants(win2.contentItem()):
+            s = t.property("text")
+            if isinstance(s, str) and s.strip() and t.isVisible():
+                out.append(s.strip())
+        return out
+
+    shown = _visible_texts()
+    check("the empty NEEDS YOU is his one sentence, verbatim",
+          "decisions brought to you from Solomon." in shown, shown[:12])
+    check("...and neither placeholder line it replaced is drawn any more",
+          not any(s.startswith("nothing needs you")
+                  or s.startswith("nothing here expires") for s in shown),
+          [s for s in shown if s.startswith("nothing")])
+    check("...nor the store's framing paragraph, empty needing no second one",
+          not any(s.startswith("Decisions only you can make") for s in shown),
+          [s for s in shown if s.startswith("Decisions")])
+    # The header lost its word, not its controls: [his] *"just have the line and
+    # collapse toggle"*. `[-]` is still drawn and the band still toggles.
+    check("...and the section header is the toggle and the rule alone",
+          "needs you" not in shown and "[-]" in shown,
+          [s for s in shown if s in ("needs you", "[-]", "[+]")])
+    win2.setProperty("collapsed", {"needs": True})
+    spin(200)
+    check("...which he can still work, the whole band being the hit target",
+          prop(win2, "collapsed").get("needs") is True
+          and "[+]" in _visible_texts())
+    win2.setProperty("collapsed", {})
+    spin(200)
     shot(win2, "03-empty-needs-you")
 
     # NOTHING RUNNING is the resting state of the agents section, and the one he
@@ -4394,11 +4464,50 @@ def test_window(app, tmp):
     # session and would otherwise be in the list.
     real_procs = ba._procs
     ba._procs = lambda: {}
+    # ...and the QUEUED tasks earlier tests left behind go with them: a task
+    # waiting for a slot is a card in this section, so the section is not empty
+    # while one exists and `nothingRunning` is honestly false.
+    pend = bw.work_dir("pending")
+    for f in os.listdir(pend):
+        os.unlink(os.path.join(pend, f))
     try:
         keep2[5].refresh()
         spin(250)
         check("with nothing running the agents section is empty, not broken",
               prop(win2, "agents") == [], prop(win2, "agents"))
+        # [his, 2026-07-29] *"binds ministers."* — what the triangle IS, and
+        # with board-watch armed it is the ONLY text down there: no systemd
+        # sentence, no second line. The window's `armed` comes from the real
+        # `Agents`, so the armed case is forced here rather than waited for.
+        keep2[5]._armed, keep2[5]._watcher = True, "board-watch is armed - x"
+        keep2[5].changed.emit()
+        spin(200)
+        shown2 = _visible_texts()
+        check("the empty triangle says what it is, in his words",
+              "binds ministers." in shown2, shown2[:12])
+        check("...and armed, that sentence is the only text the section draws",
+              not any("board-watch" in s for s in shown2),
+              [s for s in shown2 if "board-watch" in s])
+        keep2[5]._armed = False
+        keep2[5].changed.emit()
+        spin(200)
+        shown3 = _visible_texts()
+        check("...while a watcher that will never fire is said so, once",
+              "binds ministers." in shown3
+              and shown3.count("board-watch is not armed") == 1,
+              [s for s in shown3 if "board-watch" in s])
+        # Unknown is neither: §10 does not let "could not ask systemctl" become
+        # a claim about his machine in either direction.
+        keep2[5]._armed, keep2[5]._watcher = None, "board-watch could not be asked"
+        keep2[5].changed.emit()
+        spin(200)
+        shown4 = _visible_texts()
+        check("...and an unaskable systemctl reports itself, claiming neither",
+              "board-watch could not be asked" in shown4
+              and "board-watch is not armed" not in shown4,
+              [s for s in shown4 if "board-watch" in s])
+        keep2[5]._armed, keep2[5]._watcher = True, "board-watch is armed - x"
+        keep2[5].changed.emit()
         win2.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
         spin(300)
         shot(win2, "03b-agents-empty")

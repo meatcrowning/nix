@@ -640,10 +640,16 @@ Window {
             width: scroller.width - win.pad * 2 - vbar.barW
 
             // ================================================ what needs you
+            // NO LABEL — [his, 2026-07-29] *"just have the line and collapse
+            // toggle"*. The band keeps its accent rule and its `[-]`, and the
+            // rule simply starts where the word used to. The whole band has
+            // always been the MouseArea (`SectionHead`), so losing the label
+            // costs the toggle no hit target; the section still reads as one
+            // because the accent rule is what told it apart (§9.1, §5.1).
             SectionHead {
                 id: headNeeds
                 width: page.width
-                label: "needs you"
+                label: ""
                 accented: true
                 collapsed: win.isCollapsed("needs")
                 fgAccent: win.fgAccent
@@ -662,9 +668,20 @@ Window {
                     id: needsCol
                     width: parent.width
 
-                    // the section's own framing sentence, from the file
+                    //: EMPTY is the state he sees most often, and when the
+                    //: section is empty this ONE sentence is the whole of it —
+                    //: [his, 2026-07-29] *"decisions brought to you from
+                    //: Solomon."*, and every other line that used to be down
+                    //: here is gone.
+                    readonly property bool empty:
+                        win.needs.length === 0 && win.todo.length === 0
+
+                    // the section's own framing sentence, from the file — and
+                    // only while there is something for it to frame. Empty, the
+                    // sentence below IS the framing, and drawing both would be
+                    // two introductions to nothing (§5.2).
                     Repeater {
-                        model: win.intro.needs ? win.intro.needs : []
+                        model: needsCol.empty || !win.intro.needs ? [] : win.intro.needs
                         delegate: Para {
                             required property var modelData
                             width: needsCol.width
@@ -674,32 +691,23 @@ Window {
                         }
                     }
 
-                    // The state he will see most often, and it must read as
-                    // finished rather than as broken: no empty frame, no
-                    // placeholder box, no "0 items" — one dim sentence in the
-                    // token whose own job is "empty & unviewed" (§3.4), and the
-                    // section rule above it unchanged so nothing looks missing.
+                    // It must read as finished rather than as broken: no empty
+                    // frame, no placeholder box, no "0 items" — one dim
+                    // sentence in the token whose own job is "empty & unviewed"
+                    // (§3.4), and the section rule above it unchanged so
+                    // nothing looks missing.
                     Item {
                         width: needsCol.width
-                        visible: win.needs.length === 0 && win.todo.length === 0
+                        visible: needsCol.empty
                         implicitHeight: visible ? Theme.fontSize * 2 + 40 : 0
                         height: implicitHeight
 
-                        Column {
+                        PixelText {
                             anchors.centerIn: parent
                             width: parent.width
-                            PixelText {
-                                width: parent.width
-                                horizontalAlignment: Text.AlignHCenter
-                                color: Theme.dim
-                                text: "nothing needs you"
-                            }
-                            PixelText {
-                                width: parent.width
-                                horizontalAlignment: Text.AlignHCenter
-                                color: Theme.dim
-                                text: "nothing here expires - come back whenever"
-                            }
+                            horizontalAlignment: Text.AlignHCenter
+                            color: Theme.dim
+                            text: "decisions brought to you from Solomon."
                         }
                     }
 
@@ -1159,18 +1167,35 @@ Window {
 
                     // Nothing running is the NORMAL state, and it must read as
                     // finished rather than as broken — one dim sentence, no
-                    // empty frame, no "0 agents". The box at the top of the
-                    // page still works, which is the point: what he writes
-                    // there waits for the next orchestrator. Solomon's standing
-                    // row below says the same thing from the other end — who
-                    // will pick it up — so this stays a sentence about the
-                    // WORKERS and is gated on them, not on the list's length.
+                    // empty frame, no "0 agents". [his, 2026-07-29] that
+                    // sentence is now *"binds ministers."*: what the triangle
+                    // IS, rather than a report that it is currently holding
+                    // none. Gated on the WORKERS and not on the list's length,
+                    // as before.
                     PixelText {
                         width: agentsCol.width
                         visible: win.nothingRunning
                         height: visible ? implicitHeight : 0
                         color: Theme.dim
-                        text: "nothing is running"
+                        text: "binds ministers."
+                    }
+
+                    // ...and the ONE thing that can make that sentence a lie:
+                    // nothing is running and nothing is going to start. [his,
+                    // 2026-07-29] armed, the line above is the only text here;
+                    // not armed, this follows it. `Agents.armed` is polled with
+                    // the units every ten seconds, never per repaint, and it is
+                    // three-valued — `undefined` is "systemctl could not be
+                    // asked", which §10 does not let us report as either answer,
+                    // so that case says what it actually knows.
+                    PixelText {
+                        width: agentsCol.width
+                        visible: win.nothingRunning && Agents.armed !== true
+                        height: visible ? implicitHeight : 0
+                        elide: Text.ElideRight
+                        color: Theme.dim
+                        text: Agents.armed === false ? "board-watch is not armed"
+                                                     : Agents.watcher
                     }
 
                     // What this section is, said once. It is the honest frame
@@ -1284,9 +1309,14 @@ Window {
                     // The watcher's own state, from systemd. It is the thing
                     // that will pick the queue up, so "is it armed?" is a fair
                     // question for this section to answer.
+                    //
+                    // NOT while the section is empty: up there the answer is
+                    // already given in his own words, and [his, 2026-07-29] an
+                    // armed watcher over an empty triangle draws "binds
+                    // ministers." and NOTHING ELSE.
                     PixelText {
                         width: agentsCol.width
-                        visible: Agents.watcher !== ""
+                        visible: Agents.watcher !== "" && !win.nothingRunning
                         height: visible ? implicitHeight : 0
                         elide: Text.ElideRight
                         color: Theme.dim
