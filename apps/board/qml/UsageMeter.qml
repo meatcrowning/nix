@@ -123,6 +123,16 @@ Item {
     // old*. A `HoverHandler` is passive, so the two do not fight.
     ToolTipArea {
         anchors.fill: parent
-        text: meter.row && meter.row.reset ? meter.row.reset : ""
+        // BOTH sentences, in one chip. `detail` used to be written into the
+        // window's `status` on hover, and that is the footer the hyprvtb bar
+        // draws — so hovering a meter put text in the inner titlebar, his
+        // *"stray text ... in the inner sidebar"*. The two answers still differ
+        // (*what is this number* and *when does it come back*), so they are two
+        // lines of one tooltip rather than two channels.
+        text: {
+            var d = meter.row && meter.row.detail ? meter.row.detail : "";
+            var r = meter.row && meter.row.reset ? meter.row.reset : "";
+            return d !== "" && r !== "" ? d + "\n" + r : d + r;
+        }
     }
 }
