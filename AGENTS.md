@@ -321,6 +321,18 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   script is parametrized by `CM_SYNC_REPO`/`REMOTE`/`LOG`/`SEED`/`LABEL`, so a
   second systemd user unit was all it took. Log `~/.cache/nix-docs-sync.log`;
   force a run with `systemctl --user start nix-docs-sync.service`.
+  **Prose here still conflicts loudly for a human — `board.md` does not.** It is
+  a store with an unattended writer and a GUI on *both* machines, so two-sided
+  edits are routine, and an unresolved conflict does not merely flag that file:
+  it aborts the tick and stops docs/ syncing in either direction until someone
+  notices. `board.md merge=boardrecent` (seeded `.gitattributes`, registered by
+  `nix-docs-setup.sh`) runs the real 3-way merge first, so non-overlapping edits
+  on the two hosts both survive, and only a genuine collision falls back to
+  **the more recent side wins, whole** — his rule, 2026-07-29, and symmetric, so
+  neither host is privileged. Losing sides stay in history. Harness:
+  `tools/board-merge-test.sh` — re-run it after touching the driver, the
+  attributes or the registration, since a missing registration makes the rule
+  inert with no error.
   Deliberately **not** a submodule: `git
   pull` does not update submodule contents, so the other machine would read a
   stale runbook. There are now three callers of that script; a fourth **must**
