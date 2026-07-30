@@ -644,6 +644,11 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
                # `boardwork.ROLES`. A decision agent inherits his settings.json
                # default; the orchestrator does not, because it only plans.
                *bw.role_flags(role),
+               # ...and how much CONTEXT it starts with, same per-role split and
+               # imported for the same reason: `boardwork.context_flags`. A
+               # minister gets the trimmed tool set and no superpowers; Solomon
+               # keeps both and gets only the cache-prefix flag.
+               *bw.context_flags(role),
                "--permission-mode", "acceptEdits",
                "--allowedTools", *ALLOW,
                "--disallowedTools", *DENY,

@@ -1024,6 +1024,91 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
         "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git restore:*)",
         "Bash(git stash:*)", "Bash(git clean:*)"]
 
+# ------------------------------------------- what the STARTUP CONTEXT costs
+#: `ALLOW` above is a PERMISSION filter — it decides what a tool call is allowed
+#: to do, and the schema loads either way. `--tools` is the other axis: which
+#: built-in tools EXIST for the session at all, i.e. how many schemas are in the
+#: prompt before the agent has read a line. The two are not interchangeable and
+#: this system needs both.
+#:
+#: Why it is worth a constant: measured on book 2026-07-29, the startup floor of
+#: a spawn here is ~43k tokens, and it is re-read on EVERY turn of the session.
+#: Across one day (215 sessions, 11,987 assistant turns) that floor alone
+#: accounted for ~600M of the 1,510M input tokens processed — 40%. So a token cut
+#: from the floor is paid back once per turn, and the long ministers run 150-350
+#: turns each. Restricting the tool set is the single biggest lever: 43,442 ->
+#: 32,865 tokens, -24%, because it drops the deferred-tool block, `Workflow`
+#: (~6k of description on its own), `Artifact`, `ScheduleWakeup`, `ToolSearch`,
+#: `AskUserQuestion`, `ReportFindings`, `Skill` and the Task/todo reminders that
+#: fire every few turns.
+#:
+#: WHAT IS DELIBERATELY STILL HERE. `Task` is the subagent tool (the CLI answers
+#: to that name and the session then reports it as `Agent`) — ministers use it,
+#: 26 times across the last 40 sessions, and a minister that cannot fan out does
+#: the reading serially in its own context, which is the expensive shape. The web
+#: pair costs ~1k and has zero recorded uses, and is kept anyway: a minister sent
+#: at an upstream API it cannot look up flounders for far more than 1k. `Skill`
+#: and `TodoWrite` are NOT here — nothing in a minister's prompt reaches for
+#: either, and every skill this machine has is unreachable from a headless run.
+TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task",
+         "WebFetch", "WebSearch"]
+
+#: Turn the superpowers plugin OFF for a MINISTER, and only for a minister.
+#: [his, 2026-07-29] *"def disable superpowers for ministers but solomon should
+#: still have it enabled"*. `--settings` merges over `~/.claude/settings.json`
+#: rather than replacing it, which is what this needs: the SessionStart host-id
+#: hook and the PostToolUse inbox hook both still fire (verified — an inbox note
+#: reaching a worker mid-flight is load-bearing for rule 11).
+#:
+#: It is worth doing for a minister and not for Solomon because of the shape of
+#: the two runs, not because the skill is worse advice. The injection is ~2k
+#: tokens and arrives TWICE (the hook's own stdout and the additionalContext it
+#: asks for), plus ~2.2k of skill listing. Solomon runs 6-12 turns, so it costs
+#: it ~50k a run; a minister runs 150-350, so it costs one of those ~1.2M. And
+#: its first instruction — invoke a skill before answering, brainstorm before
+#: building — is advice for somebody with a human to check with. A minister has
+#: no human, has its whole task in one prompt, and has RULES that already say
+#: what to read.
+MINISTER_SETTINGS = json.dumps(
+    {"enabledPlugins": {"superpowers@claude-plugins-official": False}})
+
+
+def context_flags(role):
+    """argv fragment trimming the startup context for `role`.
+
+    Both spawners call this for the same reason they share `ALLOW`/`DENY`: a
+    flag set in one and not the other is invisible until the day the numbers
+    stop matching. Measured floors, cold, on book 2026-07-29:
+
+        today's flags                43,442
+        + --disable-slash-commands   41,147
+        + superpowers off            42,068
+        + --tools (restricted)       32,915
+        all of it                    32,865   (-24%)
+
+    `--exclude-dynamic-system-prompt-sections` shows up in none of those
+    numbers and is the reason the flag is here anyway: it moves cwd, env, memory
+    paths and git status out of the system prompt, so the ~32k prefix is
+    IDENTICAL across spawns and every one of them is a pure cache READ. Measured
+    back-to-back: with it, `read 31,873 + write 0` twice over; without it,
+    `read 14,736 + write 17,292` on a prefix that any other agent's differing
+    git status would have broken anyway. Cache writes cost 1.25x and reads 0.1x,
+    against ~200 spawns a day.
+
+    SOLOMON GETS ONLY THAT ONE. It is the only entry with no behavioural half:
+    keeping the skills and the plugin for the orchestrator is his call, and
+    passing `--tools` without `Skill` would have taken them away by the back
+    door while the injected text still told it to use them — a prompt at war
+    with its own tool list.
+    """
+    argv = ["--exclude-dynamic-system-prompt-sections"]
+    if role in MINISTER_ROLES:
+        argv += ["--tools", *TOOLS,
+                 "--disable-slash-commands",
+                 "--settings", MINISTER_SETTINGS]
+    return argv
+
+
 # ------------------------------------------------ what model does which job
 #: Per-ROLE model and reasoning effort, the one table for both spawners
 #: (`_spawn_worker` below and `board-watch.py`'s `spawn`, which imports it from
@@ -1381,6 +1466,7 @@ def _spawn_worker(rec):
         cmd = ["claude", "-p", prompt,
                "--session-id", session,
                *role_flags("worker"),
+               *context_flags("worker"),
                "--permission-mode", "acceptEdits",
                "--allowedTools", *ALLOW,
                "--disallowedTools", *DENY,

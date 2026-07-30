@@ -788,6 +788,69 @@ and after, the `Theme.qml` bump, `hyprctl reload`, the hyprvtb version bump,
 never bare `qs`, never scripting hyprvtb Lua actions), **the IPC/log
 verification toolbox**, and **saying what the other host must run**.
 
+### What each spawn STARTS WITH, before it reads a line
+
+`boardwork.context_flags(role)` is the other half of `role_flags` — not which
+model, but how big the prompt already is when the model gets it. Both spawners
+call it for the same reason both call `role_flags`: a flag set in one and not
+the other is invisible until the numbers stop matching.
+
+**Why it is a knob at all.** Measured on book, 2026-07-29: a real worker spawn
+started at **51,425 tokens**, and that floor is re-read on *every turn* of the
+session. Over one day — 215 sessions, 11,987 assistant turns — the floor alone
+accounted for **~600M of 1,510M input tokens, 40%**. A token cut here is paid
+back once per turn, and the long ministers run 150-350 turns each.
+
+| | worker floor |
+|---|---|
+| before | 51,425 |
+| `--tools` restricted to `boardwork.TOOLS` | -10.5k |
+| `--disable-slash-commands` | -2.2k |
+| superpowers off (`MINISTER_SETTINGS`) | -2.0k, and it arrived TWICE |
+| **now** | **36,417 (-29%)** |
+
+`--tools` is the big one, and it is a *different axis from `ALLOW`*: `ALLOW` is
+a permission filter and the schema loads either way, while `--tools` decides
+which built-in tools exist at all. It drops the deferred-tool block, `Workflow`
+(~6k of description by itself), `Artifact`, `ScheduleWakeup`, `ToolSearch`,
+`AskUserQuestion`, `ReportFindings`, `Skill`, and the Task/todo reminders that
+fire every few turns. `Task` stays — a minister that cannot fan out reads
+serially in its own context, which is the expensive shape — and so does the web
+pair, which costs ~1k and has no recorded use: a minister sent at an upstream
+API it cannot look up flounders for far more than that.
+
+**`--exclude-dynamic-system-prompt-sections` is in no row of that table and is
+the reason it is worth having anyway.** It moves cwd, env, memory paths and git
+status out of the system prompt, so the prefix is identical across spawns and
+each one is a pure cache READ. Measured back-to-back: `read 36,417 + write 0` on
+the second spawn, against `read 14,736 + write 17,292` without it — on a prefix
+any other agent's differing git status would have broken regardless. Writes cost
+1.25x and reads 0.1x, against ~200 spawns a day.
+
+**SOLOMON IS EXEMPT FROM EVERYTHING BUT THAT ONE FLAG.** [his, 2026-07-29]
+*"def disable superpowers for ministers but solomon should still have it
+enabled"*. The split follows the shape of the two runs rather than the quality
+of the advice: the superpowers injection is ~2k and arrives twice, plus ~2.2k of
+skill listing, so it costs a 6-12 turn orchestrator ~50k a run and a 150-350
+turn minister ~1.2M. And its first instruction — invoke a skill before
+answering, brainstorm before building — is advice for somebody with a human to
+check with; a minister has none, has its whole task in one prompt, and has
+`RULES`. Passing `--tools` to Solomon would also have taken its skills away by
+the back door, since `Skill` is not in the list, leaving an injected text at war
+with its own tool list. Solomon measures 53,281 -> 52,984: nearly nothing, and
+nothing risked.
+
+`--settings` **merges over** `~/.claude/settings.json` rather than replacing it,
+which is what makes the plugin switch safe: the SessionStart host-id hook and
+the PostToolUse inbox hook both still fire, and an inbox note reaching a worker
+mid-flight is load-bearing for rule 11.
+
+**The floor is not the whole bill.** It is 40% of it; the rest is that context
+grows 52k -> ~300k over a long minister and every turn re-reads all of it. What
+fills it is the agents' own output, ~85% of which is thinking — tool results are
+under 1% of the burn, and reads are already sliced per rule 6. Shortening
+sessions is the other lever and it is not this one.
+
 ### The one thing that could hold the whole system up, and does not
 
 board-watch is a `oneshot` holding a flock, so **anything it waits for blocks
