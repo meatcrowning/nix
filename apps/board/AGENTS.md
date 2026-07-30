@@ -9,7 +9,8 @@ property. Renamed 2026-07-29, his call; the prose here goes on calling the FILE
 "the board", because that is what it is.
 
 Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
-`boardagents.py`, `boardwork.py`, `boardphase.py`, `boardusage.py` and `qml/`.
+`boardagents.py`, `boardwork.py`, `boardphase.py`, `boardusage.py`,
+`boardundo.py` and `qml/`.
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 (including the `air` system-python split) and runs the **live** source at
 `/home/lam/nix/apps/board/main.py`, so `.py`/`.qml` edits need no rebuild. See
@@ -639,7 +640,7 @@ Rules that fall out of it, all load-bearing:
   write and there must never be one; the harness asserts conservation after the
   GUI path as well as the CLI one.
 - **The footer says where it WENT, never what will come of it.** `in the inbox -
-  an orchestrator works out who does what`. Nothing fires immediately: the
+  ctrl+z takes it back until a summoner acts`. Nothing fires immediately: the
   at-the-machine gate still applies, and promising more would be exactly §10's
   dishonest feedback.
 - **A question an agent asks is not a second mechanism.** `boardctl.py ask`
@@ -1657,10 +1658,20 @@ module docstring is authoritative and this is the summary.
 
 ### Second thoughts about something still queued
 
+**The list is PENDING ORDERS, and that is the word on it** — [his, 2026-07-29]
+*"instead of messages it says orders"*. So the group is labelled `pending orders`
+(drawn only when it holds something), a row reads `order waiting for the next
+summoner`, and every sentence about one — the menu entry, the footer after a
+removal or an edit — says *order* and *summoner*. Identifiers did not move: the
+directory is still `inbox/queue/`, the slots are still `boardagents.pending()`
+and `Agents.queued`, exactly as `kind="worker"` survived the rename to
+*minister*. And what a pending order waits for is a **summoner**, never a
+minister: Solomon is who drains the queue and decides who does it.
+
 *"allow the user to remove queued `waiting for next agent` items or edit them in
-place"*. Right-click a `waiting for the next agent` row: **edit what it says**
+place"*. Right-click a pending order: **edit what it says**
 opens the same `InputBox` every other typed sentence here uses, seeded with the
-current wording; **remove it from the queue** is last behind a separator (§7.2)
+current wording; **remove it from the pending orders** is last behind a separator (§7.2)
 and moves the message to `inbox/dropped/` — removed from the queue is not the
 same as never written, and this app deletes no prose. `QueuedNote.qml`,
 `boardagents.remove_queued`/`edit_queued`, `Agents.removeQueued`/`editQueued`.
@@ -1671,12 +1682,79 @@ and the click landing. So neither writes the queue path in place: each **claims*
 the file with `os.replace` first — the removal straight into `dropped/`, the
 edit into `inbox/editing/` for the length of three syscalls and then back under
 its own name. Either the claim wins, or it raises and the operation reports the
-message **gone** (`None` → *"that one has already gone to an agent"*), which is
+message **gone** (`None` → *"that one has already gone to a summoner"*), which is
 §10.2's refuse-visibly. An in-place rewrite of the queue path would have done
 the one unforgivable thing instead: recreate a message a drain had just taken,
 so the run already working it would find it queued again and do it twice.
 `sweep()` returns anything stranded in `editing/` (a process that died
 mid-edit, older than `EDIT_RESCUE_AFTER_S`) to the queue.
+
+### Ctrl+Z takes the last order back — and it is a real cancellation
+
+[his, 2026-07-29] *"before solomon summons a minister, allow the user to crtl+z to
+stop solomon from doing that (he should not send any messages he should just stop
+doing that specific inbox item) and then insert the prompt back into the prompt
+box for the user to edit. if the last prompt had to be placed in the pending
+[orders] section, then ctrl+z should remove it from the pending list and insert it
+back into the prompt box"*.
+
+**TWO CASES, ONE PATH.** `boardundo.cancel()` — its docstring is authoritative —
+and it does not ask which case it is in. The order is either still in
+`inbox/queue/` (nothing has happened) or a summoner run has been given it
+(Solomon exists and is deciding). Either way what he gets is his own words back
+in the box, open, caret at the end, because the point of the key is that he edits
+it and sends it again (`InputBox.restore`, `Main.qml`'s `undoSend`).
+
+**HOW A RUNNING SOLOMON IS ACTUALLY STOPPED**, given that he is a model run
+nothing here can reason with: **every act he is allowed goes through
+`boardctl.py`**, so that is where the teeth are. `board-watch._summon` calls
+`boardundo.begin_run()` with the drained orders immediately before it spawns;
+every write verb in `boardctl` calls `boardundo.claim()` first, which STAMPS the
+run as having acted and returns False — refusing the verb — if he cancelled it.
+`cancel()` marks and then reads `acted` back. Both take the same `flock` on the
+same file in the opposite order, which is why the answer is never a guess: either
+the mark landed first (nothing went out, and nothing now can) or the stamp did
+(something is already out there). **There is no interleaving that both summons a
+minister and tells him it did not.**
+
+- **The ungated verbs are `list`, `agents`, `phase` and `inbox take`.**
+  Everything else is gated, and gating is the DEFAULT — a verb added later is
+  refused after a ctrl+z without anybody remembering to add it to a list.
+- **A summon that has ALREADY gone out is reported, not half-undone** (§10.2).
+  `summoned` → *"too late - a minister has already been summoned for it"*, and
+  nothing is touched: no worker is killed, no note is retracted.
+- **One order out of a summoner's several is refused too** (`shared`). The gate
+  is per run, so cancelling would abandon the other orders — and *"that specific
+  inbox item"* is the opposite of that. It says how many others are in there.
+- **A cancelled run writes NOTHING.** `board-watch` reads `end_run()`'s verdict
+  and skips the `QUEUE_FAIL` path, because a run he took back did not fail: his
+  sentence is in the prompt box, which is where he asked for it. No dispatch, no
+  handoff, no note, and the other orders in the queue are untouched.
+- **The key is only bound while it can do something.** `Agents.canUndo` is polled
+  off `boardundo.undoable()`, and the `Shortcut` is additionally off whenever his
+  caret is in a text field (`win.inAnEditor`) — there, Ctrl+Z is ordinary text
+  undo, which is the undo he meant. An offered undo that no-ops is the §10 defect
+  this app is not allowed to draw.
+- **A draft already in the box survives it.** The cancelled order is inserted
+  ABOVE what he had typed and the footer says so, rather than overwriting a
+  sentence of his — `InputBox.qml`'s standing rule, and the case is real (type,
+  send, type again, click away).
+- **A reply to a chore is not an order.** It takes the same `send()`, but it also
+  cleared a bullet, so ctrl+z does not claim it (`Agents.notAnOrder`) and `put it
+  back` in the row menu stays that act's own undo.
+- **Nothing is deleted.** `inbox/cancelled/` is another resting place beside
+  `queue/`, `taken/`, `dropped/` and `editing/`; the conservation property holds
+  across it, and moving the order OUT of `taken/` is also what stops
+  `requeue_taken()` handing a cancelled order to the next run.
+- **The last order he sent is a FILE** (`~/.local/state/board/last-order.json`),
+  not memory, so the key still works after the window has been closed and opened.
+
+Harnesses: `tools/board-test.py` → `test_undo` (the mechanism, the three answers
+that are NOT a cancellation, and `boardctl` refusing in a real subprocess) and
+`test_undo_window` (a real `Ctrl+Z` through `QTest.keyClick`, the box refilled,
+the label). `tools/board-watch-test.py` → `test_cancelled_summoner` covers the
+only half a real tick can show: a cancelled summoner exits nonzero and still
+leaves nothing on the board.
 
 **Agents reach their side with `boardctl.py inbox take`** — `BOARD_AGENT_ID`
 names the inbox, board-watch's prompt tells every agent it spawns to check it

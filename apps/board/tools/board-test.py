@@ -3955,7 +3955,7 @@ def test_window(app, tmp):
           all("reply to this one" in str(b.property("placeholder"))
               or "send it a command" in str(b.property("placeholder"))
               or "leave a note" in str(b.property("placeholder"))
-              or "rewrite this queued note" in str(b.property("placeholder"))
+              or "rewrite this order" in str(b.property("placeholder"))
               for b in boxes if b not in unattached),
           [str(b.property("placeholder")) for b in boxes])
     typed = "the scrollbar arrows feel sluggish"
@@ -3988,7 +3988,8 @@ def test_window(app, tmp):
     check("a queued note offers both second thoughts, editing first",
           qlabels[:2] == ["edit what it says", "copy line"], qlabels)
     check("...and the one he cannot take back is LAST, behind a separator",
-          qlabels[-1] == "remove it from the queue" and qlabels[-2] == "", qlabels)
+          qlabels[-1] == "remove it from the pending orders"
+          and qlabels[-2] == "", qlabels)
     if qmenus:
         qmenus[0].close()
     spin(100)
@@ -5197,6 +5198,225 @@ def test_usage_follows_agents(app):
         bu.readings = real_readings
 
 
+def test_undo(tmp):
+    """CTRL+Z, the mechanism. [his, 2026-07-29] *"before solomon summons a
+    minister, allow the user to crtl+z to stop solomon from doing that ... and
+    then insert the prompt back into the prompt box"*.
+
+    The three answers that are NOT a cancellation are the point of most of these
+    checks: `boardundo.py` may never tell him it stopped a summon that had
+    already gone out, and it may never take two other orders down with one.
+    """
+    import boardagents as ba
+    import boardundo as bun
+
+    m = ba.send("do the thing")
+    bun.remember(m)
+    mid = ba.msg_id(m)
+    check("ctrl+z is offered while the order is still pending",
+          (bun.undoable() or {}).get("id") == mid, bun.undoable())
+    out = bun.cancel(mid)
+    check("...and cancelling it hands his own words back",
+          (out["state"], out["text"]) == ("queued", "do the thing"), out)
+    check("...it is out of the pending orders",
+          "do the thing" not in [x["text"] for x in ba.pending()],
+          [x["text"] for x in ba.pending()])
+    check("...and nothing was deleted - it rests in cancelled/",
+          "do the thing" in [x["text"]
+                             for x in ba._list(ba.inbox_dir("cancelled"))])
+    check("...so the key stops being offered", bun.undoable() is None)
+    check("...and pressing it again says gone rather than cancelling twice",
+          bun.cancel(mid)["state"] == "gone")
+
+    # ---- a summoner already holds it, and has not acted yet ----
+    m = ba.send("second thing")
+    mid = ba.msg_id(m)
+    drained = ba.drain()
+    bun.remember(m)
+    bun.begin_run("orch-2", drained)
+    out = bun.cancel(mid)
+    check("a summoner that has not acted IS stopped",
+          (out["state"], out["text"]) == ("stopped", "second thing"), out)
+    check("...and boardctl refuses every write verb it tries after that",
+          bun.claim("orch-2") is False)
+    check("...and the order is out of taken/, so a dead run cannot revive it",
+          ba.requeue_taken("orch-2") == []
+          and "second thing" not in [t["text"] for t in ba.taken()],
+          [t["text"] for t in ba.taken()])
+    check("...and board-watch is told, so it writes no failure note",
+          bun.end_run("orch-2") is True)
+
+    # ---- a summoner that has ALREADY acted: nothing is cancelled ----
+    m = ba.send("third thing")
+    mid = ba.msg_id(m)
+    drained = ba.drain()
+    bun.remember(m)
+    bun.begin_run("orch-3", drained)
+    check("the first verb of an uncancelled run is allowed",
+          bun.claim("orch-3") is True)
+    out = bun.cancel(mid)
+    check("...and after it, ctrl+z reports the summon gone",
+          (out["state"], out["text"]) == ("summoned", ""), out)
+    bun.end_run("orch-3")
+
+    # ---- one order of several: refuse rather than half-cancel ----
+    a, b = ba.send("alpha"), ba.send("beta")
+    drained = ba.drain()
+    bun.remember(a)
+    bun.begin_run("orch-4", drained)
+    out = bun.cancel(ba.msg_id(a))
+    check("one order out of a summoner's several is NOT cancelled",
+          (out["state"], out["others"], out["text"]) == ("shared", 1, ""), out)
+    check("...and that run may still act on the others",
+          bun.claim("orch-4") is True)
+    bun.end_run("orch-4")
+
+    # ---- everybody else is untouched by the gate ----
+    was = os.environ.get("BOARD_AGENT_ID")
+    os.environ["BOARD_AGENT_ID"] = "w1a2b3c"
+    check("a minister is never gated by any of this", bun.claim() is True)
+    if was is None:
+        del os.environ["BOARD_AGENT_ID"]
+    else:
+        os.environ["BOARD_AGENT_ID"] = was
+
+    # ---- and the gate is real: boardctl itself, in a subprocess ----
+    import subprocess
+    m = ba.send("fourth thing")
+    drained = ba.drain()
+    bun.begin_run("orch-5", drained)
+    bun.remember(m)
+    bun.cancel(ba.msg_id(m))
+    path = os.path.join(tmp, "board.md")
+    open(path, "w").write(FIXTURE)
+    env = dict(os.environ, BOARD_AGENT_ID="orch-5")
+    ctl = os.path.join(BOARD, "tools", "boardctl.py")
+    for verb, want in (
+            (["note", "INFORMATION: **x** - a note nobody asked for"], 4),
+            (["dispatch", "do something", "--where", "apps/**"], 4),
+            (["inbox", "send", "hello", "--to", "Marbas"], 4),
+            (["agents"], 0),
+            (["phase", "reading", "--doing", "the file"], 0)):
+        p = subprocess.run([sys.executable, ctl, "--board", path, *verb],
+                           env=env, capture_output=True, text=True)
+        check("boardctl %s -> %s after a ctrl+z"
+              % (verb[0], "REFUSED" if want else "allowed"),
+              p.returncode == want and (want == 0 or "CANCELLED" in p.stderr),
+              (p.returncode, p.stderr[-120:]))
+    bun.end_run("orch-5")
+    # Nothing reached the board: a cancelled order writes no bullet anywhere.
+    check("...and none of the refused verbs wrote a line on the board",
+          "a note nobody asked for" not in open(path).read())
+
+
+def test_undo_window(app, tmp):
+    """CTRL+Z, at the window: the key, the box he gets his words back in, and
+    the word ORDERS on the section he asked to have renamed."""
+    import boardagents as ba
+    import boardundo as bun
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest                                   # noqa: E402
+
+    path = os.path.join(tmp, "board.md")
+    open(path, "w").write(FIXTURE)
+    # EMPTY QUEUE FIRST. Earlier tests in this file send real notes into the
+    # same state dir, and this one is about what the list says when it is empty
+    # and when it holds exactly one thing.
+    ba.drain()
+    engine, win, keep = build(app, path)
+    agents = keep[5]
+    agents.refresh()
+    spin(400)
+
+    def shown(text):
+        return [it for it in descendants(win.contentItem())
+                if str(it.property("text") or "") == text
+                and it.property("visible") and it.property("height")]
+
+    check("with nothing pending there is no `pending orders` label",
+          shown("pending orders") == [])
+    msg = ba.send("make the thing blue")
+    bun.remember(msg)
+    agents.refresh()
+    spin(250)
+    # [his, 2026-07-29] *"instead of messages it says orders"*.
+    check("the pending list is labelled `pending orders`",
+          len(shown("pending orders")) == 1)
+    rows = [str(it.property("text")) for it in descendants(win.contentItem())
+            if "waiting for the next" in str(it.property("text") or "")]
+    check("...and the row calls it an order, not a message",
+          rows == ["  order waiting for the next summoner: make the thing blue"],
+          rows)
+
+    box = [it for it in descendants(win.contentItem())
+           if "type anything" in str(it.property("placeholder") or "")]
+    check("found the box at the top", len(box) == 1, len(box))
+    check("the key is offered while there is an order to take back",
+          agents.property("canUndo") is True)
+    # QTest.keyClick, not a hand-built event: a QML `Shortcut` is resolved by the
+    # application's shortcut map, which only sees a key delivered through the
+    # window system (§11.2's own note about the same trap).
+    QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier)
+    spin(300)
+    check("ctrl+z took the order out of the pending list", ba.pending() == [],
+          [m["text"] for m in ba.pending()])  # the list was drained above
+    check("...and put his words back in the box",
+          str(prop(box[0], "draft")) == "make the thing blue",
+          prop(box[0], "draft"))
+    check("...open, so he can edit and send it again",
+          prop(box[0], "editing") is True)
+    check("...and the footer says what happened",
+          "back in the box" in str(prop(win, "status")), prop(win, "status"))
+    check("...and the key is not offered any more",
+          agents.property("canUndo") is False)
+
+    # WITH THE CARET IN A BOX IT IS TEXT UNDO, not ours (§10.2 the other way
+    # round: a shortcut that fired mid-sentence would eat the undo he meant).
+    msg = ba.send("second order")
+    bun.remember(msg)
+    agents.refresh()
+    spin(250)
+    ed = [it for it in descendants(box[0])
+          if it.property("cursorPosition") is not None]
+    check("the box's editor is the one item with a caret", len(ed) == 1, len(ed))
+    ed[0].forceActiveFocus()
+    spin(120)
+    check("...and the window knows he is typing in it",
+          prop(win, "inAnEditor") is True)
+    QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier)
+    spin(250)
+    check("ctrl+z does NOT cancel an order while his caret is in a field",
+          [m["text"] for m in ba.pending()] == ["second order"],
+          [m["text"] for m in ba.pending()])
+    # A DRAFT ALREADY IN THE BOX SURVIVES the restore — nothing this app does
+    # throws away a sentence he typed.
+    ed[0].setProperty("focus", False)
+    win.contentItem().forceActiveFocus()
+    win.setProperty("drafts", {"msg:queue": "half of another thought"})
+    spin(120)
+    QTest.keyClick(win, Qt.Key_Z, Qt.ControlModifier)
+    spin(250)
+    check("a cancelled order lands ABOVE a draft rather than over it",
+          str(prop(box[0], "draft")) == "second order\nhalf of another thought",
+          prop(box[0], "draft"))
+    check("...and the footer says that is what happened",
+          "above the draft" in str(prop(win, "status")), prop(win, "status"))
+
+    # A REPLY TO A CHORE takes the same `send()` and is NOT an order: it also
+    # cleared a bullet, and undoing one half of that pair into the wrong box is
+    # not an undo (`Agents.notAnOrder`, called by `replyToTodo`).
+    bun.remember(ba.send("a reply-shaped sentence"))
+    agents.refresh()
+    spin(150)
+    check("a reply is claimed by nothing until it is un-claimed",
+          agents.property("canUndo") is True)
+    agents.notAnOrder()
+    spin(120)
+    check("...and ctrl+z stops claiming what was a reply, not an order",
+          agents.property("canUndo") is False)
+    shot(win, "07-pending-orders")
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -5235,6 +5455,8 @@ def main():
         test_todo_remove(os.path.join(tmp, "td"))
         test_agents(tmp)
         test_phase(tmp)
+        os.makedirs(os.path.join(tmp, "un"))
+        test_undo(os.path.join(tmp, "un"))
         os.makedirs(os.path.join(tmp, "work"))
         test_work(os.path.join(tmp, "work"))
         test_overlap(os.path.join(tmp, "work"))
@@ -5250,6 +5472,8 @@ def main():
         test_window(app, os.path.join(tmp, "win"))
         os.makedirs(os.path.join(tmp, "plw"))
         test_placed_window(app, os.path.join(tmp, "plw"))
+        os.makedirs(os.path.join(tmp, "unw"))
+        test_undo_window(app, os.path.join(tmp, "unw"))
     print()
     if FAILS:
         print("%d FAILED: %s" % (len(FAILS), ", ".join(FAILS)))

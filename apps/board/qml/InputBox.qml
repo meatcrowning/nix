@@ -68,6 +68,20 @@ Item {
                                 ? editor.length : Math.min(at, editor.length);
     }
 
+    //: HIS WORDS BACK, after a ctrl+z cancelled the order they were sent as.
+    //  The editor is opened with the sentence in it and the caret at the end,
+    //  because the point of the key is that he edits it and sends it again.
+    //
+    //  `editor.text` is assigned, not only `draft`: typing in a TextEdit breaks
+    //  the `text: box.draft` binding for good (Qt does that to every editable
+    //  text item), so this box — the one call site that is never rebuilt — would
+    //  otherwise keep whatever was in it when he pressed enter.
+    function restore(body) {
+        box.draftEdited(body);
+        editor.text = body;
+        box.beginEdit();
+    }
+
     Component.onCompleted: if (box.openCaret >= 0) box.beginEdit(box.openCaret);
 
     Item {

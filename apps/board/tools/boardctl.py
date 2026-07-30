@@ -48,6 +48,13 @@ directory are all named by it, so it is printed in parentheses after the name.
 **`ask` refuses without `--if-unanswered`.** Every question on this board draws
 that sentence, always; it is what makes a question safe to walk away from.
 
+**AND HE CAN TAKE AN ORDER BACK WITH CTRL+Z.** If you are a summoner run he has
+cancelled, every verb here that changes anything outside this process refuses and
+exits **4**, saying so. That is not a transient error and there is nothing to
+retry: dispatch nobody, send nothing, write no note, and stop working that item.
+`../boardundo.py` is the mechanism and the reason the answer can never be a
+guess.
+
 **If you are an agent, run `inbox take` between steps.** It is how a sentence he
 typed into the board's agents section while you were already running reaches
 you: your stdin is closed, so the only channel is a file you poll. It prints his
@@ -94,6 +101,7 @@ import boardagents as ba                                           # noqa: E402
 import boardmove as bm                                             # noqa: E402
 import boardparse as bp                                            # noqa: E402
 import boardphase as bph                                           # noqa: E402
+import boardundo as bu                                             # noqa: E402
 import boardwork as bw                                             # noqa: E402
 
 
@@ -414,6 +422,23 @@ def cmd_inbox(a):
     return 0
 
 
+#: Verbs that change nothing outside this process, and are therefore still
+#: allowed to a summoner run he has cancelled. Everything else is gated, which
+#: is deliberately the DEFAULT: a verb added later is refused after a ctrl+z
+#: without anybody having to remember this list. `phase` stays open on purpose —
+#: a cancelled Solomon saying what he is doing is not an act on the board.
+UNGATED = {"list", "agents", "phase"}
+
+
+def _gated(a):
+    """Does this invocation need `boardundo.claim()`? See `boardundo.py`."""
+    if a.cmd in UNGATED:
+        return False
+    if a.cmd == "inbox":
+        return getattr(a, "what", "list") == "send"
+    return True
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="boardctl", description=__doc__.split("\n")[0])
     p.add_argument("--board", default=bp.BOARD_PATH)
@@ -539,6 +564,17 @@ def main(argv=None):
     s.set_defaults(fn=cmd_inbox)
 
     a = p.parse_args(argv)
+    if _gated(a) and not bu.claim():
+        # HE PRESSED CTRL+Z. `boardundo.py` is the mechanism; this is the whole
+        # of its teeth. Solomon is a model run and cannot be reasoned with, but
+        # every act he is allowed goes through this program, so a cancelled
+        # summoner run is refused here — before anything is dispatched, handed
+        # over, asked or written down. Refuse VISIBLY (§10.2), and in the words
+        # the caller needs: it must stop, not retry.
+        print("boardctl: he took that back with ctrl+z - this order is "
+              "CANCELLED. Send nothing, dispatch nobody, write no note for "
+              "it, and stop working it.", file=sys.stderr)
+        return 4
     try:
         return a.fn(a)
     except bm.BoardError as e:

@@ -90,6 +90,51 @@ Window {
         }
     }
 
+    // CTRL+Z TAKES THE LAST ORDER BACK, and hands his words back to him.
+    //
+    // [his, 2026-07-29] *"before solomon summons a minister, allow the user to
+    // crtl+z to stop solomon from doing that ... and then insert the prompt back
+    // into the prompt box for the user to edit. if the last prompt had to be
+    // placed in the pending [orders] section, then ctrl+z should remove it from
+    // the pending list and insert it back into the prompt box"*. Two cases, one
+    // key, one path: `boardundo.cancel()` answers both and `main.py` turns each
+    // answer into a sentence. What comes back here is that sentence plus, ONLY
+    // when something was really cancelled, the text — so a box refilled by this
+    // is proof the summon did not happen.
+    function undoSend() {
+        var r = Agents.undoSend();
+        win.status = r.said;
+        if (r.text === "")
+            return;
+        // NOTHING HE TYPED IS THROWN AWAY — `InputBox.qml`'s rule, and the box
+        // can genuinely hold a draft already (he typed, sent, typed again, then
+        // clicked away, which is what makes the key ours rather than the
+        // editor's). So the cancelled order goes ABOVE what is in there and the
+        // footer says it did, rather than overwriting a sentence of his.
+        var had = win.draftOf("msg:queue");
+        if (had.trim() !== "" && had.trim() !== r.text.trim()) {
+            askBox.restore(r.text + "\n" + had);
+            win.status = r.said + " - above the draft that was in the box";
+        } else {
+            askBox.restore(r.text);
+        }
+    }
+
+    // The key is only OURS while there is an order to take back (§10.2 — never
+    // offer an action that no-ops). The rest of the time it is not bound at all,
+    // so Ctrl+Z is the ordinary undo of whatever text field has the caret; and
+    // it stays that even when there IS one, because a shortcut that fired while
+    // he was mid-sentence in a reply would eat the undo he actually meant. The
+    // duck-type is the whole test: everything on this board that edits text is a
+    // `TextEdit`, and nothing else has a `cursorPosition`.
+    readonly property bool inAnEditor: win.activeFocusItem !== null
+                                       && win.activeFocusItem.cursorPosition !== undefined
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: Agents.canUndo && !win.inAnEditor
+        onActivated: win.undoSend()
+    }
+
     // A window sized for reading one column of prose beside the panel: the bar
     // reserves 376px on the right of a 1920px screen and Hyprland's `gaps_out`
     // takes 35 top and bottom of 1080, so 880x880 sits inside what is actually
@@ -1272,13 +1317,30 @@ Window {
                         }
                     }
 
-                    // Notes waiting for the NEXT agent — either he wrote them
-                    // with nothing running, or an agent went away without
-                    // reading them. Drawn because a message he cannot see is a
-                    // message he has to assume was lost.
-                    // ...and one he has changed his mind about can be rewritten
-                    // or taken back, up until the moment board-watch drains it
-                    // (`QueuedNote.qml` carries what that race costs him).
+                    // PENDING ORDERS — what he typed that is waiting for the
+                    // next summoner, either because nothing was running when he
+                    // sent it or because a minister went away without reading
+                    // it. Drawn because an order he cannot see is one he has to
+                    // assume was lost.
+                    // ...and one he has changed his mind about can be rewritten,
+                    // taken back from the menu, or undone with ctrl+z, up until
+                    // the moment board-watch drains it (`QueuedNote.qml` carries
+                    // what that race costs him).
+                    //
+                    // THE WORD IS ORDERS, not messages — [his, 2026-07-29]
+                    // *"instead of messages it says orders"*, of this list. The
+                    // group is labelled rather than left to speak for itself
+                    // because that is the section he named; it appears with the
+                    // first order and goes with the last.
+                    PixelText {
+                        width: agentsCol.width
+                        visible: win.queuedNotes.length > 0
+                        height: visible ? implicitHeight : 0
+                        topPadding: visible ? 6 : 0
+                        color: Theme.dim
+                        text: "pending orders"
+                    }
+
                     Repeater {
                         model: win.keysOf(win.queuedNotes, "id")
                         delegate: QueuedNote {
@@ -1759,6 +1821,10 @@ Window {
                               + t.text + "\")");
         if (msg === "")
             return false;
+        // ...but it is not an ORDER from the box, so ctrl+z does not claim it —
+        // see `Agents.notAnOrder`. This reply also cleared a bullet, and `put it
+        // back` in the row menu is what undoes that pair.
+        Agents.notAnOrder();
         win.setDraft("todo:" + t.line, "");
         // `Board.removeTodo` is the ONE removal path — the menu entry and the
         // double click take it too — so this inherits its one-level undo and a
