@@ -255,7 +255,7 @@ def _warn_overlaps(rec):
     for w in rec.get("overlaps") or []:
         who = w.get("name") or w["id"]
         print("warning: %s (%s) is already working in `%s` - if this is the "
-              "same files, `inbox send --to %s` beats a second worker"
+              "same files, `inbox send --to %s` beats a second minister"
               % (who, w["id"], w.get("where") or "?", who))
 
 
@@ -270,7 +270,7 @@ def cmd_dispatch(a):
         _warn_overlaps(rec)
         return 0
     if rec["state"] == "failed":
-        print("boardctl: could not start a worker - " + rec.get("why", "?"),
+        print("boardctl: could not start a minister - " + rec.get("why", "?"),
               file=sys.stderr)
         return 1
     # STARTED, and that is all this can honestly say. The worker records its own
@@ -319,7 +319,7 @@ def cmd_cap(a):
     if a.n is None:
         print(bw.cap())
         return 0
-    print("at most %d workers at once" % bw.set_cap(a.n))
+    print("at most %d ministers at once" % bw.set_cap(a.n))
     return 0
 
 
@@ -447,11 +447,11 @@ def main(argv=None):
     s = sub.add_parser("agents", help="who is running right now, by phase")
     s.set_defaults(fn=cmd_agents)
 
-    s = sub.add_parser("dispatch", help="hand one piece of work to a worker agent")
+    s = sub.add_parser("dispatch", help="hand one piece of work to a minister")
     s.add_argument("task", nargs="+")
     s.add_argument("--where", default="", help="the files it will touch")
     s.add_argument("--context", default="",
-                   help="what you know that the worker does not")
+                   help="what you know that the minister does not")
     s.set_defaults(fn=cmd_dispatch)
 
     s = sub.add_parser("phase", help="say what YOU are doing (the card also "
@@ -479,7 +479,7 @@ def main(argv=None):
                    help="what you were working on when it came up")
     s.set_defaults(fn=cmd_ask)
 
-    s = sub.add_parser("cap", help="how many workers may run at once")
+    s = sub.add_parser("cap", help="how many ministers may run at once")
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_cap)
 

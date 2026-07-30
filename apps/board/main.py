@@ -744,7 +744,7 @@ class Agents(QObject):
 
     @staticmethod
     def _capLabel(n):
-        return "%d agent%s" % (n, "" if n == 1 else "s")
+        return "%d minister%s" % (n, "" if n == 1 else "s")
 
     @Property(str, notify=capChanged)
     def capLabel(self):
@@ -874,7 +874,7 @@ class Agents(QObject):
         if msg is None:
             return ("that one has already gone to an agent - "
                     "it got the old wording")
-        return "queued note rewritten - the next agent reads this"
+        return "queued note rewritten - the next minister reads this"
 
 
 class Usage(QObject):

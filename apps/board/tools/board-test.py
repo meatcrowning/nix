@@ -3346,7 +3346,7 @@ def test_window(app, tmp):
         check("picking a cap writes the one store boardctl writes",
               agents_obj.chooseCap(7)
               and open(bwm.cap_file()).read().strip() == "7"
-              and agents_obj.capLabel == "7 agents",
+              and agents_obj.capLabel == "7 ministers",
               (bwm.cap_file(), agents_obj.capLabel))
         agents_obj.chooseCap(9)
         check("...and a cap of his that is off the range is drawn, and ticked",
@@ -3355,8 +3355,8 @@ def test_window(app, tmp):
               [(c["n"], c["current"]) for c in agents_obj.caps])
         check("...and 1 is the floor, since 0 agents is not a cap",
               agents_obj.chooseCap(0) and bwm.cap() == 1, bwm.cap())
-        check("...and one agent is singular, because he reads it",
-              agents_obj.capLabel == "1 agent", agents_obj.capLabel)
+        check("...and one minister is singular, because he reads it",
+              agents_obj.capLabel == "1 minister", agents_obj.capLabel)
     finally:
         with open(bwm.cap_file(), "w") as f:
             f.write(was or "%d\n" % bwm.DEFAULT_CAP)

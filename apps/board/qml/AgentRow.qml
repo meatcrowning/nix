@@ -535,7 +535,7 @@ Item {
             placeholder: row.running
                 ? "send " + (row.name !== "" ? row.name : "it")
                   + " a command, an idea or a fix"
-                : "leave a note - it goes to the next agent"
+                : "leave a note - it goes to the next minister"
             openCaret: row.openCaret
             onDraftEdited: (b) => row.draftEdited(b)
             onSubmitted: (b) => row.send(b)

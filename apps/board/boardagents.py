@@ -824,7 +824,7 @@ def agents(procs=None):
     peers = [a.get("name") or "" for a in out
              if a.get("kind") != ORCHESTRATOR_KIND and a.get("state") == "running"]
     peers = [p for p in peers if p]
-    awaits = peers[0] if len(peers) == 1 else ("his workers" if peers else "")
+    awaits = peers[0] if len(peers) == 1 else ("his ministers" if peers else "")
     for a in out:
         a["unread"] = len(for_agent(a["id"]))
         obs = bph.observe(a["id"], session=a.get("session"))
@@ -926,7 +926,7 @@ def describe(a):
     plus the one thing about the inbox he needs to see.
     """
     if a["state"] == "queued":
-        return "not started yet - a worker starts when a slot frees"
+        return "not started yet - a minister starts when a slot frees"
     # The one row on this list that is not a process: Solomon standing by. His
     # words — *"should basically indicate like he's there and ready to go at all
     # times when hes not doing something"* — and the sentence has to be true, so

@@ -84,7 +84,7 @@ Item {
         id: line
         width: row.width
         color: row.fgDim
-        text: "  waiting for the next agent: "
+        text: "  waiting for the next minister: "
               + (row.note ? row.note.text : "")
 
         MouseArea {
@@ -115,7 +115,7 @@ Item {
         fgAccent: row.fgAccent
         fgText: row.fgText
         fgDim: row.fgDim
-        placeholder: "rewrite this queued note - the next agent reads it"
+        placeholder: "rewrite this queued note - the next minister reads it"
         openCaret: row.openCaret
         onDraftEdited: (b) => row.draftEdited(b)
         onSubmitted: (b) => row.commitEdit(b)
