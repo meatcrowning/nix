@@ -1,7 +1,7 @@
 # `board` — what needs him, what is moving, what landed
 
 Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
-`boardagents.py`, `boardwork.py`, `boardphase.py` and `qml/`.
+`boardagents.py`, `boardwork.py`, `boardphase.py`, `boardusage.py` and `qml/`.
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 (including the `air` system-python split) and runs the **live** source at
 `/home/lam/nix/apps/board/main.py`, so `.py`/`.qml` edits need no rebuild. See
@@ -1190,6 +1190,50 @@ defined model on the next prompt it recieves."*
 message] *"the other agents should all be opus 5 medium thinking"*. That
 replaces the earlier `("", "")`, which meant "inherit `~/.claude/settings.json`"
 on the reading that nobody had asked for them to be pinned. Somebody has.
+
+### ...and under it, how much of his usage is gone
+
+[his, 2026-07-29] *"add usage indicators directly under the orchestrator
+model-selection box: how much of his daily usage and how much of his weekly
+usage has been consumed"*, with one constraint stated in the same breath: **he
+does not want Fable broken out.** `boardusage.py` + `qml/UsageMeter.qml`; the
+module docstring is authoritative and this is the summary.
+
+- **There is exactly one honest source on this desktop, and it is Claude Code's
+  own cache**: `~/.claude.json` -> `cachedUsageUtilization`, what the CLI last
+  fetched for `/usage`. Everything else that looks like a source is not one —
+  the session transcripts carry token counts with **no denominator**,
+  `~/.claude/stats-cache.json` carries neither and goes days without updating,
+  and there is no `claude usage` subcommand. So the percentages drawn are the
+  CLI's own arithmetic against the real plan; **nothing here derives one from
+  tokens against a ceiling nobody published** (§10.5, and the same refusal
+  `boardphase` makes about an assumed context window).
+- **The short window is FIVE HOURS and is labelled `5h`, not "daily".** The
+  account has no daily bucket. What stops him mid-afternoon is the rolling
+  session limit, so that is what is drawn, under its own name — a five-hour
+  number under the word "daily" is §10.5's failure with a friendlier label.
+- **No Fable row, and no arithmetic was needed to get there.** The payload's
+  `limits` list carries a `weekly_scoped` entry whose `scope.model.display_name`
+  is `Fable` beside the unscoped `weekly_all`; the module reads **only entries
+  with no `scope`**, and `weekly_all` already contains that usage. A future
+  per-model kind is excluded by construction rather than by a name list that
+  would go stale. The same rule kills `utilization.seven_day_opus` and friends.
+- **Unknown is a state, not a zero** — missing file, missing key, a percentage
+  that is not a number all draw the empty track and the word `unknown`. A bar at
+  zero would be the claim "you have used none of it".
+- **A stale cache still reports, and says its age in the ROW** (`73% (9h old)`),
+  not only on hover: the difference between "he has used 73%" and "he had, nine
+  hours ago" is exactly the sort of thing colour alone loses (§3.5).
+- Machine-local by construction: `~/.claude.json` is **not** inside the
+  `~/.claude` tree that syncs between `top` and `book`, so each host draws what
+  its own CLI last fetched. Same account, different freshness.
+- Regression layer: `test_usage` in `tools/board-test.py` (the scoped entry is
+  never drawn, a scoped-only weekly reads `unknown` rather than being promoted,
+  every broken shape reads `unknown`, an old cache carries its age), plus the
+  window checks that there are two meters and that they sit **under** the
+  chooser. **Every context property `main.py` installs must also be installed in
+  the harness's `build()`** — a missing one is a `ReferenceError` the harness
+  cannot see and a section simply absent on his screen.
 
 ### Second thoughts about something still queued
 

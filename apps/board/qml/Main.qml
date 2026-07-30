@@ -376,6 +376,46 @@ Window {
                 }
             }
 
+            // ============================ what is left of the usage, under it
+            // [his, 2026-07-29] *"add usage indicators directly under the
+            // orchestrator model-selection box: how much of his daily usage and
+            // how much of his weekly usage has been consumed"* — and no Fable
+            // figure, which is a real entry in the payload and is dropped in
+            // `boardusage.py` rather than here.
+            //
+            // It sits UNDER the chooser and right-aligned with it because it is
+            // about the same thing: what spending that model costs him. Two
+            // readouts of one quantity, sharing one denominator each (§10.5) —
+            // both are "% of that window's limit", the CLI's own arithmetic
+            // against the real plan, never tokens over a ceiling we guessed.
+            //
+            // The short window is FIVE HOURS and says so. There is no daily
+            // bucket on this account, and a number under the wrong word is the
+            // §10.5 failure with a nicer label.
+            Item {
+                width: page.width
+                height: usageRow.height + 4
+                visible: Usage.rows.length > 0
+
+                Row {
+                    id: usageRow
+                    anchors.right: parent.right
+                    spacing: 14
+
+                    Repeater {
+                        model: Usage.rows
+                        delegate: UsageMeter {
+                            required property var modelData
+                            row: modelData
+                            fgDim: win.fgDim
+                            fgText: win.fgText
+                            onHoveringChanged: win.status = hovering
+                                ? modelData.detail : ""
+                        }
+                    }
+                }
+            }
+
             Item { width: 1; height: 14 }
             // The gutter is read off the bar itself: its width is a setting and
             // ranges 11-16px, and four call sites across the tree used to leave
