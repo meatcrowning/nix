@@ -842,7 +842,7 @@ def agents(procs=None):
         who = a.get("name") or ""
         orch = a["kind"] == ORCHESTRATOR_KIND
         # SOLOMON SPEAKS IN HIS OWN VOICE for the two words he actually uses —
-        # `dispatching` -> *"Solomon summons"*, `waiting` -> *"Solomon awaits
+        # `dispatching` -> *"Solomon is summoning..."*, `waiting` -> *"Solomon awaits
         # <agent>..."*, both his exact wordings. Everything else, his card
         # included, goes through the one shared `boardphase.predicate`, so the
         # verb form cannot drift between his card and a worker's.

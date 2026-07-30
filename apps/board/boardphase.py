@@ -648,9 +648,14 @@ def orch_says_line(rec, who="", awaits=""):
     phase = rec.get("claimPhase") or ""
     subj = _subject(who) if who else ba.ORCHESTRATOR_NAME
     if phase == "dispatching":
-        # No ellipsis on this one — his wording, and it is an act rather than a
-        # wait, so there is nothing for the dots to say is still going on.
-        return "%s summons" % subj
+        # [his, 2026-07-29, later] *"should instead read 'Solomon is summoning'
+        # followed by an ANIMATED ellipsis"* — it used to read *"Solomon
+        # summons"* with no dots at all, on the reading that a summon is an act
+        # rather than a wait. It is a state that is LIVE while the card says it,
+        # so it ticks like every other one: the three ASCII cells are
+        # `AgentRow.qml`'s (§2.3 — the font has no U+2026), and all this does is
+        # end the sentence in them.
+        return "%s is summoning..." % subj
     if phase == "waiting":
         # The object here is WHOM, not what he said he is doing, so it belongs on
         # this line: it is part of the verb phrase. His own words go under it on

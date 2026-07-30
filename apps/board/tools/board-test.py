@@ -2657,7 +2657,9 @@ def test_work(tmp):
           and "SAY WHAT YOU ARE DOING" in bw.ORCHESTRATOR_PROMPT)
     import boardphase as _bph
     # ...and it is in HIS OWN VOICE for the two words he actually uses [his,
-    # 2026-07-29]: `dispatching` is *"Solomon summons"* and `waiting` is
+    # 2026-07-29]: `dispatching` is *"Solomon is summoning..."* — the dots are
+    # the animated three cells `AgentRow.tick` cycles, so the sentence has to
+    # END in them — and `waiting` is
     # *"Solomon awaits <agent>..."*, which NAMES whoever he is waiting on.
     # Everything else on his card goes through the one shared predicate table, so
     # the verb form cannot drift between his card and a worker's.
@@ -2665,7 +2667,7 @@ def test_work(tmp):
           _bph.orch_says_line({"claimPhase": "dispatching",
                                "claimDoing": "three pieces of what you typed"},
                               ba.ORCHESTRATOR_NAME)
-          == "Solomon summons",
+          == "Solomon is summoning...",
           _bph.orch_says_line({"claimPhase": "dispatching",
                                "claimDoing": "three pieces of what you typed"},
                               ba.ORCHESTRATOR_NAME))

@@ -1140,8 +1140,10 @@ The short version, and every line of it is a rule:
   region: it is one region of the page and §12.1 keeps the titlebar vocabulary
   short, so there is no fifth cell.
 - **SOLOMON'S OWN VOICE, for the two words he actually uses** —
-  [his, 2026-07-29] `dispatching` reads *"Solomon summons"* (no ellipsis: an act,
-  not a wait) and `waiting` reads *"Solomon awaits <agent>..."*, which NAMES
+  [his, 2026-07-29] `dispatching` reads *"Solomon is summoning..."* — with the
+  animated ellipsis, because the state is live while the card says it; it read
+  *"Solomon summons"* with no dots until he asked for both the wording and the
+  animation — and `waiting` reads *"Solomon awaits <agent>..."*, which NAMES
   whoever he is waiting on. The name is resolved in `boardagents.agents()`,
   the only place that can see the other cards: one running named worker is that
   worker, several are `his workers`, none names nobody at all — never an empty
