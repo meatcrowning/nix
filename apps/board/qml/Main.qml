@@ -290,7 +290,7 @@ Window {
         { id: "needs",  label: "ny", state: section === "needs" ? 1 : 0,
           tip: "what needs you" },
         { id: "agents", label: "ag", state: section === "agents" ? 1 : 0,
-          tip: "who is running now" },
+          tip: "the triangle - who is running now" },
         { id: "landed", label: "ld", state: section === "landed" ? 1 : 0,
           tip: "what landed" },
         { id: "flight", label: "if", state: section === "flight" ? 1 : 0,
@@ -477,7 +477,6 @@ Window {
                     popup: menu
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
-                    onHoveringChanged: (on) => win.status = on ? hint : ""
                 }
 
                 // ...and under it, how many of them may run at once. [his,
@@ -504,7 +503,6 @@ Window {
                     popup: menu
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
-                    onHoveringChanged: (on) => win.status = on ? hint : ""
                 }
 
                 // ======================== what is left of the usage, under it
@@ -566,8 +564,6 @@ Window {
                             row: modelData
                             fgDim: win.fgDim
                             fgText: win.fgText
-                            onHoveringChanged: win.status = hovering
-                                ? modelData.detail : ""
                         }
                     }
                 }
@@ -1068,9 +1064,16 @@ Window {
 
             Item { width: 1; height: 12 }
 
+            // ---- THE TRIANGLE: where the ministers reside ----
+            // [his, 2026-07-29] *"what triangle should refer to is the area the
+            // ministers reside"*. Solomon etches the CIRCLE on his own card in
+            // the summoner section above; the spirits are bound in the triangle,
+            // which is this list. The section `id` stays `agents` — it keys the
+            // collapse state, `jump()` and the `ag` titlebar cell — so this is
+            // the drawn word only.
             SectionHead {
                 width: page.width
-                label: "agents"
+                label: "triangle"
                 collapsed: win.isCollapsed("agents")
                 fgAccent: win.fgAccent
                 fgDim: win.fgDim

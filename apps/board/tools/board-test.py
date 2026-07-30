@@ -1385,10 +1385,14 @@ def test_summon_cleared(tmp):
     def texts():
         return [t["text"] for t in B.parse(B.read(path))["todo"]]
 
-    SUM_A = ("INFORMATION: **the landed section** - summoned Marbas "
-             "(`wd690a4`), nothing landed yet.")
-    SUM_B = ("INFORMATION: **the commit times** - summoned Zepar "
-             "(`w4f82de`), nothing landed yet.")
+    # [his, 2026-07-29] the announcement is an uppercase TAG before the name and
+    # then what the worker went out for — never a trailing "nothing landed yet",
+    # which he does not want said at all. The lowercase verb it replaced is still
+    # read (below), because the store holds notes written the old way.
+    SUM_A = ("INFORMATION: **the landed section** - SUMMONED: Marbas "
+             "(`wd690a4`) to read the commit log")
+    SUM_B = ("INFORMATION: **the commit times** - SUMMONED: Zepar "
+             "(`w4f82de`) to add commit times")
 
     # ---- the note goes, and only that note ----
     board(SUM_A, SUM_B, "QUESTION: **how far?** - say the word.")
@@ -1397,9 +1401,9 @@ def test_summon_cleared(tmp):
             path=path, agent_id="wd690a4")
     left = texts()
     check("a worker's COMPLETION takes its own summon note with it",
-          not [t for t in left if "summoned Marbas" in t], left)
+          not [t for t in left if "SUMMONED: Marbas" in t], left)
     check("...and the OTHER worker's summon note is untouched",
-          any("summoned Zepar" in t for t in left), left)
+          any("SUMMONED: Zepar" in t for t in left), left)
     check("...and his QUESTION is untouched",
           any(t.startswith("QUESTION:") for t in left), left)
     check("...one out, one in: the section is the same length",
@@ -1422,6 +1426,39 @@ def test_summon_cleared(tmp):
     check("a wrapped summon note is removed whole, continuation and all",
           "already in those files" not in B.read(path), B.read(path))
 
+    # ---- a HANDOFF says `COMMANDED:`, and dies with its result the same way ----
+    # [his, 2026-07-29] `SUMMONED:` is a NEW agent and `COMMANDED:` is one
+    # already running that was given more work, so he can tell the two apart off
+    # the board. The parser has to read BOTH words: a `COMMANDED:` note it did
+    # not match would sit under the result forever announcing work the line
+    # below it has already reported the end of.
+    CMD_A = ("INFORMATION: **the reset tooltip** - COMMANDED: Marbas "
+             "(`wd690a4`) for the tooltip")
+    board(CMD_A, SUM_B)
+    check("a handoff note announces a summon just as a dispatch note does",
+          B.summon_of(CMD_A) == {"name": "Marbas", "id": "wd690a4"},
+          B.summon_of(CMD_A))
+    bm.note("COMPLETION: **the reset tooltip** - it slides left now.",
+            path=path, agent_id="wd690a4")
+    check("...so a worker's result retires its `commanded` note too",
+          not [t for t in texts() if "COMMANDED: Marbas" in t], texts())
+    check("...and still leaves the other worker's note alone",
+          any("SUMMONED: Zepar" in t for t in texts()), texts())
+    import boardwork as bw
+    check("the orchestrator is told which word is which, and never to swap them",
+          "COMMANDED: Marbas" in bw.ORCHESTRATOR_PROMPT
+          and "`SUMMONED:` is for a `dispatch` ONLY" in bw.ORCHESTRATOR_PROMPT,
+          "COMMANDED: Marbas" in bw.ORCHESTRATOR_PROMPT)
+    check("...and is never told to write that nothing has landed yet",
+          "nothing landed yet" not in bw.ORCHESTRATOR_PROMPT,
+          "nothing landed yet" in bw.ORCHESTRATOR_PROMPT)
+    # The lowercase verbs are the shape this replaced, and the store still holds
+    # notes written that way; they must keep being read or they never retire.
+    check("the old lowercase wording is still recognised",
+          B.summon_of("INFORMATION: **x** - commanded Marbas (`wd690a4`), yes.")
+          == {"name": "Marbas", "id": "wd690a4"},
+          B.summon_of("INFORMATION: **x** - commanded Marbas (`wd690a4`), yes."))
+
     # PARTIAL and FAILED are results too — a rebuild left pending or a worker
     # that landed nothing is still an outcome he has read.
     for tag in ("PARTIAL", "FAILED"):
@@ -1429,20 +1466,20 @@ def test_summon_cleared(tmp):
         bm.note("%s: **the landed section** - a rebuild is pending." % tag,
                 path=path, agent_id="wd690a4")
         check("a %s retires the summon note as well" % tag,
-              not [t for t in texts() if "summoned Marbas" in t], texts())
+              not [t for t in texts() if "SUMMONED: Marbas" in t], texts())
 
     # ---- what must NEVER be removed ----
     board(SUM_A)
     bm.note("QUESTION: **the landed section** - which order?", path=path,
             agent_id="wd690a4")
     check("a QUESTION is not a result, so the summon note stays",
-          any("summoned Marbas" in t for t in texts()), texts())
+          any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     board(SUM_A)
     bm.note("INFORMATION: **a fact** - the times come from git.", path=path,
             agent_id="wd690a4")
     check("...nor is an INFORMATION note",
-          any("summoned Marbas" in t for t in texts()), texts())
+          any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     board(SUM_A, "INFORMATION: **the cap** - it is 6 now.")
     bm.note("COMPLETION: **the landed section** - done.", path=path,
@@ -1454,19 +1491,19 @@ def test_summon_cleared(tmp):
     bm.note("COMPLETION: **something else** - done.", path=path,
             agent_id="wd690a4")
     check("a result from a DIFFERENT worker removes nothing",
-          any("summoned Zepar" in t for t in texts()), texts())
+          any("SUMMONED: Zepar" in t for t in texts()), texts())
 
     board(SUM_A)
     bm.note("COMPLETION: **the landed section** - done.", path=path)
     check("a result from nobody in particular removes nothing",
-          any("summoned Marbas" in t for t in texts()), texts())
+          any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     # ---- ambiguity is a refusal, never a guess ----
     board(SUM_A, SUM_A.replace("the landed section", "a second job"))
     bm.note("COMPLETION: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     check("two summon notes naming one id: both stay, and nothing is guessed",
-          len([t for t in texts() if "summoned Marbas" in t]) == 2, texts())
+          len([t for t in texts() if "SUMMONED: Marbas" in t]) == 2, texts())
 
     # A note with NO id falls back to the NAME — that is the older shape, and
     # the fallback is deliberately only for a note that carries no id at all: a
@@ -1481,7 +1518,7 @@ def test_summon_cleared(tmp):
     bm.note("COMPLETION: **the landed section** - done.", path=path,
             agent_id=_id_named("Marbas"))
     check("...but a name match never overrides an id that says otherwise",
-          any("summoned Marbas" in t for t in texts()), texts())
+          any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     # ---- the several-results case: each takes its own, one call at a time ----
     board(SUM_A, SUM_B)
@@ -1491,7 +1528,7 @@ def test_summon_cleared(tmp):
             agent_id="w4f82de")
     left = texts()
     check("two workers reporting clears two summon notes and no more",
-          not [t for t in left if "summoned" in t] and len(left) == 3, left)
+          not [t for t in left if "SUMMONED" in t] and len(left) == 3, left)
 
     # ---- and the OTHER writer of a result passes the id explicitly ----
     # board-watch writes the failure note for a worker whose process is gone, so
@@ -2084,9 +2121,12 @@ def test_phase(tmp):
     # observation must carry no subject, and a stopped agent must not be
     # described in the present tense.
     r = bph.observe("ph-a")
+    # TWO LINES, not one hyphenated one — [his, 2026-07-29] *"[agent]
+    # [verb]s..."* and then the words it gave, verbatim, underneath.
     check("a card's first sentence is the agent's own claim, led by its name",
-          bph.says_line(r, "Marbas") == "Marbas is testing - the parser round-trips",
-          bph.says_line(r, "Marbas"))
+          bph.says_line(r, "Marbas") == "Marbas is testing"
+          and bph.says_detail(r) == "the parser round-trips...",
+          (bph.says_line(r, "Marbas"), bph.says_detail(r)))
     check("...and its second line is the observation ALONE, with no opener",
           bph.doing_line(r, "Marbas") == "editing Main.qml",
           bph.doing_line(r, "Marbas"))
@@ -2098,9 +2138,73 @@ def test_phase(tmp):
           bph.doing_line({"observed": "none"}, "Marbas", running=False) == "",
           bph.doing_line({"observed": "none"}, "Marbas", running=False))
     check("an agent with no name is `it` in the CLAIM, and nothing invents one",
-          bph.says_line(r) == "it is testing - the parser round-trips"
+          bph.says_line(r) == "it is testing"
           and bph.doing_line(r) == "editing Main.qml",
           (bph.says_line(r), bph.doing_line(r)))
+    # ---- SIMPLE PRESENT, and an ellipsis that MOVES ----
+    # [his, 2026-07-29] *"instead of the agent verb-part being 'is researching'
+    # or 'is coding' etc it should just say 'researches...' or 'codes...' with
+    # animated elipsies"*. One table (`PHASE_PREDICATE`) decides the verb form
+    # for every card, his included, so it cannot drift between them — and the
+    # three trailing cells are ASCII, never U+2026, which would drop the line
+    # ~5px on the fallback font (docs/DESIGN.md §2.3).
+    check("the verb-part is `is <word>`, which is his wording twice over",
+          bph.says_line({"claimPhase": "researching"}, "Marbas")
+          == "Marbas is researching"
+          and bph.says_line({"claimPhase": "coding"}, "Marbas")
+          == "Marbas is coding",
+          (bph.says_line({"claimPhase": "researching"}, "Marbas"),
+           bph.says_line({"claimPhase": "coding"}, "Marbas")))
+    # The dots go on the line BELOW — [his, 2026-07-29] *"take the animated
+    # elipsies out of the top line"*. The verb line ends on the verb.
+    check("...and the ticking dots sit on the line under it, not on the verb",
+          not bph.says_line({"claimPhase": "researching"},
+                            "Marbas").endswith("...")
+          and bph.says_detail({"claimPhase": "researching",
+                               "claimDoing": "the parser"}) == "the parser...",
+          (bph.says_line({"claimPhase": "researching"}, "Marbas"),
+           bph.says_detail({"claimPhase": "researching",
+                            "claimDoing": "the parser"})))
+    check("...and the ellipsis is three ASCII periods, never one glyph (2.3)",
+          all(ord(c) < 128 for w in bph.PHASE_WORDS
+              for c in bph.says_line({"claimPhase": w}, "Marbas")
+              + bph.says_detail({"claimPhase": w, "claimDoing": "x"})),
+          [w for w in bph.PHASE_WORDS
+           if any(ord(c) > 127 for c in bph.says_line({"claimPhase": w}, "M"))])
+    # `blocked` is the one word in the list that is not a gerund, so its
+    # predicate keeps the auxiliary — `blocks` says the opposite — and it gets NO
+    # ticking dots: a stall is not motion, which is §10's rule and the same one
+    # that scopes the observed line's own tick to `observed == "ok"`.
+    # ...and the words do not open by repeating the verb the line above ends on —
+    # [his, 2026-07-29] *"if the verb at the end of the top line is the same as
+    # the verb at the start of the second line, then hide the verb"*. Every
+    # separator an agent actually writes, case-insensitively, and only ever the
+    # LEADING word.
+    def _detail(phase, doing):
+        return bph.says_detail({"claimPhase": phase, "claimDoing": doing})
+
+    check("the claim's words never repeat the verb the line above ends on",
+          (_detail("coding", "coding - writing highlight.py"),
+           _detail("coding", "Coding: writing highlight.py"),
+           _detail("coding", "coding \u2014 writing highlight.py"),
+           _detail("coding", "coding writing highlight.py"))
+          == ("writing highlight.py...",) * 4,
+          _detail("coding", "coding - writing highlight.py"))
+    check("...but a DIFFERENT verb is left exactly as the agent wrote it",
+          _detail("coding", "testing - the parser") == "testing - the parser...",
+          _detail("coding", "testing - the parser"))
+    check("...and it is a word boundary, not a prefix match",
+          _detail("coding", "codingstyle rules") == "codingstyle rules...",
+          _detail("coding", "codingstyle rules"))
+    check("...and words that are ONLY the verb stay, rather than going blank",
+          _detail("reading", "reading") == "reading...",
+          _detail("reading", "reading"))
+    check("...but a STALL keeps `is blocked`, and does not animate",
+          bph.says_line({"claimPhase": "blocked"}, "Marbas") == "Marbas is blocked"
+          and bph.says_detail({"claimPhase": "blocked",
+                               "claimDoing": "the merge"}) == "the merge",
+          (bph.says_line({"claimPhase": "blocked"}, "Marbas"),
+           bph.says_detail({"claimPhase": "blocked", "claimDoing": "the merge"})))
     check("a claim with no phase word is QUOTED, not forced after `is`",
           bph.says_line({"claimDoing": "the vtbclient parser"}, "Marbas")
           == "Marbas says: the vtbclient parser",
@@ -2221,9 +2325,9 @@ def test_phase(tmp):
     bph.claim("ph-a", "bisecting", "which commit broke the harness")
     r = bph.observe("ph-a")
     check("...and a free word is drawn as the card's own first line",
-          bph.says_line(r, "Marbas")
-          == "Marbas is bisecting - which commit broke the harness",
-          bph.says_line(r, "Marbas"))
+          bph.says_line(r, "Marbas") == "Marbas is bisecting"
+          and bph.says_detail(r) == "which commit broke the harness...",
+          (bph.says_line(r, "Marbas"), bph.says_detail(r)))
     check("...while the card is still FILED by what it is OBSERVED doing",
           r["phase"] in bph.CLAIMABLE and r["phase"] != "bisecting", r["phase"])
     # THE MENU. [his, 2026-07-29] *"create a larger list of words that could
@@ -2242,7 +2346,13 @@ def test_phase(tmp):
           bph.PHASE_WORDS[:5] == bph.CLAIMABLE, str(bph.PHASE_WORDS[:5]))
     check("...and each reads as English after \"is\"",
           all(bph.says_line({"claimPhase": w}, "Marbas") == "Marbas is " + w
-              for w in bph.PHASE_WORDS))
+              for w in bph.PHASE_WORDS),
+          [w for w in bph.PHASE_WORDS
+           if bph.says_line({"claimPhase": w}, "Marbas") != "Marbas is " + w])
+    check("...and a word that is NOT on the menu reads the same way",
+          bph.says_line({"claimPhase": "yakshaving"}, "Marbas")
+          == "Marbas is yakshaving",
+          bph.says_line({"claimPhase": "yakshaving"}, "Marbas"))
     menu = bw.phase_word_menu()
     check("the prompt's menu block is generated from the list, not retyped",
           all(("`%s`" % w) in menu for w in bph.PHASE_WORDS))
@@ -2405,7 +2515,7 @@ def test_work(tmp):
                         kind="orchestrator", name="Marbas")
     check("...and a caller cannot name one anything else",
           orec2["name"] == ba.ORCHESTRATOR_NAME, orec2)
-    # ---- and the FIRST thing his card says is `getting ready` ----
+    # ---- and the FIRST thing his card says is that he is starting up ----
     # [his, 2026-07-29] *"when solomon first takes a request, his section very
     # briefly shows 'cannot see what solomon is doing' and then changes to
     # 'Solomon is getting ready' - it shouldnt show that breif initial 'dont
@@ -2413,18 +2523,35 @@ def test_work(tmp):
     # that used to reach `unlinked` — the same branch an unobservable interactive
     # session takes. Registered here exactly as a spawn is: a session id we
     # chose, and no file at it yet.
+    #
+    # The two states now say two DIFFERENT things, in his own words and in his
+    # order: *"Solomon wields the ring..."* while the transcript is still coming,
+    # then *"Solomon etches the circle..."* once it is there and nothing has
+    # happened in it. That ordering is the point — the brief initial line LEADS,
+    # which is what collapsing the pair onto one sentence took away.
     ba.register("orch-fresh", "what he just typed", os.getpid(),
                 kind="orchestrator", where="board-watch",
                 session="deadbeef-0000-1111-2222-333344445555")
     fresh = [a for a in ba.agents() if a["id"] == "orch-fresh"]
-    check("a freshly spawned Solomon reads `getting ready`, never `cannot see`",
+    check("a freshly spawned Solomon wields the ring, and never `cannot see`",
           len(fresh) == 1
-          and fresh[0]["doingLine"] == "%s is getting ready" % ba.ORCHESTRATOR_NAME,
+          and fresh[0]["doingLine"] == "%s wields the ring..." % ba.ORCHESTRATOR_NAME,
           [a.get("doingLine") for a in fresh])
     check("...and that is the ONLY thing it says, in either sentence",
           fresh and "cannot see" not in (fresh[0]["doingLine"]
                                         + fresh[0]["saysLine"]),
           [(a.get("saysLine"), a.get("doingLine")) for a in fresh])
+    import boardphase as bph
+    check("...and the brief initial line LEADS the getting-ready one",
+          (bph.orch_doing_line("starting"), bph.orch_doing_line("none"))
+          == ("%s wields the ring..." % ba.ORCHESTRATOR_NAME,
+              # the CIRCLE is Solomon's — [his, 2026-07-29] the magician stands
+              # in it; `triangle` now names the agents area the ministers sit in
+              "%s etches the circle..." % ba.ORCHESTRATOR_NAME),
+          (bph.orch_doing_line("starting"), bph.orch_doing_line("none")))
+    check("...while a worker keeps the honest bare placeholder",
+          bph.doing_line({"observed": "starting"}, "Marbas") == "nothing yet",
+          bph.doing_line({"observed": "starting"}, "Marbas"))
     ba.unregister("orch-fresh")   # the checks below count the live ones
     ocards = bw.cards()
     check("two overlapping orchestrators are both Solomon, and both on top",
@@ -2488,11 +2615,35 @@ def test_work(tmp):
           "boardctl.py phase " in bw.ORCHESTRATOR_PROMPT
           and "SAY WHAT YOU ARE DOING" in bw.ORCHESTRATOR_PROMPT)
     import boardphase as _bph
+    # ...and it is in HIS OWN VOICE for the two words he actually uses [his,
+    # 2026-07-29]: `dispatching` is *"Solomon summons"* and `waiting` is
+    # *"Solomon awaits <agent>..."*, which NAMES whoever he is waiting on.
+    # Everything else on his card goes through the one shared predicate table, so
+    # the verb form cannot drift between his card and a worker's.
     check("...and once he has, his card's FIRST line is his name",
-          _bph.says_line({"claimPhase": "dispatching",
-                         "claimDoing": "three pieces of what you typed"},
-                        ba.ORCHESTRATOR_NAME)
-          == "Solomon is dispatching - three pieces of what you typed")
+          _bph.orch_says_line({"claimPhase": "dispatching",
+                               "claimDoing": "three pieces of what you typed"},
+                              ba.ORCHESTRATOR_NAME)
+          == "Solomon summons",
+          _bph.orch_says_line({"claimPhase": "dispatching",
+                               "claimDoing": "three pieces of what you typed"},
+                              ba.ORCHESTRATOR_NAME))
+    check("...and waiting NAMES the one he is waiting on, with moving dots",
+          (_bph.orch_says_line({"claimPhase": "waiting"}, "Solomon", "Marbas"),
+           _bph.orch_says_line({"claimPhase": "waiting"}, "Solomon", "his workers"),
+           _bph.orch_says_line({"claimPhase": "waiting"}, "Solomon", ""))
+          == ("Solomon awaits Marbas...", "Solomon awaits his workers...",
+              "Solomon awaits..."),
+          _bph.orch_says_line({"claimPhase": "waiting"}, "Solomon", "Marbas"))
+    check("...and never an empty name or the literal word `agent`",
+          "agent" not in _bph.orch_says_line({"claimPhase": "waiting"},
+                                             "Solomon", ""),
+          _bph.orch_says_line({"claimPhase": "waiting"}, "Solomon", ""))
+    check("...while any other word of his takes the shared table, like a worker",
+          _bph.orch_says_line({"claimPhase": "reading"}, "Solomon")
+          == _bph.says_line({"claimPhase": "reading"}, "Solomon")
+          == "Solomon is reading",
+          _bph.orch_says_line({"claimPhase": "reading"}, "Solomon"))
     check("...and drawn exactly once, and in the same place on the next poll",
           [c.get("name") for c in bw.cards()].count(ba.ORCHESTRATOR_NAME) == 1
           and [c["id"] for c in bw.cards()] == [c["id"] for c in bw.cards()],
@@ -2881,12 +3032,25 @@ def build(app, path):
 
     class StubTitlebar(QObject):
         clicks = []
+        # Every message the window would put on the vtb socket, in order. The
+        # ORDER is the point: the first REGISTER is what he sees for the first
+        # frames, and it used to light the wrong cell (see `test_window`).
+        sent = []
 
         @Slot("QVariantList")
-        def setButtons(self, b): pass
+        def setButtons(self, b):
+            StubTitlebar.sent.append(
+                ("buttons", tuple("-" if isinstance(x, str)
+                                  else (str(x["label"]), int(x.get("state", 0)))
+                                  for x in b)))
 
         @Slot(str)
-        def setFooter(self, t): pass
+        def setFooter(self, t):
+            StubTitlebar.sent.append(("footer", str(t)))
+
+        @Slot(bool)
+        def setTitleText(self, on):
+            StubTitlebar.sent.append(("titleText", bool(on)))
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
@@ -2995,6 +3159,36 @@ def test_window(app, tmp):
     check("the to-do list is drawn with the things that need him",
           len(prop(win, "todo")) == 1, prop(win, "todo"))
 
+    # ---- what the titlebar is told FIRST, before he has touched anything ----
+    # The very first REGISTER used to light `if` — the LAST section — because
+    # before the Column has laid out, every section is at y 0 and
+    # `contentY (0) >= secFlight.y - 4` is true. It was corrected a frame later,
+    # so what he saw was the lit cell flashing on the wrong cell at startup, and
+    # every REGISTER makes the plugin re-warm its glyphs and repaint the bar.
+    sent = type(keep[2]).sent
+    regs = [m for m in sent if m[0] == "buttons"]
+    lit = [[lab for lab in r[1] if lab != "-" and lab[1] == 1] for r in regs]
+    check("the first thing the titlebar is told is the section he is ON",
+          regs and lit[0] == [("ny", 1)], (lit[:2], prop(win, "section")))
+    check("...and it is never told he is in a section further down the page",
+          all(l == [("ny", 1)] for l in lit), lit)
+    # The footer carries the STATUS and nothing else — [his, 2026-07-29]
+    # *"remove the 'goetia' text at the bottom of the inner titlebar"*. The
+    # program's name is already the title the plugin draws up the side.
+    foots = [m[1] for m in sent if m[0] == "footer"]
+    check("...and the footer never says the program's own name",
+          not any("goetia" in f for f in foots), foots)
+    # ...and neither does the stacked title beside it. [his, 2026-07-29] *"really
+    # for now there should be no title text in the left side inner bar of
+    # goetia"* — the window declares `TITLETEXT 0` and the plugin draws nothing
+    # there (hyprvtb >= 2.95). It is NOT done by blanking `Window.title`: Qt
+    # substitutes the application name, so the bar would read `board` and the
+    # taskbar would lose the window's only name.
+    check("the window tells the bar to draw no title at all",
+          ("titleText", False) in sent, sent[:6])
+    check("...while keeping the window title, which is the only name it has",
+          win.title() == "goetia", win.title())
+
     # ---- each usage meter carries its OWN reset tooltip ----
     # [his, 2026-07-29] *"add a tooltip to each usage indicator that says when
     # that limit next resets"*. Both rows always exist (`readings()` returns the
@@ -3011,13 +3205,22 @@ def test_window(app, tmp):
                                    and round(t[0].width()) == round(m.width())
                                    for m, t in tips),
           [(round(m.width()), len(t)) for m, t in tips])
-    check("...saying when THAT window resets, in boardusage's own words",
-          all(t[0].property("text") == (m.property("row") or {}).get("reset")
-              and t[0].property("text") for m, t in tips),
+    # TWO sentences in the one chip: what the number is, then when the window
+    # comes back. The second half used to be the only tooltip and the first was
+    # written into the window's `status` on hover — which is the footer the
+    # hyprvtb bar draws, so hovering a meter put stray text in the inner
+    # titlebar. §8 is where a hover explanation goes.
+    check("...saying what THAT window measures and when it resets, in "
+          "boardusage's own words",
+          all((m.property("row") or {}).get("reset") in t[0].property("text")
+              and (m.property("row") or {}).get("detail") in t[0].property("text")
+              for m, t in tips),
           [(t[0].property("text") if t else None) for m, t in tips])
     chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
+    # FOUR now: two meters and the two dropdowns, which carry their `hint` here
+    # rather than in the footer for the same reason.
     check("...and no chip is on screen until he dwells on one (8)",
-          len(chips) == 2 and all(c.width() == 0 and not c.isVisible() for c in chips),
+          len(chips) == 4 and all(c.width() == 0 and not c.isVisible() for c in chips),
           [(c.width(), c.isVisible()) for c in chips])
 
     # ---- ...and it slides out to the LEFT, out of a fixed right edge ----
@@ -3649,9 +3852,11 @@ def test_window(app, tmp):
           all(isinstance(c, dict) and "rows" not in c for c in cards),
           [list(c)[:3] for c in cards[:2]])
     check("a card leads with the claim as a sentence, then the observation alone",
-          card.get("saysLine") == card.get("name") + " is testing - the vtbclient parser"
+          card.get("saysLine") == card.get("name") + " is testing"
+          and card.get("saysDetail") == "the vtbclient parser..."
           and card.get("doingLine") == "editing vtbclient.py",
-          (card.get("saysLine"), card.get("doingLine")))
+          (card.get("saysLine"), card.get("saysDetail"),
+           card.get("doingLine")))
     check("...and it still carries BOTH statements, neither standing in for the other",
           card.get("says") == "testing - the vtbclient parser"
           and card.get("actually") == "editing vtbclient.py",
@@ -3662,24 +3867,35 @@ def test_window(app, tmp):
           (card.get("saysLine"), card.get("doingLine")))
     check("...and it is drawn as a PERSON: the card carries a first name",
           card.get("name") in ba.NAMES, card.get("name"))
-    # ---- SOLOMON, first on the list and there whether or not he is working ----
+    # ---- SOLOMON, IN A SECTION OF HIS OWN, above the workers ----
     # *"he should always be kept on the top of the agent list and should
     # basically indicate like he's there and ready to go at all times when hes
-    # not doing something."* Nothing here registers an orchestrator, so this is
-    # the standing row: it is the whole point that it exists anyway.
-    check("Solomon holds the top row, above every worker on the list",
-          bool(cards) and cards[0].get("name") == ba.ORCHESTRATOR_NAME
-          and cards[0].get("state") == "idle"
-          and all(c.get("name") != ba.ORCHESTRATOR_NAME for c in cards[1:]),
-          [(c.get("name"), c.get("state")) for c in cards])
+    # not doing something."* ...and then, twice: *"solmon should be in his own
+    # \"summoner\" section above the agents section"*. So he is no longer a row
+    # inside the workers' list at all: `boardwork.cards()` still orders him first
+    # and still substitutes the standing row when nothing is running, and `main.py`
+    # splits that one ordering into two lists. Nothing here registers an
+    # orchestrator, so this is the standing row — it is the whole point that it
+    # exists anyway.
+    summoner = prop(win, "summonerCards")
+    check("Solomon has a section of his own, and it holds only him",
+          len(summoner) == 1
+          and summoner[0].get("name") == ba.ORCHESTRATOR_NAME
+          and summoner[0].get("state") == "idle",
+          [(c.get("name"), c.get("state")) for c in summoner])
+    check("...and the agents section below holds only the workers",
+          all(c.get("name") != ba.ORCHESTRATOR_NAME for c in cards)
+          and all(c.get("kind") != "orchestrator" for c in cards),
+          [(c.get("name"), c.get("kind")) for c in cards])
     check("...leading with `Solomon is ready`, the way every card leads",
-          cards[0].get("saysLine") == "%s is ready" % ba.ORCHESTRATOR_NAME,
-          cards[0].get("saysLine"))
+          summoner[0].get("saysLine") == "%s is ready" % ba.ORCHESTRATOR_NAME,
+          summoner[0].get("saysLine"))
     check("...with no observation on him: nothing claims to have SEEN him",
-          cards[0].get("doingLine") == ""
-          and cards[0].get("running") is False, cards[0])
+          summoner[0].get("doingLine") == ""
+          and summoner[0].get("running") is False, summoner[0])
     check("...and no box under it, there being nobody there to send to",
-          cards[0].get("id") == "" and cards[0].get("waiting") == [], cards[0])
+          summoner[0].get("id") == "" and summoner[0].get("waiting") == [],
+          summoner[0])
     check("an agent that has said nothing shows no claim at all",
           rows.get("Find where focus is decided", {}).get("says") == ""
           and rows.get("Find where focus is decided", {}).get("saysLine") == "",
@@ -3737,15 +3953,23 @@ def test_window(app, tmp):
     cardItem = drawnCards.get("Wire FOCUS through vtbclient")
     lines = _texts(cardItem) if cardItem is not None else []
     ys = {s: y for y, s, _ in lines}
+    # A line that ends in `...` is drawn with those three cells ANIMATED
+    # (`AgentRow.tick`), so a drawn line is matched by its stem rather than by an
+    # exact string — the tail changes about once a second.
+    def stem(s):
+        return s[:-3] if s.endswith("...") else s
+
+    saysStem = stem(card.get("saysLine") or "\0")
+    saysY = min([y for y, s, _ in lines if s.startswith(saysStem)] or [1e9])
     check("the card's FIRST line is what the agent SAYS it is doing",
-          bool(lines) and lines[0][1] == card.get("saysLine"),
+          bool(lines) and lines[0][1].startswith(saysStem),
           [(y, s) for y, s, _ in lines])
     # The observed line is drawn with the live tick on the end of it, so it is
     # found by its opening rather than by an exact match.
     doingY = min([y for y, s, _ in lines
                   if s.startswith(card.get("doingLine", "\0"))] or [1e9])
     check("...its SECOND is what it is OBSERVED doing, still under the claim",
-          doingY > ys.get(card.get("saysLine"), 1e9),
+          doingY > saysY,
           [(y, s) for y, s, _ in lines])
     check("...and the title row it used to open with is now the THIRD",
           ys.get("Wire FOCUS through vtbclient", -1) > doingY,
@@ -3761,27 +3985,39 @@ def test_window(app, tmp):
     # stopped agent's past-tense line and the states that say nothing is
     # happening get none, which is §10's honesty rule about a moving thing.
     doingText = [s for y, s, _ in lines if y == doingY]
-    check("the observed line ends in a ticking ASCII ellipsis while it is live",
-          cardItem is not None and cardItem.property("ticking") is True
-          and bool(doingText) and doingText[0].rstrip() .endswith(".")
-          and "…" not in doingText[0],
-          doingText)
-    # Sampled while it runs rather than by driving the phase by hand: the timer
-    # is what is under test, and setting the property underneath it raced.
-    seen = set()
+    # THE THIRD LINE ENDS ON ITS OWN WORDS — [his, 2026-07-29] *"the third line of
+    # an agents card should not have the animated elipsies or any elipsies at the
+    # end of it"*. It used to carry the tick; the tick is on the claim's words now
+    # (the line above), and there is nothing appended here at all.
+    check("the observed line ends on its words, with no dots of any kind",
+          bool(doingText) and not doingText[0].rstrip().endswith(".")
+          and "…" not in doingText[0]
+          and doingText[0] == card.get("doingLine"),
+          (doingText, card.get("doingLine")))
+    # ...and the CLAIM's words tick through the SAME field on the SAME timer —
+    # [his, 2026-07-29] the animated dots belong at the END of a line, so with the
+    # claim split in two they are on the LOWER of the pair and not on the verb:
+    # *"take the animated elipsies out of the top line"*. One mechanism for every
+    # line that ends in them, so his card and a worker's cannot drift.
+    saysItem = [t for y, s, t in lines if s.startswith(saysStem)]
+    detailStem = (card.get("saysDetail") or "\0")[:-3]
+    detailItem = [t for y, s, t in lines if s.startswith(detailStem)]
+    tails = set()
     for _ in range(20):
-        seen.add(str(cardItem.property("liveDots")))
+        if detailItem:
+            tails.add(str(detailItem[0].property("text"))[-3:])
         spin(100)
-    check("...three cells wide whatever the phase, so the line cannot reflow",
-          {len(v) for v in seen} == {3}
-          and {v.rstrip() for v in seen} <= {".", "..", "..."},
-          sorted(seen))
-    check("...and it actually cycles, so the card reads as live",
-          len(seen) > 1, sorted(seen))
+    check("the claim's words carry the ticking dots, and the verb line does not",
+          len(tails) > 1 and {len(v) for v in tails} == {3}
+          and all(set(v) <= {".", " "} for v in tails)
+          and not str(saysItem[0].property("text")).rstrip().endswith("."),
+          (sorted(tails), saysItem and saysItem[0].property("text")))
     stoppedCards = [drawnCards.get(c.get("title")) for c in cards
                     if not c.get("running")]
     check("...and NOTHING that has stopped ticks - a gone agent is not happening",
-          all(it is None or it.property("ticking") is False
+          all(it is None or not any(str(it.property(k) or "").endswith("...")
+                                    for k in ("saysLine", "saysDetail",
+                                              "doingLine"))
               for it in stoppedCards),
           [(c.get("title"), c.get("running")) for c in cards])
 
@@ -3789,10 +4025,11 @@ def test_window(app, tmp):
     # LEAD tone goes to whichever line is drawn first, so a card never opens on
     # its quietest text. It is position, not trust, that picks it.
     tone = {s: t.property("color") for _, s, t in lines}
+    saysTone = [t for s, t in tone.items() if s.startswith(saysStem)]
     check("...and the top line takes the lead tone, not the quietest one",
-          tone.get(card.get("saysLine")) == keep[-1].property("text")
+          saysTone and saysTone[0] == keep[-1].property("text")
           and tone.get("Wire FOCUS through vtbclient") == keep[-1].property("dim"),
-          (tone.get(card.get("saysLine")), tone.get("Wire FOCUS through vtbclient")))
+          (saysTone, tone.get("Wire FOCUS through vtbclient")))
     # NOTHING ON THIS LIST IS ANONYMOUS, and the name is never drawn twice over.
     # The 7-cell name column exists for exactly the card whose CLAIM does not
     # name the agent — the observed line no longer carries a subject at all — and
@@ -3872,12 +4109,31 @@ def test_window(app, tmp):
           or all(c.property("nameW") >= (len(ba.ORCHESTRATOR_NAME) + 1) * cellW
                  for c in cols if c.property("nameW") > 0),
           [(c.property("nameW"), cellW) for c in cols])
-    check("...and the standing row reads as quiet, not as an agent at work",
+    # HIS TEXT NEVER GOES QUIET, and it never wears the unfocused grey — [his,
+    # 2026-07-29] *"his text should never become the unfocused colors and he
+    # doesnt need a line to the left of his card"*. The standing row used to lead
+    # at `fgDim` for not running; his card is not a record of finished work, so it
+    # leads at full strength either way, and its tones are the `Theme` ones rather
+    # than the window's faded pair.
+    check("...and the standing row still leads at full strength, never dimmed",
           solItem is not None and solItem.property("running") is False
-          and solItem.property("titleFirst") is False
+          and solItem.property("summoner") is True
           and {s: t.property("color") for _, s, t in solLines}
-          .get(lead) == solItem.property("fgDim"),
+          .get(lead) == solItem.property("fgText"),
           [(s, t.property("color").name()) for _, s, t in solLines])
+    check("...with the unfocused fade never reaching him, whatever the window",
+          solItem is not None
+          and solItem.property("fgText") == keep[-1].property("text")
+          and solItem.property("fgDim") == keep[-1].property("textDim")
+          and solItem.property("fgAccent") == keep[-1].property("accent"),
+          [solItem.property("fgText").name() if solItem else None,
+           keep[-1].property("text").name()])
+    check("...and no accent rule to the left of his card",
+          solItem is not None
+          and not any(it.property("width") == 2 and it.isVisible()
+                      for it in solItem.childItems()),
+          [(it.property("width"), it.isVisible())
+           for it in solItem.childItems()] if solItem else None)
     check("...and 'nothing is running' is about the WORKERS, not about him",
           prop(win, "nothingRunning") is False, prop(win, "nothingRunning"))
 
