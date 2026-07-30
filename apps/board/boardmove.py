@@ -717,28 +717,95 @@ def forget_by_title(title):
             forget(r["key"])
 
 
+#: How long a stash that records NO owner pid may sit before `reconcile()`
+#: reclaims it anyway.
+#:
+#: `_alive()` returns True for a pid-less record — "no owner recorded: not ours
+#: to reclaim" — and that is the correct LIVENESS answer: `boardctl start` with
+#: no `--pid` is a human or an orchestrating session moving the item, and
+#: nothing here can tell whether that session is still thinking. But liveness
+#: with no bound is a LIFETIME of forever, and that is what it meant in
+#: practice: two decisions answered on 2026-07-28 still had pid-less stashes a
+#: day later, so `reconcile()` skipped them on every tick and `boardagents`
+#: drew two `unowned` agent cards that nothing in this tree could ever collect.
+#: He saw them for what they were — *"it also seems to have some residual agents
+#: left that should've been swept up"*.
+#:
+#: Hours rather than minutes, because the thing being waited on is a person or a
+#: session at a terminal, not a spawned worker: board-watch caps its own agents
+#: at 45 minutes and `ESCALATE_AFTER_S` is 30, so this sits well clear of both
+#: and only ever fires on something that has plainly been abandoned.
+UNOWNED_STRAND_S = int(os.environ.get("BOARD_UNOWNED_STRAND", str(4 * 3600)))
+
+
+def _stash_age(rec):
+    """Seconds since a stash was written, from its own stamp or, failing that,
+    the file's mtime. Never negative and never a guess: a record with neither is
+    treated as brand new, so an unreadable clock can only ever DELAY a reclaim.
+    """
+    for k in ("started", "at"):
+        v = rec.get(k)
+        if not v:
+            continue
+        try:
+            return max(0.0, time.time()
+                       - time.mktime(time.strptime(str(v)[:19], "%Y-%m-%dT%H:%M:%S")))
+        except ValueError:
+            pass
+    try:
+        return max(0.0, time.time() - os.path.getmtime(stash_file(rec["key"])))
+    except OSError:
+        return 0.0
+
+
+def _abandoned(rec):
+    """A pid-less stash that has sat past `UNOWNED_STRAND_S`.
+
+    Deliberately NOT folded into `_alive()`. That function is THE liveness rule
+    for this whole tree and there is exactly one definition of "running" on
+    purpose; an age is not liveness, and answering "dead" for a record that
+    simply never named an owner would make every other caller of `_alive()`
+    lie. So the bound lives here, where the question being asked is the
+    different one: has this been abandoned.
+    """
+    return not rec.get("pid") and _stash_age(rec) > UNOWNED_STRAND_S
+
+
 def reconcile(path=bp.BOARD_PATH):
     """Give back every IN FLIGHT item whose owner is gone. Returns what moved.
 
     Run at the top of every board-watch tick. This is the guarantee that an item
     cannot sit in IN FLIGHT forever with nothing working on it: the worst case
     is one timer interval, and it costs a parse and a `/proc` stat.
+
+    Two ways to qualify, and the second is why this is a guarantee rather than
+    nearly one: an owner that is provably gone (`_alive`), or no owner at all
+    for long enough that nobody is coming (`_abandoned`).
     """
     moved = []
     for rec in _stashes():
-        if _alive(rec):
+        if _alive(rec) and not _abandoned(rec):
             continue
         if rec.get("board") and os.path.abspath(rec["board"]) != os.path.abspath(path):
             continue
+        title = bp.oneline(rec.get("title", rec["key"]), 120, code=True)
+        # Two different things happened, so say the one that did. The pid-less
+        # case never had an agent to exit, and telling him one "is gone" would
+        # be inventing a death to explain a row.
+        if rec.get("pid"):
+            why = ("- FAILED: **the agent working %s is gone** - it exited "
+                   "without finishing.\n"
+                   "    It never said so; the decision is back above with your "
+                   "answer intact. Nothing was committed on its behalf. "
+                   "Log: `~/.cache/board-watch.log`" % title)
+        else:
+            why = ("- FAILED: **nothing was working %s**\n"
+                   "    It was taken by a session that recorded no process, and "
+                   "hours have passed with no result. The decision is back above "
+                   "with your answer intact and nothing was committed on its "
+                   "behalf." % title)
         try:
-            give_back(rec["key"], why=(
-                "- FAILED: **the agent working %s is gone** - it exited "
-                "without finishing.\n"
-                "    It never said so; the decision is back above with your "
-                "answer intact. Nothing was committed on its behalf. "
-                "Log: `~/.cache/board-watch.log`"
-                % bp.oneline(rec.get("title", rec["key"]), 120, code=True)),
-                path=path)
+            give_back(rec["key"], why=why, path=path)
             moved.append(rec)
         except BoardError:
             forget(rec["key"])          # the board no longer has it either
