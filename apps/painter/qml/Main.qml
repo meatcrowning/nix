@@ -119,7 +119,10 @@ Window {
                     spacing: 10
 
                     ModelPicker { width: parent.width }
-                    PromptEditor { width: parent.width }
+                    PromptEditor {
+                        width: parent.width
+                        onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
+                    }
                     LoraStack { width: parent.width }
                     ParamsPanel { width: parent.width }
                     ResolutionPanel { width: parent.width }
@@ -237,6 +240,15 @@ Window {
     onViewChanged: pushButtons()
     onShowSettingsChanged: pushButtons()
     Component.onCompleted: { pushButtons(); applyDefaults() }
+
+    // The one context menu, over everything: a prompt box is 64-130px tall and
+    // `CtxMenu` clamps into its own root, so a menu parented inside one would be
+    // trimmed to a couple of rows. Its coordinates are the scene's, which is
+    // what `mapToItem(null, ...)` at the call site hands it.
+    CtxMenu {
+        id: ctxMenu
+        anchors.fill: parent
+    }
 
     // Keyboard: Ctrl+Enter generates, Escape cancels.
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; onActivated: root.submit() }

@@ -9,6 +9,13 @@ Rectangle {
     property bool negative: false
     signal edited(string text)
 
+    //: A prompt is prose, so it is spellchecked (`qmlcommon/SpellMarks.qml`) and
+    //: right-clicking a marked word offers corrections. The MENU cannot live in
+    //: here — this box is 64-130px tall and `CtxMenu` clamps itself into its own
+    //: root — so the items travel up to Main.qml, which owns the one menu, in
+    //: SCENE coordinates.
+    signal menuRequested(real sx, real sy, var items)
+
     color: Theme.bg
     border.color: input.activeFocus ? Theme.accent : Theme.border
     border.width: 1
@@ -52,6 +59,41 @@ Rectangle {
                     e.accepted = false
                 }
             }
+
+            // §7.1: everything selectable is right-clickable. Left-drag
+            // selection stays Qt's (`selectByMouse`); this takes the right
+            // button only, so nothing else changes.
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.RightButton
+                onPressed: function (m) {
+                    var pos = input.positionAt(m.x, m.y)
+                    var hasSel = input.selectionEnd > input.selectionStart
+                    var items = marks.menuItems(pos).concat([
+                        { label: "undo", enabled: input.canUndo,
+                          trigger: () => input.undo() },
+                        { label: "redo", enabled: input.canRedo,
+                          trigger: () => input.redo() },
+                        { separator: true },
+                        { label: "cut", enabled: hasSel, trigger: () => input.cut() },
+                        { label: "copy", enabled: hasSel, trigger: () => input.copy() },
+                        { label: "paste", trigger: () => input.paste() },
+                        { label: "select all", trigger: () => input.selectAll() }
+                    ])
+                    var p = mapToItem(null, m.x, m.y)
+                    box.menuRequested(p.x, p.y, items)
+                }
+            }
+        }
+
+        SpellMarks {
+            id: marks
+            target: input
+            viewport: flick
+            x: input.x
+            y: input.y
+            width: input.width
+            height: input.height
         }
 
         PixelText {
