@@ -1108,6 +1108,14 @@ The short version, and every line of it is a rule:
   words below it, then off the THIRD line entirely: *"the third line of an agents
   card should not have the animated elipsies or any elipsies at the end of it"*.
   So on a worker's card exactly ONE line ticks, the claim's own words.
+  **And the words below never repeat the verb above them** — [his, 2026-07-29]
+  *"if the verb at the end of the top line is the same as the verb at the start of
+  the second line, then hide the verb"*. `_drop_repeated_verb` strips a leading
+  phase word, case-insensitively, across every separator an agent actually writes
+  (`-`, `:`, en and em dash, or none at all), at a word boundary only — a
+  different verb is left exactly as written, and words that are ONLY the verb stay
+  rather than leaving the line blank. `boardphase` is the one composition site;
+  the panel has none.
   `TICKLESS` is which phase words leave even that line bare: `blocked` today,
   because a stall is not motion (§10, the same rule that used to scope the
   observed line's tick to `observed == "ok"`).

@@ -649,6 +649,41 @@ def orch_says_line(rec, who="", awaits=""):
     return says_line(rec, who)
 
 
+#: The separators an agent actually puts between its phase word and its words,
+#: in the `--doing` string it hands `boardctl.py phase`. Hyphen, colon, en and em
+#: dash, with or without the space — nothing here assumes one shape, because the
+#: whole point is that the writer chose it and not us.
+_VERB_SEP = re.compile(r"^\s*(?:[-:–—]+\s*)?")
+
+
+def _drop_repeated_verb(phase, words):
+    """The claim's words, without the phase word if they open by repeating it.
+
+    [his, 2026-07-29] *"if the verb at the end of the top line is the same as the
+    verb at the start of the second line, then hide the verb (or just dont use it)
+    in the second line"*. The card's first line ends in that word — *"Barbatos is
+    coding"* — so *"coding - writing highlight.py"* under it says it twice, which
+    is §9.1's repeated metadata.
+
+    Case-insensitive, and only ever the LEADING word: a different verb is left
+    exactly as written, and so is one that merely occurs later in the sentence.
+    If dropping it would leave nothing at all, the words stay — a blank second
+    line under a card is worse than a repeated word.
+    """
+    w = (phase or "").strip().lower()
+    if not w or not words:
+        return words
+    if words[:len(w)].lower() != w:
+        return words
+    rest = words[len(w):]
+    # It has to be a WORD boundary: `coding` must not eat the front of
+    # `codingstyle`, and `read` must not eat `reading the parser`.
+    if rest[:1].isalnum() or rest[:1] == "_":
+        return words
+    rest = _VERB_SEP.sub("", rest, count=1).strip()
+    return rest or words
+
+
 def says_detail(rec):
     """The claim's SECOND line: the words the agent gave for what it is doing,
     verbatim and on their own line.
@@ -670,6 +705,7 @@ def says_detail(rec):
     if not phase:
         return ""
     words = " ".join((rec.get("claimDoing") or "").split())
+    words = _drop_repeated_verb(phase, words)
     if not words:
         return ""
     return words if phase.lower() in TICKLESS else words + "..."
