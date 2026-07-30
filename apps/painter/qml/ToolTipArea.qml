@@ -26,16 +26,33 @@ MouseArea {
             dwell.restart();
         } else {
             dwell.stop();
-            area.open = false;
+            area.close();
         }
     }
-    onEnabledChanged: if (!enabled) { dwell.stop(); area.open = false; }
+    onEnabledChanged: if (!enabled) { dwell.stop(); area.close(); }
+
+    // The retraction SNAPS (docs/DESIGN.md §8), and the gate is cleared BEFORE the
+    // assignment for a reason: `Behavior { enabled: area.open }` is a second
+    // binding over the same property and QML gives no ordering between the two,
+    // so the close animated anyway — measured offscreen against the real
+    // component, 240 -> 143 -> 42 -> 0 over ~200ms. Doing it imperatively cannot
+    // lose that race. (Same fix in `apps/board/qml/ToolTipArea.qml`.)
+    function close() {
+        chip.animate = false;
+        chip.slide = 0;
+        area.open = false;
+    }
 
     // 350ms, the panel Tooltip.qml dwell.
     Timer {
         id: dwell
         interval: 350
-        onTriggered: { chip.place(); area.open = true; }
+        onTriggered: {
+            chip.place();
+            chip.animate = true;
+            chip.slide = 1;
+            area.open = true;
+        }
     }
 
     Item {
@@ -60,9 +77,12 @@ MouseArea {
 
         // The reveal is the CLIP growing rightward from a fixed left edge; the
         // card inside is full size the whole time.
-        property real slide: area.open ? 1 : 0
+        // DRIVEN by the dwell and by `area.close()`, never bound to `open` —
+        // see the note on that function.
+        property bool animate: false
+        property real slide: 0
         Behavior on slide {
-            enabled: area.open      // retraction is immediate, not a slide back
+            enabled: chip.animate   // out over 220ms; back in one frame
             NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
         }
 
