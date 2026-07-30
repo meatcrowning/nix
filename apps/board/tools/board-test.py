@@ -1153,8 +1153,8 @@ def test_todo_tags(tmp):
               B.read(path) == before)
     n = len(B.parse(B.read(path))["todo"])
     check("...while every line tagged is fine, and lands as separate bullets",
-          bm.note("INFORMATION: **one** - handed to Marbas, nothing landed yet.\n"
-                  "INFORMATION: **two** - handed to Zepar, nothing landed yet.",
+          bm.note("INFORMATION: **one** - summoned Marbas, nothing landed yet.\n"
+                  "INFORMATION: **two** - summoned Zepar, nothing landed yet.",
                   path=path)
           and len(B.parse(B.read(path))["todo"]) == n + 2,
           [t["text"] for t in B.parse(B.read(path))["todo"]])

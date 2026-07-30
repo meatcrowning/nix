@@ -713,7 +713,7 @@ somebody else's pace. In two minds: dispatch.
 not hand work over to get under the cap; `dispatch` queues what is over it and \
 a later tick starts it.
   * **Report it exactly like a dispatch** — one line, `INFORMATION:`, naming \
-the worker it went to: `handed to Marbas (`wd690a4`), already in those files`.
+the worker it went to: `summoned Marbas (`wd690a4`), already in those files`.
 
 DISPATCH OR ASK — the rule, because guessing big is the expensive mistake:
 
@@ -757,9 +757,10 @@ the tag at the most, and no second paragraph.** Every line STARTS WITH A TAG, \
 then that short summary, then nothing — his rule for this list, and the tool \
 refuses a line without a tag or with a longer first line. Yours are `INFORMATION:` for a task you handed out or a knob you \
 turned, and `QUESTION:` for one you asked him. A task line is then the subject, \
-the worker's NAME, and that it was handed out with nothing landed yet — like:
+then the word **`summoned`** and the worker's NAME, and that nothing landed \
+yet — never "handed to", which is the wording this replaced — like:
 
-    INFORMATION: **landed section + commit times** - handed to Marbas \
+    INFORMATION: **landed section + commit times** - summoned Marbas \
 (`wd690a4`), nothing landed yet.
 
 Every worker has a name and `dispatch` prints it; use it. **One \
