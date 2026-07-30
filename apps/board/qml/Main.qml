@@ -420,29 +420,31 @@ Window {
 
                 // Top of the chooser to the bottom of the last meter. The 4s are
                 // the lead-ins below, stated once here and once at each of them.
-                readonly property real pickCol: capPick.y + capPick.height
+                readonly property real pickCol: ministerPick.y + ministerPick.height
                     + (usageCol.visible ? 4 + usageCol.height : 0)
 
                 // ONE edge for the whole column, and it is the widest control in
                 // it — his rule for the meters ("exactly as wide as the model
                 // selection box") is that the column has a single right and a
-                // single left edge, and two dropdowns of different label lengths
-                // would otherwise give it three. Bound to the labels, never a
+                // single left edge, and four dropdowns of different label lengths
+                // would otherwise give it five. Bound to the labels, never a
                 // number, so a longer model name still widens all of it (§2.7).
-                readonly property real colW: Math.max(modelPick.implicitWidth,
-                                                      capPick.implicitWidth)
+                readonly property real colW:
+                    Math.max(summonerPick.implicitWidth, modelPick.implicitWidth,
+                             capPick.implicitWidth, ministerPick.implicitWidth)
 
-                // ...and ONE arrow column, for the same reason. Both labels are
-                // padded out to the longer of the two so the `v` on each lands
+                // ...and ONE arrow column, for the same reason. Every label is
+                // padded out to the longest of the four so the `v` on each lands
                 // on the same cell; a character count, because the font is
-                // monospace and the two controls are centred (§2.7).
+                // monospace and the controls are centred (§2.7).
                 readonly property int pickCells:
-                    Math.max(Agents.modelLabel.length, Agents.capLabel.length)
+                    Math.max(Agents.summonerLabel.length, Agents.modelLabel.length,
+                             Agents.capLabel.length, Agents.ministerLabel.length)
 
                 InputBox {
                     id: askBox
                     width: parent.width - parent.colW - 10
-                    minHeight: parent.pickCol - modelPick.y
+                    minHeight: parent.pickCol - summonerPick.y
                     fgAccent: win.fgAccent
                     fgText: win.fgText
                     fgDim: win.fgDim
@@ -458,29 +460,55 @@ Window {
                     onCaretLeft: () => win.caretLeft("msg:queue")
                 }
 
-                // Both of these are MENUS, not combo boxes: §7.2 says menus on
-                // this desktop are ours and are `CtxMenu`, and a chooser with a
+                // FOUR of these, and the ORDER IS HIS. [his, 2026-07-29] *"1.
+                // number of summoners 2. summoner model 3. number of ministers
+                // 4. minister model"* — so the column reads count, model, count,
+                // model, and each count names the role of the model under it.
+                // That pairing is what lets the labels stay as short as they are:
+                // `fable 5` on its own is ambiguous between the two models, and
+                // `1 summoner` directly above it is not.
+                //
+                // Every one of them is a MENU, not a combo box: §7.2 says menus
+                // on this desktop are ours and are `CtxMenu`, and a chooser with a
                 // handful of entries is that menu with a resting label. They are
                 // one component (`PickBox.qml`) because they are one control —
-                // [his, 2026-07-29] the cap is *"another drop down"*, in the
-                // idiom of the one beside it — and the tick beside each live
-                // entry comes from `boardwork`, so neither control can disagree
-                // with what will actually happen.
+                // [his, 2026-07-29] the second was *"another drop down"*, in the
+                // idiom of the first — and the tick beside each live entry comes
+                // from `boardwork`, so none of them can disagree with what will
+                // actually happen.
                 PickBox {
-                    id: modelPick
+                    id: summonerPick
                     padTo: parent.pickCells
                     anchors.right: parent.right
                     // Flush with the box's own top, not inset by the 3px the
-                    // box pads its first line by: the box is now as tall as
-                    // this column, so the two are only "the same height" if
-                    // they start and end on the same rows.
+                    // box pads its first line by: the box is as tall as this
+                    // column, so the two are only "the same height" if they
+                    // start and end on the same rows.
                     y: 0
+                    width: parent.colW
+                    label: Agents.summonerLabel
+                    // What it changes and WHEN, which is the whole promise: a
+                    // summoner already planning is not restarted, and a tick with
+                    // one sentence in it runs one summoner however high this is.
+                    hint: "how many summoners may plan at once - the next tick honours it"
+                    items: () => win.summonerItems()
+                    popup: menu
+                    fgDim: win.fgDim
+                    fgAccent: win.fgAccent
+                }
+
+                PickBox {
+                    id: modelPick
+                    padTo: parent.pickCells
+                    anchors.top: summonerPick.bottom
+                    anchors.topMargin: 4
+                    anchors.right: summonerPick.right
                     width: parent.colW
                     label: Agents.modelLabel
                     // What it changes, and WHEN it takes effect. The second half
                     // is the whole of the promise: a running orchestrator is not
                     // restarted and not re-pointed.
-                    hint: "which model reads what you type - the one running now keeps its own"
+                    hint: "which model a summoner reads what you type on - the one running now keeps its own"
                     items: () => win.modelItems()
                     popup: menu
                     fgDim: win.fgDim
@@ -509,6 +537,33 @@ Window {
                     label: Agents.capLabel
                     hint: "the most ministers allowed to work at once - the next tick honours it"
                     items: () => win.capItems()
+                    popup: menu
+                    fgDim: win.fgDim
+                    fgAccent: win.fgAccent
+                }
+
+                // ...and under THAT, what those ministers run on. [his,
+                // 2026-07-29] *"do not allow ministers to be anything higher than
+                // opus 5 medium thinking."* So this control offers
+                // `boardwork.MINISTER_MODELS` and nothing else, ceiling first —
+                // and the ceiling is enforced AGAIN at the spawn
+                // (`boardwork.role_flags`), because a control is not a guard
+                // against a file he or an agent edited by hand.
+                //
+                // The label carries the thinking budget as well as the family
+                // (`opus 5 medium`) — it is one choice, and a chooser that showed
+                // only half of what it set would be the §10 failure with a
+                // shorter string.
+                PickBox {
+                    id: ministerPick
+                    padTo: parent.pickCells
+                    anchors.top: capPick.bottom
+                    anchors.topMargin: 4
+                    anchors.right: capPick.right
+                    width: parent.colW
+                    label: Agents.ministerLabel
+                    hint: "what ministers run on, up to opus 5 medium - the next one dispatched gets it"
+                    items: () => win.ministerItems()
                     popup: menu
                     fgDim: win.fgDim
                     fgAccent: win.fgAccent
@@ -552,10 +607,10 @@ Window {
                     // and the same 4 this block leaves under itself, so the card
                     // keeps one gap and not three. The 5h/7d rows still butt
                     // together; only the lead-in moved.
-                    anchors.top: capPick.bottom
+                    anchors.top: ministerPick.bottom
                     anchors.topMargin: 4
-                    anchors.right: capPick.right
-                    width: capPick.width
+                    anchors.right: ministerPick.right
+                    width: ministerPick.width
                     visible: Usage.rows.length > 0
                     // Zero: each meter already carries its own line box (§4.1),
                     // and stacked readouts butt together like every other tiled
@@ -1555,6 +1610,40 @@ Window {
                     win.status = "could not save that choice";
                 else
                     win.status = m.label + " orchestrates from the next prompt on";
+            }
+        }));
+    }
+
+    // How many summoners may plan at once. Same shape and the same honesty as
+    // the two above: the tick reads the store, so the footer says when it
+    // applies rather than that it has already happened (§10).
+    function summonerItems() {
+        return Agents.summonerCounts.map((s) => ({
+            label: (s.current ? "* " : "  ") + s.label,
+            trigger: () => {
+                if (!Agents.chooseSummoners(s.n))
+                    win.status = "could not save that choice";
+                else
+                    win.status = "up to " + s.label
+                        + " from the next tick on - nothing running is stopped";
+            }
+        }));
+    }
+
+    // What the ministers run on. The list is `boardwork.MINISTER_MODELS`, which
+    // stops at opus 5 medium by his rule, so there is nothing here to disable
+    // and nothing greyed out: a chooser that draws what it will not do is the
+    // §10 failure (see `boardwork.role_flags`, which enforces the same ceiling
+    // where a minister is actually spawned).
+    function ministerItems() {
+        return Agents.ministers.map((m) => ({
+            label: (m.current ? "* " : "  ") + m.label,
+            trigger: () => {
+                if (!Agents.chooseMinister(m.name))
+                    win.status = "could not save that choice";
+                else
+                    win.status = "ministers run on " + m.label
+                        + " from the next one dispatched on";
             }
         }));
     }

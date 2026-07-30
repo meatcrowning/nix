@@ -26,8 +26,10 @@ The orchestrator's verbs — how one sentence he typed becomes several agents
     boardctl.py dispatch 'wire FOCUS through vtbclient' --where 'apps/pylib/**'
     boardctl.py ask 'How far should the fade reach?' --option 'apps only' \\
         --option 'apps and panel' --if-unanswered 'the apps get it, nothing else'
-    boardctl.py cap 6                              # workers allowed at once
-    boardctl.py model opus                         # which model orchestrates
+    boardctl.py cap 6                              # ministers allowed at once
+    boardctl.py summoners 2                        # summoners planning at once
+    boardctl.py model opus                         # which model summons
+    boardctl.py minister 'sonnet 5 low'            # what a minister runs on
     boardctl.py phase coding --doing 'the vtbclient parser'
 
 **`phase` records what you SAY you are doing and does not set the phase your
@@ -323,6 +325,33 @@ def cmd_cap(a):
     return 0
 
 
+def cmd_summoners(a):
+    if a.n is None:
+        print(bw.summoners())
+        return 0
+    print("up to %d summoner(s) plan at once" % bw.set_summoners(a.n))
+    return 0
+
+
+def cmd_minister(a):
+    """What the ministers run on. Capped at opus 5 medium by his rule, so this
+    prints the whole of what is reachable and refuses anything else — the
+    dropdown's list and this one are `boardwork.MINISTER_MODELS`."""
+    if a.name is None:
+        cur = bw.minister_model()
+        for flag, effort, label in bw.MINISTER_MODELS:
+            print("%s %-28s %-7s %s"
+                  % ("*" if (flag, effort) == cur else " ", flag, effort, label))
+        return 0
+    try:
+        flag, effort = bw.set_minister_model(a.name)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    print("the next minister runs on %s at %s effort" % (flag, effort))
+    return 0
+
+
 def cmd_model(a):
     """Which model orchestrates. The dropdown beside his box writes the same
     file; this is the scriptable half, and what a harness drives."""
@@ -483,9 +512,18 @@ def main(argv=None):
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_cap)
 
+    s = sub.add_parser("summoners", help="how many summoners may plan at once")
+    s.add_argument("n", nargs="?", type=int, default=None)
+    s.set_defaults(fn=cmd_summoners)
+
     s = sub.add_parser("model", help="which model the next orchestrator runs on")
     s.add_argument("name", nargs="?", default=None)
     s.set_defaults(fn=cmd_model)
+
+    s = sub.add_parser("minister", help="what the ministers run on (at most "
+                                        "opus 5 medium)")
+    s.add_argument("name", nargs="?", default=None)
+    s.set_defaults(fn=cmd_minister)
 
     s = sub.add_parser("inbox", help="his mid-flight notes to a running agent")
     s.add_argument("what", nargs="?", default="list",

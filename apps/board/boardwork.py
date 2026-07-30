@@ -166,6 +166,22 @@ DEFAULT_CAP = 4
 #: disagree with the store.
 CAP_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8]
 
+#: How many SUMMONERS may plan at once when nothing says otherwise. One, which
+#: is what this system did before the control existed: a tick drained everything
+#: he had typed into a single orchestrator prompt, so adding the dropdown moved
+#: no behaviour on its own.
+DEFAULT_SUMMONERS = 1
+
+#: What the top dropdown offers. Small on purpose and for a different reason
+#: than `CAP_CHOICES`: a summoner run is WAITED ON by the tick that started it
+#: (`board-watch.work_the_queue`), so every one of them is a claude session held
+#: open for up to `BOARD_ORCH_TIMEOUT` while the board's flock is held. Four is
+#: as far as that is honest. Not a ceiling — `boardctl.py summoners <n>` takes
+#: any n >= 1, the way every typed selector here is more forgiving than the
+#: drawn one, and a value of his that is off the list is drawn and ticked rather
+#: than hidden.
+SUMMONER_CHOICES = [1, 2, 3, 4]
+
 #: A worker is capped like a decision agent is — the same 45 minutes, so one
 #: wedged run cannot hold a slot for the rest of the day.
 WORKER_TIMEOUT_S = int(os.environ.get("BOARD_WORK_TIMEOUT", "2700"))
@@ -233,6 +249,69 @@ def set_cap(n):
         os.fsync(f.fileno())
     os.replace(tmp, cap_file())
     return n
+
+
+# ------------------------------------------------------- how many summoners
+#: [his, 2026-07-29] four dropdowns at the top of the window, in his order:
+#: *"1. number of summoners 2. summoner model 3. number of ministers 4. minister
+#: model"*. This is the first of them, and it is the only one of the four that
+#: had no store at all before.
+#:
+#: What it MEANS, because a count is only honest if it names something real: a
+#: tick with something in the queue splits what he typed across up to this many
+#: orchestrator runs, started together (`board-watch.work_the_queue`). It is a
+#: ceiling on the fan-out, not a quota — two summoners with one sentence queued
+#: is one summoner, because there is nothing for the second to read.
+def summoners_file():
+    return os.path.join(_root(), "summoners")
+
+
+def summoners():
+    env = os.environ.get("BOARD_MAX_SUMMONERS")
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    try:
+        with open(summoners_file()) as f:
+            return max(1, int(f.read().strip()))
+    except (OSError, ValueError):
+        return DEFAULT_SUMMONERS
+
+
+def set_summoners(n):
+    n = max(1, int(n))
+    os.makedirs(_root(), exist_ok=True)
+    tmp = summoners_file() + ".tmp"
+    with open(tmp, "w") as f:
+        f.write("%d\n" % n)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, summoners_file())
+    return n
+
+
+def split_for_summoners(items, n=None):
+    """`items` in at most `n` contiguous groups, longest first, none empty.
+
+    Contiguous rather than round-robin so two sentences he typed one after the
+    other about the same thing stay in one summoner's prompt where a human would
+    read them together. With `n == 1` this is `[items]` — the whole point, since
+    that is the behaviour that predates the control.
+    """
+    items = list(items)
+    n = max(1, int(summoners() if n is None else n))
+    n = min(n, len(items)) or 1
+    if not items:
+        return []
+    size, extra = divmod(len(items), n)
+    out, i = [], 0
+    for k in range(n):
+        take = size + (1 if k < extra else 0)
+        out.append(items[i:i + take])
+        i += take
+    return out
 
 
 # ------------------------------------------------- which model orchestrates
@@ -320,6 +399,118 @@ def set_orch_model(flag):
         os.fsync(f.fileno())
     os.replace(tmp, orch_model_file())
     return flag
+
+
+# --------------------------------------------- what the MINISTERS run on
+#: The fourth dropdown, and the one with a hard ceiling on it. [his, 2026-07-29]
+#: *"do not allow ministers to be anything higher than opus 5 medium
+#: thinking."* So this list is the WHOLE of what a minister may ever be, and it
+#: is an ALLOWLIST rather than an ordering: "higher" needs no definition if the
+#: only reachable values are the ones written here.
+#:
+#: `(flag, effort, label)`, ceiling first because the ceiling is also the
+#: default — `("claude-opus-5", "medium")` is exactly what `ROLES` pinned before
+#: this control existed, so drawing the dropdown moved no behaviour on its own.
+#: Below it: the same model thinking less, then the smaller families. Effort
+#: never exceeds `medium` for ANY of them, because his sentence caps the thinking
+#: budget as well as the family and a bigger budget on a smaller model is still a
+#: tier he did not offer.
+MINISTER_MODELS = [
+    ("claude-opus-5", "medium", "opus 5 medium"),
+    ("claude-opus-5", "low", "opus 5 low"),
+    ("claude-sonnet-5", "medium", "sonnet 5 medium"),
+    ("claude-sonnet-5", "low", "sonnet 5 low"),
+    ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
+    ("claude-haiku-4-5-20251001", "low", "haiku 4.5 low"),
+]
+
+#: The ceiling, named once. It is the first row of the list above and the value
+#: everything that cannot be honoured falls back to.
+MINISTER_CEILING = (MINISTER_MODELS[0][0], MINISTER_MODELS[0][1])
+
+
+def minister_choices():
+    return {(f, e) for f, e, _ in MINISTER_MODELS}
+
+
+def minister_file():
+    return os.path.join(_root(), "minister-model")
+
+
+def minister_label(pair=None):
+    """The prose for a `(flag, effort)` pair — what the closed control reads and
+    what the footer reports. Never the wire values (docs/DESIGN.md §2)."""
+    flag, effort = pair or minister_model()
+    for f, e, lab in MINISTER_MODELS:
+        if (f, e) == (flag, effort):
+            return lab
+    return "%s %s" % (flag, effort)
+
+
+def minister_model():
+    """`(flag, effort)` the NEXT minister spawns with, never above the ceiling.
+
+    Read at spawn time and cached nowhere, so his choice reaches the next
+    dispatch and no running minister is re-pointed — the same mechanism
+    `orch_model()` is, and for the same reason.
+
+    Anything the file says that is not one of `MINISTER_MODELS` — stale, hand
+    edited, or written by a version that offered more — is the CEILING, not the
+    file's value and not a spawn that dies on a CLI usage error. That is the
+    enforcement half of his rule: the dropdown cannot offer more, and this cannot
+    read more.
+    """
+    try:
+        with open(minister_file()) as f:
+            parts = f.read().split()
+    except OSError:
+        return MINISTER_CEILING
+    pair = (parts[0], parts[1]) if len(parts) >= 2 else None
+    return pair if pair in minister_choices() else MINISTER_CEILING
+
+
+def resolve_minister(name):
+    """A `(flag, effort)` from what somebody typed. Exact label, exact
+    `<flag> <effort>`, or one unambiguous case-insensitive substring of either —
+    `resolve_model`'s forgiveness, and its refusal: ambiguity is an error.
+
+    A model this board offers a SUMMONER but not a minister (`fable 5`) is
+    refused here with the reason, rather than silently becoming the ceiling: a
+    typed selector that quietly does something else is worse than one that says
+    no.
+    """
+    want = " ".join((name or "").split()).lower()
+    if not want:
+        raise ValueError("no minister model named")
+    rows = [("%s %s" % (f, e), lab, (f, e)) for f, e, lab in MINISTER_MODELS]
+    for wire, lab, pair in rows:
+        if want in (wire.lower(), lab.lower()):
+            return pair
+    hits = [(lab, pair) for wire, lab, pair in rows
+            if want in wire.lower() or want in lab.lower()]
+    if len(hits) == 1:
+        return hits[0][1]
+    if hits:
+        raise ValueError("%r matches %s - be more specific"
+                         % (name, ", ".join(lab for lab, _ in hits)))
+    raise ValueError("not a minister this board may run: %r - the ceiling is %s "
+                     "and the choices are: %s"
+                     % (name, minister_label(MINISTER_CEILING),
+                        ", ".join(lab for _, _, lab in MINISTER_MODELS)))
+
+
+def set_minister_model(name):
+    """Choose it. Same atomic write as `set_cap`, because a dispatch may fire at
+    any moment and a half-written file must be impossible."""
+    flag, effort = resolve_minister(name)
+    os.makedirs(_root(), exist_ok=True)
+    tmp = minister_file() + ".tmp"
+    with open(tmp, "w") as f:
+        f.write("%s %s\n" % (flag, effort))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, minister_file())
+    return (flag, effort)
 
 
 # ------------------------------------------------------------------ dispatch
@@ -865,6 +1056,18 @@ DENY = ["Bash(hyprctl plugin:*)", "Bash(loginctl:*)",
 #: a model, not a thinking budget, and the argument above for buying the
 #: orchestrator's judgement is about the run's shape, not about which family it
 #: belongs to.
+#:
+#: A MINISTER's pair is his too — the fourth dropdown, read out of
+#: `minister_model()` at spawn — so the `claude-opus-5`/`medium` written below is
+#: what that function returns when he has never chosen, stated twice on purpose:
+#: it is the ceiling AND the default, and the two must not be able to drift.
+#:
+#: The two MINISTER roles. Both are drawn on his board as ministers and both are
+#: bound by the same ceiling, so the dropdown writes one store and this names who
+#: reads it — a decision agent that could be re-pointed while a worker could not
+#: would be the same control disagreeing with itself.
+MINISTER_ROLES = ("worker", "decision")
+
 ROLES = {
     "orchestrator": ("", "high"),
     "worker": ("claude-opus-5", "medium"),
@@ -880,13 +1083,25 @@ def role_flags(role):
     `BOARD_ORCH_MODEL` / `BOARD_ORCH_EFFORT`, `BOARD_WORKER_MODEL` /
     `BOARD_WORKER_EFFORT`, `BOARD_DECISION_MODEL` / `BOARD_DECISION_EFFORT`.
     Set one to the empty string to drop the flag and inherit the default.
+
+    **A MINISTER role is clamped after all of that**, environment included. [his,
+    2026-07-29] *"do not allow ministers to be anything higher than opus 5 medium
+    thinking"* — so the pair either is one of `MINISTER_MODELS` or becomes
+    `MINISTER_CEILING`, and there is no reachable route (stale file, hand-edited
+    file, exported variable, dropped flag inheriting whatever
+    `~/.claude/settings.json` says) by which a minister spawns above it. The
+    variables can still LOWER a minister, which is all a harness ever wanted.
     """
     model, effort = ROLES.get(role, ("", ""))
     if role == "orchestrator":
         model = orch_model()          # his choice, re-read on every spawn
+    elif role in MINISTER_ROLES:
+        model, effort = minister_model()   # his choice, capped, re-read likewise
     prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
     model = os.environ.get(prefix + "_MODEL", model).strip()
     effort = os.environ.get(prefix + "_EFFORT", effort).strip()
+    if role in MINISTER_ROLES and (model, effort) not in minister_choices():
+        model, effort = MINISTER_CEILING
     argv = []
     if model:
         argv += ["--model", model]

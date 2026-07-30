@@ -514,6 +514,56 @@ def _bw():
     return boardwork
 
 
+def test_summoner_fanout():
+    """The top dropdown has to reach the number of summoners that really start.
+
+    [his, 2026-07-29] *"number of summoners"*, and the rule for every one of
+    these four controls is that it applies or it is not shipped. So: what he
+    typed is split across up to that many orchestrator runs, every sentence
+    reaches exactly one of them, and one queued sentence is one summoner however
+    high the number is — the count is a ceiling on the fan-out, not a quota.
+    """
+    print("the summoner count - how many actually start")
+    d = tempfile.mkdtemp(prefix="board-watch-summon-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        for s in ("the first thing", "the second thing", "the third thing"):
+            r.note(s)
+        # One prompt file per run, named by the key, so the split itself is
+        # visible rather than inferred from a count.
+        stub = ('cat > "%s/prompt-$BOARD_WATCH_KEY"; echo "$BOARD_WATCH_KEY" >> %s'
+                % (d, r.fired))
+        r.run(spawn=stub, BOARD_MAX_SUMMONERS=2)
+        keys = r.fires()
+        check("two summoners, two runs, two distinct cards",
+              len(keys) == 2 and len(set(keys)) == 2, str(keys))
+        prompts = {k: open(os.path.join(d, "prompt-" + k)).read() for k in keys}
+        for s in ("the first thing", "the second thing", "the third thing"):
+            hits = [k for k, p in prompts.items() if s in p]
+            check("...and %r reached exactly one of them" % s, len(hits) == 1,
+                  str(hits))
+        check("...and the queue is empty, so nothing re-triggers",
+              r.queued() == [], r.queued())
+
+        r.clear()
+        r.note("something on its own")
+        r.run(spawn=stub, BOARD_MAX_SUMMONERS=4)
+        check("one sentence is one summoner, whatever the number says",
+              len(r.fires()) == 1, str(r.fires()))
+
+        r.clear()
+        r.note("one of two"), r.note("two of two")
+        r.run(spawn=stub, BOARD_MAX_SUMMONERS=1)
+        one = r.fires()
+        check("...and at one, everything he typed goes to that one run",
+              len(one) == 1
+              and "one of two" in open(os.path.join(d, "prompt-" + one[0])).read()
+              and "two of two" in open(os.path.join(d, "prompt-" + one[0])).read(),
+              str(one))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_the_loop():
     """The 2026-07-28 hot loop, as three separate defects.
 
@@ -1088,6 +1138,7 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
 
     test_worker_outlives_the_tick()
+    test_summoner_fanout()
     test_the_loop()
     test_host_affinity()
     test_landed_needs_no_tick()

@@ -1344,11 +1344,12 @@ where a sentence he typed reaches nobody and says nothing.
 [his, 2026-07-29] *"the prompt box should extend so that it is not a single line
 but rather multiple lines so that it is the same height as from the top of the
 model selector box to the bottom of the indicators. the indicators should be
-anchored to the model selector box not the prompt box as they are now"*. So
-`modelPick` sits at y 0, the meters anchor to **its** bottom, and
-`askBox.minHeight` is that column's whole span — chooser, the cap dropdown, both
-meters and a 4px rung between each — read off their real geometry (the meters
-anchor to the cap box, which anchors to the chooser), never a number, so a
+anchored to the model selector box not the prompt box as they are now"*. So the
+column's TOP control sits at y 0 — `summonerPick` since his four dropdowns
+landed — each control anchors to the one above it, the meters anchor to the
+**last** of them, and `askBox.minHeight` is that column's whole span — four
+dropdowns, both meters and a 4px rung between each — read off their real
+geometry, never a number, so a
 longer model
 label or a bigger font size moves box and column together (§2.7). The
 dependency runs column -> box and only that way: anchoring the meters to the box
@@ -1362,7 +1363,56 @@ the area beside the meters empty — and the whole tall region is the hover fill
 and the click target (§5.3), in both the resting and the open state.
 Regression layer: four checks in `test_window`, measured against the real items.
 
-### The dropdown beside the box: which model orchestrates
+### FOUR dropdowns beside the box, and the order is his
+
+[his, 2026-07-29] *"1. number of summoners 2. summoner model 3. number of
+ministers 4. minister model"*. Top to bottom, in that order, in one column to the
+right of the box he types in, with the usage meters under the last of them.
+
+- **Each COUNT names the role of the MODEL under it**, which is what lets the
+  labels stay as short as they are: `fable 5` on its own does not say which of
+  the two models it is, and `1 summoner` directly above it does. The hover line
+  on each control says the rest (§8).
+- **One component for all four (`qml/PickBox.qml`)**, one `colW`, one
+  `pickCells` arrow column, and one store each. A fifth copy of the chrome is
+  how four controls that must look identical stop being (docs/DESIGN.md §19.1).
+- **Every one of them APPLIES**, and the harnesses assert the applying rather
+  than the drawing: `apps/board/tools/board-test.py` for the stores, the ceiling
+  and the order on screen, `tools/board-watch-test.py::test_summoner_fanout` for
+  how many summoners really start. A dropdown that only rendered would be the
+  §10 failure this app is most exposed to.
+- **All four choices are machine-local** — files under `~/.local/state/board/`,
+  which does not sync — so `top` and `book` can be set differently and neither
+  surprises the other.
+
+### 1. How many summoners plan at once
+
+[his, 2026-07-29] *"number of summoners"*.
+
+- **`boardwork.summoners()` / `set_summoners()`**, the file
+  `~/.local/state/board/summoners`, also written by `boardctl.py summoners <n>`
+  and overridable by `BOARD_MAX_SUMMONERS` for a harness.
+- **What it MEANS is a ceiling on the fan-out, not a quota.** A tick with
+  something in the queue splits what he typed across up to that many
+  orchestrator runs (`boardwork.split_for_summoners` — contiguous, longest
+  first, none empty) and starts them together in threads
+  (`board-watch.work_the_queue` → `_summon`). One queued sentence is ONE
+  summoner however high the number is, because there is nothing for a second to
+  read.
+- **Contiguous, not round-robin**: two sentences he typed one after the other
+  about the same thing stay in one prompt, where a human would read them
+  together.
+- **The tick is held for the slowest run, not the sum** — the runs are waited on
+  (that is what puts a failure back on his board in his own words), so the
+  flock's worst case does not grow with the count. Each failed run leaves its
+  own `QUEUE_FAIL` bullet, written serially after the join because `board.md` is
+  one file.
+- **The range offered is `SUMMONER_CHOICES` (1-4)**, small on purpose: every
+  summoner is a claude session held open for up to `BOARD_ORCH_TIMEOUT` while
+  the tick's flock is held. `boardctl.py summoners` still takes any `n >= 1`, and
+  a value of his off the list is drawn and ticked rather than hidden.
+
+### 2. The dropdown beside the box: which model summons
 
 [his, 2026-07-29] *"add a drop down to the right of the top prompt box that
 allows the user to select which model they wish the orchestrator to be. if this
@@ -1400,9 +1450,11 @@ defined model on the next prompt it recieves."*
 **Workers and decision agents are `claude-opus-5` at `medium`** — [his, same
 message] *"the other agents should all be opus 5 medium thinking"*. That
 replaces the earlier `("", "")`, which meant "inherit `~/.claude/settings.json`"
-on the reading that nobody had asked for them to be pinned. Somebody has.
+on the reading that nobody had asked for them to be pinned. Somebody has. It is
+now the DEFAULT and the CEILING of the fourth dropdown below, which is the same
+value read twice on purpose.
 
-### ...and under THAT, how many agents may run at once
+### 3. ...and under THAT, how many agents may run at once
 
 [his, 2026-07-29] *"between the model selector and the indicators, add another
 drop down for the max number of agents available."*
@@ -1423,16 +1475,49 @@ drop down for the max number of agents available."*
   beside a number that is not live. `BOARD_MAX_WORKERS` still wins over the
   file, which is why the harness pops it before checking that picking one
   writes anything.
-- **One component for both dropdowns: `qml/PickBox.qml`.** Label, `v`, hover
+- **One component for every dropdown: `qml/PickBox.qml`.** Label, `v`, hover
   chrome, and `CtxMenu` under it — his *"another drop down"* is the same
   control, and a second hand-rolled copy of the chrome is how two things that
   must look identical stop being (docs/DESIGN.md §19.1). Its menu property is
   called `popup`, not `menu`, so a call site can write `popup: menu` without the
   id resolving to the property.
-- **The column has ONE left and ONE right edge**: `colW` is the wider of the two
-  dropdowns' `implicitWidth`, and the meters take it too — his "exactly as wide
-  as the model selection box" generalised, since two labels of different lengths
-  would otherwise give that column three edges.
+- **The column has ONE left and ONE right edge**: `colW` is the widest of the
+  four dropdowns' `implicitWidth`, and the meters take it too — his "exactly as
+  wide as the model selection box" generalised, since labels of different lengths
+  would otherwise give that column five edges.
+
+### 4. ...and under that, what the MINISTERS run on — CAPPED
+
+[his, 2026-07-29] *"do not allow ministers to be anything higher than opus 5
+medium thinking."* That is a hard ceiling and it is enforced in **two independent
+places**, because a control is not a guard against a file:
+
+- **The list cannot offer more.** `boardwork.MINISTER_MODELS` is an ALLOWLIST of
+  `(flag, effort, label)`, ceiling first, and it is the only list — the dropdown,
+  `boardctl.py minister` and `resolve_minister` all read it. An allowlist rather
+  than an ordering, because *"higher"* needs no definition if nothing above the
+  ceiling is reachable. Effort never exceeds `medium` for any family: his
+  sentence caps the thinking budget as well as the model, and a bigger budget on
+  a smaller model is still a tier he did not offer. `fable 5` is deliberately
+  absent — it is what a SUMMONER defaults to, and this list may not exceed opus 5.
+- **The spawn cannot pass more.** `role_flags()` reads `minister_model()` for
+  both `MINISTER_ROLES` (`worker`, `decision`) and then clamps the pair to
+  `MINISTER_CEILING` if it is not in the list — **after** the `BOARD_WORKER_*` /
+  `BOARD_DECISION_*` environment overrides, so those can lower a minister and
+  never raise one, and an emptied override cannot inherit whatever
+  `~/.claude/settings.json` says. A stale, hand-edited or retired value is the
+  ceiling, not a spawn dying on a CLI usage error and a `FAILED:` bullet he has
+  to decode.
+- **`minister_model()` returns a `(flag, effort)` PAIR** — one choice, so the
+  label carries both (`opus 5 medium`). A chooser that showed only half of what
+  it sets would be the §10 failure with a shorter string.
+- **The store** is `~/.local/state/board/minister-model`, one line,
+  `<flag> <effort>`; `boardctl.py minister [name]` is the typed half and is
+  forgiving the way `resolve_model` is (exact, or one unambiguous substring —
+  ambiguity is an error). A model this board offers a summoner but not a minister
+  is refused **with the reason** rather than silently becoming the ceiling.
+- Read at spawn, cached nowhere: a minister already running keeps what it started
+  with, and the next one dispatched reads the file again.
 
 ### ...and under that, how much of his usage is gone
 
