@@ -857,7 +857,7 @@ def agents(procs=None):
         # own two-line startup pair instead of the bare `nothing yet` — [his,
         # 2026-07-29] *"Solomon wields the ring..."* while his transcript is
         # still a second away (`starting`), then *"Solomon etches the
-        # triangle..."* once it is there and nothing has happened in it yet
+        # circle..."* once it is there and nothing has happened in it yet
         # (`none`). Scoped to the orchestrator card so ordinary workers keep the
         # honest bare placeholder; the wordings and the ORDER are
         # `boardphase.orch_doing_line`, which carries the argument for both.

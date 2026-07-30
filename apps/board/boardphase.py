@@ -583,9 +583,16 @@ def says_line(rec, who=""):
 
 # ------------------------------------------------- SOLOMON'S OWN VOCABULARY
 # The orchestrator's card is the one that speaks in his own voice — [his,
-# 2026-07-29] *"Solomon wields the ring..."*, *"Solomon etches the triangle..."*,
+# 2026-07-29] *"Solomon wields the ring..."*, *"Solomon etches the circle..."*,
 # *"Solomon summons"*, *"Solomon awaits <agent>..."*. His exact wordings, so do
 # not smooth them into the generic `<subj> is <word>` shape the workers use.
+#
+# **The CIRCLE is his, the TRIANGLE is theirs** — [his, 2026-07-29] *"instead of
+# \"solomon etches the triangle...\" it should read \"solomon etches the
+# circle...\""*. In the Lesser Key the magician stands in the circle and the
+# spirit is bound in the triangle, so this line said the wrong shape. The word
+# is not retired: `triangle` now names the AREA THE MINISTERS RESIDE IN — the
+# agents section of the board, below Solomon's own summoner section.
 #
 # **Two of them are the STARTUP pair, and the order is the point.** `starting`
 # (his spawn exists, its transcript is a second away) leads, then `none` (the
@@ -618,7 +625,7 @@ def orch_doing_line(state, who=""):
     if state == "starting":
         return "%s wields the ring..." % subj
     if state == "none":
-        return "%s etches the triangle..." % subj
+        return "%s etches the circle..." % subj
     return ""
 
 
