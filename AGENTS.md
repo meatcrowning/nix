@@ -544,7 +544,10 @@ the conditional session and `aeroshell` activation.
 `tailscale up`/`status` need no sudo — that is how an agent drives it).
 
 **Every hole is an allowlist, per interface.** `share.nix` scopes the LAN holes
-to `enp12s0`; `tailscale.nix` opens exactly **22 (ssh) and 445 (SMB)** on
+to `enp12s0` and `kdeconnect.nix` scopes 1714-1764 there too — hand-rolled
+because `programs.kdeconnect.enable` opens that range on *every* interface with
+no opt-out, so the module is deliberately unused. `tailscale.nix` opens exactly
+**22 (ssh) and 445 (SMB)** on
 `tailscale0`. It is deliberately *not* a trusted interface — that setting
 published every listener on the box, including OpenRGB's unauthenticated SDK
 server on `0.0.0.0:6742`. **Anything loopback-pinned stays loopback-pinned**:
