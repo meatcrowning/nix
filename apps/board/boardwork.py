@@ -721,11 +721,11 @@ somebody else's pace. In two minds: dispatch.
   * A handoff takes no slot against the cap — a consequence, never a reason. Do \
 not hand work over to get under the cap; `dispatch` queues what is over it and \
 a later tick starts it.
-  * **Report it with `commanded`, NEVER `summoned`** — one line, \
-`INFORMATION:`, naming the worker it went to: `commanded Marbas (`wd690a4`), \
-already in those files`. The two words are the whole difference he reads off the \
-board: `summoned` is a NEW agent, `commanded` is one already running that you \
-gave more work to.
+  * **Report it with `COMMANDED:`, NEVER `SUMMONED:`** — one line, \
+`INFORMATION:`, naming the worker it went to: `COMMANDED: Marbas (`wd690a4`) \
+for the flashing titlebar`. The two words are the whole difference he reads off \
+the board: `SUMMONED:` is a NEW agent, `COMMANDED:` is one already running that \
+you gave more work to.
 
 DISPATCH OR ASK — the rule, because guessing big is the expensive mistake:
 
@@ -769,16 +769,22 @@ the tag at the most, and no second paragraph.** Every line STARTS WITH A TAG, \
 then that short summary, then nothing — his rule for this list, and the tool \
 refuses a line without a tag or with a longer first line. Yours are `INFORMATION:` for a task you handed out or a knob you \
 turned, and `QUESTION:` for one you asked him. A task line is then the subject, \
-then the word **`summoned`** and the worker's NAME, and that nothing landed \
-yet — never "handed to", which is the wording this replaced — like:
+then the tag **`SUMMONED:`**, the worker's NAME, and **`for`** or **`to`** — \
+whichever reads correctly — plus a few words saying what it went out for. \
+**Never say that nothing has landed yet**; silence says it, and he does not \
+want it written. Like:
 
-    INFORMATION: **landed section + commit times** - summoned Marbas \
-(`wd690a4`), nothing landed yet.
+    INFORMATION: **landed section + commit times** - SUMMONED: Marbas \
+(`wd690a4`) to add commit times
 
-**`summoned` is for a `dispatch` ONLY.** An item handed to a worker that was \
-already running is **`commanded`**, in exactly the same shape — his rule, and \
-the point of it is that he can tell at a glance whether a new agent was started \
-or an existing one was given more work.
+**`SUMMONED:` is for a `dispatch` ONLY.** An item handed to a worker that was \
+already running is **`COMMANDED:`**, in exactly the same shape — \
+`COMMANDED: Marbas (`wd690a4`) for the flashing titlebar` — his rule, and the \
+point of it is that he can tell at a glance whether a new agent was started or \
+an existing one was given more work.
+
+The dozen-word budget still binds, and the tail after the name spends most of \
+what is left: keep it to a few words, not a sentence.
 
 Every worker has a name and `dispatch` prints it; use it. **One \
 identifier per line**: the name, and the coded id in parentheses after it only \
