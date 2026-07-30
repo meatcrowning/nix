@@ -1360,6 +1360,162 @@ def test_todo_tags(tmp):
     check("...and grouping writes nothing", B.read(path) == before)
 
 
+# ------------------------- 1b1. a summon note dies when its result arrives
+def test_summon_cleared(tmp):
+    """*"once an agent give the board a completed, partial, etc message - its
+    related summon information message should be removed since the user would
+    already know that part."* [his, 2026-07-29]
+
+    So the board holds ONE line about one piece of work. The two halves worth a
+    harness are opposite failures: the note that must GO, and every note that
+    must not. A wrong deletion loses something he cannot get back, so the
+    matcher refuses to act on ambiguity — that refusal is checked here too,
+    because it is the part a later "improvement" would tidy away.
+    """
+    import boardmove as bm
+    import boardparse as B
+
+    path = os.path.join(tmp, "board.md")
+
+    def board(*bullets):
+        open(path, "w").write(FIXTURE)
+        for b in bullets:
+            bm.note(b, path=path)
+
+    def texts():
+        return [t["text"] for t in B.parse(B.read(path))["todo"]]
+
+    SUM_A = ("INFORMATION: **the landed section** - summoned Marbas "
+             "(`wd690a4`), nothing landed yet.")
+    SUM_B = ("INFORMATION: **the commit times** - summoned Zepar "
+             "(`w4f82de`), nothing landed yet.")
+
+    # ---- the note goes, and only that note ----
+    board(SUM_A, SUM_B, "QUESTION: **how far?** - say the word.")
+    n = len(texts())
+    bm.note("COMPLETION: **the landed section** - it reads the commit log.",
+            path=path, agent_id="wd690a4")
+    left = texts()
+    check("a worker's COMPLETION takes its own summon note with it",
+          not [t for t in left if "summoned Marbas" in t], left)
+    check("...and the OTHER worker's summon note is untouched",
+          any("summoned Zepar" in t for t in left), left)
+    check("...and his QUESTION is untouched",
+          any(t.startswith("QUESTION:") for t in left), left)
+    check("...one out, one in: the section is the same length",
+          len(left) == n, (len(left), n))
+    check("...and the preamble survives byte for byte",
+          B.read(path).startswith(FIXTURE.split("## NEEDS YOU")[0]))
+    check("...and the note's `placed` stamp goes with it, leaving no orphan",
+          B.read(path).count("<!-- placed:") == len([t for t in left
+                                                     if t.startswith(("QUESTION",
+                                                                      "INFORMATION",
+                                                                      "COMPLETION"))]),
+          B.read(path).count("<!-- placed:"))
+
+    # A summon note that WRAPPED is removed whole — a bullet is its first line
+    # plus whatever ran on under it, and leaving half of one behind would put an
+    # orphan paragraph where the note used to be.
+    board(SUM_A + "\n    It is already in those files.")
+    bm.note("COMPLETION: **the landed section** - done.", path=path,
+            agent_id="wd690a4")
+    check("a wrapped summon note is removed whole, continuation and all",
+          "already in those files" not in B.read(path), B.read(path))
+
+    # PARTIAL and FAILED are results too — a rebuild left pending or a worker
+    # that landed nothing is still an outcome he has read.
+    for tag in ("PARTIAL", "FAILED"):
+        board(SUM_A)
+        bm.note("%s: **the landed section** - a rebuild is pending." % tag,
+                path=path, agent_id="wd690a4")
+        check("a %s retires the summon note as well" % tag,
+              not [t for t in texts() if "summoned Marbas" in t], texts())
+
+    # ---- what must NEVER be removed ----
+    board(SUM_A)
+    bm.note("QUESTION: **the landed section** - which order?", path=path,
+            agent_id="wd690a4")
+    check("a QUESTION is not a result, so the summon note stays",
+          any("summoned Marbas" in t for t in texts()), texts())
+
+    board(SUM_A)
+    bm.note("INFORMATION: **a fact** - the times come from git.", path=path,
+            agent_id="wd690a4")
+    check("...nor is an INFORMATION note",
+          any("summoned Marbas" in t for t in texts()), texts())
+
+    board(SUM_A, "INFORMATION: **the cap** - it is 6 now.")
+    bm.note("COMPLETION: **the landed section** - done.", path=path,
+            agent_id="wd690a4")
+    check("a plain INFORMATION note that announces no summon is untouched",
+          any("the cap" in t for t in texts()), texts())
+
+    board(SUM_B)
+    bm.note("COMPLETION: **something else** - done.", path=path,
+            agent_id="wd690a4")
+    check("a result from a DIFFERENT worker removes nothing",
+          any("summoned Zepar" in t for t in texts()), texts())
+
+    board(SUM_A)
+    bm.note("COMPLETION: **the landed section** - done.", path=path)
+    check("a result from nobody in particular removes nothing",
+          any("summoned Marbas" in t for t in texts()), texts())
+
+    # ---- ambiguity is a refusal, never a guess ----
+    board(SUM_A, SUM_A.replace("the landed section", "a second job"))
+    bm.note("COMPLETION: **the landed section** - done.", path=path,
+            agent_id="wd690a4")
+    check("two summon notes naming one id: both stay, and nothing is guessed",
+          len([t for t in texts() if "summoned Marbas" in t]) == 2, texts())
+
+    # A note with NO id falls back to the NAME — that is the older shape, and
+    # the fallback is deliberately only for a note that carries no id at all: a
+    # name can be moved off a live agent (`boardagents.pick_name`), an id never.
+    board("INFORMATION: **an older summon** - summoned Marbas, nothing yet.")
+    bm.note("COMPLETION: **an older summon** - done.", path=path,
+            agent_id=_id_named("Marbas"))
+    check("an id-less summon note is matched by NAME",
+          not [t for t in texts() if "summoned Marbas" in t], texts())
+
+    board(SUM_A)
+    bm.note("COMPLETION: **the landed section** - done.", path=path,
+            agent_id=_id_named("Marbas"))
+    check("...but a name match never overrides an id that says otherwise",
+          any("summoned Marbas" in t for t in texts()), texts())
+
+    # ---- the several-results case: each takes its own, one call at a time ----
+    board(SUM_A, SUM_B)
+    bm.note("COMPLETION: **the landed section** - done.", path=path,
+            agent_id="wd690a4")
+    bm.note("PARTIAL: **the commit times** - a rebuild is pending.", path=path,
+            agent_id="w4f82de")
+    left = texts()
+    check("two workers reporting clears two summon notes and no more",
+          not [t for t in left if "summoned" in t] and len(left) == 3, left)
+
+    # ---- and the OTHER writer of a result passes the id explicitly ----
+    # board-watch writes the failure note for a worker whose process is gone, so
+    # `BOARD_AGENT_ID` there names the watcher and not the worker that died. It
+    # is checked as SOURCE, like the templates above: the copy that runs is
+    # whatever the last rebuild put in the store.
+    watch = os.path.join(os.path.dirname(APPS), "home", "srvs",
+                         "board-watch-files", "board-watch.py")
+    src = open(watch).read() if os.path.exists(watch) else ""
+    check("board-watch's dead-worker note names the worker it is a result for",
+          re.search(r"WORKER_FAIL\.format\(.*?agent_id=", src, re.S), bool(src))
+
+
+def _id_named(name):
+    """An agent id whose derived name is `name` — the harness's way of asking
+    for the id that goes with a name, since the mapping is one-way."""
+    import boardagents as ba
+    for i in range(4096):
+        aid = "w%04x" % i
+        if ba.name_for(aid) == name:
+            return aid
+    raise AssertionError("no id derives the name %r" % name)
+
+
 # ------------------------------------- 1b2. clearing a chore off the TO DO list
 TODO_FIXTURE = """# Board
 
@@ -4465,6 +4621,8 @@ def main():
         test_landed_upgrade(os.path.join(tmp, "lup"))
         os.makedirs(os.path.join(tmp, "tg"))
         test_todo_tags(os.path.join(tmp, "tg"))
+        os.makedirs(os.path.join(tmp, "sum"))
+        test_summon_cleared(os.path.join(tmp, "sum"))
         os.makedirs(os.path.join(tmp, "pl"))
         test_placed(os.path.join(tmp, "pl"))
         os.makedirs(os.path.join(tmp, "td"))

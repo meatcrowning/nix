@@ -1261,6 +1261,122 @@ def add_todo_bullet(lines, doc, bullet, when=None):
     return lines[:at] + block + lines[at:]
 
 
+# -------------------------------- a summon note dies when its result arrives
+# His rule, 2026-07-29: *"once an agent give the board a completed, partial, etc
+# message - its related summon information message should be removed since the
+# user would already know that part."*
+#
+# The orchestrator's note is a START, never a result (`boardwork.RULES`), so it
+# writes one `INFORMATION:` line per task it handed out — *"summoned Marbas
+# (`wd690a4`), nothing landed yet"*. That line is true for as long as nothing has
+# come back, and the moment the worker posts its own `COMPLETION:`/`PARTIAL:`/
+# `FAILED:` it is worse than noise: two bullets about one piece of work, the
+# upper one saying nothing landed yet under the one saying what did.
+#
+# It happens HERE rather than in `boardctl`, because the store has more than one
+# writer of a result — `boardctl note` for a worker that finished, board-watch's
+# `WORKER_FAIL` for one that died mid-sentence — and a rule implemented in one
+# caller is a rule that is true in one caller.
+#
+# CONSERVATIVE BY CONSTRUCTION. A wrong deletion loses something he cannot get
+# back; an undeleted summon note is a line he has already read. So:
+#
+#   * only a bullet whose tag is `INFORMATION` and which says `summoned <Name>`
+#     is a candidate. A `QUESTION:`, a decision, an ordinary `INFORMATION:` fact
+#     and the result itself are never touched.
+#   * the ID matches first and the NAME only second, and a name match is
+#     accepted only for a summon note that carries no id at all — a name can be
+#     moved off a live agent (`boardagents.pick_name`), an id never is.
+#   * ambiguity is a REFUSAL to act: two candidates for one worker, or none,
+#     and every summon note stays exactly where it is.
+RESULT_TAGS = ("COMPLETION", "PARTIAL", "FAILED")
+
+#: `summoned Marbas`, and then the coded id if the writer put one there. The id
+#: is PARENTHESISED, immediately after the name — the shape the orchestrator's
+#: prompt gives it, and the only one read: something in parentheses further along
+#: the line is a path or a log file, not an identity. Written as a code span in
+#: the store, so the backticks are optional here and this reads the DRAWN text
+#: (`parse` pops a bullet's raw form and keeps the de-emphasised one).
+_SUMMONED = re.compile(r"\bsummoned\s+([A-Z][A-Za-z'-]*)"
+                       r"(?:\s*\(\s*`?([^`()\s]+)`?\s*\))?")
+
+
+def _id_key(s):
+    """An agent id, normalised for comparison only.
+
+    The same shape as `boardagents.clean_id` and deliberately a separate two
+    lines: this module parses the store and imports nothing of the app, and the
+    id it is comparing came out of a markdown line rather than off disk.
+    """
+    return re.sub(r"[^a-z0-9._-]+", "-", str(s or "").lower()).strip("-")
+
+
+def summon_of(drawn):
+    """`{"name", "id"}` if this bullet ANNOUNCES a summon, else None.
+
+    `drawn` is a bullet's `text` — what the view shows, which is the form a
+    parsed bullet keeps.
+    """
+    if tag_of(drawn) != "INFORMATION":
+        return None
+    m = _SUMMONED.search(drawn)
+    if not m:
+        return None
+    return {"name": m.group(1), "id": _id_key(m.group(2) or "")}
+
+
+def is_result(bullet):
+    """Does this message report an outcome — the thing that retires a summon
+    note? Every unindented line is a message of its own, so any one of them
+    reporting an outcome is enough."""
+    for line in str(bullet or "").split("\n"):
+        if not line.strip() or line[:1].isspace():
+            continue
+        if tag_of(text(re.sub(r"^\s*[-*+]\s+", "", line))) in RESULT_TAGS:
+            return True
+    return False
+
+
+def find_summon(doc, agent_id="", name=""):
+    """The ONE summon note announcing this agent, or None.
+
+    None both when there is nothing to remove and when it cannot be said which
+    of several notes to remove — the caller cannot tell those apart and must not
+    need to, since it does the same thing either way.
+    """
+    aid = _id_key(agent_id)
+    cands = [(t, summon_of(t.get("text", ""))) for t in doc.get("todo", [])]
+    cands = [(t, s) for t, s in cands if s]
+    if aid:
+        hit = [t for t, s in cands if s["id"] == aid]
+        if len(hit) == 1:
+            return hit[0]
+        if hit:
+            return None            # two notes name this id: say nothing, act on nothing
+    who = str(name or "").strip().lower()
+    if who:
+        hit = [t for t, s in cands if not s["id"] and s["name"].lower() == who]
+        if len(hit) == 1:
+            return hit[0]
+    return None
+
+
+def drop_summon(lines, doc, agent_id="", name=""):
+    """Remove this agent's summon note from `lines`, if exactly one is found.
+
+    `doc` must be a parse of `lines` as they are NOW — the caller adds its result
+    bullet first and re-parses, because a bullet is a line plus whatever it
+    wrapped onto and an index computed before the insert points at the wrong one.
+    """
+    t = find_summon(doc, agent_id, name)
+    if t is None:
+        return lines
+    try:
+        return remove_todo(lines, t)
+    except BoardError:
+        return lines               # it moved under us: leave it, never guess
+
+
 # ------------------------------------------------------- one edit, done safely
 # board(1), the five-minute docs sync, board-watch and any agent with a terminal
 # all write this file. Two defences, and they are separate on purpose: the

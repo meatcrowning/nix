@@ -845,6 +845,40 @@ assumed.
   not have been.** Nothing covers that ordering; watch for it before trusting
   a `done` worker with an unacted-on handoff.
 
+### ...and the summon note GOES when the result arrives
+
+*"once an agent give the board a completed, partial, etc message - its related
+summon information message should be removed since the user would already know
+that part."* [his, 2026-07-29]
+
+A start and a result are two bullets about one piece of work, and the start is
+only true until the result lands. So posting a `COMPLETION:`/`PARTIAL:`/`FAILED:`
+(`boardparse.RESULT_TAGS`) retires the `INFORMATION: ... summoned <Name>
+(`<id>`)` note that announced it, in the **same** read-modify-write as the
+insert — one edit under the lock, so the board is never briefly holding both and
+a `boardrecent` merge never sees a half-state.
+
+- **It lives in `boardmove.note`, not in `boardctl`.** There are two writers of
+  a result — `boardctl note` for a worker that finished, board-watch's
+  `WORKER_FAIL` for one that died mid-sentence — and a rule implemented in one
+  caller is a rule that is true in one caller. `note(agent_id=...)` names the
+  agent the result is FROM; it defaults to `BOARD_AGENT_ID` (the same key
+  `mark_reported` reads), and board-watch passes it explicitly because there the
+  process writing the failure is the watcher, not the worker that failed.
+- **The ID matches first, the NAME only second**, and a name match is accepted
+  only for a summon note carrying no id at all: a name can be moved off a live
+  agent (`boardagents.pick_name`), an id never is.
+- **Ambiguity is a refusal to act.** Two summon notes naming one id, or none,
+  and every one of them stays. A wrong deletion loses something he cannot get
+  back; an undeleted summon note is a line he has already read. Nothing else is
+  reachable — a `QUESTION:`, a decision, an ordinary `INFORMATION:` fact and the
+  result itself are all outside the candidate set by construction
+  (`boardparse.summon_of`).
+- The bullet goes **whole**, its wrapped continuation lines and its
+  `<!-- placed: -->` stamp with it (`remove_todo`), and the removal happens
+  BEFORE the insert so the result bullet cannot match itself.
+- Harness: `test_summon_cleared` in `tools/board-test.py`.
+
 ## The `agents` section: the only part of this window that is NOT the store
 
 He asked for *"a display on the board of currently active systemd claude agents
@@ -1606,7 +1640,7 @@ W=$(readlink -f "$(command -v goetia)"); sed '$d' "$W" > /tmp/brdenv.sh
 /usr/bin/python3 apps/board/tools/board-test.py --shots /tmp/board-shots
 ```
 
-`tools/board-test.py`, offscreen, ten layers (267 checks). Four of them are
+`tools/board-test.py`, offscreen, eleven layers. Five of them are
 new and are the ones to read first if the fan-out misbehaves:
 
 - **the tags** (`test_todo_tags`) — a writer that emits an untagged bullet
@@ -1625,6 +1659,14 @@ new and are the ones to read first if the fan-out misbehaves:
   splits its argv at each tag, a bullet quoting a hostile line of his survives
   every check with his words intact inside the code span, and both prompts still
   carry the rule in the words the refusal uses.
+
+- **the summon note dies with its result** (`test_summon_cleared`) — a worker's
+  `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `summoned <Name> (`<id>`)`
+  note with it, whole, stamp and wrapped lines included, and takes **nothing**
+  else: not another worker's summon note, not a `QUESTION:`, not a plain
+  `INFORMATION:` fact, not a result from a different id or from nobody. Two
+  notes naming one id leave both, an id-less note falls back to the name, and
+  board-watch's dead-worker note is checked (as source) to pass the id.
 
 - **LANDED** (`test_landed`) — a commit records with NO IN FLIGHT row (the bug
   that made the section look frozen), the time comes from git rather than from

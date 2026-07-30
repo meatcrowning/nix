@@ -478,7 +478,7 @@ WORKER_FAIL = (
     "again to have another go. Log: `~/.cache/board-work/{aid}.log`\n")
 
 
-def note_on_board(bullet):
+def note_on_board(bullet, agent_id=None):
     """Add one bullet to WAITING ON YOU TO DO.
 
     He must be able to see that something was attempted and failed WITHOUT
@@ -487,9 +487,14 @@ def note_on_board(bullet):
     targeted line insert, advisory lock, digest re-check and atomic replace
     `boardctl` and the app use, so three writers cannot interleave into a
     half-written store.
+
+    `agent_id` names the agent the bullet is a RESULT for, so the summon note
+    that announced it goes with it (`boardparse.drop_summon`). It has to be
+    passed explicitly here: this process is the watcher, not the worker that
+    died, so `BOARD_AGENT_ID` would name the wrong one or nobody.
     """
     try:
-        return bm.note(bullet, path=BOARD)
+        return bm.note(bullet, path=BOARD, agent_id=agent_id)
     except (bm.BoardError, OSError) as e:
         log("could not add the failure note: %s" % e)
         return False
@@ -961,7 +966,8 @@ def tick():
                 % rec.get("task", "")[:80])
             note_on_board(WORKER_FAIL.format(
                 task=bp.oneline(rec.get("task", ""), 200, code=True),
-                aid=rec.get("agent") or "?"))
+                aid=rec.get("agent") or "?"),
+                agent_id=rec.get("agent") or "")
     except (OSError, bm.BoardError) as e:
         log("could not reap finished workers: %s" % e)
 
