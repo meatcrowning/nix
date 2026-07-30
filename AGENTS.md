@@ -283,6 +283,11 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   helpers — most importantly
   `vtbclient.py`, the hyprvtb titlebar-button socket bridge each app draws its
   chrome through.
+    - **`apps/board/` is the program called `goetia`** — that is the only name it
+      presents to him (window title, desktop entry, binary). The store it reads
+      and writes is still `docs/board.md`, and every path and identifier is
+      still `board*`: this directory, `boardctl.py`, `home/prog/board.nix`,
+      `board-watch`. Prose keeps calling the FILE "the board".
     - It lives **outside** `home/`/`sys/` on purpose: `umport` would try to
       eval an app's own `flake.nix` as a NixOS module. Nothing in the NixOS or
       home evaluation imports `apps/` — it is inert vendored source.

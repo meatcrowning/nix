@@ -10,9 +10,9 @@
 # home/pkgs/desktop/font.nix is not edited. This is a demo, not a change.
 #
 # Environment reuse: the demo needs PySide6 + the Qt plugin/QML paths, which the
-# `board` wrapper (home/prog/board.nix) already sets up. Rather than add a
+# `goetia` wrapper (home/prog/board.nix) already sets up. Rather than add a
 # derivation for a throwaway window, we source the wrapper's exported env and
-# exec its python at our own script. If board is ever removed, any of the other
+# exec its python at our own script. If goetia is ever removed, any of the other
 # seven app wrappers works the same way - change WRAPPER below.
 #
 # Rebuild the fonts from scratch with:  rm -rf ~/.cache/font-demo
@@ -20,7 +20,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE="${FONT_DEMO_DIR:-$HOME/.cache/font-demo}"
-WRAPPER="${FONT_DEMO_WRAPPER:-board}"
+WRAPPER="${FONT_DEMO_WRAPPER:-goetia}"
 
 # --- 1. the three candidate faces ------------------------------------------
 if [ ! -f "$CACHE/current.ttf" ] || [ ! -f "$CACHE/merged.ttf" ] \
