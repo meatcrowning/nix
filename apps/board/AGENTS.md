@@ -1070,6 +1070,23 @@ The short version, and every line of it is a rule:
   his ask; his original complaint is untouched, because what he objected to was a
   *"dont know"* text flashing first and `starting` never reaches the unlinked
   sentence now.
+- **SOLOMON IS HIS OWN SECTION, headed `summoner`, above `agents`** — [his,
+  2026-07-29, asked twice] *"solmon should be in his own \"summoner\" section
+  above the agents section"*. He was a row pinned to the top of the agents list.
+  `boardwork.cards()` is unchanged and still owns the WHOLE ordering (the pin,
+  birth order under it, the standing row when nothing runs); `main.py` splits that
+  one list into `Agents.summoner` and `Agents.workers`, so the two sections cannot
+  disagree about who is where. It is a titled `SectionHead` band like every other
+  section, not a headerless card floated above the list — that band is what makes
+  a section one on this page, and he said "section".
+  Two recorded exceptions come with it (`docs/DESIGN.md` §20): **his text never
+  takes the unfocused fade** — the summoner Repeater hands `AgentRow` the `Theme`
+  tones instead of the window's `fgX` pair, which covers every label on the card
+  at once (§3.1.1 says a leaf takes the tone it is given), and `leadTone` exempts
+  him from the stopped-dim rung — and **his card has no 2px accent gutter**.
+  `main.py`'s `section` readout and `jump()` treat summoner as part of the `ag`
+  region: it is one region of the page and §12.1 keeps the titlebar vocabulary
+  short, so there is no fifth cell.
 - **SOLOMON'S OWN VOICE, for the two words he actually uses** —
   [his, 2026-07-29] `dispatching` reads *"Solomon summons"* (no ellipsis: an act,
   not a wait) and `waiting` reads *"Solomon awaits <agent>..."*, which NAMES

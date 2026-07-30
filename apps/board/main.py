@@ -698,6 +698,25 @@ class Agents(QObject):
     def cards(self):
         return self._cards
 
+    # SOLOMON IS HIS OWN SECTION, above the workers — [his, 2026-07-29, asked
+    # twice] *"solmon should be in his own \"summoner\" section above the agents
+    # section"*. He was a row pinned to the top of the agents list until then.
+    #
+    # The SPLIT is here rather than in `boardwork.cards()`: that function still
+    # owns the whole ordering — the pin, the birth order under it, the standing
+    # row when nothing is running — and two views of one ordered list cannot
+    # disagree about who is where. Two overlapping orchestrators are both his,
+    # and both land in his section.
+    @Property("QVariantList", notify=changed)
+    def summoner(self):
+        return [c for c in self._cards
+                if c.get("kind") == boardagents.ORCHESTRATOR_KIND]
+
+    @Property("QVariantList", notify=changed)
+    def workers(self):
+        return [c for c in self._cards
+                if c.get("kind") != boardagents.ORCHESTRATOR_KIND]
+
     @Property(int, notify=changed)
     def cap(self):
         return boardwork.cap()

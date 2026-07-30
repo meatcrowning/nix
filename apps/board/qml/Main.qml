@@ -61,16 +61,19 @@ Window {
     // The machine, not the store: who is running, and what he has written to
     // them that nobody has picked up yet (`boardagents.py`).
     readonly property var agents: Agents.list
-    readonly property var agentCards: Agents.cards
+    // TWO LISTS OUT OF ONE ORDERING — [his, 2026-07-29, asked twice] *"solmon
+    // should be in his own \"summoner\" section above the agents section"*. He
+    // used to be a row pinned to the top of this list. `boardwork.cards()` still
+    // decides the whole order (the pin, birth under it, the standing row when
+    // nothing runs) and `main.py` splits that one list in two, so the two
+    // sections cannot disagree about who is where.
+    readonly property var summonerCards: Agents.summoner
+    readonly property var agentCards: Agents.workers
     readonly property var queuedNotes: Agents.queued
-    // Is anything actually HAPPENING? Not `agentCards.length`, since Solomon's
-    // standing row is drawn whether or not it is: `boardwork.cards()` pins the
-    // orchestrator at the top and substitutes a `ready` row when none is
-    // running, so the list is never empty any more. This is what the section's
-    // "nothing is running" sentence and its two-lines-per-card preamble hang
-    // off — both are about the cards under Solomon.
-    readonly property bool nothingRunning:
-        win.agentCards.filter((c) => c.state !== "idle").length === 0
+    // Is anything actually HAPPENING? This is the WORKERS' list now, so the
+    // question is just whether it is empty — Solomon's standing row, which is
+    // drawn whether or not anything is running, is in his own section above.
+    readonly property bool nothingRunning: win.agentCards.length === 0
 
     // A note to an agent takes the SAME path his answers take: never lost, and
     // honest about which of the two things happened. `boardagents.send()` files
@@ -230,6 +233,13 @@ Window {
         if (secFlight.visible && secFlight.y > 0 && scroller.contentY >= secFlight.y - 4) return "flight";
         if (secLanded.visible && secLanded.y > 0 && scroller.contentY >= secLanded.y - 4) return "landed";
         if (secAgents.visible && secAgents.y > 0 && scroller.contentY >= secAgents.y - 4) return "agents";
+        // The `ag` cell covers SUMMONER too: they are one region of the page —
+        // who is working on what — and splitting Solomon out of the agents list
+        // did not add a fifth destination to the titlebar (§12.1 keeps that
+        // vocabulary short). `summonerHead` is the top of the region, so the cell
+        // lights as soon as it reaches the viewport.
+        if (secSummoner.visible && summonerHead.y > 0
+            && scroller.contentY >= summonerHead.y - 4) return "agents";
         return "needs";
     }
     // ...and the cells read left-to-right as the page reads top-to-bottom.
@@ -280,7 +290,8 @@ Window {
             switch (id) {
             case "needs":  win.jump(secNeeds);  break;
             case "flight": win.jump(secFlight); break;
-            case "agents": win.jump(secAgents); break;
+            case "agents": win.jump(summonerHead.visible ? summonerHead
+                                                         : secAgents); break;
             case "landed": win.jump(secLanded); break;
             case "reader":
                 if (!Board.openInReader())
@@ -901,6 +912,84 @@ Window {
             // It obeys the same no-pressure rule as the rest: no ages, no
             // counts, no urgency ordering, nothing in the warn/crit ramp. A
             // running agent is just running.
+            // ---- SUMMONER: Solomon, and nothing else ----
+            // [his, 2026-07-29, asked twice] *"solmon should be in his own
+            // \"summoner\" section above the agents section"*. He was a row
+            // pinned to the top of the agents list; the pin is still what orders
+            // him first (`boardwork.cards()`), but he is drawn in a section of
+            // his own above the workers.
+            //
+            // It is a TITLED section, the same `SectionHead` band every other
+            // section on this page wears — not a bare card floated above the
+            // list. He said "section" and he said it twice, and the band is what
+            // makes a section one on this page: same casing, same rule, same
+            // collapse control (docs/DESIGN.md §9.1, §5.1). A headerless card
+            // would have been a fourth way of grouping things in one window.
+            //
+            // No framing sentence under it, unlike AGENTS: there is exactly one
+            // card in here and its own detail line already says what he can do
+            // with it, so a paragraph would be the dead space §5.2 calls a
+            // defect.
+            SectionHead {
+                id: summonerHead
+                width: page.width
+                label: "summoner"
+                collapsed: win.isCollapsed("summoner")
+                fgAccent: win.fgAccent
+                fgDim: win.fgDim
+                onToggled: win.toggleCollapsed("summoner")
+            }
+
+            Item {
+                id: secSummoner
+                width: page.width
+                visible: !win.isCollapsed("summoner")
+                implicitHeight: visible ? summonerCol.implicitHeight : 0
+                height: implicitHeight
+
+                Column {
+                    id: summonerCol
+                    width: parent.width
+
+                    Repeater {
+                        model: win.summonerCards
+                        delegate: AgentRow {
+                            required property var modelData
+                            width: summonerCol.width
+                            agent: modelData
+                            cellW: win.cellW
+                            // HIS TEXT NEVER FADES — [his, 2026-07-29] *"his
+                            // text should never become the unfocused colors"*.
+                            // The fade is handed down (docs/DESIGN.md §3.1.1),
+                            // so the exemption is one place: the `Theme` tones
+                            // instead of the window's `fgX` ternaries. That
+                            // covers every label on the card, the inbox box
+                            // included, without a leaf reading `Window.active`
+                            // itself — which §3.1.1 forbids for its own reasons.
+                            // A recorded exception to that section, not a drift
+                            // from it (DESIGN.md §20).
+                            fgAccent: Theme.accent
+                            fgText: Theme.text
+                            fgDim: Theme.textDim
+                            draft: win.draftOf("msg:" + modelData.id)
+                            onDraftEdited: (b) =>
+                                win.setDraft("msg:" + modelData.id, b)
+                            onSend: (b) => win.sendTo(modelData, b)
+                            onContextRequested: (mx, my) =>
+                                win.rowMenu((modelData.doingLine !== ""
+                                             ? modelData.doingLine
+                                             : (modelData.name
+                                                ? modelData.name + " - " : "")
+                                               + modelData.detail)
+                                            + "  (" + modelData.title + ")",
+                                            mx, my)
+                        }
+                    }
+                }
+            }
+
+            Item { width: 1; height: 12 }
+
             SectionHead {
                 width: page.width
                 label: "agents"

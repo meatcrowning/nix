@@ -199,6 +199,19 @@ def describe_call(name, inp):
         return os.path.basename(v.rstrip("/")) or v
 
     if name == "Bash":
+        cmd0 = " ".join(str(inp.get("command") or "").split())
+        # SUMMONED vs COMMANDED, on the OBSERVED line too — [his, 2026-07-29]
+        # *"the `commanded` verb should also be used in solomons agent card,
+        # instead of `hands`"*. It is the same distinction his notes carry
+        # (`boardwork.ORCHESTRATOR_PROMPT`, `boardparse._SUMMONED`): a `dispatch`
+        # starts a NEW agent, an `inbox send` gives one that is already running
+        # more work. Read off the command itself and therefore ahead of the
+        # tool's own `description`, which the agent writes and could word any way
+        # it liked — this is the observed line, so the machine picks the words.
+        if "boardctl.py dispatch" in cmd0:
+            return "summoning a worker"
+        if "boardctl.py inbox send" in cmd0:
+            return "commanding a worker already in those files"
         d = " ".join(str(inp.get("description") or "").split())
         if d:
             return d[0].lower() + d[1:] if d[:1].isupper() else d
@@ -221,7 +234,10 @@ def describe_call(name, inp):
     if name == "TodoWrite":
         return "working out the steps"
     if name in ("Task", "Agent"):
-        return "handing part of it to another agent"
+        # Same vocabulary: a `Task` call IS a new agent, so it is a summoning.
+        # "handing part of it to another agent" is what this said, and `hands` is
+        # the word he had replaced everywhere else.
+        return "summoning another agent"
     return "using " + name
 
 
@@ -575,17 +591,16 @@ def says_line(rec, who=""):
     phase, doing = rec.get("claimPhase") or "", rec.get("claimDoing") or ""
     subj = _subject(who)
     if phase:
-        # SIMPLE PRESENT, from the one table (`PHASE_PREDICATE`), and the
-        # animated `...` right on the end of the verb — three ASCII periods,
-        # never U+2026 (§2.3); `AgentRow.qml` cycles them.
+        # SIMPLE PRESENT, from the one table (`PHASE_PREDICATE`), and NOTHING
+        # ELSE ON THIS LINE. What it said it is doing is `says_detail`, drawn
+        # under this one — [his, 2026-07-29] the card is *"[agent] [verb]s"* and
+        # then the words that used to follow a hyphen, on their own line.
         #
-        # WHAT IT SAID IT IS DOING IS NOT ON THIS LINE — it is `says_detail`,
-        # drawn under this one. [his, 2026-07-29] the card is *"[agent]
-        # [verb]s..."* and then the words that used to follow a hyphen, on their
-        # own line. That also puts the dots at the end of a line again rather
-        # than mid-sentence, which is what the hyphenated form cost.
-        line = "%s %s" % (subj, predicate(phase))
-        return line if phase.lower() in TICKLESS else line + "..."
+        # **The ticking `...` belongs to that lower line, not this one** — [his,
+        # 2026-07-29] *"take the animated elipsies out of the top line"*. It
+        # marks the END of what the card is saying, and with two lines the end is
+        # the second one.
+        return "%s %s" % (subj, predicate(phase))
     if doing:
         # No phase word to lean on, so the words are quoted rather than forced
         # into a sentence they may not fit.
@@ -665,19 +680,26 @@ def says_detail(rec):
     """The claim's SECOND line: the words the agent gave for what it is doing,
     verbatim and on their own line.
 
-    [his, 2026-07-29] the card reads *"Marbas researches..."* and then *"the
-    vtbclient parser"* under it, where the two used to share one hyphenated line.
-    Verbatim is the point — this is his agent's own sentence, so it is split off,
-    never reformatted.
+    [his, 2026-07-29] the card reads *"Marbas researches"* and then *"the
+    vtbclient parser..."* under it, where the two used to share one hyphenated
+    line. Verbatim is the point — this is his agent's own sentence, so it is split
+    off and never reformatted; the only thing added is the trailing `...`, which
+    is HERE and not on the verb line above because the dots mark the end of what
+    the card is saying ([his, 2026-07-29] *"take the animated elipsies out of the
+    top line"*). ASCII, and `AgentRow.qml` cycles the three cells.
 
     "" when it named no words, and "" when it named no PHASE either: with no verb
     line to sit under, `says_line` quotes the words itself and repeating them here
     would draw the same sentence twice (§9.1).
     """
     rec = rec or {}
-    if not (rec.get("claimPhase") or ""):
+    phase = rec.get("claimPhase") or ""
+    if not phase:
         return ""
-    return " ".join((rec.get("claimDoing") or "").split())
+    words = " ".join((rec.get("claimDoing") or "").split())
+    if not words:
+        return ""
+    return words if phase.lower() in TICKLESS else words + "..."
 
 
 def doing_line(rec, who="", running=True):
