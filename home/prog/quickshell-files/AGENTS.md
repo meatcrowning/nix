@@ -1521,6 +1521,73 @@ org.freedesktop.Notifications /org/freedesktop/Notifications
 org.freedesktop.Notifications CloseNotification u <id>`) — by construction it
 will not go away on its own. `gdbus` is not installed here; `busctl` is.
 
+### A KDE Connect toast is titled with the PHONE, and only that one is
+
+The card's header line is the sender's `appName` — except for a notification
+relayed off his phone, where `appName` is the string `KDE Connect` on every one
+of them and says nothing. `Notifications.sender(n)` owns that choice and
+`NotificationCard.qml` just draws what it returns; nothing else in the stack
+knows about it.
+
+**The device name arrives in a HINT, and Quickshell drops hints it was not asked
+for.** `NotificationServer.extraHints` is the opt-in: without
+`["x-kde-origin-name", "x-kdeconnect-source-device"]` in it,
+`Notification.hints` holds only the hints Quickshell has properties for and the
+name is simply not there. That is silent — the header just keeps saying
+`KDE Connect`.
+
+Which hint carries what was **measured, not assumed** (26.04.3):
+
+- `kdeconnect_notifications.so`, `Notification::createKNotification`, calls
+  `KNotification::setHint` with `Device::name()` for **both**
+  `x-kde-origin-name` (17 chars, upstream's device-name hint) and
+  `x-kdeconnect-source-device` (26) — the latter is documented upstream as the
+  device *ID*, so treat the name there as this build's accident, not a contract.
+  `x-kde-display-appname` gets the phone-side app.
+- `knotifications` forwards them: `NotifyByPopup::sendNotificationToServer`
+  loops over `KNotification::hints()` unconditionally into the `QMap` it hands
+  `Notify`. The server's advertised capabilities do **not** filter hints, so
+  there is nothing to declare in `GetCapabilities` to earn them.
+
+Three rules the implementation is built on:
+
+- **Only KDE Connect's title changes.** `x-kde-origin-name` is a *general* KDE
+  hint (KMail sets it to an account name), so the notification has to be
+  identified as KDE Connect first — the `x-kdeconnect-source-device` hint being
+  present, or `appName`/`desktopEntry` naming kdeconnect. Everything else keeps
+  its `appName` untouched.
+- **Never draw a raw device id, and never draw nothing.** If the candidate looks
+  like an id (`>=16` chars of hex/`_`/`-`, which covers both forms kdeconnect
+  issues) it is looked up in a table built from `kdeconnect-cli --list-devices
+  --id-only` + `--name-only` — one `sh` line, zipped by index, **refused
+  outright on a length mismatch** rather than zipped into wrong names. Until
+  that lands the header falls back to `appName`. `kdeDevices` is reassigned
+  wholesale so the card's binding re-evaluates when it does; the spawn is
+  throttled to once a minute so a burst from an unknown id cannot fork per
+  notification.
+- **`kdeconnect-cli` is nix-only**, so it goes through `NixPath.sh` and is in
+  `NixPath.launchTargets` — book's panel has a Fedora-only PATH.
+
+Verify it without a phone and without touching his screen: copy this directory
+to a throwaway config, add a `shell.qml` that prints `Notifications.sender()`
+for every tracked notification, and run it under an isolated `HOME` **and an
+isolated bus** — `dbus-run-session`, because the live panel already owns
+`org.freedesktop.Notifications`:
+
+```bash
+HOME=$P XDG_CONFIG_HOME=$P/.config XDG_RUNTIME_DIR=$P/run QT_QPA_PLATFORM=offscreen \
+  dbus-run-session -- sh -c 'qs -p $P/.config/quickshell/shell.qml --no-duplicate & …
+    notify-send -a "KDE Connect" -h string:x-kde-origin-name:"Galaxy S22 Ultra" \
+        -h string:x-kdeconnect-source-device:"Galaxy S22 Ultra" "Signal" "hello"'
+```
+
+**Put a stub `kdeconnect-cli` first on `PATH` when you exercise the id lookup.**
+A private bus has no kdeconnect on it, so the real CLI *activates a second
+`kdeconnectd`* — which advertises this box on the LAN under the throwaway `HOME`
+and, measured 2026-07-29, **outlives the bus teardown** and has to be killed by
+hand. The CLI's output shape is verifiable once against the live daemon; the
+stub is what keeps the harness off the network.
+
 ---
 
 ## The bar dims itself for the sudo modal (`Askpass.qml`)

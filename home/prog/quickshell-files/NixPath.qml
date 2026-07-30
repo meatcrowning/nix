@@ -47,7 +47,8 @@ Singleton {
         "hyprsunset",   // SettingsApply: night light + negative brightness
         "filer",        // DiskContent: click a mount
         "wf-recorder",  // Screenshot: record mode
-        "cava"          // SysInfo/Media: VU meter + spectrum
+        "cava",         // SysInfo/Media: VU meter + spectrum
+        "kdeconnect-cli" // Notifications: name the phone a toast was relayed from
     ]
 
     Process {
