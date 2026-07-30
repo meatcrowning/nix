@@ -2098,6 +2098,35 @@ class ZoomFilter(QObject):
         return False
 
 
+class HotkeyFilter(QObject):
+    """The chrome's own keyboard shortcuts — today just Ctrl+F for
+    find-in-page — installed on the top-level WINDOW for exactly the reason
+    ZoomFilter is (see its docstring: an app-wide filter segfaults this
+    PySide6/Py3.14 build, and the QQuickWindow sees platform input BEFORE the
+    WebEngineView item does).
+
+    A QML `Shortcut` is NOT an option here: while a WebEngineView has the focus
+    Chromium takes the key stream, so the shortcut either never fires or races
+    a page that binds Ctrl+F itself. Consuming the event here (return True) both
+    opens our find bar and makes sure the page never sees the key — QtWebEngine
+    has no find UI of its own for it to reach.
+
+    Escape deliberately stays OUT of this filter. It only needs to close the bar
+    while the bar's own field holds the keyboard, and Qt already delivers it
+    there (FindBar.qml's Keys.onPressed); taking Escape window-wide would
+    steal it from every page that uses it."""
+
+    find = Signal()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            if (event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                    and event.key() == Qt.Key.Key_F):
+                self.find.emit()
+                return True
+        return False
+
+
 class AdBlocker(QWebEngineUrlRequestInterceptor):
     """Ad/tracker blocking via Brave's adblock-rust engine (the `adblock` pip
     package) — the same filter engine class uBlock Origin is, so it applies the
@@ -3443,6 +3472,11 @@ def main():
     # ZoomFilter has already divided by WHEEL_GAIN for the web view; this is
     # what their WheelScroll multiplies back by. One source: pylib/kinetic.py.
     ctx.setContextProperty("WheelGain", QML_WHEEL_GAIN)
+    # Ctrl+F -> the find bar. The object is both the signal source QML connects
+    # to and the event filter that catches the key; installed below, once the
+    # window exists.
+    hotkeys = HotkeyFilter(app)
+    ctx.setContextProperty("Hotkeys", hotkeys)
 
     theme_comp = QQmlComponent(engine, QUrl.fromLocalFile(str(QML / "theme" / "Theme.qml")))
     theme = theme_comp.create()
@@ -3461,6 +3495,8 @@ def main():
     # suppresses Chromium's own Ctrl+wheel zoom. Parented to app so it lives.
     zoom_filter = ZoomFilter(zoom, app)
     engine.rootObjects()[0].installEventFilter(zoom_filter)
+    # …and Ctrl+F, upstream of Chromium for the same reason (HotkeyFilter)
+    engine.rootObjects()[0].installEventFilter(hotkeys)
 
     # Install the gmxhr scheme handler on the QML profile (found by objectName)
     # once the tree is fully built and stable — deferred onto the event loop to
