@@ -7,6 +7,12 @@ chrome via hyprvtb like the others.
 **QtWebEngine spellcheck is imperative-only**: the declarative QML
 `WebEngineProfile` `spellCheck*` properties are silently dropped — set
 `setSpellCheckEnabled`/`setSpellCheckLanguages` imperatively in `_wire_profile`.
+That covers **web pages only** — Chromium's checker, an `en-US.bdic` compiled by
+`qwebengine_convert_dict` in `surfer.nix`. surfer's own QML fields (the find bar,
+the file picker) are queries and paths and are deliberately NOT checked; the
+apps' checker for ordinary QML inputs is `pylib/spellcheck.py`
+(`../AGENTS.md`), which reads the same `hunspellDicts.en_US` this `.bdic` is
+built from, so the two never disagree about a word.
 
 **Wheel events in this window are rescaled, and QML must undo it.** `ZoomFilter` divides every touchpad wheel event by `pylib/kinetic.py`'s `WHEEL_GAIN` (1/6) so QtWebEngine pages track the finger at the same rate the QML apps do; that is window-wide, so any scrollable QML surface here takes `wheelGain: WheelGain` (the reciprocal, published by `main.py` from the same constant) — the file picker does. Real mouse detents are passed through untouched (`is_wheel_detent`); applying the gain to them made top's wheel scroll pages at 1/6 speed twice already. The page itself is Chromium's own scroller and cannot use `WheelScroll`: parity there is the gain plus the compositor's >=300 ms withheld stop, which zeroes Chromium's 200 ms fling estimator so it adds no fling of its own. See [`../AGENTS.md`](../AGENTS.md).
 

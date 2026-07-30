@@ -91,6 +91,18 @@ tests dirtiness by assigning `content` "proves" the dirty flag broken.
   App-wide keys are window `Shortcut`s; editing keys are the `TextEdit`'s
   `Keys.onPressed` — and `Keys.priority: Keys.BeforeItem` there is load-bearing
   for exactly one key, Tab, which focus navigation eats otherwise.
+- **Spellchecking, in PROSE documents only** —
+  `qmlcommon/SpellMarks.qml` over the `TextEdit`, `pylib/spellcheck.py` behind
+  it, docs/DESIGN.md §3.7 for the mark. `CodeView.prose` is true only for the
+  `text` and `md` language KEYS (`highlight.py`'s, not their display names —
+  markdown's key is `md`), so a source file is not checked: nothing here can tell
+  a comment from an identifier, since the highlighter is regex-per-line and not a
+  parser. Switching a file's language to `text` from the context menu turns it on
+  by hand, which is why `refreshSpell()` is called from `loadText`,
+  `reloadText`, the language menu and save-as. A correction goes through
+  `Buffers.replaceOne`, so it is ONE Ctrl+Z like every other multi-character
+  edit here. Widening it to comments and strings means teaching `highlight.py`
+  to publish the spans it painted; nothing else would need to change.
 - **The open / save-as / go-to-line prompt** is `PathBar.qml`, one chip with
   readline-style completion. **Not a `FileDialog`**: a stock platform dialog is
   the one thing this desktop could draw that would look like nothing else on it

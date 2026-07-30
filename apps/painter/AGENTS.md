@@ -39,6 +39,26 @@ records each one and what it became. What that leaves you with, mechanically:
 
 **Every scrollable surface here is a `Kinetic*` view from `../qmlcommon/`** — the gallery grid, the model/LoRA/dropdown lists, the left parameter column and the prompt boxes. painter used to carry its own copy of `WheelScroll.qml` that nothing imported, so every one of those was a bare Flickable adding Qt's flick on top of the compositor's momentum. Never write a bare `ListView`/`GridView`/`Flickable` here; see [`../AGENTS.md`](../AGENTS.md).
 
+## The prompt boxes are spellchecked
+
+A prompt is prose, so both `PromptBox`es carry a `SpellMarks` overlay
+(`apps/AGENTS.md` → `SpellMarks.qml`; the mark itself is docs/DESIGN.md §3.7) and
+right-clicking a marked word offers hunspell's corrections. Two things about the
+wiring are deliberate:
+
+- **The menu is Main.qml's, not the box's.** A `PromptBox` is 64-130px tall and
+  `CtxMenu` clamps itself into its own root, so a menu parented inside one would
+  be trimmed to a couple of rows. `PromptBox` emits `menuRequested(sx, sy,
+  items)` in **scene** coordinates (`mapToItem(null, ...)`), `PromptEditor`
+  forwards it, and the one `CtxMenu` at the bottom of `Main.qml` opens it.
+- **`qml/CtxMenu.qml` is a verbatim sixth copy** of the file filer, player,
+  reader, editor and board each have. painter had no context menu at all before
+  this; folding the six into `qmlcommon/` is docs/DESIGN.md Open question 3 and is
+  blocked on `PixelText`, which a shared component cannot reach. Do not "improve"
+  this copy — retune all six or none.
+
+The numeric `Spin`/`Field` controls are not spellchecked and must not be.
+
 ## The backend is NOT packaged
 
 ComfyUI stays the venv+`nix-shell` checkout at `/home/lam/comfy` (symlink →
