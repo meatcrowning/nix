@@ -548,6 +548,13 @@ class Agents(QObject):
     changed = Signal()
     #: for the titlebar footer, the same channel Board uses
     status = Signal(str)
+    #: A LIFECYCLE transition and nothing else: an agent appeared, or one of
+    #: them changed state (finished, was killed, failed, was reclaimed).
+    #: Deliberately NOT `changed`, which also fires for the churn every poll
+    #: brings — a worked-for line ticking over a minute, a context tally, a new
+    #: unread note — and anything hung off that would be a 2.5s poll of
+    #: whatever it drives. See `Usage.follow()`, its one consumer.
+    lives = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -555,6 +562,7 @@ class Agents(QObject):
         self._cards = []
         self._queued = []
         self._watcher = ""
+        self._lives = None
         # The registry, the stashes and the inboxes are all files, so watch
         # them — but /proc is not, so poll as well. 2.5s is well under "prompt"
         # for a finished agent leaving the list and costs one /proc walk.
@@ -660,9 +668,18 @@ class Agents(QObject):
                       for m in boardagents.pending()]
         except OSError:
             return
+        # Who exists and what state each one is in — the only thing `lives` is
+        # about. Built off `cards`, which is the superset (`boardwork.cards()`
+        # pins the orchestrator and the queued tasks as well), and sorted so a
+        # reordering is not a transition.
+        lives = tuple(sorted((c["id"], c["state"]) for c in cards))
         if rows != self._rows or queued != self._queued or cards != self._cards:
             self._rows, self._queued, self._cards = rows, queued, cards
             self.changed.emit()
+        if lives != self._lives:
+            was, self._lives = self._lives, lives
+            if was is not None:      # the first read is not a transition
+                self.lives.emit()
 
     @Property("QVariantList", notify=changed)
     def list(self):
@@ -799,6 +816,16 @@ class Usage(QObject):
     `$HOME`, where watching the directory would wake this app for every stray
     download. The cache changes on the order of minutes, so 60s is well inside
     "prompt" and the read is mtime-gated on top of that.
+
+    **The 60s poll is the FALLBACK, not the trigger** [his, 2026-07-29]: *"ensure
+    the usage indicators update every time an agent is killed / finishes their
+    job / etc."* — so `follow()` also re-reads on every agent LIFECYCLE
+    transition, which is when the number has just moved by a visible amount. It
+    hangs off `Agents.lives`, not `Agents.changed`, because the latter fires for
+    ordinary per-poll churn and that would make this a 2.5s poll of a 60KB JSON
+    file. What it cannot do is invent a fresher figure than the CLI has cached
+    (§10.5): an agent that exits before its own CLI writes the cache is read on
+    the next tick like before.
     """
 
     changed = Signal()
@@ -812,6 +839,15 @@ class Usage(QObject):
         self._poll.timeout.connect(self.refresh)
         self._poll.start()
         self.refresh()
+
+    def follow(self, agents):
+        """Re-read whenever an agent starts, finishes, dies or is reclaimed.
+
+        Called wherever these two objects are built — `main()` and the harness's
+        `build()`. One line, and it is here rather than in `Agents` so that
+        class keeps knowing nothing about what watches it.
+        """
+        agents.lives.connect(self.refresh)
 
     @Slot()
     def refresh(self):
@@ -927,6 +963,8 @@ def main():
     board = Board(args[0] if args else None)
     agents = Agents()
     usage = Usage()
+    # The bars move when the agent list does, not only on their own 60s clock.
+    usage.follow(agents)
 
     ctx.setContextProperty("Agents", agents)
     ctx.setContextProperty("Usage", usage)
