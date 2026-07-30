@@ -1243,21 +1243,14 @@ Window {
                                                      : Agents.watcher
                     }
 
-                    // What this section is, said once. It is the honest frame
-                    // for every card below it: two sentences, the agent's own
-                    // account of itself and then what its tool calls show.
-                    // Once, here — not repeated per card, which would be a
-                    // disclaimer where a sentence belongs (§5.2).
-                    Para {
-                        width: agentsCol.width
-                        visible: !win.nothingRunning
-                        height: visible ? implicitHeight : 0
-                        bottomPadding: 6
-                        color: Theme.dim
-                        text: "each minister says what it is doing, and the line "
-                              + "under it is what it is actually doing, read "
-                              + "from its tool calls. oldest first."
-                    }
+                    // NO description of this section. [his, 2026-07-30] the
+                    // triangle explains itself with cards: bound ministers ->
+                    // the cards and nothing else, none bound -> the one line
+                    // above. The paragraph that used to stand here ("each
+                    // minister says what it is doing...") is gone; the two
+                    // sentences on a card are legible without a preface, and
+                    // §5.2 already refuses a disclaimer where a sentence
+                    // belongs.
 
                     // ---- the cards ----
                     // ONE FLAT LIST, oldest first. The phase headings his first
@@ -1366,24 +1359,13 @@ Window {
                         }
                     }
 
-                    Item { width: 1; height: 6 }
-
-                    // The watcher's own state, from systemd. It is the thing
-                    // that will pick the queue up, so "is it armed?" is a fair
-                    // question for this section to answer.
-                    //
-                    // NOT while the section is empty: up there the answer is
-                    // already given in his own words, and [his, 2026-07-29] an
-                    // armed watcher over an empty triangle draws "binds
-                    // ministers." and NOTHING ELSE.
-                    PixelText {
-                        width: agentsCol.width
-                        visible: Agents.watcher !== "" && !win.nothingRunning
-                        height: visible ? implicitHeight : 0
-                        elide: Text.ElideRight
-                        color: Theme.dim
-                        text: Agents.watcher
-                    }
+                    // The watcher's own systemd sentence used to sit here, under
+                    // the cards. It does not any more: [his, 2026-07-30] with
+                    // ministers bound the section draws the cards and NOTHING
+                    // else. It is still read (`Agents.watcher`/`armed`) and it
+                    // is still SAID in the one case where silence would make
+                    // the empty line a lie — a watcher that will never fire,
+                    // up beside "binds ministers." (§10).
                 }
             }
 
