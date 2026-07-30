@@ -1237,8 +1237,12 @@ module docstring is authoritative and this is the summary.
 - **Both meters are exactly as wide as the model chooser, stacked, `5h` on
   top** [his, 2026-07-29]. The width is *bound* to `modelPick`, never a number,
   so a longer model label widens box and bars together; the stack takes its
-  order from `boardusage.WINDOWS` and its spacing from nothing (each meter is
-  its own line box, §4.1/§5.1). Inside a meter the window name goes hard left
+  order from `boardusage.WINDOWS` and its internal spacing from nothing (each
+  meter is its own line box, §4.1/§5.1). It leads in 4px under the chooser and
+  leaves 4px under itself — *"just a little more space between the top of the
+  indicators and the bottom of the model selector"*, one rung of §4.1's scale
+  and the gap that block already used, so the card has one gap rather than
+  three. The 5h/7d rows still butt together. Inside a meter the window name goes hard left
   and the reading hard right (§5.4) and the **bar is what flexes** into what is
   left (§5.2) — under `minBarW` it is not drawn at all, which happens only for
   `unknown`, a word about as wide as the chooser and the whole reading in that

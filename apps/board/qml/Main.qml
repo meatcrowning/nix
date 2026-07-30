@@ -402,11 +402,18 @@ Window {
             // that is the one that stops him mid-afternoon.
             Item {
                 width: page.width
-                height: usageCol.height + 4
+                height: usageCol.y + usageCol.height + 4
                 visible: Usage.rows.length > 0
 
                 Column {
                     id: usageCol
+                    // [his, 2026-07-29] *"there should be just a little more
+                    // space between the top of the indicators and the bottom of
+                    // the model selector"* — one rung of §4.1's in-widget scale,
+                    // and the same 4 this block already leaves under itself, so
+                    // the card keeps one gap and not three. The 5h/7d rows still
+                    // butt together; only the lead-in moved.
+                    y: 4
                     anchors.right: parent.right
                     width: modelPick.width
                     // Zero: each meter already carries its own line box (§4.1),
