@@ -363,13 +363,13 @@ Item {
             readonly property real whereW: wide && row.agent && row.agent.where !== ""
                 ? Math.min(row.agent.where.length * row.cellW + 2, width * 0.4)
                 : 0
-            // 7 cells for a six-character pool name plus its space — and it
-            // MEASURES rather than assuming, because one name is longer than
-            // the pool allows: the orchestrator is always `Solomon`, seven
-            // characters, and truncating the one row he asked to have pinned
-            // at the top would be the worst possible place to elide. Nothing
-            // is drawn between this column and the title, so widening it costs
-            // the title one cell on that card and nothing anywhere else.
+            // 7 cells minimum, and it MEASURES per card: the pool is the full
+            // Goetia now (`boardagents.NAMES`, up to `Andromalius` at eleven)
+            // and the orchestrator is always `Solomon` at seven, so an assumed
+            // 7 would truncate — and the pinned top row would be the worst
+            // possible place to elide. Nothing is drawn between this column
+            // and the title, so a long name costs the title cells on ITS card
+            // and nothing anywhere else.
             readonly property real nameW: row.nameNeeded
                 ? Math.max(7, row.name.length + 1) * row.cellW : 0
 

@@ -2105,9 +2105,12 @@ def test_work(tmp):
           ba.pick_name("wcollide", taken=set(ba.NAMES[:-1])) == ba.NAMES[-1])
     check("...and every drawn name is ASCII, which the font can draw (2.3)",
           all(n.isascii() and n.isalpha() for n in ba.NAMES), ba.NAMES)
-    check("...and fits the card's historic 7-cell label column, so the titles "
-          "down the list stay in one place",
-          all(len(n) <= 6 for n in ba.NAMES), [n for n in ba.NAMES if len(n) > 6])
+    check("...the full Goetia, in the traditional order 1 Bael...72 Andromalius, "
+          "keeping the pre-72 pool's spellings where they overlap",
+          len(ba.NAMES) == 72 and ba.NAMES[0] == "Bael"
+          and ba.NAMES[71] == "Andromalius" and ba.NAMES[20] == "Marax"
+          and ba.NAMES[63] == "Haures" and ba.NAMES[24] == "Glasya"
+          and ba.NAMES[57] == "Amy", (len(ba.NAMES), ba.NAMES[:5]))
     check("...and no two collide, since `inbox send --to` matches on the name",
           len({n.lower() for n in ba.NAMES}) == len(ba.NAMES))
     check("...with room in the pool to walk past every live agent",

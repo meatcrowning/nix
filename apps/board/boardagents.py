@@ -164,9 +164,12 @@ def clean_id(s):
 #: *"can you give the workers regular human names? you can still keep the coded
 #: names if you'd like but i think itd be interesting to have them referred to
 #: by regular names"*, then: *"i want the names of agents to be taken from the
-#: names of demons in the lesser key of solomon"* — so the pool is the
-#: Lemegeton's: the Ars Goetia's 72, plus the short names the Theurgia-Goetia
-#: and the Ars Paulina supply.
+#: names of demons in the lesser key of solomon"* — so the pool is the Ars
+#: Goetia's 72, complete and in the traditional order, 1 Bael ... 72
+#: Andromalius (the Lemegeton's list as Wikipedia gives it, fetched
+#: 2026-07-29). It ran 56 for a while — the short Goetia spellings padded out
+#: with Theurgia-Goetia / Ars Paulina names — until he asked for the full
+#: seventy-two.
 #:
 #: THE NAME IS PRESENTATION AND NOTHING IS KEYED ON IT. The id (`w1a2b3c`) is
 #: still the key: the systemd unit, `~/.cache/board-work/<id>.log`, the
@@ -174,24 +177,28 @@ def clean_id(s):
 #: by it, and a message is addressed by it. Renaming any of those would orphan a
 #: worker that is running right now.
 #:
-#: TWO RULES ON WHAT MAY GO IN, and both are about the row it is drawn in.
-#: **Six characters at most**: the card draws the name in the same label column
-#: as `says` and `doing`, and it is the WIDEST name on the list that sets that
-#: column (`AgentRow`'s `nameW`, at least 7 font cells). Keeping the pool at six
-#: keeps every worker in the historic 7-cell column, so the titles down the list
-#: stay in one place — which is what rules out `Focalor`, `Gremory`, `Bifrons`
-#: and the rest of the long spellings. **ASCII only**: §2.3, a glyph the font
-#: lacks clips the whole row, so `Belial` and never a diacritical spelling of
-#: it. Distinct case-insensitively, because `boardctl inbox send --to` matches
-#: on the name.
-NAMES = ["Agares", "Aim", "Amon", "Amy", "Anael", "Andras", "Bael", "Balam",
-         "Bariel", "Bathin", "Beleth", "Belial", "Berith", "Bidiel", "Botis",
-         "Buer", "Bune", "Caim", "Eligos", "Foras", "Furcas", "Furfur", "Gaap",
-         "Gediel", "Glasya", "Gusion", "Haures", "Ipos", "Leraje", "Marax",
-         "Marbas", "Murmur", "Orias", "Oriel", "Orobas", "Ose", "Paimon",
-         "Phenex", "Purson", "Raum", "Ronove", "Sallos", "Samael", "Seere",
-         "Shax", "Sitri", "Stolas", "Symiel", "Usiel", "Valac", "Vapula",
-         "Vepar", "Vine", "Vual", "Zagan", "Zepar"]
+#: TWO RULES ON WHAT MAY GO IN. **ASCII only**: §2.3, a glyph the font lacks
+#: clips the whole row, so `Bune`, `Ronove`, `Vine`, `Raum`, `Gaap` and never
+#: the diacritical spellings. **Distinct case-insensitively**, because
+#: `boardctl inbox send --to` matches on the name. Length is deliberately NOT
+#: one any more: `AgentRow.nameW` measures per card (minimum 7 cells), so
+#: `Andromalius` at eleven costs its own card a few title cells and the rest
+#: of the list nothing. Where the pre-72 pool already had a spelling it is
+#: KEPT — `Marax` (not Morax), `Haures` (not Flauros), `Glasya` (for
+#: Glasya-Labolas, and what keeps the pool `isalpha`) — so a worker running
+#: under one of those still matches its own name.
+NAMES = ["Bael", "Agares", "Vassago", "Samigina", "Marbas", "Valefor", "Amon",
+         "Barbatos", "Paimon", "Buer", "Gusion", "Sitri", "Beleth", "Leraje",
+         "Eligos", "Zepar", "Botis", "Bathin", "Sallos", "Purson", "Marax",
+         "Ipos", "Aim", "Naberius", "Glasya", "Bune", "Ronove", "Berith",
+         "Astaroth", "Forneus", "Foras", "Asmodeus", "Gaap", "Furfur",
+         "Marchosias", "Stolas", "Phenex", "Halphas", "Malphas", "Raum",
+         "Focalor", "Vepar", "Sabnock", "Shax", "Vine", "Bifrons", "Vual",
+         "Haagenti", "Crocell", "Furcas", "Balam", "Alloces", "Caim",
+         "Murmur", "Orobas", "Gremory", "Ose", "Amy", "Orias", "Vapula",
+         "Zagan", "Valac", "Andras", "Haures", "Andrealphus", "Kimaris",
+         "Amdusias", "Belial", "Decarabia", "Seere", "Dantalion",
+         "Andromalius"]
 
 #: **The orchestrator is Solomon, always, and he is not in the pool.** [his,
 #: 2026-07-29] *"make the main orchestrators name Solomon. he should always be
@@ -202,9 +209,9 @@ NAMES = ["Agares", "Aim", "Amon", "Amy", "Anael", "Andras", "Bael", "Balam",
 #: the bag and never shuffled by `pick_name` — the orchestrator is a ROLE, and
 #: a role that renamed itself per run would be a stranger every time.
 #:
-#: Seven characters, and that is the exception that widened the column (see the
-#: pool's width rule above and `AgentRow.nameW`). He is not truncated: the
-#: whole point is that he is recognisable.
+#: Seven characters — what first pushed `AgentRow.nameW` from an assumed 7
+#: cells to a measurement, before the pool itself grew names past six. He is
+#: not truncated: the whole point is that he is recognisable.
 #:
 #: If two orchestrators ever overlap — successive things typed close together —
 #: they are BOTH Solomon. That is the honest reading (one role, briefly doing
