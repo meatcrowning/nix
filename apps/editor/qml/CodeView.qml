@@ -85,8 +85,37 @@ Item {
     function selectAll() { ed.selectAll(); }
 
     signal statusReported(string message)
-    signal contextRequested(real x, real y)
+    //: `pos` is the CHARACTER offset under the pointer, so the menu can offer
+    //: spelling corrections for the word that was actually right-clicked.
+    signal contextRequested(real x, real y, int pos)
     signal edited()
+
+    // ---- spelling --------------------------------------------------------
+    //: PROSE ONLY, and that is a deliberate limit. `spellcheck.py`'s tokeniser
+    //: already refuses identifiers and paths, but a code file is mostly
+    //: identifiers with prose in the comments, and no per-line grammar here
+    //: knows which is which (`highlight.py` is regex-per-line, not a parser).
+    //: So `.md`/`.txt` — the files whose whole content is prose, and the reason
+    //: he asked for this — are checked, and a source file is not. Widening it
+    //: means teaching the highlighter to publish its comment/string spans; the
+    //: language menu switching a file to `text` already turns it on by hand.
+    readonly property var proseLangs: ["text", "md"]   //: highlight.py's KEYS
+    property bool prose: false
+
+    function refreshSpell() {
+        root.prose = root.proseLangs.indexOf(Buffers.language(root.tid)) >= 0;
+        spell.rebuild();
+    }
+
+    //: The menu items for the word at character `pos`, or [] — Main.qml puts
+    //: them at the top of the document menu.
+    function spellItems(pos) { return spell.menuItems(pos); }
+
+    //: How many words are marked wrong right now. Part of the view's surface for
+    //: the same reason everything else here is: the harness cannot reach `spell`
+    //: (PySide6 wraps no QML component type), and a marker nobody can count is a
+    //: marker nobody can test.
+    readonly property int spellCount: spell.spans.length
 
     // §3.1.1: an unfocused window fades its WHOLE foreground, body text
     // included. The ternary lives HERE, once, and the delegates below bind to
@@ -391,8 +420,28 @@ Item {
                 acceptedButtons: Qt.RightButton
                 onPressed: (m) => {
                     var p = mapToItem(root, m.x, m.y);
-                    root.contextRequested(p.x, p.y);
+                    root.contextRequested(p.x, p.y, ed.positionAt(m.x, m.y));
                 }
+            }
+        }
+
+        // The spelling marks. A SIBLING of `ed` inside the content item, so it
+        // scrolls with the text and shares its coordinate space; `viewport`
+        // keeps the check to the screenful that is actually visible.
+        SpellMarks {
+            id: spell
+            target: ed
+            viewport: flick
+            x: ed.x
+            y: ed.y
+            width: ed.width
+            height: ed.height
+            active: root.prose
+            //: One undo step per correction. `remove` + `insert` — SpellMarks'
+            //: default — would cost two Ctrl+Z, and every other multi-character
+            //: edit in this editor is one (`textops.py`'s edit blocks).
+            replaceFn: function (s, e, w) {
+                root.applySel(Buffers.replaceOne(root.tid, s, e, w));
             }
         }
     }
@@ -406,6 +455,7 @@ Item {
         Buffers.attach(root.tid, ed.textDocument, root.path, root.lang);
         refreshLines();
         refreshCursor();
+        refreshSpell();
     }
 
     // §6.1, the most-repeated rule in the corpus: a document edited underneath
@@ -423,6 +473,7 @@ Item {
         flick.contentX = Math.min(x, Math.max(0, flick.contentWidth - flick.width));
         refreshLines();
         refreshCursor();
+        refreshSpell();
     }
 
     onWrapChanged: {

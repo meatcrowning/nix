@@ -407,13 +407,14 @@ def build(app, start_paths, start_line=0):
     ctx = engine.rootContext()
     pal = ed.Palette(ed.PANEL_THEME)
     keep = (pal, DeskStyle(parent=engine), StubTitlebar(), ed.Files(),
-            ed.Buffers(pal), ed.Settings())
+            ed.Buffers(pal), ed.Settings(), ed.SpellCheck())
     ctx.setContextProperty("WalPalette", keep[0])
     ctx.setContextProperty("DeskStyle", keep[1])
     ctx.setContextProperty("Titlebar", keep[2])
     ctx.setContextProperty("Files", keep[3])
     ctx.setContextProperty("Buffers", keep[4])
     ctx.setContextProperty("Settings", keep[5])
+    ctx.setContextProperty("Spell", keep[6])
     ctx.setContextProperty("startArgs", {"paths": start_paths, "line": start_line,
                                          "restored": False})
     # Every QML warning is collected: a binding loop or a missing property here is
@@ -617,6 +618,30 @@ def test_window(app, tmp):
     g2 = buffers.guessIndent(win.property("view").property("tid"))
     check("...and a 2-space nix file as 2 (the GCD of the widths present)",
           g2["width"] == 2 and g2["guessed"] is True, g2)
+
+    # ---- spelling: prose is checked, code is not ----
+    # The dictionary is the app wrapper's (`SPELL_HUNSPELL`/`SPELL_DICPATH`);
+    # with none, `Spell.available` is false and every count below is 0, so this
+    # section SKIPS rather than failing on a machine with no dictionary.
+    md = os.path.join(tmp, "note.md")
+    open(md, "w").write("a paragraph with one sentance that is wrong in it\n")
+    win.openPath(md, 0)
+    spin(600)
+    v3 = win.property("view")
+    if not keep[6].available:
+        print("SKIP  spelling: no dictionary (SPELL_HUNSPELL=%r)"
+              % os.environ.get("SPELL_HUNSPELL"))
+    else:
+        check("a markdown document is prose, so it IS spellchecked",
+              v3.property("prose") is True, v3.property("prose"))
+        check("...and the one misspelling is the one thing marked",
+              v3.property("spellCount") == 1, v3.property("spellCount"))
+        win.openPath(a, 0)          # a.py, from the top of this function
+        spin(600)
+        v4 = win.property("view")
+        check("a source file is NOT spellchecked",
+              v4.property("prose") is False and v4.property("spellCount") == 0,
+              (v4.property("prose"), v4.property("spellCount")))
 
     check("no QML warnings anywhere in the run", not WARNINGS, WARNINGS[:4])
 

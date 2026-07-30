@@ -11,11 +11,21 @@
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env.
 #
-# **Nothing here is architecture-specific and there is no new dependency.**
-# editor draws only text and imports only PySide6 + the stdlib — the same set
-# reader already needs on both machines — so book gets it from the shared `home/`
-# tree with nothing extra installed, and the aarch64 gates the other apps need
-# (`pkgs.stdenv.hostPlatform.isx86_64`) do not apply.
+# **Nothing here is architecture-specific.** editor draws only text and imports
+# only PySide6 + the stdlib — the same set reader already needs on both machines
+# — so book gets it from the shared `home/` tree, and the aarch64 gates the
+# other apps need (`pkgs.stdenv.hostPlatform.isx86_64`) do not apply.
+#
+# The ONE runtime dependency beyond that is the spell checker's dictionary, and
+# it is deliberately not a Python module: `pylib/spellcheck.py` talks to the
+# `hunspell` BINARY in pipe mode, so `SPELL_HUNSPELL`/`SPELL_DICPATH` below are
+# the whole wiring on top. **book gets nothing here** — its branch execs
+# Fedora's python3 with no wrapper, so the checker resolves `hunspell` from
+# `$PATH` and the dictionary from `/usr/share/hunspell`, i.e. it works if
+# `hunspell` + `hunspell-en-US` are dnf-installed and marks NOTHING if they are
+# not (docs/DESIGN.md §10 — an input with no dictionary behaves exactly as it did
+# before). Nothing is x86-only about either package; keeping book on the system
+# copy is what avoids a second nixpkgs Qt/Mesa closure on the laptop.
 #
 # Both run the LIVE source at ~/nix/apps/editor/main.py, so QML/Python edits need
 # no rebuild — only changing the runtime deps or this file does.
@@ -42,6 +52,8 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/editor \
             --add-flags /home/lam/nix/apps/editor/main.py \
+            --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
+            --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
