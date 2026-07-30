@@ -24,6 +24,7 @@ Item {
     property color codeColor: Theme.text
     property int indent: 0            // leading character cells
     property string query: ""         // search term; matching LINES highlight
+    property bool current: false      // this block is the match being stepped to
 
     signal linkActivated(string href, string lt)
     signal linkHovered(string href)
@@ -117,16 +118,27 @@ Item {
                 // A hit HIGHLIGHTS THE LINE rather than the characters: the
                 // matched substring can straddle two runs and two Texts, and a
                 // per-character highlight would have to re-implement the layout
-                // it is drawn over. One row, one selection fill — the same
-                // Theme.highlight every list on this desktop selects with
-                // (§9.1).
+                // it is drawn over.
                 readonly property bool hit: root.query.length > 1
                     && lineText.toLowerCase().indexOf(root.query.toLowerCase()) >= 0
+
+                // A find mark is `dim` for every match and `accent` for the one
+                // you are ON, exactly as surfer paints its own (docs/DESIGN.md
+                // §3.6). It was `Theme.highlight`, the selection fill, which is
+                // 1.15:1 against the pure-black page — measured offscreen, and
+                // the reason he could barely see a hit at all.
+                readonly property color fill: root.current ? Theme.accent : Theme.dim
+                // The accent fill is bright, so the words on it invert to `bg`.
+                // One binding per LINE that the words below read, never a
+                // ternary per word: this delegate is one Text per word and the
+                // pane's fade already pays that cost once (§3.1.1).
+                readonly property color ink: (lineItem.hit && root.current)
+                                             ? Theme.bg : root.color
 
                 Rectangle {
                     anchors.fill: parent
                     visible: lineItem.hit
-                    color: Theme.highlight
+                    color: lineItem.fill
                 }
 
                 // ONE ITEM PER SEGMENT OF PROSE, and the chrome only where
@@ -155,16 +167,23 @@ Item {
                             // other inset surface on this desktop takes
                             // (Theme.bgAlt, §3.1) — no new colour, and it reads
                             // against the body text without a second hue.
+                            //
+                            // On the CURRENT match's accent bar it gives that
+                            // chrome up: `bgAlt` inside an accent fill is a
+                            // hole, and `bg` ink on `bgAlt` cannot be read at
+                            // all. The bar is the inset surface there.
                             DelegateChoice {
                                 roleValue: "code"
                                 Rectangle {
                                     width: codeLabel.implicitWidth
                                     height: Theme.fontSize
-                                    color: Theme.bgAlt
+                                    color: (lineItem.hit && root.current)
+                                           ? "transparent" : Theme.bgAlt
                                     PixelText {
                                         id: codeLabel
                                         text: modelData.t
-                                        color: root.codeColor
+                                        color: (lineItem.hit && root.current)
+                                               ? Theme.bg : root.codeColor
                                     }
                                 }
                             }
@@ -187,7 +206,7 @@ Item {
                                         id: linkLabel
                                         text: modelData.t
                                         font.underline: true
-                                        color: root.color
+                                        color: lineItem.ink
                                     }
                                     MouseArea {
                                         id: ma
@@ -207,7 +226,7 @@ Item {
                             DelegateChoice {
                                 PixelText {
                                     text: modelData.t
-                                    color: root.color
+                                    color: lineItem.ink
                                 }
                             }
                         }

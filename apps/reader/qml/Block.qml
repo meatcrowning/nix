@@ -44,17 +44,15 @@ Item {
 
     implicitHeight: topGap + body.implicitHeight
 
-    // The current search match keeps the accent gutter §9.1 gives the current
-    // row, so it still reads as "you are here" while the pointer hovers
-    // something else.
-    Rectangle {
-        x: -6
-        y: root.topGap
-        width: 2
-        height: body.implicitHeight
-        visible: root.current
-        color: root.fgAccent
-    }
+    // The current match is told apart by its FILL — an accent bar where the
+    // other matches get `dim` (docs/DESIGN.md §3.6) — and not by §9.1's 2px
+    // gutter. That gutter used to be here at `x: -6` and drew NOTHING: a block
+    // delegate sits at x=0 in the list's content item, so a negative x is
+    // outside the viewport and `clip: true` ate every pixel of it. Measured
+    // offscreen — all three match rows came back identical to the pixel, which
+    // is why find-next read as a scroll and nothing else. §9.1's gutter exists
+    // to disambiguate a uniform selection fill under a hovering pointer; a
+    // whole different fill needs no help, and a document is not a hover list.
 
     Item {
         id: body
@@ -129,6 +127,7 @@ Item {
                 cellW: root.cellW
                 runs: root.block.runs || []
                 query: root.query
+                current: root.current
                 color: root.btype === "quote" ? root.fgDim : root.fg
                 codeColor: root.fg
                 onLinkActivated: (href, lt) => root.linkActivated(href, lt)
@@ -182,14 +181,16 @@ Item {
                         height: Theme.fontSize
                         readonly property bool hit: root.query.length > 1
                             && String(modelData).toLowerCase().indexOf(root.query.toLowerCase()) >= 0
+                        // dim for a match, accent for the one you are on — the
+                        // same two marks as prose (docs/DESIGN.md §3.6)
                         Rectangle {
                             anchors.fill: parent
                             visible: codeLine.hit
-                            color: Theme.highlight
+                            color: root.current ? Theme.accent : Theme.dim
                         }
                         PixelText {
                             text: codeLine.modelData
-                            color: root.fg
+                            color: (codeLine.hit && root.current) ? Theme.bg : root.fg
                         }
                     }
                 }
@@ -256,7 +257,7 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             visible: trow.hit
-                            color: Theme.highlight
+                            color: root.current ? Theme.accent : Theme.dim
                         }
                         Row {
                             spacing: 2 * root.cellW
@@ -270,8 +271,11 @@ Item {
                                     elide: Text.ElideRight
                                     text: tbl.cellText(modelData)
                                     // The header row is the label; the body is
-                                    // the reading. Two tiers on one hue (§3.2).
-                                    color: trow.index === 0 ? root.fg : root.fgDim
+                                    // the reading. Two tiers on one hue (§3.2)
+                                    // — both inverting to `bg` on the current
+                                    // match's accent bar (§3.6).
+                                    color: (trow.hit && root.current) ? Theme.bg
+                                         : trow.index === 0 ? root.fg : root.fgDim
                                 }
                             }
                         }
