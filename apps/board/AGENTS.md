@@ -1407,12 +1407,20 @@ all of it.
   listed as what can actually be observed — a process — and described as
   `running - board sees the process, not what it is doing`. Nothing invents a
   title for it.
+- **THE SECTION DESCRIBES ITSELF WITH CARDS — it has no description of its
+  own.** [his, 2026-07-30] bound ministers → the cards and nothing else; none
+  bound → the one empty line below and nothing else. Two things went for that:
+  the paragraph that framed the cards (*"each minister says what it is doing,
+  and the line under it is what it is actually doing…"*) and the watcher's
+  systemd sentence that sat under them. `Agents.watcher`/`Agents.armed` are
+  still read and still polled — the only place either is DRAWN now is the
+  not-armed line below, which §10 does not let us drop. Do not reintroduce a
+  subtitle here; the other sections keep theirs.
 - **Empty is the resting state**: `binds ministers.`, in `Theme.dim`, with the
   box still there — [his, 2026-07-29] what the triangle IS, rather than a report
   that it currently holds nobody.
 - **...and a SECOND line only when nothing will ever start.** Armed, that
-  sentence is the only text the section draws: the systemd status line at the
-  bottom of it is suppressed while the section is empty. Not armed, it reads
+  sentence is the only text the section draws. Not armed, it reads
   `board-watch is not armed`. The verdict is `Agents.armed`, three-valued —
   `boardagents.watcher_state()` asks BOTH `board-watch.service` (a tick running,
   a failed last run) and `board-watch.path` (will anything start one), checks
