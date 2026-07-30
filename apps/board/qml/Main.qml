@@ -217,10 +217,18 @@ Window {
     // sections are asked about in reverse page order. It follows the page, and
     // the page order changed — IN FLIGHT sits below LANDED now, at his request
     // ("for now"), so `flight` is asked FIRST here and `needs` is the fallback.
+    //
+    // `y > 0` on each test is NOT redundant: before the Column has laid out,
+    // every section sits at y 0, so `contentY (0) >= 0 - 4` was TRUE for the
+    // LAST section and the first thing the titlebar was told was that he is
+    // looking at `if` — then it was corrected to `ny` a frame later. Every
+    // REGISTER bumps the plugin's IPC serial and repaints the bar, so a wrong
+    // one is a visible flash of the wrong lit cell. Only `needs` can honestly
+    // be at y 0, and it is the fallback anyway.
     readonly property string section: {
-        if (secFlight.visible && scroller.contentY >= secFlight.y - 4) return "flight";
-        if (secLanded.visible && scroller.contentY >= secLanded.y - 4) return "landed";
-        if (secAgents.visible && scroller.contentY >= secAgents.y - 4) return "agents";
+        if (secFlight.visible && secFlight.y > 0 && scroller.contentY >= secFlight.y - 4) return "flight";
+        if (secLanded.visible && secLanded.y > 0 && scroller.contentY >= secLanded.y - 4) return "landed";
+        if (secAgents.visible && secAgents.y > 0 && scroller.contentY >= secAgents.y - 4) return "agents";
         return "needs";
     }
     // ...and the cells read left-to-right as the page reads top-to-bottom.
@@ -238,7 +246,13 @@ Window {
     ]
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
-    readonly property string footerStr: status !== "" ? status : "goetia"
+    // [his, 2026-07-29] *"remove the 'goetia' text at the bottom of the inner
+    // titlebar"* — so the footer is the STATUS and nothing else, and the bar is
+    // empty down there when there is nothing to report. The program's name is
+    // already the window title the plugin draws up the side of the same bar;
+    // saying it twice was the redundancy §9.1 rules out, and a standing label is
+    // not a report (the rule this property's own comment states).
+    readonly property string footerStr: status
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
     function jump(item) {
