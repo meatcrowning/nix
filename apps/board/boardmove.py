@@ -663,8 +663,30 @@ def backfill_placed(path=bp.BOARD_PATH):
     return wrote[0]
 
 
-def note(text, path=bp.BOARD_PATH):
+def whoami(agent_id=None):
+    """`(id, name)` of the agent writing — from the argument, else the
+    environment `boardwork.mark_reported` reads.
+
+    `boardagents` is imported HERE and not at the top: it imports this module,
+    so a module-level import would be a cycle.
+    """
+    import boardagents as ba
+    aid = ba.clean_id(agent_id or os.environ.get("BOARD_AGENT_ID") or "")
+    if not aid or aid == "agent":
+        return "", ""
+    return aid, ba.name_of(aid) or ba.name_for(aid)
+
+
+def note(text, path=bp.BOARD_PATH, agent_id=None):
     """One bullet into WAITING ON YOU TO DO.
+
+    **A RESULT retires the summon note that announced it** — his rule,
+    2026-07-29 — in the same read-modify-write as the insert, so the board never
+    holds *"summoned Marbas, nothing landed yet"* above the line saying what
+    landed. `boardparse.drop_summon` decides which note that is and refuses to
+    guess; `agent_id` names the agent the result is FROM, defaulting to
+    `BOARD_AGENT_ID` — board-watch passes it explicitly, because there the
+    process writing the failure is not the worker that failed.
 
     It must start with one of `boardparse.TODO_TAGS` — `QUESTION:`,
     `INFORMATION:`, `COMPLETION:`, `PARTIAL:`, `FAILED:` — then a summary of AT
@@ -699,7 +721,21 @@ def note(text, path=bp.BOARD_PATH):
         else:
             out.append("- " + line)
     body = "\n".join(out)
-    return bp.edit(path, lambda doc: bp.add_todo_bullet(doc["lines"], doc, body))
+    aid, who = whoami(agent_id) if bp.is_result(body) else ("", "")
+
+    def go(doc):
+        lines = doc["lines"]
+        if aid or who:
+            # The removal goes FIRST, and the parse is redone if it took one
+            # away: a bullet's index only means anything against the lines it
+            # was read from, and doing it the other way round would also make
+            # the result bullet a candidate to match itself.
+            out = bp.drop_summon(lines, doc, aid, who)
+            if out is not lines:
+                lines, doc = out, bp.parse("".join(out))
+        return bp.add_todo_bullet(lines, doc, body)
+
+    return bp.edit(path, go)
 
 
 def forget(key):
