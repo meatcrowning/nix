@@ -230,6 +230,11 @@
     Unit.Description = "Look for board answers the path unit could not deliver";
     Timer = {
       OnBootSec = "4min";
+      # Required alongside it: OnBootSec counts from SYSTEM boot but the user
+      # manager starts at login, so a login later than 4min after boot leaves
+      # the only elapse point in the past and the timer never fires at all.
+      # See home/srvs/nix-docs.nix for the 14-hour outage that proved it.
+      OnStartupSec = "4min";
       # Also the unlock latency: an answer that arrived while the screen was
       # locked waits at most this long after he comes back. Matched to the docs
       # sync so a pull from book and the run that acts on it stay adjacent.

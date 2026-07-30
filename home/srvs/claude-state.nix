@@ -105,6 +105,11 @@ in
       # cheaply. A short poll is simpler, and a tick with nothing to do is two
       # git no-ops.
       OnBootSec = "2min";
+      # Required alongside it: OnBootSec counts from SYSTEM boot but the user
+      # manager starts at login, so a login later than 2min after boot leaves
+      # the only elapse point in the past and the timer never fires at all.
+      # See home/srvs/nix-docs.nix for the 14-hour outage that proved it.
+      OnStartupSec = "2min";
       OnUnitActiveSec = "5min";
       # Catch up after the machine was asleep/off rather than waiting a full
       # interval — important on the laptop, which is rarely on for long.
