@@ -362,9 +362,9 @@ CLAIMABLE = ["planning", "researching", "coding", "testing", "finishing"]
 #: itself off to `coding` — the five were a menu by accident, and a menu of five
 #: makes every card say one of five things.
 #:
-#: Every word has an entry in `PHASE_PREDICATE`, because that is what the card's
-#: sentence is built from (`says_line`) — gerunds throughout bar `blocked`, which
-#: is the one state a gerund cannot say; every word passes `clean_phase_word`
+#: Every word FOLLOWS "is" as English, because that is the sentence the card
+#: builds (`says_line` -> `predicate`) — gerunds throughout bar `blocked`, which
+#: reads after "is" anyway; every word passes `clean_phase_word`
 #: (lowercase letters, one word, at most `CLAIM_WORD_MAX`), which
 #: `tools/board-test.py` asserts rather than trusting.
 PHASE_WORDS = [
@@ -387,56 +387,29 @@ PHASE_WORDS = [
 #: THE ONE PLACE A PHASE WORD BECOMES WORDS ON A CARD — phase word -> the whole
 #: PREDICATE that follows the agent's name.
 #:
-#: [his, 2026-07-29] *"instead of the agent verb-part being 'is researching' or
-#: 'is coding' etc it should just say 'researches...' or 'codes...' with animated
-#: elipsies"*. So the card reads *"Marbas researches..."*, simple present, third
-#: person, no auxiliary — and the trailing `...` is ANIMATED by `AgentRow.qml`
-#: (see `TICKLESS` below for the ones that do not get it).
+#: It is **`is <word>`**, and that is his call twice: it was the shape from the
+#: start, it became the simple present for an hour on 2026-07-29 (*"it should
+#: just say 'researches...' or 'codes...'"*) and he walked that back the same
+#: evening — *"sorry, change the top line of an agents card back to 'is reading'
+#: or 'is coding' etc"*. Every word in `PHASE_WORDS` is a gerund bar `blocked`,
+#: which reads as English after "is" anyway, so one rule covers the list and an
+#: off-list word (any single word is legal) as well.
 #:
-#: **It is a PREDICATE and not a verb**, which is what lets `blocked` stay
-#: `is blocked`: it is the one word in `PHASE_WORDS` that is not a gerund, and
-#: `blocks` would say the opposite of what it means. One table, so the verb form
-#: cannot drift between the worker cards and Solomon's.
-#:
-#: An off-list word is legal (`clean_phase_word` takes any single word) and gets
-#: `is <word>` — an auxiliary is a worse sentence than the rest of this table,
-#: and mangling an unknown word into a conjugation it may not have is worse than
-#: either.
-PHASE_PREDICATE = {
-    "planning": "plans", "researching": "researches", "coding": "codes",
-    "testing": "tests", "finishing": "finishes",
-    "reading": "reads", "exploring": "explores",
-    "investigating": "investigates", "debugging": "debugs",
-    "bisecting": "bisects", "profiling": "profiles", "measuring": "measures",
-    "benchmarking": "benchmarks", "tracing": "traces", "auditing": "audits",
-    "designing": "designs", "drafting": "drafts",
-    "implementing": "implements", "refactoring": "refactors",
-    "porting": "ports", "packaging": "packages",
-    "documenting": "documents", "cleaning": "cleans",
-    "verifying": "verifies", "reviewing": "reviews",
-    "reproducing": "reproduces",
-    "building": "builds", "rebuilding": "rebuilds",
-    "committing": "commits", "merging": "merges", "rebasing": "rebases",
-    "waiting": "waits", "blocked": "is blocked",
-    # Solomon's, and not on the menu the workers are shown. His card overrides
-    # this one in his own voice (`orch_says_line`); a worker that claimed it
-    # would read as English rather than as him.
-    "dispatching": "dispatches",
-}
-
-#: The predicates that do NOT end in an animated `...`. A stall is not motion:
-#: an animation over a state where nothing is happening is the dishonest
-#: affordance docs/DESIGN.md §10 forbids, and it is the same reason the observed
-#: line's own tick is scoped to `observed == "ok"`.
-TICKLESS = ("blocked",)
-
-
+#: **It stays a function rather than a f-string at the call site**, because there
+#: are two callers — a worker's card and Solomon's — and the verb form drifting
+#: between them is exactly what the two rounds of this cost. Solomon's own two
+#: phrases override it in `orch_says_line` and nothing else does.
 def predicate(word):
     """A phase word -> the predicate the card draws after the agent's name."""
     w = " ".join(str(word or "").split()).lower()
-    if not w:
-        return ""
-    return PHASE_PREDICATE.get(w) or "is %s" % w
+    return "is %s" % w if w else ""
+
+
+#: The phase words whose line does NOT end in an animated `...` — the dots are on
+#: the claim's words (`says_detail`), and a stall is not motion: an animation over
+#: a state where nothing is happening is the dishonest affordance
+#: docs/DESIGN.md §10 forbids.
+TICKLESS = ("blocked",)
 
 
 #: A claimed word is drawn inside a sentence on a card that is one line high.
@@ -564,8 +537,8 @@ def actually(rec):
 #
 # **The joining is chosen for the REAL strings, not assumed.** `says()` is
 # `"<phase> - <words>"`, and the phase word reaches the card through
-# `PHASE_PREDICATE` as a simple-present predicate — *"Marbas researches..."*, his
-# call, no auxiliary. The words on their own may be a noun phrase —
+# `predicate` as *"is <word>"* — his wording, twice (see `predicate`). The words
+# on their own may be a noun phrase —
 # `boardctl.py phase` takes the phase as OPTIONAL and its `--doing` is *"one
 # short line"*, so *"the vtbclient parser"* is a legal claim — and *"Marbas the
 # vtbclient parser"* is not a sentence. That case gets `says:` instead.
@@ -591,10 +564,10 @@ def says_line(rec, who=""):
     phase, doing = rec.get("claimPhase") or "", rec.get("claimDoing") or ""
     subj = _subject(who)
     if phase:
-        # SIMPLE PRESENT, from the one table (`PHASE_PREDICATE`), and NOTHING
+        # *"<name> is <word>"*, from the one place (`predicate`), and NOTHING
         # ELSE ON THIS LINE. What it said it is doing is `says_detail`, drawn
-        # under this one — [his, 2026-07-29] the card is *"[agent] [verb]s"* and
-        # then the words that used to follow a hyphen, on their own line.
+        # under this one — [his, 2026-07-29] the card is two lines, the verb and
+        # then the words that used to follow a hyphen on this one.
         #
         # **The ticking `...` belongs to that lower line, not this one** — [his,
         # 2026-07-29] *"take the animated elipsies out of the top line"*. It
