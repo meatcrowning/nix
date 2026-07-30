@@ -1279,15 +1279,44 @@ usage has been consumed"*, with one constraint stated in the same breath: **he
 does not want Fable broken out.** `boardusage.py` + `qml/UsageMeter.qml`; the
 module docstring is authoritative and this is the summary.
 
-- **There is exactly one honest source on this desktop, and it is Claude Code's
-  own cache**: `~/.claude.json` -> `cachedUsageUtilization`, what the CLI last
-  fetched for `/usage`. Everything else that looks like a source is not one —
-  the session transcripts carry token counts with **no denominator**,
-  `~/.claude/stats-cache.json` carries neither and goes days without updating,
-  and there is no `claude usage` subcommand. So the percentages drawn are the
-  CLI's own arithmetic against the real plan; **nothing here derives one from
-  tokens against a ceiling nobody published** (§10.5, and the same refusal
-  `boardphase` makes about an assumed context window).
+- **The percentages are the ACCOUNT's, never derived here.** Everything on this
+  desktop that looks like a second source is not one — the session transcripts
+  carry token counts with **no denominator**, `~/.claude/stats-cache.json`
+  carries neither and goes days without updating, and there is no `claude usage`
+  subcommand. **Nothing here derives a percentage from tokens against a ceiling
+  nobody published** (§10.5, and the same refusal `boardphase` makes about an
+  assumed context window).
+- **IT FETCHES FOR ITSELF, because the CLI's cache does not tick.** [his,
+  2026-07-29] *"why did it take me opening an instance of claude-code for the
+  usage indicators to update? they should always be up to date"* — and the
+  answer was not the poll. `~/.claude.json` -> `cachedUsageUtilization` advances
+  **only while a claude-code session runs**: measured on `top` 2026-07-29, with
+  no session live its `fetchedAtMs` does not move at all, and even a whole
+  `claude -p "/usage"` run leaves it untouched (it printed 16% while the cache
+  still said 14%). So the bars were as old as his last session, however honestly
+  they said so. `boardusage.fetch()` now does the same
+  `GET /api/oauth/usage` the CLI does, with the access token the CLI already
+  holds, and writes the answer to `LIVE_PATH`
+  (`~/.local/state/board/usage.json`) — **a file this app owns**. The response
+  body is shape-identical to `cachedUsageUtilization.utilization`, `limits[]`
+  and all, so nothing downstream learned a second format. `_cache()` reads both
+  files and takes the newer `fetchedAtMs`, so the CLI's writes are never thrown
+  away and a host where the fetch cannot work behaves exactly as before.
+- **`~/.claude.json` and the credentials stay READ-ONLY from here.** `fetch()`
+  uses the access token and **never refreshes or rewrites it**: the refresh token
+  rotates, and racing the CLI for `~/.claude/.credentials.json` could log him out
+  of every session on the machine. An expired token therefore fails the fetch;
+  `nudge()` asks the CLI to sort its own credentials out (`claude auth status`,
+  measured 0.22s on `top` — no session, no transcript, no model call) and the
+  fetch is retried once, at most every `Usage.NUDGE_SEC`. If that does not work
+  either the last reading is still drawn with its honest age.
+- **A failed fetch costs freshness and nothing else.** `fetch()` returns a reason
+  word (`off`, `no-token`, `expired`, `unauthorized`, `http-<code>`, `offline`,
+  `bad-payload`, `unwritable`) and never raises, never blanks a working bar, and
+  refuses to STORE a payload from which no window parses — overwriting a real
+  reading with a shape we cannot read would turn a bar into `unknown` for as long
+  as the endpoint stayed odd. `Usage` logs the reason to stderr only when it
+  *changes*, or a machine with no network writes a line a minute.
 - **The short window is FIVE HOURS and is labelled `5h`, not "daily".** The
   account has no daily bucket. What stops him mid-afternoon is the rolling
   session limit, so that is what is drawn, under its own name — a five-hour
@@ -1319,26 +1348,37 @@ module docstring is authoritative and this is the summary.
   left (§5.2) — under `minBarW` it is not drawn at all, which happens only for
   `unknown`, a word about as wide as the chooser and the whole reading in that
   state anyway.
-- **The 60s poll is the fallback; the trigger is an agent's LIFE changing.**
+- **Two clocks, because reading is cheap and fetching is not.** The 60s tick
+  re-reads both caches (two `stat`s and a small JSON parse); a FETCH happens at
+  most every `Usage.FETCH_SEC` (300s), on a daemon thread so the window never
+  waits on the network, with exactly one ever in flight and the result carried
+  back over a queued `_fetched` signal. That is what makes the bars right with no
+  claude-code running, right after a relaunch, and right after the machine has
+  been idle for hours.
+- **The clocks are the fallback; the trigger is an agent's LIFE changing.**
   [his, 2026-07-29] *"ensure the usage indicators update every time an agent is
   killed / finishes their job / etc."* `Agents.lives` fires when the set of
   `(id, state)` pairs changes — born, finished, killed, failed, reclaimed,
-  gone — and `Usage.follow()` re-reads on it. It is deliberately **not**
-  `Agents.changed`, which also fires for per-poll churn (a worked-for line
-  ticking over, a context tally, a new unread note): hanging the re-read off
-  that would silently make it a 2.5s poll of a 60KB JSON file. The figure is
-  still only as fresh as the CLI's own cache — an agent that exits before its
-  own CLI writes one is picked up on the next tick, as before.
-- Machine-local by construction: `~/.claude.json` is **not** inside the
-  `~/.claude` tree that syncs between `top` and `book`, so each host draws what
-  its own CLI last fetched. Same account, different freshness.
+  gone — and `Usage.follow()` hangs `kick()` on it, which now genuinely re-reads
+  the number instead of re-reading a file nobody wrote. It is deliberately
+  **not** `Agents.changed`, which also fires for per-poll churn (a worked-for
+  line ticking over, a context tally, a new unread note): hanging it off that
+  would make this a 2.5s fetch. `Usage.KICK_SEC` (20s) is the floor either way.
+- Machine-local by construction: neither `~/.claude.json` nor `LIVE_PATH` is
+  inside the `~/.claude` tree that syncs between `top` and `book`, so each host
+  draws what it last read for itself. Same account, different freshness.
 - Regression layer: `test_usage` in `tools/board-test.py` (the scoped entry is
   never drawn, a scoped-only weekly reads `unknown` rather than being promoted,
   every broken shape reads `unknown`, an old cache carries its age), plus the
   window checks that there are two meters, that they sit **under** the chooser
   in `WINDOWS` order top-to-bottom, and that both edges are flush with the
   chooser's — a hardcoded width would pass the first three and silently drift on
-  the fourth — plus `test_usage_follows_agents`, which asserts the lifecycle
+  the fourth — plus `test_usage_fetch`, which covers where the number comes FROM
+  (the fresher of the two caches wins, an unreadable one does not take the other
+  down, a token that has expired is not spent on a round trip, the wire is the
+  account's own endpoint with the CLI's token, and every failure mode keeps the
+  last reading unblanked) — plus `test_usage_follows_agents`, which asserts the
+  lifecycle
   re-read fires on all four transitions and **not** on a card merely redrawing. **Every context property `main.py` installs must also be installed in
   the harness's `build()`** — a missing one is a `ReferenceError` the harness
   cannot see and a section simply absent on his screen.
@@ -1652,6 +1692,12 @@ populated, a 420x600 window, and an unreadable store. It redirects
 write into `~/.claude`, which syncs to book — and `XDG_STATE_HOME` into a
 scratch dir (a harness here **must**, or it rewrites his own app's state), works
 on a COPY of the store for every write, and stubs the Titlebar, because the real
-one registers buttons against the harness's pid in the live compositor.
+one registers buttons against the harness's pid in the live compositor. It also
+exports **`BOARD_USAGE_OFFLINE=1`**, which makes `boardusage.fetch()` and
+`nudge()` no-ops: `Usage` fetches the account's live figures on a worker thread
+from its constructor, so without that switch every test that builds one would
+reach the network and write his real
+`~/.local/state/board/usage.json`. `test_usage_fetch` unsets it and drives the
+fetch against a stub `urlopen` instead.
 
 The *appearance* is his check, as always.
