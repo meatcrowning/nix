@@ -336,14 +336,23 @@ Window {
                 width: page.width
                 height: Math.max(askBox.height, pickCol) + (usageCol.visible ? 4 : 0)
 
-                // Top of the chooser to the bottom of the last meter. The 4 is
-                // the lead-in below, stated once here and once there.
-                readonly property real pickCol: modelPick.y + modelPick.height
+                // Top of the chooser to the bottom of the last meter. The 4s are
+                // the lead-ins below, stated once here and once at each of them.
+                readonly property real pickCol: capPick.y + capPick.height
                     + (usageCol.visible ? 4 + usageCol.height : 0)
+
+                // ONE edge for the whole column, and it is the widest control in
+                // it — his rule for the meters ("exactly as wide as the model
+                // selection box") is that the column has a single right and a
+                // single left edge, and two dropdowns of different label lengths
+                // would otherwise give it three. Bound to the labels, never a
+                // number, so a longer model name still widens all of it (§2.7).
+                readonly property real colW: Math.max(modelPick.implicitWidth,
+                                                      capPick.implicitWidth)
 
                 InputBox {
                     id: askBox
-                    width: parent.width - modelPick.width - 10
+                    width: parent.width - parent.colW - 10
                     minHeight: parent.pickCol - modelPick.y
                     fgAccent: win.fgAccent
                     fgText: win.fgText
@@ -355,12 +364,15 @@ Window {
                     onSubmitted: (b) => win.sendTo(null, b)
                 }
 
-                // It is a MENU, not a combo box: §7.2 says menus on this desktop
-                // are ours and are `CtxMenu`, and a chooser with four entries is
-                // that menu with a resting label. No second popup implementation,
-                // and the tick beside the live one comes from `boardwork`, so the
-                // control cannot disagree with what will actually spawn.
-                Item {
+                // Both of these are MENUS, not combo boxes: §7.2 says menus on
+                // this desktop are ours and are `CtxMenu`, and a chooser with a
+                // handful of entries is that menu with a resting label. They are
+                // one component (`PickBox.qml`) because they are one control —
+                // [his, 2026-07-29] the cap is *"another drop down"*, in the
+                // idiom of the one beside it — and the tick beside each live
+                // entry comes from `boardwork`, so neither control can disagree
+                // with what will actually happen.
+                PickBox {
                     id: modelPick
                     anchors.right: parent.right
                     // Flush with the box's own top, not inset by the 3px the
@@ -368,46 +380,44 @@ Window {
                     // this column, so the two are only "the same height" if
                     // they start and end on the same rows.
                     y: 0
-                    width: pickText.implicitWidth + 16
-                    height: Theme.fontSize + 6
+                    width: parent.colW
+                    label: Agents.modelLabel
+                    // What it changes, and WHEN it takes effect. The second half
+                    // is the whole of the promise: a running orchestrator is not
+                    // restarted and not re-pointed.
+                    hint: "which model reads what you type - the one running now keeps its own"
+                    items: () => win.modelItems()
+                    popup: menu
+                    fgDim: win.fgDim
+                    fgAccent: win.fgAccent
+                    onHoveringChanged: (on) => win.status = on ? hint : ""
+                }
 
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 3
-                        color: pickMa.containsMouse ? Theme.highlight : "transparent"
-                        border.width: 1
-                        border.color: pickMa.containsMouse ? Theme.accent : Theme.border
-                    }
-                    PixelText {
-                        id: pickText
-                        anchors.centerIn: parent
-                        // `v` is the one glyph this font does have for "opens
-                        // downward" - §2.3 rules out the triangles, and the
-                        // section bands already use this ASCII vocabulary.
-                        text: Agents.modelLabel + "  v"
-                        color: pickMa.containsMouse ? win.fgAccent : win.fgDim
-                    }
-                    MouseArea {
-                        id: pickMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            // Under the control's bottom-left, in window
-                            // coordinates - the menu fills the window and
-                            // clamps itself back into view.
-                            var p = mapToItem(null, 0, height);
-                            menu.open(p.x, p.y, win.modelItems());
-                        }
-                    }
-                    HoverHandler {
-                        // What it changes, and WHEN it takes effect. The second
-                        // half is the whole of the promise: a running
-                        // orchestrator is not restarted and not re-pointed.
-                        onHoveredChanged: win.status = hovered
-                            ? "which model reads what you type - the one running now keeps its own"
-                            : ""
-                    }
+                // ...and under it, how many of them may run at once. [his,
+                // 2026-07-29] *"between the model selector and the indicators,
+                // add another drop down for the max number of agents
+                // available."* It is BETWEEN them, in his order, so the column
+                // reads model -> how many -> what they have cost.
+                //
+                // It writes the ONE cap store — the file `boardctl.py cap`
+                // writes and `promote()` re-reads at the top of every tick — so
+                // nothing is restarted and nothing is killed by picking one: a
+                // bigger cap starts queued work on the next tick, a smaller one
+                // stops starting more. Same 4px rung under it as the meters get
+                // (§4.1), rather than butting two 1px borders into a 2px seam.
+                PickBox {
+                    id: capPick
+                    anchors.top: modelPick.bottom
+                    anchors.topMargin: 4
+                    anchors.right: modelPick.right
+                    width: parent.colW
+                    label: Agents.capLabel
+                    hint: "the most agents allowed to work at once - the next tick honours it"
+                    items: () => win.capItems()
+                    popup: menu
+                    fgDim: win.fgDim
+                    fgAccent: win.fgAccent
+                    onHoveringChanged: (on) => win.status = on ? hint : ""
                 }
 
                 // ======================== what is left of the usage, under it
@@ -448,10 +458,10 @@ Window {
                     // and the same 4 this block leaves under itself, so the card
                     // keeps one gap and not three. The 5h/7d rows still butt
                     // together; only the lead-in moved.
-                    anchors.top: modelPick.bottom
+                    anchors.top: capPick.bottom
                     anchors.topMargin: 4
-                    anchors.right: modelPick.right
-                    width: modelPick.width
+                    anchors.right: capPick.right
+                    width: capPick.width
                     visible: Usage.rows.length > 0
                     // Zero: each meter already carries its own line box (§4.1),
                     // and stacked readouts butt together like every other tiled
@@ -1297,6 +1307,22 @@ Window {
     // The model chooser's rows. A tick marks the live one rather than the row
     // being disabled — picking what is already picked is a no-op he can see the
     // result of, and a greyed row would read as "unavailable" (§10).
+    // The cap dropdown's entries. Same shape as `modelItems`, and the same
+    // honesty: the tick is the store's, and the footer says WHEN it applies
+    // rather than claiming the change already happened (§10).
+    function capItems() {
+        return Agents.caps.map((c) => ({
+            label: (c.current ? "* " : "  ") + c.label,
+            trigger: () => {
+                if (!Agents.chooseCap(c.n))
+                    win.status = "could not save that choice";
+                else
+                    win.status = "at most " + c.label
+                        + " from the next tick on - nothing running is stopped";
+            }
+        }));
+    }
+
     function modelItems() {
         return Agents.models.map((m) => ({
             label: (m.current ? "* " : "  ") + m.label,

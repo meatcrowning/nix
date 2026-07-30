@@ -1165,8 +1165,10 @@ but rather multiple lines so that it is the same height as from the top of the
 model selector box to the bottom of the indicators. the indicators should be
 anchored to the model selector box not the prompt box as they are now"*. So
 `modelPick` sits at y 0, the meters anchor to **its** bottom, and
-`askBox.minHeight` is that column's whole span — chooser + the 4px lead-in +
-both meters — read off their real geometry, never a number, so a longer model
+`askBox.minHeight` is that column's whole span — chooser, the cap dropdown, both
+meters and a 4px rung between each — read off their real geometry (the meters
+anchor to the cap box, which anchors to the chooser), never a number, so a
+longer model
 label or a bigger font size moves box and column together (§2.7). The
 dependency runs column -> box and only that way: anchoring the meters to the box
 while the box measures itself off the meters is a **binding loop**, and it is
@@ -1219,7 +1221,39 @@ message] *"the other agents should all be opus 5 medium thinking"*. That
 replaces the earlier `("", "")`, which meant "inherit `~/.claude/settings.json`"
 on the reading that nobody had asked for them to be pinned. Somebody has.
 
-### ...and under it, how much of his usage is gone
+### ...and under THAT, how many agents may run at once
+
+[his, 2026-07-29] *"between the model selector and the indicators, add another
+drop down for the max number of agents available."*
+
+- **It writes the cap FILE, and that is the only cap there is.**
+  `boardwork.cap()` / `set_cap()` — `~/.local/state/board/cap`, the same store
+  `boardctl.py cap <n>` writes and every spawner reads. `Agents.chooseCap()` is
+  four lines over those two functions for the reason `chooseModel` is: a second
+  copy of the number is a control that can disagree with what actually runs.
+- **Nothing is restarted and nothing is killed.** `promote()` re-reads the file
+  at the top of every board-watch tick, so a bigger cap starts queued work on
+  the next one and a smaller cap simply stops starting more. The footer says
+  that in his words rather than claiming the change already happened (§10).
+- **The range offered is `boardwork.CAP_CHOICES` (1-8), not a ceiling.**
+  `boardctl.py cap` still takes any `n >= 1` — a typed selector here is always
+  more forgiving than a drawn one — and a cap of his that is off the list is
+  **appended and ticked** rather than hidden, or the control would draw a tick
+  beside a number that is not live. `BOARD_MAX_WORKERS` still wins over the
+  file, which is why the harness pops it before checking that picking one
+  writes anything.
+- **One component for both dropdowns: `qml/PickBox.qml`.** Label, `v`, hover
+  chrome, and `CtxMenu` under it — his *"another drop down"* is the same
+  control, and a second hand-rolled copy of the chrome is how two things that
+  must look identical stop being (docs/DESIGN.md §19.1). Its menu property is
+  called `popup`, not `menu`, so a call site can write `popup: menu` without the
+  id resolving to the property.
+- **The column has ONE left and ONE right edge**: `colW` is the wider of the two
+  dropdowns' `implicitWidth`, and the meters take it too — his "exactly as wide
+  as the model selection box" generalised, since two labels of different lengths
+  would otherwise give that column three edges.
+
+### ...and under that, how much of his usage is gone
 
 [his, 2026-07-29] *"add usage indicators directly under the orchestrator
 model-selection box: how much of his daily usage and how much of his weekly
@@ -1501,7 +1535,9 @@ each separately leaves both markers on screen (it did).
 
 ```bash
 # on `top`, where the wrapper carries the Qt env:
-W=$(readlink -f "$(which board)"); sed '$d' "$W" > /tmp/brdenv.sh
+# the binary is `goetia`; there has never been one called `board` (the NAME is
+# the only thing that was renamed - every path and identifier is still board*)
+W=$(readlink -f "$(command -v goetia)"); sed '$d' "$W" > /tmp/brdenv.sh
 ( . /tmp/brdenv.sh; "$(tail -1 "$W" | grep -o '/nix/store/[^"]*/bin/python3')" \
     apps/board/tools/board-test.py --shots /tmp/board-shots )
 

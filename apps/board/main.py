@@ -693,6 +693,51 @@ class Agents(QObject):
     def cap(self):
         return boardwork.cap()
 
+    # ---- how many of them may run at once -----------------------------------
+    # The second dropdown, between the model chooser and the meters. [his,
+    # 2026-07-29] *"between the model selector and the indicators, add another
+    # drop down for the max number of agents available."* Thin for the same
+    # reason `models` is: `boardwork.cap()`/`set_cap()` are the ONE store —
+    # the same file `boardctl.py cap` writes and every spawner reads — and
+    # `CAP_CHOICES` is the one list.
+    capChanged = Signal()
+
+    @Property("QVariantList", notify=capChanged)
+    def caps(self):
+        """`[{n, label, current}]`, in the order the menu draws them. A cap of
+        his that is off the list is appended rather than hidden: the control
+        must not draw a tick beside a number that is not the live one."""
+        cur = boardwork.cap()
+        ns = list(boardwork.CAP_CHOICES)
+        if cur not in ns:
+            ns = sorted(ns + [cur])
+        return [{"n": n, "label": self._capLabel(n), "current": n == cur}
+                for n in ns]
+
+    @staticmethod
+    def _capLabel(n):
+        return "%d agent%s" % (n, "" if n == 1 else "s")
+
+    @Property(str, notify=capChanged)
+    def capLabel(self):
+        """What the closed control reads."""
+        return Agents._capLabel(boardwork.cap())
+
+    @Slot(int, result=bool)
+    def chooseCap(self, n):
+        """Write it. Nothing is restarted and nothing is killed: `promote()`
+        reads the file at the top of every board-watch tick, so a bigger cap
+        starts queued work on the next one and a smaller cap simply stops
+        starting more — the same "it takes effect for the next tick" mechanism
+        the model chooser has, and for the same reason."""
+        try:
+            boardwork.set_cap(n)
+        except (ValueError, OSError):
+            return False
+        self.capChanged.emit()
+        self.changed.emit()
+        return True
+
     # ---- which model orchestrates -------------------------------------------
     # The dropdown beside the box. Both halves are thin on purpose: the list and
     # the choice live in `boardwork`, because `boardctl.py model` and the
