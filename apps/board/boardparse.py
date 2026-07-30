@@ -977,7 +977,7 @@ TODO_TAGS = (
     #: agent leaves behind on its way out.
     "QUESTION",
     #: a fact he may want and nothing is being asked of him. The orchestrator's
-    #: "summoned Marbas, nothing landed yet" and `stall`'s moved row.
+    #: "SUMMONED: Marbas (`wd690a4`) to add commit times" and `stall`'s moved row.
     "INFORMATION",
     #: the work is finished and on his machine.
     "COMPLETION",
@@ -1267,11 +1267,11 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 # user would already know that part."*
 #
 # The orchestrator's note is a START, never a result (`boardwork.RULES`), so it
-# writes one `INFORMATION:` line per task it handed out — *"summoned Marbas
-# (`wd690a4`), nothing landed yet"*. That line is true for as long as nothing has
-# come back, and the moment the worker posts its own `COMPLETION:`/`PARTIAL:`/
-# `FAILED:` it is worse than noise: two bullets about one piece of work, the
-# upper one saying nothing landed yet under the one saying what did.
+# writes one `INFORMATION:` line per task it handed out — *"SUMMONED: Marbas
+# (`wd690a4`) to add commit times"*. That line is worth reading for as long as
+# nothing has come back, and the moment the worker posts its own
+# `COMPLETION:`/`PARTIAL:`/`FAILED:` it is worse than noise: two bullets about
+# one piece of work, the upper one announcing what the lower one has finished.
 #
 # It happens HERE rather than in `boardctl`, because the store has more than one
 # writer of a result — `boardctl note` for a worker that finished, board-watch's
@@ -1292,13 +1292,18 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 #     and every summon note stays exactly where it is.
 RESULT_TAGS = ("COMPLETION", "PARTIAL", "FAILED")
 
-#: `summoned Marbas` — or `commanded Marbas`, which is the same announcement for
-#: a worker that was already running (his rule, 2026-07-29: `summoned` is a NEW
-#: agent, `commanded` is one given more work). **Both words have to be read
+#: `SUMMONED: Marbas` — or `COMMANDED: Marbas`, which is the same announcement
+#: for a worker that was already running (his rule, 2026-07-29: `SUMMONED:` is a
+#: NEW agent, `COMMANDED:` is one given more work). **Both words have to be read
 #: here.** The note is retired by the worker's own result either way, and a
-#: `commanded` line this regex did not match would sit under that result forever
-#: saying nothing landed yet — the exact two-bullets-about-one-piece-of-work this
-#: whole mechanism exists to prevent.
+#: `COMMANDED:` line this regex did not match would sit under that result
+#: forever announcing work he has already been told the end of — the exact
+#: two-bullets-about-one-piece-of-work this whole mechanism exists to prevent.
+#:
+#: The words were the lowercase verbs `summoned`/`commanded` until 2026-07-29,
+#: when he restyled them as uppercase tags before the name; both spellings and
+#: the optional colon are matched, because the store still holds notes written
+#: the old way and they must keep being retired.
 #:
 #: Then the coded id if the writer put one there. The id
 #: is PARENTHESISED, immediately after the name — the shape the orchestrator's
@@ -1306,7 +1311,7 @@ RESULT_TAGS = ("COMPLETION", "PARTIAL", "FAILED")
 #: the line is a path or a log file, not an identity. Written as a code span in
 #: the store, so the backticks are optional here and this reads the DRAWN text
 #: (`parse` pops a bullet's raw form and keeps the de-emphasised one).
-_SUMMONED = re.compile(r"\b(?:summoned|commanded)\s+([A-Z][A-Za-z'-]*)"
+_SUMMONED = re.compile(r"\b(?i:summoned|commanded):?\s+([A-Z][A-Za-z'-]*)"
                        r"(?:\s*\(\s*`?([^`()\s]+)`?\s*\))?")
 
 
