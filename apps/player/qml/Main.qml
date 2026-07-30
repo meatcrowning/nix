@@ -217,7 +217,7 @@ Window {
             { id: "now",       label: "n", state: view === "now" ? 1 : 0, tip: "now playing" },
             "-",
             { id: "sort",      label: sortLabel, state: 0, tip: sortTip },
-            { id: "search",    label: "/", state: win.searchOpen ? 1 : 0, tip: "search" },
+            { id: "search",    label: "fs", state: win.searchOpen ? 1 : 0, tip: "find (Ctrl+F)" },
             { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings", bottom: true },
         ];
     }
@@ -453,6 +453,8 @@ Window {
     }
 
     // ---- global keys ----
+    // Ctrl+F is the desktop's find key (docs/DESIGN.md §11.2). The titlebar cell
+    // used to be labelled "/", which advertised a key that was never bound.
     Shortcut { sequence: "Ctrl+F"; onActivated: win.openSearch() }
     Shortcut { sequence: "Space";  enabled: !searchInput.activeFocus; onActivated: Player.toggle() }
     Shortcut { sequence: "Ctrl+Right"; onActivated: Player.next() }
