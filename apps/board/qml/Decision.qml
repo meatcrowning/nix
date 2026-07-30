@@ -33,6 +33,14 @@ Item {
     signal draftEdited(string body)
     signal contextRequested(real mx, real my)
 
+    //: the same caret hand-off `InputBox` carries, and for the same reason: a
+    //  decision APPEARING in or LEAVING the store rebuilds every card in the
+    //  list, so where his caret was has to be held by the page and given back.
+    //  See `InputBox.qml`.
+    signal caretHeld(int pos)
+    signal caretLeft()
+    property int openCaret: -1
+
     readonly property bool answered: decision && decision.answered === true
     readonly property bool picked: {
         if (!decision)
@@ -48,13 +56,16 @@ Item {
     implicitHeight: col.implicitHeight + 12
     height: implicitHeight
 
-    function beginEdit() {
+    function beginEdit(at) {
         if (!card.canAnswer)
             return;
         card.editing = true;
         editor.forceActiveFocus();
-        editor.cursorPosition = editor.length;
+        editor.cursorPosition = (at === undefined || at < 0)
+                                ? editor.length : Math.min(at, editor.length);
     }
+
+    Component.onCompleted: if (card.openCaret >= 0) card.beginEdit(card.openCaret);
 
     // An answered item carries the 2px accent gutter §9.1 gives a current row —
     // used here for "you have said something about this", which is the one
@@ -265,17 +276,21 @@ Item {
                     text: card.draft !== "" ? card.draft
                                             : (card.decision ? card.decision.answer : "")
                     onTextChanged: card.draftEdited(text)
+                    onActiveFocusChanged: if (activeFocus) card.caretHeld(cursorPosition);
+                    onCursorPositionChanged: if (activeFocus) card.caretHeld(cursorPosition);
                     Keys.onPressed: (e) => {
                         if (e.key === Qt.Key_Escape) {
                             // Leaves the editor and KEEPS what he typed. An
                             // unsaved sentence is never thrown away by this
                             // app — it is persisted and shown as a draft.
                             card.editing = false;
+                            card.caretLeft();
                             e.accepted = true;
                         } else if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
                                    && !(e.modifiers & Qt.ShiftModifier)) {
                             card.commit(editor.text);
                             card.editing = false;
+                            card.caretLeft();
                             e.accepted = true;
                         }
                     }

@@ -32,6 +32,10 @@ Item {
 
     signal draftEdited(string body)
     signal statusMessage(string text)
+    //: passed straight through to the box — see `InputBox.qml`.
+    signal caretHeld(int pos)
+    signal caretLeft()
+    property int openCaret: -1
     // head goes above the shared entries, tail below them — the destructive one
     // is LAST behind its own separator (§7.2), so the pointer never lands on it.
     signal menuRequested(real mx, real my, var head, var tail)
@@ -112,7 +116,10 @@ Item {
         fgText: row.fgText
         fgDim: row.fgDim
         placeholder: "rewrite this queued note - the next agent reads it"
+        openCaret: row.openCaret
         onDraftEdited: (b) => row.draftEdited(b)
         onSubmitted: (b) => row.commitEdit(b)
+        onCaretHeld: (p) => row.caretHeld(p)
+        onCaretLeft: () => row.caretLeft()
     }
 }
