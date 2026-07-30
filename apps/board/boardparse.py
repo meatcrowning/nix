@@ -31,7 +31,9 @@ parser keys on):
         *If unanswered:* ...  what happens if he never answers
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions. Each one
                               starts with a TAG (`QUESTION:`, `INFORMATION:`,
-                              `COMPLETION:`, `PARTIAL:`, `FAILED:`) and then a
+                              `COMPLETION:`, `PARTIAL:`, `FAILED:` — or a
+                              colonless `SUMMONED`/`COMMANDED`, which are drawn
+                              under `information`) and then a
                               summary of about a dozen words at most; background
                               goes on indented continuation lines under it.
                               `add_todo_bullet` refuses one that does not —
@@ -481,9 +483,25 @@ TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION")
 
 
 def tag_of(text):
-    """The tag a drawn bullet leads with, or `""` for one that leads with none."""
-    head = text.split(":", 1)[0].strip()
-    return head if head in TODO_TAGS else ""
+    """The tag a drawn bullet leads with, or `""` for one that leads with none.
+
+    The colon first, so an OLD `INFORMATION: **x** - SUMMONED: Marbas ...` line
+    still reads as the `INFORMATION` it was written as; only then the bare
+    first word, which is how the two summon tags are written now.
+    """
+    s = str(text or "").strip()
+    head = s.split(":", 1)[0].strip()
+    if head in TODO_TAGS:
+        return head
+    head = s.split(None, 1)[0] if s else ""
+    return head if head in BARE_TAGS else ""
+
+
+def section_of(tag):
+    """The subsection a tag is DRAWN under — itself, unless `TAG_SECTION` says
+    otherwise. `SUMMONED` reads as `SUMMONED` on the line and files under
+    `information`, which is exactly what he asked for."""
+    return TAG_SECTION.get(tag, tag)
 
 
 def todo_groups(todos):
@@ -498,7 +516,9 @@ def todo_groups(todos):
     if untagged:
         out.append({"tag": "", "label": "", "items": untagged})
     for tag in TODO_ORDER:
-        items = [t for t in todos if t.get("tag") == tag]
+        # By SECTION, not by tag: a `SUMMONED` bullet keeps its own word on the
+        # line and is drawn under `information` with the rest of the facts.
+        items = [t for t in todos if section_of(t.get("tag")) == tag]
         if items:
             out.append({"tag": tag, "label": tag.lower(), "items": items})
     return out
@@ -976,8 +996,9 @@ TODO_TAGS = (
     #: an `*If unanswered:*` line. This is the small "say the word and X" an
     #: agent leaves behind on its way out.
     "QUESTION",
-    #: a fact he may want and nothing is being asked of him. The orchestrator's
-    #: "SUMMONED: Marbas (`wd690a4`) to add commit times" and `stall`'s moved row.
+    #: a fact he may want and nothing is being asked of him. `stall`'s moved
+    #: row, and a knob the orchestrator turned. A SUMMON is no longer one of
+    #: these — it has its own tag now (below) and files under this one.
     "INFORMATION",
     #: the work is finished and on his machine.
     "COMPLETION",
@@ -988,17 +1009,46 @@ TODO_TAGS = (
     #: emits this one, and it is the reason the set is not just his three: the
     #: system must never let a failure read as information.
     "FAILED",
+    #: a minister was started for a piece of work. [his, 2026-07-30] *"the
+    #: message posted to the board when a minister is summoned should read
+    #: `SUMMONED [agent] [for/to] [task]` instead of what it is now. it should
+    #: NOT say INFORMATION: at the beginning HOWEVER the summoned message
+    #: should still appear in the information subsection of todo"*. So it is a
+    #: tag of its own that FILES under information (`TAG_SECTION`) rather than
+    #: a sentence sitting behind `INFORMATION:`.
+    "SUMMONED",
+    #: ...and the same announcement for an item handed to a worker that was
+    #: ALREADY running. The two words are the whole difference he reads off the
+    #: board, so they are siblings in every rule that touches either.
+    "COMMANDED",
 )
 
-_TODO_TAG = re.compile(r"^\s*[-*+]\s+(%s):\s+\S" % "|".join(TODO_TAGS))
+#: The two that are written WITHOUT a colon — `SUMMONED Marbas (`w1ff021`) for
+#: the flashing titlebar` — because that is the shape he asked for, verbatim.
+#: A colon is still accepted everywhere they are read: the store holds notes
+#: written the old way and they must keep rendering.
+BARE_TAGS = ("SUMMONED", "COMMANDED")
+
+#: Which SUBSECTION a tag is drawn under, when that is not the tag itself. Only
+#: the two summon words, and only because he asked for the word `SUMMONED` on
+#: the line and the bullet under `information` — the grouping is a view over the
+#: store and the store keeps the tag he reads.
+TAG_SECTION = {"SUMMONED": "INFORMATION", "COMMANDED": "INFORMATION"}
+
+#: `TAG:` for every tag, or a bare `TAG ` for the two summon words.
+_TAG_ALT = "(?:%s):|(?:%s)" % ("|".join(TODO_TAGS), "|".join(BARE_TAGS))
+
+_TODO_TAG = re.compile(r"^\s*[-*+]\s+(?:%s)\s+\S" % _TAG_ALT)
 
 
 def _tag_refusal(line):
     return BoardError(
         "a WAITING ON YOU TO DO bullet starts with one of %s, then a SHORT "
         "description, then any background - e.g. `- COMPLETION: **the thing** - "
-        "what it does now`. Got: %s"
-        % ("/".join(t + ":" for t in TODO_TAGS), line.strip()[:80]))
+        "what it does now`, or `- SUMMONED Marbas (`w1ff021`) for the thing`. "
+        "Got: %s"
+        % ("/".join(t + ("" if t in BARE_TAGS else ":") for t in TODO_TAGS),
+           line.strip()[:80]))
 
 
 def is_tagged(text):
@@ -1039,7 +1089,7 @@ def check_todo_tag(bullet):
 #: none), so the slack "about" implies is in the measure, not the number.
 SUMMARY_MAX_WORDS = 12
 
-_TAG_LEAD = re.compile(r"^\s*[-*+]?\s*(?:%s):\s*" % "|".join(TODO_TAGS))
+_TAG_LEAD = re.compile(r"^\s*[-*+]?\s*(?:%s)\s*" % _TAG_ALT)
 
 
 def _summary_words(line):
@@ -1122,7 +1172,13 @@ def check_short_summary(bullet):
 # templates interpolate what he typed, and a note that says a worker died must
 # never be refused because of how he phrased the thing it died on. So they pass
 # it through `oneline()` and the checks skip anything inside a `` ` `` span.
-_INLINE_TAG = re.compile(r"\S[ \t]+(?:%s):[ \t]" % "|".join(TODO_TAGS))
+#: The two summon words are NOT looked for here, colon or no colon. A bare
+#: `SUMMONED` mid-line is as likely to be the ordinary English word, and a
+#: `SUMMONED:` mid-line is the shape every summon note was written in before
+#: 2026-07-30 — `INFORMATION: **subject** - SUMMONED: Marbas (`id`) to x` — so
+#: reading one as a second ask would refuse the very line this tag replaced.
+_INLINE_TAG = re.compile(r"\S[ \t]+(?:%s):[ \t]"
+                         % "|".join(t for t in TODO_TAGS if t not in BARE_TAGS))
 _SUB_BULLET = re.compile(r"^[ \t]+[-*+][ \t]+\S")
 _BOLD = re.compile(r"\*\*.+?\*\*")
 _CODE = re.compile(r"`[^`]*`")
@@ -1267,8 +1323,9 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 # user would already know that part."*
 #
 # The orchestrator's note is a START, never a result (`boardwork.RULES`), so it
-# writes one `INFORMATION:` line per task it handed out — *"SUMMONED: Marbas
-# (`wd690a4`) to add commit times"*. That line is worth reading for as long as
+# writes one `SUMMONED` line per task it handed out — *"SUMMONED Marbas
+# (`wd690a4`) to add commit times"*, and did the same behind an `INFORMATION:`
+# tag before 2026-07-30, which the store still holds. That line is worth reading for as long as
 # nothing has come back, and the moment the worker posts its own
 # `COMPLETION:`/`PARTIAL:`/`FAILED:` it is worse than noise: two bullets about
 # one piece of work, the upper one announcing what the lower one has finished.
@@ -1281,10 +1338,10 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 # CONSERVATIVE BY CONSTRUCTION. A wrong deletion loses something he cannot get
 # back; an undeleted summon note is a line he has already read. So:
 #
-#   * only a bullet whose tag is `INFORMATION` and which says `summoned <Name>`
-#     or `commanded <Name>` (a handoff to a worker already running)
-#     is a candidate. A `QUESTION:`, a decision, an ordinary `INFORMATION:` fact
-#     and the result itself are never touched.
+#   * only a bullet tagged `SUMMONED`/`COMMANDED` — or, in the shape written
+#     before 2026-07-30, an `INFORMATION` one that SAYS `summoned <Name>` or
+#     `commanded <Name>` — is a candidate. A `QUESTION:`, a decision, an
+#     ordinary `INFORMATION:` fact and the result itself are never touched.
 #   * the ID matches first and the NAME only second, and a name match is
 #     accepted only for a summon note that carries no id at all — a name can be
 #     moved off a live agent (`boardagents.pick_name`), an id never is.
@@ -1292,7 +1349,7 @@ def add_todo_bullet(lines, doc, bullet, when=None):
 #     and every summon note stays exactly where it is.
 RESULT_TAGS = ("COMPLETION", "PARTIAL", "FAILED")
 
-#: `SUMMONED: Marbas` — or `COMMANDED: Marbas`, which is the same announcement
+#: `SUMMONED Marbas` — or `COMMANDED Marbas`, which is the same announcement
 #: for a worker that was already running (his rule, 2026-07-29: `SUMMONED:` is a
 #: NEW agent, `COMMANDED:` is one given more work). **Both words have to be read
 #: here.** The note is retired by the worker's own result either way, and a
@@ -1331,7 +1388,9 @@ def summon_of(drawn):
     `drawn` is a bullet's `text` — what the view shows, which is the form a
     parsed bullet keeps.
     """
-    if tag_of(drawn) != "INFORMATION":
+    # `SUMMONED`/`COMMANDED` are the tag now [his, 2026-07-30]; `INFORMATION`
+    # is still read because the store holds every note written before that.
+    if tag_of(drawn) not in ("INFORMATION",) + BARE_TAGS:
         return None
     m = _SUMMONED.search(drawn)
     if not m:

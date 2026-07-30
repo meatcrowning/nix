@@ -165,7 +165,7 @@ the elaboration if needed. it shouldnt really elaborate that much though"*. So:
     (§5.1, §10) — a right-click anywhere still opens the row's menu, and the
     double-click-that-removes is swallowed in that band on purpose.
 
-Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
+Seven tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 
 | | it means | who emits it |
 | --- | --- | --- |
@@ -174,6 +174,24 @@ Five tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 | `COMPLETION:` | done, and on his machine | a worker's or decision agent's `note` |
 | `PARTIAL:` | some landed, some did not — a pending rebuild counts | the same |
 | `FAILED:` | attempted, nothing landed | every failure path in `board-watch.py`, and `reconcile`'s dead-agent bullet |
+| `SUMMONED` | a minister was started for a piece of work | the orchestrator's note |
+| `COMMANDED` | ...and the same, for one that was already running | the same |
+
+**The last two carry NO COLON and NOTHING in front of them**, and they are the
+only two written that way (`boardparse.BARE_TAGS`). [his, 2026-07-30] *"the
+message posted to the board when a minister is summoned should read `SUMMONED
+[agent] [for/to] [task]` instead of what it is now ... it should NOT say
+INFORMATION: at the beginning HOWEVER the summoned message should still appear
+in the information subsection of todo"*. So the line is
+`SUMMONED Marbas (`wd690a4`) to add commit times` — the `for`/`to` is whichever
+is grammatical — and it is DRAWN under `information` all the same, via
+`boardparse.TAG_SECTION`/`section_of()`, which is the one place a tag and the
+subsection it files under are allowed to differ. Reading is unchanged: the store
+is full of the old `INFORMATION: **subject** - SUMMONED: Marbas (...)` shape and
+every one of them still parses, still groups under `information` and still gets
+retired by its worker's result (`tag_of` tries the colon first, `summon_of`
+accepts either). A `SUMMONED:` further along a line is deliberately NOT read as
+a second ask by `check_one_ask` — that IS the old shape.
 
 - **There is no tag nothing can write**, and `tools/board-test.py` asserts that.
   His three are the starting set he opened up (*"or something like those, maybe
@@ -762,7 +780,7 @@ Everything else about it is the honest reading of what that channel can do:
 - **It takes no slot against the cap**, which is a consequence and is written
   down as one: handing work over to get under the cap is refused in the prompt,
   because `dispatch` already queues what is over it and `promote()` starts it.
-- **It is still a START, not a result** — reported as one `INFORMATION:` line
+- **It is still a START, not a result** — reported as one `COMMANDED` line
   naming the worker, inside the same note budget as a dispatch.
 
 The neighbouring rule is the same one read from the other end: two items in ONE
@@ -927,10 +945,11 @@ assumed.
   forbids "done", "fixed", "wired", "implemented", "working" — it did not do the
   work and cannot see whether it happened.
 - **And it says it in one line per task.** The bullet an orchestrator leaves in
-  WAITING ON YOU TO DO is `INFORMATION:` (a start is a fact, never a result),
-  then the subject, the worker's **name** (its coded id in
-  parentheses, because that is what its log is called), and that nothing has
-  landed yet; one more line for anything it asked, tagged `QUESTION:`. The tag
+  WAITING ON YOU TO DO is `SUMMONED` (a start is a fact, never a result — and
+  since 2026-07-30 that word IS the tag, with no `INFORMATION:` and no subject
+  in front of it), then the worker's **name**, its coded id in
+  parentheses because that is what its log is called, then `for`/`to` and a few
+  words; one more line for anything it asked, tagged `QUESTION:`. The tag
   is *inside* this budget and not a second rule beside it — the line is still
   one line. The prompt states that as a
   budget — *one line each, about a dozen words after the tag at the most, no
@@ -991,9 +1010,10 @@ that part."* [his, 2026-07-29]
 
 A start and a result are two bullets about one piece of work, and the start is
 only true until the result lands. So posting a `COMPLETION:`/`PARTIAL:`/`FAILED:`
-(`boardparse.RESULT_TAGS`) retires the `INFORMATION: ... SUMMONED: <Name>
-(`<id>`)` note that announced it — **or the `COMMANDED: <Name>` one**, which is
-the same announcement for a worker that was already running — in the **same**
+(`boardparse.RESULT_TAGS`) retires the `SUMMONED <Name> (`<id>`)` note that
+announced it — **or the `COMMANDED <Name>` one**, which is
+the same announcement for a worker that was already running, and either of them
+in the pre-2026-07-30 `INFORMATION: ... SUMMONED: <Name>` shape — in the **same**
 read-modify-write as the
 insert — one edit under the lock, so the board is never briefly holding both and
 a `boardrecent` merge never sees a half-state.
@@ -2201,9 +2221,10 @@ new and are the ones to read first if the fan-out misbehaves:
   carry the rule in the words the refusal uses.
 
 - **the summon note dies with its result** (`test_summon_cleared`) — a worker's
-  `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `SUMMONED: <Name> (`<id>`)`
-  note with it — and a `COMMANDED: <Name>` handoff note the same way, the
-  lowercase verbs they replaced included — whole,
+  `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `SUMMONED <Name> (`<id>`)`
+  note with it — and a `COMMANDED <Name>` handoff note the same way, the
+  lowercase verbs and the `INFORMATION: ... SUMMONED:` shape they replaced
+  included — whole,
   stamp and wrapped lines included, and takes **nothing**
   else: not another worker's summon note, not a `QUESTION:`, not a plain
   `INFORMATION:` fact, not a result from a different id or from nobody. Two
