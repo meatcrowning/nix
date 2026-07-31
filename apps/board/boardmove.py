@@ -821,14 +821,20 @@ def note(text, path=bp.BOARD_PATH, agent_id=None, by=None):
     body = "\n".join(out)
     me = whoami(agent_id)
     aid, who = me if bp.is_result(body) else ("", "")
-    # WHO wrote it, for the gutter — and it is `me` unconditionally, not `who`:
-    # the summon-retiring above only looks up an agent for a RESULT, while every
-    # bullet has an author. The agent's NAME when one is writing (that is the
-    # word he reads on this board), and `by` only as the fallback for a caller
-    # with no agent identity at all, which is the program's own name. Neither
-    # resolving means NO stamp: `boardparse.by_now` refuses to invent an author,
-    # and the gutter draws nothing for one.
-    stamp_by = me[1] or by
+    # WHO wrote it, for the gutter — resolved from the ENVIRONMENT and never
+    # from `agent_id`. The two are different questions: `agent_id` names the
+    # agent a result is FROM (which is what retires its summon note above),
+    # while the stamp says who put the line on the board. They are the same
+    # process for a worker writing its own result, and they are NOT for
+    # `board-watch`, which writes the failure note for a minister that died —
+    # reading `agent_id` there stamped every one of those with the dead
+    # minister's name, i.e. an entry attributed to the one process that
+    # certainly did not write it, on a bullet whose own text says it recorded
+    # nothing. `by` is the fallback for a caller with no agent identity at all,
+    # which is the program's own name. Neither resolving means NO stamp:
+    # `boardparse.by_now` refuses to invent an author, and the gutter draws
+    # nothing for one.
+    stamp_by = whoami()[1] or by
 
     def go(doc):
         lines = doc["lines"]
