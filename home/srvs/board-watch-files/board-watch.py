@@ -534,9 +534,16 @@ def note_on_board(bullet, agent_id=None):
     that announced it goes with it (`boardparse.drop_summon`). It has to be
     passed explicitly here: this process is the watcher, not the worker that
     died, so `BOARD_AGENT_ID` would name the wrong one or nobody.
+
+    ...and for exactly that reason the gutter's `by=` is **this program**, not
+    that agent. The bullet says the minister recorded nothing; an attribution
+    naming it would be the same sentence claiming it did. `boardmove.note`
+    resolves the author from the environment, which here names nobody, so this
+    is the fallback and it is an honest one — the watcher genuinely is what put
+    the line on the board.
     """
     try:
-        return bm.note(bullet, path=BOARD, agent_id=agent_id)
+        return bm.note(bullet, path=BOARD, agent_id=agent_id, by="board-watch")
     except (bm.BoardError, OSError) as e:
         log("could not add the failure note: %s" % e)
         return False
