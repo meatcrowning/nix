@@ -490,9 +490,10 @@ def test_moves(tmp):
           (new["tag"], len(new["summary"].split()), new["summary"]))
 
     # ---- AN OLD `## IN FLIGHT` SECTION IS READ AND NEVER WRITTEN ----
-    # The section is gone [2026-07-30]. `parse` still reads one, because
-    # `board.md` syncs to the other machine and a store this parser could not
-    # read is one neither program could write — but nothing appends to it, and
+    # The section is gone [2026-07-30]. `parse` still reads one, because the
+    # store outlives any one version of this app — his own hand edits, an older
+    # copy still running — and a store this parser could not read is one
+    # neither program could write — but nothing appends to it, and
     # a store that still carries one comes out of a whole start/land/back cycle
     # byte-identical in that section. That is what makes it unable to silt up:
     # `reconcile` only ever saw this host's stashes, so a row written by hand,
@@ -914,8 +915,8 @@ def test_placed(tmp):
       * the stamp is written by the WRITER, at the moment the item goes up, so
         it is a fact and not a guess at read time;
       * it is OPTIONAL, in both directions. The store is full of items that
-        predate it and `board.md` syncs between two machines that may be running
-        different copies of this app, so a missing one draws NO time — never an
+        predate it, and the two machines' boards may be written by different
+        copies of this app, so a missing one draws NO time — never an
         empty box and never an invented one;
       * it is inside the span the bullet is removed and restored by, so clearing
         a chore does not leave its stamp behind as an orphan comment;
@@ -3431,15 +3432,27 @@ def test_dead_worker_notes(tmp):
 
 
 # ----------------------------------------------------------------- 2. the store
+def real_store():
+    """This host's live board, or None. READ ONLY, and never `ensure_board()`:
+    the harness must not bring a store into existence, and the pre-split
+    `board.md` is still the right file until the migration lands."""
+    import boardparse as B
+    for p in (B.BOARD_PATH, B.LEGACY_BOARD_PATH):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def test_real_store():
     import boardparse as B
 
-    if not os.path.isfile(B.BOARD_PATH):
+    path = real_store()
+    if path is None:
         check("the store exists", False, B.BOARD_PATH)
         return
-    src = B.read(B.BOARD_PATH)
+    src = B.read(path)
     doc = B.parse(src)
-    check("the real board.md round-trips unchanged", "".join(doc["lines"]) == src)
+    check("the real store round-trips unchanged", "".join(doc["lines"]) == src)
     # NEEDS YOU is deliberately NOT required to be non-empty: with the moves in
     # `boardmove.py` an answered decision leaves it, so an empty section is the
     # resting state (and the one he sees most often), not a parse regression.
@@ -3599,10 +3612,10 @@ def test_real_window(app):
     board writes only when one is called. This is the layout check that matters,
     because his document is the one with 200-character option labels, wrapped
     continuations and a LANDED section of prose."""
-    import boardparse as B
-    if not os.path.isfile(B.BOARD_PATH):
+    path = real_store()
+    if path is None:
         return
-    engine, win, keep = build(app, B.BOARD_PATH)
+    engine, win, keep = build(app, path)
     spin(500)
     # Not "there is a decision": there may legitimately be none (`boardmove.py`
     # takes answered ones out). What must hold is that his real document draws.
@@ -6260,6 +6273,16 @@ def main():
         # from these two harnesses).
         os.environ["XDG_CACHE_HOME"] = os.path.join(tmp, "cache")
         os.environ["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
+        # ...and THE CALLER'S OWN AGENT ENVIRONMENT. An agent running this
+        # harness has `BOARD_ORDER` (his sentence), `BOARD_AGENT_ID` and the
+        # rest exported into it, and the writers read them: every bullet written
+        # here then carried a `<!-- for: -->` stamp the fixtures do not expect,
+        # and seven checks failed for whoever ran it from a worker while passing
+        # from a plain shell. The env is an input; a test must supply it.
+        for k in ("BOARD_ORDER", "BOARD_AGENT_ID", "BOARD_WORK_SESSION",
+                  "BOARD_WORK_TASK", "BOARD_WATCH_KEY", "BOARD_FILE",
+                  "BOARD_WORK_SPAWN", "BOARD_MAX_WORKERS", "BOARD_TRANSCRIPTS"):
+            os.environ.pop(k, None)
         os.makedirs(os.path.join(tmp, "rt"))
         os.makedirs(os.path.join(tmp, "mv"))
         os.makedirs(os.path.join(tmp, "win"))
