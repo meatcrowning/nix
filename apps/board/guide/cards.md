@@ -409,10 +409,25 @@ all of it.
   moves for the rest of its life. The raw `born` epoch still never reaches
   QML (`boardagents.born`) — the duration is formatted in Python, so the
   ordering key cannot quietly become a second counter.
-- **A finished agent leaves the list at once** — board-watch drops the stash on
-  success and on failure alike — and **a failed one is told apart in WORDS**
-  (`exited without finishing`). Until then, **a stopped worker that REPORTED is
-  drawn as finished, not abandoned**: [his, 2026-07-30] a completed worker's card
+- **A finished agent leaves the list at once, and the DRAWING is what makes
+  that true** (`boardwork._drawable` skips a row that is `exited` AND
+  `finished`) — [his, 2026-07-30] *"are ministers sometimes staying in the
+  triangle unfocused colored until the user clears their completion
+  message?"*. They were, and "sometimes" was a race: the card is only deleted
+  from disk by `boardagents.sweep()`, on a board-watch tick, and the tick a
+  worker's own final `note` triggers usually runs while that worker is still
+  alive. Nothing then wrote the board again until HE replied to the bullet — so
+  clearing the message looked like the thing that removed the card, and the
+  5-minute timer was the only other way out. Liveness is polled here every
+  second, so the drawing already knew; the sweep behind it is bookkeeping he
+  does not have to watch. **A worker that stopped WITHOUT reporting keeps its
+  card** until the tick files it and puts the FAILED bullet on his board — that
+  dimmed row is the only visible trace of the loss until then. Harness:
+  `test_finished_leaves`.
+- **A stopped worker is told apart from a finished one in WORDS**, wherever one
+  is still shown — the card in the moment before it goes, and everything that
+  reads `boardagents.agents()` rather than the drawing. **A stopped worker that
+  REPORTED reads as finished, not abandoned**: [his, 2026-07-30] a completed worker's card
   *"still sits and proclaims 'exited without finishing - nothing was
   committed..' ... and no vertical line on the left EVEN THOUGH its task has been
   completed"*. `boardagents` carries `finished` off `boardwork.reported` — the
@@ -421,7 +436,9 @@ all of it.
   recorded its result on the board` and §9.1's accent gutter is present on a
   running row **and** on a finished one. A worker that genuinely stopped
   mid-sentence keeps both the old words and no gutter. The reap runs on a
-  board-watch tick, so the stale claim had up to five minutes to be read. Colour says nothing here; §8.1's ramp means a machine fault.
+  board-watch tick, so the stale claim had up to five minutes to be read — and
+  that same five minutes is what the bullet above took out of the drawing.
+  Colour says nothing here; §8.1's ramp means a machine fault.
 - **There are NO phase headings over the cards.** He asked for them and then
   asked for them back out: *"maybe for now take out the 'coding' 'Testing'
   'finishing touches' text and just keep agents ordered by birth/age so they

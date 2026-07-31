@@ -859,6 +859,13 @@ def _stash_agents():
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
                     "session": rec.get("session") or "", "state": state,
+                    # ...and WHETHER IT FINISHED, on the same fact and the same
+                    # terms as a registration's (above), so `_drawable()` has
+                    # one rule to apply and not two. Computed only for a stash
+                    # whose process is gone: for a live one it is both false by
+                    # definition and a directory listing per poll.
+                    "finished": (state == "exited"
+                                 and _reported(clean_id(rec.get("key")))),
                     "born": born(rec, pid or 0)})
     return out
 
