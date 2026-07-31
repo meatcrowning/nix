@@ -1548,10 +1548,20 @@ agent's own voice, uncut except for width.
   anything to watch. `Agents._transcript_lines()` now reads
   `boardphase.transcript(rec["session"])` instead — the same file
   `boardphase` already tails for the observed line, appended to as the agent
-  works — one line per assistant entry: what it SAID, or `describe_call` on the
-  tool it reached for, which is the vocabulary the card's observed line above it
-  already speaks. Tool *results* and user turns are skipped: those are somebody
-  else's voice, and one of them is a whole file.
+  works.
+- **And it is the LITERAL output, not a summary of it.** [his, 2026-07-30]
+  *"you are saying we cannot actually see its real live log i.e. not what its
+  saying its doing but its literal actual thinking / tool call / coding
+  output?"* — so every line of every assistant `text` and `thinking` block, each
+  tool call's own ARGUMENTS (`Agents._tool_use_lines`: `$ <command>` for Bash,
+  otherwise the tool and its lead path/pattern, then the `old_string` /
+  `new_string` / `content` body), and each tool result's own text
+  (`Agents._result_lines`), flattened in file order. The drawer draws the last
+  few, which makes it `tail` on a running log. `boardphase.describe_call`'s
+  one-line-per-event summary is still right for the card's OBSERVED line, which
+  is a summary by design, and wrong here. The only entries skipped are his own
+  turns — a user message is his prompt read back at him; a `tool_result` riding
+  on one is kept, being the tool's output.
 - **Both readers are in PYTHON** (QML cannot open a file), and both are trimmed
   there rather than in the drawer. Transcript: the last 256k, whole lines only —
   it is being appended to while this runs. Log: the last 64k, ANSI/C0 junk and
