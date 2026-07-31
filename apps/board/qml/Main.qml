@@ -1033,6 +1033,7 @@ Window {
                                                 // one-line SUMMONED lines is made of.
                                                 implicitHeight: Math.max(
                                                     todoText.implicitHeight
+                                                    + todoFor.height
                                                     + (todoMore.visible
                                                        ? todoMore.implicitHeight + 6 : 0),
                                                     gutter.implicitHeight)
@@ -1109,10 +1110,48 @@ Window {
                                                                 Math.floor(width / win.cellW))
                                                           : full
                                                 }
+                                                // WHICH OF HIS ASKS THIS CAME OUT OF —
+                                                // [his, 2026-07-30] *"information
+                                                // messages should display a truncated
+                                                // version of the original user prompt
+                                                // that spawned the message between the
+                                                // top line and the second verbose
+                                                // line"*. So it goes exactly there,
+                                                // between the summary and the
+                                                // elaboration, and it is HIS sentence:
+                                                // carried down from the box he typed it
+                                                // into (`boardparse.for_now`).
+                                                //
+                                                // ONE line, cut in CHARACTERS with an
+                                                // ASCII `...` — `win.clipTo`, never
+                                                // `Text.ElideRight`, whose U+2026 this
+                                                // font does not have (§2.3). It is
+                                                // reference and not the message, so it
+                                                // takes the `dim` rung the metadata
+                                                // does, a rung under the elaboration.
+                                                // ABSENT when nothing was recorded and
+                                                // when the row is folded: every bullet
+                                                // written before this existed has none,
+                                                // and so has one nobody dispatched.
+                                                PixelText {
+                                                    id: todoFor
+                                                    x: todoText.x
+                                                    y: todoText.height + 2
+                                                    width: todoText.width
+                                                    visible: todoRow.modelData.order
+                                                             && !todoRow.folded
+                                                    height: visible ? implicitHeight : 0
+                                                    color: Theme.dim
+                                                    text: visible
+                                                          ? win.clipTo(
+                                                                "for: " + todoRow.modelData.order,
+                                                                Math.floor(width / win.cellW))
+                                                          : ""
+                                                }
                                                 Para {
                                                     id: todoMore
                                                     x: todoText.x
-                                                    y: todoText.height + 6
+                                                    y: todoText.height + todoFor.height + 6
                                                     width: todoText.width
                                                     // Folded, the elaboration is the
                                                     // half that goes: the summary is

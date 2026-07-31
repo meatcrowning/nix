@@ -1157,6 +1157,53 @@ def test_by(tmp):
     check("...it is attributed to the program that wrote it, when it says so",
           onbehalf["by"] == "board-watch", onbehalf["by"])
 
+    # ---- ...and WHICH OF HIS ASKS the entry came out of ----
+    # *"information messages should display a truncated version of the original
+    # user prompt that spawned the message"*. `$BOARD_ORDER` is the channel: the
+    # summoner is registered under his sentence, `boardwork` puts it in every
+    # worker's environment, and the bullet stamps it. Optional in exactly the
+    # way `by:` is — an entry nobody dispatched quotes nothing.
+    B.write(path, FIXTURE)
+    bm.note("INFORMATION: an undispatched chore", path=path)
+    check("a bullet nobody dispatched quotes no order, and says nothing",
+          B.parse(B.read(path))["todo"][-1]["order"] == ""
+          and "<!-- for:" not in B.read(path), B.read(path))
+    B.write(path, FIXTURE)
+    HIS = "make the titlebar stop flashing, and check the other apps too"
+    os.environ["BOARD_ORDER"] = HIS
+    try:
+        bm.note("INFORMATION: **a dispatched chore** - it is done.\n"
+                "    And this is the background under it.", path=path)
+    finally:
+        del os.environ["BOARD_ORDER"]
+    ordraw = B.read(path)
+    orddoc = B.parse(ordraw)
+    got = orddoc["todo"][-1]
+    check("a bullet a dispatched agent writes quotes the order behind it",
+          got["order"] == HIS, got["order"])
+    check("...as a comment, so it is metadata and not prose in his file",
+          "<!-- for: %s -->" % HIS in ordraw and "for:" not in got["text"],
+          got["text"])
+    check("...ABOVE the author and the time, inside the bullet's own span",
+          ordraw.splitlines()[got["line"] + 2].startswith("<!-- for:")
+          and ordraw.splitlines()[got["line"] + 3].startswith("<!-- placed:"),
+          ordraw.splitlines()[got["line"]:got["line"] + 4])
+    check("...and the file still round-trips byte for byte",
+          "".join(orddoc["lines"]) == ordraw)
+    check("...and removing the bullet takes the quote with it, no orphan",
+          "<!-- for:" not in "".join(B.remove_todo(orddoc["lines"], got)),
+          "".join(B.remove_todo(orddoc["lines"], got)))
+    # His sentence is his: a paragraph is capped at the WRITE so the store stays
+    # one line per stamp, and `-->` in it cannot end the comment early.
+    long_one = "x" * 400 + " -->" + " and more"
+    check("a long order is cut in the store, with an ASCII marker",
+          len(B.for_now(long_one)) < 260 and B.for_now(long_one).endswith("-->\n")
+          and "..." in B.for_now(long_one), B.for_now(long_one)[:80])
+    check("...and nothing he types can close the comment early",
+          B.for_now("all done --> now what").count("-->") == 1,
+          B.for_now("all done --> now what"))
+    check("...and an empty order writes no line at all", B.for_now("") == "")
+
     # The ORDER is why `by:` goes first: `placed:` is the line that closes the
     # bullet's span, so a stamp under it would fall outside `todo_span` and be
     # left behind by a removal as an orphan comment.
@@ -5436,12 +5483,19 @@ def test_placed_window(app, tmp):
 
     B.write(path, FIXTURE)
     os.environ["BOARD_AGENT_ID"] = "w2502ad"
+    # ...and one of them was dispatched from something he typed, so it also
+    # quotes that (`for:`), which is the line drawn between the two it already
+    # had.
+    HIS_ORDER = "make the titlebar stop flashing"
+    os.environ["BOARD_ORDER"] = HIS_ORDER
     try:
         who = bm.whoami()[1]
-        bm.note("INFORMATION: an attributed chore", path=path)
+        bm.note("INFORMATION: **an attributed chore** - it is done.\n"
+                "    And this is the verbose line under it.", path=path)
         bm.ask("An attributed question?", if_unanswered="nothing happens", path=path)
     finally:
         del os.environ["BOARD_AGENT_ID"]
+        del os.environ["BOARD_ORDER"]
     stamp = [d["placed"] for d in B.parse(B.read(path))["needs"] if d["placed"]][0]
     engineB, winB, keepB = build(app, path)
     spin(400)
@@ -5482,6 +5536,28 @@ def test_placed_window(app, tmp):
         check("a stamped row is at least as tall as its own gutter",
               row.height() >= it.parentItem().height() > 0,
               (row.height(), it.parentItem().height()))
+
+    # ---- ...and WHICH OF HIS ASKS it came out of, BETWEEN the two lines ----
+    # *"...between the top line and the second verbose line"*, so the check is
+    # the ordering and not merely the presence: summary above it, elaboration
+    # below it.
+    quoted = boxes("for: " + HIS_ORDER)
+    summary = [b for b in boxes("INFORMATION: an attributed chore - it is done.")]
+    verbose = boxes("And this is the verbose line under it.")
+    check("an information card quotes the ask it came out of, truncated",
+          len(quoted) == 1, (quoted, [str(it.property("text"))
+                                      for it in descendants(winB.contentItem())
+                                      if str(it.property("text")).startswith("for:")]))
+    check("...between the top line and the verbose line under it",
+          len(summary) == 1 and len(verbose) == 1
+          and summary[0][0] < quoted[0][0] < verbose[0][0],
+          (summary, quoted, verbose))
+    # ...and the cards that were NOT dispatched from anything quote nothing:
+    # every entry written before this existed is one of those.
+    check("...and a card with no recorded ask draws no line for one",
+          len([it for it in descendants(winB.contentItem())
+               if str(it.property("text")).startswith("for: ")
+               and it.isVisible()]) == 1)
     shot(winB, "06b-attributed")
 
 
