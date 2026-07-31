@@ -2196,7 +2196,24 @@ click** on the row and the row's right-click menu. Every point of it is a rule:
 
 `ny` / `if` / `ag` / `ld` jump to a section **and** report position — the lit one is the
 section the top of the viewport is in, like reader's outline marking. `md` opens
-the store in `reader`, and says so if `reader` cannot be launched.
+the store in `reader`, and says so if `reader` cannot be launched. `lg`, in its
+own section under it, opens every card's log drawer at once.
+
+**`lg` is a DEFAULT, not a bulk edit of `outputOpen`, and that is the whole
+design.** Cards are rebuilt on every 2.5s poll, so a switch that merely wrote
+`true` into the ids present when he pressed it would leave the next agent to
+appear shut — which is not "all cards". `Main.qml`'s `allLogs` is the default
+`isOutputOpen` falls back to; the map holds EXCEPTIONS to it, so a card he shuts
+by hand while the switch is on stays shut and the rest stay open. Flipping the
+switch clears the exceptions, so both directions are visible on every card.
+
+**It is the one piece of card state that PERSISTS** (§14): a view preference he
+sets by using the app and would notice reverting, and it names no process, so it
+still means the same thing tomorrow — unlike the exception map and `todoFolded`,
+which are session-only because an id names a process that is gone. It lives in
+`Settings` (`~/.local/state/board/state.json`, key `allLogs`) beside `collapsed`
+and `drafts`; there is no second store. §12.1 does the reporting: the lit cell
+IS the state, so there is no status line and no second glyph for "off".
 
 **There are deliberately no `<`/`>` cells and no `NavButtons`.** board has one
 page and no journey to retrace; §11.1 says a program with no genuine history gets

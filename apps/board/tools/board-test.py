@@ -3278,13 +3278,17 @@ def test_real_store():
 
 # --------------------------------------------------------------- 3. the window
 def build(app, path):
-    from PySide6.QtCore import QUrl, QObject, Slot
+    from PySide6.QtCore import QUrl, QObject, Signal, Slot
     from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
     import PySide6.QtQuick  # noqa: F401  (registers the QQuickItem converter)
     from deskstyle import DeskStyle
     import main as brd
 
     class StubTitlebar(QObject):
+        # The real `Titlebar.clicked` (main.py), so a test can press a cell the
+        # way the plugin does. Without it the window's `Connections` has no
+        # signal to attach to and every titlebar action is untested.
+        clicked = Signal(str)
         clicks = []
         # Every message the window would put on the vtb socket, in order. The
         # ORDER is the point: the first REGISTER is what he sees for the first
@@ -4574,6 +4578,57 @@ def test_window(app, tmp):
               "nothing logged yet" in etexts, etexts)
         win.setProperty("outputOpen", {})
         spin(300)
+
+    # ---- ...and ONE SWITCH opens every card's drawer at once ----
+    # [his, 2026-07-30] a global toggle under `md`, PERSISTED (§14): he leaves
+    # the logs showing and they are showing when he next opens the window. The
+    # thing being asserted is that it is a DEFAULT and not a bulk edit — a card
+    # that appears after the switch is thrown is open too — and that turning it
+    # off puts every drawer away, including the ones he opened by hand.
+    import main as brd_mod
+
+    def _drawerHeights():
+        return [it.height() for it in descendants(win.contentItem())
+                if it.property("openH") is not None]
+
+    def brd_settings_get(k):
+        # A FRESH `Settings`, i.e. what the next launch reads off disk. Asking
+        # the live one back would only prove the property was assigned.
+        return brd_mod.Settings().get(k)
+
+    cells = ["-" if isinstance(b, str) else str(b["label"])
+             for b in prop(win, "tbButtons")]
+    check("the titlebar carries a `lg` cell in its own section under `md`",
+          cells[-3:] == ["md", "-", "lg"], cells)
+
+    type(keep[2]).sent[:] = []
+    keep[2].clicked.emit("logs")
+    spin(600)
+    heights = _drawerHeights()
+    check("throwing it opens the drawer on EVERY card, not just the ones drawn",
+          prop(win, "allLogs") is True and heights and all(h > 0 for h in heights),
+          heights)
+    regs = [m[1] for m in type(keep[2]).sent if m[0] == "buttons"]
+    check("...and the cell lights, which is the only report a toggle owes (§12.1)",
+          regs and ("lg", 1) in regs[-1], regs)
+    check("...and it survives the app being closed and opened again (§14)",
+          brd_settings_get("allLogs") is True, brd_settings_get("allLogs"))
+
+    # A card he shuts by hand while the switch is on is an EXCEPTION to it, and
+    # the others stay open — the map holds exceptions, not absolute states.
+    win.setProperty("outputOpen", {"w-code": False})
+    spin(600)
+    check("...and shutting one card by hand leaves the rest open",
+          [h for h in _drawerHeights() if h == 0]
+          and [h for h in _drawerHeights() if h > 0], _drawerHeights())
+
+    keep[2].clicked.emit("logs")
+    spin(600)
+    check("throwing it back shuts every drawer, exceptions included",
+          prop(win, "allLogs") is False and all(h == 0 for h in _drawerHeights())
+          and prop(win, "outputOpen") == {}, _drawerHeights())
+    check("...and THAT is remembered too", brd_settings_get("allLogs") is False,
+          brd_settings_get("allLogs"))
 
     # ---- ...and SOLOMON'S OWN ROW LEADS WITH HIS NAME ----
     # [his, 2026-07-29] the orchestrator's card should read *"Solomon is ..."*

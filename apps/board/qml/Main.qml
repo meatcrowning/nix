@@ -199,14 +199,41 @@ Window {
     //
     // Session-only, like `todoFolded`: an id names one process that no longer
     // exists next time this window opens, so there is nothing there to remember.
+    // The map holds EXCEPTIONS to `allLogs` below, not absolute states — see
+    // there for why a per-card entry cannot be the whole answer.
     property var outputOpen: ({})
-    function isOutputOpen(id) { return outputOpen[String(id)] === true; }
+    function isOutputOpen(id) {
+        var v = outputOpen[String(id)];
+        return v === undefined ? allLogs : v === true;
+    }
     function toggleOutputOpen(id) {
         var o = {};
         for (var i in outputOpen) o[i] = outputOpen[i];
         var k = String(id);
-        if (o[k] === true) delete o[k]; else o[k] = true;
+        // Back to the default is the ABSENCE of an entry, never an entry that
+        // happens to equal it: otherwise a card he opened and shut again would
+        // stay pinned shut when the global switch is next turned on.
+        if (isOutputOpen(k) === allLogs) o[k] = !allLogs; else delete o[k];
         outputOpen = o;          // reassigned: a mutated object notifies nothing
+    }
+
+    // ---- ...and the one switch that opens EVERY card's drawer ----
+    // [his, 2026-07-30] one control that expands, and collapses, the log view on
+    // all cards at once. It is a DEFAULT, not a bulk edit of the map above, and
+    // that is the whole design: cards come and go on every 2.5s poll, so a
+    // switch that merely wrote `true` into the ids present when he pressed it
+    // would leave the next agent to appear shut — which is not "all cards".
+    //
+    // PERSISTED (§14), unlike the exception map: this is a view preference he
+    // sets by using the app and would notice reverting, and it names no process,
+    // so it still means the same thing tomorrow. Flipping it CLEARS the
+    // exceptions, so both directions are visible on every card at once rather
+    // than on all but the few he had touched by hand.
+    property bool allLogs: false
+    function toggleAllLogs() {
+        allLogs = !allLogs;
+        outputOpen = ({});
+        Settings.set("allLogs", allLogs);
     }
 
     // Cut a string to `cells` characters, marking the cut with ASCII "...".
@@ -284,6 +311,7 @@ Window {
         collapsed = (c && typeof c === "object") ? c : ({});
         var d = Settings.get("drafts", {});
         drafts = (d && typeof d === "object") ? d : ({});
+        allLogs = Settings.get("allLogs", false) === true;
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
     }
@@ -384,6 +412,14 @@ Window {
           tip: "what is in flight" },
         "-",
         { id: "reader", label: "md", state: 0, tip: "open board.md in reader" },
+        // Its own section, under `md`: a toggle is not a jump and not a launch.
+        // §12.1 — a lit cell IS the state (inverted, accent-filled), so there is
+        // no second glyph for "off" and no status line saying what it did; the
+        // drawers opening on every card say it. The tooltip names what the click
+        // will DO, which is the half that is not on screen.
+        "-",
+        { id: "logs", label: "lg", state: allLogs ? 1 : 0,
+          tip: allLogs ? "hide every card's log" : "show every card's log" },
     ]
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -426,6 +462,7 @@ Window {
                 if (!Board.openInReader())
                     win.status = "could not run reader";
                 break;
+            case "logs":   win.toggleAllLogs(); break;
             }
         }
     }
