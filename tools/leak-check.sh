@@ -84,9 +84,15 @@ if hyprctl version >/dev/null 2>&1; then
     "      A 'sandbox.sh start' with no 'stop'. Windows may still be on it." \
     "      repair:  $HOME/nix/tools/sandbox.sh stop"
 fi
-if [ -d "$SBOX" ] && [ -z "${heads:-}" ]; then
-  warn "WARN: sandbox state left behind at $SBOX (no headless monitor, so the" \
-       "      monitor half was torn down).  repair:  $HOME/nix/tools/sandbox.sh stop"
+# The STATE FILE, not the directory. `stop` removes state+classes and leaves the
+# (now empty) directory behind, so testing for the directory made a cleanly
+# stopped sandbox warn on every preflight from then until a reboot cleared /tmp —
+# a permanent false positive that teaches agents to skim past this whole script.
+# `start` writes the state file and `stop` removes it, so it is the honest
+# marker of "a sandbox is up"; the monitor half is caught separately above.
+if [ -f "$SBOX/state" ] && [ -z "${heads:-}" ]; then
+  warn "WARN: sandbox state left behind at $SBOX/state (no headless monitor, so" \
+       "      the monitor half was torn down).  repair:  $HOME/nix/tools/sandbox.sh stop"
 fi
 
 # 5 + 6. The live symptoms, not the residue: a test window he can SEE, and his
