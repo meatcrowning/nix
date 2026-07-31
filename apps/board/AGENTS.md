@@ -1487,6 +1487,34 @@ all of it.
   state is `inactive` whether or not the path unit exists, so the old sentence
   claimed armed for a watcher that could never fire.
 
+### A card is WITHHELD until its top line is a real sentence
+
+[his, 2026-07-30] *"minister cards should only show up once the top line of
+their card reads [agent] is [verb] - as right now they can appear before that
+with the text 'nothing yet' at the top which looks bad"*.
+
+- **`boardagents`' `speaks` decides, off the observation STATE**, never off the
+  words: a card is withheld exactly while it is *running*, has claimed no phase,
+  has no orchestrator startup line of its own, and its observation is `none` or
+  `starting` — which is `boardphase.doing_line`'s placeholder branch for an
+  ABSENCE of observation, i.e. the one that renders `nothing yet`. Matching the
+  string would break the moment either sentence is reworded.
+- **`AgentRow`'s `visible` is the whole drawing half** (`agent.speaks !== false`
+  — `!==` and not truthiness, so `boardwork`'s synthetic cards, which carry no
+  such field, stay drawn). An invisible child is outside a Column's layout, so a
+  withheld card leaves no gap.
+- **It is not a gate forever.** The card appears on the next 2.5s poll after the
+  agent's first `boardctl.py phase` OR its first observed act — seconds, for a
+  live worker — with nothing reloaded. A spawn whose transcript never appears
+  goes `unlinked` past `boardphase.START_GRACE_S` (120s) and is drawn then,
+  saying honestly that the work cannot be seen. Only an agent that is
+  registered, linked, and has genuinely never done anything stays hidden.
+- **A stopped card is never withheld**, whatever it said: its top line is the
+  title row, which is real.
+- The triangle's empty state counts CARDS (`Main.qml`'s `nothingRunning`), not
+  visible ones, so it does not claim nothing is running while one is merely
+  withheld — the section is briefly blank instead.
+
 ### ...and clicking the card opens what it is ACTUALLY SAYING
 
 [his, 2026-07-30] *"a minister card should expand to show what that minister is

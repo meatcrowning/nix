@@ -5744,6 +5744,7 @@ def test_card_output(tmp):
     import main as brd
     import boardagents as ba
     import boardwork as bw
+    import boardphase as bph
     print("\n=== the card drawer shows real live output ===")
     os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
     agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling: one method
@@ -5801,6 +5802,22 @@ def test_card_output(tmp):
     check("a finished worker with no transcript falls back to its log",
           agents.output("w-done") == ["finished", "last word"],
           agents.output("w-done"))
+    # ---- and whether the card may be DRAWN at all yet (`speaks`) ----
+    # His: a card must not appear reading `nothing yet` at the top.
+    ba.register("w-hush", "T", os.getpid(), kind="worker", where="apps/x/**",
+                session="ses-never")          # linked, transcript never appears
+    by_id = {a["id"]: a for a in ba.agents()}
+    check("a running agent that has neither claimed nor been seen is withheld",
+          by_id["w-hush"]["speaks"] is False, by_id.get("w-hush", {}).get("speaks"))
+    check("...while one whose transcript already shows work is drawn",
+          by_id["w-live"]["speaks"] is True, by_id.get("w-live", {}).get("speaks"))
+    bph.claim("w-hush", "researching", "the vtbclient parser")
+    by_id = {a["id"]: a for a in ba.agents()}
+    check("...and its first phase is enough to draw it, nothing else changed",
+          by_id["w-hush"]["speaks"] is True and by_id["w-hush"]["saysLine"],
+          by_id.get("w-hush", {}).get("saysLine"))
+    ba.unregister("w-hush")
+
     # The registrations are in the ONE shared state dir every later test reads,
     # and two strangers in the agents list is enough to fail the window's own
     # "with nothing running" checks. Take them back out.

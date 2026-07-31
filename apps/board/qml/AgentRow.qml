@@ -144,6 +144,23 @@ Item {
         function onChanged() { row.refreshOutput(); }
     }
 
+    // ---- A CARD IS WITHHELD UNTIL ITS TOP LINE IS A REAL SENTENCE ----
+    // [his, 2026-07-30] *"minister cards should only show up once the top line
+    // of their card reads [agent] is [verb] - as right now they can appear
+    // before that with the text 'nothing yet' at the top which looks bad"*. The
+    // judgement is `boardagents`' (`speaks`), off the observation STATE and not
+    // off the words, and it flips on the ordinary 2.5s poll — so the card
+    // appears by itself the moment the agent claims a phase or is first seen
+    // acting, with nothing reloaded. `!== false` and not a truthiness test:
+    // `boardwork`'s synthetic cards carry no such field and stay drawn.
+    //
+    // An invisible child is out of a Column's layout entirely, so a withheld
+    // card leaves no gap. The triangle's own empty state is counted off the
+    // CARDS (`Main.qml`'s `nothingRunning`), not off what is visible, so it does
+    // not claim nothing is running while one is merely withheld — the section is
+    // briefly blank instead, which is the honest reading of "no placeholder".
+    visible: !agent || agent.speaks !== false
+
     readonly property bool running: agent && agent.running === true
     // WHO IT IS, in one short name — his call: *"i think itd be
     // interesting to have them referred to by regular names"*. The coded id is
