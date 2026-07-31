@@ -33,7 +33,13 @@ import subprocess
 import sys
 import tempfile
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# SET, never `setdefault`: layer 3 calls `view.show()`, so an inherited
+# `QT_QPA_PLATFORM=wayland` — which any Qt-aware shell or a caller prefixing the
+# command can supply — would put a real 320x90 window on HIS monitor and take
+# his focus while he works. The user's session is his; a harness that can only
+# be run one way must enforce that way rather than inherit it. `test_marker()`
+# also refuses to run if Qt somehow came up on any other platform.
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PYLIB = os.path.dirname(HERE)
@@ -217,6 +223,13 @@ def test_marker():
         return
 
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
+    # ABORT, never degrade. If the platform plugin is anything but offscreen the
+    # `view.show()` below is a window on his screen, so there is nothing sane to
+    # fall back to and no reason to find out from a screenshot.
+    if app.platformName() != "offscreen":
+        raise SystemExit("refusing to run: Qt came up on %r, not offscreen — a "
+                         "test window would land on the user's monitor"
+                         % app.platformName())
     warnings = []
 
     tmp = tempfile.mkdtemp()

@@ -120,6 +120,12 @@ def main():
     import main as boardmain
 
     app = QGuiApplication([])
+    # ABORT, never degrade: `Main.qml` is a `Window`, so on any platform but
+    # offscreen this probe is goetia opening a second window on his monitor.
+    if app.platformName() != "offscreen":
+        print("refusing to run: Qt came up on %r, not offscreen" % app.platformName(),
+              file=sys.stderr)
+        return 1
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     settings = boardmain.Settings()
