@@ -1569,6 +1569,31 @@ def reported_file(agent_id):
     return os.path.join(work_dir("reported"), ba.clean_id(agent_id) + ".json")
 
 
+def reported(agent_id):
+    """Did this worker put its result on the board before it stopped?
+
+    THE FACT THE CARD WAS MISSING. `reap()` has always known it — it is what
+    sorts a worker into `done/` rather than `failed/` — but it only runs on a
+    board-watch tick, and until then `boardagents.describe()` called every
+    stopped worker `exited without finishing - nothing was committed on its
+    behalf`. So a worker that had just committed and reported was drawn as
+    abandoned for up to five minutes. [his, 2026-07-30] about exactly that card.
+
+    Two places, because `reap()` deletes the stamp as it files the record: the
+    live stamp for a worker that has stopped but not been reaped, and `done/`
+    for one that has.
+    """
+    aid = ba.clean_id(agent_id or "")
+    if not aid or aid == "agent":
+        return False
+    if os.path.exists(reported_file(aid)):
+        return True
+    try:
+        return any(r.get("agent") == aid for r in ba._list(work_dir("done")))
+    except OSError:
+        return False
+
+
 def mark_reported(agent_id=None, what=""):
     """Record that this agent put its result on the board.
 

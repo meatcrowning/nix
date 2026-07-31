@@ -1443,8 +1443,17 @@ all of it.
   ordering key cannot quietly become a second counter.
 - **A finished agent leaves the list at once** — board-watch drops the stash on
   success and on failure alike — and **a failed one is told apart in WORDS**
-  (`exited without finishing`), with §9.1's accent gutter present only on a
-  running row. Colour says nothing here; §8.1's ramp means a machine fault.
+  (`exited without finishing`). Until then, **a stopped worker that REPORTED is
+  drawn as finished, not abandoned**: [his, 2026-07-30] a completed worker's card
+  *"still sits and proclaims 'exited without finishing - nothing was
+  committed..' ... and no vertical line on the left EVEN THOUGH its task has been
+  completed"*. `boardagents` carries `finished` off `boardwork.reported` — the
+  same fact `reap()` sorts `done/` from `failed/` by, read from the live stamp
+  before the reap and from `done/` after it — so `describe()` says `finished - it
+  recorded its result on the board` and §9.1's accent gutter is present on a
+  running row **and** on a finished one. A worker that genuinely stopped
+  mid-sentence keeps both the old words and no gutter. The reap runs on a
+  board-watch tick, so the stale claim had up to five minutes to be read. Colour says nothing here; §8.1's ramp means a machine fault.
 - **There are NO phase headings over the cards.** He asked for them and then
   asked for them back out: *"maybe for now take out the 'coding' 'Testing'
   'finishing touches' text and just keep agents ordered by birth/age so they

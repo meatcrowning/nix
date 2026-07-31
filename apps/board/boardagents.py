@@ -412,6 +412,18 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     return rec
 
 
+def _reported(agent_id):
+    """`boardwork.reported`, imported LAZILY — `boardwork` imports this module,
+    so a top-level import here would be a cycle. Returns False if that module
+    cannot be reached at all, which is the honest answer: no evidence it
+    finished."""
+    try:
+        import boardwork as bw
+        return bool(bw.reported(agent_id))
+    except Exception:
+        return False
+
+
 def record(agent_id):
     """One agent's registration as it sits on disk, or `None`.
 
@@ -868,6 +880,11 @@ def agents(procs=None):
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
                     "session": rec.get("session") or "",
                     "state": "running" if alive else "exited",
+                    # ...and, for one that has stopped, WHETHER IT FINISHED.
+                    # `describe()` used to call every stopped worker abandoned;
+                    # `boardwork.reported` is the fact that tells the two apart,
+                    # and it is the same one `reap()` files them by.
+                    "finished": (not alive) and _reported(rec.get("id") or ""),
                     # A SUMMON IS NOT A CARD until it is confirmed. Everything
                     # here still SEES the row — the cap, `reap()`, `sweep()`,
                     # the inbox — and only `boardwork.cards()`/`groups()` skip
@@ -1113,6 +1130,11 @@ def describe(a):
             return "running - your note is in its inbox, unread"
         return "running - it reads its inbox between steps"
     if a["state"] == "exited":
+        # IT REPORTED, so it is finished and not abandoned — the claim that
+        # nothing was committed on its behalf is false about this one, and it
+        # was being made about every stopped worker until 2026-07-30.
+        if a.get("finished"):
+            return "finished - it recorded its result on the board"
         if a["kind"] == "decision":
             return "exited without finishing - the decision comes back on the next check"
         return "exited without finishing - nothing was committed on its behalf"
