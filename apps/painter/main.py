@@ -898,13 +898,22 @@ class Titlebar(QObject):
 def main():
     selftest = "--selftest" in sys.argv
     if selftest:
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        # Hard, never setdefault, and with no display left to fall back to: an
+        # exported QT_QPA_PLATFORM (his session's, or the wrapper's) used to win
+        # here, and the selftest then opened a real painter window on his
+        # screen. With no display Qt aborts instead — see apps/AGENTS.md.
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        os.environ.pop("WAYLAND_DISPLAY", None)
+        os.environ.pop("DISPLAY", None)
 
     # Pin the Controls style: the system default resolves to KDE Breeze, whose
     # ToolTip pulls in kirigami and fails to load outside a Plasma session.
     os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 
     app = QGuiApplication(sys.argv)
+    if selftest and app.platformName() != "offscreen":
+        raise SystemExit("selftest refuses to run on platform %r, not offscreen"
+                         % app.platformName())
     app.setApplicationName("painter")
     app.setOrganizationName("painter")
 
