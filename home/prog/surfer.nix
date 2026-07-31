@@ -118,6 +118,50 @@ let
       "$out/en-US.bdic"
   '';
 
+  # A wrapper is not a sourceable env file, and this one bites: line 3 is the
+  # single-instance probe, so `source $(which surfer)` hands the RUNNING browser
+  # an empty OPEN — a new home-page tab in the window the user is looking at —
+  # and line 4 then redirects the sourcing shell's stdout into ~/.cache/surfer.log.
+  # An agent did exactly that three times on 2026-07-30, borrowing the Qt env for
+  # an offscreen harness, and he watched three DuckDuckGo tabs appear.
+  #
+  # Two halves of the fix live here: this guard, which makes sourcing an error
+  # instead of an accident, and `surfer-qtenv` below, which is the thing the
+  # sourcer actually wanted. (The third half is in apps/surfer/singleton.py:
+  # a bare no-URL invocation from a caller with no tty is refused outright.)
+  sourceGuard = ''
+    if [ -z "''${BASH_SOURCE[0]-}" ] || [ "''${BASH_SOURCE[0]}" != "$0" ]; then
+      echo "surfer: this wrapper must be EXECUTED, not sourced." >&2
+      echo "  Sourcing it runs its body: the single-instance probe opens a tab in" >&2
+      echo "  the running browser, and the log redirect swallows your shell's stdout." >&2
+      echo "  For the Qt environment use:  surfer-qtenv <command> [args...]" >&2
+      echo "                          or:  eval \"\$(surfer-qtenv)\"   # in a subshell" >&2
+      return 1
+    fi
+  '';
+
+  # The documented, side-effect-free way to borrow surfer's Qt environment.
+  # With arguments it execs them inside that environment; with none it prints
+  # the Qt variables as `export` lines for `eval "$(surfer-qtenv)"`. It never
+  # touches the socket, never redirects anything, and never starts a browser.
+  qtenvBody = pkgs.writeShellScript "surfer-qtenv-body" ''
+    # `''${!prefix@}` and not `compgen -v`: nixpkgs' bash is built without
+    # progcomp, so compgen is not a builtin here and the loop silently
+    # enumerated nothing (caught 2026-07-30 — the printed env was empty and the
+    # caller inherited its Qt vars from elsewhere without noticing).
+    if [ "$#" -eq 0 ]; then
+      # PATH is in the list so the printed form matches what the exec form
+      # would give you, surfer's own python included. It is a superset of the
+      # caller's PATH (makeWrapper --prefix), never a replacement — but it is
+      # still store paths, so `eval` it in a subshell, not in a login shell.
+      for v in ''${!QT_@} ''${!QML@} ''${!NIXPKGS_QT@} ''${!QTWEBENGINE@} LOCALE_ARCHIVE PATH; do
+        if [ -n "''${!v-}" ]; then printf 'export %s=%q\n' "$v" "''${!v}"; fi
+      done
+      exit 0
+    fi
+    exec "$@"
+  '';
+
   surfer =
     if host == "air" then
       # air additionally brackets the run with the profile handoff (see
@@ -134,6 +178,7 @@ let
       # or mid-session just logs and launches anyway. Chatter goes to
       # ~/.cache/surfer-sync.log, not the terminal.
       pkgs.writeShellScriptBin "surfer" ''
+        ${sourceGuard}
         # Single instance FIRST, before anything else in this wrapper runs.
         # surfer is the default browser now (home/prog/mime-defaults.nix), so a
         # link clicked in another app lands here; apps/surfer/singleton.py hands
@@ -177,21 +222,46 @@ let
           makeWrapper ${pyEnv}/bin/python3 $out/bin/surfer \
             --add-flags /home/lam/nix/apps/surfer/main.py \
             --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
+            --run ${lib.escapeShellArg sourceGuard} \
             --run 'if ${pyEnv}/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi' \
             --run 'exec > "$HOME/.cache/surfer.log" 2>&1' \
+            "''${qtWrapperArgs[@]}"
+
+          # Same Qt environment, none of the body. This is what an agent or a
+          # harness reaches for; see apps/surfer/AGENTS.md.
+          # PATH too, not just the Qt vars: a harness borrowing this environment
+          # wants surfer's OWN python (PySide6 + the pinned adblock fork), and
+          # having to dig the interpreter out of the wrapper's last line by hand
+          # is exactly the manoeuvre that ended in three tabs. `surfer-qtenv
+          # python3 tools/find-test.py` is now the whole recipe. air needs no
+          # equivalent: there the interpreter IS /usr/bin/python3.
+          makeWrapper ${qtenvBody} $out/bin/surfer-qtenv \
+            --set-default QTWEBENGINE_DICTIONARIES_PATH ${spellDicts} \
+            --prefix PATH : ${pyEnv}/bin \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
       };
 in
 {
-  home.packages = [ surfer ];
+  home.packages = [ surfer ]
+    # top's `surfer-qtenv` is built inside the derivation above (it needs the
+    # same wrapQtAppsHook arguments). air has no nix Qt to borrow — it runs
+    # Fedora's system PySide6 — so there the helper is just the passthrough,
+    # which keeps ONE documented recipe working on both machines.
+    ++ lib.optional (host == "air")
+      (pkgs.writeShellScriptBin "surfer-qtenv" ''exec ${qtenvBody} "$@"'');
 
   # Desktop entry so surfer shows up in the runner and is eligible for http(s).
   # It IS now the default browser — that association, plus Plasma's separate
   # kdeglobals BrowserApplication key and $BROWSER, is set centrally in
   # home/prog/mime-defaults.nix. `%U` is load-bearing for that: main.py takes
   # the first non-flag argv as the start URL.
+  #
+  # `env SURFER_DESKTOP_LAUNCH=1` in Exec is what tells apps/surfer/singleton.py
+  # that a HUMAN asked for this: the runner and Plasma's BrowserApplication are
+  # the one legitimate no-URL launch, and without the marker they look exactly
+  # like the accidental script launch that gate exists to refuse.
   #
   # application/xhtml+xml and x-scheme-handler/about are in that file's
   # surferTypes and were NOT in this MimeType= line, so surfer was the default
@@ -204,7 +274,7 @@ in
     Name=surfer
     GenericName=Web Browser
     Comment=Minimal QtWebEngine browser for the top desktop
-    Exec=${surfer}/bin/surfer %U
+    Exec=${pkgs.coreutils}/bin/env SURFER_DESKTOP_LAUNCH=1 ${surfer}/bin/surfer %U
     Icon=web-browser
     Terminal=false
     Categories=Network;WebBrowser;

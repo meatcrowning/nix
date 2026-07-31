@@ -488,16 +488,32 @@ Fixed plugin-side in v2.45, but guard on the app side too.
 - **Tear down in a trap** (`try/finally`, or `atexit.register`), never at the
   end of the happy path: the harnesses that leak into his session are the ones
   that failed halfway.
-- **Never source an app's wrapper wholesale to borrow its Qt env.** The
-  `. <(sed '$d' "$(readlink -f "$(which X)")")` recipe some guides show is safe
-  only for a wrapper that is nothing but exports. **surfer's is not**: its
-  second line runs `singleton.py "$@"` and `exit 0`s if a surfer is already
-  running — so sourcing it hands his LIVE browser an `OPEN` (empty url = a new
-  home tab) and never runs your test at all, and the line after that redirects
-  the sourcing shell into `~/.cache/surfer.log`. Both happened here on
-  2026-07-30. Filter the wrapper the way `surfer/tools/find-test.py` does (drop
-  the `#!`, the `singleton.py` line and every `exec`), or just take the
-  interpreter path out of it and set nothing else.
+- **Never source an app's wrapper to borrow its Qt env — use `surfer-qtenv`.**
+  A wrapper is a program, not an env file: sourcing it runs its BODY. surfer's
+  body probes the single-instance socket, so `. $(which surfer)` hands his LIVE
+  browser an `OPEN` with no url — a new home-page tab in the window he is
+  looking at — and the next line redirects the sourcing shell's stdout into
+  `~/.cache/surfer.log`. That is not hypothetical: three DuckDuckGo tabs
+  appeared in his session on 2026-07-30, from three attempts to borrow the env
+  for an offscreen harness. The `sed '$d'`/`head -n -1` variants do **not**
+  help — they strip the final `exec`, which is the one line that was harmless.
+
+  The safe recipe, and it is one line on both hosts:
+
+  ```bash
+  surfer-qtenv python3 apps/surfer/tools/find-test.py   # exec form: Qt env + surfer's own python
+  ( eval "$(surfer-qtenv)"; ... )                       # print form, in a SUBSHELL
+  ```
+
+  `surfer-qtenv` is built beside `surfer` by `home/prog/surfer.nix` from the
+  same `wrapQtAppsHook` arguments, so it is the identical environment with none
+  of the body — no socket, no redirect, no browser. Three guards now make the
+  old route fail loudly instead of silently: the wrapper refuses to be sourced,
+  `apps/surfer/singleton.py` refuses a bare no-URL invocation from a caller
+  with no tty, and `surfer.desktop` carries `SURFER_DESKTOP_LAUNCH=1` so his own
+  launches are still allowed. **Only surfer ships a `-qtenv` helper so far** —
+  for the other eight, take the interpreter path out of the wrapper's last line
+  and set nothing else, and add the helper if you find yourself needing more.
 - **Never script hyprvtb's Lua actions to probe behaviour** — `hl.dsp.focuswindow`
   is nil there, so `rollup`/`minimize_active` land on HIS active window. Play
   the plugin's part instead: bind a scratch `hyprvtb-buttons.sock` in a scratch

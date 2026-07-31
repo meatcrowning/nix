@@ -431,7 +431,8 @@ book a second `sync.py` bracket interleaving with the live session.
 So a launch that finds a surfer already running hands it the URL over a Unix
 socket and exits 0. The running instance opens it via the *existing*
 `normalize()` → `newTab()` path (a bare launch with no URL gets a home tab, so
-clicking the menu entry always does something visible).
+clicking the menu entry always does something visible — but only when a human
+asked for it; see "The handoff is a loaded gun" below).
 
 - **Client half: [`singleton.py`](singleton.py) — stdlib only, deliberately Qt
   free.** `main.py` imports it and calls `try_handoff()` **before** `import
@@ -445,6 +446,8 @@ clicking the menu entry always does something visible).
 - Socket is `$XDG_RUNTIME_DIR/surfer-<uid>.sock` (per-user, per-machine), `/tmp`
   fallback at 0600. `SURFER_SOCKET` overrides it; `SURFER_NO_SINGLETON=1`
   disables the whole thing and always starts a fresh process.
+  `SURFER_ALLOW_HANDOFF=1` / `SURFER_DESKTOP_LAUNCH=1` re-permit a bare, no-URL
+  invocation (below).
 - **A stale socket is unlinked only after a connect has actually FAILED**, never
   unconditionally — an unconditional `removeServer()` would evict a healthy
   running instance from its own address. Correspondingly, a `listen()` that
@@ -465,6 +468,47 @@ server (scratch `HOME` + `XDG_RUNTIME_DIR`, `QT_QPA_PLATFORM=offscreen`,
 `SURFER_NO_SYNC=1`) and counting `tab:<tid>` buttons in the `REGISTER` lines:
 1 tab → second launch exits 0 in 0.07 s → 2 tabs → bare launch → 3 tabs (the
 third being `homeUrl`), with the first process still alive throughout.
+
+### The handoff is a loaded gun, and it went off (2026-07-30)
+
+**Three DuckDuckGo tabs appeared in his browser while he was using it.** An
+agent wanted surfer's Qt environment for an offscreen harness, took the packaged
+wrapper, stripped its last line and sourced the rest — three times. Stripping
+the last line removes the `exec`; it leaves *line 3*, the `singleton.py "$@"`
+probe, which with no argv sends `OPEN` with an empty url, which is `homeUrl`,
+which is `https://start.duckduckgo.com/`. One tab per source. (Line 4,
+`exec > ~/.cache/surfer.log`, then redirected the agent's own shell.)
+
+**Never source a wrapper. `surfer-qtenv` is the supported way** —
+`surfer-qtenv <cmd>...`, or `eval "$(surfer-qtenv)"` in a subshell. Same
+`wrapQtAppsHook` environment plus surfer's own python on `PATH`, none of the
+body. See `apps/AGENTS.md` → Verifying changes.
+
+Three guards, so the class cannot recur rather than merely being written down:
+
+- **The wrapper refuses to be sourced** (`sourceGuard` in
+  `home/prog/surfer.nix`, both host branches, emitted as the FIRST line of the
+  body): `BASH_SOURCE[0] != $0` → a message naming `surfer-qtenv`, and
+  `return 1` before the probe.
+- **`singleton.refusal()` refuses a bare, no-URL invocation** from a caller
+  with no tty, whether or not a browser is running — so it can neither open a
+  tab in his window nor a window on his screen. It is keyed on *no URL*, not on
+  *no tty*, because every legitimate programmatic caller (a link click through
+  `surfer.desktop`, anything using `$BROWSER`) names a URL and must keep
+  working. `try_handoff` exits **3**; the standalone probe exits **0** so the
+  wrapper stops there instead of falling through to a launch.
+- **`SURFER_DESKTOP_LAUNCH=1` is set by `surfer.desktop`'s `Exec=`**, marking
+  the one legitimate no-URL launch — the runner, Plasma's `BrowserApplication`.
+  `SURFER_ALLOW_HANDOFF=1` is the manual override. An offscreen launch is
+  excused only when `SURFER_NO_SINGLETON=1` is also set: offscreen alone still
+  reaches his running browser over the socket, because the handoff happens
+  before Qt exists.
+
+Verified offscreen against a fake socket server standing in for his browser —
+bare/no-tty sends nothing (rc 0, rc 3 via `try_handoff`), a URL still hands off,
+both markers still hand off, and a real pty still hands off — plus the whole of
+`tools/find-test.py` run through `surfer-qtenv`, and the built wrapper sourced
+in a sealed env (guard fires, no process, no log).
 
 ## Profile handoff between `top` and `book` (2026-07-26)
 
