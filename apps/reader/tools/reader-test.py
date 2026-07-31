@@ -254,8 +254,14 @@ def build(app, tmp, start):
 
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
+    pdf = rdr.PdfLibrary()
     keep = (rdr.Palette(rdr.PANEL_THEME), DeskStyle(parent=engine), StubTitlebar(),
-            rdr.Docs(), rdr.Library(), rdr.Settings())
+            rdr.Docs(pdf), rdr.Library(), rdr.Settings(), pdf)
+    # The PDF mode's whole drawing path (pdfdoc.py). Registered before Main.qml
+    # loads, exactly as `main()` does it, or the first page delegate's source
+    # resolves to nothing and the check would pass against a blank sheet.
+    engine.addImageProvider("pdfpage", rdr.PageProvider(pdf))
+    ctx.setContextProperty("Pdf", pdf)
     ctx.setContextProperty("WalPalette", keep[0])
     ctx.setContextProperty("DeskStyle", keep[1])
     ctx.setContextProperty("Titlebar", keep[2])
@@ -749,6 +755,156 @@ def test_window(app, tmp):
           any("appended paragraph" in bb["text"] for bb in prop(pane, "blocks")))
 
 
+# ------------------------------------------------------- 4. the PDF page mode
+def make_pdf(path, pages=3):
+    """A PDF with real, extractable text, written by Qt itself — so the harness
+    needs no fixture file in the repo and no second library."""
+    from PySide6.QtGui import QPdfWriter, QPainter, QFont, QPageSize
+    w = QPdfWriter(path)
+    w.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+    w.setTitle("Harness Document")
+    p = QPainter(w)
+    f = QFont("Helvetica")
+    f.setPointSize(24)
+    p.setFont(f)
+    for i in range(pages):
+        if i:
+            w.newPage()
+        p.drawText(400, 800, "page %d needle%d here" % (i + 1, i + 1))
+    p.end()
+
+
+def test_pdf(app, tmp):
+    """reader's second document mode, end to end: open, page geometry, zoom,
+    jump, find, and a real grab of the rendered page — offscreen throughout."""
+    from PySide6.QtCore import Qt, QSize
+    from PySide6.QtGui import QImage
+
+    os.makedirs(tmp, exist_ok=True)
+    doc = os.path.join(tmp, "book.pdf")
+    make_pdf(doc, 3)
+    open(os.path.join(tmp, "notes.md"), "w").write("# Notes\n\nbeside the pdf\n")
+
+    engine, win, keep = build(app, tmp, doc)
+    spin(500)
+    pane = win.property("pane")
+    if pane is None:
+        check("the pdf window has a focused pane", False)
+        return
+
+    check("a .pdf argument opens in the PDF mode", pane.property("isPdf") is True)
+    check("...and the window knows it", win.property("pdfMode") is True)
+    check("the page count is the document's", pane.property("pageCount") == 3,
+          pane.property("pageCount"))
+    check("a PDF with no bookmarks falls back to a page outline",
+          len(prop(pane, "outline")) == 3, prop(pane, "outline"))
+
+    # The files pane lists a PDF beside the .md files it already listed.
+    rels = [f["rel"] for f in prop(win, "fileIndex")]
+    check("the files pane lists PDFs next to markdown",
+          "book.pdf" in rels and "notes.md" in rels, rels)
+
+    # ---- zoom. fit-width is the default, a step drops out of it (§10.1) ----
+    check("it opens fit to width", pane.property("fit") == "width", pane.property("fit"))
+    wide = pane.property("zoomPct")
+    pane.zoomIn()
+    spin(200)
+    check("zoom in enlarges the page and leaves the fit mode",
+          pane.property("zoomPct") > wide and pane.property("fit") == "none",
+          (wide, pane.property("zoomPct"), pane.property("fit")))
+    pane.zoomOut()
+    spin(200)
+    check("zoom out is its inverse", abs(pane.property("zoomPct") - wide) < 0.51,
+          (wide, pane.property("zoomPct")))
+    pane.fitPage()
+    spin(200)
+    check("fit page fits the whole page", pane.property("fit") == "page"
+          and pane.property("zoomPct") <= wide + 0.01,
+          (pane.property("fit"), pane.property("zoomPct")))
+    pane.fitWidth()
+    spin(200)
+
+    # ---- jumping, and the history it records (§11.1) ----
+    pane.jumpTo(2)
+    spin(300)
+    check("jump to a page lands on it", pane.property("topIndex") == 2,
+          pane.property("topIndex"))
+    check("...and it is walkable with the side buttons", pane.property("canBack") is True)
+    pane.goBack()
+    spin(300)
+    check("back returns to the page you left", pane.property("topIndex") == 0,
+          pane.property("topIndex"))
+
+    # ---- go to page: out of range REFUSES VISIBLY, never a no-op (§10.2) ----
+    win.gotoPage("2")
+    spin(300)
+    check("the go-to-page field jumps", pane.property("topIndex") == 1,
+          pane.property("topIndex"))
+    win.setProperty("status", "")
+    win.gotoPage("99")
+    spin(120)
+    check("a page outside the document is refused in words",
+          "no page 99" in str(win.property("status")), win.property("status"))
+
+    # ---- find, inside the PDF ----
+    # The refusal above is still in the footer — it is a REPORT and clears
+    # itself after four seconds (§10.4). Clear it rather than wait for it.
+    win.setProperty("status", "")
+    win.setProperty("query", "needle3")
+    win.runSearch()
+    spin(400)
+    check("find inside a PDF matches the page holding the text",
+          list(prop(pane, "matches")) == [2], prop(pane, "matches"))
+    check("...and the footer reports it",
+          "1/1" in str(win.property("footerStr")), win.property("footerStr"))
+    win.closeSearch()
+    spin(120)
+    check("the footer says the page and the zoom",
+          "/3" in str(win.property("footerStr"))
+          and "%" in str(win.property("footerStr")), win.property("footerStr"))
+
+    # ---- the titlebar carries the mode's own cells, and only in this mode ----
+    ids = [b["id"] for b in prop(win, "tbButtons") if not isinstance(b, str)]
+    check("the PDF cells are in the titlebar",
+          all(i in ids for i in ("zoomout", "zoomin", "fitw", "fitp", "goto")), ids)
+
+    # ---- the page actually RASTERIZED. Two ways, because an Image that never
+    # loaded and a page provider that returns white are different failures ----
+    img = keep[6].render(pane.property("watchKey"), prop(pane, "doc")["gen"],
+                         0, QSize(300, 424))
+    check("the provider rasterizes a page", img is not None and not img.isNull()
+          and img.size() == QSize(300, 424), img.size() if img else None)
+    inked = 0
+    if img is not None and not img.isNull():
+        rgb = img.convertToFormat(QImage.Format.Format_RGB32)
+        for y in range(0, rgb.height(), 3):
+            for x in range(0, rgb.width(), 3):
+                if rgb.pixelColor(x, y).lightness() < 200:
+                    inked += 1
+    check("...with ink on it, not a blank sheet", inked > 0, inked)
+
+    # The whole window, grabbed offscreen — never a screenshot of his screen.
+    shot = os.path.join(tmp, "pdfview.png")
+    grab = win.grabWindow()
+    check("the window grabs at its real size",
+          not grab.isNull() and grab.width() > 100, grab.size())
+    if not grab.isNull():
+        grab.save(shot)
+        g = grab.convertToFormat(QImage.Format.Format_RGB32)
+        # A rendered page is a light sheet on this desktop's near-black page
+        # background; if none of the window is light, no page was drawn.
+        light = 0
+        for y in range(0, g.height(), 5):
+            for x in range(0, g.width(), 5):
+                if g.pixelColor(x, y).lightness() > 180:
+                    light += 1
+        check("a page sheet is actually drawn in the window", light > 50, light)
+
+    win.close()
+    spin(80)
+    del engine, keep
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     with tempfile.TemporaryDirectory() as tmp:
@@ -764,6 +920,7 @@ def main():
                              % app.platformName())
         test_font()
         test_window(app, os.path.join(tmp, "win"))
+        test_pdf(app, os.path.join(tmp, "pdf"))
     print()
     if FAILS:
         print("%d FAILED: %s" % (len(FAILS), ", ".join(FAILS)))

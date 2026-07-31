@@ -45,6 +45,14 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 
 import mdparse  # noqa: E402  (beside this file)
 from mdparse import DOC_EXTS  # noqa: E402
+import pdfdoc  # noqa: E402  (beside this file — the PDF document mode)
+from pdfdoc import PDF_EXTS, PdfLibrary, PageProvider, is_pdf  # noqa: E402
+
+#: Everything reader opens. Two pipelines behind it: markdown goes through
+#: `mdparse` to blocks, a PDF through `pdfdoc` to rendered pages — but ONE set
+#: of extensions, because the files pane, the drop target, a directory argument
+#: and the last-document memory must all agree about what this app reads.
+OPEN_EXTS = DOC_EXTS | PDF_EXTS
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "reader" / "state.json"
@@ -62,7 +70,7 @@ FALLBACKS = ["~/nix/docs/DESIGN.md", "~/nix/AGENTS.md", "~/README.md"]
 
 
 def is_doc(name):
-    return os.path.splitext(name)[1].lower() in DOC_EXTS
+    return os.path.splitext(name)[1].lower() in OPEN_EXTS
 
 
 def natkey(name):
@@ -208,26 +216,41 @@ class Docs(QObject):
     #: a watched document changed on disk; the QML reloads it in place.
     fileChanged = Signal(str)          # key (which pane)
 
-    def __init__(self, parent=None):
+    def __init__(self, pdf=None, parent=None):
         super().__init__(parent)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file)
         self._watched = {}             # key -> path
+        self._pdf = pdf                # the PDF pipeline, by pane key
 
     # ---- reading ----
 
     @Slot(str, result="QVariantMap")
-    def load(self, path):
+    @Slot(str, str, result="QVariantMap")
+    def load(self, path, key="left"):
+        """The one seam between a file and a pane, both modes.
+
+        `kind` is what the pane branches on: `"md"` carries `blocks`, `"pdf"`
+        carries `pageCount`/`pages` and is drawn by rasterizing pages instead
+        (see `pdfdoc.py`). Everything else in the map — `ok`, `path`, `name`,
+        `error`, `outline` — means the same thing in both, which is why the
+        sidebar, the history, the footer and the persisted position needed no
+        second version of themselves."""
         p = os.path.abspath(os.path.expanduser(path))
+        if is_pdf(p) and self._pdf is not None:
+            got = self._pdf.open(key, p)
+            got["dir"] = os.path.dirname(p)
+            got["blocks"] = []
+            return got
         try:
             raw = open(p, "rb").read()
         except OSError as e:
-            return {"ok": False, "path": p, "name": os.path.basename(p),
+            return {"ok": False, "kind": "md", "path": p, "name": os.path.basename(p),
                     "error": e.strerror or "cannot read", "blocks": [],
                     "outline": [], "dir": os.path.dirname(p)}
         text = raw.decode("utf-8", "replace")
         blocks = mdparse.parse(text, os.path.dirname(p))
-        return {"ok": True, "path": p, "name": os.path.basename(p),
+        return {"ok": True, "kind": "md", "path": p, "name": os.path.basename(p),
                 "error": "", "blocks": blocks, "outline": mdparse.outline(blocks),
                 "dir": os.path.dirname(p), "lines": text.count("\n") + 1}
 
@@ -355,6 +378,13 @@ class Library(QObject):
         needle = q.lower()
         results = []
         for e in self._files:
+            # A PDF is listed in the files pane and opened like anything else,
+            # but it is not TEXT: matching a query against its bytes finds
+            # nothing a reader would recognise and occasionally finds a hit
+            # inside a compressed stream. Cross-document search is markdown's;
+            # find WITHIN an open PDF is `Pdf.search` (pdfdoc.py) and works.
+            if is_pdf(e["path"]):
+                continue
             try:
                 if os.path.getsize(e["path"]) > MAX_SEARCH_BYTES:
                     continue
@@ -453,13 +483,20 @@ def main():
     palette = Palette(PANEL_THEME)
     style = DeskStyle()
     titlebar = Titlebar()
-    docs = Docs()
+    pdf = PdfLibrary()
+    docs = Docs(pdf)
     library = Library()
+
+    # `image://pdfpage/<key>/<gen>/<page>` — the whole PDF drawing path
+    # (pdfdoc.py). Registered before Main.qml loads, or the first delegate's
+    # source resolves to nothing.
+    engine.addImageProvider("pdfpage", PageProvider(pdf))
 
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Docs", docs)
+    ctx.setContextProperty("Pdf", pdf)
     ctx.setContextProperty("Library", library)
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("startPath", start_path(sys.argv[1:], settings))

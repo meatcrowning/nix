@@ -136,6 +136,33 @@ Window {
         if (sideMode === "results") sideMode = "outline";
     }
 
+    // ---- go to page (PDF mode only) ----
+    // The same chip as find, on the same reveal, one cell in from it: a page
+    // number is the other thing you type at a document, and a 400-page scan
+    // whose only jump is scrolling is not a reader. It refuses a number outside
+    // the document VISIBLY rather than doing nothing (§10.2).
+    property bool gotoOpen: false
+    function openGoto() {
+        if (!pdfMode) return;
+        gotoOpen = true;
+        gotoField.text = String(pane.topIndex + 1);
+        gotoField.forceActiveFocus();
+        gotoField.selectAll();
+    }
+    function closeGoto() {
+        gotoOpen = false;
+        stage.forceActiveFocus();
+    }
+    function gotoPage(s) {
+        var n = parseInt(String(s), 10);
+        if (isNaN(n) || n < 1 || n > pane.pageCount) {
+            win.status = "no page " + String(s) + " - this document has " + pane.pageCount;
+            return;
+        }
+        pane.jumpTo(n - 1);
+        closeGoto();
+    }
+
     // ---- the document panes ----
     function openIn(p, path) { p.navigate(path); }
 
@@ -176,21 +203,38 @@ Window {
     // ASCII, lowercase, one or two characters (§12.1). `|` and `_` are kitty's
     // split glyphs and therefore everyone's; `_` and not `-`, because a bare
     // `-` is the SPACER token in the vtb button-array protocol.
+    //
+    // The PDF cells are inserted, not appended: a mode's own controls belong
+    // beside what they act on, and the two splits stay at the trailing end in
+    // every app that has them. `−` is U+2212 and not a hyphen because a bare
+    // `-` is the SPACER token in the vtb button-array protocol; viewer's zoom
+    // pair is the same two glyphs (§12.1 — a function keeps its glyph).
+    readonly property bool pdfMode: pane ? pane.isPdf : false
     readonly property var tbButtons: [
         { id: "back",    label: "<",  state: pane && pane.canBack ? 0 : 2,    tip: "back" },
         { id: "forward", label: ">",  state: pane && pane.canForward ? 0 : 2, tip: "forward" },
         "-",
         { id: "files",   label: "fl", state: sideOpen && sideMode === "files" ? 1 : 0,
-          tip: "browse .md files" },
+          tip: "browse documents" },
         { id: "outline", label: "ol", state: sideOpen && sideMode === "outline" ? 1 : 0,
-          tip: "this document's headings" },
+          tip: pdfMode ? "this document's bookmarks" : "this document's headings" },
         { id: "search",  label: "fs", state: searchOpen ? 1 : 0, tip: "find (Ctrl+F)" },
+    ].concat(pdfMode ? [
+        "-",
+        { id: "zoomout", label: "−",  state: 0, tip: "zoom out" },
+        { id: "zoomin",  label: "+",  state: 0, tip: "zoom in" },
+        { id: "fitw",    label: "fw", state: pane && pane.fit === "width" ? 1 : 0,
+          tip: "fit width" },
+        { id: "fitp",    label: "fp", state: pane && pane.fit === "page" ? 1 : 0,
+          tip: "fit page" },
+        { id: "goto",    label: "gp", state: gotoOpen ? 1 : 0, tip: "go to page (Ctrl+G)" },
+    ] : []).concat([
         "-",
         { id: "vsplit",  label: "|",  state: splitOn && splitVertical ? 1 : 0,
           tip: "split right" },
         { id: "hsplit",  label: "_",  state: splitOn && !splitVertical ? 1 : 0,
           tip: "split down" },
-    ]
+    ])
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
     readonly property string footerStr: {
@@ -199,6 +243,13 @@ Window {
         if (query.length > 1 && pane)
             return pfx + (pane.matches.length ? (pane.matchAt + 1) + "/" + pane.matches.length
                                               : "0/0") + "  " + query;
+        // Where you are in a PDF is the thing a page view has to say, and the
+        // footer is where this app already says it (§7.4). Page first, because
+        // that is what is asked for; the zoom after it, so the two `fit` cells
+        // report a number rather than only a lit state (§10.6).
+        if (pdfMode && pane && pane.pageCount > 0)
+            return pfx + (pane.topIndex + 1) + "/" + pane.pageCount + "  "
+                   + Math.round(pane.zoomPct) + "%  " + pane.docName;
         return pfx + (pane ? pane.docName : "");
     }
     onFooterStrChanged: Titlebar.setFooter(footerStr)
@@ -217,6 +268,14 @@ Window {
                 break;
             case "vsplit":  win.setSplit(true);    break;
             case "hsplit":  win.setSplit(false);   break;
+            case "zoomout": win.pane.zoomOut();    break;
+            case "zoomin":  win.pane.zoomIn();     break;
+            case "fitw":    win.pane.fitWidth();   break;
+            case "fitp":    win.pane.fitPage();    break;
+            case "goto":
+                if (win.gotoOpen) win.closeGoto();
+                else win.openGoto();
+                break;
             }
         }
     }
@@ -262,7 +321,37 @@ Window {
             const alt = (e.modifiers & Qt.AltModifier) !== 0;
             switch (e.key) {
             case Qt.Key_Escape:
-                if (win.searchOpen) { win.closeSearch(); e.accepted = true; }
+                if (win.gotoOpen) { win.closeGoto(); e.accepted = true; }
+                else if (win.searchOpen) { win.closeSearch(); e.accepted = true; }
+                break;
+            // The page-view keys. `+` `−` `0` are viewer's, verbatim — zoom
+            // keeps its keys in every app that zooms, the way it keeps its
+            // glyphs (§12.1) — and `w` is fit-width, which viewer has no need
+            // of. They are PDF-only: in markdown they would claim keys that
+            // mean nothing there.
+            case Qt.Key_Plus: case Qt.Key_Equal:
+                if (win.pdfMode) { win.pane.zoomIn();   e.accepted = true; }
+                break;
+            case Qt.Key_Minus:
+                if (win.pdfMode) { win.pane.zoomOut();  e.accepted = true; }
+                break;
+            case Qt.Key_0:
+                if (win.pdfMode) { win.pane.fitPage();  e.accepted = true; }
+                break;
+            case Qt.Key_W:
+                if (win.pdfMode) { win.pane.fitWidth(); e.accepted = true; }
+                break;
+            case Qt.Key_PageDown:
+                if (win.pdfMode) { win.pane.pageStep(1);  e.accepted = true; }
+                break;
+            case Qt.Key_PageUp:
+                if (win.pdfMode) { win.pane.pageStep(-1); e.accepted = true; }
+                break;
+            case Qt.Key_Home:
+                if (win.pdfMode) { win.pane.jumpTo(0); e.accepted = true; }
+                break;
+            case Qt.Key_End:
+                if (win.pdfMode) { win.pane.jumpTo(win.pane.pageCount - 1); e.accepted = true; }
                 break;
             case Qt.Key_F3:
                 win.setSplit(e.modifiers & Qt.ShiftModifier ? !win.splitVertical : win.splitVertical);
@@ -497,6 +586,85 @@ Window {
                     }
                 }
             }
+            // ---- go to page ----
+            // The find chip's twin: same reveal, same clip, same duration
+            // (§6.2.1), stacked under it when both are open rather than
+            // overlapping it. It is only ever built in PDF mode.
+            Item {
+                id: gotoClip
+                z: 30
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.rightMargin: 10
+                anchors.topMargin: 10 + (win.searchOpen ? searchClip.height + 6 : 0)
+                width: win.gotoOpen ? chipW : 0
+                height: Theme.fontSize + 10
+                clip: true
+                visible: width > 0 && win.pdfMode
+
+                readonly property real chipW: Math.min(docArea.width - 20, 22 * win.cellW)
+                Behavior on width {
+                    NumberAnimation {
+                        duration: motion.ms(motion.slideMs)
+                        easing.type: motion.slideEasing
+                    }
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    width: gotoClip.chipW
+                    height: parent.height
+                    color: Theme.bgAlt
+                    border.width: 1
+                    border.color: win.fgAccent
+
+                    PixelText {
+                        id: gotoLabel
+                        anchors {
+                            left: parent.left; leftMargin: 6
+                            verticalCenter: parent.verticalCenter
+                        }
+                        color: win.fgDim
+                        text: "page"
+                    }
+                    TextInput {
+                        id: gotoField
+                        anchors {
+                            left: gotoLabel.right; leftMargin: 6
+                            right: ofN.left; rightMargin: 6
+                            verticalCenter: parent.verticalCenter
+                        }
+                        font.family: Theme.font
+                        font.pixelSize: Theme.fontSize
+                        font.hintingPreference: Font.PreferFullHinting
+                        renderType: Text.NativeRendering
+                        color: win.fgText
+                        selectionColor: Theme.accent
+                        selectedTextColor: Theme.bg
+                        clip: true
+                        validator: IntValidator { bottom: 1 }
+                        Keys.onPressed: (e) => {
+                            if (e.key === Qt.Key_Escape) { win.closeGoto(); e.accepted = true; }
+                            else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
+                                win.gotoPage(gotoField.text);
+                                e.accepted = true;
+                            }
+                        }
+                    }
+                    // What you may type — the honest bound, not a box that
+                    // silently rejects (§10.2).
+                    PixelText {
+                        id: ofN
+                        anchors {
+                            right: parent.right; rightMargin: 6
+                            verticalCenter: parent.verticalCenter
+                        }
+                        color: win.fgDim
+                        text: "/" + (win.pane ? win.pane.pageCount : 0)
+                    }
+                }
+            }
+
             // Cross-document search is a filesystem walk, so it runs when the
             // typing settles; the in-document highlight is live and free.
             Timer {
@@ -544,6 +712,9 @@ Window {
     // work while the focus is in a pane, the sidebar or the search field itself
     // (docs/DESIGN.md §11.2).
     Shortcut { sequence: "Ctrl+F"; onActivated: win.openSearch() }
+    // Ctrl+G is go-to-page, for the same reason and by the same route: it has
+    // to work while the focus is in a pane, the sidebar or the find chip.
+    Shortcut { sequence: "Ctrl+G"; onActivated: win.openGoto() }
 
     // A status line is a report, not a permanent label: it clears itself so the
     // footer goes back to saying what is open.
