@@ -24,7 +24,22 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PY="${FILER_TEST_PYTHON:-/usr/bin/python3}"
+# TWO interpreters, because the two halves need different modules and on top
+# they live in different wrappers: the picker needs PySide6 (`filer`'s), the
+# portal needs gi (`filer-portal`'s). `/usr/bin/python3` is book's answer to
+# both and does not exist on top, so hardcoding it made the suite unrunnable
+# there — borrow from the wrappers, exactly as the surfer harnesses do, and keep
+# the Fedora path as the fallback.
+_wrapped_python() {   # $1 = wrapper on PATH
+  local w; w="$(command -v "$1")" || return 1
+  sed -n 's|^exec "\{0,1\}\(/nix/store/[^" ]*/bin/python3\)"\{0,1\} .*|\1|p' \
+      "$(readlink -f "$w")" | head -1
+}
+PY="${FILER_TEST_PYTHON:-$(_wrapped_python filer)}"; PY="${PY:-/usr/bin/python3}"
+PYGI="${FILER_TEST_PYTHON_GI:-$(_wrapped_python filer-portal)}"; PYGI="${PYGI:-/usr/bin/python3}"
+for p in "$PY" "$PYGI"; do
+  [ -x "$p" ] || { echo "no usable python3 ($p) — set FILER_TEST_PYTHON[_GI]"; exit 1; }
+done
 TMP="$(mktemp -d -t filer-portal-tests-XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -38,9 +53,9 @@ run() {
 
 run "picker (offscreen QML)"    env T_TMP="$TMP" "$PY" "$HERE/pick-test.py"
 run "portal backend (private bus)" \
-    env T_TMP="$TMP" dbus-run-session -- "$PY" "$HERE/portal-test.py"
+    env T_TMP="$TMP" dbus-run-session -- "$PYGI" "$HERE/portal-test.py"
 run "end-to-end seam (private bus)" \
-    env T_TMP="$TMP" dbus-run-session -- "$PY" "$HERE/e2e-test.py"
+    env T_TMP="$TMP" FILER_TEST_PYTHON="$PY" dbus-run-session -- "$PYGI" "$HERE/e2e-test.py"
 
 echo
 if [ "$fail" -ne 0 ]; then

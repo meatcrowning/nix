@@ -6,6 +6,7 @@ window is created anywhere. Verifies that a live OpenFile call starts filer with
 a well-formed spec and that Close() aborts it into a clean response 1 rather
 than a hang.
 """
+import atexit
 import os
 import subprocess
 import sys
@@ -31,15 +32,39 @@ def check(name, cond, detail=""):
 
 
 tmp = os.environ["T_TMP"]
+PICKER_PY = os.environ.get("FILER_TEST_PYTHON", "/usr/bin/python3")
+if not os.access(PICKER_PY, os.X_OK):
+    raise SystemExit("no PySide6 interpreter for the picker (%s) — run this "
+                     "through portal-tests.sh, or set FILER_TEST_PYTHON" % PICKER_PY)
 shim = os.path.join(tmp, "filer-offscreen")
 with open(shim, "w") as f:
-    f.write("#!/bin/sh\nexec env QT_QPA_PLATFORM=offscreen "
-            "/usr/bin/python3 /home/lam/nix/apps/filer/main.py \"$@\"\n")
+    # the -u pair goes BEFORE the assignment (env stops parsing options at the
+    # first operand): with no display there is no fallback to his session, so a
+    # picker that ignored the platform plugin aborts instead of mapping.
+    # NOT sys.executable — this process is the one with `gi`, the picker needs
+    # the one with PySide6 — and not a hardcoded /usr/bin/python3 either: that
+    # path is book's and does not exist on top. portal-tests.sh passes filer's.
+    f.write("#!/bin/sh\nexec env -u WAYLAND_DISPLAY -u DISPLAY "
+            "QT_QPA_PLATFORM=offscreen "
+            "%s /home/lam/nix/apps/filer/main.py \"$@\"\n" % PICKER_PY)
 os.chmod(shim, 0o755)
 
 conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 env = dict(os.environ, FILER_BIN=shim, FILER_PORTAL_DELEGATE="nosuchbackend")
 proc = subprocess.Popen([sys.executable, PORTAL], env=env)
+
+
+@atexit.register
+def _reap_portal():
+    """Teardown in a trap, not at the end of the happy path: a check that
+    raises halfway used to leave the portal backend — and the picker it
+    spawned — running against his session bus."""
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 for _ in range(120):
     try:
@@ -98,8 +123,7 @@ leftover = subprocess.run(["pgrep", "-f", "apps/filer/main.py --pick"],
                           capture_output=True, text=True).stdout.strip()
 check("the picker process was reaped, not left behind", leftover == "", leftover)
 
-proc.terminate()
-proc.wait(10)
+_reap_portal()
 print()
 if FAILS:
     print("FAILED:", ", ".join(FAILS))
