@@ -501,7 +501,18 @@ So that harness puts two real clients on the sandbox monitor — one declaring
 tests the plugin that is actually LOADED, which no source read can do:
 `hyprvtb 2.95 -> 0 px with the verb, 473 px without` is what a pass looks like.
 
-Copy its shape for the next flag of this kind rather than hand-building a probe
+`tools/vtb-flash-test.sh` is the same shape aimed at the titlebar text FLASH: it
+shoots one probe window repeatedly while its footer string changes every 16ms,
+and fails if the footer's ink ever collapses — i.e. if the stacked text is being
+drawn from a texture built inside the render pass. It runs a **self-check mode
+first** (a footer whose length changes, whose ink must swing), because the
+interesting comparison is "the ink did not change", and a probe that never
+reached the bar produces exactly that. On `hyprvtb 2.97`, `top`: 20/20 shots at
+156px in both modes, no blank frame — so the footer/title textures still being
+built in `renderBar` (`prewarmGlyphs` covers button glyphs only) is measured NOT
+to blank here, whatever it does in theory. `docs/hyprvtb-titlebar-flash.md`.
+
+Copy their shape for the next flag of this kind rather than hand-building a probe
 each time (that hunt cost a whole session on 2026-07-29). Two traps it encodes:
 `hyprctl dispatch exec` spawns from the COMPOSITOR's environment, so an on/off
 choice cannot ride in on an env var — two probe files, or you silently test the
