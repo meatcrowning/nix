@@ -1023,9 +1023,19 @@ Window {
                                             Item {
                                                 id: bar
                                                 width: parent.width
-                                                implicitHeight: todoText.implicitHeight
-                                                                + (todoMore.visible
-                                                                   ? todoMore.implicitHeight + 6 : 0)
+                                                // ...and never shorter than the GUTTER
+                                                // beside it. A one-line bullet with a
+                                                // `by:` stamp has two lines of metadata
+                                                // against one line of text, and without
+                                                // this the name and the time spilled out
+                                                // of the row and drew over the bullet
+                                                // below — which is what a stack of
+                                                // one-line SUMMONED lines is made of.
+                                                implicitHeight: Math.max(
+                                                    todoText.implicitHeight
+                                                    + (todoMore.visible
+                                                       ? todoMore.implicitHeight + 6 : 0),
+                                                    gutter.implicitHeight)
                                                 height: implicitHeight
                                                 Rectangle {
                                                     anchors.fill: parent
@@ -1135,12 +1145,13 @@ Window {
                                                 // ABSENT, not blank, when nothing is
                                                 // recorded (§10): every bullet written
                                                 // before the stamp existed has none,
-                                                // and so does one from a writer that
-                                                // does not emit it yet. Its height
+                                                // and so does one no writer could name
+                                                // an author for. Its height
                                                 // collapses with it, so the time is
                                                 // back on the first line and those
                                                 // bullets draw exactly as they did.
                                                 Column {
+                                                    id: gutter
                                                     anchors.right: parent.right
                                                     anchors.top: parent.top
                                                     width: 15 * win.cellW
