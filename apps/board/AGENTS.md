@@ -1790,8 +1790,10 @@ drop down for the max number of agents available."*
   copy of the number is a control that can disagree with what actually runs.
 - **Nothing is restarted and nothing is killed.** `promote()` re-reads the file
   at the top of every board-watch tick, so a bigger cap starts queued work on
-  the next one and a smaller cap simply stops starting more. The footer says
-  that in his words rather than claiming the change already happened (§10).
+  the next one and a smaller cap simply stops starting more. The **`hint` on
+  the box** says that, permanently and before he picks; it used to be a footer
+  line after the pick, which is the flash he reported — see "the footer only
+  says what nothing else on screen can", below.
 - **The range offered is `boardwork.CAP_CHOICES` (1-8), not a ceiling.**
   `boardctl.py cap` still takes any `n >= 1` — a typed selector here is always
   more forgiving than a drawn one — and a cap of his that is off the list is
@@ -2279,6 +2281,41 @@ they are correct, and an app with a real document identity would use them.
 **Never blank `Window.title` instead**: Qt substitutes the application name for
 an empty title, so the bar would read `board` — the one word the rename exists to
 keep off screen — and the taskbar and alt-tab would lose the window's name too.
+
+**...and the footer only says what nothing else on screen can.** [his,
+2026-07-30] *"when i change the number of ministers in goetia itll flash text
+indicating that on the inner bar"* — the third report of that bar flashing, and
+the first with a repro. It was not a render fault at all (the plugin's IPC-serial
+stamp was already fixed in hyprvtb 2.97, and `tools/vtb-flash-test.sh` measured
+the cold footer path clean, 20/20 shots): it was **goetia's own confirmation
+message**. `footerStr` IS `status`, so that slot is empty except for the four
+seconds a report sits in it — text appearing out of nothing and going again is
+exactly what a flash looks like, whatever wrote it.
+
+So the rule now, and it is what to test a new report against: **the footer
+carries a failure, or an outcome nothing else on screen shows** — where an order
+went, what Ctrl+Z took back, why a usage refresh he asked for could not happen.
+Two kinds of line were dropped for failing it:
+
+- **A successful pick in any of the four choosers says nothing.** The closed box
+  relabels itself from the store and the tick moves, so the change is on screen;
+  the WHEN (`the next tick honours it`) is the `PickBox`'s own `hint`,
+  permanently and *before* he picks, so the four-second version bought no
+  honesty. A failed pick still reports — that outcome has nowhere else to go,
+  and §10 is about those.
+- **A reload says nothing.** `board.md changed on disk - reloaded` fired on every
+  agent write and every five-minute sync, i.e. §6.1's own rule (the maintenance
+  mechanism must not be visible) breaking itself in the one slot he cannot look
+  away from. The rows changing is the report.
+
+Harness: **`tools/vtb-cap-probe.py`** — the PRODUCER half, and the one to extend
+for anything else this app pushes down that socket. It stands up a fake
+`hyprvtb-buttons.sock` in a scratch `$XDG_RUNTIME_DIR`, runs the real app
+offscreen against a scratch board/state tree, drives the real cap dropdown's
+`trigger()` through `QQmlExpression`, and asserts a successful change publishes
+**nothing** — no `FOOTER`, no re-`REGISTER`, no flag line. It needs no plugin,
+no compositor and no window; `tools/vtb-flash-test.sh` and
+`tools/vtb-titletext-test.sh` remain the pixel side.
 
 ### A usage meter is a BUTTON, and its tooltip is a countdown
 

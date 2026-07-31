@@ -334,14 +334,18 @@ Window {
         function onStatus(msg) { win.status = msg; }
         // The file changed underneath us — an agent, or the five-minute sync.
         // §6.1: the maintenance mechanism must not be visible, so the scroll
-        // position is put back where it was rather than jumping to the top.
+        // position is put back where it was rather than jumping to the top —
+        // and, since 2026-07-30, nothing is said about it either. It used to
+        // put `board.md changed on disk - reloaded` in the titlebar footer,
+        // which is the same rule breaking itself: every agent write and every
+        // five-minute sync flashed text onto the inner bar for something he
+        // did not do and cannot act on. The rows changing is the report.
         function onReloaded() {
             var y = scroller.contentY;
             Qt.callLater(function () {
                 scroller.contentY = Math.max(0, Math.min(y, scroller.contentHeight
                                                             - scroller.height));
             });
-            win.status = "board.md changed on disk - reloaded";
         }
     }
 
@@ -429,6 +433,15 @@ Window {
     // already the window title the plugin draws up the side of the same bar;
     // saying it twice was the redundancy §9.1 rules out, and a standing label is
     // not a report (the rule this property's own comment states).
+    //
+    // ...and since this slot is the ONLY text the inner bar ever holds, what
+    // goes in it is now scoped to match: **a failure, or an outcome nothing
+    // else on screen shows** — where an order went, what Ctrl+Z took back, why
+    // a usage refresh he asked for could not happen. Not a confirmation of a
+    // control that relabels itself (the four choosers), and not maintenance he
+    // did not ask for (a reload). Both of those appeared and left again with
+    // an empty bar on either side, which is what he reads as the bar flashing
+    // text at him ([his, 2026-07-30], `capItems` below).
     readonly property string footerStr: status
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
@@ -1790,18 +1803,28 @@ Window {
     // The model chooser's rows. A tick marks the live one rather than the row
     // being disabled — picking what is already picked is a no-op he can see the
     // result of, and a greyed row would read as "unavailable" (§10).
-    // The cap dropdown's entries. Same shape as `modelItems`, and the same
-    // honesty: the tick is the store's, and the footer says WHEN it applies
-    // rather than claiming the change already happened (§10).
+    // The cap dropdown's entries. Same shape as `modelItems`.
+    //
+    // A SUCCESSFUL PICK SAYS NOTHING. [his, 2026-07-30] *"when i change the
+    // number of ministers in goetia itll flash text indicating that on the
+    // inner bar"* — reported as the inner titlebar flashing text, and it is
+    // this: `footerStr` IS `status`, so a four-second confirmation is the only
+    // thing that slot ever holds, appearing and going again with nothing on
+    // either side of it. Nothing was clobbered and nothing was drawn wrong; the
+    // announcement should not have been there.
+    //
+    // It costs no honesty, which is why it can go. The closed box relabels
+    // itself from the store (`Agents.capLabel`) and the tick moves, so the
+    // CHANGE is on screen; and the WHEN — the half that is not — is the
+    // `PickBox`'s own `hint`, permanently, before he picks rather than for four
+    // seconds after. A FAILURE still reports: that is the one outcome nothing
+    // else on screen can show, and §10's rule is about those.
     function capItems() {
         return Agents.caps.map((c) => ({
             label: (c.current ? "* " : "  ") + c.label,
             trigger: () => {
                 if (!Agents.chooseCap(c.n))
                     win.status = "could not save that choice";
-                else
-                    win.status = "at most " + c.label
-                        + " from the next tick on - nothing running is stopped";
             }
         }));
     }
@@ -1812,24 +1835,18 @@ Window {
             trigger: () => {
                 if (!Agents.chooseModel(m.flag))
                     win.status = "could not save that choice";
-                else
-                    win.status = m.label + " orchestrates from the next prompt on";
             }
         }));
     }
 
-    // How many summoners may plan at once. Same shape and the same honesty as
-    // the two above: the tick reads the store, so the footer says when it
-    // applies rather than that it has already happened (§10).
+    // How many summoners may plan at once. Same shape and the same silence on
+    // success as the two above.
     function summonerItems() {
         return Agents.summonerCounts.map((s) => ({
             label: (s.current ? "* " : "  ") + s.label,
             trigger: () => {
                 if (!Agents.chooseSummoners(s.n))
                     win.status = "could not save that choice";
-                else
-                    win.status = "up to " + s.label
-                        + " from the next tick on - nothing running is stopped";
             }
         }));
     }
@@ -1845,9 +1862,6 @@ Window {
             trigger: () => {
                 if (!Agents.chooseMinister(m.name))
                     win.status = "could not save that choice";
-                else
-                    win.status = "ministers run on " + m.label
-                        + " from the next one dispatched on";
             }
         }));
     }
