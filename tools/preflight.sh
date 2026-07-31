@@ -66,21 +66,14 @@ if [ -e "$DEPLOYED" ] && [ -e "$SRC" ] && ! cmp -s "$DEPLOYED" "$SRC"; then
   echo "      watcher is a rebuild behind (this host's switch deploys it)."
 fi
 
-# 5. The systemd user manager's compositor identity. Hyprland imports its own
-#    HYPRLAND_INSTANCE_SIGNATURE/WAYLAND_DISPLAY into that manager-global store
-#    at every startup, so a nested test compositor claims it — and, SIGKILLed by
-#    the harnesses, never gives it back. A user unit then talks to a dead socket
-#    and exits 0, which is invisible: wal-set.service would change the wallpaper
-#    and silently not recolour anything. Warning only — it is a state-of-the-
-#    machine fault, not a fault in the tree being built, and it is absent
-#    entirely from a TTY or a non-Hyprland session (exit 3).
-ENVCHK="$HOME/.config/scripts/hypr-session-env.sh"
-if [ -x "$ENVCHK" ]; then
-  out=$("$ENVCHK" --check 2>&1); rc=$?
-  if [ "$rc" -eq 1 ]; then
-    echo "WARN: $out"
-  fi
-fi
+# 5. Residue from a test that leaked into his live session — a dead compositor
+#    signature in the systemd user manager (the manager-global store every
+#    Hyprland overwrites and a SIGKILLed nested one never gives back), a stale
+#    hypr lock directory, a nested compositor still running, a sandbox left
+#    standing. Warning only, by design: these are states of the machine, not
+#    faults in the tree, and a false failure that blocks his rebuild is worse
+#    than the bug. See AGENTS.md -> "Testing without interfering with the user".
+"$REPO/tools/leak-check.sh" || true
 
 [ "$fail" -eq 0 ] && echo "preflight OK"
 exit "$fail"
