@@ -3267,6 +3267,63 @@ def test_summon_confirmed(tmp):
     ba.CONFIRM_GRACE_S = -1.0
 
 
+def test_finished_leaves(tmp):
+    """A MINISTER THAT FINISHED LEAVES THE TRIANGLE AT ONCE. [his, 2026-07-30]
+
+    *"are ministers sometimes staying in the triangle unfocused colored until
+    the user clears their completion message?"* — they were: the card is only
+    deleted from disk by `boardagents.sweep()`, on a board-watch tick, and the
+    next thing to trigger a tick after a worker's final `note` was usually his
+    reply clearing that bullet. So the DRAWING decides now
+    (`boardwork._drawable`), off liveness it already polls.
+
+    The other half is the one that must NOT leave: a worker that stopped
+    without reporting keeps its card until the tick puts the FAILED bullet on
+    his board, because until then it is the only visible trace of the loss.
+    """
+    import boardagents as ba
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "3"
+    bw.reap()          # clear earlier fixtures' dead tasks out of work/taken
+
+    drawn = lambda: [c["id"] for c in bw.cards()]
+
+    ok = bw.dispatch("finish and go", where="apps/zzz/**")
+    bad = bw.dispatch("stop mid-sentence", where="apps/yyy/**")
+    check("(setup) both ministers are drawn while they run",
+          ok["id"] in drawn() and bad["id"] in drawn(), drawn())
+
+    bw.mark_reported(ok["id"], "recorded its result")
+    check("...and reporting alone does not remove a LIVE one",
+          ok["id"] in drawn(), drawn())
+
+    os.kill(ok["pid"], 9)
+    os.kill(bad["pid"], 9)
+    time.sleep(0.4)
+    check("the finished minister is gone the moment it exits - no tick needed",
+          ok["id"] not in drawn(), drawn())
+    check("...while the one that stopped without reporting stays",
+          bad["id"] in drawn(), drawn())
+    listed = [r["id"] for g in bw.groups() for r in g["rows"]]
+    check("...and the terminal listing agrees, applying the same filter",
+          ok["id"] not in listed and bad["id"] in listed, listed)
+    check("...but EVERYTHING THAT COUNTS still sees the finished record",
+          any(a["id"] == ok["id"] for a in ba.agents()))
+
+    done, failed, _ = bw.reap()
+    check("(setup) the reap files them apart on the same fact",
+          [r["task"] for r in done] == ["finish and go"]
+          and [r["task"] for r in failed] == ["stop mid-sentence"],
+          ([r["task"] for r in done], [r["task"] for r in failed]))
+    check("the finished one STAYS gone once the reap has moved the stamp",
+          ok["id"] not in drawn(), drawn())
+    ba.sweep()
+    check("...and the failed one leaves when the sweep drops it",
+          bad["id"] not in drawn(), drawn())
+
+
 def test_overlap(tmp):
     """`dispatch` WARNS on a --where that overlaps a live worker's — the
     mechanical half of the prompt's `run agents first` rule. Warn only: a
@@ -3456,8 +3513,12 @@ def test_real_store():
     # NEEDS YOU is deliberately NOT required to be non-empty: with the moves in
     # `boardmove.py` an answered decision leaves it, so an empty section is the
     # resting state (and the one he sees most often), not a parse regression.
+    # TODO is the same and for the same reason — a chore leaves it when it is
+    # done, and a board he has caught up with is not a parser bug. LANDED is
+    # the one that must have content: it is DERIVED from `git log`
+    # (`boardmove.landed_view()`), so an empty one means the derivation broke.
     check("...and the sections that have content parsed",
-          bool(doc["todo"]) and bool(doc["landed"]),
+          bool(doc["landed"]),
           (len(doc["needs"]), len(doc["todo"]), len(doc["landed"])))
     check("every decision has a title and an `if unanswered` line",
           all(d["title"] and d["ifUnanswered"] for d in doc["needs"]),
@@ -6314,6 +6375,7 @@ def main():
         test_work(os.path.join(tmp, "work"))
         test_overlap(os.path.join(tmp, "work"))
         test_dead_worker_notes(os.path.join(tmp, "work"))
+        test_finished_leaves(os.path.join(tmp, "work"))
         os.makedirs(os.path.join(tmp, "conf"))
         test_summon_confirmed(os.path.join(tmp, "conf"))
         os.makedirs(os.path.join(tmp, "use"))

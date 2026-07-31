@@ -1972,8 +1972,28 @@ def _drawable(rows):
     returning every record, which is what keeps the concurrency cap, `reap()`,
     `sweep()` and the inbox seeing a worker that is starting up.
     `boardagents.CONFIRM_GRACE_S` carries the rest of the argument.
+
+    **...and a minister that FINISHED leaves at once, rather than when he next
+    touches the board.** [his, 2026-07-30] *"are ministers sometimes staying in
+    the triangle unfocused colored until the user clears their completion
+    message?"* — they were, and the "sometimes" was a race. A card is only
+    deleted from disk by `boardagents.sweep()`, which runs on a board-watch
+    tick; the tick that a worker's own final `note` triggers usually runs while
+    that worker is still alive, and nothing writes the board again until HE
+    replies to the bullet — so clearing the message looked like what removed
+    the card, and the 5-minute timer was the only other way out. Liveness is
+    polled here every second, so the drawing already knows: a row that is
+    `exited` AND `finished` is drawn by nobody, and the reap that follows is
+    bookkeeping he does not have to watch.
+
+    A worker that stopped WITHOUT reporting keeps its card, deliberately. Until
+    the next tick files it as failed and puts the bullet on his board, that
+    dimmed row saying `exited without finishing` is the only visible trace that
+    anything was lost.
     """
-    return [a for a in rows if a.get("confirmed", True)]
+    return [a for a in rows
+            if a.get("confirmed", True)
+            and not (a.get("state") == "exited" and a.get("finished"))]
 
 
 def cards(agents=None, pend=None):
