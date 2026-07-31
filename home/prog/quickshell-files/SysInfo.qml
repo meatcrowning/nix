@@ -143,6 +143,13 @@ Singleton {
     // adjustBrightness() updates this optimistically so scrolling feels
     // instant; the periodic poll here just corrects for drift (e.g. the
     // monitor's own physical buttons).
+    //
+    // PERSISTED to SettingsStore.d.brightnessHw on every adjustment and
+    // re-applied once per session (_restoreBrightness below), because neither
+    // backend is a store we control: book's backlight is only written back by
+    // systemd-backlight on a clean shutdown, and top's level is whatever the
+    // monitor kept in its own NVRAM. settings.json is machine-local, so each
+    // host remembers its own level.
     property int    brightness: -1      // 0-100, or -1 until first poll
     // Which brightness backend to drive. "auto" uses whatever was detected at
     // startup (_hasBacklight); the Settings "brightness backend" override forces
@@ -494,6 +501,9 @@ Singleton {
         if (!s) return;
         let d;
         try { d = JSON.parse(s); } catch (e) { return; }
+        // This is a reload, not a fresh session: the live level came with us,
+        // so there is nothing to put back.
+        _restorePending = false;
         rxSpeed = d.rx; txSpeed = d.tx; diskFreeKb = d.dfk; diskUsePct = d.dup;
         volume = d.vol; muted = d.mut; cpuUsage = d.cu; cpuTemp = d.ct;
         gpuUsage = d.gu; gpuTemp = d.gt; batteryPct = d.bp; batteryCharging = d.bc;
@@ -768,6 +778,10 @@ Singleton {
         if (step < 0 && brightness === 0) { adjustGamma(step); return; }
         if (step > 0 && gamma < 100)      { adjustGamma(step); return; }
         brightness = Math.max(0, Math.min(100, brightness + step));
+        // Remember it for the next session. save() is debounced (300ms), so a
+        // scroll down the whole range is one disk write, like the DDC one.
+        SettingsStore.d.brightnessHw = brightness;
+        SettingsStore.save();
         Osd.trigger("brightness");
         // Leading-edge fire: a single tick after being idle writes
         // immediately (0ms artificial delay — ddcutil itself is still
@@ -850,16 +864,47 @@ Singleton {
         command: ["sh", "-c", "ls /sys/class/backlight/*/brightness 2>/dev/null | head -n1"]
         running: true
         stdout: StdioCollector {
-            onStreamFinished: root._hasBacklight = text.trim() !== ""
+            onStreamFinished: {
+                root._hasBacklight = text.trim() !== "";
+                root._backlightProbed = true;
+            }
         }
+    }
+
+    // Has the probe above answered? The poll below waits for it: `useBacklight`
+    // is false until it has, so a read issued at component completion ran
+    // `ddcutil getvcp` on the LAPTOP — an external-monitor command on a machine
+    // with no external monitor, whose empty output simply left `brightness` at
+    // -1 for the first 30s.
+    property bool _backlightProbed: false
+    // Is the session-start restore still owed? Cleared by restoreState() too:
+    // a panel RELOAD carries the live value across and must not re-drive the
+    // hardware (on top that is a 1.5s DDC write per reload).
+    property bool _restorePending: true
+
+    // Put the remembered level back, once, before the first read — rather than
+    // after one, so nothing can read the old hardware value and clobber it.
+    // Returns true if it took the tick.
+    function _restoreBrightness() {
+        _restorePending = false;
+        // A fresh tree evaluates its bindings against the SHIPPED DEFAULTS;
+        // settings.json lands ~25ms later, long after this. Imperative code
+        // reading the store must pull it in first — see SettingsStore.loadNow().
+        SettingsStore.loadNow();
+        const want = SettingsStore.d.brightnessHw;
+        if (want < 0 || want > 100) return false;   // never set here: leave it be
+        brightness = want;
+        fireBrightnessWrite();
+        return true;
     }
 
     Timer {
         interval: 30000
-        running: true
+        running: root._backlightProbed
         repeat: true
         triggeredOnStart: true
         onTriggered: {
+            if (root._restorePending && root._restoreBrightness()) return;
             if (ddcBusy) return;
             ddcBusy = true;
             ddcutilProc.running = true;
