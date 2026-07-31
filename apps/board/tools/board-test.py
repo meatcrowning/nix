@@ -3449,14 +3449,14 @@ def test_window(app, tmp):
     foots = [m[1] for m in sent if m[0] == "footer"]
     check("...and the footer never says the program's own name",
           not any("goetia" in f for f in foots), foots)
-    # ...and neither does the stacked title beside it. [his, 2026-07-29] *"really
+    # ...and it does NOT suppress the stacked title. [his, 2026-07-29] *"really
     # for now there should be no title text in the left side inner bar of
-    # goetia"* — the window declares `TITLETEXT 0` and the plugin draws nothing
-    # there (hyprvtb >= 2.95). It is NOT done by blanking `Window.title`: Qt
-    # substitutes the application name, so the bar would read `board` and the
-    # taskbar would lose the window's only name.
-    check("the window tells the bar to draw no title at all",
-          ("titleText", False) in sent, sent[:6])
+    # goetia"* was answered with `TITLETEXT 0`, which is the wrong lever: the
+    # stacked title is drawn in the OUTER column and the inner bar he meant only
+    # ever holds the buttons and the footer, so the flag erased the title from
+    # the RIGHT OUTER bar instead. Dropped 2026-07-30.
+    check("the window does NOT suppress the stacked title it never drew",
+          ("titleText", False) not in sent, sent[:6])
     check("...while keeping the window title, which is the only name it has",
           win.title() == "goetia", win.title())
 
