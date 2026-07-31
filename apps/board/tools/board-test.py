@@ -331,7 +331,7 @@ def test_moves(tmp):
         common = [ln for ln in la if ln in lb]
         return len(la) - len(common), len(lb) - len([ln for ln in lb if ln in la])
 
-    # ---- NEEDS YOU -> IN FLIGHT ----
+    # ---- NEEDS YOU -> the stash ----
     src = reset()
     doc = B.parse(src)
     B.write(path, "".join(B.toggle_option(doc["lines"], doc["needs"][0], 0, True)))
@@ -344,18 +344,11 @@ def test_moves(tmp):
     check("starting a decision takes it out of NEEDS YOU",
           len(doc2["needs"]) == 1 and doc2["needs"][0]["num"] == "2",
           [d["num"] for d in doc2["needs"]])
-    check("...and puts a row in IN FLIGHT carrying his answer",
-          any(r["what"] == "First question?" and "the first way" in r["notes"]
-              for r in doc2["flight"]),
-          [(r["what"], r["notes"]) for r in doc2["flight"]])
-    check("...in the section's OWN table, not the one below it",
-          doc2["flight"][2]["what"] == "First question?",
-          [r["what"] for r in doc2["flight"]])
-    # Every line that was not part of the decision comes out in the same order,
-    # untouched: the move is a relocation plus one inserted row, not a rewrite.
-    left = [ln for ln in out.splitlines(True) if ln != rec["row"]]
-    check("...and every other line of the file is untouched, in order",
-          left == kept, [ln for ln in kept if ln not in left][:3])
+    check("...and writes NOTHING in its place - no row, nowhere",
+          out.splitlines(True) == kept,
+          lines_differing("".join(kept), out))
+    check("...and his answer is on the stash, for the hand-back to carry",
+          "the first way" in (rec.get("notes") or ""), rec.get("notes"))
 
     # ---- ...and back again, byte for byte ----
     bm.give_back("1", path=path)
@@ -383,17 +376,14 @@ def test_moves(tmp):
         check("an UNANSWERED decision is refused", True)
     check("...and the refusal wrote nothing", B.read(path) == FIXTURE)
 
-    # ---- IN FLIGHT -> LANDED ----
+    # ---- the stash -> LANDED ----
     src = reset()
     d = B.parse(src)
     B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
     bm.start("1", path=path)
     bm.land("1", "abc1234", what="thing: did the first way", path=path)
     doc3 = B.parse(B.read(path))
-    check("landing removes the IN FLIGHT row",
-          not any(r["what"] == "First question?" for r in doc3["flight"]),
-          [r["what"] for r in doc3["flight"]])
-    check("...and appends it under today's date with the commit",
+    check("landing appends it under today's date with the commit",
           any(r["commit"] == "abc1234" and r["what"] == "thing: did the first way"
               for g in doc3["landed"] for r in g["rows"]),
           [(g["date"], [r["commit"] for r in g["rows"]]) for g in doc3["landed"]])
@@ -499,50 +489,52 @@ def test_moves(tmp):
           and len(new["summary"].split()) <= B.SUMMARY_MAX_WORDS,
           (new["tag"], len(new["summary"].split()), new["summary"]))
 
-    # ---- THE ROWS NOTHING OWNS: the section has to be able to shrink ----
-    # `reconcile` only ever sees this host's stashes, so a row written by hand,
+    # ---- AN OLD `## IN FLIGHT` SECTION IS READ AND NEVER WRITTEN ----
+    # The section is gone [2026-07-30]. `parse` still reads one, because
+    # `board.md` syncs to the other machine and a store this parser could not
+    # read is one neither program could write — but nothing appends to it, and
+    # a store that still carries one comes out of a whole start/land/back cycle
+    # byte-identical in that section. That is what makes it unable to silt up:
+    # `reconcile` only ever saw this host's stashes, so a row written by hand,
     # or by the other machine, or before the stash existed, had no exit at all
     # and IN FLIGHT could only grow. His words: it "doesnt update at all".
     src = reset()
-    rows = [r["what"] for r in bm.unowned(path=path)]
-    check("a row no stash on this host owns is reported",
-          rows == ["A thing being built", "Another thing"], rows)
+    old = B.parse(src)
+    before = [r["what"] for r in old["flight"]]
+    check("the fixture still has an IN FLIGHT section, and it parses",
+          before == ["A thing being built", "Another thing"], before)
+    B.write(path, "".join(B.set_answer(B.parse(src)["lines"],
+                                       B.parse(src)["needs"][0], "do it")))
+    src = B.read(path)
+    flight_lines = [ln for ln in src.splitlines(True) if ln.startswith("| A thing")
+                    or ln.startswith("| Another thing")]
+    bm.start("1", path=path)
+    bm.land("1", "abc1234", what="thing: did the first way", path=path)
+    after = B.read(path)
+    check("a start and a land add NOTHING to it and take nothing out of it",
+          [r["what"] for r in B.parse(after)["flight"]] == before,
+          [r["what"] for r in B.parse(after)["flight"]])
+    check("...and its rows are the same bytes, in the same order",
+          [ln for ln in after.splitlines(True)
+           if ln.startswith("| A thing") or ln.startswith("| Another thing")]
+          == flight_lines)
+    check("...and no writer for it is left in the tree",
+          not hasattr(B, "add_flight_row") and not hasattr(B, "flight_row")
+          and not hasattr(bm, "stall") and not hasattr(bm, "unowned")
+          and not hasattr(bm, "find_flight"),
+          [n for n in ("add_flight_row", "flight_row") if hasattr(B, n)]
+          + [n for n in ("stall", "unowned", "find_flight") if hasattr(bm, n)])
 
-    got = bm.stall("A thing being built", path=path)
-    doc6 = B.parse(B.read(path))
-    check("stall takes the row out of IN FLIGHT",
-          [r["what"] for r in doc6["flight"]] == ["Another thing"],
-          [r["what"] for r in doc6["flight"]])
-    check("...and it is MOVED, not dropped: the cells become one bullet",
-          len(doc6["todo"]) == 2
-          and "A thing being built" in doc6["todo"][-1]["text"]
-          and "apps/thing/**" in doc6["todo"][-1]["text"]
-          and "with a note" in doc6["todo"][-1]["text"],
-          [t["text"] for t in doc6["todo"]])
-    check("...one row out, one bullet in, and nothing else touched",
-          # net +2: one table row leaves, and the bullet that replaces it costs
-          # three lines — its summary line, the indented continuation the
-          # dozen-word first-line cap pushes the story onto, and the `placed`
-          # stamp under them.
-          len(B.read(path).splitlines()) == len(src.splitlines()) + 2,
-          lines_differing(src, B.read(path)))
-    check("...and it says which row it moved", got["what"] == "A thing being built")
-
-    # a row this host DOES own keeps its real exit: `back` restores his question
+    # `land` has no row to take a sentence from, so it insists on one
     src = reset()
     d = B.parse(src)
     B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
-    bm.start("1", path=path)
-    check("a stashed decision is NOT reported as unowned",
-          "First question?" not in [r["what"] for r in bm.unowned(path=path)],
-          [r["what"] for r in bm.unowned(path=path)])
     before = B.read(path)
     try:
-        bm.stall("First question?", path=path)
-        check("stall refuses a row whose decision is recoverable", False)
+        bm.land("1", "abc1234", path=path)
+        check("land refuses a commit with no --what", False)
     except bm.BoardError as e:
-        check("stall refuses a row whose decision is recoverable", "back" in str(e),
-              str(e))
+        check("land refuses a commit with no --what", "what" in str(e), str(e))
     check("...and the refusal wrote nothing", B.read(path) == before)
 
     # ---- the write is guarded against a racing writer ----
@@ -568,7 +560,7 @@ def test_moves(tmp):
     p = subprocess.run([sys.executable, cli, "--board", path, "list"],
                        capture_output=True, text=True)
     check("boardctl list runs against a fixture",
-          p.returncode == 0 and "IN FLIGHT" in p.stdout, p.stderr.strip()[:200])
+          p.returncode == 0 and "NEEDS YOU" in p.stdout, p.stderr.strip()[:200])
     p = subprocess.run([sys.executable, cli, "--board", path, "start", "nope"],
                        capture_output=True, text=True)
     check("boardctl refuses a selector that matches nothing, and says so",
@@ -619,11 +611,11 @@ def test_landed(tmp):
                   date="2026-07-28", path=path)
     doc = B.parse(B.read(path))
     row = [r for g in doc["landed"] for r in g["rows"] if r["commit"] == "0badc0d"]
-    check("a worker with no IN FLIGHT row can still record its commit",
+    check("a worker with no selector at all can still record its commit",
           len(row) == 1 and row[0]["what"] == "board: land with no row",
           [(g["date"], [r["commit"] for r in g["rows"]]) for g in doc["landed"]])
-    check("...and nothing was moved out of IN FLIGHT for it",
-          got == {} and len(doc["flight"]) == len(B.parse(before)["flight"]))
+    check("...and it closed nothing out, there being no stash to close",
+          got == {}, got)
     check("...carrying the time, 12-hour, on its own row",
           row and row[0]["when"] == "3:42 pm", row and row[0]["when"])
 
@@ -666,13 +658,12 @@ def test_landed(tmp):
                         "--commit", "feedbee", "--what", "board: via the CLI"],
                        capture_output=True, text=True)
     check("boardctl land takes no selector",
-          p.returncode == 0 and "nothing was moved" in p.stdout,
+          p.returncode == 0 and "board: via the CLI" in p.stdout,
           (p.stdout.strip()[:120], p.stderr.strip()[:120]))
     p = subprocess.run([sys.executable, cli, "--board", path, "land", "nothing-here",
                         "--commit", "feedbee"], capture_output=True, text=True)
-    check("...but a selector that matches nothing and no --what is refused",
-          p.returncode == 1 and "no line to record" in p.stderr,
-          p.stderr.strip()[:160])
+    check("...but a commit with no --what is refused by the parser itself",
+          p.returncode != 0 and "--what" in p.stderr, p.stderr.strip()[:160])
 
 
 # ------------------- 1a1a. LANDED IS READ FROM THE COMMIT LOG, every time
@@ -902,16 +893,14 @@ def test_landed_upgrade(tmp):
     check("...and saying it a second time is a no-op, not a refusal",
           B.read(path) == after)
 
-    # ---- with an IN FLIGHT row to retire, it is still ONE edit ----
-    bm.land("A thing being built", "def5678", what="board: upgraded again",
-            path=path)
+    # ---- a selector that matches no stash is not an error ----
+    bm.land("nothing this host ever started", "def5678",
+            what="board: upgraded again", path=path)
     doc = B.parse(B.read(path))
-    check("a selector still retires its IN FLIGHT row while upgrading the row",
-          [r["what"] for r in doc["flight"]] == ["Another thing"]
-          and any(r["what"] == "board: upgraded again"
-                  for g in doc["landed"] for r in g["rows"]),
-          ([r["what"] for r in doc["flight"]],
-           [r["what"] for g in doc["landed"] for r in g["rows"]]))
+    check("a selector matching no stash still records the commit",
+          any(r["what"] == "board: upgraded again"
+              for g in doc["landed"] for r in g["rows"]),
+          [r["what"] for g in doc["landed"] for r in g["rows"]])
 
 
 # ------------------- 1b1b. everything in NEEDS YOU says WHEN it was put there
@@ -1512,13 +1501,6 @@ def test_todo_tags(tmp):
           block[0].strip())
 
     # ---- every MECHANICAL writer emits one ----
-    open(path, "w").write(FIXTURE)
-    got = bm.stall("A thing being built", path=path)
-    check("stall's bullet carries a tag",
-          B.parse(B.read(path))["todo"][-1]["text"].startswith("INFORMATION: "),
-          [t["text"][:40] for t in B.parse(B.read(path))["todo"]])
-    check("...and it is the row it says it is", got["what"] == "A thing being built")
-
     open(path, "w").write(FIXTURE)
     d = B.parse(B.read(path))
     B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "do it")))
@@ -3462,8 +3444,8 @@ def test_real_store():
     # `boardmove.py` an answered decision leaves it, so an empty section is the
     # resting state (and the one he sees most often), not a parse regression.
     check("...and the sections that have content parsed",
-          bool(doc["flight"]) and bool(doc["landed"]),
-          (len(doc["needs"]), len(doc["todo"]), len(doc["flight"]), len(doc["landed"])))
+          bool(doc["todo"]) and bool(doc["landed"]),
+          (len(doc["needs"]), len(doc["todo"]), len(doc["landed"])))
     check("every decision has a title and an `if unanswered` line",
           all(d["title"] and d["ifUnanswered"] for d in doc["needs"]),
           [(d["key"], bool(d["ifUnanswered"])) for d in doc["needs"]])
@@ -3496,8 +3478,6 @@ def test_real_store():
         drawn += [d["title"], d["ifUnanswered"]] + [o["label"] for o in d["options"]]
         drawn += [b["text"] for b in d["body"]]
     drawn += [t["text"] for t in doc["todo"]]
-    for f in doc["flight"]:
-        drawn += [f["what"], f["where"], f["notes"]]
     for g in doc["landed"]:
         drawn += [g["date"]] + [r["commit"] for r in g["rows"]] \
                  + [r["what"] for r in g["rows"]] + [p["text"] for p in g["prose"]]
@@ -3627,14 +3607,13 @@ def test_real_window(app):
     # Not "there is a decision": there may legitimately be none (`boardmove.py`
     # takes answered ones out). What must hold is that his real document draws.
     check("the real store draws",
-          len(prop(win, "flight")) > 0 and len(prop(win, "landed")) > 0,
-          (len(prop(win, "needs")), len(prop(win, "flight")),
-           len(prop(win, "landed"))))
+          len(prop(win, "landed")) > 0,
+          (len(prop(win, "needs")), len(prop(win, "landed"))))
     shot(win, "00-real-store")
     # ...and with the two live sections folded away, which is how LANDED gets
     # onto one screen — the collapse is persisted state, so this is a real
     # state, not a harness trick.
-    win.setProperty("collapsed", {"needs": True, "flight": True})
+    win.setProperty("collapsed", {"needs": True, "landed": True})
     spin(300)
     shot(win, "00b-real-store-collapsed")
     win.setProperty("collapsed", {})
@@ -3653,10 +3632,9 @@ def test_window(app, tmp):
     check("the window opened", win.isVisible() is not False)
     check("it drew a default size that fits beside the panel",
           win.width() == 880 and win.height() == 880, (win.width(), win.height()))
-    check("all three sections parsed into the view",
-          len(prop(win, "needs")) == 2 and len(prop(win, "flight")) == 2
-          and len(prop(win, "landed")) == 1,
-          (len(prop(win, "needs")), len(prop(win, "flight")), len(prop(win, "landed"))))
+    check("the sections parsed into the view",
+          len(prop(win, "needs")) == 2 and len(prop(win, "landed")) == 1,
+          (len(prop(win, "needs")), len(prop(win, "landed"))))
     check("the to-do list is drawn with the things that need him",
           len(prop(win, "todo")) == 1, prop(win, "todo"))
 
@@ -4229,23 +4207,18 @@ def test_window(app, tmp):
         scroller.setProperty("contentY", 120)
         spin(150)
     win.setProperty("drafts", {"second-question": "half a sentence he is typing"})
-    before_needs, before_flight = len(prop(win, "needs")), len(prop(win, "flight"))
+    before_needs = len(prop(win, "needs"))
 
     B.write(path, "".join(B.set_answer(B.parse(B.read(path))["lines"],
                                        B.parse(B.read(path))["needs"][1], "go on")))
     spin(400)
     rec = bm.start("2", where="apps/thing", path=path)
     spin(500)
-    check("an item moved to IN FLIGHT leaves NEEDS YOU on screen, no relaunch",
+    check("an item taken off NEEDS YOU leaves the screen, no relaunch",
           len(prop(win, "needs")) == before_needs - 1,
           (before_needs, len(prop(win, "needs"))))
-    check("...and arrives in IN FLIGHT in the same reload",
-          len(prop(win, "flight")) == before_flight + 1
-          and any("Second question?" == r["what"] for r in prop(win, "flight")),
-          [r["what"] for r in prop(win, "flight")])
-    check("...carrying his answer back to him, and no time or count",
-          any(r["notes"] == "you said: go on" for r in prop(win, "flight")),
-          [r["notes"] for r in prop(win, "flight")])
+    check("...and his answer went to the stash, where the hand-back reads it",
+          "go on" in (rec.get("notes") or ""), rec.get("notes"))
     if scroller is not None:
         check("...without moving his place in the document",
               abs(scroller.property("contentY") - 120) < 1,
@@ -4262,10 +4235,9 @@ def test_window(app, tmp):
     bm.land("Second question?", "aa11bb2", what="thing: went on", date="2026-09-09",
             when="3:42 pm", path=path)
     spin(500)
-    check("landing redraws IN FLIGHT and LANDED together",
-          len(prop(win, "flight")) == before_flight
-          and len(prop(win, "landed")) == before_landed + 1,
-          (len(prop(win, "flight")), len(prop(win, "landed"))))
+    check("landing redraws LANDED without a relaunch",
+          len(prop(win, "landed")) == before_landed + 1,
+          len(prop(win, "landed")))
     # ...and the time reaches the row, while the rows that never had one carry
     # an empty string rather than an invented time or an undefined.
     groups = prop(win, "landed")
@@ -4299,9 +4271,8 @@ def test_window(app, tmp):
     spin(500)
     check("NEEDS YOU emptying completely redraws to the empty state",
           len(prop(win, "needs")) == 0, len(prop(win, "needs")))
-    check("...and the other two sections are still there",
-          len(prop(win, "flight")) > 0 and len(prop(win, "landed")) > 0,
-          (len(prop(win, "flight")), len(prop(win, "landed"))))
+    check("...and LANDED is still there",
+          len(prop(win, "landed")) > 0, len(prop(win, "landed")))
 
     # ---- the agents section: the machine, drawn beside the store ----
     # It is not part of board.md, so it is checked through the same window but
@@ -5002,7 +4973,7 @@ def test_window(app, tmp):
 
     # ...with the store's own sections folded away, so the shot is of THIS
     # section rather than of whatever happens to be above it.
-    win.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
+    win.setProperty("collapsed", {"needs": True, "landed": True})
     spin(300)
     shot(win, "06-agents")
     win.setProperty("collapsed", {})
@@ -5029,7 +5000,7 @@ def test_window(app, tmp):
     check("an empty board has nothing needing him",
           len(prop(win2, "needs")) == 0 and len(prop(win2, "todo")) == 0)
     check("...and still shows what is moving and what landed",
-          len(prop(win2, "flight")) == 1 and len(prop(win2, "landed")) == 1)
+          len(prop(win2, "landed")) == 1)
 
     # ONE SENTENCE AND NO OTHER. [his, 2026-07-29] *"decisions brought to you
     # from Solomon."* is the whole of the empty section — the second placeholder
@@ -5119,7 +5090,7 @@ def test_window(app, tmp):
               [s for s in shown4 if "board-watch" in s])
         keep2[5]._armed, keep2[5]._watcher = True, "board-watch is armed - x"
         keep2[5].changed.emit()
-        win2.setProperty("collapsed", {"needs": True, "flight": True, "landed": True})
+        win2.setProperty("collapsed", {"needs": True, "landed": True})
         spin(300)
         shot(win2, "03b-agents-empty")
         win2.setProperty("collapsed", {})

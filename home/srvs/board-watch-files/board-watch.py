@@ -23,19 +23,21 @@ WHAT IT WILL AND WILL NOT DO — his two decisions, and they are settled:
   * It fires only while he is AT the machine. Away, asleep or locked, the answer
     is QUEUED, not dropped — see gate() and the "no state update" trick below.
 
-AND IT MOVES THE ITEM. Answering used to leave the decision sitting in NEEDS YOU
-for the whole run, so the board went on asking him for something he had already
-given. Now the decision is relocated into IN FLIGHT — his answer on the row, its
-raw lines stashed — as the agent is spawned, and one of three things brings it
-back out: the agent lands it (`boardctl land`, which the prompt below tells it
-to use), the agent fails and `give_back()` puts the decision back byte-for-byte
-with a bullet saying so, or this process is killed outright and the NEXT tick's
-reconcile() sees a dead owner pid and does the same. An item cannot sit in IN
-FLIGHT with nothing working on it for longer than one timer interval. All of
-that mechanism is `apps/board/boardmove.py`; read its docstring.
+AND IT TAKES THE ITEM OFF HIM. Answering used to leave the decision sitting in
+NEEDS YOU for the whole run, so the board went on asking him for something he
+had already given. Now the decision is lifted OUT of NEEDS YOU — raw lines
+stashed, nothing written in its place — as the agent is spawned, and one of
+three things brings it back: the agent lands it (`boardctl land`, which the
+prompt below tells it to use), the agent fails and `give_back()` puts the
+decision back byte-for-byte with a bullet saying so, or this process is killed
+outright and the NEXT tick's reconcile() sees a dead owner pid and does the
+same. A decision cannot be away from the board with nothing working on it for
+longer than one timer interval. All of that mechanism is
+`apps/board/boardmove.py`; read its docstring. (It wrote an `## IN FLIGHT` row
+as well until 2026-07-30; the section is gone, the stash is not.)
 
 Consequence worth knowing: an item that has been moved out of NEEDS YOU is no
-longer fingerprinted, so **moving an item into IN FLIGHT by hand suppresses the
+longer fingerprinted, so **taking an item off NEEDS YOU by hand suppresses the
 auto-spawn for it**. That is correct — work is already underway — but it means
 whoever moves it owns doing the work.
 
@@ -85,7 +87,7 @@ THE THREE HAZARDS, and how each is defended:
      fingerprint only the ANSWER-BEARING state of each decision (which options
      are ticked, plus his free text) and fire only when a decision that was
      already known becomes newly answered. An item moving to LANDED, a reworded
-     paragraph, a new question, a new IN FLIGHT row: no new answer, no fire.
+     paragraph, a new question, a decision taken off the list: no new answer, no fire.
   2. THE SYNC ALSO WRITES. nix-docs-sync pulls the other machine's copy every
      five minutes with no human in the loop. Same filter handles the rewordings
      and the moved rows — but an ANSWER that arrives that way is a special case,
@@ -445,7 +447,7 @@ def load_state():
     It used to be inferred — `first_run = not state["answers"]` — which is the
     same thing only for as long as NEEDS YOU is never empty. An empty NEEDS YOU
     is now the RESTING state (`apps/board/AGENTS.md`), and on 2026-07-28 it
-    became the actual one: everything moved to IN FLIGHT/LANDED, `answers` saved
+    became the actual one: everything moved off the list or into LANDED, saved
     as `{}`, and from then on every single run decided it was the first. 3,151 of
     them logged `first run: recorded 0 decisions, fired nothing` in a few
     minutes, each returning before the queue was drained and each re-arming the
@@ -599,10 +601,9 @@ bulleted line in the elaboration); the rest is on you. Several tagged strings \
 in one call, or several unindented lines, land as several bullets, each \
 clearable on its own.
 
-   `land` when the work is complete: it removes the IN FLIGHT row and appends \
-`| commit | what |` under today's date in LANDED. `note` when it is not: the \
-row stays in flight and he gets a bullet in WAITING ON YOU TO DO. Run \
-`boardctl.py --help` for the rest.
+   `land` when the work is complete: it appends `| commit | what | when |` \
+under today's date in LANDED. `note` when it is not, and he gets a bullet in \
+WAITING ON YOU TO DO. Run `boardctl.py --help` for the rest.
 
    **Do not edit `docs/board.md` in an editor.** It is a store three programs \
 parse and write concurrently — the app he may have open right now, the \
@@ -1042,7 +1043,7 @@ def tick():
         log("could not retire finished decisions: %s" % e)
 
     # NOTHING STAYS STRANDED. If a previous run was killed outright — OOM,
-    # reboot, systemd's TimeoutStartSec — its decision is sitting in IN FLIGHT
+    # reboot, systemd's TimeoutStartSec — its decision is off the board, stashed
     # with nothing working on it. Hand back every item whose owning process is
     # gone, before deciding what to fire on. Worst case is one timer interval.
     try:
@@ -1268,10 +1269,10 @@ def tick():
         rec = bm.start(item["key"], where="board-watch", pid=os.getpid(),
                        path=BOARD, session=session)
         moved = True
-        log("moved decision %s into IN FLIGHT" % (item["num"] or "?"))
+        log("took decision %s off NEEDS YOU" % (item["num"] or "?"))
     except (bm.BoardError, OSError) as e:
         # Bookkeeping must never cost him the work. Spawn anyway and say so.
-        log("could not move decision %s into IN FLIGHT (%s) - working it anyway"
+        log("could not take decision %s off NEEDS YOU (%s) - working it anyway"
             % (item["num"] or "?", e))
 
     # ...AND THE STASH FOLLOWS THE AGENT FROM HERE ON, not this process. A
@@ -1296,14 +1297,14 @@ def tick():
         log("decision %s finished in %dm%02ds" % (item["num"] or "?",
                                                   secs // 60, secs % 60))
         # It worked: whatever the agent did with the row (landed it, or left it
-        # in flight because a rebuild is pending), the item is not stranded and
+        # away because a rebuild is pending), the item is not stranded and
         # must not be yanked back into NEEDS YOU by the next reconcile().
         bm.forget(item["key"])
         return 0
 
     log("decision %s FAILED %s after %dm%02ds" % (item["num"] or "?", how,
                                                   secs // 60, secs % 60))
-    # HAND IT BACK. An item left in IN FLIGHT with nothing working on it reads
+    # HAND IT BACK. A decision off the board with nothing working on it reads
     # as handled, which is worse than it still being open — so the decision goes
     # back where it was, byte for byte, and the bullet says what happened. One
     # edit, so the row is never gone while the decision is not yet back.

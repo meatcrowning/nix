@@ -1,6 +1,6 @@
 import QtQuick
 
-// A section band: `needs you`, `in flight`, `landed`.
+// A section band: `needs you`, `the triangle`, `landed`.
 //
 // A heading here is told apart by a RULE and by spacing, never by size or
 // weight — reader's reading of docs/DESIGN.md §2.2 (the font ships Regular only
