@@ -151,13 +151,16 @@ Some prose about the first question.
 
 fails = []
 
-#: A bullet's "placed" stamp. Writing ANY bullet into a section stamps the
-#: bullets already there with the time they were placed (`boardparse`, so the
-#: board can draw how long something has been waiting) — so a fixture nobody
-#: touched legitimately gains a line, and the three "nothing else in the file
-#: moved" checks below read that as the watcher rewriting his board. It is not
-#: what any of them is about, so it comes off both sides.
-PLACED = re.compile(r"^\s*<!--\s*placed:")
+#: A bullet's OWN metadata comments. Writing ANY bullet into a section stamps
+#: the bullets already there with the time they were placed (`boardparse`, so
+#: the board can draw how long something has been waiting), and since
+#: 2026-07-30 a bullet also carries `<!-- by: -->`, the agent that put it there
+#: — so a fixture nobody touched legitimately gains a line, and the three
+#: "nothing else in the file moved" checks below read that as the watcher
+#: rewriting his board. Neither is what any of them is about, so both come off
+#: both sides. (`by:` was missed when attribution landed, and all three checks
+#: failed for a day with nothing wrong in the watcher.)
+PLACED = re.compile(r"^\s*<!--\s*(placed|by):")
 
 
 def unmoved(after, before, *drop):
