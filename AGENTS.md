@@ -162,7 +162,15 @@ live session is a bug in the test, not the price of testing.
 His, and not yours to borrow even for a second:
 
 - **Keyboard and pointer focus** — no focusing a window, no warping the cursor,
-  no synthetic clicks or key events.
+  no synthetic clicks or key events. **And grepping for a cursor dispatcher is
+  not how you check that**: the compositor moves his pointer on its own, for
+  things that do not look like pointer calls at all. Removing an output
+  (`hyprctl output remove`, i.e. every `tools/sandbox.sh stop`) snaps the cursor
+  to the exact centre of the surviving monitor, and `hl.dsp.focus({monitor=…})`
+  warps it to the focused window's middle — **neither obeys `cursor:no_warps`**.
+  That was "the mouse still gets stolen / randomly moved to the center of the
+  screen", it survived an audit that grepped for `movecursor`, and the fix is
+  `sg_pointer_pin` (below), which puts the pointer back where it read it.
 - **The clipboard and the primary selection.**
 - **His active window and workspace.** In particular, never script hyprvtb's Lua
   actions (`rollup`, `minimize_active`, …) to probe behaviour: `hl.dsp.focuswindow`
@@ -198,7 +206,18 @@ after starting a nested compositor), `sg_require_offscreen`,
 `sg_require_live_session` (for a harness that deliberately uses the live
 compositor, so a stale signature aims it at nothing else), and
 `sg_seat_snapshot` / `sg_seat_assert` to notice if a run took his focus or moved
-his pointer. Every function is read-only against his session.
+his pointer, and `sg_pointer_pin CMD…` — the **only** sanctioned pointer warp,
+for wrapping a call whose compositor-side side effect is a cursor snap. It
+restores the position it read a moment before and cannot be aimed anywhere else.
+Everything else here is read-only against his session.
+
+The three nested harnesses (`home/prog/hyprvtb/tools/{nested-smoke,kinetic-test,hotswap-test}.sh`)
+do **not** source this file and should stay that way: they are inside the
+plugin's `src = ./.`, so editing them forces a plugin rebuild, a `main.cpp`
+version bump and a live hot-swap. Their own `hc()` refusal is strictly stronger
+anyway — it identifies the nested instance POSITIVELY, by its per-run config
+path in `/proc/<pid>/cmdline`, so the signature it aims at can never be his, and
+it re-checks on every single call rather than once.
 
 **Placement is verified, not assumed.** `tools/sandbox.sh exec` checks after
 every launch that the window actually landed on the headless output; one that
@@ -209,7 +228,9 @@ a dead compositor signature in the user manager, a stale `$XDG_RUNTIME_DIR/hypr/
 lock whose PID is gone, a second Hyprland still running, a sandbox left standing,
 **a test window (sandbox-tagged or probe-titled) mapped on a monitor he can see**,
 and **his seat left where a harness put it** — focus on a test window or on an
-off-screen monitor, or the pointer parked inside a `HEADLESS-*` output. It
+off-screen monitor, or the pointer parked inside a `HEADLESS-*` output. It also
+**notes a pointer sitting on the exact centre of a real monitor**, which is the
+after-the-fact signature of an output removed without `sg_pointer_pin`. It
 **warns and never fails** — every one of those states is one a real session can
 legitimately be in, and a false failure blocking his rebuild would be worse than
 the bug. Repair with `~/.config/scripts/hypr-session-env.sh --restore` and
