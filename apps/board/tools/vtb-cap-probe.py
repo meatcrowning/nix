@@ -16,13 +16,24 @@ Everything the app touches is redirected into a scratch tree — the cap file,
     apps/board/tools/vtb-cap-probe.py           # trace, then PASS/FAIL
     apps/board/tools/vtb-cap-probe.py --keep    # keep the scratch tree
 
-PASS is: a successful cap change publishes NOTHING to the inner bar — no
-FOOTER, no re-REGISTER, no flag line — so the slot reads the same before,
-during and after. [his, 2026-07-30] *"when i change the number of ministers in
-goetia itll flash text indicating that on the inner bar"*: the confirmation was
-the flash, and it is gone (`Main.qml` -> `capItems`). A FAILURE still reports;
-that path is not exercised here, since it cannot be provoked without breaking
-the store out from under a real write.
+Two things are asserted, and the second is the invariant.
+
+1. **A successful cap change publishes NOTHING** — no FOOTER, no re-REGISTER,
+   no flag line — so the slot reads the same before, during and after.
+   [his, 2026-07-30] *"when i change the number of ministers in goetia itll
+   flash text indicating that on the inner bar"*: the confirmation was the
+   flash, and it is gone (`Main.qml` -> `capItems`).
+2. **NO `FOOTER` LINE CARRYING TEXT IS EVER SENT, whatever happens** —
+   [his, 2026-07-30] *"why are you unable to simply stop ANY text from
+   appearing in the inner titlebar of goetia?"*. The probe drives, in turn, a
+   pick (the cap change), a real `Board.status` failure, a direct write to
+   `win.status` (the funnel every one of the ~20 QML call sites ends at), and a
+   reload of the store underneath the window. Each of those used to put a
+   sentence in the bar; none of them may now. `main.py`'s
+   `_MuteFooterVtbClient` is what makes that structural rather than a matter of
+   call sites, and the reports land in `~/.cache/goetia-status.log` instead —
+   which this probe also checks actually received them, since §10 forbids
+   dropping a failure silently.
 """
 import os
 import shutil
@@ -57,8 +68,11 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["XDG_RUNTIME_DIR"] = os.path.join(SCRATCH, "run")
 os.environ["XDG_STATE_HOME"] = os.path.join(SCRATCH, "state")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(SCRATCH, "config")
+# The status log lives under $XDG_CACHE_HOME, so redirect that too or the probe
+# appends to the one he reads.
+os.environ["XDG_CACHE_HOME"] = os.path.join(SCRATCH, "cache")
 os.environ["BOARD_NO_SYNC"] = "1"
-for d in ("run", "state", "config"):
+for d in ("run", "state", "config", "cache"):
     os.makedirs(os.path.join(SCRATCH, d), exist_ok=True)
 
 SOCK = os.path.join(os.environ["XDG_RUNTIME_DIR"], "hyprvtb-buttons.sock")
@@ -66,6 +80,8 @@ BOARD = os.path.join(SCRATCH, "board.md")
 
 TRACE = []          # (t, line)
 T0 = [None]         # set to the moment the cap is changed
+CAP_WINDOW = [None]  # t at which the cap-change window closes (next phase starts)
+SAID = []           # every report the app was made to produce, in order
 
 
 def _stamp():
@@ -172,7 +188,30 @@ def main():
         else:
             print("clicked: {}".format(out))
 
+    # Everything the app can still be talked into saying. Each one used to put a
+    # sentence in the inner bar; the assertions below say none of them may now.
+    def phase_failure():
+        CAP_WINDOW[0] = _stamp()
+        TRACE.append((_stamp(), "--- Board.status failure ---"))
+        SAID.append("could not write board.md - probe")
+        board.status.emit(SAID[-1])
+
+    def phase_direct():
+        TRACE.append((_stamp(), "--- win.status written directly ---"))
+        SAID.append("probe wrote this straight into win.status")
+        # The property, not an expression: `status` is where all ~20 QML call
+        # sites end up, so writing it is the whole funnel in one line.
+        win.setProperty("status", SAID[-1])
+
+    def phase_reload():
+        TRACE.append((_stamp(), "--- store rewritten on disk ---"))
+        with open(BOARD, "a") as fh:
+            fh.write("\n<!-- probe touch -->\n")
+
     QTimer.singleShot(1200, change_cap)
+    QTimer.singleShot(4000, phase_failure)
+    QTimer.singleShot(5000, phase_direct)
+    QTimer.singleShot(6000, phase_reload)
     QTimer.singleShot(9000, app.quit)
     app.exec()
     stop.set()
@@ -185,8 +224,9 @@ def main():
     foot = [(t, ln[len("FOOTER "):]) for t, ln in TRACE if ln.startswith("FOOTER ")]
     before = [f for t, f in foot if t is None or t < 0]
     b = before[-1] if before else ""
+    end = CAP_WINDOW[0] if CAP_WINDOW[0] is not None else float("inf")
     sent = [(t, ln) for t, ln in TRACE
-            if t is not None and t > 0 and not ln.startswith("---")]
+            if t is not None and 0 < t < end and not ln.startswith("---")]
     rc = 0
     print("\nfooter before the change: %r" % b)
     print("lines sent after it:      %d" % len(sent))
@@ -197,6 +237,28 @@ def main():
         rc = 1
     else:
         print("PASS: a cap change publishes nothing to the inner bar")
+
+    # ---- the invariant: no FOOTER text, ever, from any path ----
+    texted = [(t, f) for t, f in foot if f.strip()]
+    if texted:
+        for t, f in texted:
+            print("FAIL: %8s  FOOTER %r" % ("before" if t is None else "%+.2f" % t, f))
+        print("FAIL: goetia sent text to the inner titlebar")
+        rc = 1
+    else:
+        print("PASS: no FOOTER line carrying text was sent, over %d driven reports"
+              % len(SAID))
+
+    # ...and §10: a report that vanished instead of moving is also a failure.
+    log = os.path.join(SCRATCH, "cache", "goetia-status.log")
+    logged = open(log).read() if os.path.exists(log) else ""
+    missing = [s for s in SAID if s not in logged]
+    if missing:
+        for s in missing:
+            print("FAIL: dropped silently: %r" % s)
+        rc = 1
+    elif SAID:
+        print("PASS: all %d reports reached %s" % (len(SAID), log))
     if keep:
         print("scratch kept at %s" % SCRATCH)
     else:

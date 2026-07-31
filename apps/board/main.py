@@ -181,17 +181,77 @@ class Palette(QObject):
     def info(self): return self._c("info")
 
 
+#: Where a report goes now that the titlebar cannot carry one. Appended to, one
+#: stamped line per message, and never rotated by the app — it is a handful of
+#: lines a day. `$XDG_CACHE_HOME` so it is machine-local on both `top` and
+#: `book` and nothing syncs it.
+STATUS_LOG = (Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+              / "goetia-status.log")
+
+
+def _record_status(text):
+    """A report goes to the log and to stderr — never to the titlebar.
+
+    §10 says a failure is REPORTED, not swallowed, so the choke point below
+    cannot simply drop the string: everything the app would once have flashed in
+    the inner bar lands here instead, with a stamp, and is still on `win.status`
+    for any in-window surface goetia grows later.
+    """
+    text = str(text).strip()
+    if not text:
+        return
+    line = time.strftime("%Y-%m-%d %H:%M:%S ") + text
+    print("goetia: " + text, file=sys.stderr)
+    try:
+        STATUS_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATUS_LOG, "a") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass          # stderr already has it; a log that cannot be written is
+                      # not worth taking the report down with it
+
+
+class _MuteFooterVtbClient(VtbClient):
+    """goetia's `VtbClient`, with the `FOOTER` verb removed.
+
+    THE choke point, and it is at the client rather than at the `Slot` on
+    purpose — [his, 2026-07-30] *"why are you unable to simply stop ANY text
+    from appearing in the inner titlebar of goetia?"*, after a pass that removed
+    one emitter and left the others. Removing call sites one at a time is
+    whack-a-mole; this makes the string UNSENDABLE from this app, so a future
+    caller — a new failure report, a new phase line, `Titlebar.setFooter`
+    itself, anything that reaches `self._client` directly — cannot reintroduce
+    it without deleting this class.
+
+    The inner (left) bar draws exactly two things: the app's button cells and
+    the footer (`pylib/vtbclient.py`'s docstring; `home/prog/hyprvtb/vtbIpc.hpp`
+    is the server side). The cells are 1-2 char glyphs and are the app's
+    navigation chrome, which he uses; the footer is the only free-text slot
+    there, so overriding `set_footer` closes the bar completely.
+
+    `_footer` therefore stays `""` for this app's whole life, which also keeps
+    `_flag_lines_locked()` from replaying a `FOOTER` line on every reconnect —
+    the path that used to survive a plugin hot-swap. **Not a change to
+    `pylib/vtbclient.py`**: eight other apps use that footer and are unaffected.
+    """
+
+    def set_footer(self, text):
+        _record_status(text)
+
+
 class Titlebar(QObject):
     """hyprvtb app-button bridge — board's chrome (the three section jumps and
     `md`) is drawn by the compositor in the titlebar's inner column, not in QML
     (docs/DESIGN.md §12, §7.4). The vtb callbacks fire on the client's I/O
-    thread; the Signal hops them onto the GUI thread."""
+    thread; the Signal hops them onto the GUI thread.
+
+    **Its inner bar carries NO text.** See `_MuteFooterVtbClient`."""
 
     clicked = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._client = VtbClient(on_click=self.clicked.emit)
+        self._client = _MuteFooterVtbClient(on_click=self.clicked.emit)
 
     @Slot("QVariantList")
     def setButtons(self, buttons):
@@ -206,7 +266,10 @@ class Titlebar(QObject):
 
     @Slot(str)
     def setFooter(self, text):
-        self._client.set_footer(text)
+        # Kept so `Main.qml` needs no change, and deliberately NOT a route to
+        # the bar: the client refuses it anyway (`_MuteFooterVtbClient`), and
+        # going straight to the log means one hop instead of two.
+        _record_status(text)
 
     @Slot(bool)
     def setTitleText(self, on):
