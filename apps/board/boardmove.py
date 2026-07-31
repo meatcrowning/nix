@@ -434,7 +434,8 @@ def give_back(sel, why=None, path=bp.BOARD_PATH):
         if why:
             b = why.strip()
             lines = bp.add_todo_bullet(lines, bp.parse("".join(lines)),
-                                       b if b.startswith("- ") else "- " + b)
+                                       b if b.startswith("- ") else "- " + b,
+                                       by=whoami()[1])
         return lines
 
     bp.edit(path, go)
@@ -514,8 +515,12 @@ def stall(sel, path=bp.BOARD_PATH):
         # `add_todo_bullet` and this move would be refused outright — and the
         # headline gets a word cap too, since `check_short_summary` counts its
         # words like any others.
+        # No `by=` fallback: this bullet is written by whichever program's tick
+        # noticed the idle row, and naming one that may not be the caller would
+        # be an invented attribution. Unstamped is the honest answer (`_BY`).
         return bp.add_todo_bullet(lines, bp.parse("".join(lines)),
-                                  "- INFORMATION: **%s** - idle in IN FLIGHT, "
+                                  by=whoami()[1],
+                                  bullet="- INFORMATION: **%s** - idle in IN FLIGHT, "
                                   "moved here.\n"
                                   "    Nothing was working on it%s, so it is "
                                   "here instead of claiming to be handled.%s"
@@ -531,7 +536,7 @@ def stall(sel, path=bp.BOARD_PATH):
 
 
 def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
-        path=bp.BOARD_PATH):
+        path=bp.BOARD_PATH, by=None):
     """An agent asking him something: one new decision at the end of NEEDS YOU.
 
     THIS IS THE SAME MECHANISM AS EVERY OTHER QUESTION ON THE BOARD, and that is
@@ -574,7 +579,11 @@ def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
         # the needs you section should all have the time they were placed on the
         # board indicated on them."* An HTML comment, so the file still reads
         # cleanly for him; `boardparse._PLACED` owns the shape and the reasons.
-        block = ["### %s\n" % title, bp.placed_now(), "\n"]
+        # ...and WHO put it there, on the line above the time (`boardparse._BY`).
+        # `asked_by` is a different fact and stays where it is: it says what the
+        # agent was WORKING ON, in his prose, and is not an attribution.
+        block = [l for l in ("### %s\n" % title, bp.by_now(whoami()[1] or by),
+                             bp.placed_now(), "\n") if l]
         for para in [p for p in (context or []) if (p or "").strip()]:
             block += [" ".join(para.split()) + "\n", "\n"]
         if asked_by:
@@ -677,7 +686,7 @@ def whoami(agent_id=None):
     return aid, ba.name_of(aid) or ba.name_for(aid)
 
 
-def note(text, path=bp.BOARD_PATH, agent_id=None):
+def note(text, path=bp.BOARD_PATH, agent_id=None, by=None):
     """One bullet into WAITING ON YOU TO DO.
 
     **A RESULT retires the summon note that announced it** — his rule,
@@ -721,7 +730,16 @@ def note(text, path=bp.BOARD_PATH, agent_id=None):
         else:
             out.append("- " + line)
     body = "\n".join(out)
-    aid, who = whoami(agent_id) if bp.is_result(body) else ("", "")
+    me = whoami(agent_id)
+    aid, who = me if bp.is_result(body) else ("", "")
+    # WHO wrote it, for the gutter — and it is `me` unconditionally, not `who`:
+    # the summon-retiring above only looks up an agent for a RESULT, while every
+    # bullet has an author. The agent's NAME when one is writing (that is the
+    # word he reads on this board), and `by` only as the fallback for a caller
+    # with no agent identity at all, which is the program's own name. Neither
+    # resolving means NO stamp: `boardparse.by_now` refuses to invent an author,
+    # and the gutter draws nothing for one.
+    stamp_by = me[1] or by
 
     def go(doc):
         lines = doc["lines"]
@@ -733,7 +751,7 @@ def note(text, path=bp.BOARD_PATH, agent_id=None):
             out = bp.drop_summon(lines, doc, aid, who)
             if out is not lines:
                 lines, doc = out, bp.parse("".join(out))
-        return bp.add_todo_bullet(lines, doc, body)
+        return bp.add_todo_bullet(lines, doc, body, by=stamp_by)
 
     return bp.edit(path, go)
 

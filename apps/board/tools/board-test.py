@@ -52,6 +52,13 @@ os.environ["BOARD_USAGE_OFFLINE"] = "1"
 # elapsed and sees the old behaviour. Negative rather than 0: the registration
 # stamp has one-second resolution, so an exact tie is reachable.
 os.environ["BOARD_CONFIRM_GRACE"] = "-1"
+# ...and NOBODY is writing as an agent unless a test says so. This harness is
+# usually run BY an agent, whose systemd unit exports `BOARD_AGENT_ID` — and
+# `boardmove.whoami` reads it, so every `note()` and `ask()` in here was
+# attributed to whichever worker happened to be running the tests, which moved
+# the `<!-- placed: -->` stamp down a line and failed three checks that had
+# nothing to do with the change. Tests that want an author set it themselves.
+os.environ.pop("BOARD_AGENT_ID", None)
 
 BOARD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS = os.path.dirname(BOARD)
@@ -1061,6 +1068,168 @@ def test_placed(tmp):
     check("what draws the time cannot see the clock, so it cannot become an age",
           "now(" not in body and "today(" not in body and "time.time" not in body,
           [ln.strip() for ln in body.splitlines() if "now" in ln][:3])
+
+
+# ----------------------------- 1b1c. every entry says WHO put it on the board
+def test_by(tmp):
+    """*"every entry on the board should record WHO wrote it - which program or
+    agent put it there"*, drawn in the gutter above the time.
+
+    The stamp is `<!-- by: ... -->`, the twin of `placed:` in every respect, and
+    the claims that keep it safe are all about its ABSENCE. Three programs write
+    this file concurrently, one of them lives outside this tree
+    (`home/srvs/board-watch-files/`) and does not emit it yet, the store syncs
+    between two machines that may run different copies of this app, and every
+    entry written before today has none. So the failure to design against is not
+    a wrong attribution — it is a parser that drops or mangles an UNSTAMPED
+    entry. Every check below is either that, or the ordering rule that keeps the
+    stamp inside the span a bullet is removed by.
+    """
+    import boardparse as B
+    import boardmove as bm
+
+    check("a writer that cannot say who it is writes NO stamp, never `unknown`",
+          (B.by_now(""), B.by_now(None), B.by_now("   ")) == ("", "", ""))
+    check("...and a name it cannot spell in the stamp is dropped, not mangled",
+          (B.by_now("two words"), B.by_now("<!-- nested -->"),
+           B.by_now("a:b")) == ("", "", ""),
+          (B.by_now("two words"), B.by_now("a:b")))
+    check("...while a name, an id and a program all pass through as they are",
+          (B.by_now("Marbas"), B.by_now("w2502ad"), B.by_now("board-watch"))
+          == ("<!-- by: Marbas -->\n", "<!-- by: w2502ad -->\n",
+              "<!-- by: board-watch -->\n"), B.by_now("board-watch"))
+
+    # ---- the store as it is today: nothing carries one, and nothing breaks ----
+    path = os.path.join(tmp, "board.md")
+    B.write(path, FIXTURE)
+    src = B.read(path)
+    doc = B.parse(src)
+    check("an entry written before this existed says nothing, and parses fine",
+          [d["by"] for d in doc["needs"]] == ["", ""]
+          and [t["by"] for t in doc["todo"]] == [""],
+          ([d["by"] for d in doc["needs"]], [t["by"] for t in doc["todo"]]))
+    check("...and the file still round-trips byte for byte", "".join(doc["lines"]) == src)
+
+    # ---- a bullet an AGENT wrote ----
+    # `whoami` reads `BOARD_AGENT_ID`, which is what every worker's boardctl run
+    # carries and what board-watch passes explicitly on behalf of a dead one — so
+    # neither writer needs a second channel to say who it is.
+    B.write(path, FIXTURE)
+    os.environ["BOARD_AGENT_ID"] = "w2502ad"
+    try:
+        who = bm.whoami()[1]
+        bm.note("INFORMATION: an agent wrote this", path=path)
+    finally:
+        del os.environ["BOARD_AGENT_ID"]
+    after = B.read(path)
+    doc = B.parse(after)
+    mine = doc["todo"][-1]
+    check("a bullet an agent writes is attributed to that agent, by NAME",
+          who and mine["by"] == who, (who, mine["by"]))
+    check("...as an HTML comment, so the file still reads cleanly for him",
+          after.splitlines()[mine["line"] + 1].startswith("<!-- by:"),
+          after.splitlines()[mine["line"] + 1])
+    check("...on the line ABOVE the time, which is what the gutter draws",
+          after.splitlines()[mine["line"] + 2].startswith("<!-- placed:")
+          and mine["placed"] != "", after.splitlines()[mine["line"]:mine["line"] + 3])
+    check("...and it is not prose: nothing of it reaches what gets drawn",
+          "by:" not in mine["text"] and "by:" not in mine["summary"], mine["text"])
+    check("...and the file still round-trips byte for byte", "".join(doc["lines"]) == after)
+
+    # The ORDER is why `by:` goes first: `placed:` is the line that closes the
+    # bullet's span, so a stamp under it would fall outside `todo_span` and be
+    # left behind by a removal as an orphan comment.
+    check("the bullet's span covers BOTH stamps, so removal takes all three lines",
+          mine["endLine"] == mine["line"] + 2, (mine["line"], mine["endLine"]))
+    block = doc["lines"][mine["line"]:mine["endLine"] + 1]
+    gone = B.remove_todo(doc["lines"], mine)
+    check("...leaving no orphan comment of either kind behind",
+          "".join(gone).count("<!-- by:") == 0
+          and "".join(gone).count("<!-- placed:") == 0
+          and len(B.parse("".join(gone))["todo"]) == 1,
+          "".join(gone).count("<!-- by:"))
+    back = B.parse("".join(gone))
+    check("...and the undo puts the bullet, its time AND its author back",
+          [t["by"] for t in
+           B.parse("".join(B.add_todo_block(back["lines"], back, block)))["todo"]]
+          == ["", who],
+          [t["by"] for t in
+           B.parse("".join(B.add_todo_block(back["lines"], back, block)))["todo"]])
+
+    # ---- ...and one nobody can name ----
+    # `by=` is the program's own name, and it is a FALLBACK: an agent writing
+    # through the same call is named by its id, because the name is the word he
+    # reads on this board.
+    B.write(path, FIXTURE)
+    bm.note("COMPLETION: he ran it himself", path=path, by="boardctl")
+    check("a bullet with no agent behind it names the PROGRAM that wrote it",
+          B.parse(B.read(path))["todo"][-1]["by"] == "boardctl",
+          B.parse(B.read(path))["todo"][-1]["by"])
+    B.write(path, FIXTURE)
+    os.environ["BOARD_AGENT_ID"] = "w2502ad"
+    try:
+        bm.note("COMPLETION: an agent ran it", path=path, by="boardctl")
+    finally:
+        del os.environ["BOARD_AGENT_ID"]
+    check("...and an agent behind the same call outranks that fallback",
+          B.parse(B.read(path))["todo"][-1]["by"] == who,
+          B.parse(B.read(path))["todo"][-1]["by"])
+    B.write(path, FIXTURE)
+    bm.note("INFORMATION: nobody at all", path=path)
+    check("...and a caller that offers neither writes no stamp, not an empty one",
+          B.parse(B.read(path))["todo"][-1]["by"] == ""
+          and "<!-- by:" not in B.read(path), B.read(path).count("<!-- by:"))
+
+    # ---- a decision an agent asks ----
+    B.write(path, FIXTURE)
+    os.environ["BOARD_AGENT_ID"] = "w2502ad"
+    try:
+        key = bm.ask("Which way should this go?", if_unanswered="nothing moves",
+                     path=path, by="boardctl")
+    finally:
+        del os.environ["BOARD_AGENT_ID"]
+    after = B.read(path)
+    doc = B.parse(after)
+    asked = [d for d in doc["needs"] if d["key"] == key][0]
+    check("a question an agent asks is attributed the same way",
+          asked["by"] == who and asked["byLine"] == asked["titleLine"] + 1,
+          (asked["by"], asked["byLine"], asked["titleLine"]))
+    check("...above its time, with the answer line and the options untouched",
+          asked["placedLine"] == asked["byLine"] + 1 and asked["placed"] != ""
+          and asked["ifUnanswered"] == "nothing moves",
+          (asked["placedLine"], asked["byLine"]))
+    check("...and the file still round-trips byte for byte", "".join(doc["lines"]) == after)
+
+    # ...and it travels with the item, like every other line of it: a relocation
+    # cuts the decision's RAW lines into IN FLIGHT's stash and back.
+    d = B.parse(B.read(path))
+    B.write(path, "".join(B.set_answer(d["lines"], d["needs"][0], "the first way")))
+    src = B.read(path)
+    bm.start("1", path=path)
+    bm.give_back("1", path=path)
+    check("an attribution survives IN FLIGHT and back, untouched",
+          B.read(path) == src,
+          [ln for ln in B.read(path).splitlines() if ln not in src.splitlines()][:4])
+
+    # ---- a store somebody ELSE stamped, by hand or from the other machine ----
+    # The parser must not care who wrote the line or what shape the item was in
+    # when it did — including the one case that has no `placed:` under it at all,
+    # which is what a hand edit or a half-upgraded writer produces.
+    hand = FIXTURE.replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- **Relaunch `reader`** - live source, no hot reload.\n<!-- by: Botis -->")
+    B.write(path, hand)
+    doc = B.parse(B.read(path))
+    check("a bullet stamped by hand, with no time under it, still parses",
+          [t["by"] for t in doc["todo"]] == ["Botis"]
+          and doc["todo"][0]["text"] == "Relaunch reader - live source, no hot reload."
+          and doc["todo"][0]["placed"] == "",
+          [(t["by"], t["placed"], t["text"][:20]) for t in doc["todo"]])
+    check("...and that file round-trips byte for byte too",
+          "".join(doc["lines"]) == hand)
+    check("...and the span still covers the stamp",
+          doc["todo"][0]["endLine"] == doc["todo"][0]["line"] + 1,
+          (doc["todo"][0]["line"], doc["todo"][0]["endLine"]))
 
 
 # ------------------------- 1b1a. every WAITING bullet says WHAT IT IS, in a word
@@ -5220,6 +5389,65 @@ def test_placed_window(app, tmp):
           titles > 0 and titles < bare - 100, (titles, bare))
     shot(win, "06-placed")
 
+    # ---- ...and WHO put it there, on the line ABOVE the time ----
+    # *"every entry on the board should record WHO wrote it"*, drawn in the
+    # gutter above the time. Two claims the store test cannot make: that it is
+    # drawn at all, and — the one that matters — that an entry with NO
+    # attribution reserves nothing for it, since every entry written before this
+    # existed has none and one of the three writers does not emit it yet.
+    slots0 = [it for it in descendants(win0.contentItem())
+              if it.objectName() == "gutterBy"]
+    check("an unattributed board reserves NOTHING for an author it does not have",
+          slots0 and all(str(it.property("text")) == "" and not it.isVisible()
+                         and it.height() == 0 for it in slots0),
+          [(str(it.property("text")), it.isVisible(), it.height()) for it in slots0])
+    check("...and the stamp is never prose: no comment syntax reaches the screen",
+          not [it for it in descendants(win0.contentItem())
+               if str(it.property("text")).startswith("<!--")],
+          [str(it.property("text")) for it in descendants(win0.contentItem())
+           if str(it.property("text")).startswith("<!--")])
+
+    B.write(path, FIXTURE)
+    os.environ["BOARD_AGENT_ID"] = "w2502ad"
+    try:
+        who = bm.whoami()[1]
+        bm.note("INFORMATION: an attributed chore", path=path)
+        bm.ask("An attributed question?", if_unanswered="nothing happens", path=path)
+    finally:
+        del os.environ["BOARD_AGENT_ID"]
+    stamp = [d["placed"] for d in B.parse(B.read(path))["needs"] if d["placed"]][0]
+    engineB, winB, keepB = build(app, path)
+    spin(400)
+
+    def boxes(s):
+        """(top, right edge) of every visible drawing of `s`, topmost first."""
+        from PySide6.QtCore import QPointF                              # noqa: E402
+        out = []
+        for it in descendants(winB.contentItem()):
+            if str(it.property("text")) == s and it.isVisible():
+                p = it.mapToScene(QPointF(0, 0))
+                out.append((round(p.y(), 1), round(p.x() + it.property("width"), 1)))
+        return sorted(out)
+
+    authors, times = boxes(who), boxes(stamp)
+    check("both shapes draw who put them there - the decision and the bullet",
+          who and len(authors) == 2 and len(times) == 2, (who, authors, times))
+    check("...ABOVE the time, in the same trailing-edge column (§9.1)",
+          len(authors) == len(times)
+          and all(a[0] < t[0] for a, t in zip(authors, times))
+          and all(a[1] == t[1] for a, t in zip(authors, times)),
+          (authors, times))
+    # ...and the two stamped entries are the ONLY ones that draw an author on a
+    # board that also holds three older ones. A slot that filled itself in would
+    # be an invented attribution, which is worse than none (§10).
+    filled = [it for it in descendants(winB.contentItem())
+              if it.objectName() == "gutterBy" and it.isVisible()]
+    check("...and the older items on the same board still draw none",
+          len(filled) == 2 and all(str(it.property("text")) == who
+                                   for it in filled),
+          [str(it.property("text")) for it in filled])
+    shot(winB, "06b-attributed")
+
 
 def test_usage(tmp):
     """The two usage bars: HIS number, or none, and never a Fable one.
@@ -5953,6 +6181,8 @@ def main():
         test_summon_cleared(os.path.join(tmp, "sum"))
         os.makedirs(os.path.join(tmp, "pl"))
         test_placed(os.path.join(tmp, "pl"))
+        os.makedirs(os.path.join(tmp, "by"))
+        test_by(os.path.join(tmp, "by"))
         os.makedirs(os.path.join(tmp, "td"))
         test_todo_remove(os.path.join(tmp, "td"))
         test_agents(tmp)

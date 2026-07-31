@@ -106,9 +106,17 @@ Item {
         //
         // It is an absolute time and must stay one: no age, no "3 days ago",
         // no badge. `boardparse.format_placed` is the only formatter.
+        //
+        // WHO put it there sits on the line ABOVE the time, in the same cluster
+        // and on the same `dim` rung — a name is metadata like the time, not a
+        // louder thing than the question. It is ABSENT and takes no height when
+        // nothing is recorded (§10): every item written before the stamp existed
+        // has none, and one of the three writers does not emit it yet, so those
+        // items must draw exactly as they always did rather than reserve an
+        // empty row.
         Item {
             width: col.width
-            implicitHeight: title.implicitHeight
+            implicitHeight: Math.max(title.implicitHeight, meta.implicitHeight)
             height: implicitHeight
 
             Para {
@@ -118,12 +126,26 @@ Item {
                 text: (card.decision && card.decision.num ? card.decision.num + ". " : "")
                       + (card.decision ? card.decision.title : "")
             }
-            PixelText {
+            Column {
+                id: meta
                 anchors.right: parent.right
                 width: 15 * card.cellW      // `jul 29 11:04 pm`, the longest it gets
-                horizontalAlignment: Text.AlignRight
-                color: Theme.dim
-                text: card.decision && card.decision.placed ? card.decision.placed : ""
+                PixelText {
+                    id: byT
+                    objectName: "gutterBy"
+                    width: parent.width
+                    horizontalAlignment: Text.AlignRight
+                    color: Theme.dim
+                    visible: text !== ""
+                    height: visible ? implicitHeight : 0
+                    text: card.decision && card.decision.by ? card.decision.by : ""
+                }
+                PixelText {
+                    width: parent.width
+                    horizontalAlignment: Text.AlignRight
+                    color: Theme.dim
+                    text: card.decision && card.decision.placed ? card.decision.placed : ""
+                }
             }
         }
 
