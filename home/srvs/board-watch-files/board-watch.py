@@ -532,7 +532,35 @@ WORKER_FAIL = (
     "`{task}`.\n"
     "    Dispatched from something you typed into the box; it recorded "
     "nothing on this board, so nothing landed for it. Answer or type it "
-    "again to have another go. Log: `~/.cache/board-work/{aid}.log`\n")
+    "again to have another go. {where}\n")
+
+
+#: Where to READ what it did, on that same continuation line — one path, not a
+#: paragraph. `claude -p` writes its stdout ONCE, at exit, so the `.log` of a
+#: worker that was killed is a POINTER rather than a record: since 2026-07-30
+#: `boardwork` writes it a header at spawn and a post-mortem at reap, and puts
+#: the transcript path on the failed record as `rec["transcript"]`
+#: (commit f3d5b4d). Naming that path here saves the hop through the log, which
+#: is the hop he has to take at exactly the moment he wants an answer fastest.
+#: Older records — and any path where the spawn never recorded a session —
+#: carry no such key, so the log-only wording stays as the fallback rather than
+#: printing an empty span.
+#: The path goes through `bp.oneline(code=True)` for the same reason `{task}`
+#: does: it is DATA. A glob (`transcript_hint` returns one when the file is not
+#: there yet) must not read as `**` structure, and the span keeps the
+#: separation checks off it.
+WHERE_LOG = "Log: `~/.cache/board-work/{aid}.log`"
+WHERE_TRANSCRIPT = "Transcript: {transcript} (log: `~/.cache/board-work/{aid}.log`)"
+
+
+def worker_fail_bullet(rec):
+    """The FAILED bullet for a worker that recorded nothing."""
+    aid = bp.oneline(rec.get("agent") or "?", 60) or "?"
+    transcript = bp.oneline(rec.get("transcript") or "", 200, code=True)
+    where = (WHERE_TRANSCRIPT.format(transcript=transcript, aid=aid)
+             if transcript else WHERE_LOG.format(aid=aid))
+    return WORKER_FAIL.format(
+        task=bp.oneline(rec.get("task", ""), 200, code=True), where=where)
 
 
 def note_on_board(bullet, agent_id=None):
@@ -1129,10 +1157,8 @@ def tick():
         for rec in failed:
             log("a worker stopped without recording anything: %s"
                 % rec.get("task", "")[:80])
-            note_on_board(WORKER_FAIL.format(
-                task=bp.oneline(rec.get("task", ""), 200, code=True),
-                aid=rec.get("agent") or "?"),
-                agent_id=rec.get("agent") or "")
+            note_on_board(worker_fail_bullet(rec),
+                          agent_id=rec.get("agent") or "")
     except (OSError, bm.BoardError) as e:
         log("could not reap finished workers: %s" % e)
 

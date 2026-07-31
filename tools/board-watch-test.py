@@ -58,6 +58,10 @@ What it asserts, in order:
               still be harmless
   ctrl+z      a summoner he TOOK BACK leaves nothing behind: no dispatch, no
               note, and — although it exits nonzero — not his own sentence
+  transcript  the bullet for a worker that recorded nothing names its
+              TRANSCRIPT when the failed record carries one, and falls back to
+              the log-only wording when it does not — both shapes placed
+              through the real checks
               returned to him as a failure. `boardundo.py`; the gate that
               refuses the run's verbs is `board-test.py`'s half
   the loop    the three defects behind 2026-07-28's 3,151 starts, kept apart
@@ -1129,6 +1133,64 @@ def test_cancelled_summoner():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_dead_worker_names_its_transcript():
+    """A worker that recorded nothing leaves a bullet that says WHERE TO READ
+    what it did — and since 2026-07-30 that is the transcript, in one hop.
+
+    `claude -p` writes its stdout once, at exit, so a killed worker's
+    `~/.cache/board-work/<id>.log` used to be zero bytes. `boardwork` now writes
+    that file a header and a post-mortem and hands the failed record a
+    `transcript` key (commit f3d5b4d); the bullet quotes it when it is there and
+    falls back to the log-only wording when it is not, because older records and
+    any spawn that recorded no session have neither.
+
+    Both shapes are asserted through the REAL `note_on_board`, not by reading
+    the template: the bullet goes through `boardparse`'s tag, separation and
+    dozen-word checks, and a failure note that is refused is the one failure
+    this file exists to prevent.
+    """
+    print("\na dead worker's bullet points at its transcript")
+    d = tempfile.mkdtemp(prefix="board-watch-transcript-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        mod = _load_watcher(r.env())
+        tx = "/home/lam/.claude/projects/-home-lam-nix/deadbeef.jsonl"
+
+        with_tx = mod.worker_fail_bullet(
+            {"agent": "we12345", "task": "outlive the tick", "transcript": tx})
+        check("the bullet names the transcript when the record carries one",
+              tx in with_tx, with_tx)
+        check("...and still says which log, so both hops are on the line",
+              "board-work/we12345.log" in with_tx, with_tx)
+        check("...on the indented continuation line, not the summary",
+              tx not in with_tx.splitlines()[0]
+              and with_tx.splitlines()[1].startswith("    "), with_tx)
+
+        without = mod.worker_fail_bullet(
+            {"agent": "we12345", "task": "outlive the tick"})
+        check("a record with no transcript keeps the log-only wording",
+              "board-work/we12345.log" in without
+              and "Transcript" not in without, without)
+        check("...and never trails an empty span for the path it does not have",
+              without.rstrip().endswith("board-work/we12345.log`"), without)
+
+        # Nothing either shape adds may read as a bullet, a tag or a second ask
+        # to the checks in `add_todo_bullet` — assert by actually placing them.
+        for label, bullet in (("with a transcript", with_tx),
+                              ("without one", without)):
+            ok = r.state_home(lambda b=bullet: mod.note_on_board(b))
+            why = open(r.log).read()[-300:] if os.path.exists(r.log) else ""
+            check("the board accepts the bullet %s" % label, bool(ok), why)
+        placed = [l for l in r.text().splitlines()
+                  if "a minister stopped without finishing" in l]
+        check("...both landing as their own FAILED bullet", len(placed) == 2,
+              str(placed))
+        check("...and the transcript path reaches the file intact",
+              tx in r.text(), r.text()[-400:])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     d = tempfile.mkdtemp(prefix="board-watch-test-")
     try:
@@ -1410,6 +1472,7 @@ def main():
     test_the_loop()
     test_host_affinity()
     test_landed_needs_no_tick()
+    test_dead_worker_names_its_transcript()
 
     print()
     if fails:
