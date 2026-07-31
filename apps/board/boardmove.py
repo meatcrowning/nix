@@ -1,7 +1,7 @@
 """Moving a board item as work starts, lands, or dies — the policy half.
 
 `boardparse` owns the line edits; this owns WHEN they are made and WHAT the
-moved row says. Two callers, one implementation on purpose:
+item says on its way through. Two callers, one implementation on purpose:
 
   * `home/srvs/board-watch-files/board-watch.py` — moves the decision as it
     spawns its agent, and hands it back if that agent dies.
@@ -10,29 +10,32 @@ moved row says. Two callers, one implementation on purpose:
     watcher, and the answer to "how do I move this" must never be "hand-edit the
     markdown".
 
-WHAT A MOVED ITEM SAYS, and what it deliberately does not
+WHAT LEAVES THE STORE WHEN WORK STARTS, and what does not
 ---------------------------------------------------------
-The IN FLIGHT row is `| what | where | notes |`, drawn as the title with the
-location dim on the right and the note wrapped underneath. A moved decision
-fills them with the title, where the work is happening, and **his own answer
-read back to him** — the ticked option, his sentence, or both.
+**An answered decision is REMOVED from NEEDS YOU and nothing is written in its
+place.** There was an `## IN FLIGHT` row until 2026-07-30; the section is gone
+[his call — the note in `boardparse` where its writers were has the why] and
+this module is what it was load-bearing FOR. What the row said is now either
+somewhere better or nowhere:
 
-His answer is there for three reasons and none of them is decoration: it is the
-one thing in the item he wrote, it lets him catch a misread answer while the
-work is still cheap to redirect, and LANDED will not carry it.
+  * that the item is being worked  -> the triangle, drawn from the agent's own
+                                      process and transcript, which cannot go
+                                      stale the way a hand-written row did
+  * what landed                    -> LANDED, computed from the commit log
+  * his answer, read back          -> the stash, and back onto his own decision
+                                      verbatim if it has to be handed back
 
-There is **no timestamp, no age, no "started at", nothing counting**. §"The
-no-pressure requirement is a design constraint" in `AGENTS.md`: he asked for
-this board because a running log made him feel he had to act in the moment. A
-start time on a row is an elapsed time the moment he reads it. The stash below
-records one, because reconciliation is machine business; it never reaches the
-file.
+There is **no timestamp, no age, no "started at", nothing counting** anywhere he
+can see. §"The no-pressure requirement is a design constraint" in `AGENTS.md`:
+he asked for this board because a running log made him feel he had to act in the
+moment. The stash records a start time, because reconciliation is machine
+business; it never reaches the file.
 
 STRANDING, and why an item cannot
 ---------------------------------
-An item in IN FLIGHT with nothing working on it is worse than one still in NEEDS
-YOU: it says "handled" and nothing is. So `start()` STASHES the decision's raw
-lines outside the store, and there are four ways back:
+A decision that has left NEEDS YOU with nothing working on it is invisible: it
+is not being asked and not being done. So `start()` STASHES its raw lines
+outside the store, and there are three ways back:
 
   1. the agent finished       -> `land()`, and the stash is dropped
   2. the agent exited badly   -> `give_back()` from the watcher, same run: the
@@ -42,8 +45,16 @@ lines outside the store, and there are four ways back:
                                  board-watch tick (so, within five minutes),
                                  finds stashes whose owning process is gone and
                                  does 2 for them
-  4. there is no stash at all -> `stall()`, by hand. The row becomes one bullet
-                                 in WAITING ON YOU TO DO
+
+**There used to be a fourth, and losing the need for it is the point.** All
+three above are keyed on the stash, and the stash is MACHINE-LOCAL state while
+`board.md` syncs between the machines — so a row `top` started was, from `book`,
+indistinguishable from a row nobody started. Add the rows written before the
+stash existed and the rows added by hand, and IN FLIGHT could only ever grow:
+`stall()` was the manual exit for the ones no mechanism here could reach, and he
+read the result as *"doesnt update at all its still got old stuff in it"*.
+Nothing accumulates now, because nothing is written. A stash the other machine
+owns is simply not this host's business, which is what it always was.
 
 Case 3 checks the pid AND its kernel start time, so a recycled pid cannot make a
 dead agent look alive. A stash with no owner pid (an interactive session started
@@ -67,18 +78,6 @@ outlives its tick has nobody left to call `land()` or `forget()`, so when it
 finally exits its stash still names a dead pid and case 3 would hand back work
 that was done. An agent that recorded a result on the board (`boardwork.reported`
 — the same fact `reap()` files a worker by) is retired instead of reclaimed.
-
-**Case 4 is the one the first three do not cover, and it is bigger than it
-sounds.** 1-3 are all keyed on the stash, and the stash is MACHINE-LOCAL state
-while `board.md` syncs between the two machines — so from `book`, a row `top`
-started is indistinguishable from a row nobody started, and vice versa. Add the
-rows written before the stash existed and the rows added by hand, and the honest
-statement is: **`reconcile()` covers only what this host started, and everything
-else in IN FLIGHT can never leave it.** That is what he was looking at when he
-said the section *"doesnt update at all"* — five rows, four of which no
-mechanism here could remove. `unowned()` reports them and `stall()` is their
-exit; neither is automatic, because a row this host does not own may be alive on
-the other one.
 """
 import datetime
 import json
@@ -198,35 +197,12 @@ def find_needs(doc, sel):
     raise BoardError("no decision in NEEDS YOU matches '%s'" % sel)
 
 
-def _where(s):
-    """The `where` column is a code location and the store spells those in
-    backticks. Callers pass a bare path far more often than not, so add them
-    rather than let the section grow two conventions."""
-    s = (s or "").strip()
-    if s and "`" not in s and " " not in s and re.search(r"[/.]", s):
-        return "`%s`" % s
-    return s
-
-
 def _norm(s):
     """Compare a selector to what is drawn. The parsed cells are glyph-mapped
     and the stashed title is raw, so both sides go through the same map before
     they are matched — otherwise an em dash in a title makes the row it names
     unfindable."""
     return " ".join(bp.text(s or "").lower().split())
-
-
-def find_flight(doc, sel):
-    """A row in IN FLIGHT, by a bit of its `what` (or its `where`)."""
-    low = _norm(sel)
-    hits = [r for r in doc["flight"]
-            if low and (low in _norm(r["what"]) or low == _norm(r["where"]))]
-    if len(hits) == 1:
-        return hits[0]
-    if len(hits) > 1:
-        raise BoardError("'%s' matches %d rows in IN FLIGHT: %s"
-                         % (sel, len(hits), "; ".join(h["what"] for h in hits)))
-    raise BoardError("no row in IN FLIGHT matches '%s'" % sel)
 
 
 def said(lines, item):
@@ -250,8 +226,22 @@ def said(lines, item):
 # ---------------------------------------------------------------- the moves
 def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
           force=False, session=""):
-    """NEEDS YOU -> IN FLIGHT, keeping his answer on the row and his words in
-    the stash. Returns the stash record."""
+    """Lift an answered decision OUT of NEEDS YOU, verbatim, into the stash.
+    Returns the stash record.
+
+    It used to land a row in IN FLIGHT as well; that section is gone
+    [2026-07-30, his call — see `boardparse`'s note where the writers were] and
+    the move is now a removal. **What the section was load-bearing FOR is
+    entirely here**: the decision leaves the questions list the moment work
+    starts, so the board stops asking him something he has already answered,
+    and `block`/`before` hold his own words byte-exact so `give_back()` can put
+    the question back if the agent never finishes.
+
+    `where` and `notes` are still recorded on the stash. Nothing draws them
+    today, but they are what a hand-back and any future report are written
+    from, and dropping facts on the floor at the one point they are known is
+    not a saving.
+    """
     rec = {}
 
     def go(doc):
@@ -264,9 +254,8 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
         a, b = bp.item_span(doc["lines"], item)
         after = doc["lines"][b].rstrip("\n") if b < len(doc["lines"]) else ""
         lines, block = bp.cut_item(doc["lines"], item)
-        row = bp.flight_row(title, _where(where), note)
         rec.update({"key": item["key"], "num": item["num"], "title": title,
-                    "where": where, "row": row, "block": block,
+                    "where": where, "notes": note, "block": block,
                     # the heading it sat above, so a hand-back is byte-exact
                     "before": after if after.startswith("###") else "",
                     "pid": pid, "pidStart": _proc_start(pid) if pid else None,
@@ -277,7 +266,7 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
                     "host": socket.gethostname(),
                     "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                     "board": os.path.abspath(path)})
-        return bp.add_flight_row(lines, row)
+        return lines
 
     if not bp.edit(path, go):
         raise BoardError("nothing was written")
@@ -408,16 +397,17 @@ def commit_time(commit, repos=COMMIT_REPOS):
 
 
 def land(sel, commit, what=None, date=None, when=None, path=bp.BOARD_PATH):
-    """IN FLIGHT -> LANDED, under today's date, carrying the commit and its time.
+    """Record a commit in LANDED, under today's date, with its own time.
 
-    **The IN FLIGHT row is optional, and that is the whole point of the
-    section.** A decision agent has a row (`start()` made one); a WORKER
-    dispatched out of the box never did, and for a day that meant every commit
-    the fan-out produced was invisible here — `land` needed a row it could not
-    have, so a worker could only leave a bullet and LANDED silently stopped
-    growing while the repo did not. So: a selector that matches a row moves it,
-    and no selector (or one that matches nothing) simply records the commit.
-    `what` is then required, because there is no row to take it from.
+    **`what` is required and there is no row to take it from.** It used to be
+    optional for the one caller that had an IN FLIGHT row — a decision agent —
+    while a WORKER dispatched out of the box never had one, and for a day that
+    meant every commit the fan-out produced was unrecordable: `land` needed a
+    row it could not have, so a worker could only leave a bullet and LANDED
+    silently stopped growing while the repo did not. He noticed. The row was
+    made optional then and the section is gone now, so this takes the sentence
+    from its caller, always. `sel` is still accepted and still names the STASH
+    to forget, which is how a decision agent closes its own item out.
 
     **If LANDED already names this commit, the row is UPGRADED in place rather
     than added.** The sweep (`reconcile_landed`) fills a hole about two minutes
@@ -432,9 +422,9 @@ def land(sel, commit, what=None, date=None, when=None, path=bp.BOARD_PATH):
     """
     got = {}
     upgraded = []
-    rec = _stash_for(sel) if sel else None
-    row_sel = rec["title"] if rec else sel
     when = commit_time(commit) if when is None else when
+    if not what:
+        raise BoardError("no --what was given - there is no line to record")
 
     def existing(doc):
         c = (commit or "").strip().strip("`").lower()
@@ -449,54 +439,41 @@ def land(sel, commit, what=None, date=None, when=None, path=bp.BOARD_PATH):
 
     def go(doc):
         del upgraded[:]
-        row = None
-        if row_sel:
-            try:
-                row = find_flight(doc, row_sel)
-            except BoardError:
-                if not what:
-                    raise BoardError(
-                        "nothing in IN FLIGHT matches '%s' and no --what was "
-                        "given - there is no line to record" % sel)
         lines = doc["lines"]
-        if row is None and not what:
-            raise BoardError(
-                "nothing in IN FLIGHT matches '%s' and no --what was given - "
-                "there is no line to record" % sel)
-        said = what or row["what"]
-        # The upgrade goes FIRST and replaces exactly one line, so the IN FLIGHT
-        # row's index — measured on this same doc, and above LANDED — is still
-        # the line it was.
         have = existing(doc)
         if have is not None:
-            new = bp.landed_row(have["commit"], said, have["when"] or when)
-            lines = lines[:have["line"]] + [new] + lines[have["line"] + 1:]
-        if row is not None:
-            got.update(row)
-            lines = bp.remove_row(lines, row["line"])
-        if have is not None:
+            lines = lines[:have["line"]] \
+                + [bp.landed_row(have["commit"], what, have["when"] or when)] \
+                + lines[have["line"] + 1:]
             upgraded.append(True)
             return lines
-        return bp.add_landed_row(lines, commit, said, date, when)
+        return bp.add_landed_row(lines, commit, what, date, when)
 
     # A `land` that re-states a row already reading exactly that way writes
     # nothing, and that is a SUCCESS: `bp.edit` returns False for "the bytes
     # would not change", which here means the record is already right.
     if not bp.edit(path, go) and not upgraded:
         raise BoardError("nothing was written")
+    # A selector names a STASH, not a row: a decision agent closing its own item
+    # out. It is optional and usually absent (a worker never had one), so a
+    # selector that matches nothing is not an error — the commit is recorded
+    # either way, which is the bug that made this optional in the first place.
     if sel:
-        forget(sel)
-    if got.get("what"):
-        forget_by_title(got["what"])
+        # `_stash_for` takes the same three selectors `start` did — the key, the
+        # decision number, or part of the title — so `land 1` drops the stash
+        # `start 1` wrote. `forget(sel)` alone would only ever match the key,
+        # which is how a numbered decision stayed reclaimable after it landed.
+        got.update(_stash_for(sel) or {})
+        forget(got.get("key") or sel)
     return got
 
 
 def give_back(sel, why=None, path=bp.BOARD_PATH):
-    """IN FLIGHT -> NEEDS YOU, verbatim, plus a bullet saying why.
+    """The stash -> NEEDS YOU, verbatim, plus a bullet saying why.
 
-    One edit, not three: the row must never be gone while the decision is not
-    yet back, because that state syncs to book and reads as work he never asked
-    for having silently vanished.
+    One edit, not two: the decision and the bullet explaining it land together,
+    because this file syncs to the other machine and a half-applied hand-back
+    reads there as a question that came back with nothing to say for itself.
     """
     rec = None
     sel = (sel or "").strip()
@@ -513,13 +490,7 @@ def give_back(sel, why=None, path=bp.BOARD_PATH):
             "recoverable, so it has to be moved by hand" % sel)
 
     def go(doc):
-        lines = doc["lines"]
-        try:
-            row = find_flight(doc, rec["title"])
-            lines = bp.remove_row(lines, row["line"])
-        except BoardError:
-            pass                  # already gone: still put the decision back
-        lines = bp.add_needs_item(lines, rec["block"], rec.get("before"))
+        lines = bp.add_needs_item(doc["lines"], rec["block"], rec.get("before"))
         if why:
             b = why.strip()
             lines = bp.add_todo_bullet(lines, bp.parse("".join(lines)),
@@ -530,98 +501,6 @@ def give_back(sel, why=None, path=bp.BOARD_PATH):
     bp.edit(path, go)
     forget(rec["key"])
     return rec
-
-
-def unowned(path=bp.BOARD_PATH):
-    """The IN FLIGHT rows no stash on THIS host accounts for.
-
-    These are the rows `reconcile()` structurally cannot see, and there are more
-    of them than the design assumed: every row written before the stash existed,
-    every row an agent on the other machine started (the stash is machine-local
-    state and `board.md` is not), and every row somebody added by hand. Nothing
-    ages them out, so the section only ever grew — his words, reading it:
-    *"it just seems like that section doesnt update at all its still got old
-    stuff in it"*.
-
-    It is a REPORT and not a rule. A row unowned here may be perfectly alive on
-    the other machine, so nothing acts on this list automatically; `stall()`
-    below is the manual exit, and `boardctl reconcile` prints it so the next
-    thing to look at the board can see what has silted up.
-
-    It lists **every** table under `## IN FLIGHT`, the store's `**Queued**` one
-    included — `parse` has no case for a second table there and never has, so
-    `find_flight` and `land` see those rows too. A queued row is unowned by
-    design and is not something to stall; read the list, do not sweep it.
-    """
-    doc = bp.parse(bp.read(path))
-    owned = {_norm(r.get("title")) for r in _stashes()}
-    return [r for r in doc["flight"] if _norm(r["what"]) not in owned]
-
-
-def stall(sel, path=bp.BOARD_PATH):
-    """IN FLIGHT -> a bullet in WAITING ON YOU TO DO. The fourth way out.
-
-    `land` needs a commit, `back` needs the stash it cannot have, and until this
-    existed a row with no stash had no exit at all: the only way to remove one
-    was to hand-edit the store, which nothing here is allowed to do. So a row
-    that has outlived whatever was working on it sat there claiming to be
-    handled, forever.
-
-    **It moves the row, it does not delete it.** The three cells become one
-    bullet under WAITING ON YOU TO DO — restarting it is his call, and a row
-    quietly vanishing off the board would be the worse of the two failures. One
-    edit, so the row is never gone while the bullet is not yet there.
-
-    It REFUSES a row that a stash owns: that decision's own text is recoverable,
-    so `give_back` is the honest move for it and would put his question back
-    rather than flatten it into a to-do.
-    """
-    got = {}
-
-    def go(doc):
-        row = find_flight(doc, sel)
-        titles = {_norm(r.get("title")) for r in _stashes()}
-        if _norm(row["what"]) in titles or _stash_for(sel):
-            raise BoardError(
-                "'%s' is a decision this machine stashed - use `back` (which "
-                "returns your question intact) or `land`" % row["what"])
-        got.update(row)
-        # The cells AS THEY ARE SPELLED IN THE FILE. `row["what"]` has been
-        # through `text()` at ingest and putting that back would rewrite his
-        # em dashes and backticks into ASCII, one move at a time — the same
-        # trap `raw_title` exists for.
-        cells = bp._table_cells(doc["lines"][row["line"]].rstrip("\n"))
-        cells += [""] * (3 - len(cells))
-        what, where, notes = (c.strip() for c in cells[:3])
-        lines = bp.remove_row(doc["lines"], row["line"])
-        # INFORMATION: the row moved and nothing was lost. It is not a FAILED —
-        # nothing was attempted and dropped here; a row this host cannot account
-        # for may well have finished on the other machine.
-        # First line inside the summary word cap; the row's cells and the rest
-        # of the story go on the indented continuation line. The cells are
-        # interpolated, so they go through `oneline`: `**`, a tag word or a
-        # newline in one of them would be read as structure by the checks in
-        # `add_todo_bullet` and this move would be refused outright — and the
-        # headline gets a word cap too, since `check_short_summary` counts its
-        # words like any others.
-        # No `by=` fallback: this bullet is written by whichever program's tick
-        # noticed the idle row, and naming one that may not be the caller would
-        # be an invented attribution. Unstamped is the honest answer (`_BY`).
-        return bp.add_todo_bullet(lines, bp.parse("".join(lines)),
-                                  by=whoami()[1],
-                                  bullet="- INFORMATION: **%s** - idle in IN FLIGHT, "
-                                  "moved here.\n"
-                                  "    Nothing was working on it%s, so it is "
-                                  "here instead of claiming to be handled.%s"
-                                  % (bp.oneline(what, 120, words=6),
-                                     (" (%s)" % bp.oneline(where, 80, code=True))
-                                     if where else "",
-                                     (" " + bp.oneline(notes, 120))
-                                     if notes else ""))
-
-    if not bp.edit(path, go):
-        raise BoardError("nothing was written")
-    return got
 
 
 def ask(question, context=None, options=None, if_unanswered=None, asked_by=None,
@@ -857,13 +736,6 @@ def forget(key):
         return True
     except OSError:
         return False
-
-
-def forget_by_title(title):
-    low = _norm(title)
-    for r in _stashes():
-        if low and _norm(r.get("title")) == low:
-            forget(r["key"])
 
 
 #: How long a stash that records NO owner pid may sit before `reconcile()`
@@ -1354,6 +1226,6 @@ def landed_view(doc, repos=None, now=None, days=LANDED_DAYS, log=None,
 
 
 def status(path=bp.BOARD_PATH):
+    """What is asked of him, and what this host has taken off him and is on."""
     doc = bp.parse(bp.read(path))
-    owned = {_norm(r.get("title")): r for r in _stashes()}
-    return {"needs": doc["needs"], "flight": doc["flight"], "stashed": owned}
+    return {"needs": doc["needs"], "stashed": _stashes()}

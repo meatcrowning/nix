@@ -493,7 +493,7 @@ Item {
         }
 
         // ---- THIRD LINE ----
-        // name left, title, where right — the flight row's shape, so the two
+        // name left, title, where right — what the IN FLIGHT row used to be, so the two
         // live sections read the same way one under the other. The `where`
         // column drops widest-first as the window narrows (§9.1), at width 0.
         //

@@ -895,31 +895,25 @@ def add_needs_item(lines, block, before=None):
     return head + blk + tail
 
 
-FLIGHT_HEAD = ["| What | Where | Notes |\n", "|---|---|---|\n"]
 LANDED_HEAD = ["| Commit | What | When |\n", "|---|---|---|\n"]
 
-
-def flight_row(what, where="", notes=""):
-    return "| %s | %s | %s |\n" % (cell(what), cell(where), cell(notes))
-
-
-def add_flight_row(lines, row):
-    """Append a row to IN FLIGHT's own table (not the `Queued` one below it).
-
-    The table header is written if the section has no table yet — that is the
-    documented shape of this section, unlike a `##` heading, which is never
-    invented.
-    """
-    s, e = section_bounds(lines, "flight")
-    if s < 0:
-        raise BoardError("there is no `## IN FLIGHT` section to move it into")
-    a, b = _table_span(lines, s + 1, e)
-    if a < 0:
-        at = _content_end(lines, s, e)
-        new = (["\n"] if lines[at - 1:at] and lines[at - 1].strip() else []) \
-            + FLIGHT_HEAD + [row]
-        return lines[:at] + new + lines[at:]
-    return lines[:b] + [row] + lines[b:]
+#: **NOTHING WRITES `## IN FLIGHT` ANY MORE**, and this is the reader that is
+#: left [2026-07-30, his call]. The section was a third, hand-maintained view of
+#: what is running, and the other two took its job: the triangle draws live
+#: agents from their own processes and transcripts, and LANDED is computed from
+#: the commit log. What it kept doing was accumulating — `reconcile()` can only
+#: reclaim what THIS host stashed, and a row it does not own may be alive on the
+#: other machine, so rows that nothing here could remove built up until he read
+#: it and said it *"doesnt update at all its still got old stuff in it"*.
+#:
+#: The MECHANISM it existed for is untouched: `start()` still lifts an answered
+#: decision out of NEEDS YOU and stashes it verbatim, and `give_back()` still
+#: puts it back word for word when the agent dies. Only the row is gone.
+#:
+#: `parse()` still reads an `## IN FLIGHT` section into `doc["flight"]` if the
+#: store has one, and deliberately: `board.md` syncs to the other machine, which
+#: may be running the older app, and a store this parser could not read is a
+#: store neither program can write. Nothing draws it and nothing appends to it.
 
 
 def remove_row(lines, line_index):

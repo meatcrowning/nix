@@ -265,8 +265,8 @@ class Rig:
     def _unmove(self, before):
         """Undo the watcher's RELOCATION of the decision it fired on.
 
-        Since `boardmove.py`, firing moves the decision out of NEEDS YOU and
-        into IN FLIGHT, and a stub agent that "succeeds" leaves it there — so
+        Since `boardmove.py`, firing takes the decision out of NEEDS YOU and
+        into the stash, and a stub agent that "succeeds" leaves it there — so
         every later step of this script, which goes on editing that decision
         where he wrote it, found nothing to edit and the whole file below this
         point stopped being exercised. THIS harness is about the trigger, the
@@ -285,12 +285,6 @@ class Rig:
             a, b = bp.item_span(db["lines"], it)
             block = db["lines"][a:b]
             below = db["lines"][b].rstrip("\n") if b < len(db["lines"]) else ""
-            title = bp.raw_title(db["lines"], it)
-            doc = bp.parse("".join(lines))
-            for row in doc["flight"]:
-                if bm._norm(row["what"]) == bm._norm(title):
-                    lines = bp.remove_row(doc["lines"], row["line"])
-                    break
             lines = bp.add_needs_item(lines, block,
                                       below if below.startswith("###") else "")
             # ...in the RIG's state dir. `bm` reads XDG_STATE_HOME on every
@@ -632,8 +626,9 @@ def test_a_rebuild_kills_the_tick():
         held = subprocess.Popen([sys.executable, WATCHER],
                                 env=r.env(gate="open", spawn=sleeper),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        check("the tick fires and moves the decision into IN FLIGHT",
-              _wait_for(r.log, "moved decision 1 into IN FLIGHT"), open(r.log).read()[-300:])
+        check("the tick fires and takes the decision off NEEDS YOU",
+              _wait_for(r.log, "took decision 1 off NEEDS YOU"),
+              open(r.log).read()[-300:])
         stub = _agent_pids("first-question")
         check("...and the agent it spawned carries the decision's key",
               len(stub) == 1, str(stub))
@@ -647,7 +642,7 @@ def test_a_rebuild_kills_the_tick():
         log = open(r.log).read()
         check("the next tick does NOT hand the decision back",
               "returned decision" not in log, log[-300:])
-        check("...it is still in IN FLIGHT, not back in front of him",
+        check("...it is still off the board, not back in front of him",
               "first-question" not in needs(), str(needs()))
         check("...and no second agent was fired", r.fires() == ["first-question"],
               str(r.fires()))
@@ -672,7 +667,7 @@ def test_a_rebuild_kills_the_tick():
                                 env=r.env(gate="open", spawn=sleeper),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         check("a second decision fires its own agent",
-              _wait_for(r.log, "moved decision 2 into IN FLIGHT"),
+              _wait_for(r.log, "took decision 2 off NEEDS YOU"),
               open(r.log).read()[-300:])
         stub = _agent_pids("second-question")
         held.terminate()
@@ -708,7 +703,7 @@ def test_a_rebuild_kills_the_tick():
                                 env=r.env(gate="open", spawn=sleeper),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         check("a third decision fires its own agent",
-              _wait_for(r.log, "moved decision 3 into IN FLIGHT"),
+              _wait_for(r.log, "took decision 3 off NEEDS YOU"),
               open(r.log).read()[-300:])
         held.terminate()
         held.wait(timeout=30)

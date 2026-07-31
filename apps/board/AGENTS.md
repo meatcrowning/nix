@@ -59,13 +59,12 @@ swallow whole for one change.
 
 ### [`guide/store.md`](guide/store.md) — the STORE — `docs/board.md` and how anything writes to it
 
-511 lines. Its sections:
+513 lines. Its sections:
 
   - It is a GUI over ONE file, and that file is not this app's to redesign
     - The store's shape
   - NEEDS YOU              decisions, `### <n>. <title>` each
   - WAITING ON YOU TO DO   `- <TAG>: ` bullets. Actions, not decisions, each
-  - IN FLIGHT              a | table |: what / where / notes
   - LANDED                 `### <date>` groups of | commit | what | when |,
     - Every WAITING bullet says WHAT IT IS in its first word
     - ONE BOARD ITEM PER ASK
@@ -79,7 +78,7 @@ swallow whole for one change.
 
 ### [`guide/orchestrator.md`](guide/orchestrator.md) — the ORCHESTRATOR half (`boardwork.py`) — spawning, the cap, the handoff
 
-599 lines. Its sections:
+633 lines. Its sections:
 
 - ...and the orchestrator's half (`boardwork.py`)
   - The box at the top: this window STARTS things now
@@ -119,7 +118,7 @@ swallow whole for one change.
 
 ### [`guide/drawing.md`](guide/drawing.md) — what it DRAWS, and why it looks like that
 
-351 lines. Its sections:
+352 lines. Its sections:
 
   - Never clobber him — four defences
   - What it draws, and why it looks like that
@@ -176,9 +175,9 @@ new and are the ones to read first if the fan-out misbehaves:
   notes naming one id leave both, an id-less note falls back to the name, and
   board-watch's dead-worker note is checked (as source) to pass the id.
 
-- **LANDED** (`test_landed`) — a commit records with NO IN FLIGHT row (the bug
-  that made the section look frozen), the time comes from git rather than from
-  now, a hash that resolves nowhere is simply timeless, a two-cell row still
+- **LANDED** (`test_landed`) — a commit records with no selector at all (the
+  bug that made the section look frozen), the time comes from git rather than
+  from now, a hash that resolves nowhere is simply timeless, a two-cell row still
   parses, and the header widens exactly once when an old group gains its first
   timed row.
 
@@ -212,8 +211,9 @@ down the queue with his sentence leading and the chore quoted after it, and
 clearing the answered bullet off the list — restorably, against a stale line
 index, and removing nothing when the chore has already gone), **the moves**
 (start/land/back/note/reconcile: every
-decision's start -> back is byte-identical, the row lands in IN FLIGHT's own
-table and not the `Queued` one below it, an unanswered decision is refused, a
+decision's start -> back is byte-identical, a start writes nothing in the
+decision's place and an old `## IN FLIGHT` section is left byte-identical
+through a whole start/land cycle, an unanswered decision is refused, a
 dead owner is reclaimed, and an edit computed from stale bytes is retried rather
 than landed), **the agents** (a live agent, a dead one and a hand-moved one are
 told apart by `boardmove`'s own liveness rule; and every path the box takes is a

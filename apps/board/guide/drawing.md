@@ -49,13 +49,14 @@ The store is edited by agents and by a sync timer **while this window is open**.
 
 ## What it draws, and why it looks like that
 
-One page, four sections — **what needs you, who is running it, what happened,
-what is moving** — inside **one** `KineticFlickable`. IN FLIGHT sits at the
-BOTTOM, below LANDED, at his request (*"for now"*, 2026-07-29); it used to sit
-second. **That is a DISPLAY order and nothing else** — `board.md`'s own section
-order and `boardparse.SECTIONS` are untouched, and a reorder here has to carry
-three things with it or the titlebar lies: the `section` position readout (which
-asks bottom-up and takes the first match), the `tbButtons` cell order, and
+One page, three sections — **what needs you, who is running it, what
+happened** — inside **one** `KineticFlickable`. There were four until
+2026-07-30: IN FLIGHT sat at the BOTTOM, below LANDED, at his request
+(*"for now"*, 2026-07-29), and the section is gone. **The order here is a
+DISPLAY order and nothing else** — `board.md`'s own section order and
+`boardparse.SECTIONS` are untouched, and a reorder has to carry three things
+with it or the titlebar lies: the `section` position readout (which asks
+bottom-up and takes the first match), the `tbButtons` cell order, and
 `jump()`. §9.2
 forbids nested scroll regions, so every section sizes to its whole content and a
 wheel notch means the same thing wherever the cursor is. `VScroll` is the bar and

@@ -723,9 +723,9 @@ is right after the push:
        python3 apps/board/tools/boardctl.py land --commit <hash> --what \
 '<one line, imperative, like the commit subject>'
 
-   That is what the LANDED section is: what actually reached his machine. You \
-have no IN FLIGHT row and you do not need one — `land` with no selector simply \
-records the commit, and reads its time out of git itself.
+   That is what the LANDED section is: what actually reached his machine. It \
+takes no selector — `land` simply records the commit, and reads its time out of \
+git itself.
 
    Then, commits or none, one line saying where it ended up:
 

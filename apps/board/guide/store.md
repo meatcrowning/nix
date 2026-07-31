@@ -61,7 +61,6 @@ Consequences that are rules, not preferences:
 ## WAITING ON YOU TO DO   `- <TAG>: ` bullets. Actions, not decisions, each
                           followed by its own `<!-- by: -->` then
                           `<!-- placed: ... -->`, in that order
-## IN FLIGHT              a | table |: what / where / notes
 ## LANDED                 `### <date>` groups of | commit | what | when |,
                           plus prose. `when` is the commit's own local time in
                           12-hour form and is OPTIONAL in both directions
@@ -444,8 +443,7 @@ So, as binding as the parse:
   fold, never abbreviated. That sentence is what makes walking away safe, and it
   comes from the file rather than from this app's judgement.
 - **Nothing leaves NEEDS YOU because board says so.** The store's own rule: an
-  agent may add items and move things between IN FLIGHT and LANDED, but only he
-  resolves a decision. board ticks boxes and writes his sentence; it never
+  agent may add items and record what landed, but only he resolves a decision. board ticks boxes and writes his sentence; it never
   deletes an item. An item leaves NEEDS YOU only once **he** has answered it and
   work has actually started — see *Answering here now STARTS something*, below.
   That is not this app doing it: `boardmove.py` is, on behalf of whoever is doing
@@ -498,13 +496,17 @@ for anything in this app that writes:
 ### ...and the item MOVES when it does
 
 An answered decision that stays in NEEDS YOU is the board asking him for
-something he already gave, so as work starts the decision is **relocated into IN
-FLIGHT**, and to LANDED when it lands. `boardmove.py` is the whole mechanism and
-its docstring is the authoritative statement; the short version:
+something he already gave, so as work starts the decision is **taken off the
+list** — lifted out verbatim into a stash outside the store, with nothing
+written in its place — and the commit reaches LANDED when it lands. (There was
+an `## IN FLIGHT` section carrying a row for it until 2026-07-30; see
+`boardparse.py`'s note for why it went and what took its three jobs.)
+`boardmove.py` is the whole mechanism and its docstring is the authoritative
+statement; the short version:
 
 ```bash
-apps/board/tools/boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> IN FLIGHT
+apps/board/tools/boardctl.py start 4 --where 'apps/player/**'   # off NEEDS YOU
+apps/board/tools/boardctl.py land --commit a3c2aac --what 'player: dim the art'
 apps/board/tools/boardctl.py land 4 --commit a3c2aac --what 'player: dim the art'
-apps/board/tools/boardctl.py land --commit a3c2aac --what 'board: no row needed'
 apps/board/tools/boardctl.py back 4 --why 'blocked on the FOCUS signal'
 apps/board/tools/boardctl.py note '**Relaunch `player`** - live source.'

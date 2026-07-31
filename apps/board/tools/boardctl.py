@@ -6,11 +6,10 @@ the only ways to move an item on it were the GUI, which deliberately never moves
 anything, and a text editor, which is how half-written rows and reflowed tables
 happen. This is the third way, and it is the one an agent should use:
 
-    boardctl.py start 4 --where 'apps/player/**'   # NEEDS YOU -> IN FLIGHT
+    boardctl.py start 4 --where 'apps/player/**'   # off NEEDS YOU, into the stash
+    boardctl.py land --commit a3c2aac --what 'player: dim the art'
     boardctl.py land 'cover art' --commit a3c2aac --what 'player: dim the art'
-    boardctl.py land --commit a3c2aac --what 'player: dim the art'   # no row
     boardctl.py back 'cover art' --why 'FAILED: **cover art** - blocked on FOCUS'
-    boardctl.py stall 'board app'                  # a row nothing owns -> to-do
     boardctl.py note 'PARTIAL: **Relaunch `player`** - live source, no hot reload.'
     boardctl.py note 'COMPLETION: **the fade** - landed.' \\
                      'PARTIAL: **the tooltip** - needs a rebuild.'   # TWO items
@@ -73,17 +72,16 @@ SELECTORS are forgiving on purpose, because the caller is usually a language
 model holding a decision's title and not its slug: a number (`4`), the slug, or
 any unambiguous part of the title. Ambiguity is an error, never a guess.
 
-**`land` does not need an IN FLIGHT row.** A decision agent has one; a worker
-dispatched out of the box never did, so for a day the fan-out's commits reached
-LANDED never — `land` refused, and `note` was all a worker could reach. Every
-agent that commits something records it here, with or without a row.
+**`land` needs no selector at all.** It once required an IN FLIGHT row, which a
+decision agent had and a worker dispatched out of the box never did, so for a
+day the fan-out's commits reached LANDED never. That section is gone; `--what`
+carries the sentence, and a selector only names the STASH to close out. Every
+agent that commits something records it here.
 
 WHAT IT WILL NOT DO. It does not resolve a decision — `start` refuses an item he
 has not answered (`--force` if you genuinely mean to, and say why on the board).
-It does not delete anything: `land` moves a row to LANDED, `back` returns the
-whole decision verbatim from the stash, and `stall` — the exit for a row no
-stash on this host owns, which is most of what IN FLIGHT accumulates — moves the
-row's three cells into WAITING ON YOU TO DO rather than dropping them. And it
+It does not delete anything: `start` takes the decision off NEEDS YOU only after
+stashing it verbatim, and `back` puts that same text back. And it
 writes no ages, elapsed times or counts anywhere in the file — a LANDED row's
 `when` is the commit's own time, a fact about the past and not a clock running
 against him; see `boardmove.py`.
@@ -108,22 +106,21 @@ import boardwork as bw                                             # noqa: E402
 def cmd_start(a):
     rec = bm.start(a.selector, where=a.where, notes=a.notes, pid=a.pid,
                    path=a.board, force=a.force)
-    print("in flight: " + rec["row"].strip())
-    print("stashed:   " + bm.stash_file(rec["key"]))
+    print("taken off NEEDS YOU: " + rec["title"])
+    print("stashed:             " + bm.stash_file(rec["key"]))
     return 0
 
 
 def cmd_land(a):
-    row = bm.land(a.selector, a.commit, what=a.what, date=a.date, when=a.when,
+    rec = bm.land(a.selector, a.commit, what=a.what, date=a.date, when=a.when,
                   path=a.board)
-    what = a.what or row.get("what") or a.commit
-    bw.mark_reported(what=what)
+    bw.mark_reported(what=a.what)
     when = bm.commit_time(a.commit) if a.when is None else a.when
-    print("landed: %s (%s%s)" % (what, a.commit, ", " + when if when else ""))
-    if not row:
-        # No IN FLIGHT row was moved — the commit was simply recorded. Say so,
-        # rather than letting it read as though something moved sections.
-        print("recorded in LANDED; nothing was moved out of IN FLIGHT")
+    print("landed: %s (%s%s)" % (a.what, a.commit, ", " + when if when else ""))
+    if rec:
+        # A decision agent closing its own item out: say that the question is
+        # now finished with, since nothing on the board says so by itself.
+        print("closed out: " + rec.get("title", a.selector))
     return 0
 
 
@@ -190,27 +187,12 @@ def cmd_note(a):
     return 1
 
 
-def cmd_stall(a):
-    row = bm.stall(a.selector, path=a.board)
-    print("out of IN FLIGHT, into WAITING ON YOU TO DO: " + row["what"])
-    return 0
-
-
 def cmd_reconcile(a):
     moved = bm.reconcile(path=a.board)
     for rec in moved:
         print("returned to NEEDS YOU (its agent is gone): " + rec["title"])
     if not moved:
         print("nothing stranded")
-    # ...and the rows reconcile structurally cannot reach. Reported, never
-    # acted on: this host has no way to tell a row the OTHER machine is working
-    # from one nothing is. Saying nothing is how the section silted up.
-    rest = bm.unowned(path=a.board)
-    if rest:
-        print("%d row(s) no stash on this host owns - `boardctl.py stall "
-              "<row>` moves one to WAITING ON YOU TO DO:" % len(rest))
-        for r in rest:
-            print("  " + r["what"])
     return 0
 
 
@@ -220,11 +202,9 @@ def cmd_list(a):
     for it in st["needs"]:
         print("  %-3s %-58s %s" % (it["num"] or "-", it["title"][:58],
                                    "answered" if it["answered"] else ""))
-    print("IN FLIGHT")
-    for r in st["flight"]:
-        owned = st["stashed"].get(bm._norm(r["what"]))
-        print("  %-62s %s%s" % (r["what"][:62], r["where"],
-                                "  [returnable]" if owned else ""))
+    print("TAKEN OFF IT, ON THIS HOST")
+    for r in st["stashed"]:
+        print("  %-62s %s" % (str(r.get("title"))[:62], r.get("where") or ""))
     return 0
 
 
@@ -467,7 +447,8 @@ def main(argv=None):
     p.add_argument("--board", default=bp.BOARD_PATH)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("start", help="move an answered decision into IN FLIGHT")
+    s = sub.add_parser("start", help="take an answered decision off NEEDS YOU "
+                                     "and stash it while it is worked")
     s.add_argument("selector")
     s.add_argument("--where", default="agent", help="the `where` column: the code it touches")
     s.add_argument("--notes", default=None,
@@ -478,21 +459,20 @@ def main(argv=None):
                    help="start an UNANSWERED decision (say why on the board)")
     s.set_defaults(fn=cmd_start)
 
-    s = sub.add_parser("land", help="record a commit in LANDED (and move its "
-                                    "IN FLIGHT row, if it has one)")
+    s = sub.add_parser("land", help="record a commit in LANDED")
     s.add_argument("selector", nargs="?", default="",
-                   help="an IN FLIGHT row to move; omit if you have none")
+                   help="a decision this host stashed, to close out; omit if "
+                        "you have none, which a worker never does")
     s.add_argument("--commit", required=True)
-    s.add_argument("--what", default=None,
-                   help="one line; defaults to the row's own, and is REQUIRED "
-                        "when there is no row")
+    s.add_argument("--what", required=True,
+                   help="one line, imperative, like the commit subject")
     s.add_argument("--date", default=None, help="YYYY-MM-DD; defaults to today")
     s.add_argument("--when", default=None,
                    help="the time, 12-hour; defaults to the commit's own "
                         "committer date, read from git")
     s.set_defaults(fn=cmd_land)
 
-    s = sub.add_parser("back", help="return a stranded IN FLIGHT item to NEEDS YOU")
+    s = sub.add_parser("back", help="put a stashed decision back in NEEDS YOU")
     s.add_argument("selector")
     s.add_argument("--why", default=None,
                    help="a bullet for WAITING ON YOU TO DO; same tag rule as "
@@ -511,11 +491,6 @@ def main(argv=None):
                                         for t in bp.TODO_TAGS))
     s.add_argument("text", nargs="+")
     s.set_defaults(fn=cmd_note)
-
-    s = sub.add_parser("stall", help="an IN FLIGHT row nothing owns -> one "
-                                     "bullet in WAITING ON YOU TO DO")
-    s.add_argument("selector")
-    s.set_defaults(fn=cmd_stall)
 
     s = sub.add_parser("reconcile", help="return every item whose agent has died")
     s.set_defaults(fn=cmd_reconcile)

@@ -27,12 +27,16 @@ Rules that fall out of it, all of them load-bearing:
   stashed under `~/.local/state/board/inflight/`, so `back` restores them
   byte-for-byte, in their original position, and a failed agent leaves no trace
   in the store at all. `tools/board-test.py` asserts that for every item.
-- **The moved row carries his answer and nothing else.** The ticked option, his
-  sentence, or both — it is the one thing in the item he wrote, and LANDED will
-  not carry it. **No start time, no age, no count**: the no-pressure requirement
-  above applies to IN FLIGHT exactly as it does to NEEDS YOU, and a start time is
-  an elapsed time the moment he reads it. The stash records one because
-  reclaiming a dead agent's item is machine business; it never reaches the file.
+- **NOTHING IS WRITTEN IN ITS PLACE** [2026-07-30, his call]. There was an
+  `## IN FLIGHT` section holding a `| what | where | notes |` row for every
+  started decision, and it is gone: the triangle already draws what is running
+  from the agents' own processes, LANDED is computed from git, and the row's
+  third job — his answer read back to him — is on the stash, where the hand-back
+  reads it. What the section actually did in practice was accumulate; the
+  bullets below on stranding are what is left of it. Nothing about that changes
+  the no-pressure rule: there is still **no start time, no age, no count**
+  anywhere he can see. The stash records one because reclaiming a dead agent's
+  item is machine business; it never reaches the file.
 - **LANDED IS READ FROM THE COMMIT LOG, every time it is drawn.**
   `boardmove.landed_view()` derives the section from `git log`: the file's rows
   supply the WORDING and git supplies what exists. Nothing sweeps, nothing
@@ -100,15 +104,17 @@ Rules that fall out of it, all of them load-bearing:
       `tools/board-watch-test.py` → `test_landed_needs_no_tick` asserts the
       inverse of what it used to: a tick appends nothing, and the commit is in
       the section anyway.
-- **`land` does not need an IN FLIGHT row, and requiring one was a real bug.**
-  Only a decision agent has a row (`start()` made it); a WORKER dispatched out
-  of the box never did, so every commit the fan-out produced was unrecordable —
-  `land` refused, `note` was all a worker could reach, and LANDED sat at
-  2026-07-28 while a run of board commits went in over the next day. He noticed:
-  *"are you sure the landed section functions? it's showing what look like older
-  commits"*. So a selector is optional: one that matches a row moves it, and none
-  at all simply records the commit (`--what` is then required, there being no row
-  to take it from). The worker prompt says to call it once per commit.
+- **`land` needs no selector, and requiring one was a real bug.** It used to
+  need an IN FLIGHT row, which only a decision agent had (`start()` made it); a
+  WORKER dispatched out of the box never did, so every commit the fan-out
+  produced was unrecordable — `land` refused, `note` was all a worker could
+  reach, and LANDED sat at 2026-07-28 while a run of board commits went in over
+  the next day. He noticed: *"are you sure the landed section functions? it's
+  showing what look like older commits"*. `--what` carries the sentence now,
+  always, and a selector only names the STASH to close out — a decision agent
+  finishing its own item. One that matches nothing is not an error, which is
+  the whole shape of that bug refusing to come back. The worker prompt says to
+  call it once per commit.
 - **A LANDED row carries WHEN its commit happened** — `| commit | what | when |`,
   the commit's own committer date in local time, 12-hour (`3:42 pm`), read from
   git by `boardmove.commit_time()` and never from when the row was written. That
@@ -121,12 +127,13 @@ Rules that fall out of it, all of them load-bearing:
   third. A group that gains its first timed row gains the `When` header in the
   same edit — a markdown row with more cells than its header drops the extras in
   every renderer, and this file is read in `reader` and on GitHub too.
-- **An item cannot be stranded.** Four ways back out of IN FLIGHT: the agent
-  lands it, the watcher hands it back when the agent exits badly,
+- **An item cannot be stranded.** Three ways back onto the board: the agent
+  lands it, the watcher hands it back when the agent exits badly, or
   `boardmove.reconcile()` — run at the top of every board-watch tick — sees the
-  owning pid is gone and hands it back itself, or `boardctl stall <row>` moves a
-  row nothing owns into WAITING ON YOU TO DO. The first three are worst-case one
-  timer interval. A hand-started item (`boardctl start` with no `--pid`) is not
+  owning pid is gone and hands it back itself. Worst case, one timer interval.
+  (There was a fourth, `boardctl stall <row>`, and it existed only because the
+  IN FLIGHT rows nothing here owned had no other exit. It went with them.)
+  A hand-started item (`boardctl start` with no `--pid`) is not
   reclaimed on liveness — nothing can tell whether that session is still
   thinking — **but it is reclaimed on AGE**, after `boardmove.UNOWNED_STRAND_S`
   (4h, `BOARD_UNOWNED_STRAND`). Without that bound "not ours to reclaim" meant
@@ -142,20 +149,18 @@ Rules that fall out of it, all of them load-bearing:
   everywhere else. Hours, not minutes, because what is being waited on is a
   person or a session at a terminal: it sits well clear of both board-watch's
   45-minute agent cap and `ESCALATE_AFTER_S`.
-- **The first three are keyed on the STASH, and the stash is machine-local.**
-  `board.md` syncs both ways; `~/.local/state/board/inflight/` does not. So from
-  either machine, a row the *other* one started is indistinguishable from a row
-  nobody started — and neither is a row written before the stash existed, or one
-  added by hand. `reconcile()` covers what this host started and nothing else,
-  which is why IN FLIGHT could only ever grow: reading it on 2026-07-29 he said
-  it *"doesnt update at all its still got old stuff in it"*, and four of its
-  five rows were ones no mechanism here could remove. `boardmove.unowned()`
-  reports them (`boardctl reconcile` prints the list after its own work) and
-  `stall()` is their exit. **Neither is automatic and neither should become
-  one** — a row this host does not own may be perfectly alive on the other.
-  `stall` MOVES the row's three cells into WAITING ON YOU TO DO rather than
-  dropping them, and refuses a row whose decision is stashed here, because
-  `back` would put his actual question back instead of flattening it.
+- **All three are keyed on the STASH, and the stash is machine-local — which is
+  why the section had to go.** `board.md` syncs both ways;
+  `~/.local/state/board/inflight/` does not. So from either machine, a row the
+  *other* one started was indistinguishable from a row nobody started — and so
+  was a row written before the stash existed, or one added by hand. `reconcile()`
+  covers what this host started and nothing else, so IN FLIGHT could only ever
+  grow: reading it on 2026-07-29 he said it *"doesnt update at all its still got
+  old stuff in it"*, and four of its five rows were ones no mechanism here could
+  remove. Nothing accumulates now, because nothing is written — and a stash the
+  other machine owns is simply not this host's business, which it always was.
+  **Do not reintroduce a synced record of what is running.** The two hosts
+  cannot reconcile one, and that is the whole finding.
 - **A failed decision does NOT re-fire.** Its answer is already recorded in the
   watcher's state, so it comes back to NEEDS YOU and sits there with the bullet
   saying what happened. Re-answering it is what starts it again — deliberately,

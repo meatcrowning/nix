@@ -54,7 +54,6 @@ Window {
     // rule, the same reason the glyph map lives at the parse). `todo` stays the
     // flat list everything else — removal, undo, reply — still works from.
     readonly property var todoGroups: doc && doc.todoGroups ? doc.todoGroups : []
-    readonly property var flight: doc && doc.flight ? doc.flight : []
     readonly property var landed: doc && doc.landed ? doc.landed : []
     readonly property var intro: doc && doc.intro ? doc.intro : ({})
 
@@ -382,7 +381,8 @@ Window {
     // BOTTOM-UP, and it has to be: the first test that matches wins, so the
     // sections are asked about in reverse page order. It follows the page, and
     // the page order changed — IN FLIGHT sits below LANDED now, at his request
-    // ("for now"), so `flight` is asked FIRST here and `needs` is the fallback.
+    // ("for now"). IN FLIGHT was the bottom-most and is gone [2026-07-30], so
+    // LANDED is asked first and `needs` is still the fallback.
     //
     // `y > 0` on each test is NOT redundant: before the Column has laid out,
     // every section sits at y 0, so `contentY (0) >= 0 - 4` was TRUE for the
@@ -392,7 +392,6 @@ Window {
     // one is a visible flash of the wrong lit cell. Only `needs` can honestly
     // be at y 0, and it is the fallback anyway.
     readonly property string section: {
-        if (secFlight.visible && secFlight.y > 0 && scroller.contentY >= secFlight.y - 4) return "flight";
         if (secLanded.visible && secLanded.y > 0 && scroller.contentY >= secLanded.y - 4) return "landed";
         if (secAgents.visible && secAgents.y > 0 && scroller.contentY >= secAgents.y - 4) return "agents";
         // The `ag` cell covers SUMMONER too: they are one region of the page —
@@ -412,8 +411,6 @@ Window {
           tip: "the triangle - who is running now" },
         { id: "landed", label: "ld", state: section === "landed" ? 1 : 0,
           tip: "what landed" },
-        { id: "flight", label: "if", state: section === "flight" ? 1 : 0,
-          tip: "what is in flight" },
         "-",
         { id: "reader", label: "md", state: 0, tip: "open board.md in reader" },
         // Its own section, under `md`: a toggle is not a jump and not a launch.
@@ -467,7 +464,6 @@ Window {
         function onClicked(id) {
             switch (id) {
             case "needs":  win.jump(secNeeds);  break;
-            case "flight": win.jump(secFlight); break;
             case "agents": win.jump(summonerHead.visible ? summonerHead
                                                          : secAgents); break;
             case "landed": win.jump(secLanded); break;
@@ -1773,121 +1769,6 @@ Window {
                                               + lprose.modelData.text
                                     }
                                 }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Item { width: 1; height: 18 }
-
-            // ================================================ what is moving
-            SectionHead {
-                width: page.width
-                label: "in flight"
-                collapsed: win.isCollapsed("flight")
-                fgAccent: win.fgAccent
-                fgDim: win.fgDim
-                onToggled: win.toggleCollapsed("flight")
-            }
-
-            Item {
-                id: secFlight
-                width: page.width
-                visible: !win.isCollapsed("flight")
-                implicitHeight: visible ? flightCol.implicitHeight : 0
-                height: implicitHeight
-
-                Column {
-                    id: flightCol
-                    width: parent.width
-
-                    Repeater {
-                        model: win.intro.flight ? win.intro.flight : []
-                        delegate: Para {
-                            required property var modelData
-                            width: flightCol.width
-                            color: win.fgDim
-                            text: modelData.text
-                            bottomPadding: 8
-                        }
-                    }
-
-                    PixelText {
-                        width: flightCol.width
-                        visible: win.flight.length === 0
-                        height: visible ? implicitHeight : 0
-                        color: Theme.dim
-                        text: "nothing running"
-                    }
-
-                    // A row is one line: what on the left, where on the right in
-                    // the dim tone, with the note under it. The `where` column
-                    // drops widest-first as the window narrows (§9.1) — at
-                    // width 0, so what is beside it keeps its anchor.
-                    Repeater {
-                        model: win.flight
-                        delegate: Item {
-                            id: frow
-                            required property var modelData
-                            width: flightCol.width
-                            implicitHeight: whatT.implicitHeight
-                                            + (noteT.visible ? noteT.implicitHeight : 0) + 4
-                            height: implicitHeight
-
-                            readonly property bool wide: width > 56 * win.cellW
-                            // Sized from the CHARACTER COUNT, not from the
-                            // item's own implicitWidth: `width: min(implicitWidth,
-                            // ...)` on an elided Text is self-referential and
-                            // resolves to zero — measured, the column simply
-                            // vanished. The font is monospace, so a count is
-                            // exact anyway (§2.7).
-                            readonly property real whereW: wide
-                                ? Math.min(modelData.where.length * win.cellW + 2,
-                                           frow.width * 0.4)
-                                : 0
-
-                            Rectangle {
-                                anchors.fill: parent
-                                color: fma.containsMouse ? Theme.highlight : "transparent"
-                            }
-                            PixelText {
-                                id: whereT
-                                anchors.right: parent.right
-                                y: 0
-                                width: frow.whereW
-                                horizontalAlignment: Text.AlignRight
-                                elide: Text.ElideLeft
-                                color: win.fgDim
-                                text: frow.modelData.where
-                            }
-                            Para {
-                                id: whatT
-                                x: 0
-                                y: 0
-                                width: parent.width - whereT.width - (whereT.width > 0 ? 8 : 0)
-                                color: win.fgText
-                                text: frow.modelData.what
-                            }
-                            Para {
-                                id: noteT
-                                x: 12
-                                y: whatT.implicitHeight
-                                width: parent.width - x
-                                visible: frow.modelData.notes !== ""
-                                color: win.fgDim
-                                text: frow.modelData.notes
-                            }
-                            MouseArea {
-                                id: fma
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.RightButton
-                                onClicked: (m) => {
-                                    var p = mapToItem(null, m.x, m.y);
-                                    win.rowMenu(frow.modelData.what + "  "
-                                                + frow.modelData.where, p.x, p.y);
                                 }
                             }
                         }
