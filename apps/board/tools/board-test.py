@@ -5733,6 +5733,82 @@ def test_undo_window(app, tmp):
     shot(win, "07-pending-orders")
 
 
+def test_card_output(tmp):
+    """What the card's drawer tails, and in which order it prefers them.
+
+    The `.log` is written once, at exit, so preferring it is what made the
+    drawer read "nothing logged yet" for the whole of every run. The transcript
+    is appended to as the agent works and is therefore the live source; the log
+    is the fallback for after it, when there is no more transcript.
+    """
+    import main as brd
+    import boardagents as ba
+    import boardwork as bw
+    print("\n=== the card drawer shows real live output ===")
+    os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
+    agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling: one method
+
+    ba.register("w-live", "T", 1, kind="worker", where="apps/x/**",
+                session="ses-live")
+    d = os.path.join(tmp, "transcripts", "-proj")
+    os.makedirs(d, exist_ok=True)
+    tsc = os.path.join(d, "ses-live.jsonl")
+
+    def say(*parts):
+        with open(tsc, "a") as f:
+            f.write(json.dumps({"type": "assistant",
+                                "message": {"role": "assistant",
+                                            "content": list(parts)}}) + "\n")
+
+    # An empty log, which is what a running worker's really looks like.
+    open(bw._log_path("w-live"), "w").close()
+    check("no transcript and an empty log is honestly nothing",
+          agents.output("w-live") == [], agents.output("w-live"))
+
+    say({"type": "text", "text": "looking at the seed drift"})
+    say({"type": "tool_use", "name": "Edit", "input": {"file_path": "/a/b/Main.qml"}})
+    check("a running agent's own words and tools ARE the drawer, log or no log",
+          agents.output("w-live") == ["looking at the seed drift",
+                                      "editing Main.qml"],
+          agents.output("w-live"))
+
+    # ...and it keeps up: the next poll sees what was appended since.
+    say({"type": "tool_use", "name": "Bash",
+         "input": {"command": "git push", "description": "Push to main"}})
+    check("...and a later poll shows what it did next, unreloaded",
+          agents.output("w-live")[-1] == "push to main", agents.output("w-live"))
+
+    # Only the last few, however long it ran.
+    for i in range(8):
+        say({"type": "text", "text": "line %d" % i})
+    check("...trimmed to the couple of lines the drawer can carry",
+          agents.output("w-live") == ["line 5", "line 6", "line 7"],
+          agents.output("w-live"))
+
+    # A tool RESULT is a whole file's contents in somebody else's voice, and a
+    # user turn is his own prompt read back at him. Neither is the agent.
+    with open(tsc, "a") as f:
+        f.write(json.dumps({"type": "user", "message": {
+            "role": "user", "content": [{"type": "text", "text": "HIS PROMPT"}]}}) + "\n")
+    check("...and it is the AGENT's voice only, not his prompt read back",
+          "HIS PROMPT" not in agents.output("w-live"), agents.output("w-live"))
+
+    # After the run: no transcript at all, and the log finally has the output.
+    ba.register("w-done", "T", 1, kind="worker", where="apps/x/**",
+                session="ses-gone")
+    with open(bw._log_path("w-done"), "w") as f:
+        f.write("\x1b[32mfinished\x1b[0m\nlast word\n")
+    check("a finished worker with no transcript falls back to its log",
+          agents.output("w-done") == ["finished", "last word"],
+          agents.output("w-done"))
+    # The registrations are in the ONE shared state dir every later test reads,
+    # and two strangers in the agents list is enough to fail the window's own
+    # "with nothing running" checks. Take them back out.
+    ba.unregister("w-live")
+    ba.unregister("w-done")
+    del os.environ["BOARD_TRANSCRIPTS"]
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -5783,6 +5859,8 @@ def main():
         test_usage(os.path.join(tmp, "use"))
         os.makedirs(os.path.join(tmp, "usf"))
         test_usage_fetch(os.path.join(tmp, "usf"))
+        os.makedirs(os.path.join(tmp, "out"))
+        test_card_output(os.path.join(tmp, "out"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
         test_real_store()
