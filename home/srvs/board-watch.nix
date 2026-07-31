@@ -174,6 +174,19 @@
       #   ~/.nix-profile/bin              standalone home-manager (book)
       #   /etc/profiles/per-user/lam/bin  home-manager as a NixOS module (top)
       #   /run/current-system/sw/bin      NixOS system packages (top)
+      #   /run/wrappers/bin               NixOS setuid wrappers (top) — and it
+      #                                   MUST come before the two store paths
+      #                                   below. Without it `sudo` resolves to
+      #                                   /run/current-system/sw/bin/sudo, the
+      #                                   plain store binary, which is not
+      #                                   setuid and refuses to run at all
+      #                                   ("must be owned by uid 0 and have the
+      #                                   setuid bit set"). Every worker is told
+      #                                   to end its change with `sudo
+      #                                   rebuild-top` and none of them could;
+      #                                   hit on top 2026-07-30. Absent on book,
+      #                                   where a missing PATH entry costs
+      #                                   nothing.
       #   /usr/bin:/bin                   Fedora (book) — and where book's
       #                                   systemctl/loginctl/systemd-run come
       #                                   from, deliberately: they must match
@@ -191,7 +204,7 @@
           pkgs.git
           pkgs.gh
           pkgs.nix
-        ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+        ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:/run/wrappers/bin:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
       ];
       ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-watch.py";
       # Outer guard only. The script caps the agent itself at 45 minutes so the
