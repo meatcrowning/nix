@@ -400,6 +400,22 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   whichever guide owns them (`claude-merge-test.sh`, `hotswap-test.sh`,
   `fan-harness.sh`, `media-lyrics-probe.sh`, …) — `ls tools/` rather than
   assume this list is complete.
+  `boot-verify.sh` is **opt-in and not part of any rebuild**: it answers "will
+  this configuration boot?" as far as anything short of a reboot can — static
+  checks on the built toplevel (initrd modules for the nvme/ext4 root, NVIDIA
+  built against the new kernel, ESP headroom) and, with `--vm`, a headless
+  QEMU boot to `multi-user.target`. What it can and cannot prove, and the
+  known-good ring below, are in `docs/agents/boot-safety.md`.
+- **Known-good boot entries (`top` only).** `sys/boot-known-good.nix` keeps the
+  last three generations *observed to boot* — a timer 3 minutes into boot
+  records `/run/booted-system`, a permanent GC root under
+  `/nix/var/nix/gcroots/known-good-boots/` puts it beyond both the root and the
+  user `nix-collect-garbage`, and the recorder writes its own ESP copies and
+  `known-good-*.conf` loader entries, which sit below the normal generation
+  list as their own section and which the systemd-boot installer never
+  garbage-collects. `known-good-boots list` to inspect; harness
+  `tools/boot-known-good-test.sh`; full design in `docs/agents/boot-safety.md`.
+  NixOS-only, so `book` does not get it.
 - `sounds/` — **git submodule** → `github.com/meatcrowning/vista-sounds`
   (PRIVATE). The Vista event `.wav`s are Microsoft's and must not live in this
   public tree. `home/srvs/vista-sounds.nix` exposes the checkout at the runtime
