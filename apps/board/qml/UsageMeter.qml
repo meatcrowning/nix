@@ -12,9 +12,15 @@ import QtQuick
 // a bar there does. The unlit track is `bgAlt`, never `dim` (§3.4).
 //
 // An UNKNOWN reading draws the empty track and the word, never a zero-length
-// bar that would read as "nothing used" (§10). The bar is not clickable and
-// nothing here opens anything: it is a readout, and a control that is drawn is
-// a control that works.
+// bar that would read as "nothing used" (§10).
+//
+// CLICKING THE ROW REFRESHES IT [his, 2026-07-30] — the whole row, label to
+// percentage, because "this limit" is all of it (§5.3) and a bar 7px tall is not
+// a target. It runs the same fetch the clocks run (`Usage.refreshNow()`), and
+// §10 is why `busy` and the caller's report exist rather than a cursor alone: a
+// host with no network, an expired token or `BOARD_USAGE_OFFLINE=1` all make
+// this click achieve nothing, and each of those has to SAY so. Nothing here
+// blanks while it works — the reading on screen stays the last true one.
 //
 // The WIDTH is the caller's, not the content's ([his, 2026-07-29] the meters are
 // exactly as wide as the model chooser above them and stack under it). So the
@@ -37,6 +43,15 @@ Item {
     //: the narrowest the bar may get before the row stops being a bar at all
     property int minBarW: 24
 
+    //: a fetch is in flight — the caller hands this straight from `Usage.busy`.
+    //  While it is true the row says so and refuses a second click: two clicks
+    //  cannot make one round trip go faster, and the second would look ignored.
+    property bool busy: false
+
+    //: he clicked the row. The caller runs the fetch and words the outcome; a
+    //  readout does not own the network (§5.3, and the same split as `hovering`).
+    signal refreshRequested()
+
     readonly property int lineH: Theme.fontSize + 4
 
     implicitWidth: name.width + 6 + minBarW + 6 + value.width
@@ -44,10 +59,23 @@ Item {
     width: implicitWidth
     height: implicitHeight
 
+    // The row is a target now, so it hovers like one — the same `Theme.highlight`
+    // fill a list row and the chooser above it use (§9.1), declared first so it
+    // sits behind the reading rather than over it. No border and no radius: it is
+    // a row in a stack, not a box (§5.1).
+    Rectangle {
+        anchors.fill: parent
+        color: hov.hovered ? Theme.highlight : "transparent"
+    }
+
     PixelText {
         id: name
         y: Math.round((meter.lineH - height) / 2)
-        color: meter.fgDim
+        // Lit for as long as the fetch runs — the in-flight state has to be
+        // visible in the ROW he clicked and not only in the footer, and the one
+        // thing a meter can safely change while it works is the label beside a
+        // reading that must not move (§10, §3.5).
+        color: meter.busy ? Theme.accent : meter.fgDim
         text: meter.row ? meter.row.label : ""
     }
 
@@ -109,30 +137,32 @@ Item {
 
     HoverHandler { id: hov }
 
-    // ...and WHEN THIS LIMIT COMES BACK is the row's own tooltip. [his,
-    // 2026-07-29] *"add a tooltip to each usage indicator that says when that
-    // limit next resets"*. The sentence is `boardusage.readings()`'s (§2 — his
-    // prose lives with the numbers, not here), it names its own window because a
-    // chip is read away from the label it grew out of, and it is never empty: a
-    // payload with no `resets_at` says that instead of showing nothing (§10).
+    // The whole row, both lines of it when the age is showing. A `HoverHandler`
+    // is passive and the tooltip below accepts no buttons, so all three channels
+    // — hover fill, click, chip — live over the same rectangle without fighting
+    // (the pairing `PickBox` documents).
+    MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: if (!meter.busy) meter.refreshRequested()
+    }
+
+    // ...and HOW LONG UNTIL THIS LIMIT COMES BACK is the row's own tooltip, and
+    // now the only thing in it: [his, 2026-07-30] *"the tooltip should just say
+    // `resets in ____`"*. One line, a countdown, `boardusage.readings()`'s
+    // wording (§2 — his prose lives with the numbers, not here) and never empty
+    // (§10).
+    //
+    // It used to carry `detail` above that line — what the number is and how old
+    // the reading is. Nothing was lost by dropping it: the age is already the
+    // row's second line (§3.5), and the window name is two characters to the
+    // left of the pointer. A chip that repeats what is under it costs the width
+    // of the one thing that is not (§8, §9.1).
     //
     // It covers the whole row rather than the bar alone: the label and the
-    // percentage are as much "this limit" as the track is (§5.3). Both hover
-    // channels are live at once and that is deliberate — the chip answers *when
-    // does it reset*, the footer sentence answers *what is this number and how
-    // old*. A `HoverHandler` is passive, so the two do not fight.
+    // percentage are as much "this limit" as the track is (§5.3).
     ToolTipArea {
         anchors.fill: parent
-        // BOTH sentences, in one chip. `detail` used to be written into the
-        // window's `status` on hover, and that is the footer the hyprvtb bar
-        // draws — so hovering a meter put text in the inner titlebar, his
-        // *"stray text ... in the inner sidebar"*. The two answers still differ
-        // (*what is this number* and *when does it come back*), so they are two
-        // lines of one tooltip rather than two channels.
-        text: {
-            var d = meter.row && meter.row.detail ? meter.row.detail : "";
-            var r = meter.row && meter.row.reset ? meter.row.reset : "";
-            return d !== "" && r !== "" ? d + "\n" + r : d + r;
-        }
+        text: meter.row && meter.row.reset ? meter.row.reset : ""
     }
 }

@@ -1829,6 +1829,9 @@ module docstring is authoritative and this is the summary.
   **not** `Agents.changed`, which also fires for per-poll churn (a worked-for
   line ticking over, a context tally, a new unread note): hanging it off that
   would make this a 2.5s fetch. `Usage.KICK_SEC` (20s) is the floor either way.
+- **...and a CLICK on a meter is the third trigger** [his, 2026-07-30], with the
+  gap set to zero and the outcome reported in the footer. See "A usage meter is a
+  BUTTON" below.
 - Machine-local by construction: neither `~/.claude.json` nor `LIVE_PATH` is
   inside the `~/.claude` tree that syncs between `top` and `book`, so each host
   draws what it last read for itself. Same account, different freshness.
@@ -2147,19 +2150,34 @@ the rename exists to keep off screen — and the taskbar and alt-tab would lose 
 window's name too. One `false` to put the title back; that is what *"for now"*
 buys.
 
-### The usage meters hover TWICE, and each channel answers a different question
+### A usage meter is a BUTTON, and its tooltip is a countdown
 
-`UsageMeter.qml` + `boardusage.readings()`. Pointing at a meter puts its
-`detail` sentence in the titlebar footer (what this window is, and how old the
-reading is) **and** slides out a tooltip carrying its `reset` sentence — [his,
-2026-07-29] *"add a tooltip to each usage indicator that says when that limit
-next resets"*.
+`UsageMeter.qml` + `boardusage.readings()` + `Usage` in `main.py`.
 
-- **Both sentences are `boardusage.py`'s**, like the figures and the `5h`/`7d`
-  labels (§2). The QML picks which field to draw and never composes prose.
-- **`reset` is never empty**: a payload with no `resets_at`, or no reading at
-  all, says that instead of showing an empty chip (§10). It names its own
-  window, because a chip is read away from the label it grew out of.
+- **Clicking a meter refreshes that reading, now** — [his, 2026-07-30]. The
+  target is the whole row, label to percentage (a 7px bar is not one, §5.3), and
+  the click runs `Usage.refreshNow()`: the SAME fetch the 60s/300s clocks and the
+  agent-lifecycle kick run, with the gap set to zero. One fetch path, one place a
+  failure is worded.
+- **It reports, because it can fail** (§10). `Usage.busy` lights the row's label
+  for as long as the round trip lasts and refuses a second click; `Usage.refreshed`
+  carries the outcome to the window's footer, in his words — `off` (this host has
+  `BOARD_USAGE_OFFLINE=1`), `offline`, an expired token — never a reason word and
+  never silence. **Only a hand-driven refresh emits it**: the clocks must not put
+  a report in the footer he did not ask for (§10.4). Nothing blanks while it
+  works — the last true reading stays on screen with its age.
+- **The tooltip is ONE line and it is a countdown**: [his, 2026-07-30] *"the
+  tooltip should just say `resets in ____`"* — `resets in 2h 14m`, `resets in
+  6d 17h`. It carried `detail` above that line until then; the age is already the
+  row's second line and the window's name is two characters from the pointer, so
+  the chip spends its width on the one thing the row does not say.
+- **The wording is `boardusage.py`'s**, like the figures and the `5h`/`7d` labels
+  (§2). The QML picks which field to draw and never composes prose. `_left()` is
+  the span (two units, coarsest first, §9.3); `_clock()` still exists for
+  `detail`, which is no longer drawn anywhere.
+- **`reset` is never empty**: a payload with no `resets_at`, one whose reset has
+  already gone by, or no reading at all each say so in the same `resets in ? - …`
+  shape rather than showing an empty chip (§10).
 - The tooltip is `qml/ToolTipArea.qml`, a second copy of painter's (§8, §19.1) —
   `qmlcommon/` cannot hold it, since the chip is `PixelText` and that type
   resolves per app directory. **This copy snaps its retraction and painter's does

@@ -226,6 +226,45 @@ def _clock(iso, now):
     return stamp
 
 
+def _left(iso, now):
+    """How long until `resets_at`, terse and ASCII: `2h 14m`, `14m`, or `""`.
+
+    The tooltip is a COUNTDOWN and not a clock time — [his, 2026-07-30] the chip
+    should read *"resets in ____"* and nothing else. A wall-clock `5:40pm`
+    answers "when" only after he has worked out what time it is now; the
+    remaining span is the thing he is actually asking for when he points at a bar
+    that is 80% full. `_clock()` stays: `detail` still uses it, and one of these
+    is not the other.
+
+    `""` for a time that cannot be parsed OR that has already passed — a reading
+    whose window reset before we drew it is stale rather than imminent, and
+    saying "resets in 0m" would be inventing a countdown out of an old payload
+    (§10). The caller words both cases.
+    """
+    if not iso:
+        return ""
+    try:
+        when = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    left = when.timestamp() - now
+    if left <= 0:
+        return ""
+    if left < 60:
+        return "under a minute"
+    mins = int(left // 60)
+    if mins < 60:
+        return "%dm" % mins
+    hours, mins = divmod(mins, 60)
+    if hours < 24:
+        return "%dh %dm" % (hours, mins) if mins else "%dh" % hours
+    # The seven-day window resets up to 168 hours out, and `161h 20m` is a
+    # number to do arithmetic on rather than a span to read. Two units, coarsest
+    # first, the way `_age` steps up (§9.3).
+    days, hours = divmod(hours, 24)
+    return "%dd %dh" % (days, hours) if hours else "%dd" % days
+
+
 def _age(seconds):
     """How old the cache is, in the terse register the readouts use (§9.3)."""
     if seconds < 90:
@@ -246,13 +285,15 @@ def readings(path=None, now=None):
     and `detail` is the hover sentence — which always names the window and,
     when there is nothing to show, says why rather than blaming him.
 
-    `reset` is the row's TOOLTIP: when that limit next comes back, in the same
-    clock `detail` uses. [his, 2026-07-29] *"add a tooltip to each usage
-    indicator that says when that limit next resets"* — so it is per-row, it
-    names its own window (a tooltip is read on its own, away from the label it
-    popped out of), and it is **never empty**: a payload with no `resets_at`
-    says so, which is the §10 rule that a missing reading is reported and not
-    invented. The wording lives here with the rest of his prose, not in the QML.
+    `reset` is the row's TOOLTIP, and it is ONE SHORT LINE: [his, 2026-07-30]
+    *"the tooltip should just say `resets in ____`"* — a COUNTDOWN (`resets in
+    2h 14m`), not the wall-clock time it used to carry and not a sentence naming
+    the window. The label is two characters away under the pointer, so the chip
+    spends its width on the one thing the row does not already say. It is still
+    **never empty**: a payload with no `resets_at`, or one whose reset has
+    already gone by, says that instead — the §10 rule that a missing reading is
+    reported rather than invented. The wording lives here with the rest of his
+    prose, not in the QML.
     """
     now = time.time() if now is None else now
     util, fetched = _cache(path)
@@ -266,15 +307,17 @@ def readings(path=None, now=None):
                 "text": "unknown", "note": "", "stale": False,
                 "detail": ("no usage reading on this host yet - it needs the "
                            "account reachable once"),
-                "reset": ("no usage reading yet, so no reset time for the %s "
-                          "window either" % label),
+                "reset": "resets in ? - no usage reading on this host yet",
             })
             continue
         stale = age < 0 or age > STALE_SEC
         detail = hover
         clock = _clock(resets, now) if resets else ""
-        reset = ("the %s window resets %s" % (label, clock) if clock
-                 else "this reading carries no reset time for the %s window" % label)
+        left = _left(resets, now) if resets else ""
+        reset = ("resets in %s" % left if left
+                 else "resets in ? - this reading carries no reset time"
+                 if not resets
+                 else "resets in ? - this reading's reset time has gone by")
         if clock:
             detail += " - resets " + clock
         if age >= 0:
