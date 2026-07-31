@@ -91,13 +91,15 @@ Consequences that are rules, not preferences:
 
 ```
 ## NEEDS YOU              decisions, `### <n>. <title>` each
+    <!-- by: ... -->      WHO put it there. Drawn; see below. OPTIONAL
     <!-- placed: ... -->  WHEN it went on the board. Drawn; see below
     prose                 what the decision is about
     - [ ] option          ALTERNATIVES; wrapped continuations are indented
     > answer              his free text. Always beats the options
     *If unanswered:* ...  what happens if he never answers
 ## WAITING ON YOU TO DO   `- <TAG>: ` bullets. Actions, not decisions, each
-                          followed by its own `<!-- placed: ... -->`
+                          followed by its own `<!-- by: -->` then
+                          `<!-- placed: ... -->`, in that order
 ## IN FLIGHT              a | table |: what / where / notes
 ## LANDED                 `### <date>` groups of | commit | what | when |,
                           plus prose. `when` is the commit's own local time in
@@ -360,6 +362,46 @@ the item goes up, never guessed at read time.
   exactly the clock it forbids. This is a fact about the past, like the hash
   beside a LANDED row. `tools/board-test.py` asserts that `format_placed` cannot
   see the clock at all.
+
+### ...and WHO put it there, on the line above the time
+
+*"every entry on the board should record WHO wrote it - which program or agent
+put it there"*, drawn in the message gutter above the time. `<!-- by: Marbas -->`
+— the twin of `placed:` in shape, ownership (`boardparse._BY`), invisibility to
+markdown and `reader`, and drawing (same trailing-edge cluster, same `dim` rung,
+same reserved column). Three things are specific to it:
+
+- **It is the agent's NAME when an agent wrote it**, because that is the word he
+  reads for an agent everywhere else on this board. `boardmove.whoami()` resolves
+  it from `BOARD_AGENT_ID`, which every worker's `boardctl` run already carries
+  and which `board-watch` passes explicitly when it writes on behalf of a worker
+  that died — so **neither writer needed a second channel**, and the whole write
+  side is `boardmove.note()` + `boardmove.ask()`. The `by=` argument is only the
+  FALLBACK for a caller with no agent identity at all (`boardctl` passes
+  `"boardctl"`); an agent behind the same call outranks it.
+- **Nobody resolving means NO stamp.** `by_now()` returns `""` for an empty or
+  unspellable author rather than writing `unknown`, so "nothing recorded it" and
+  "written before this existed" are one state in the file and one on screen. The
+  gutter slot **collapses to zero height** when it is empty — an unattributed
+  entry draws exactly as it always did, and never an empty row.
+- **`by:` goes ABOVE `placed:` and that order is load-bearing.** For a WAITING
+  bullet, `placed:` is the line that CLOSES the bullet's span, so a `by:` written
+  under it would fall outside `todo_span()` and be left behind by a removal as an
+  orphan comment.
+
+**What is not attributed yet, and it is fine that it is not.** `board-watch`'s
+results go through `note_on_board()` -> `boardmove.note(agent_id=...)` and are
+attributed already, but its own housekeeping bullets — `give_back`'s `why` and
+`reconcile`'s idle-row INFORMATION — are written by whichever tick noticed, and
+nothing in that process names itself. They ask `whoami()` and land unstamped
+when it answers nothing; **no `by=` fallback is passed there on purpose**, since
+naming a program that may not be the caller is an invented attribution. Anything
+in `home/srvs/board-watch-files/` that writes the store by some other path is
+unstamped too, and that file is outside this tree. The parser is built for
+exactly this — an unstamped entry is normal, not a defect.
+
+LANDED is deliberately out of scope: its rows are table cells with no gutter to
+draw in, and a commit already records its own author in git.
 
 ## The no-pressure requirement is a design constraint
 

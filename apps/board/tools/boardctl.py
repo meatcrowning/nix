@@ -156,7 +156,11 @@ def _note_text(argv):
 
 
 def cmd_note(a):
-    if bm.note(_note_text(a.text), path=a.board):
+    # `by=` is the FALLBACK attribution only: an agent writing this is named by
+    # its own id (`BOARD_AGENT_ID`), and this is what the gutter says when there
+    # is no agent at all — him at a shell, or a script. The program that put it
+    # there is the honest answer then, and it beats no attribution at all.
+    if bm.note(_note_text(a.text), path=a.board, by="boardctl"):
         # ...and, if a worker wrote it, that it reported AT ALL. `reap()` reads
         # exactly this: a worker whose process goes without one of `note`,
         # `land` or `ask` behind it is reported to him as having stopped without
@@ -317,7 +321,8 @@ def cmd_phase(a):
 
 def cmd_ask(a):
     key = bm.ask(" ".join(a.question), context=a.context, options=a.option,
-                 if_unanswered=a.if_unanswered, asked_by=a.asked_by, path=a.board)
+                 if_unanswered=a.if_unanswered, asked_by=a.asked_by, path=a.board,
+                 by="boardctl")
     bw.seed_watch_state(key)
     bw.mark_reported(what="asked: " + " ".join(a.question))
     print("asked, in NEEDS YOU: " + " ".join(a.question)[:90])

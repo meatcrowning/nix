@@ -113,6 +113,20 @@ _ANSWERED_ON = re.compile(r"^\s*<!--\s*answered-on:\s*([A-Za-z0-9._-]+)\s*-->\s*
 #: `### <n>. <title>`. A WAITING bullet: on the line right under the bullet's
 #: last line, so it is inside the span `todo_span()` removes and restores.
 _PLACED = re.compile(r"^\s*<!--\s*placed:\s*([0-9T:+.\-]+)\s*-->\s*$")
+#: WHO put an item on the board — the agent's name if one wrote it, otherwise the
+#: program that did. Same shape as `placed` above, same reasons, and the same
+#: OPTIONALITY, which here is not a nicety: every entry that predates this stamp
+#: has none, `board.md` syncs between `top` and `book` with either app on either
+#: end, and one writer of the three lives outside this tree
+#: (`home/srvs/board-watch-files/board-watch.py`) and does not emit it yet. So an
+#: unstamped entry parses and draws exactly as it always did, with the gutter
+#: simply saying nothing above the time — never `unknown`, never a blank row.
+#:
+#: It sits ABOVE `placed:` in both shapes, and that order is load-bearing for the
+#: WAITING bullet: `placed:` is the line that CLOSES the bullet's span, so a `by:`
+#: written under it would fall outside `todo_span()` and be left behind when the
+#: bullet is removed.
+_BY = re.compile(r"^\s*<!--\s*by:\s*([A-Za-z0-9._-]+)\s*-->\s*$")
 _TABLE_SEP = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 _HR = re.compile(r"^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$")
 
@@ -129,6 +143,19 @@ def placed_now(when=None):
     """
     when = when or datetime.datetime.now()
     return "<!-- placed: %s -->\n" % when.strftime("%Y-%m-%dT%H:%M")
+
+
+def by_now(who):
+    """The `<!-- by: ... -->` line for an item being written right now, or `""`.
+
+    Empty in, empty out, deliberately: a writer that cannot say who it is writes
+    NO stamp rather than one saying `unknown`, so "nobody recorded it" and "an
+    entry older than this stamp" are the same state on screen and in the file.
+    Anything outside the stamp's charset is dropped for the same reason — a
+    mangled attribution is worse than none.
+    """
+    s = " ".join(str(who or "").split())
+    return "<!-- by: %s -->\n" % s if _BY.match("<!-- by: %s -->" % s) else ""
 
 
 def format_placed(raw):
@@ -296,7 +323,8 @@ def parse(src):
                         "answerFrom": -1, "answerTo": -1, "answer": "",
                         "answerRaw": [], "ifUnanswered": "", "ifRaw": "",
                         "answerHost": "", "hostLine": -1,
-                        "placedRaw": "", "placed": "", "placedLine": -1}
+                        "placedRaw": "", "placed": "", "placedLine": -1,
+                        "by": "", "byLine": -1}
             elif sec == "landed":
                 close_item()
                 date = {"date": text(m3.group(1)), "rows": [], "prose": [],
@@ -380,6 +408,23 @@ def parse(src):
         # extends that bullet's `endLine` over it, so removing the bullet
         # removes its stamp and the one-level undo puts both back (`todo_span`).
         # Anywhere else it is an unrecognised line: carried through, not drawn.
+        # ---- ...and WHO put it there ----
+        # Above `placed:`, and it must NOT close a bullet's prose: `placed:` is
+        # the line that does that, and closing here would leave the stamp under
+        # it outside the span. A decision has no span, so that branch closes as
+        # `answered-on` does.
+        mby = _BY.match(ln)
+        if mby:
+            if sec == "needs" and item is not None:
+                close_prose()
+                item["by"] = mby.group(1)
+                item["byLine"] = i
+                continue
+            if sec == "todo" and prose is not None and prose["kind"] == "bullet":
+                prose["by"] = mby.group(1)
+                prose["endLine"] = i
+                continue
+
         mp = _PLACED.match(ln)
         if mp:
             if sec == "needs" and item is not None:
@@ -439,6 +484,7 @@ def parse(src):
     for t in out["todo"]:
         t["tag"] = tag_of(t["text"])
         t["placedRaw"] = t.get("placedRaw", "")
+        t["by"] = t.get("by", "")
         t["summary"] = t.get("summary", t["text"])
         t["detail"] = t.get("detail", "")
         t["placed"] = format_placed(t["placedRaw"])
@@ -1273,7 +1319,7 @@ def oneline(text, limit=160, code=False, words=None):
     return ("`%s`" % s) if code and s else s
 
 
-def add_todo_bullet(lines, doc, bullet, when=None):
+def add_todo_bullet(lines, doc, bullet, when=None, by=None):
     """One `- ` bullet into WAITING ON YOU TO DO, after the last one there.
 
     Each top-level bullet in `bullet` gets its own `<!-- placed: -->` line
@@ -1290,13 +1336,16 @@ def add_todo_bullet(lines, doc, bullet, when=None):
     check_short_summary(bullet)
     if not bullet.endswith("\n"):
         bullet += "\n"
-    stamp = placed_now(when)
+    # `by:` above `placed:`, and both under EVERY top-level bullet: the stamps
+    # are per-bullet for the reason the docstring gives, and `placed:` stays last
+    # because it is the line that closes the bullet's span (`_BY`, `todo_span`).
+    stamp = [s for s in (by_now(by), placed_now(when)) if s]
     block = []
     for ln in bullet.splitlines(keepends=True):
         if block and _BULLET.match(ln.rstrip("\n")) and not ln[:1].isspace():
-            block.append(stamp)
+            block += stamp
         block.append(ln)
-    block.append(stamp)
+    block += stamp
     if doc["todo"]:
         # `endLine`, not `line`: a bullet routinely wraps onto indented
         # continuation lines, and anchoring on the first line of the last one

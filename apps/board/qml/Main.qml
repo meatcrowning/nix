@@ -1062,15 +1062,44 @@ Window {
                                         // written before this existed wraps
                                         // exactly where a new one does and
                                         // nothing shifts as the list fills.
-                                        PixelText {
-                                            id: todoWhen
+                                        // ...and WHO put it there, on the line
+                                        // ABOVE the time. One metadata cluster
+                                        // at the trailing edge (§9.1), so it
+                                        // takes the same `dim` rung and the
+                                        // same reserved character width — a
+                                        // name is not louder than a time.
+                                        //
+                                        // ABSENT, not blank, when nothing is
+                                        // recorded (§10): every bullet written
+                                        // before the stamp existed has none,
+                                        // and so does one from a writer that
+                                        // does not emit it yet. Its height
+                                        // collapses with it, so the time is
+                                        // back on the first line and those
+                                        // bullets draw exactly as they did.
+                                        Column {
                                             anchors.right: parent.right
                                             anchors.top: parent.top
                                             width: 15 * win.cellW
-                                            horizontalAlignment: Text.AlignRight
-                                            color: Theme.dim
-                                            text: todoRow.modelData.placed
-                                                  ? todoRow.modelData.placed : ""
+                                            PixelText {
+                                                id: todoBy
+                                                objectName: "gutterBy"
+                                                width: parent.width
+                                                horizontalAlignment: Text.AlignRight
+                                                color: Theme.dim
+                                                visible: text !== ""
+                                                height: visible ? implicitHeight : 0
+                                                text: todoRow.modelData.by
+                                                      ? todoRow.modelData.by : ""
+                                            }
+                                            PixelText {
+                                                id: todoWhen
+                                                width: parent.width
+                                                horizontalAlignment: Text.AlignRight
+                                                color: Theme.dim
+                                                text: todoRow.modelData.placed
+                                                      ? todoRow.modelData.placed : ""
+                                            }
                                         }
                                         MouseArea {
                                             id: tma
