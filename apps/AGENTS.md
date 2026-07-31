@@ -488,6 +488,16 @@ Fixed plugin-side in v2.45, but guard on the app side too.
 - **Tear down in a trap** (`try/finally`, or `atexit.register`), never at the
   end of the happy path: the harnesses that leak into his session are the ones
   that failed halfway.
+- **Never source an app's wrapper wholesale to borrow its Qt env.** The
+  `. <(sed '$d' "$(readlink -f "$(which X)")")` recipe some guides show is safe
+  only for a wrapper that is nothing but exports. **surfer's is not**: its
+  second line runs `singleton.py "$@"` and `exit 0`s if a surfer is already
+  running — so sourcing it hands his LIVE browser an `OPEN` (empty url = a new
+  home tab) and never runs your test at all, and the line after that redirects
+  the sourcing shell into `~/.cache/surfer.log`. Both happened here on
+  2026-07-30. Filter the wrapper the way `surfer/tools/find-test.py` does (drop
+  the `#!`, the `singleton.py` line and every `exec`), or just take the
+  interpreter path out of it and set nothing else.
 - **Never script hyprvtb's Lua actions to probe behaviour** — `hl.dsp.focuswindow`
   is nil there, so `rollup`/`minimize_active` land on HIS active window. Play
   the plugin's part instead: bind a scratch `hyprvtb-buttons.sock` in a scratch
