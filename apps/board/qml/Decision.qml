@@ -111,7 +111,7 @@ Item {
         // and on the same `dim` rung — a name is metadata like the time, not a
         // louder thing than the question. It is ABSENT and takes no height when
         // nothing is recorded (§10): every item written before the stamp existed
-        // has none, and one of the three writers does not emit it yet, so those
+        // has none, and so does one no writer could name an author for, so those
         // items must draw exactly as they always did rather than reserve an
         // empty row.
         Item {

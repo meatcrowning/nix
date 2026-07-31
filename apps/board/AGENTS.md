@@ -393,12 +393,19 @@ same reserved column). Three things are specific to it:
 
 - **It is the agent's NAME when an agent wrote it**, because that is the word he
   reads for an agent everywhere else on this board. `boardmove.whoami()` resolves
-  it from `BOARD_AGENT_ID`, which every worker's `boardctl` run already carries
-  and which `board-watch` passes explicitly when it writes on behalf of a worker
-  that died — so **neither writer needed a second channel**, and the whole write
-  side is `boardmove.note()` + `boardmove.ask()`. The `by=` argument is only the
-  FALLBACK for a caller with no agent identity at all (`boardctl` passes
-  `"boardctl"`); an agent behind the same call outranks it.
+  it **from the environment** (`BOARD_AGENT_ID`, which every worker's `boardctl`
+  run already carries) — so **no writer needed a second channel**, and the whole
+  write side is `boardmove.note()` + `boardmove.ask()`. The `by=` argument is
+  only the FALLBACK for a caller with no agent identity at all (`boardctl`
+  passes `"boardctl"`, `board-watch` passes `"board-watch"`); an agent behind
+  the same call outranks it.
+- **`agent_id` is NOT authorship and must never be read as it.** It names the
+  agent a result is FROM, which is what retires that agent's summon note
+  (`drop_summon`). Reading it as the author stamped every `board-watch` failure
+  note with the DEAD minister's name — a bullet whose own text says that
+  minister recorded nothing, attributed to it (fixed 2026-07-30; the stamp comes
+  from `whoami()` with no argument, and `board-watch` names itself through
+  `by=`).
 - **Nobody resolving means NO stamp.** `by_now()` returns `""` for an empty or
   unspellable author rather than writing `unknown`, so "nothing recorded it" and
   "written before this existed" are one state in the file and one on screen. The
@@ -410,8 +417,8 @@ same reserved column). Three things are specific to it:
   orphan comment.
 
 **What is not attributed yet, and it is fine that it is not.** `board-watch`'s
-results go through `note_on_board()` -> `boardmove.note(agent_id=...)` and are
-attributed already, but its own housekeeping bullets — `give_back`'s `why` and
+results go through `note_on_board()` -> `boardmove.note(..., by="board-watch")`
+and are attributed to the watcher, but its own housekeeping bullets — `give_back`'s `why` and
 `reconcile`'s idle-row INFORMATION — are written by whichever tick noticed, and
 nothing in that process names itself. They ask `whoami()` and land unstamped
 when it answers nothing; **no `by=` fallback is passed there on purpose**, since

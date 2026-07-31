@@ -117,8 +117,9 @@ _PLACED = re.compile(r"^\s*<!--\s*placed:\s*([0-9T:+.\-]+)\s*-->\s*$")
 #: program that did. Same shape as `placed` above, same reasons, and the same
 #: OPTIONALITY, which here is not a nicety: every entry that predates this stamp
 #: has none, `board.md` syncs between `top` and `book` with either app on either
-#: end, and one writer of the three lives outside this tree
-#: (`home/srvs/board-watch-files/board-watch.py`) and does not emit it yet. So an
+#: end, and some entries have no author to name at all — a housekeeping bullet
+#: written by whichever tick noticed, a LANDED row (a table cell, with the
+#: commit's own git author beside it). So an
 #: unstamped entry parses and draws exactly as it always did, with the gutter
 #: simply saying nothing above the time — never `unknown`, never a blank row.
 #:

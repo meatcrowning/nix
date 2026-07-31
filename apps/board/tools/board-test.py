@@ -1136,6 +1136,27 @@ def test_by(tmp):
           "by:" not in mine["text"] and "by:" not in mine["summary"], mine["text"])
     check("...and the file still round-trips byte for byte", "".join(doc["lines"]) == after)
 
+    # ---- ...and a bullet written ON BEHALF of an agent is NOT that agent's ----
+    # `agent_id` says which agent a result is FROM, so its summon note goes with
+    # it. It is NOT authorship, and reading it as authorship stamped every
+    # board-watch failure note with the dead minister's name — a bullet whose own
+    # text says that minister recorded nothing, attributed to it. The author is
+    # resolved from the environment (the writing process) and nothing else; a
+    # caller that is nobody falls back to `by=`, which is how board-watch says
+    # `board-watch`.
+    B.write(path, FIXTURE)
+    bm.note("FAILED: a minister stopped without finishing", path=path,
+            agent_id="w2502ad")
+    onbehalf = B.parse(B.read(path))["todo"][-1]
+    check("a bullet written on behalf of an agent is not attributed to it",
+          onbehalf["by"] == "", onbehalf["by"])
+    B.write(path, FIXTURE)
+    bm.note("FAILED: a minister stopped without finishing", path=path,
+            agent_id="w2502ad", by="board-watch")
+    onbehalf = B.parse(B.read(path))["todo"][-1]
+    check("...it is attributed to the program that wrote it, when it says so",
+          onbehalf["by"] == "board-watch", onbehalf["by"])
+
     # The ORDER is why `by:` goes first: `placed:` is the line that closes the
     # bullet's span, so a stamp under it would fall outside `todo_span` and be
     # left behind by a removal as an orphan comment.
@@ -5452,6 +5473,15 @@ def test_placed_window(app, tmp):
           len(filled) == 2 and all(str(it.property("text")) == who
                                    for it in filled),
           [str(it.property("text")) for it in filled])
+    # A ONE-LINE bullet has one line of text against TWO of metadata, and the
+    # row has to be as tall as the taller of the two or the name and the time
+    # draw over the bullet below — which is what a stack of one-line SUMMONED
+    # lines is. The decision card has always taken the max; the bullet did not.
+    for it in filled:
+        row = it.parentItem().parentItem()      # gutter Column -> the row's `bar`
+        check("a stamped row is at least as tall as its own gutter",
+              row.height() >= it.parentItem().height() > 0,
+              (row.height(), it.parentItem().height()))
     shot(winB, "06b-attributed")
 
 
