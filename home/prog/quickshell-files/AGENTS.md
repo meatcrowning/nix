@@ -496,6 +496,30 @@ still lives here, because one channel with an unused key beats a second channel.
 Put the next desktop-wide appearance setting in the same place, and add its
 control to `SetPgAppearance.qml` beside the font and motion ones.
 
+### Volume is NOT one of them — WirePlumber already remembers it
+
+`SysInfo.volume` is a **mirror of the default sink**, not a stored setting:
+`adjustVolume`/`setVolume` write through `wpctl set-volume` and
+`scripts/sysinfo.sh` reads the level back every poll. Do not add a `volume` key
+to `SettingsStore` and do not re-apply a saved level at startup — WirePlumber
+persists it per machine, in a file that does not sync between the hosts:
+
+    ~/.local/state/wireplumber/stream-properties   sinks/sources with no device
+                                                   route (every virtual/filter
+                                                   sink) + application streams
+    ~/.local/state/wireplumber/default-routes      devices that DO have routes
+                                                   (ALSA cards, bluez)
+
+Both hosts run stock WirePlumber restore hooks (`hooks.stream.state`,
+`hooks.device.routes.state`), and a level set through the panel is on disk
+within a second or two, so it survives a logout and a reboot on its own. A
+second copy in `settings.json` would be a shared-across-machines value fighting
+a machine-local one. **Brightness is the opposite case** — no daemon remembers
+it, so the panel has to — which is exactly why the two must not be treated as
+one feature. `tools/volume-persist-test.sh` proves the restore path on
+whichever host runs it, from a private pipewire instance that never touches the
+session graph; `docs/volume-persistence.md` has the measurements.
+
 ### One widget, two places: `*Content.qml` + a data singleton
 
 A widget is drawn by a **content component** and its data belongs to a
