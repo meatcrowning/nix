@@ -775,6 +775,10 @@ class Agents(QObject):
     # their logs were 0 bytes, and of ~200 finished ones every single non-empty
     # file was written at exit. So the drawer said "nothing logged yet" for
     # exactly as long as there was anything to watch, which is the complaint.
+    # (Since 2026-07-30 the file is not literally empty: `boardwork` writes a
+    # `- [board ...]` header at spawn and a post-mortem at reap, so a worker
+    # killed mid-run still points at its transcript. Those are board's lines,
+    # not the agent's — the transcript is still the live source.)
     #
     # The agent's transcript is appended to as it works, and `boardphase` already
     # reads it for the observed line and the context tally — so it is the same
