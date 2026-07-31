@@ -75,5 +75,22 @@ fi
 #    than the bug. See AGENTS.md -> "Testing without interfering with the user".
 "$REPO/tools/leak-check.sh" || true
 
+# 7. Known-corrupt /nix/store paths, found by the weekly nix-store-integrity
+#    timer (home/srvs/nix-store-integrity.nix). Bit rot in the store is silent
+#    and surfaces as an eval error that reads like a config bug — a rebuild is
+#    exactly the moment to know about it. Warning only: a rotted path off the
+#    eval path breaks nothing, and repair is a deliberate act
+#    (`sudo nix-store --repair-path <path>`), not something to block on.
+NSI="${XDG_STATE_HOME:-$HOME/.local/state}/nix-store-integrity/corrupt.txt"
+if [ -s "$NSI" ]; then
+  still=$("$HOME/.config/scripts/nix-store-integrity.sh" --known 2>/dev/null | wc -l)
+  if [ "$still" -gt 0 ]; then
+    echo "WARN: $still /nix/store path(s) still fail their content hash - bit rot."
+    echo "      Listed in $NSI; repair with:"
+    echo "        sudo -A nix-store --repair-path <path>     # if substitutable"
+    echo "      Background: docs/agents/nix-store-bitrot-extent.md"
+  fi
+fi
+
 [ "$fail" -eq 0 ] && echo "preflight OK"
 exit "$fail"
