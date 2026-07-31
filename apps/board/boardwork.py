@@ -626,7 +626,11 @@ every fact in it names the command that established it; read it BEFORE you go \
 measuring the metal, and add what you find that is not in it. `docs/DESIGN.md` \
 is ~2,300 lines: read its Contents table and then the two or three sections \
 your change actually touches, never the whole file, and grep a long \
-`AGENTS.md` to the section rather than swallowing it. Budget your context \
+`AGENTS.md` to the section rather than swallowing it — a nested guide is an \
+index plus parts when it is big (`apps/board/AGENTS.md` -> `guide/*.md`), so \
+open the part, not the set. **And a file you have already read is still in \
+front of you**: re-read only the lines you changed, with `offset`/`limit`, \
+never the whole file again. Budget your context \
 deliberately — an agent that runs out mid-task leaves the tree half-edited, \
 which here is worse than a slow one. And **never run `sudo -A` merely to prove \
 that something works**: every one of those puts a real password dialog in front \
