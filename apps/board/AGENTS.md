@@ -2292,10 +2292,44 @@ message**. `footerStr` IS `status`, so that slot is empty except for the four
 seconds a report sits in it — text appearing out of nothing and going again is
 exactly what a flash looks like, whatever wrote it.
 
-So the rule now, and it is what to test a new report against: **the footer
-carries a failure, or an outcome nothing else on screen shows** — where an order
-went, what Ctrl+Z took back, why a usage refresh he asked for could not happen.
-Two kinds of line were dropped for failing it:
+**...and then: NOTHING, EVER.** [his, 2026-07-30, escalating after the pass
+above removed only the confirmation] *"it was not only that. why are you unable
+to simply stop ANY text from appearing in the inner titlebar of goetia?"* The
+rule below — footer carries a failure or an outcome nothing else shows — was
+still a judgement about WHICH strings, so it still let the failure reports and
+the phase lines through, and every new call site got to make the call again.
+It is not a judgement any more:
+
+> **goetia's inner titlebar carries no text under any condition.** The only
+> things in it are the button cells (`ny` `if` `ag` `ld` `md` `lg` — 1-2 char
+> glyphs, the navigation chrome he uses; their tooltips pop out BESIDE the bar,
+> not in it). There is no other text and no way to add one.
+
+**It is closed structurally, at the client, not at the call sites.**
+`main.py`'s `_MuteFooterVtbClient` is a `VtbClient` subclass whose `set_footer`
+does not reach the socket, and `Titlebar` constructs that instead of a plain
+`VtbClient` — so the `FOOTER` verb does not exist for this app. A future report,
+a new phase line, or a direct `self._client.set_footer` cannot reintroduce the
+flash without deleting that class. `_footer` therefore stays `""` for the
+process's whole life, which also kills the reconnect replay
+(`_flag_lines_locked()` emits `FOOTER` only for a non-empty one), the path that
+survived a plugin hot-swap. **`pylib/vtbclient.py` is untouched** — eight other
+apps draw a real footer through it and are behaviourally identical.
+
+**A report is moved, never dropped** (§10). `Titlebar.setFooter` and the
+overridden `set_footer` both call `main.py`'s `_record_status`, which stamps the
+line into **`~/.cache/goetia-status.log`** and prints it to stderr. `win.status`
+in `Main.qml` still holds it too, unchanged and still cleared on the four-second
+timer, so an in-window status surface can bind to it whenever goetia grows one —
+the wiring above it did not have to change at all, which is why this fix is one
+class and two call lines.
+
+The older rule below is what the app's own `status` channel is still worded to,
+and it stays worth reading: **the footer carries a failure, or an outcome
+nothing else on screen shows** — where an order went, what Ctrl+Z took back, why
+a usage refresh he asked for could not happen. It now decides what is worth a
+LOG line rather than what reaches the bar. Two kinds of line were dropped for
+failing it:
 
 - **A successful pick in any of the four choosers says nothing.** The closed box
   relabels itself from the store and the tick moves, so the change is on screen;
@@ -2311,10 +2345,17 @@ Two kinds of line were dropped for failing it:
 Harness: **`tools/vtb-cap-probe.py`** — the PRODUCER half, and the one to extend
 for anything else this app pushes down that socket. It stands up a fake
 `hyprvtb-buttons.sock` in a scratch `$XDG_RUNTIME_DIR`, runs the real app
-offscreen against a scratch board/state tree, drives the real cap dropdown's
-`trigger()` through `QQmlExpression`, and asserts a successful change publishes
-**nothing** — no `FOOTER`, no re-`REGISTER`, no flag line. It needs no plugin,
-no compositor and no window; `tools/vtb-flash-test.sh` and
+offscreen against a scratch board/state tree, and asserts two things. First, a
+successful cap change publishes **nothing** — no `FOOTER`, no re-`REGISTER`, no
+flag line (the real dropdown entry, driven through `QQmlExpression`). Second,
+**the invariant**: it then drives a real `Board.status` failure, a direct write
+to `win.status` (the funnel all ~20 QML call sites end at) and a reload of the
+store underneath the window, and asserts that no `FOOTER` line carrying text was
+sent by ANY of them — while checking each report did reach
+`~/.cache/goetia-status.log`, so a pass cannot mean "swallowed". Verified
+against a negative control: with the mute removed, both the failure and the
+direct write put `FOOTER <text>` on the wire and the probe fails on each. It
+needs no plugin, no compositor and no window; `tools/vtb-flash-test.sh` and
 `tools/vtb-titletext-test.sh` remain the pixel side.
 
 ### A usage meter is a BUTTON, and its tooltip is a countdown
