@@ -264,6 +264,46 @@ disagree.
 `tools/sandbox.sh` is NOT implicated: it creates a headless output on the live
 compositor and starts no second Hyprland.
 
+### The nested compositor goes on the SANDBOX, and two things make that real
+
+The three harnesses launch their nested Hyprland through `tools/sandbox.sh
+exec` (2026-07-30), so it maps on a headless output and, by hyprland.lua's
+`sandbox-never-takes-the-seat` (`no_focus` on the `sandbox` tag), cannot take
+his keyboard. Before that they opened it as a plain window on his monitor —
+`nested-smoke.sh` said so in its own step line. Two rules came out of making
+that work, and both are the kind that fail SILENTLY:
+
+- **Whatever `sandbox.sh exec` spawns must `exec` all the way down to the real
+  program.** Hyprland keys an exec rule on **the pid it forked**. Put a
+  redirection straight into the exec string and `/bin/sh` stops exec-ing its
+  last command: it forks, the program is a GRANDCHILD, and `[workspace N
+  silent; tag +sandbox]` matches nothing. The window then maps on the REAL
+  monitor and — carrying no `sandbox` tag — is not covered by the `no_focus`
+  rule either, so it takes his keyboard and Hyprland warps his pointer to it.
+  Measured on `top` 2026-07-30, off `hyprctl clients`/`activewindow`, and it
+  is exactly the "test windows keep popping up and they keep moving my mouse
+  around" he reported. The fix in all three: write a one-line `launch.sh`
+  whose body is `exec env … Hyprland … >log 2>&1` and hand the sandbox THAT.
+  Anything else you add to a launch — a wrapper, a `tee`, a `timeout` — ask
+  first whether it forks.
+- **`hyprctl -i ""` does not fail. It talks to the LIVE compositor.** So an
+  unresolved instance signature does not make a harness error out, it makes
+  every `hl.exec_cmd`, every cursor warp and every plugin call in it happen on
+  HIS desktop. Each harness now resolves its instance EXACTLY — walk
+  `$XDG_RUNTIME_DIR/hypr/*/hyprland.lock`, read the pid each records, and ask
+  `/proc` whether that process carries this run's unique config path — and its
+  `hc()` refuses, loudly and fatally, if the signature is empty or is
+  `$HYPRLAND_INSTANCE_SIGNATURE`. The set-difference against a "before"
+  snapshot this replaced could name the live session (an empty snapshot) or a
+  concurrent agent's instance (`head -1` of two new ones).
+
+Two smaller ones, same session: each harness runs an **off-screen watchdog**
+that kills its compositor the moment that window is seen on a physical output
+(another agent's `sandbox.sh stop` removes the monitor, and Hyprland migrates
+the windows onto a real one), and each stops the sandbox in its **trap** — but
+only if it CREATED it, since `sandbox.sh start` reuses an existing headless
+output and several agents share this desktop.
+
 ### Test a swap without gambling the session
 
 ```bash
@@ -485,8 +525,8 @@ window would appear in it**, and filter on the output:
 - Windows there are decorated by the **live** plugin instance, which is the point
   (you test what is actually running) — but it is therefore **no protection
   against a plugin crash.** For an unswitched plugin build use the nested
-  harness `hyprvtb/tools/nested-smoke.sh`, which is properly isolated but
-  appears as a window.
+  harness `hyprvtb/tools/nested-smoke.sh`, which is properly isolated — and,
+  since 2026-07-30, launched THROUGH this sandbox, so it is off-screen too.
 - Three headless-parent designs were tried and rejected first; `tools/sandbox.sh`'s
   header records why, so they do not get retried.
 

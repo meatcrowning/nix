@@ -39,6 +39,8 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$HERE/../../../.." && pwd)"   # …/home/prog/hyprvtb/tools -> repo root
+SANDBOX="$REPO/tools/sandbox.sh"
 RUN="/tmp/vtbhs$$"
 mkdir -p "$RUN"
 KIN_TSV="$RUN/wheel.tsv"
@@ -51,13 +53,32 @@ case "$WAYLAND_DISPLAY" in
   /*) PARENT_WL="$WAYLAND_DISPLAY" ;;
   *)  PARENT_WL="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY" ;;
 esac
+# HIS compositor. Recorded once, so everything below can refuse to touch it.
+LIVE_SIG="${HYPRLAND_INSTANCE_SIGNATURE:-}"
 
 cleanup() {
+  # Single-shot: the hc() guard aborts by SIGTERM, so this can be entered twice
+  # (once for TERM, once for EXIT) and a second teardown only muddies the log.
+  [ -n "${CLEANED:-}" ] && return 0
+  CLEANED=1
   # The wheel logger is a client of the NESTED compositor; its argv carries the
   # (unique) TSV path, so this can never match anything of the user's.
   pkill -9 -f "$KIN_TSV" 2>/dev/null
+  # Kill by CONFIG PATH. It cannot be $!: the compositor is spawned by
+  # tools/sandbox.sh and is not this script's child. The path is unique per
+  # run, so this can never touch the live session.
+  [ -n "${GUARDPID:-}" ] && kill "$GUARDPID" 2>/dev/null
+  if [ -f "${GUARD_FLAG:-/nonexistent}" ]; then
+    LEAKED="$(cat "$GUARD_FLAG")"
+    printf '\n\033[31mSESSION LEAK\033[0m the nested compositor was migrated onto %s (a REAL output);\n' "$(cat "$GUARD_FLAG")" >&2
+    printf '             the watchdog killed it. Almost certainly another agent ran sandbox.sh stop.\n' >&2
+  fi
   pkill -9 -f "Hyprland -c $RUN/hyprland.lua" 2>/dev/null
   [ -n "${HYPRPID:-}" ] && kill -9 "$HYPRPID" 2>/dev/null
+  # …and take the headless output down with it IF WE MADE IT (see SBOX_MINE).
+  # In the trap, not at the end of the happy path: a run that dies halfway is
+  # exactly the one that would leave a sandbox standing for leak-check.sh.
+  [ "${SBOX_MINE:-0}" = 1 ] && "$SANDBOX" stop >/dev/null 2>&1
   sleep 0.5
   rm -rf "$RUN"
   # Hyprland ITSELF runs `systemctl --user import-environment … WAYLAND_DISPLAY
@@ -71,8 +92,11 @@ cleanup() {
   if [ -f "$G" ] && grep -q '^aquamarine	' "$G"; then
     grep -v '^aquamarine	' "$G" > "$G.tmp" && mv "$G.tmp" "$G"
   fi
+  # A run that put anything on his screen did not pass, whatever else it found.
+  [ -n "${LEAKED:-}" ] && exit 1
+  return 0
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok()   { printf '   \033[32mok\033[0m   %s\n' "$*"; }
@@ -119,31 +143,171 @@ hl.config({
 LUA
 }
 
-step "starting a nested Hyprland on vtb-a.so"
+# The compositor is not this script's child: it is spawned by tools/sandbox.sh,
+# onto a headless output, under a no_focus rule. So its pid comes from the
+# process table, matched on the per-run config path. (The /proc/$HYPRPID/maps
+# check near the end wants the real compositor pid, which is what this is.)
+# Is anything of this run's still up? A launch goes through /bin/sh and then a
+# nix wrapper before the compositor itself, so this deliberately matches loosely
+# — it answers "did the launch die", not "which pid is the compositor".
+nested_running() { pgrep -f "Hyprland -c $RUN/hyprland.lua" >/dev/null 2>&1; }
+# THE compositor pid, from the instance lock — which the compositor writes
+# itself, so it names the right one of the three processes that carry this
+# config path in their argv (sh, the wrapper, the real thing). Guessing from
+# the process table gets the wrapper, whose /proc/PID/maps has no plugin in it.
+# /proc/<pid>/maps always stats as size 0, so `test -s` cannot ask this.
+has_maps() { [ -n "$(head -c 1 "/proc/$1/maps" 2>/dev/null)" ]; }
+nested_pid() {
+  local lock p
+  [ -n "${SIG:-}" ] || return 0
+  lock="$(head -1 "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/hyprland.lock" 2>/dev/null)"
+  # Prefer a pid whose address space is actually readable. hotswap-test's
+  # dlclose/unmap assertion reads /proc/<pid>/maps, and on `top` 2026-07-30
+  # that file came back EMPTY for BOTH Hyprland pids of a nested run (both
+  # alive, State: S — so not the zombie-launcher theory; it reads like the
+  # /proc permission that applies to a non-dumpable process). That assertion
+  # therefore still skips itself here, out loud. The preference costs nothing
+  # and picks the right pid wherever maps IS readable.
+  if [ -n "$lock" ] && has_maps "$lock"; then echo "$lock"; return; fi
+  for p in $(pgrep -f "Hyprland -c $RUN/hyprland.lua" 2>/dev/null); do
+    has_maps "$p" && { echo "$p"; return; }
+  done
+  echo "$lock"
+}
+
+# WHICH instance is ours: resolved EXACTLY, from the instance locks. Each lock
+# records the pid of the compositor that owns it, and /proc says whether that
+# process was started with OUR unique config path. The set-difference against a
+# "before" snapshot that used to live here had two ways to name the WRONG
+# instance, and `hyprctl -i <wrong>` is not a harmless mistake: an EMPTY -i
+# silently talks to the LIVE session (measured on top 2026-07-30), so a harness
+# that fell through spawned kitty windows on his desktop and warped his cursor
+# — exactly what he reported. The two ways were: a `hyprctl instances` call that
+# returned nothing made the LIVE signature look new, and a second harness
+# running concurrently (several agents share this desktop) made ITS instance
+# look like ours.
+find_sig() {
+  local d sig pid
+  for d in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/hypr/*/; do
+    sig="$(basename "$d")"
+    [ -n "$LIVE_SIG" ] && [ "$sig" = "$LIVE_SIG" ] && continue
+    pid="$(head -1 "$d/hyprland.lock" 2>/dev/null)"
+    [ -n "$pid" ] || continue
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "$RUN/hyprland.lua" || continue
+    echo "$sig"
+    return
+  done
+}
+
+# The watchdog's eyes, kept in a file rather than inline so no shell quoting can
+# silently break the one check that protects his screen.
+PY_WITNESS="$RUN/onreal.py"
+cat > "$PY_WITNESS" <<'PYWITNESS'
+import json, subprocess, sys
+pid = sys.argv[1]
+mons = json.loads(subprocess.run(["hyprctl", "-j", "monitors"],
+                                 capture_output=True, text=True).stdout)
+phys = {m["id"]: m["name"] for m in mons if not m["name"].startswith("HEADLESS-")}
+for c in json.load(sys.stdin):
+    if str(c.get("pid")) == pid and c["monitor"] in phys:
+        print(phys[c["monitor"]])
+        break
+PYWITNESS
+
+# THE OFF-SCREEN WATCHDOG. The nested compositor is a WINDOW in his session,
+# parked on a headless output. If that output goes away — another agent's
+# `sandbox.sh stop`, a stray `hyprctl output remove` — Hyprland MIGRATES its
+# windows onto a REAL monitor, i.e. into his face. Measured on top 2026-07-30,
+# during a run of this very harness: `aquamarine` sat on DP-5 for twelve
+# seconds. So poll the LIVE session for our own window (matched on the nested
+# compositor's pid, which is exact) and if it ever lands on a physical output,
+# kill it AT ONCE and fail the run — never let it wait for the next step.
+GUARD_FLAG="$RUN/on-his-screen"
+offscreen_guard() {
+  local m
+  while sleep 2; do
+    m="$(hyprctl -j clients 2>/dev/null | python3 "$PY_WITNESS" "$HYPRPID")"
+    if [ -n "$m" ]; then
+      echo "$m" > "$GUARD_FLAG"
+      pkill -9 -f "Hyprland -c $RUN/hyprland.lua" 2>/dev/null
+      return
+    fi
+  done
+}
+
+step "starting a nested Hyprland on vtb-a.so (off-screen via tools/sandbox.sh)"
 write_config "$RUN/vtb-a.so"
-BEFORE=$(hyprctl instances -j 2>/dev/null | grep -o '"instance": *"[^"]*"' | cut -d'"' -f4 | sort)
 mkdir -p "$RUN/home"
-env -u HYPRLAND_INSTANCE_SIGNATURE \
+: > "$RUN/hyprland.log"
+# Own it only if we created it. Several agents share this desktop and
+# sandbox.sh reuses an existing headless output, so an unconditional `stop` in
+# our trap would pull the monitor out from under somebody else's running
+# harness — and Hyprland migrates a removed output's windows onto a REAL one.
+SBOX_OUT="$("$SANDBOX" start)" || { echo "could not start the off-screen sandbox"; exit 1; }
+echo "$SBOX_OUT"
+case "$SBOX_OUT" in
+  *"reusing existing"*) SBOX_MINE=0 ;;
+  *)                    SBOX_MINE=1 ;;
+esac
+# ONE PROCESS, from what the sandbox spawns down to the compositor. This is
+# load-bearing, not tidiness: Hyprland keys an exec rule on the pid it forked,
+# so if anything in the chain FORKS instead of exec-ing, the compositor is a
+# grandchild and `[workspace N silent; tag +sandbox]` matches nothing — the
+# window maps on the REAL monitor and, having no `no_focus` tag either, takes
+# his keyboard and warps his pointer to itself. Measured on top 2026-07-30: a
+# redirection written straight into the exec string is enough to do it, because
+# it stops /bin/sh from exec-ing the last command. Hence this launcher: the
+# redirection lives inside it, after an explicit `exec`.
+#
+# `env WAYLAND_DISPLAY=…` is required for a different reason, and equally not
+# decoration: hl.dsp.exec_cmd runs BY THE COMPOSITOR and inherits the
+# COMPOSITOR's environment, which on `top` has no WAYLAND_DISPLAY at all.
+cat > "$RUN/launch.sh" <<LAUNCH
+#!/bin/sh
+exec env -u HYPRLAND_INSTANCE_SIGNATURE \
     WAYLAND_DISPLAY="$PARENT_WL" \
     HOME="$RUN/home" \
-    Hyprland -c "$RUN/hyprland.lua" >"$RUN/hyprland.log" 2>&1 &
-HYPRPID=$!
+    Hyprland -c "$RUN/hyprland.lua" >"$RUN/hyprland.log" 2>&1
+LAUNCH
+chmod +x "$RUN/launch.sh"
+"$SANDBOX" exec "$RUN/launch.sh" \
+    || { echo "sandbox could not launch the nested compositor"; exit 1; }
 
 SIG=""
 for _ in $(seq 1 60); do
   sleep 0.5
-  kill -0 "$HYPRPID" 2>/dev/null || break
-  SIG=$(hyprctl instances -j 2>/dev/null | grep -o '"instance": *"[^"]*"' | cut -d'"' -f4 | sort | comm -13 <(echo "$BEFORE") - | head -1)
+  SIG="$(find_sig)"
   [ -n "$SIG" ] && break
+  # Once it has appeared, its disappearance means it died — stop waiting.
+  if nested_running; then SEEN=1
+  elif [ -n "${SEEN:-}" ]; then break
+  fi
 done
 [ -n "$SIG" ] || { bad "nested Hyprland never came up"; tail -30 "$RUN/hyprland.log"; exit 1; }
-ok "instance $SIG"
+HYPRPID="$(nested_pid)"
+ok "instance $SIG (pid ${HYPRPID:-unknown})"
+offscreen_guard & GUARDPID=$!
 
-hc()    { hyprctl -i "$SIG" "$@"; }
+# EVERY hyprctl below is aimed at the NESTED instance, and this is the guard
+# that makes that true rather than intended. `hyprctl -i ""` does NOT fail: it
+# connects to the LIVE compositor. So an unset SIG turned every `hl.exec_cmd`,
+# every cursor warp and every plugin call in this file into something that
+# happened on HIS desktop. Refuse loudly instead of degrading — and SIGTERM the
+# script itself, because a bare `exit` inside `$(hc ...)` only leaves the
+# subshell and the run would carry on unaimed.
+hc() {
+  if [ -z "${SIG:-}" ] || { [ -n "$LIVE_SIG" ] && [ "$SIG" = "$LIVE_SIG" ]; }; then
+    printf '\n\033[31mREFUSING\033[0m no nested instance (SIG=%s) — this hyprctl would drive the LIVE session: %s\n' \
+      "'${SIG:-}'" "$*" >&2
+    kill -TERM $$
+    exit 1
+  fi
+  hyprctl -i "$SIG" "$@"
+}
 # Hyprland's real log is per-instance under $XDG_RUNTIME_DIR (stdout gets only
 # the banner) — the plugin load/unload lines we assert on live there.
 ILOG="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/$SIG/hyprland.log"
-alive() { kill -0 "$HYPRPID" 2>/dev/null && hc version >/dev/null 2>&1; }
+alive() { [ -n "${HYPRPID:-}" ] && kill -0 "$HYPRPID" 2>/dev/null && hc version >/dev/null 2>&1; }
 
 hc plugin list | grep -q hyprvtb || { bad "plugin did not load"; exit 1; }
 ok "vtb-a.so loaded"
