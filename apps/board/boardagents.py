@@ -952,11 +952,33 @@ def agents(procs=None):
         # (`none`). Scoped to the orchestrator card so ordinary workers keep the
         # honest bare placeholder; the wordings and the ORDER are
         # `boardphase.orch_doing_line`, which carries the argument for both.
+        orch_line = ""
         if orch and a["state"] == "running":
-            line = bph.orch_doing_line(obs.get("observed") or "",
-                                       who or ORCHESTRATOR_NAME)
-            if line:
-                a["doingLine"] = line
+            orch_line = bph.orch_doing_line(obs.get("observed") or "",
+                                            who or ORCHESTRATOR_NAME)
+            if orch_line:
+                a["doingLine"] = orch_line
+        # MAY THE CARD BE DRAWN AT ALL? [his, 2026-07-30] *"minister cards should
+        # only show up once the top line of their card reads [agent] is [verb] -
+        # as right now they can appear before that with the text 'nothing yet' at
+        # the top which looks bad"*. A card leads with its claim and falls back
+        # to the observation, so its top line is `nothing yet` exactly when the
+        # agent has claimed nothing AND nothing has been observed of it yet —
+        # `doing_line`'s `none`/`starting` branch, the placeholder for an ABSENCE
+        # of observation. That is the state, not the string: matching the words
+        # would break the moment either sentence is reworded, and Solomon's own
+        # startup pair (`orch_line`, above) is a real line in the same states.
+        #
+        # NOT A GATE FOREVER. The card appears on the poll after the agent's
+        # first phase OR its first observed act, which for a live worker is
+        # seconds; a spawn whose transcript never appears is `unlinked` past
+        # `boardphase.START_GRACE_S` (120s) and is drawn then, saying honestly
+        # that the work cannot be seen. The one card that stays hidden is one
+        # that is registered, linked, and has genuinely never done anything —
+        # which is what he asked for.
+        a["speaks"] = bool(a["saysLine"] or orch_line) \
+            or a["state"] != "running" \
+            or (obs.get("observed") or "") not in ("none", "starting")
         # `ok` / `quiet` / `none` / `starting` / `unlinked` — which of the honest
         # outcomes the observation is, so the card can label the line correctly
         # (`doing` while it runs, `last` once it has stopped) without

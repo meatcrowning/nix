@@ -657,6 +657,12 @@ class Agents(QObject):
             # is doing, which used to follow a hyphen on the line above.
             "saysDetail": a.get("saysDetail", ""),
             "doingLine": a.get("doingLine", ""),
+            # ...and whether that top line is a real sentence yet at all. False
+            # WITHHOLDS the card (`AgentRow.visible`) — see `boardagents` for
+            # what the state means and why it is not a permanent gate. Absent
+            # defaults to True, which is what keeps `boardwork`'s own synthetic
+            # cards (a queued task, Solomon's standing row) drawn.
+            "speaks": a.get("speaks", True),
             "observed": a.get("observed", "unlinked"),
             # How much context it is standing in, against what it can hold —
             # already formatted, and "" when nothing could be measured.
