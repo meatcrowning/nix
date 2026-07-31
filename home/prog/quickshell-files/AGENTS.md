@@ -520,6 +520,35 @@ one feature. `tools/volume-persist-test.sh` proves the restore path on
 whichever host runs it, from a private pipewire instance that never touches the
 session graph; `docs/volume-persistence.md` has the measurements.
 
+#### "No sound, but the panel looks like audio is playing"
+
+Reported on `top`, 2026-07-30. Diagnosed to the default sink being **MUTED**;
+nothing in this repo had done it, and the two things that looked guilty were not:
+
+- **MUTE IS PER-ROUTE, and it survives a reboot with nothing in this repo
+  recording it.** `default-routes` stores one entry per ALSA route, so
+  `…:output:analog-output-lineout={"mute":true, …}` mutes the speakers while
+  `…:output:analog-output-headphones` stays unmuted at its own level. Neither
+  the panel nor `settings.json` holds a mute anywhere — **`wpctl set-mute` is
+  written in exactly one place in this repo**, the `XF86AudioMute` bind in
+  `../hypr-files/hyprland.lua`; `SysInfo.muted` and `Osd.muted` only ever READ
+  it. So when sound is gone, `wpctl get-volume @DEFAULT_AUDIO_SINK@` first, and
+  do not go looking in the panel for a writer that does not exist.
+- **`wpctl set-volume` does NOT unmute**, so raising the level through the
+  panel on a muted sink changes a number and nothing else. The OSD is honest
+  about it (`x` instead of a level, empty fill) — keep it that way.
+- **The VU meter and the spectrum keep moving while the speakers are silent,
+  and that is correct.** Both cavas capture a **monitor port**, and on both
+  hosts apps play into `easyeffects_sink` — which is *upstream* of the hardware
+  sink's mute. `audio-active.py` counts sink-inputs for the same reason and is
+  read-only. So "bars are moving" says a client is producing audio, never that
+  anything is reaching the speakers; the mute is said in `StatusPanel`'s `vol`
+  row (`Theme.crit`) and the VU's level line, which is the only place to read it.
+
+Confirm the graph before blaming a level: `pw-link -l` shows the whole chain
+(`mpv → easyeffects_sink → ee_soe_* → alsa_output.…analog-stereo`), and a break
+there is a different bug from a mute.
+
 ### Brightness IS one of them — nothing else remembers it
 
 Both halves of the range are live STATE in `settings.json` (machine-local, so
