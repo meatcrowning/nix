@@ -1025,6 +1025,19 @@ def watcher_state(raw=None):
     active = svc.get("ActiveState")
     if not active:
         return {"state": "", "armed": None, "text": "board-watch could not be asked"}
+    # NOT INSTALLED IS ITS OWN ANSWER, and it is the one that cost him a whole
+    # order. `home/` is shared by both hosts but only reaches one of them when
+    # that host's own switch runs, so a machine that has not been switched since
+    # the watcher was written has no `board-watch.service` at all — and
+    # `systemctl show` answers for a unit that does not exist with a perfectly
+    # ordinary `ActiveState=inactive`, which used to be reported as merely "not
+    # armed - its path unit is inactive". Same words for "it is stopped" and for
+    # "it was never deployed here", and only the second one tells him what to
+    # run. So ask for `LoadState` too (main.py does) and say which it is.
+    if "not-found" in (svc.get("LoadState", ""), pathu.get("LoadState", "")):
+        return {"state": "not-installed", "armed": False,
+                "text": "board-watch is not installed on %s - it needs that "
+                        "host's own rebuild/home-manager switch" % os.uname().nodename}
     if active == "failed":
         return {"state": active, "armed": False,
                 "text": "board-watch failed its last run - see ~/.cache/board-watch.log"}
