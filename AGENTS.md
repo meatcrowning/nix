@@ -13,7 +13,8 @@ not a red build. Work like a colleague who has to sit at this desk afterwards.
 - **Finish the job.** Edit → verify → rebuild → commit → push to `main`. Those
   steps are pre-authorized (see Boundaries); don't stop to ask for them.
 - **Measure, don't reason, about anything on screen.** The user does all
-  visual checks. Your evidence is IPC, logs and traces.
+  visual checks. Your evidence is IPC, logs and traces — and your test never
+  touches his session; see "Testing without interfering with the user".
 - **These files are the source of truth for agent instructions here.**
   `CLAUDE.md` is a symlink to this one, and so is every nested `CLAUDE.md` —
   edit the `AGENTS.md`. Per-area detail lives in nested
@@ -149,6 +150,52 @@ prompt for a specific run: an explicit instruction from him always wins.
 
 ---
 
+## Testing without interfering with the user
+
+**Never let a test touch anything he can see, hear, type into or click on.** He
+is sitting at this desk while you work — on 2026-07-30 workers took his keyboard
+focus out from under him mid-sentence, and his correction was *"not just
+keyboard, mouse... everything! its like they forgot how to properly do testing
+outside the desktop without interfering with the user"*. A test that reaches the
+live session is a bug in the test, not the price of testing.
+
+His, and not yours to borrow even for a second:
+
+- **Keyboard and pointer focus** — no focusing a window, no warping the cursor,
+  no synthetic clicks or key events.
+- **The clipboard and the primary selection.**
+- **His active window and workspace.** In particular, never script hyprvtb's Lua
+  actions (`rollup`, `minimize_active`, …) to probe behaviour: `hl.dsp.focuswindow`
+  is nil, so they land on HIS window.
+- **Any window on the real monitor** — `tools/sandbox.sh` or
+  `QT_QPA_PLATFORM=offscreen`, never a packaged app "just to check", never bare
+  `qs` (it launches a second panel).
+- **Notifications and OSDs.**
+- **Audio playback and MPRIS** — never drive the running player; he listens on it
+  live. A muted headless harness, or nothing.
+- **Gamma/brightness and the cursor theme** — global, and both outlive the
+  process that set them.
+- **The systemd user manager environment.** Every Hyprland, nested test ones
+  included, overwrites `HYPRLAND_INSTANCE_SIGNATURE`/`WAYLAND_DISPLAY` in that
+  manager-global store, and one killed with `SIGKILL` never gives it back — see
+  `home/srvs/hypr-env.nix` under Where things live. Any harness that starts a
+  compositor calls `hypr-session-env.sh --restore` on teardown.
+- **Screenshots and driving the GUI** — he does every visual, animation and
+  interaction check himself. Your evidence is IPC, logs and traces.
+
+**Tear down in a trap, not at the end of the happy path.** The leaks that reach
+him come from tests that failed halfway.
+
+**`tools/leak-check.sh` is the enforcement**, run by `preflight.sh`: it catches a
+dead compositor signature in the user manager, a stale `$XDG_RUNTIME_DIR/hypr/*`
+lock whose PID is gone, a second Hyprland still running, and a sandbox left
+standing. It **warns and never fails** — every one of those states is one a real
+session can legitimately be in, and a false failure blocking his rebuild would be
+worse than the bug. Repair with `~/.config/scripts/hypr-session-env.sh --restore`
+and `tools/sandbox.sh stop`.
+
+---
+
 ## Which machine you are on
 
 **You are told, at session start. Do not guess, and do not re-derive it.** A
@@ -230,9 +277,10 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   agents and the user; a pathspec-less commit takes *their* staged work too.
 - **Never `hyprctl plugin load` / `unload`** for `hyprvtb`. It permanently
   erases the plugin's config keys and cannot be undone by `hyprctl reload`.
-- **Never open a test window on the user's screen** — use `tools/sandbox.sh`.
-- **Never screenshot or drive the GUI yourself** unless explicitly asked; the
-  user does all visual, animation and interaction checks.
+- **Never let a test touch his focus, pointer, clipboard, windows, audio,
+  gamma or screen** — no test window on the real monitor, no screenshots, no
+  driving the GUI. The whole list, and the detector that catches the residue,
+  is under "Testing without interfering with the user" above.
 - **Never call `save_session()` from a script.** It arms a window-spawning
   restore at the next login. It is a manual act (Meta+Ctrl+S) only.
 - **Never edit only one side of a seed-once file.** The running system keeps
@@ -299,7 +347,8 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       tree moves as a unit or not at all.
 - `tools/` — the maintenance scripts the documented workflows depend on:
   `preflight.sh`, `seed-drift.sh`, `prune-worktrees.sh` (aliased `wtprune`),
-  `sandbox.sh`. Per-area **test harnesses** live here too and are named by
+  `sandbox.sh`, `leak-check.sh` (residue of a test that leaked into his live
+  session; preflight runs it). Per-area **test harnesses** live here too and are named by
   whichever guide owns them (`claude-merge-test.sh`, `hotswap-test.sh`,
   `fan-harness.sh`, `media-lyrics-probe.sh`, …) — `ls tools/` rather than
   assume this list is complete.
