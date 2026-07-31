@@ -770,3 +770,37 @@ hl.window_rule({
     move  = "20 monitor_h-120",
     float = true,
 })
+
+-- AN AGENT'S TEST WINDOW MAY NEVER HOLD THIS SEAT.
+--
+-- `tools/sandbox.sh` launches every window it starts with `tag +sandbox`, onto
+-- a headless output nobody can see. That hid the window but NOT the keyboard:
+-- measured on top 2026-07-30 on the event socket, every launch was an
+-- `openwindow>>` followed immediately by `activewindow>>` naming the test
+-- window, and the next two seconds of typing went to a monitor with no cable
+-- in it. A single harness run launches dozens of those.
+--
+-- `no_focus` is what actually holds, and it was the third thing tried.
+-- `no_initial_focus` was measured NOT to work here — the sandbox workspace is
+-- the ACTIVE workspace of its own monitor, so a map onto it is an ordinary
+-- focus rather than the initial-focus-onto-a-hidden-workspace that rule
+-- governs — and the `silent` in the exec rule only ever stopped the VIEW from
+-- switching. `no_focus` also closes the pointer route ("Ignoring focus to
+-- nofocus window!") and with it the clipboard, since a client needs a focus
+-- serial before it may own the selection.
+--
+-- The cost is intended: a sandbox window cannot be typed into AT ALL. A
+-- harness that must send input to the thing it is testing wants a nested
+-- compositor with its own seat (home/prog/hyprvtb/tools/*.sh), not this
+-- monitor.
+--
+-- Valid `match` keys, measured against this build rather than guessed (an
+-- unknown one is refused by name in `hyprctl configerrors`): class, title,
+-- initial_class, initial_title, tag, workspace, xwayland, float, fullscreen,
+-- pin, focus. NOT monitor, onworkspace, floating, pinned, content_type.
+hl.window_rule({
+    name  = "sandbox-never-takes-the-seat",
+    match = { tag = "sandbox" },
+
+    no_focus = true,
+})

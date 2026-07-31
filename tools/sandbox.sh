@@ -42,11 +42,19 @@
 #
 # NOTES
 #
-#  * `exec` restores keyboard focus to the monitor that had it. A new window
-#    takes focus even with `silent` (silent only stops the VIEW switching), and
-#    focus left sitting on an invisible monitor means the user's next keystroke
-#    goes somewhere they cannot see. That is the one thing here that would
-#    genuinely disturb them, so it is handled on every launch.
+#  * A window launched here CANNOT TAKE THE KEYBOARD, and that is a compositor
+#    rule rather than anything this script does after the fact:
+#    `sandbox-never-takes-the-seat` in hyprland.lua is `no_focus` matched on the
+#    `sandbox` tag below. `silent` only ever stopped the VIEW from switching —
+#    the window still took focus at map time and held it for the two seconds
+#    until the restore in `exec` noticed, once per launch, dozens of times in a
+#    harness run (measured on the event socket, top 2026-07-30). The restore is
+#    still there, as a net, and now warns if it ever fires.
+#    The intended cost: nothing here can be typed into. A harness that must send
+#    input to its subject wants a nested compositor with its own seat.
+#  * A window launched here is also DEAF — `exec` prepends
+#    `env PIPEWIRE_REMOTE=/dev/null PULSE_SERVER=/dev/null` so a test program
+#    cannot play over whatever he is listening to. `SANDBOX_AUDIO=1` opts out.
 #  * Every window launched here is TAGGED `sandbox` (an exec rule, so the
 #    compositor applies it at map time — `hyprctl clients -j` shows
 #    "tags": ["sandbox*"]). The monitor is what the panel filters on, since a
@@ -166,14 +174,38 @@ case "${1:-}" in
     have_hypr
     load_state
     prev="$(focused_mon)"
+    # DEAF BY CONSTRUCTION. A test program must not be able to make a sound on
+    # the machine he is sitting at — he asked for mechanism, not a rule agents
+    # remember. `hl.dsp.exec_cmd` is run BY THE COMPOSITOR, so it inherits the
+    # compositor's environment and nothing this script exports reaches it; the
+    # only way in is to prepend `env` to the command itself. Both names are
+    # needed: PipeWire-native clients read PIPEWIRE_REMOTE, everything speaking
+    # PulseAudio reads PULSE_SERVER, and a socket path that is not a socket
+    # makes each of them fail to connect and carry on silently.
+    # `SANDBOX_AUDIO=1` opts out, for a harness whose subject IS the audio.
+    if [ "${SANDBOX_AUDIO:-0}" = 1 ]; then
+      envwrap=""
+    else
+      envwrap="env PIPEWIRE_REMOTE=/dev/null PULSE_SERVER=/dev/null "
+    fi
     # The bracket list is the exec dispatcher's own rule syntax: put the window
     # on the sandbox workspace without dragging the user's view along, and tag
-    # it as ours so it stays identifiable wherever it ends up (see the notes).
-    hyprctl dispatch "hl.dsp.exec_cmd(\"[workspace $WS silent; tag +sandbox] $*\")" >/dev/null \
+    # it as ours.
+    #
+    # THE TAG IS ALSO WHAT KEEPS THIS OFF HIS KEYBOARD. `hyprland.lua` carries
+    # `sandbox-never-takes-the-seat`, a `no_focus` window rule matched on
+    # exactly this tag — read the comment there before changing either half,
+    # because `silent` alone does NOT do it: measured on top 2026-07-30 on the
+    # live event socket, every launch was `openwindow>>` followed immediately by
+    # `activewindow>>` naming the test window, and his next two seconds of
+    # typing went to a monitor with no cable in it. The restore below used to be
+    # the whole defence and is now only a net under the rule.
+    hyprctl dispatch "hl.dsp.exec_cmd(\"[workspace $WS silent; tag +sandbox] $envwrap$*\")" >/dev/null \
       || die "exec dispatch failed"
     basename "$1" >> "$CLASSES" # for the geometry-memory prune in stop
     sleep 2
     if [ -n "$prev" ] && [ "$(focused_mon)" != "$prev" ]; then
+      echo "sandbox: warning — focus left $prev despite the no_focus rule; restoring it. Check that hyprland.lua's 'sandbox-never-takes-the-seat' rule is live (hyprctl configerrors)." >&2
       hyprctl dispatch "hl.dsp.focus({ monitor = \"$prev\" })" >/dev/null
     fi
     echo "sandbox: launched on $MON (ws $WS): $*"
