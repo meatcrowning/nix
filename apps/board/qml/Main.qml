@@ -286,7 +286,6 @@ Window {
         drafts = (d && typeof d === "object") ? d : ({});
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
-        Titlebar.setTitleText(false);
     }
     onClosing: {
         Settings.set("drafts", win.drafts);
@@ -397,18 +396,17 @@ Window {
     readonly property string footerStr: status
     onFooterStrChanged: Titlebar.setFooter(footerStr)
 
-    // ...and the stacked title beside it says nothing either. [his,
-    // 2026-07-29, five minutes after the footer went] *"really for now there
-    // should be no title text in the left side inner bar of goetia"* — so the
-    // whole bar carries controls and reports, and no name. §12 already says the
-    // title region is for live document/state identity rather than the app's
-    // name, and this window's `title` IS the app's name: it has one page and one
-    // file, so there is nothing there to identify. It stays the *window* title
-    // (the taskbar and alt-tab need a name); what is turned off is the bar
-    // DRAWING it, through `TITLETEXT 0` (see `pylib/vtbclient.py`). Blanking
-    // `title` here does not work — Qt substitutes the application name, and the
-    // bar reads "board" (measured in the sandbox, 2026-07-29).
-    // "for now": one `false` to flip back.
+    // ...and the stacked title beside it is NOT ours to turn off. [his,
+    // 2026-07-29] *"really for now there should be no title text in the left
+    // side inner bar of goetia"* was answered with `TITLETEXT 0`, and that was
+    // the wrong lever: the stacked title is drawn in the OUTER column, while the
+    // inner bar he was talking about only ever holds the app buttons and the
+    // footer. So the flag suppressed the title on the RIGHT OUTER bar, where he
+    // had not asked for anything, and the inner bar was already nameless.
+    // Dropped 2026-07-30 (Kimaris' finding); goetia now reads
+    // `"titleText":true` in `~/.local/state/hyprvtb/ipc-dump.json`. The
+    // `Titlebar.setTitleText` wrapper in `main.py` stays — the plugin verb is
+    // correct and is what an app with a real document identity would use.
 
     function jump(item) {
         scroller.contentY = Math.max(0, Math.min(item.y,

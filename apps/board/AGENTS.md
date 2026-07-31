@@ -2203,17 +2203,23 @@ page and no journey to retrace; §11.1 says a program with no genuine history ge
 nothing rather than an invented one. Add a row to DESIGN.md §11.1's table if that
 ever changes.
 
-**And the bar carries NO NAME anywhere** — neither the footer nor the stacked
-title. [his, 2026-07-29, twice within five minutes] *"remove the 'goetia' text at
-the bottom of the inner titlebar"*, then *"really for now there should be no title
+**The INNER bar carries no name — and the stacked title is not the inner bar.**
+[his, 2026-07-29, twice within five minutes] *"remove the 'goetia' text at the
+bottom of the inner titlebar"*, then *"really for now there should be no title
 text in the left side inner bar of goetia"*. The footer is the status and nothing
-else; the title is turned off with `Titlebar.setTitleText(false)` in
-`Main.qml`'s `Component.onCompleted` → `TITLETEXT 0` on the vtb socket (hyprvtb
-≥2.95, DESIGN.md §12). **Not by blanking `Window.title`**: Qt substitutes the
-application name for an empty title, so the bar would read `board` — the one word
-the rename exists to keep off screen — and the taskbar and alt-tab would lose the
-window's name too. One `false` to put the title back; that is what *"for now"*
-buys.
+else, which answers the first. The second was answered with
+`Titlebar.setTitleText(false)` → `TITLETEXT 0` on the vtb socket, and **that was
+the wrong lever**: the stacked title is drawn in the OUTER column, while the
+inner (left) bar only ever holds the app buttons and the footer. So the flag
+erased the title from the RIGHT OUTER bar, which he had not asked about, and the
+inner bar was already nameless. Dropped 2026-07-30 (Kimaris' finding); goetia
+reads `"titleText":true` in `~/.local/state/hyprvtb/ipc-dump.json`
+(`hyprctl eval "hl.plugin.hyprvtb.ipc_dump()"` writes it). The
+`Titlebar.setTitleText` wrapper in `main.py` and the plugin verb both stay —
+they are correct, and an app with a real document identity would use them.
+**Never blank `Window.title` instead**: Qt substitutes the application name for
+an empty title, so the bar would read `board` — the one word the rename exists to
+keep off screen — and the taskbar and alt-tab would lose the window's name too.
 
 ### A usage meter is a BUTTON, and its tooltip is a countdown
 
