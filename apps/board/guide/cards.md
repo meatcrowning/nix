@@ -526,6 +526,22 @@ agent's own voice, uncut except for width.
   `boardphase.transcript(rec["session"])` instead — the same file
   `boardphase` already tails for the observed line, appended to as the agent
   works.
+- **...and the `.log` is now a POINTER, so a killed worker is never `log
+  empty`.** Same fact, worse consequence: a worker that is SIGKILLed, OOMed or
+  reaped at `RuntimeMaxSec` never reaches the exit that would have written its
+  output, so its log stayed 0 bytes forever — and the one case where it matters
+  most is the one case it said nothing. [his, 2026-07-30, of a bullet reporting
+  a worker killed mid-verification with an empty log] *"i doubt you have no idea
+  what happened to foras as this message implies"*. So `boardwork` writes the
+  file itself at both ends: a **header** before the spawn (who, the task, the
+  session, and the transcript path — the spawn chooses the uuid, so the path is
+  known before the agent exists) and a **post-mortem** when `reap()` closes a
+  worker that reported nothing (`log_postmortem`, plus `rec["transcript"]` on
+  the failed record for whatever writes the bullet). `_session_of()` recovers
+  the uuid from that header when the registration is already swept, which is
+  why the header carries it. Board-written lines are `- [board HH:MM:SS] ` so
+  nothing mistakes them for the agent's voice, and `_died_transiently` reads
+  only the tail, which they cannot match.
 - **And it is the LITERAL output, not a summary of it.** [his, 2026-07-30]
   *"you are saying we cannot actually see its real live log i.e. not what its
   saying its doing but its literal actual thinking / tool call / coding

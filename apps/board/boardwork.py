@@ -1277,6 +1277,100 @@ def _log_path(agent_id):
     return os.path.join(d, ba.clean_id(agent_id) + ".log")
 
 
+# ------------------------------------------------- a log that survives a kill
+# **A worker's `.log` is empty for the whole run, and empty forever if it is
+# killed.** `claude -p` with no tty writes its result ONCE, at exit, so there is
+# nothing to line-buffer and nothing to flush: a worker that is SIGKILLed, OOMed,
+# reaped at `RuntimeMaxSec` or cut off mid-sentence leaves a zero-byte file, and
+# the one case where the log matters most is the one case it is guaranteed to
+# say nothing. [his, 2026-07-30, of the bullet that reported Foras killed
+# mid-verification with an empty log:] *"i doubt you have no idea what happened
+# to foras as this message implies"*.
+#
+# The full history DOES exist — the agent's own transcript, written live, the
+# same file `boardphase` tails for the observed line — and we know its exact
+# path because the spawn CHOOSES the session uuid. So the log stops being the
+# record and becomes the POINTER: a header at spawn (so it is never zero bytes
+# and always names the transcript) and a post-mortem footer when the worker is
+# reaped without having reported.
+#
+# Header and footer are both `- ` prefixed and dated so nothing mistakes them
+# for the agent's own voice — the card drawer prefers the transcript anyway and
+# falls back to this file (`main.py`), and `_died_transiently` reads the tail,
+# which neither of these lines can match.
+def _log_line(aid, text):
+    """Append one board-written line to a worker's log. Never raises."""
+    try:
+        with open(_log_path(aid), "a") as f:
+            f.write("- [board %s] %s\n" % (time.strftime("%H:%M:%S"), text))
+    except OSError:
+        pass
+
+
+def transcript_hint(session):
+    """Where a worker's full history is, as a path — even before the file
+    exists, because a header is written before the agent has opened it."""
+    if not session:
+        return ""
+    found = bph.transcript(session)
+    if found:
+        return found
+    # Not there yet (or the project directory was renamed) — a glob is still an
+    # answer he can paste into a shell, and it is honest about what is known.
+    return os.path.join(bph.projects_dir(), "*", "%s.jsonl" % session)
+
+
+def log_header(aid, name, task, session):
+    """Written BEFORE the worker starts, so even a kill at second one leaves a
+    log that says who this was and where to read what it did. How it was
+    started is appended by the caller, which is the only thing that knows."""
+    _log_line(aid, "worker %s (%s) starting: %s" % (aid, name or "?",
+                                                    " ".join((task or "").split())[:120]))
+    if session:
+        _log_line(aid, "session %s - LIVE HISTORY IS THE TRANSCRIPT, this file "
+                       "gets stdout only at exit: %s"
+                  % (session, transcript_hint(session)))
+
+
+_LOGGED_SESSION = re.compile(
+    r"session ([0-9a-fA-F-]{36}) - LIVE HISTORY")
+
+
+def _session_of(aid, rec=None):
+    """The session uuid of a worker that is already gone.
+
+    Three places, in order of how long they survive it: the task record, its
+    registration (`sweep()` drops that soon after death), and finally the log
+    HEADER this module wrote at spawn — which outlives both, which is the whole
+    reason the header carries it.
+    """
+    if rec and rec.get("session"):
+        return rec["session"]
+    for a in ba.agents():
+        if a.get("id") == aid and a.get("session"):
+            return a["session"]
+    try:
+        with open(_log_path(aid), "r", errors="replace") as f:
+            head = f.read(4000)
+    except OSError:
+        return ""
+    m = _LOGGED_SESSION.search(head)
+    return m.group(1) if m else ""
+
+
+def log_postmortem(aid, session=None, why=""):
+    """Written when a worker is closed out without having reported. This is the
+    line that stops a killed worker reading as `log empty`."""
+    _log_line(aid, "worker stopped without reporting%s"
+              % ((" - " + why) if why else ""))
+    hint = transcript_hint(session)
+    if hint:
+        _log_line(aid, "what it actually did is in its transcript: " + hint)
+    else:
+        _log_line(aid, "no session id was recorded for it, so there is no "
+                       "transcript to point at")
+
+
 def live_workers():
     return [a for a in ba.agents() if a["kind"] == "worker" and a["state"] == "running"]
 
@@ -1566,11 +1660,18 @@ def _spawn_worker(rec):
                BOARD_WORK_TASK=rec["task"], BOARD_WORK_SESSION=session,
                BOARD_ORDER=rec.get("order") or "")
     logpath = _log_path(aid)
+    # BEFORE the spawn, so a worker killed at second one still leaves a log that
+    # names it and points at its transcript. See "a log that survives a kill".
+    log_header(aid, name, rec["task"], session)
     pid = _start_unit(aid, cmd, env, logpath, rec["task"])
     how = "unit"
     if pid is None:
         pid = _start_detached(cmd, env, logpath)
         how = "detached"
+    if pid is not None:
+        _log_line(aid, ("unit: %s (journalctl --user -u %s)"
+                        % (unit_name(aid), unit_name(aid))) if how == "unit"
+                  else "started detached, pid %s - no unit" % pid)
     if pid is None:
         # NOTHING STARTED, so no card is registered — and the task must not be
         # left orphaned either. It is already in `taken/` (`dispatch()` writes
@@ -1731,6 +1832,7 @@ def reap():
             continue          # still working, or dispatched before this existed
         ok = os.path.exists(reported_file(aid))
         if not ok and not rec.get("retried") and _died_transiently(aid):
+            _log_line(aid, "requeued after a transient platform error")
             rec = dict(rec, retried=True, agent="", unit="")
             moved = ba._move(rec, work_dir("pending"),
                              state="requeued", by=aid)
@@ -1739,6 +1841,13 @@ def reap():
         else:
             moved = ba._move(rec, work_dir("done" if ok else "failed"))
             if not ok:
+                # It reported NOTHING, which is the case its log is guaranteed
+                # to be empty for, so say where the history is — in the log
+                # itself, and on the record, so the bullet can quote it rather
+                # than tell him nobody knows what happened.
+                session = _session_of(aid, rec)
+                log_postmortem(aid, session, rec.get("why") or "")
+                moved["transcript"] = transcript_hint(session)
                 moved["notesBack"] = ba.requeue_taken(aid)
             (done if ok else failed).append(moved)
         try:
