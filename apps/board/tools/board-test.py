@@ -5947,6 +5947,21 @@ def test_undo_window(app, tmp):
     # [his, 2026-07-29] *"instead of messages it says orders"*.
     check("the pending list is labelled `pending orders`",
           len(shown("pending orders")) == 1)
+    # [his, 2026-07-30] *"pending orders for solomon should be shown at the
+    # bottom of the summoner section NOT at the bottom of the triangle"*. An
+    # order is waiting on the SUMMONER to pick it up, so it sits under his card
+    # — measured by position, because that is what he reads.
+    from PySide6.QtCore import QPointF as _QPointF                     # noqa: E402
+
+    def _top(it):
+        return it.mapToItem(win.contentItem(), _QPointF(0, 0)).y()
+
+    tri = shown("the triangle")
+    check("...at the foot of the SUMMONER section, above the triangle",
+          len(tri) == 1
+          and _top(shown("pending orders")[0]) < _top(tri[0]),
+          (len(tri), _top(shown("pending orders")[0]),
+           _top(tri[0]) if tri else None))
     rows = [str(it.property("text")) for it in descendants(win.contentItem())
             if "waiting for the next" in str(it.property("text") or "")]
     check("...and the row calls it an order, not a message",

@@ -1992,6 +1992,13 @@ and `Agents.queued`, exactly as `kind="worker"` survived the rename to
 *minister*. And what a pending order waits for is a **summoner**, never a
 minister: Solomon is who drains the queue and decides who does it.
 
+**It is drawn at the foot of the SUMMONER section** — [his, 2026-07-30]
+*"pending orders for solomon should be shown at the bottom of the summoner
+section NOT at the bottom of the triangle"*, where it used to sit. It is waiting
+on the summoner to pick it up, so it belongs under his card; the triangle
+answers a different question (who is bound right now). `board-test.py` asserts
+the position, not just the label.
+
 *"allow the user to remove queued `waiting for next agent` items or edit them in
 place"*. Right-click a pending order: **edit what it says**
 opens the same `InputBox` every other typed sentence here uses, seeded with the
