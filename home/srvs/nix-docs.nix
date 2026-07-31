@@ -34,13 +34,22 @@
   # should stop and ask a human, and it still does — logged loudly, retried next
   # tick.
   #
-  # board.md is the exception, because it is a store rather than a document:
-  # board-watch's agents write it unattended on BOTH machines and the board GUI
-  # writes it on both, so two-sided edits are routine — and an unresolved
-  # conflict does not merely flag that file, it aborts the tick and stops docs/
-  # syncing in either direction until someone notices. See the seeded
+  # The boards are the exception, because each is a store rather than a
+  # document: board-watch's agents and the board GUI write them unattended — and
+  # an unresolved conflict does not merely flag that file, it aborts the tick and
+  # stops docs/ syncing in either direction until someone notices. See the seeded
   # gitattributes and board-recent-merge.sh for the policy (real 3-way merge
   # first, most recent side wins a genuine collision).
+  #
+  # ONE BOARD PER HOST since 2026-07-30: `docs/board.top.md` and
+  # `docs/board.book.md`, each written only by the machine it is named for and
+  # carried by the other purely as a backup and a history. His words: "i
+  # actually want to change it so neither board on top or air syncs ... i dont
+  # want that overwriting ... to overwrite anything i do on air. commits
+  # obviously will stay synced." The FILES still sync — this repo is unchanged
+  # in what it moves; what changed is that nothing on top writes book's board,
+  # so nothing arbitrates between them. The merge rule stays as the net for a
+  # hand edit on the wrong machine.
   xdg.configFile = {
     "scripts/nix-docs-seed/gitattributes".source = ./nix-docs-files/gitattributes;
 

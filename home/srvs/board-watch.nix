@@ -1,6 +1,7 @@
 { pkgs, lib, host, config, ... }:
 
-# Act on his answers to `docs/board.md` without waiting for him to mention them.
+# Act on his answers to this host's board (`docs/board.<hostname>.md`) without
+# waiting for him to mention them.
 #
 # The board is where agents park the questions only he can settle. Answering one
 # used to do nothing until he next opened a terminal and told a session about
@@ -51,13 +52,23 @@
 #     once a slot frees — the same guarantee reconcile() and sweep() already
 #     gave stranded items and unread notes.
 #
-# BOTH MACHINES, and the duplicate is prevented by AFFINITY rather than by a
-# gate. This was `top`-only until 2026-07-29 — `home/` is shared verbatim with
-# `air`/book and docs/ syncs both ways every five minutes, so deploying it to
-# both would have had one answer picked up twice, by two agents, on two
-# checkouts of the same two repos. The cost of that gate was that answering on
-# book did nothing at all until he was next sitting at top, which is not what he
-# asked for. So instead:
+# BOTH MACHINES, and since 2026-07-30 each watches ITS OWN BOARD:
+# `docs/board.top.md` on top, `docs/board.book.md` on book. The two files still
+# sync (so each machine keeps a backup and a history of the other's board) but
+# only the machine a board is named for ever writes it, so one answer cannot be
+# seen by two watchers in the first place and nothing merges his typing with
+# anybody else's. His words, 2026-07-30: "i actually want to change it so
+# neither board on top or air syncs ... commits obviously will stay synced."
+#
+# The AFFINITY below predates that and is now belt-and-braces rather than the
+# load-bearing de-duplicator. It is kept deliberately: it costs nothing, it is
+# what makes a board file restored from the other host's copy harmless, and
+# removing it would churn the parser and the harness for no behaviour. This was
+# `top`-only until 2026-07-29 — `home/` is shared verbatim with `air`/book, so
+# deploying it to both would then have had one answer picked up twice, by two
+# agents, on two checkouts of the same two repos. The cost of that gate was that
+# answering on book did nothing at all until he was next sitting at top, which
+# is not what he asked for. So instead:
 #
 #   * A DECISION is stamped with the machine he answered it on — an HTML comment
 #     the parser owns (`boardparse.set_answer_host`, written by the board app in
@@ -94,6 +105,15 @@
 # uses, and here it does double duty: it is also what drains the queue when he
 # unlocks, since nothing on this desktop emits an unlock signal we can watch.
 
+let
+  # THE BOARD THIS HOST WATCHES. One board per host since 2026-07-30, named for
+  # the OS hostname (`top`, `book`) rather than the flake attribute (`top`,
+  # `air`) — every runtime writer of the store derives it from
+  # `os.uname().nodename` and nothing else, so the mapping is done here, once,
+  # where the flake attribute is the only name available.
+  boardHost = if host == "air" then "book" else host;
+  boardFile = "%h/nix/docs/board.${boardHost}.md";
+in
 {
   xdg.configFile."scripts/board-watch.py" = {
     source = ./board-watch-files/board-watch.py;
@@ -102,7 +122,7 @@
 
   systemd.user.services.board-watch = {
     Unit = {
-      Description = "Work one newly-answered decision from ~/nix/docs/board.md";
+      Description = "Work one newly-answered decision from ~/nix/docs/board.${boardHost}.md";
       # THE OUTER NET, and it is set this high on purpose. The path units
       # retrigger in bursts (his edit, then the sync's pull of it, then the
       # agent's own commit, then the timer) and every run is cheap when there is
@@ -215,8 +235,9 @@
   };
 
   systemd.user.paths.board-watch = {
-    Unit.Description = "Watch ~/nix/docs/board.md for a newly-answered decision";
-    Path.PathChanged = "%h/nix/docs/board.md";
+    Unit.Description =
+      "Watch ~/nix/docs/board.${boardHost}.md for a newly-answered decision";
+    Path.PathChanged = boardFile;
     Install.WantedBy = [ "default.target" ];
   };
 

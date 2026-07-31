@@ -8,19 +8,35 @@
 # silently duplicate paragraphs; last-writer-wins would silently delete one
 # side's work. nix-docs.nix argues that at length and it has not changed.
 #
-# board.md is different in kind. It is a STORE, not a document: an unattended
-# writer on each machine (board-watch's agents), a GUI on each machine, and a
-# five-minute window between them, so two-sided edits are routine rather than
-# exceptional. Wedging the whole docs sync until someone notices — which is what
-# an unresolved conflict does here — is the one outcome it must never produce.
+# The boards are different in kind. Each is a STORE, not a document: an
+# unattended writer (board-watch's agents), a GUI, and a five-minute sync window
+# between the machines. Wedging the whole docs sync until someone notices —
+# which is what an unresolved conflict does here — is the one outcome they must
+# never produce.
 #
-# The driver tries the real 3-way merge FIRST, so non-overlapping edits on the
-# two machines both survive; only where the sides genuinely collide does it keep
-# the more recent one whole. [his, 2026-07-29] "which version of the board
-# should we use should be determined by which one was the most recent."
+# Since 2026-07-30 there is ONE BOARD PER HOST — `board.top.md` and
+# `board.book.md`, each written only by its own machine and merely carried by
+# the other as a backup and a history. [his, 2026-07-30] "i actually want to
+# change it so neither board on top or air syncs ... i dont want that
+# overwriting ... to overwrite anything i do on air. commits obviously will stay
+# synced." So a genuine two-sided edit is now near impossible rather than
+# routine, and this rule is the net for the case it happens anyway (a hand edit
+# on the wrong machine, a restored backup).
+#
+# The driver tries the real 3-way merge FIRST, so non-overlapping edits both
+# survive; only where the sides genuinely collide does it keep the more recent
+# one whole. [his, 2026-07-29] "which version of the board should we use should
+# be determined by which one was the most recent."
+#
+# Named one by one rather than globbed: `board*.md` would also swallow
+# `agents/board-watch.md`, which is prose and must still conflict loudly. The
+# pre-split `board.md` keeps its rule because git still merges history from
+# before the rename.
 #
 # Requires merge.boardrecent.driver, which nix-docs-setup.sh registers on every
-# run. Without that registration this line is INERT and git silently falls back
-# to the default merge — i.e. back to the wedged sync. Verified end-to-end by
-# tools/board-merge-test.sh.
+# run. Without that registration these lines are INERT and git silently falls
+# back to the default merge — i.e. back to the wedged sync. Verified end-to-end
+# by tools/board-merge-test.sh.
 board.md merge=boardrecent
+board.top.md merge=boardrecent
+board.book.md merge=boardrecent

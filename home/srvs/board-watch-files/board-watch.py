@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """board-watch — spawn ONE headless agent when he newly answers a board decision.
 
-`~/nix/docs/board.md` is where he answers the questions agents park for him
+`~/nix/docs/board.<hostname>.md` — one board per machine — is where he answers
+the questions agents park for him
 (`apps/board/AGENTS.md`). Until this existed, an answer sat there until he next
 opened a terminal and told somebody about it. This closes that loop: the answer
 itself is the trigger.
@@ -125,7 +126,8 @@ that as the net for a runaway that never reaches this code at all.
 TESTING. Every side effect is overridable by environment, so the trigger, the
 filter, the queue and the dedupe can be exercised without spawning anything:
 
-    BOARD_WATCH_BOARD       store to read (default ~/nix/docs/board.md)
+    BOARD_WATCH_BOARD       store to read (default: this host's own board,
+                            `boardparse.board_path()`)
     BOARD_WATCH_STATE       state dir    (default ~/.local/state/board-watch)
     BOARD_WATCH_LOG         log file     (default ~/.cache/board-watch.log)
     BOARD_WATCH_SPAWN       command run INSTEAD of `claude`; the prompt arrives
@@ -164,17 +166,20 @@ from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
 REPO = os.environ.get("BOARD_WATCH_REPO", os.path.join(HOME, "nix"))
-BOARD = os.environ.get("BOARD_WATCH_BOARD", os.path.join(REPO, "docs", "board.md"))
 STATE = os.environ.get("BOARD_WATCH_STATE",
                        os.path.join(HOME, ".local", "state", "board-watch"))
 LOG = os.environ.get("BOARD_WATCH_LOG", os.path.join(HOME, ".cache", "board-watch.log"))
 
 # ------------------------------------------------------------ HOST AFFINITY
-#: WHICH MACHINE THIS IS. This unit runs on `top` AND on `book` now, and
-#: `docs/board.md` syncs both ways every five minutes — so "he answered this" is
-#: not on its own a reason to fire. Two watchers would read the same `[x]` and
-#: put two agents on one job, on two checkouts of the same repos, both
-#: committing and both pushing.
+#: WHICH MACHINE THIS IS. This unit runs on `top` AND on `book`. Since
+#: 2026-07-30 each watches its OWN board — `docs/board.top.md` /
+#: `docs/board.book.md`, resolved by `boardparse.board_path()` below — so the
+#: `[x]` this one reads was typed on this machine by construction and no answer
+#: can be seen twice.
+#:
+#: The stamp below is therefore belt-and-braces now, not the de-duplicator it
+#: was when there was one shared file. It is kept: it costs nothing, and it is
+#: what makes a board restored from the other host's synced copy harmless.
 #:
 #: **The host an answer was typed on works it.** The board app stamps it
 #: (`boardparse.set_answer_host`, an HTML comment the parser owns), the
@@ -208,6 +213,14 @@ import boardmove as bm                                           # noqa: E402
 import boardparse as bp                                          # noqa: E402
 import boardundo as bu                                           # noqa: E402
 import boardwork as bw                                           # noqa: E402
+
+#: THIS HOST'S STORE, and it has to be resolved after the imports because the
+#: rule lives in `boardparse` — one board per host (`docs/board.<hostname>.md`),
+#: stated once there and restated nowhere. `ensure_board()` seeds an empty one
+#: on a machine that has never had a board (book's first tick) and hands back
+#: the pre-split `board.md` on a checkout where the migration has not landed
+#: yet, so this can never end up watching a file he cannot see.
+BOARD = os.environ.get("BOARD_WATCH_BOARD") or bp.ensure_board()
 
 
 # ------------------------------------------------------------------------ log
@@ -555,8 +568,8 @@ def note_on_board(bullet, agent_id=None):
 PROMPT = """You are running headless, with no human watching, on the machine \
 {host}. Work in `{repo}`.
 
-He answered one decision on his board (`docs/board.md`, the store behind the \
-`board` app). Your whole job is that ONE decision, below, verbatim from the \
+He answered one decision on this machine's board (the store behind the \
+`board` app; one file per host, `docs/board.<hostname>.md`). Your whole job is that ONE decision, below, verbatim from the \
 file. Do not pick up any other item.
 
 --- the decision, as it stands in the file ---
@@ -605,7 +618,7 @@ clearable on its own.
 under today's date in LANDED. `note` when it is not, and he gets a bullet in \
 WAITING ON YOU TO DO. Run `boardctl.py --help` for the rest.
 
-   **Do not edit `docs/board.md` in an editor.** It is a store three programs \
+   **Do not edit the board in an editor.** It is a store three programs \
 parse and write concurrently — the app he may have open right now, the \
 five-minute sync, and this tool — and every one of those edits is a targeted \
 line edit under a lock with a digest re-check. A hand-written table row or a \

@@ -4,7 +4,8 @@
 #
 # The PROGRAM is called Goetia (lowercase `goetia` in every string it draws, like
 # every other app here). Only the presentation was renamed: the store it reads and
-# writes is still `docs/board.md`, and every path, module and identifier is still
+# writes is still `docs/board.<hostname>.md` — one board per host since
+# 2026-07-30 — and every path, module and identifier is still
 # `board*` — this file, `apps/board/`, `boardctl.py`, `board-watch`. His call.
 # Packaging mirrors reader.nix exactly, including the air split:
 #
@@ -19,7 +20,7 @@
 # no rebuild — only changing the runtime deps does.
 #
 # It has no MimeType= and is not a default for anything: goetia is a GUI over ONE
-# file (~/nix/docs/board.md), not a markdown viewer — that is `reader`, which
+# file (~/nix/docs/board.<hostname>.md, this machine's own board), not a markdown viewer — that is `reader`, which
 # goetia opens the same file in from its `md` titlebar cell. The desktop entry
 # exists so it is in the runner like the other seven.
 let
