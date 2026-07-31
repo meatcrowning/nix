@@ -1329,6 +1329,45 @@ def overlaps(where, workers=None):
     return hits
 
 
+def _order_now():
+    """HIS OWN SENTENCE, for the task about to be dispatched — or `""`.
+
+    [his, 2026-07-30] *"information messages should display a truncated version
+    of the original user prompt that spawned the message"*. This is where that
+    text is picked up: `dispatch()` runs inside the summoner, and the summoner
+    was registered under the words he typed into the box (`board-watch`'s
+    `work_the_queue` -> `boardagents.register`). So the order is read off the
+    caller's OWN card rather than threaded through a prompt an agent could
+    forget to fill in — nothing an agent writes decides what he is quoted as
+    having asked.
+
+    `$BOARD_ORDER` wins when it is already set: a worker that dispatches more
+    work is carrying the order it was given, and the chain must not restart at
+    that worker's own task. Empty for an interactive session, a harness or a
+    hand-run `boardctl dispatch` — nobody typed an order, so nothing is quoted.
+    """
+    return order_of(os.environ.get("BOARD_AGENT_ID", ""))
+
+
+def order_of(agent_id):
+    """The order behind `agent_id`'s run: `$BOARD_ORDER`, else the SUMMONER's
+    own card title.
+
+    The kind check is the whole of it. A summoner is registered under what he
+    typed, so its title is his sentence; a WORKER is registered under the task
+    it was handed, which is an agent's words about his words and must never be
+    quoted back at him as the thing he asked for. A worker gets its order from
+    the environment or not at all.
+    """
+    env = " ".join(os.environ.get("BOARD_ORDER", "").split())
+    if env:
+        return env
+    rec = ba.record(agent_id) or {}
+    if rec.get("kind") != "orchestrator":
+        return ""
+    return " ".join(str(rec.get("title") or "").split())
+
+
 def dispatch(task, phase="", where="", context="", cap_=None):
     """One piece of work -> one worker, or -> the pending queue if we are full.
 
@@ -1347,7 +1386,7 @@ def dispatch(task, phase="", where="", context="", cap_=None):
     rec = {"task": task, "phase": (phase or "").strip().lower(),
            "where": (where or "").strip(), "context": (context or "").strip(),
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
-           "host": os.uname().nodename}
+           "host": os.uname().nodename, "order": _order_now()}
     over = [{"id": a["id"], "name": a.get("name") or "",
              "where": a.get("where") or ""} for a in overlaps(rec["where"])]
     limit = cap() if cap_ is None else cap_
@@ -1513,8 +1552,14 @@ def _spawn_worker(rec):
                "--disallowedTools", *DENY,
                "--output-format", "text",
                "-n", "board: " + rec["task"][:50]]
+    # `BOARD_ORDER` is HIS sentence, and it rides the environment for the same
+    # reason `BOARD_AGENT_ID` does: every `boardctl` this worker runs inherits
+    # it, so the bullet it eventually writes can say which of his own asks it
+    # came out of without anything having to remember to pass it along
+    # (`boardparse.for_now`). Absent when nobody typed an order.
     env = dict(os.environ, BOARD_AGENT_ID=aid, BOARD_WATCH_KEY=aid,
-               BOARD_WORK_TASK=rec["task"], BOARD_WORK_SESSION=session)
+               BOARD_WORK_TASK=rec["task"], BOARD_WORK_SESSION=session,
+               BOARD_ORDER=rec.get("order") or "")
     logpath = _log_path(aid)
     pid = _start_unit(aid, cmd, env, logpath, rec["task"])
     how = "unit"

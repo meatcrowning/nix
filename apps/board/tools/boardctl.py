@@ -155,7 +155,25 @@ def _note_text(argv):
     return "\n".join(out)
 
 
+def _seed_order():
+    """Put his own sentence in `$BOARD_ORDER` if this run can work out what it
+    was and nothing already said.
+
+    `boardparse.for_now` reads that variable, so this is the one place a caller
+    that was NOT spawned with it — the summoner itself, which writes its own
+    `SUMMONED` lines — still stamps the bullet with the ask behind it.
+    `boardwork.order_of` is what decides, and it quotes only a summoner's card:
+    a worker's title is an agent's words about his, not his own.
+    """
+    if os.environ.get("BOARD_ORDER"):
+        return
+    order = bw.order_of(os.environ.get("BOARD_AGENT_ID", ""))
+    if order:
+        os.environ["BOARD_ORDER"] = order
+
+
 def cmd_note(a):
+    _seed_order()
     # `by=` is the FALLBACK attribution only: an agent writing this is named by
     # its own id (`BOARD_AGENT_ID`), and this is what the gutter says when there
     # is no agent at all — him at a shell, or a script. The program that put it

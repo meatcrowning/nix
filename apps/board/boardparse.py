@@ -128,6 +128,21 @@ _PLACED = re.compile(r"^\s*<!--\s*placed:\s*([0-9T:+.\-]+)\s*-->\s*$")
 #: written under it would fall outside `todo_span()` and be left behind when the
 #: bullet is removed.
 _BY = re.compile(r"^\s*<!--\s*by:\s*([A-Za-z0-9._-]+)\s*-->\s*$")
+#: WHAT HE ASKED THAT PRODUCED THIS ENTRY — [his, 2026-07-30] *"information
+#: messages should display a truncated version of the original user prompt that
+#: spawned the message between the top line and the second verbose line"*. His
+#: own sentence, carried down the chain that acted on it: he types it into the
+#: box, the summoner is registered under it, `boardwork.dispatch` copies it onto
+#: the task record, `_spawn_worker` puts it in the worker's environment as
+#: `BOARD_ORDER`, and the bullet that worker finally writes stamps it here. One
+#: line, collapsed and length-capped at the WRITE (`for_now`), because the store
+#: is a file he reads and a pasted paragraph in a comment is not.
+#:
+#: Optional exactly as `by:` is, and for more reasons: every entry written
+#: before this existed has none, a note typed by hand has none, and an agent
+#: nobody dispatched (an interactive session, a harness) has none. The line
+#: simply is not drawn then — never a blank row, never `unknown`.
+_FOR = re.compile(r"^\s*<!--\s*for:\s*(.*?)\s*-->\s*$")
 _TABLE_SEP = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 _HR = re.compile(r"^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$")
 
@@ -157,6 +172,32 @@ def by_now(who):
     """
     s = " ".join(str(who or "").split())
     return "<!-- by: %s -->\n" % s if _BY.match("<!-- by: %s -->" % s) else ""
+
+
+#: How much of his sentence the store keeps. Long enough that a truncated line
+#: on screen is a truncation of HIS words and not of a truncation, short enough
+#: that a comment in the file he reads stays one line in an editor.
+ORDER_CHARS = 200
+
+
+def for_now(order=None, limit=ORDER_CHARS):
+    """The `<!-- for: ... -->` line for an entry being written now, or `""`.
+
+    `order` defaults to `$BOARD_ORDER`, which is how it reaches the agent that
+    writes the bullet: `boardwork` puts his sentence there when it spawns a
+    worker, and the environment is inherited, so nothing has to be threaded
+    through a call chain that would forget it.
+
+    Collapsed to one line and capped (`oneline`), and any `-->` in his text is
+    broken up — a stamp that ended the comment early would put the rest of his
+    sentence into the store as prose. Empty in, empty out, exactly like
+    `by_now`: no author, no stamp; no order, no line.
+    """
+    if order is None:
+        order = os.environ.get("BOARD_ORDER", "")
+    s = oneline(order, limit).replace("-->", "- ->")
+    return "<!-- for: %s -->\n" % s if s and _FOR.match(
+        "<!-- for: %s -->" % s) else ""
 
 
 def format_placed(raw):
@@ -325,7 +366,8 @@ def parse(src):
                         "answerRaw": [], "ifUnanswered": "", "ifRaw": "",
                         "answerHost": "", "hostLine": -1,
                         "placedRaw": "", "placed": "", "placedLine": -1,
-                        "by": "", "byLine": -1}
+                        "by": "", "byLine": -1,
+                        "order": "", "orderLine": -1}
             elif sec == "landed":
                 close_item()
                 date = {"date": text(m3.group(1)), "rows": [], "prose": [],
@@ -426,6 +468,22 @@ def parse(src):
                 prose["endLine"] = i
                 continue
 
+        # ---- ...and WHAT HE ASKED that produced it ----
+        # Same treatment as `by:` in every respect — inside the span, above
+        # `placed:`, never closing the prose — because it is the same kind of
+        # thing: metadata about the entry, invisible to markdown, optional.
+        mfor = _FOR.match(ln)
+        if mfor:
+            if sec == "needs" and item is not None:
+                close_prose()
+                item["order"] = mfor.group(1)
+                item["orderLine"] = i
+                continue
+            if sec == "todo" and prose is not None and prose["kind"] == "bullet":
+                prose["order"] = mfor.group(1)
+                prose["endLine"] = i
+                continue
+
         mp = _PLACED.match(ln)
         if mp:
             if sec == "needs" and item is not None:
@@ -486,6 +544,7 @@ def parse(src):
         t["tag"] = tag_of(t["text"])
         t["placedRaw"] = t.get("placedRaw", "")
         t["by"] = t.get("by", "")
+        t["order"] = t.get("order", "")
         t["summary"] = t.get("summary", t["text"])
         t["detail"] = t.get("detail", "")
         t["placed"] = format_placed(t["placedRaw"])
@@ -1341,7 +1400,7 @@ def oneline(text, limit=160, code=False, words=None):
     return ("`%s`" % s) if code and s else s
 
 
-def add_todo_bullet(lines, doc, bullet, when=None, by=None):
+def add_todo_bullet(lines, doc, bullet, when=None, by=None, order=None):
     """One `- ` bullet into WAITING ON YOU TO DO, after the last one there.
 
     Each top-level bullet in `bullet` gets its own `<!-- placed: -->` line
@@ -1358,10 +1417,12 @@ def add_todo_bullet(lines, doc, bullet, when=None, by=None):
     check_short_summary(bullet)
     if not bullet.endswith("\n"):
         bullet += "\n"
-    # `by:` above `placed:`, and both under EVERY top-level bullet: the stamps
+    # `for:` then `by:` then `placed:`, under EVERY top-level bullet: the stamps
     # are per-bullet for the reason the docstring gives, and `placed:` stays last
     # because it is the line that closes the bullet's span (`_BY`, `todo_span`).
-    stamp = [s for s in (by_now(by), placed_now(when)) if s]
+    # `order` defaults to `$BOARD_ORDER` inside `for_now` — a worker writing its
+    # result does not have to know it is carrying his sentence.
+    stamp = [s for s in (for_now(order), by_now(by), placed_now(when)) if s]
     block = []
     for ln in bullet.splitlines(keepends=True):
         if block and _BULLET.match(ln.rstrip("\n")) and not ln[:1].isspace():

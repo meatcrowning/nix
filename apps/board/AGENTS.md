@@ -430,6 +430,36 @@ exactly this — an unstamped entry is normal, not a defect.
 LANDED is deliberately out of scope: its rows are table cells with no gutter to
 draw in, and a commit already records its own author in git.
 
+### ...and WHICH OF HIS ASKS it came out of
+
+[his, 2026-07-30] *"information messages should display a truncated version of
+the original user prompt that spawned the message between the top line and the
+second verbose line"*. A third stamp, `<!-- for: ... -->`, the same shape and
+the same optionality as the two above it, and it sits FIRST of the three (above
+`by:`, above `placed:`, inside the bullet's span).
+
+**The text is HIS, and it is never an agent's paraphrase of his.** The chain is
+by construction, so nothing has to remember to pass it:
+
+1. He types into the box; `board-watch` registers the summoner under those
+   words (`boardagents.register`, `kind="orchestrator"`).
+2. `boardwork.order_of()` reads that card — **and only a summoner's card**: a
+   worker is registered under the TASK it was handed, which is an agent's words
+   about his and must not be quoted back at him as his ask.
+3. `boardwork.dispatch()` puts it on the task record; `_spawn_worker` exports it
+   as **`BOARD_ORDER`**, which every `boardctl` the worker runs inherits.
+4. `boardparse.for_now()` reads that variable and writes the line. `boardctl`
+   seeds the variable for a summoner writing its own `SUMMONED` lines
+   (`_seed_order`).
+
+Capped at `ORDER_CHARS` (200) and collapsed to one line at the WRITE, with any
+`-->` in it broken up — a stamp that closed the comment early would spill the
+rest of his sentence into the store as prose. Drawn as one `dim` line between
+the summary and the elaboration, cut in CHARACTERS with an ASCII `...`
+(`win.clipTo`; `Text.ElideRight`'s U+2026 is not in the font, §2.3). Nothing
+recorded, nothing drawn — a bullet nobody dispatched, one typed by hand, and
+every bullet written before this existed all draw exactly as they did.
+
 ## The no-pressure requirement is a design constraint
 
 He asked for this because the terminal chat log made him feel he had to answer
