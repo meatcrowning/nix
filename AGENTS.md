@@ -186,13 +186,38 @@ His, and not yours to borrow even for a second:
 **Tear down in a trap, not at the end of the happy path.** The leaks that reach
 him come from tests that failed halfway.
 
-**`tools/leak-check.sh` is the enforcement**, run by `preflight.sh`: it catches a
-dead compositor signature in the user manager, a stale `$XDG_RUNTIME_DIR/hypr/*`
-lock whose PID is gone, a second Hyprland still running, and a sandbox left
-standing. It **warns and never fails** — every one of those states is one a real
-session can legitimately be in, and a false failure blocking his rebuild would be
-worse than the bug. Repair with `~/.config/scripts/hypr-session-env.sh --restore`
-and `tools/sandbox.sh stop`.
+**Never fall back to his session. Abort instead.** The way a careful harness
+still reaches him is the SILENT DEGRADE: it means to drive a nested compositor
+or an offscreen client, that target does not come up, `WAYLAND_DISPLAY` /
+`HYPRLAND_INSTANCE_SIGNATURE` still name HIS session because they were
+inherited and nothing cleared them — and the test drives his desktop
+successfully, quietly, exiting 0. **`tools/lib/session-guard.sh` is the
+mechanism**; source it and call the one that fits:
+`sg_require_nested` (die unless the target is NOT his session — call it right
+after starting a nested compositor), `sg_require_offscreen`,
+`sg_require_live_session` (for a harness that deliberately uses the live
+compositor, so a stale signature aims it at nothing else), and
+`sg_seat_snapshot` / `sg_seat_assert` to notice if a run took his focus or moved
+his pointer. Every function is read-only against his session.
+
+**Placement is verified, not assumed.** `tools/sandbox.sh exec` checks after
+every launch that the window actually landed on the headless output; one that
+did not is closed and the run **aborts** rather than retrying in front of him.
+
+**`tools/leak-check.sh` is the enforcement**, run by `preflight.sh`. Six states:
+a dead compositor signature in the user manager, a stale `$XDG_RUNTIME_DIR/hypr/*`
+lock whose PID is gone, a second Hyprland still running, a sandbox left standing,
+**a test window (sandbox-tagged or probe-titled) mapped on a monitor he can see**,
+and **his seat left where a harness put it** — focus on a test window or on an
+off-screen monitor, or the pointer parked inside a `HEADLESS-*` output. It
+**warns and never fails** — every one of those states is one a real session can
+legitimately be in, and a false failure blocking his rebuild would be worse than
+the bug. Repair with `~/.config/scripts/hypr-session-env.sh --restore` and
+`tools/sandbox.sh stop`.
+
+**`tools/font-demo/font-demo.sh` is the one thing under `tools/` that opens a
+window on his real screen on purpose** — a specimen for a person. It refuses to
+run with no tty attached. Do not set `FONT_DEMO_ON_HIS_SCREEN=1`.
 
 ---
 
@@ -347,8 +372,10 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       tree moves as a unit or not at all.
 - `tools/` — the maintenance scripts the documented workflows depend on:
   `preflight.sh`, `seed-drift.sh`, `prune-worktrees.sh` (aliased `wtprune`),
-  `sandbox.sh`, `leak-check.sh` (residue of a test that leaked into his live
-  session; preflight runs it). Per-area **test harnesses** live here too and are named by
+  `sandbox.sh`, `leak-check.sh` (a test that leaked into his live session —
+  residue *and* the live symptoms; preflight runs it) and `lib/session-guard.sh`
+  (sourced by the harnesses; the anti-fall-through guards, see "Testing without
+  interfering with the user"). Per-area **test harnesses** live here too and are named by
   whichever guide owns them (`claude-merge-test.sh`, `hotswap-test.sh`,
   `fan-harness.sh`, `media-lyrics-probe.sh`, …) — `ls tools/` rather than
   assume this list is complete.

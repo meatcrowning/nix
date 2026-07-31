@@ -63,6 +63,16 @@
 #    one — "whose window is this" — which survives the window being moved, and
 #    is what `stop` uses so a window dragged off the sandbox workspace is still
 #    torn down instead of being left on the user's desktop.
+#  * `exec` VERIFIES the placement afterwards and treats a miss as fatal. The
+#    exec rule below places the window; until 2026-07-30 nothing checked that it
+#    had, so a client the rule did not reach (a second toplevel, a splash, a
+#    rule the compositor refused) simply opened in front of him and the harness
+#    carried on. Now any sandbox-tagged window that is not on the sandbox
+#    workspace is closed and the run aborts. It does not retry.
+#  * Everything here goes through `lib/session-guard.sh`, which is also what
+#    stops this script driving a compositor that is NOT his session — a stale
+#    `HYPRLAND_INSTANCE_SIGNATURE` from somebody's nested test is an abort, not
+#    a target.
 #  * `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
 #    migrates the windows of a removed monitor onto a real one, which is
 #    exactly what this exists to prevent. It then prunes the classes it
@@ -75,6 +85,10 @@
 
 set -uo pipefail
 
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib/session-guard.sh
+. "$HERE/lib/session-guard.sh"
+
 DIR="${VTB_SANDBOX_DIR:-/tmp/vtb-sandbox}"
 STATE="$DIR/state"
 CLASSES="$DIR/classes"
@@ -84,8 +98,13 @@ die() {
   exit 1
 }
 
+# This harness DELIBERATELY drives the live compositor (see the trade-off
+# above), so the guard it wants is the one that refuses to drive anything
+# ELSE: a stale signature left by a nested test would otherwise have us
+# creating outputs in a compositor nobody is looking at, or in one that is
+# half dead.
 have_hypr() {
-  hyprctl version >/dev/null 2>&1 || die "no live Hyprland session"
+  sg_require_live_session
 }
 
 find_headless() {
@@ -110,6 +129,34 @@ import json, sys
 for m in json.load(sys.stdin):
     if m["focused"]:
         print(m["name"]); break'
+}
+
+# strays WS — sandbox-tagged clients that are NOT on the sandbox workspace, i.e.
+# on a monitor he can see. One line each: address, class, monitor name.
+#
+# The exec rule places the window; nothing until now CHECKED that it did. A rule
+# that does not match (a client that maps a second, unrelated toplevel; a splash
+# or dialog that the `[workspace ...]` rule does not reach; a compositor that
+# refused the rule outright) puts an agent's test window in front of him, which
+# is exactly what he reported on 2026-07-30. Checked after every launch, and a
+# hit is fatal to the run rather than cosmetic.
+strays() {
+  python3 - "$1" <<'PY'
+import json, subprocess, sys
+ws = int(sys.argv[1])
+j = lambda *a: json.loads(subprocess.check_output(["hyprctl", "-j", *a]))
+mons = {m["id"]: m["name"] for m in j("monitors")}
+for c in j("clients"):
+    tags = [t.rstrip("*") for t in c.get("tags") or []]
+    if "sandbox" in tags and c["workspace"]["id"] != ws:
+        print(c["address"], c["class"], mons.get(c["monitor"], "?"), sep="\t")
+PY
+}
+
+kill_addr() {
+  hyprctl dispatch "hl.dsp.window.close({ window = \"address:$1\" })" >/dev/null 2>&1
+  sleep 0.5
+  hyprctl dispatch "hl.dsp.window.kill({ window = \"address:$1\" })" >/dev/null 2>&1
 }
 
 ws_windows() { # addresses of everything on the sandbox workspace, OR tagged ours
@@ -174,6 +221,7 @@ case "${1:-}" in
     have_hypr
     load_state
     prev="$(focused_mon)"
+    sg_seat_snapshot
     # DEAF BY CONSTRUCTION. A test program must not be able to make a sound on
     # the machine he is sitting at — he asked for mechanism, not a rule agents
     # remember. `hl.dsp.exec_cmd` is run BY THE COMPOSITOR, so it inherits the
@@ -208,6 +256,19 @@ case "${1:-}" in
       echo "sandbox: warning — focus left $prev despite the no_focus rule; restoring it. Check that hyprland.lua's 'sandbox-never-takes-the-seat' rule is live (hyprctl configerrors)." >&2
       hyprctl dispatch "hl.dsp.focus({ monitor = \"$prev\" })" >/dev/null
     fi
+    # DID IT ACTUALLY LAND OFF-SCREEN? Nothing verified this before, and a
+    # window the exec rule missed is a window on HIS monitor. Close it, and fail
+    # the run — a harness that carries on here goes on to shoot pixels of a
+    # window that is not where it thinks, and leaves the real one in front of
+    # him for however long the run lasts.
+    st="$(strays "$WS")"
+    if [ -n "$st" ]; then
+      echo "sandbox: ERROR - a window this launch created is NOT on $MON:" >&2
+      printf '%s\n' "$st" | sed 's/^/  /' >&2
+      printf '%s\n' "$st" | while IFS=$'\t' read -r addr _ _; do kill_addr "$addr"; done
+      die "closed it. The [workspace $WS silent; tag +sandbox] rule did not reach that window — check 'hyprctl configerrors' and whether the client maps more than one toplevel. NOT retrying on his monitor."
+    fi
+    sg_seat_assert || true   # warn-only: says so in the log if we took the seat
     echo "sandbox: launched on $MON (ws $WS): $*"
     ;;
 

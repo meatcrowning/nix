@@ -94,13 +94,19 @@ done
 shoot() { # $1 = off|on -> "WX WY WW WH MX MY" on stdout, shot at $OUT/$1.png
     local mode=$1 geom= mon=
     "$SANDBOX" start >/dev/null 2>&1 || { fail "sandbox start"; return 1; }
-    "$SANDBOX" exec "$OUT/run-$mode.sh" >/dev/null 2>&1
+    # `exec` now verifies the window landed off-screen and fails if it did not,
+    # so its exit status is load-bearing — swallowing it used to mean the run
+    # carried on with a probe window sitting on the user's real monitor.
+    "$SANDBOX" exec "$OUT/run-$mode.sh" \
+      || { fail "$mode: sandbox exec refused the launch (see above) — not retrying"; return 1; }
     for _ in $(seq 40); do
         sleep 0.25
         geom=$(hyprctl -j clients | python3 -c "
 import json,sys
 for c in json.load(sys.stdin):
-    if c['title'] == '$TITLE':
+    # tagged AND titled: the tag is what says it is ours rather than a window of
+    # his that happens to share a title, so the geometry below is never his.
+    if c['title'] == '$TITLE' and 'sandbox' in [t.rstrip('*') for t in c.get('tags') or []]:
         print(*c['at'], *c['size']); break
 ")
         [ -n "$geom" ] && break
