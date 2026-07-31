@@ -505,6 +505,21 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   takeover — re-answer on the other machine to hand an item over. Kill switch:
   `touch ~/.local/state/board-watch/off`. Log `~/.cache/board-watch.log`;
   harness `tools/board-watch-test.py`; runbook `docs/agents/board-watch.md`.
+- `home/srvs/board-reminder.nix` + `board-reminder-files/board-reminder.py` —
+  **writes a bullet onto `docs/board.md` when a condition he named comes true,
+  once, and then never again.** A quarter-hourly timer, no path unit (nothing
+  writes a file when the condition changes). The one reminder in it fires after
+  his **weekly Claude usage window resets** — the instant is read, not guessed,
+  from Claude Code's own cache in `~/.claude.json`
+  (`cachedUsageUtilization.utilization.limits[kind=weekly_all].resets_at`;
+  that file is NOT under `~/.claude`, so it does not sync). A reset counts as
+  observed either when the clock passes the recorded target or when the cached
+  window moves past it; unreadable cache is a no-op that retries. **One bullet,
+  both boards**: `docs/` syncs both ways, so `top` owns the write, `book` waits
+  out a 24h grace in case top is off, and either way the bullet's marker is
+  looked for in the live board first. Self-disarms via
+  `~/.local/state/board-reminder/<id>.done` (delete to re-arm). Harness
+  `tools/board-reminder-test.py`.
 - `home/srvs/lid.nix` + `lid-files/lid-close.sh` — **what closing the lid does,
   on `book` only** (`top` is a desktop; the module is gated on `host == "air"`).
   The setting is `lidClose` in `~/.config/quickshell/settings.json`
