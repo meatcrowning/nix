@@ -520,6 +520,27 @@ one feature. `tools/volume-persist-test.sh` proves the restore path on
 whichever host runs it, from a private pipewire instance that never touches the
 session graph; `docs/volume-persistence.md` has the measurements.
 
+### Brightness IS one of them — nothing else remembers it
+
+Both halves of the range are live STATE in `settings.json` (machine-local, so
+`top` and `book` keep their own): `gammaLevel` for the negative region and
+`brightnessHw` for the hardware level, both written by `SysInfo` and by nothing
+else. `brightnessHw` is `-1` until the user first moves brightness through the
+panel — then the machine came up however it came up and we leave it alone.
+
+**The restore takes the FIRST poll tick rather than following a read**
+(`SysInfo._restoreBrightness`), because a read that lands first sets
+`brightness` from the hardware and the restore is then indistinguishable from
+drift. It is skipped entirely when `restoreState()` ran, i.e. on a reload: the
+live level came across with the rest of the state, and on `top` re-driving the
+hardware costs a 1.5s DDC write every reload. Imperative code at startup reads
+the store through `SettingsStore.loadNow()` — measured here, a fresh tree sees
+the shipped default (`stored=-1`) for the first tens of ms.
+
+Neither the kernel nor the monitor is a store we control: book's backlight is
+only written back by `systemd-backlight@` on a **clean** shutdown, and top's
+level is whatever the Dell kept in its own NVRAM over DDC.
+
 ### One widget, two places: `*Content.qml` + a data singleton
 
 A widget is drawn by a **content component** and its data belongs to a
