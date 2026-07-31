@@ -902,12 +902,19 @@ Window {
                     // list. They carry no checkbox in the store, so none is
                     // drawn: a box that cannot be written is exactly the
                     // control §10 says must not exist.
-                    PixelText {
+                    // ...under a band of their own, and a collapsible one:
+                    // this line heads a sub-section (the second list in the
+                    // section), so it wears what every other heading here
+                    // wears rather than being the one dim label that could not
+                    // be folded. Folding it takes every tag group with it.
+                    SectionHead {
                         width: needsCol.width
                         visible: win.todo.length > 0
                         height: visible ? implicitHeight : 0
-                        color: win.fgDim
-                        text: "to do, when you feel like it"
+                        label: "to do, when you feel like it"
+                        collapsed: win.isCollapsed("todo")
+                        fgDim: win.fgDim
+                        onToggled: win.toggleCollapsed("todo")
                     }
                     // ...and they are grouped by that first word — his:
                     // *"the information, completion, partial etc of a message
@@ -916,9 +923,13 @@ Window {
                     // of these headers"*.
                     //
                     // A sub-heading is the SAME band the sections use, one rung
-                    // quieter: no accent, and `interactive: false` so it carries
-                    // no `[-]` and cannot be clicked — it groups, it does not
-                    // collapse. It is a heading and NOT a count: no tally, no
+                    // quieter: no accent. [his, 2026-07-30] *"all sections /
+                    // subsections should be collapseable like the top
+                    // decisions one"* — so it carries the band's own `[-]`,
+                    // the same hit area, the same hover light and the same
+                    // persisted state (§14), and it stopped being the
+                    // `interactive: false` label it shipped as.
+                    // It is a heading and NOT a count: no tally, no
                     // badge, no severity colour, exactly as the flat list had
                     // none (AGENTS.md, and §8.1's ramp means a machine fault).
                     // A tag with no bullets has no heading at all; the order and
@@ -926,288 +937,331 @@ Window {
                     // Keyed twice over — the group by its tag, the bullets in it
                     // by their line — so a note arriving under one tag leaves
                     // every other bullet's reply box exactly as he left it.
-                    Repeater {
-                        model: win.keysOf(win.todoGroups, "tag")
-                        delegate: Column {
-                            id: todoGroup
-                            required property int index
-                            readonly property var modelData:
-                                win.todoGroups[todoGroup.index]
-                                || ({ label: "", items: [] })
-                            width: needsCol.width
+                    Item {
+                        width: needsCol.width
+                        visible: !win.isCollapsed("todo")
+                        implicitHeight: visible ? todoCol.implicitHeight : 0
+                        height: implicitHeight
 
-                            Item {
-                                width: 1
-                                height: todoGroup.modelData.label !== "" ? 4 : 0
-                            }
-                            SectionHead {
-                                width: todoGroup.width
-                                visible: todoGroup.modelData.label !== ""
-                                label: todoGroup.modelData.label
-                                interactive: false
-                                fgDim: win.fgDim
-                            }
+                        Column {
+                            id: todoCol
+                            width: parent.width
 
-                            Repeater {
-                                model: win.keysOf(todoGroup.modelData.items, "line")
-                                delegate: Item {
-                                    id: todoRow
-                                    required property int index
-                                    readonly property var modelData:
-                                        todoGroup.modelData.items[todoRow.index] || ({})
-                                    // The reply box is opened from the row's own menu
-                                    // and stays open until he sends or clears it, like
-                                    // every other editor here — a draft is never thrown
-                                    // away by a click somewhere else.
-                                    property bool replying: win.draftOf("todo:" + todoRow.modelData.line) !== ""
-                                    // Folded to its one summary line, by his
-                                    // click on the mark. `win.todoFolded` says
-                                    // what the key is and why it is the text.
-                                    readonly property bool folded:
-                                        win.isTodoFolded(todoRow.modelData.text)
-                                    width: needsCol.width
-                                    implicitHeight: bar.implicitHeight
-                                                    + (replying ? replyBox.height + 4 : 0)
+                        Repeater {
+                            model: win.keysOf(win.todoGroups, "tag")
+                            delegate: Column {
+                                id: todoGroup
+                                required property int index
+                                readonly property var modelData:
+                                    win.todoGroups[todoGroup.index]
+                                    || ({ label: "", items: [] })
+                                width: needsCol.width
+
+                                // Its own collapse key, so folding `information`
+                                // says nothing about `failed` — and namespaced by
+                                // the TAG rather than by position, because the
+                                // groups come and go with what is on the board and
+                                // an index would remember the wrong one. The
+                                // untagged group has no band, so it has no fold:
+                                // there would be no way back.
+                                readonly property string ckey:
+                                    "todo:" + String(todoGroup.modelData.tag || "")
+                                readonly property bool folded:
+                                    todoGroup.modelData.label !== ""
+                                    && win.isCollapsed(todoGroup.ckey)
+
+                                Item {
+                                    width: 1
+                                    height: todoGroup.modelData.label !== "" ? 4 : 0
+                                }
+                                SectionHead {
+                                    width: todoGroup.width
+                                    visible: todoGroup.modelData.label !== ""
+                                    label: todoGroup.modelData.label
+                                    collapsed: todoGroup.folded
+                                    fgDim: win.fgDim
+                                    onToggled: win.toggleCollapsed(todoGroup.ckey)
+                                }
+
+                                // ...and the bullets under it, which the band
+                                // hides and shows with the same `visible` +
+                                // `implicitHeight` pair every section on this
+                                // page collapses with — a sub-section folds
+                                // exactly the way the one above it does.
+                                Item {
+                                    width: todoGroup.width
+                                    visible: !todoGroup.folded
+                                    implicitHeight: visible ? groupCol.implicitHeight : 0
                                     height: implicitHeight
 
-                                    Item {
-                                        id: bar
+                                    Column {
+                                        id: groupCol
                                         width: parent.width
-                                        implicitHeight: todoText.implicitHeight
-                                                        + (todoMore.visible
-                                                           ? todoMore.implicitHeight + 6 : 0)
-                                        height: implicitHeight
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            color: tma.containsMouse ? Theme.highlight : "transparent"
-                                        }
-                                        // THE MARK IS THE FOLD CONTROL — his:
-                                        // *"i should be able to collapse to a
-                                        // single line and expand messages in
-                                        // the to do section via the mark to the
-                                        // left of the messages."* So it says
-                                        // which way it goes, in the same ASCII
-                                        // vocabulary the section bands use
-                                        // (`SectionHead`, §2.3 — the font has
-                                        // no triangles): `-` open, `+` folded.
-                                        // One character rather than the band's
-                                        // `[-]`, because a bullet is a bullet
-                                        // and the list must not gain two cells
-                                        // of indent; the pointing hand and the
-                                        // row's own hover light are what say it
-                                        // is a target (§10).
-                                        PixelText {
-                                            id: todoMark
-                                            x: 0
-                                            color: win.fgDim
-                                            text: todoRow.folded ? "+" : "-"
-                                        }
-                                        // TAG plus ONE summary line, then a gap,
-                                        // then the elaboration if there is any —
-                                        // his: *"it should show the PARTIAL
-                                        // INFORMATION whatever text, then a
-                                        // single line summarizing, a new line,
-                                        // and THEN the elaboration if needed. it
-                                        // shouldnt really elaborate that much
-                                        // though"*.
-                                        //
-                                        // The split is the PARSE's (`summary` /
-                                        // `detail` beside the joined `text` the
-                                        // rest of this app still uses); the
-                                        // store on disk is untouched and its
-                                        // round trip is still byte-identical.
-                                        // §5.2: a bullet with nothing under it
-                                        // COLLAPSES rather than reserving the
-                                        // gap — that absence is permanent, not
-                                        // transient, so there is no blank line
-                                        // to look at.
-                                        // Folded, this is ONE line — *"collapse
-                                        // to a single line"* — so a summary
-                                        // that does not fit is CUT, in
-                                        // characters, with an ASCII marker.
-                                        // **Not `Text.ElideRight`**: Qt elides
-                                        // with U+2026, a glyph this font does
-                                        // not have, and a missing glyph clips
-                                        // the whole row (§2.3). `maximumLineCount`
-                                        // still pins the height, so a string
-                                        // the cut underestimates cannot grow a
-                                        // second line. The width does not
-                                        // change with the fold, so unfolding
-                                        // reflows nothing beside it.
-                                        Para {
-                                            id: todoText
-                                            readonly property string full:
-                                                todoRow.modelData.summary
-                                                ? todoRow.modelData.summary
-                                                : todoRow.modelData.text
-                                            x: todoMark.width + 8
-                                            width: parent.width - x - (15 * win.cellW + 8)
-                                            color: win.fgText
-                                            maximumLineCount: todoRow.folded ? 1 : 9999
-                                            text: todoRow.folded
-                                                  ? win.clipTo(full,
-                                                        Math.floor(width / win.cellW))
-                                                  : full
-                                        }
-                                        Para {
-                                            id: todoMore
-                                            x: todoText.x
-                                            y: todoText.height + 6
-                                            width: todoText.width
-                                            // Folded, the elaboration is the
-                                            // half that goes: the summary is
-                                            // what he asked to keep.
-                                            visible: text !== "" && !todoRow.folded
-                                            color: win.fgDim
-                                            text: todoRow.modelData.detail
-                                                  ? todoRow.modelData.detail : ""
-                                        }
-                                        // WHEN it was put on the board — his:
-                                        // *"mesages in the needs you section
-                                        // should all have the time they were
-                                        // placed on the board indicated on
-                                        // them."* Same treatment as a LANDED
-                                        // row's `when` and a decision's:
-                                        // trailing edge, `Theme.dim`, a width
-                                        // in CHARACTERS that the message text
-                                        // reserves whether or not this bullet
-                                        // has a stamp (§5.4) — so a bullet
-                                        // written before this existed wraps
-                                        // exactly where a new one does and
-                                        // nothing shifts as the list fills.
-                                        // ...and WHO put it there, on the line
-                                        // ABOVE the time. One metadata cluster
-                                        // at the trailing edge (§9.1), so it
-                                        // takes the same `dim` rung and the
-                                        // same reserved character width — a
-                                        // name is not louder than a time.
-                                        //
-                                        // ABSENT, not blank, when nothing is
-                                        // recorded (§10): every bullet written
-                                        // before the stamp existed has none,
-                                        // and so does one from a writer that
-                                        // does not emit it yet. Its height
-                                        // collapses with it, so the time is
-                                        // back on the first line and those
-                                        // bullets draw exactly as they did.
-                                        Column {
-                                            anchors.right: parent.right
-                                            anchors.top: parent.top
-                                            width: 15 * win.cellW
-                                            PixelText {
-                                                id: todoBy
-                                                objectName: "gutterBy"
+
+                                    Repeater {
+                                        model: win.keysOf(todoGroup.modelData.items, "line")
+                                        delegate: Item {
+                                            id: todoRow
+                                            required property int index
+                                            readonly property var modelData:
+                                                todoGroup.modelData.items[todoRow.index] || ({})
+                                            // The reply box is opened from the row's own menu
+                                            // and stays open until he sends or clears it, like
+                                            // every other editor here — a draft is never thrown
+                                            // away by a click somewhere else.
+                                            property bool replying: win.draftOf("todo:" + todoRow.modelData.line) !== ""
+                                            // Folded to its one summary line, by his
+                                            // click on the mark. `win.todoFolded` says
+                                            // what the key is and why it is the text.
+                                            readonly property bool folded:
+                                                win.isTodoFolded(todoRow.modelData.text)
+                                            width: needsCol.width
+                                            implicitHeight: bar.implicitHeight
+                                                            + (replying ? replyBox.height + 4 : 0)
+                                            height: implicitHeight
+
+                                            Item {
+                                                id: bar
                                                 width: parent.width
-                                                horizontalAlignment: Text.AlignRight
-                                                color: Theme.dim
-                                                visible: text !== ""
+                                                implicitHeight: todoText.implicitHeight
+                                                                + (todoMore.visible
+                                                                   ? todoMore.implicitHeight + 6 : 0)
+                                                height: implicitHeight
+                                                Rectangle {
+                                                    anchors.fill: parent
+                                                    color: tma.containsMouse ? Theme.highlight : "transparent"
+                                                }
+                                                // THE MARK IS THE FOLD CONTROL — his:
+                                                // *"i should be able to collapse to a
+                                                // single line and expand messages in
+                                                // the to do section via the mark to the
+                                                // left of the messages."* So it says
+                                                // which way it goes, in the same ASCII
+                                                // vocabulary the section bands use
+                                                // (`SectionHead`, §2.3 — the font has
+                                                // no triangles): `-` open, `+` folded.
+                                                // One character rather than the band's
+                                                // `[-]`, because a bullet is a bullet
+                                                // and the list must not gain two cells
+                                                // of indent; the pointing hand and the
+                                                // row's own hover light are what say it
+                                                // is a target (§10).
+                                                PixelText {
+                                                    id: todoMark
+                                                    x: 0
+                                                    color: win.fgDim
+                                                    text: todoRow.folded ? "+" : "-"
+                                                }
+                                                // TAG plus ONE summary line, then a gap,
+                                                // then the elaboration if there is any —
+                                                // his: *"it should show the PARTIAL
+                                                // INFORMATION whatever text, then a
+                                                // single line summarizing, a new line,
+                                                // and THEN the elaboration if needed. it
+                                                // shouldnt really elaborate that much
+                                                // though"*.
+                                                //
+                                                // The split is the PARSE's (`summary` /
+                                                // `detail` beside the joined `text` the
+                                                // rest of this app still uses); the
+                                                // store on disk is untouched and its
+                                                // round trip is still byte-identical.
+                                                // §5.2: a bullet with nothing under it
+                                                // COLLAPSES rather than reserving the
+                                                // gap — that absence is permanent, not
+                                                // transient, so there is no blank line
+                                                // to look at.
+                                                // Folded, this is ONE line — *"collapse
+                                                // to a single line"* — so a summary
+                                                // that does not fit is CUT, in
+                                                // characters, with an ASCII marker.
+                                                // **Not `Text.ElideRight`**: Qt elides
+                                                // with U+2026, a glyph this font does
+                                                // not have, and a missing glyph clips
+                                                // the whole row (§2.3). `maximumLineCount`
+                                                // still pins the height, so a string
+                                                // the cut underestimates cannot grow a
+                                                // second line. The width does not
+                                                // change with the fold, so unfolding
+                                                // reflows nothing beside it.
+                                                Para {
+                                                    id: todoText
+                                                    readonly property string full:
+                                                        todoRow.modelData.summary
+                                                        ? todoRow.modelData.summary
+                                                        : todoRow.modelData.text
+                                                    x: todoMark.width + 8
+                                                    width: parent.width - x - (15 * win.cellW + 8)
+                                                    color: win.fgText
+                                                    maximumLineCount: todoRow.folded ? 1 : 9999
+                                                    text: todoRow.folded
+                                                          ? win.clipTo(full,
+                                                                Math.floor(width / win.cellW))
+                                                          : full
+                                                }
+                                                Para {
+                                                    id: todoMore
+                                                    x: todoText.x
+                                                    y: todoText.height + 6
+                                                    width: todoText.width
+                                                    // Folded, the elaboration is the
+                                                    // half that goes: the summary is
+                                                    // what he asked to keep.
+                                                    visible: text !== "" && !todoRow.folded
+                                                    color: win.fgDim
+                                                    text: todoRow.modelData.detail
+                                                          ? todoRow.modelData.detail : ""
+                                                }
+                                                // WHEN it was put on the board — his:
+                                                // *"mesages in the needs you section
+                                                // should all have the time they were
+                                                // placed on the board indicated on
+                                                // them."* Same treatment as a LANDED
+                                                // row's `when` and a decision's:
+                                                // trailing edge, `Theme.dim`, a width
+                                                // in CHARACTERS that the message text
+                                                // reserves whether or not this bullet
+                                                // has a stamp (§5.4) — so a bullet
+                                                // written before this existed wraps
+                                                // exactly where a new one does and
+                                                // nothing shifts as the list fills.
+                                                // ...and WHO put it there, on the line
+                                                // ABOVE the time. One metadata cluster
+                                                // at the trailing edge (§9.1), so it
+                                                // takes the same `dim` rung and the
+                                                // same reserved character width — a
+                                                // name is not louder than a time.
+                                                //
+                                                // ABSENT, not blank, when nothing is
+                                                // recorded (§10): every bullet written
+                                                // before the stamp existed has none,
+                                                // and so does one from a writer that
+                                                // does not emit it yet. Its height
+                                                // collapses with it, so the time is
+                                                // back on the first line and those
+                                                // bullets draw exactly as they did.
+                                                Column {
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
+                                                    width: 15 * win.cellW
+                                                    PixelText {
+                                                        id: todoBy
+                                                        objectName: "gutterBy"
+                                                        width: parent.width
+                                                        horizontalAlignment: Text.AlignRight
+                                                        color: Theme.dim
+                                                        visible: text !== ""
+                                                        height: visible ? implicitHeight : 0
+                                                        text: todoRow.modelData.by
+                                                              ? todoRow.modelData.by : ""
+                                                    }
+                                                    PixelText {
+                                                        id: todoWhen
+                                                        width: parent.width
+                                                        horizontalAlignment: Text.AlignRight
+                                                        color: Theme.dim
+                                                        text: todoRow.modelData.placed
+                                                              ? todoRow.modelData.placed : ""
+                                                    }
+                                                }
+                                                MouseArea {
+                                                    id: tma
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    // Left is here for the DOUBLE click only —
+                                                    // *"i should be able to just double click
+                                                    // on stuff in the to do when you feel like
+                                                    // it section to remove them"*. A single
+                                                    // left click stays inert: there is nothing
+                                                    // for it to do on a bullet the store gives
+                                                    // no checkbox, and a row that reacted to
+                                                    // one pass of the pointer would make the
+                                                    // removal an accident waiting to happen.
+                                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                                    onClicked: (m) => {
+                                                        if (m.button !== Qt.RightButton)
+                                                            return;
+                                                        var p = mapToItem(null, m.x, m.y);
+                                                        win.todoMenu(todoRow.modelData, p.x, p.y,
+                                                                     todoRow);
+                                                    }
+                                                    onDoubleClicked: (m) => {
+                                                        if (m.button !== Qt.LeftButton)
+                                                            return;
+                                                        Board.removeTodo(todoRow.modelData.line);
+                                                    }
+                                                }
+                                                // ...and the mark's own band, over the
+                                                // top of that one, because the fold is
+                                                // *"via the mark to the left of the
+                                                // messages"*. Two rules from §5.1 and
+                                                // §10 shape it: the HIT BAND EXCEEDS
+                                                // THE INK — one dim character is a
+                                                // 8px target and he has already
+                                                // reported a collapse handle as
+                                                // unclickable once — and it takes the
+                                                // LEFT button only, so a right-click
+                                                // anywhere on the row still opens the
+                                                // row's menu underneath.
+                                                //
+                                                // It swallows the double-click-to-
+                                                // remove in this band, and that is the
+                                                // safe way round: folding twice is
+                                                // nothing, and removing his chore by
+                                                // accident is not.
+                                                MouseArea {
+                                                    x: 0
+                                                    width: todoMark.width + 8
+                                                    height: parent.height
+                                                    acceptedButtons: Qt.LeftButton
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: win.toggleTodoFolded(
+                                                        todoRow.modelData.text)
+                                                }
+                                            }
+
+                                            // *"the top item on the right click menu for to do
+                                            // items should be `reply` that lets me reply
+                                            // directly to it instead of typing in the top box
+                                            // like i am doing now"*. Same component, same
+                                            // `boardagents.send()` path, same conservation
+                                            // property — what it adds is the quote, so whoever
+                                            // picks it up knows which chore he meant, and the
+                                            // removal: a chore he has answered leaves the list.
+                                            InputBox {
+                                                id: replyBox
+                                                y: bar.height + 4
+                                                width: parent.width
+                                                visible: todoRow.replying
                                                 height: visible ? implicitHeight : 0
-                                                text: todoRow.modelData.by
-                                                      ? todoRow.modelData.by : ""
+                                                draft: win.draftOf("todo:" + todoRow.modelData.line)
+                                                openCaret: win.caretOf("todo:" + todoRow.modelData.line)
+                                                onCaretHeld: (p) => win.caretHeld(
+                                                    "todo:" + todoRow.modelData.line, p)
+                                                onCaretLeft: () => win.caretLeft(
+                                                    "todo:" + todoRow.modelData.line)
+                                                fgAccent: win.fgAccent
+                                                fgText: win.fgText
+                                                fgDim: win.fgDim
+                                                placeholder: "reply to this one - it goes to the inbox"
+                                                onDraftEdited: (b) => win.setDraft(
+                                                    "todo:" + todoRow.modelData.line, b)
+                                                onSubmitted: (b) => {
+                                                    if (win.replyToTodo(todoRow.modelData, b))
+                                                        todoRow.replying = false;
+                                                }
                                             }
-                                            PixelText {
-                                                id: todoWhen
-                                                width: parent.width
-                                                horizontalAlignment: Text.AlignRight
-                                                color: Theme.dim
-                                                text: todoRow.modelData.placed
-                                                      ? todoRow.modelData.placed : ""
+
+                                            function beginReply() {
+                                                todoRow.replying = true;
+                                                replyBox.beginEdit();
                                             }
-                                        }
-                                        MouseArea {
-                                            id: tma
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            // Left is here for the DOUBLE click only —
-                                            // *"i should be able to just double click
-                                            // on stuff in the to do when you feel like
-                                            // it section to remove them"*. A single
-                                            // left click stays inert: there is nothing
-                                            // for it to do on a bullet the store gives
-                                            // no checkbox, and a row that reacted to
-                                            // one pass of the pointer would make the
-                                            // removal an accident waiting to happen.
-                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                            onClicked: (m) => {
-                                                if (m.button !== Qt.RightButton)
-                                                    return;
-                                                var p = mapToItem(null, m.x, m.y);
-                                                win.todoMenu(todoRow.modelData, p.x, p.y,
-                                                             todoRow);
-                                            }
-                                            onDoubleClicked: (m) => {
-                                                if (m.button !== Qt.LeftButton)
-                                                    return;
-                                                Board.removeTodo(todoRow.modelData.line);
-                                            }
-                                        }
-                                        // ...and the mark's own band, over the
-                                        // top of that one, because the fold is
-                                        // *"via the mark to the left of the
-                                        // messages"*. Two rules from §5.1 and
-                                        // §10 shape it: the HIT BAND EXCEEDS
-                                        // THE INK — one dim character is a
-                                        // 8px target and he has already
-                                        // reported a collapse handle as
-                                        // unclickable once — and it takes the
-                                        // LEFT button only, so a right-click
-                                        // anywhere on the row still opens the
-                                        // row's menu underneath.
-                                        //
-                                        // It swallows the double-click-to-
-                                        // remove in this band, and that is the
-                                        // safe way round: folding twice is
-                                        // nothing, and removing his chore by
-                                        // accident is not.
-                                        MouseArea {
-                                            x: 0
-                                            width: todoMark.width + 8
-                                            height: parent.height
-                                            acceptedButtons: Qt.LeftButton
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: win.toggleTodoFolded(
-                                                todoRow.modelData.text)
                                         }
                                     }
-
-                                    // *"the top item on the right click menu for to do
-                                    // items should be `reply` that lets me reply
-                                    // directly to it instead of typing in the top box
-                                    // like i am doing now"*. Same component, same
-                                    // `boardagents.send()` path, same conservation
-                                    // property — what it adds is the quote, so whoever
-                                    // picks it up knows which chore he meant, and the
-                                    // removal: a chore he has answered leaves the list.
-                                    InputBox {
-                                        id: replyBox
-                                        y: bar.height + 4
-                                        width: parent.width
-                                        visible: todoRow.replying
-                                        height: visible ? implicitHeight : 0
-                                        draft: win.draftOf("todo:" + todoRow.modelData.line)
-                                        openCaret: win.caretOf("todo:" + todoRow.modelData.line)
-                                        onCaretHeld: (p) => win.caretHeld(
-                                            "todo:" + todoRow.modelData.line, p)
-                                        onCaretLeft: () => win.caretLeft(
-                                            "todo:" + todoRow.modelData.line)
-                                        fgAccent: win.fgAccent
-                                        fgText: win.fgText
-                                        fgDim: win.fgDim
-                                        placeholder: "reply to this one - it goes to the inbox"
-                                        onDraftEdited: (b) => win.setDraft(
-                                            "todo:" + todoRow.modelData.line, b)
-                                        onSubmitted: (b) => {
-                                            if (win.replyToTodo(todoRow.modelData, b))
-                                                todoRow.replying = false;
-                                        }
-                                    }
-
-                                    function beginReply() {
-                                        todoRow.replying = true;
-                                        replyBox.beginEdit();
                                     }
                                 }
                             }
+                        }
                         }
                     }
                 }
@@ -1557,87 +1611,110 @@ Window {
                             required property var modelData
                             width: landedCol.width
 
-                            PixelText {
-                                width: parent.width
-                                topPadding: 6
-                                bottomPadding: 2
-                                color: win.fgDim
-                                text: group.modelData.date
+                            // A DAY is a sub-section of `landed`, so it wears
+                            // the same band as everything else here rather
+                            // than the bare dim line it shipped as — [his,
+                            // 2026-07-30] *"all sections / subsections should
+                            // be collapseable like the top decisions one"*.
+                            // Keyed by the DATE and not by position: the list
+                            // grows a new day at the top, and an index would
+                            // hand yesterday's fold to today.
+                            readonly property string ckey:
+                                "landed:" + String(group.modelData.date)
+
+                            SectionHead {
+                                width: group.width
+                                label: String(group.modelData.date)
+                                collapsed: win.isCollapsed(group.ckey)
+                                fgDim: win.fgDim
+                                onToggled: win.toggleCollapsed(group.ckey)
                             }
 
-                            Repeater {
-                                model: group.modelData.rows
-                                delegate: Item {
-                                    id: lrow
-                                    required property var modelData
-                                    width: landedCol.width
-                                    implicitHeight: lwhat.implicitHeight
-                                    height: implicitHeight
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        color: lma.containsMouse ? Theme.highlight : "transparent"
-                                    }
-                                    PixelText {
-                                        id: lcommit
-                                        x: 0
-                                        width: 8 * win.cellW
-                                        elide: Text.ElideRight
-                                        color: Theme.dim
-                                        text: lrow.modelData.commit
-                                    }
-                                    Para {
-                                        id: lwhat
-                                        x: lcommit.width + 8
-                                        width: parent.width - x
-                                               - (lwhen.width > 0 ? lwhen.width + 8 : 0)
-                                        color: win.fgDim
-                                        text: lrow.modelData.what
-                                    }
-                                    // WHEN it happened, at the trailing edge
-                                    // (§9.1: metadata clusters there) and a
-                                    // rung dimmer than the line it belongs to,
-                                    // because the what is the point and the
-                                    // time is not. Its width is a CHARACTER
-                                    // COUNT like the commit's — `implicitWidth`
-                                    // on an elided Text measures out at zero —
-                                    // and it is 0 for a row that has no time,
-                                    // so the old rows give the space back.
-                                    PixelText {
-                                        id: lwhen
-                                        anchors.right: parent.right
-                                        width: lrow.modelData.when ? 8 * win.cellW : 0
-                                        visible: width > 0
-                                        horizontalAlignment: Text.AlignRight
-                                        color: Theme.dim
-                                        text: lrow.modelData.when ? lrow.modelData.when : ""
-                                    }
-                                    MouseArea {
-                                        id: lma
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        acceptedButtons: Qt.RightButton
-                                        onClicked: (m) => {
-                                            var p = mapToItem(null, m.x, m.y);
-                                            win.rowMenu(lrow.modelData.commit + "  "
-                                                        + lrow.modelData.what
-                                                        + (lrow.modelData.when
-                                                           ? "  " + lrow.modelData.when : ""),
-                                                        p.x, p.y);
+                            Item {
+                                width: group.width
+                                visible: !win.isCollapsed(group.ckey)
+                                implicitHeight: visible ? dayCol.implicitHeight : 0
+                                height: implicitHeight
+
+                                Column {
+                                    id: dayCol
+                                    width: parent.width
+
+                                Repeater {
+                                    model: group.modelData.rows
+                                    delegate: Item {
+                                        id: lrow
+                                        required property var modelData
+                                        width: landedCol.width
+                                        implicitHeight: lwhat.implicitHeight
+                                        height: implicitHeight
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            color: lma.containsMouse ? Theme.highlight : "transparent"
+                                        }
+                                        PixelText {
+                                            id: lcommit
+                                            x: 0
+                                            width: 8 * win.cellW
+                                            elide: Text.ElideRight
+                                            color: Theme.dim
+                                            text: lrow.modelData.commit
+                                        }
+                                        Para {
+                                            id: lwhat
+                                            x: lcommit.width + 8
+                                            width: parent.width - x
+                                                   - (lwhen.width > 0 ? lwhen.width + 8 : 0)
+                                            color: win.fgDim
+                                            text: lrow.modelData.what
+                                        }
+                                        // WHEN it happened, at the trailing edge
+                                        // (§9.1: metadata clusters there) and a
+                                        // rung dimmer than the line it belongs to,
+                                        // because the what is the point and the
+                                        // time is not. Its width is a CHARACTER
+                                        // COUNT like the commit's — `implicitWidth`
+                                        // on an elided Text measures out at zero —
+                                        // and it is 0 for a row that has no time,
+                                        // so the old rows give the space back.
+                                        PixelText {
+                                            id: lwhen
+                                            anchors.right: parent.right
+                                            width: lrow.modelData.when ? 8 * win.cellW : 0
+                                            visible: width > 0
+                                            horizontalAlignment: Text.AlignRight
+                                            color: Theme.dim
+                                            text: lrow.modelData.when ? lrow.modelData.when : ""
+                                        }
+                                        MouseArea {
+                                            id: lma
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            acceptedButtons: Qt.RightButton
+                                            onClicked: (m) => {
+                                                var p = mapToItem(null, m.x, m.y);
+                                                win.rowMenu(lrow.modelData.commit + "  "
+                                                            + lrow.modelData.what
+                                                            + (lrow.modelData.when
+                                                               ? "  " + lrow.modelData.when : ""),
+                                                            p.x, p.y);
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            Repeater {
-                                model: group.modelData.prose
-                                delegate: Para {
-                                    id: lprose
-                                    required property var modelData
-                                    width: landedCol.width
-                                    topPadding: lprose.modelData.kind === "bullet" ? 0 : 6
-                                    color: win.fgDim
-                                    text: (lprose.modelData.kind === "bullet" ? "- " : "")
-                                          + lprose.modelData.text
+                                Repeater {
+                                    model: group.modelData.prose
+                                    delegate: Para {
+                                        id: lprose
+                                        required property var modelData
+                                        width: landedCol.width
+                                        topPadding: lprose.modelData.kind === "bullet" ? 0 : 6
+                                        color: win.fgDim
+                                        text: (lprose.modelData.kind === "bullet" ? "- " : "")
+                                              + lprose.modelData.text
+                                    }
+                                }
                                 }
                             }
                         }
