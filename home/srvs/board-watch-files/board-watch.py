@@ -266,6 +266,44 @@ def owns(item):
     return h == HOST if h else HOST == DEFAULT_HOST
 
 
+def working_keys():
+    """The decision keys a process on this machine is working RIGHT NOW.
+
+    THE LAST GUARD AGAINST FIRING TWICE, and deliberately the one that depends
+    on nothing this system wrote down. Every agent this file spawns carries
+    `BOARD_WATCH_KEY=<key>` in its environment (`spawn()`), so a live process
+    with that variable set IS the decision being worked — no stash to be stale,
+    no registration to have been dropped, no fingerprint to have been rewritten
+    by a sync.
+
+    It exists because on 2026-07-30 every one of those bookkeeping routes was
+    intact and the decision still fired twice: a rebuild killed the tick, the
+    agent lived on, and the stash was the only thing anyone asked. `adopt()`
+    and `retire_finished()` fix that path; this one is what catches the next
+    path nobody has thought of, and the cost is one pass over `/proc`.
+
+    Own processes only — `/proc/<pid>/environ` is mode 0400 and unreadable for
+    anyone else's, which is exactly the right scope: another user's agent is
+    not working his board.
+    """
+    keys = set()
+    try:
+        pids = [n for n in os.listdir("/proc") if n.isdigit()]
+    except OSError:
+        return keys
+    for n in pids:
+        try:
+            with open("/proc/%s/environ" % n, "rb") as f:
+                blob = f.read(64 * 1024)
+        except OSError:
+            continue                      # gone, or not ours: neither is a key
+        for var in blob.split(b"\0"):
+            if var.startswith(b"BOARD_WATCH_KEY="):
+                keys.add(var[len(b"BOARD_WATCH_KEY="):].decode("utf-8", "replace"))
+                break
+    return keys
+
+
 def item_span(lines, item):
     """The decision's raw lines, `### n. title` to just before the next heading.
 
@@ -595,7 +633,7 @@ DENY = bw.DENY
 
 
 def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
-          retry=True):
+          retry=True, on_start=None):
     """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
 
     A run that dies on a TRANSIENT platform error — the CLI printing an API
@@ -622,6 +660,13 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
     starts — a decision and an orchestrator — are waited on deliberately,
     because a failure has to be reported onto the board in his own words and
     there is nobody else left to do it.
+
+    `on_start(pid)` is called with the agent's own pid as soon as it exists,
+    and it is why this uses `Popen` rather than `subprocess.run`. WAITING FOR
+    IT IS NOT OWNING IT: this process is a oneshot systemd stops on every
+    `home-manager switch`, the agent is not, and something has to be able to
+    say which of the two the item's liveness follows (`boardmove.adopt`).
+    Called for the retry too, which is a different process.
     """
     stub = os.environ.get("BOARD_WATCH_SPAWN")
     env = dict(os.environ, BOARD_WATCH_KEY=agent_id, BOARD_AGENT_ID=agent_id)
@@ -655,24 +700,39 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
                "--output-format", "text",
                "-n", label]
     t0 = time.time()
+    cap = timeout or AGENT_TIMEOUT_S
     try:
-        p = subprocess.run(cmd, cwd=REPO, env=env, timeout=timeout or AGENT_TIMEOUT_S,
-                           input=prompt if stub else None,
-                           capture_output=True, text=True)
-    except subprocess.TimeoutExpired:
-        return 124, "after %d minutes without finishing" \
-            % ((timeout or AGENT_TIMEOUT_S) // 60), time.time() - t0
+        p = subprocess.Popen(cmd, cwd=REPO, env=env,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
     except OSError as e:
         return 127, "without starting at all (%s)" % e, time.time() - t0
-    if p.stdout:
-        log("agent said: " + " ".join(p.stdout.split())[:400])
-    if p.returncode != 0 and p.stderr:
-        log("agent stderr: " + " ".join(p.stderr.split())[:400])
+    if on_start:
+        # BEFORE the wait, and before anything that can raise: the whole point
+        # is that this holds even if this process never reaches the line below.
+        try:
+            on_start(p.pid)
+        except Exception as e:                                # noqa: BLE001
+            log("could not record the agent's pid: %s" % e)
+    try:
+        out, err = p.communicate(input=prompt if stub else None, timeout=cap)
+    except subprocess.TimeoutExpired:
+        # `subprocess.run` did this for us; `Popen` does not, and an agent left
+        # running past its cap would go on editing the tree with nothing
+        # watching it.
+        p.kill()
+        p.communicate()
+        return 124, "after %d minutes without finishing" % (cap // 60), \
+            time.time() - t0
+    if out:
+        log("agent said: " + " ".join(out.split())[:400])
+    if p.returncode != 0 and err:
+        log("agent stderr: " + " ".join(err.split())[:400])
     if (p.returncode != 0 and retry and not stub
-            and bw.TRANSIENT_RE.search((p.stdout or "") + "\n" + (p.stderr or ""))):
+            and bw.TRANSIENT_RE.search((out or "") + "\n" + (err or ""))):
         log("that was a transient API error - trying the run once more")
         return spawn(prompt, agent_id, label, session=None, timeout=timeout,
-                     role=role, retry=False)
+                     role=role, retry=False, on_start=on_start)
     return p.returncode, "with status %d" % p.returncode, time.time() - t0
 
 
@@ -961,6 +1021,19 @@ def main():
 
 
 def tick():
+    # ...BUT WORK THAT WAS DONE IS NOT STRANDED WORK, and this runs first
+    # because `reconcile()` below cannot tell the two apart on its own. An agent
+    # whose tick was killed mid-run (a rebuild restarts this unit; the agent
+    # survives it) finishes with nobody left to close its stash out, so the
+    # stash outlives it naming a dead pid. Retire the ones that recorded a
+    # result on his board; only what is left is a death.
+    try:
+        for rec in bm.retire_finished():
+            log("decision %s finished after its tick was killed - not handing "
+                "it back" % (rec.get("num") or rec.get("key")))
+    except (bm.BoardError, OSError) as e:
+        log("could not retire finished decisions: %s" % e)
+
     # NOTHING STAYS STRANDED. If a previous run was killed outright — OOM,
     # reboot, systemd's TimeoutStartSec — its decision is sitting in IN FLIGHT
     # with nothing working on it. Hand back every item whose owning process is
@@ -1065,6 +1138,16 @@ def tick():
 
     fresh = {}
     fired_candidates = []
+    # Read at most once per tick, and only if something would otherwise fire:
+    # it is a pass over /proc, and the overwhelmingly common tick has no
+    # candidate at all.
+    _busy = {}
+
+    def busy():
+        if "keys" not in _busy:
+            _busy["keys"] = working_keys()
+        return _busy["keys"]
+
     for item in doc["needs"]:
         fp = fingerprint(item)
         fresh[item["key"]] = fp
@@ -1076,6 +1159,17 @@ def tick():
             continue
         if fp != seen[item["key"]] and item["answered"]:
             if owns(item):
+                # ONE AGENT PER DECISION, whatever the bookkeeping says. A key
+                # a live process still carries is a decision being worked, so
+                # it is left at its OLD fingerprint — untouched, not recorded —
+                # and looked at again when that process is gone. Same shape as
+                # the gate's queue below, and the same reason: a skip that
+                # recorded the answer would lose it.
+                if item["key"] in busy():
+                    fresh[item["key"]] = seen[item["key"]]
+                    log("decision %s is already being worked - not firing a "
+                        "second agent on it" % (item["num"] or item["key"]))
+                    continue
                 fired_candidates.append(item)
             else:
                 # Answered on the OTHER machine, which is the one that works it.
@@ -1173,9 +1267,17 @@ def tick():
         log("could not move decision %s into IN FLIGHT (%s) - working it anyway"
             % (item["num"] or "?", e))
 
+    # ...AND THE STASH FOLLOWS THE AGENT FROM HERE ON, not this process. A
+    # `sudo rebuild-top` stops this unit mid-run (home-manager restarts the
+    # units it manages), the agent survives it, and until `adopt()` existed the
+    # next tick read our dead pid as a dead agent and handed the decision back
+    # — where it read as newly answered and fired a second agent nine minutes
+    # later. Two agents, one job, 2026-07-30. `boardmove.adopt` has the timings.
     rc, how, secs = spawn(prompt, item["key"],
                           "board: decision %s" % (item["num"] or item["key"]),
-                          session=session)
+                          session=session,
+                          on_start=(lambda pid: bm.adopt(item["key"], pid))
+                          if moved else None)
     state = load_state()
     state["runs"] = (state["runs"] + [{
         "key": item["key"], "num": item["num"], "rc": rc,

@@ -42,6 +42,13 @@ What it asserts, in order:
               oneshot unit, because that is the only place the bug exists. And
               a worker that ends without recording anything is reported to him
               as a failure rather than passing for success
+  rebuild     THE 2026-07-30 DOUBLE-FIRE: a `sudo rebuild-top` stops this unit,
+              so a tick is killed mid-agent while the agent lives on. The
+              decision must not be handed back (the stash follows the AGENT),
+              must not be handed back when that agent later finishes either,
+              and must not fire a second time even if it is back in NEEDS YOU
+              and he answers it again — while an agent that dies recording
+              nothing is still handed back, as it always was
   affinity    TWO MACHINES, ONE FILE: this unit runs on `top` and on `book`
               now and `docs/board.md` syncs both ways, so an answer stamped for
               the other machine must NOT fire here, one stamped for this machine
@@ -358,9 +365,12 @@ def check_session_id_is_passed(r):
     `apps/board/boardphase.py`. Lose the flag and every card silently degrades
     to "cannot see what it is doing" — a regression with no error anywhere.
 
-    Checked by importing the watcher and intercepting `subprocess.run`, because
-    the stub path (`BOARD_WATCH_SPAWN`) deliberately replaces the whole command
-    line and so cannot see it.
+    Checked by importing the watcher and intercepting `subprocess.Popen`,
+    because the stub path (`BOARD_WATCH_SPAWN`) deliberately replaces the whole
+    command line and so cannot see it. `Popen` and not `run`: `spawn()` has to
+    know the agent's own pid while the run is still going, so that the stash
+    can follow the AGENT rather than the tick a rebuild kills
+    (`test_a_rebuild_kills_the_tick`).
     """
     import importlib.util
     spec = importlib.util.spec_from_file_location("bw_under_test", WATCHER)
@@ -376,18 +386,18 @@ def check_session_id_is_passed(r):
         class Done(Exception):
             pass
 
-        def fake_run(cmd, **kw):
+        def fake_popen(cmd, **kw):
             seen["cmd"] = cmd
             raise Done()
 
-        real = mod.subprocess.run
-        mod.subprocess.run = fake_run
+        real = mod.subprocess.Popen
+        mod.subprocess.Popen = fake_popen
         try:
             mod.spawn("a prompt", "k", "label", session="fixed-uuid-here")
         except Done:
             pass
         finally:
-            mod.subprocess.run = real
+            mod.subprocess.Popen = real
     finally:
         os.environ.clear()
         os.environ.update(old)
@@ -516,6 +526,206 @@ def test_worker_outlives_the_tick():
 def _bw():
     import boardwork
     return boardwork
+
+
+def _agent_pids(key):
+    """Live processes carrying `BOARD_WATCH_KEY=<key>` — the stub agents this
+    file spawns, found the same way `working_keys()` finds real ones."""
+    out = []
+    try:
+        names = [n for n in os.listdir("/proc") if n.isdigit()]
+    except OSError:
+        return out
+    for n in names:
+        try:
+            with open("/proc/%s/environ" % n, "rb") as f:
+                blob = f.read(64 * 1024)
+        except OSError:
+            continue
+        if any(v == b"BOARD_WATCH_KEY=" + key.encode() for v in blob.split(b"\0")):
+            out.append(int(n))
+    return out
+
+
+def _kill(key):
+    """Kill every stub agent carrying `key` and wait for /proc to agree."""
+    for pid in _agent_pids(key):
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+    for _ in range(100):
+        if not _agent_pids(key):
+            return
+        time.sleep(0.1)
+
+
+def _wait_for(path, text, secs=60):
+    """Wait for a line to appear in the watcher's log. Returns whether it did."""
+    for _ in range(int(secs * 10)):
+        try:
+            with open(path) as f:
+                if text in f.read():
+                    return True
+        except OSError:
+            pass
+        time.sleep(0.1)
+    return False
+
+
+def test_a_rebuild_kills_the_tick():
+    """A DECISION ALREADY BEING WORKED CANNOT BE PICKED UP A SECOND TIME.
+
+    The 2026-07-30 double-fire, reproduced. Decision 1 fired at 19:23:08; a
+    `sudo rebuild-top` at 19:23:50 reached home-manager's `reloadSystemd`,
+    which STOPS the units it manages — `board-watch.service: Main process
+    exited, code=killed, status=15/TERM` at 19:24:25, with the agent itself
+    surviving because the unit is `KillMode=process`. One second later the
+    restarted tick ran `reconcile()`, read the dead TICK's pid off the stash,
+    logged "returned decision 1 to NEEDS YOU: its agent is gone" and put the
+    decision back in front of him with his answer on it — so he answered it
+    again, in his own words this time, and 19:33:04 fired a second agent while
+    the first was still running. Two agents did one job and both wrote a LANDED
+    row for it.
+
+    Every mechanism was working as designed; the design asked the wrong
+    process. So this asserts the three things that make the sequence
+    impossible, in the order they would fail:
+
+      1. the stash follows the AGENT (`boardmove.adopt`), so a killed tick
+         strands nothing;
+      2. an agent that finished after its tick died is RETIRED rather than
+         reclaimed (`boardmove.retire_finished`) — the same duplicate by a
+         slower route;
+      3. and whatever the bookkeeping says, a key a live process still carries
+         does not fire (`working_keys`) — with his answer QUEUED, not dropped.
+
+    Plus the guarantee none of that may cost: an agent that dies without
+    recording anything still hands its decision back.
+    """
+    print("a rebuild that kills the tick mid-agent")
+    d = tempfile.mkdtemp(prefix="board-watch-kill-")
+    stub = None
+    try:
+        r = Rig(d)
+        r.run()                                   # seed
+        # Two stubs: one that hangs around like a real agent (so a tick can be
+        # killed out from under it), and one that is over before the tick is —
+        # a `tick()` here is waited on, so the sleeper cannot be used for a run
+        # that is expected to fire.
+        sleeper = 'echo "$BOARD_WATCH_KEY" >> %s; exec sleep 300' % r.fired
+        quick = 'echo "$BOARD_WATCH_KEY" >> %s' % r.fired
+
+        def tick(spawn=quick, **kw):
+            return subprocess.run([sys.executable, WATCHER],
+                                  env=r.env(gate="open", spawn=spawn, **kw),
+                                  capture_output=True, text=True, timeout=120)
+
+        def needs():
+            return [i["key"] for i in bp.parse(r.text())["needs"]]
+
+        # --- the fire, then the rebuild that kills the tick under it
+        r.edit("- [ ] Do it the short way", "- [x] Do it the short way")
+        held = subprocess.Popen([sys.executable, WATCHER],
+                                env=r.env(gate="open", spawn=sleeper),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        check("the tick fires and moves the decision into IN FLIGHT",
+              _wait_for(r.log, "moved decision 1 into IN FLIGHT"), open(r.log).read()[-300:])
+        stub = _agent_pids("first-question")
+        check("...and the agent it spawned carries the decision's key",
+              len(stub) == 1, str(stub))
+        held.terminate()                          # what sd-switch does, verbatim
+        held.wait(timeout=30)
+        check("the agent survives the tick being killed",
+              _agent_pids("first-question") == stub, str(_agent_pids("first-question")))
+
+        # --- the tick that used to hand it back
+        tick()
+        log = open(r.log).read()
+        check("the next tick does NOT hand the decision back",
+              "returned decision" not in log, log[-300:])
+        check("...it is still in IN FLIGHT, not back in front of him",
+              "first-question" not in needs(), str(needs()))
+        check("...and no second agent was fired", r.fires() == ["first-question"],
+              str(r.fires()))
+
+        # --- ...and it is not handed back once the agent finishes, either
+        r.state_home(lambda: _bw().mark_reported("first-question", "done"))
+        _kill("first-question")
+        tick()
+        log = open(r.log).read()
+        check("an agent that finished after its tick died is retired, not reclaimed",
+              "finished after its tick was killed" in log
+              and "returned decision" not in log, log[-300:])
+        check("...so the decision stays out of NEEDS YOU",
+              "first-question" not in needs(), str(needs()))
+        check("...and its stash is gone rather than left to be reclaimed later",
+              r.state_home(lambda: bm._stash_for("first-question")) is None)
+
+        # --- THE LAST GUARD: he re-answers an item that is being worked
+        r.clear()
+        r.edit("- [ ] Yes\n- [ ] No", "- [x] Yes\n- [ ] No")
+        held = subprocess.Popen([sys.executable, WATCHER],
+                                env=r.env(gate="open", spawn=sleeper),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        check("a second decision fires its own agent",
+              _wait_for(r.log, "moved decision 2 into IN FLIGHT"),
+              open(r.log).read()[-300:])
+        stub = _agent_pids("second-question")
+        held.terminate()
+        held.wait(timeout=30)
+        # Put it back the way the BUG did, with the agent still running, and
+        # let him answer it a second time — which is exactly what he did at
+        # 19:32 after finding it in NEEDS YOU again.
+        r.state_home(lambda: bm.give_back("second-question", path=r.board))
+        r.edit(">\n\n*If unanswered:* nothing happens.\n\n---",
+               "> fetch the microfilm scans\n\n*If unanswered:* nothing happens.\n\n---")
+        tick()
+        check("re-answering a decision an agent is still working fires nothing",
+              r.fires() == ["second-question"], str(r.fires()))
+        check("...and says why", "already being worked" in open(r.log).read())
+
+        # ...QUEUED, not dropped: the answer is his and it is still there.
+        _kill("second-question")
+        tick()
+        check("...and it fires once the agent is really gone",
+              r.fires() == ["second-question", "second-question"], str(r.fires()))
+
+        # --- the guarantee none of this may cost: a DEATH is still a death.
+        # Its own decision, so the log line it is asserted on cannot be an
+        # earlier one, and it is the whole of case 3 — killed tick, killed
+        # agent, nothing recorded.
+        r.edit("---\n\n## WAITING ON YOU TO DO",
+               "### 3. Third question?\n\n- [ ] Left\n- [ ] Right\n\n>\n\n"
+               "*If unanswered:* nothing.\n\n---\n\n## WAITING ON YOU TO DO")
+        tick()                                    # record it; a new item never fires
+        r.clear()
+        r.edit("- [ ] Left\n- [ ] Right", "- [x] Left\n- [ ] Right")
+        held = subprocess.Popen([sys.executable, WATCHER],
+                                env=r.env(gate="open", spawn=sleeper),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        check("a third decision fires its own agent",
+              _wait_for(r.log, "moved decision 3 into IN FLIGHT"),
+              open(r.log).read()[-300:])
+        held.terminate()
+        held.wait(timeout=30)
+        _kill("third-question")
+        tick()
+        check("an agent that dies recording NOTHING still hands its decision back",
+              "returned decision 3 to NEEDS YOU: its agent is gone"
+              in open(r.log).read(), open(r.log).read()[-300:])
+        check("...and the decision is back in front of him",
+              "third-question" in needs(), str(needs()))
+        check("...without the hand-back itself reading as a new answer",
+              r.fires() == ["third-question"], str(r.fires()))
+    finally:
+        for key in ("first-question", "second-question"):
+            for pid in _agent_pids(key):
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def test_summoner_fanout():
@@ -1189,6 +1399,7 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
 
     test_worker_outlives_the_tick()
+    test_a_rebuild_kills_the_tick()
     test_summoner_fanout()
     test_cancelled_summoner()
     test_the_loop()
