@@ -33,7 +33,9 @@ import sys
 import tempfile
 import time
 
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 
 READER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS = os.path.dirname(READER)
@@ -757,6 +759,9 @@ def main():
         # QRawFont needs a QGuiApplication to exist (it segfaults without one),
         # so the font audit runs after the app is up, not before.
         app = QGuiApplication(sys.argv)
+        if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+            raise SystemExit("refusing to run on platform %r, not offscreen"
+                             % app.platformName())
         test_font()
         test_window(app, os.path.join(tmp, "win"))
     print()

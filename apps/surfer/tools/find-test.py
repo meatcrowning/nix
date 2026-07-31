@@ -41,7 +41,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 FIXTURE = HERE / "find-test.qml"
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 
 # A bare `python3` on top is neither the interpreter surfer runs under nor
 # carrying QtWebEngine's QML import path, and unlike split-geom-test.py this
@@ -74,10 +76,17 @@ def _borrow_wrapper_env():
         if not entry or b"=" not in entry:
             continue
         k, v = entry.decode(errors="replace").split("=", 1)
-        # keep this process's own HOME and offscreen decision
-        if k in ("HOME", "PWD", "SHLVL", "_"):
+        # keep this process's own HOME and offscreen decision. The platform and
+        # the display variables are NOT negotiable: the wrapper is packaging for
+        # a windowed app and anything it says about them would put a real window
+        # on his monitor after the re-exec.
+        if k in ("HOME", "PWD", "SHLVL", "_",
+                 "QT_QPA_PLATFORM", "WAYLAND_DISPLAY", "DISPLAY"):
             continue
         env[k] = v
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env.pop("WAYLAND_DISPLAY", None)
+    env.pop("DISPLAY", None)
     return py, env
 
 
@@ -105,6 +114,9 @@ import main as surfer                          # noqa: E402  (import-safe: main(
 
 QtWebEngineQuick.initialize()
 app = QGuiApplication(sys.argv)
+if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+    raise SystemExit("refusing to run on platform %r, not offscreen"
+                     % app.platformName())
 
 engine = QQmlApplicationEngine()
 ctx = engine.rootContext()

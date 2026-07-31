@@ -5,6 +5,7 @@ Runs on a PRIVATE session bus (dbus-run-session), with a stub delegate backend
 and a stub `filer` binary, so nothing touches the user's desktop and no window
 is ever created.
 """
+import atexit
 import json
 import os
 import subprocess
@@ -192,6 +193,10 @@ def main():
                 p.kill()
         procs.clear()
         time.sleep(0.3)
+
+    # in a trap, not only where the happy path calls it: a check that raises
+    # halfway through used to leave a portal backend on the bus.
+    atexit.register(stop_all)
 
     # ---- 1. introspection: all three methods, correct signatures ----
     start_portal(FILER_BIN=make_stub_filer(tmp, "ok"))

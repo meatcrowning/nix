@@ -50,7 +50,9 @@ import sys
 import tempfile
 import time
 
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 # The harness draws its own palette; it must never read (or watch) the user's.
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.*=false")
 
@@ -450,6 +452,9 @@ def main():
     a.save(art)
 
     app = QGuiApplication(sys.argv[:1])
+    if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+        raise SystemExit("refusing to run on platform %r, not offscreen"
+                         % app.platformName())
 
     albums = Rows(ALBUM_ROLES,
                   [{"albumId": i + 1, "album": "Album %d" % (i + 1),

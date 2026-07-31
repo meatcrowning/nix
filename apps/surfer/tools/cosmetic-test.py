@@ -38,7 +38,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Slot                # noqa: E402
 from PySide6.QtGui import QGuiApplication                             # noqa: E402
@@ -265,6 +267,9 @@ def main():
 
     QtWebEngineQuick.initialize()
     app = QGuiApplication(sys.argv)
+    if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+        raise SystemExit("refusing to run on platform %r, not offscreen"
+                         % app.platformName())
 
     import main as surfer                                            # noqa: E402
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Page)

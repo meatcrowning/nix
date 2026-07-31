@@ -105,6 +105,10 @@ NOPYSIDE = None   # tempdir shadowing PySide6, set up in main()
 def child_env(case):
     env = dict(os.environ)
     env["QT_QPA_PLATFORM"] = "offscreen"
+    # and no display for it to fall back to: a real askpass dialog on his screen
+    # would be a password prompt he did not ask for.
+    env.pop("WAYLAND_DISPLAY", None)
+    env.pop("DISPLAY", None)
     if case == "broken":
         # Make `import PySide6` fail the way a broken Fedora python3-pyside6
         # would, and assert the exit code the wrapper's fallback keys off.
