@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Put one bullet on `docs/board.md` once his weekly usage limit has reset.
+"""Put one bullet on this host's board once his weekly usage limit has reset.
 
 He asked (2026-07-30) for a reminder that fires AFTER the weekly Claude usage
 window rolls over, so the FOCUS-signal work can be picked up then rather than
@@ -33,22 +33,18 @@ If neither is readable (no `~/.claude.json`, no cached utilization), the tick
 does nothing and the timer tries again in fifteen minutes. That is also the
 documented fallback: the mechanism IS the periodic re-check.
 
-ONE BULLET, ON BOTH BOARDS. `docs/` syncs both ways every five minutes
-(home/srvs/nix-docs.nix), so a single bullet written on either machine appears
-on both — writing one per host would be a duplicate, not coverage. This module
-deploys from `home/`, which BOTH hosts evaluate, so the duplicate is prevented
-twice over:
+ONE BULLET PER BOARD, and each host writes its own. There is one board per
+machine since 2026-07-30 (`docs/board.<hostname>.md`, resolved by
+`boardparse.ensure_board()`); the files sync as files but nothing on top writes
+book's board, so the host affinity and the 24h grace this used to carry — which
+existed only because a bullet written on top appeared on book's board too — are
+gone. The condition is per-machine anyway: the weekly window is read from
+`~/.claude.json`, which does NOT sync.
 
-  * HOST AFFINITY, the same idea as `board-watch.py`'s `owns()`: `top` is the
-    machine that is always on, so `top` writes. book waits.
-  * THE GRACE, so book is not merely disabled: if top has still not written the
-    bullet 24 hours after the reset, book writes it. That covers top being off
-    for the week without ever opening a window where both would write in the
-    same tick.
-  * IDEMPOTENCE as the backstop, since neither of those can see the other's
-    state directly: before writing anything, the marker (a substring of the
-    bullet, e.g. the doc path) is looked for in the CURRENT board. Found means
-    somebody already wrote it, and this host disarms without writing.
+IDEMPOTENCE still stands, and is now the only guard needed: before writing
+anything, the marker (a substring of the bullet, e.g. the doc path) is looked
+for in THIS host's current board. Found means it is already there — he moved it,
+or a stamp was deleted — and this host disarms without writing a second copy.
 
 SELF-DISARMING. A fired reminder drops a stamp in
 `~/.local/state/board-reminder/<id>.done` and is skipped from then on. The
@@ -60,7 +56,7 @@ board-reminder.timer`.
 Everything is overridable by environment variable so it can be tested against
 a scratch board and a scratch clock without touching his:
 `BOARD_REMINDER_STATE`, `BOARD_REMINDER_CLAUDE_JSON`, `BOARD_REMINDER_BOARD`,
-`BOARD_REMINDER_HOST`, `BOARD_REMINDER_NOW` (ISO-8601), `BOARD_REMINDER_BOARDCTL`.
+`BOARD_REMINDER_NOW` (ISO-8601), `BOARD_REMINDER_BOARDCTL`.
 Harness: `tools/board-reminder-test.py`.
 """
 
@@ -77,20 +73,20 @@ STATE = pathlib.Path(os.environ.get(
     "BOARD_REMINDER_STATE", HOME / ".local/state/board-reminder"))
 CLAUDE_JSON = pathlib.Path(os.environ.get(
     "BOARD_REMINDER_CLAUDE_JSON", HOME / ".claude.json"))
-BOARD = pathlib.Path(os.environ.get(
-    "BOARD_REMINDER_BOARD", HOME / "nix/docs/board.md"))
 BOARDCTL = pathlib.Path(os.environ.get(
     "BOARD_REMINDER_BOARDCTL", HOME / "nix/apps/board/tools/boardctl.py"))
 
-#: The machine that writes first. `top` is the desktop that is always on; book
-#: is a laptop that may be shut for days. Same choice board-watch.py makes for
-#: an unstamped answer, and for the same reason.
-OWNER_HOST = "top"
+#: THIS HOST'S BOARD. The rule (`docs/board.<hostname>.md`, one per machine) is
+#: stated once, in `boardparse`, and imported rather than restated here — which
+#: is worth the coupling to `apps/board` that this file otherwise avoids.
+#: `ensure_board()` also seeds an empty board on a machine that has never had
+#: one, so book gets its board from whichever of the three board programs runs
+#: there first, with nothing for him to run by hand.
+sys.path[:0] = [str(HOME / "nix/apps/board"), str(HOME / "nix/apps/pylib")]
+import boardparse as _bp                                          # noqa: E402
 
-#: How long the non-owner waits before concluding the owner is not going to do
-#: it. Comfortably longer than the five-minute docs sync, so the marker check
-#: below has seen anything top wrote long before book considers writing.
-GRACE_HOURS = 24
+BOARD = pathlib.Path(os.environ.get("BOARD_REMINDER_BOARD")
+                     or _bp.ensure_board())
 
 
 # --------------------------------------------------------------- reminders
@@ -203,7 +199,7 @@ def disarm(rid, why):
 # ------------------------------------------------------------------ firing
 
 def already_on_board(marker):
-    """Has this bullet already been written — by the other host, or by him?"""
+    """Has this bullet already been written onto THIS host's board?"""
     try:
         return marker in BOARD.read_text()
     except OSError:
@@ -220,13 +216,6 @@ def write_bullet(lines):
         sys.stderr.write(proc.stderr or "boardctl note failed\n")
         return False
     return True
-
-
-def host():
-    got = os.environ.get("BOARD_REMINDER_HOST")
-    if got:
-        return got
-    return os.uname().nodename
 
 
 def due(rem, st):
@@ -252,11 +241,6 @@ def due(rem, st):
     return False, "waiting for %s" % target.isoformat(), st
 
 
-def fired_at(st):
-    """The instant the reset was observed, for the grace window."""
-    return parse_ts(st.get("target")) or now()
-
-
 def run_one(rem):
     rid = rem["id"]
     if done_stamp(rid).exists():
@@ -271,12 +255,6 @@ def run_one(rem):
     if already_on_board(rem["marker"]):
         disarm(rid, "already on the board")
         return "%s: already on the board, disarmed" % rid
-
-    if host() != OWNER_HOST:
-        waited = now() - fired_at(st)
-        if waited < datetime.timedelta(hours=GRACE_HOURS):
-            return ("%s: %s owns this; waiting out the %dh grace"
-                    % (rid, OWNER_HOST, GRACE_HOURS))
 
     if not write_bullet(rem["lines"]):
         return "%s: boardctl refused it - left armed" % rid

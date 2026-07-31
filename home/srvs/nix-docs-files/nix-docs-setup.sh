@@ -1,7 +1,7 @@
 #!/bin/sh
 # nix-docs-setup.sh — ExecStartPre for nix-docs-sync.service.
 #
-# Registers the board.md merge driver in docs/'s repo config. This has to live
+# Registers the board merge driver in docs/'s repo config. This has to live
 # outside the .gitattributes seed because a gitattributes rule names a driver by
 # a short name only; the command behind that name is repo-local config that no
 # file in the tree can carry. Same split, and the same reason, as
@@ -23,7 +23,7 @@ DRIVER="${CM_SYNC_MERGE_DRIVER:-$HOME/.config/scripts/board-recent-merge.sh}"
 if [ -x "$DRIVER" ]; then
   git -C "$REPO" config merge.boardrecent.driver "$DRIVER %O %A %B %L %P"
   git -C "$REPO" config merge.boardrecent.name \
-    "board.md (real 3-way merge; newest side wins a genuine collision)"
+    "board.<host>.md (real 3-way merge; newest side wins a genuine collision)"
 else
   # Never leave a registration pointing at a path that no longer exists: git
   # fails the merge outright and wedges the sync for every other file in docs/.

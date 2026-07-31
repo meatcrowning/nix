@@ -49,11 +49,13 @@ What it asserts, in order:
               and must not fire a second time even if it is back in NEEDS YOU
               and he answers it again — while an agent that dies recording
               nothing is still handed back, as it always was
-  affinity    TWO MACHINES, ONE FILE: this unit runs on `top` and on `book`
-              now and `docs/board.md` syncs both ways, so an answer stamped for
-              the other machine must NOT fire here, one stamped for this machine
-              must, an UNSTAMPED one (a hand edit) is worked by exactly one of
-              them, and re-answering on the other machine is the hand-off
+  affinity    THE ANSWER STAMP: an answer stamped for the other machine must
+              NOT fire here, one stamped for this machine must, an UNSTAMPED
+              one (a hand edit) is worked by exactly one of them, and
+              re-answering on the other machine is the hand-off. Belt-and-
+              braces since the boards went per-host on 2026-07-30 — kept
+              because a board restored from the other host's synced copy must
+              still be harmless
   ctrl+z      a summoner he TOOK BACK leaves nothing behind: no dispatch, no
               note, and — although it exits nonzero — not his own sentence
               returned to him as a failure. `boardundo.py`; the gate that
@@ -154,13 +156,16 @@ fails = []
 #: A bullet's OWN metadata comments. Writing ANY bullet into a section stamps
 #: the bullets already there with the time they were placed (`boardparse`, so
 #: the board can draw how long something has been waiting), and since
-#: 2026-07-30 a bullet also carries `<!-- by: -->`, the agent that put it there
-#: — so a fixture nobody touched legitimately gains a line, and the three
-#: "nothing else in the file moved" checks below read that as the watcher
-#: rewriting his board. Neither is what any of them is about, so both come off
-#: both sides. (`by:` was missed when attribution landed, and all three checks
-#: failed for a day with nothing wrong in the watcher.)
-PLACED = re.compile(r"^\s*<!--\s*(placed|by):")
+#: 2026-07-30 a bullet also carries `<!-- by: -->`, the agent that put it there,
+#: and `<!-- for: -->`, the ask it was written for — so a fixture nobody touched
+#: legitimately gains a line, and the three "nothing else in the file moved"
+#: checks below read that as the watcher rewriting his board. None of that is
+#: what any of them is about, so all three come off both sides.
+#:
+#: EVERY new bullet-metadata comment has to be added here. `by:` was missed when
+#: attribution landed and all three checks failed for a day with nothing wrong
+#: in the watcher; `for:` was missed the same way and did it again.
+PLACED = re.compile(r"^\s*<!--\s*(placed|by|for):")
 
 
 def unmoved(after, before, *drop):
@@ -907,17 +912,19 @@ def test_the_loop():
 def test_host_affinity():
     """TWO WATCHERS, ONE FILE — the hazard that came with running on book.
 
-    `home/srvs/board-watch.nix` is no longer `top`-only, and `docs/board.md`
-    syncs both ways every five minutes, so both machines see the same `[x]`.
-    Firing on content alone would put two agents on one job, on two checkouts of
-    the same two repos, both committing and both pushing.
+    Each machine now reads its OWN board (`docs/board.<hostname>.md`, since
+    2026-07-30), so this is no longer the only thing standing between one `[x]`
+    and two agents. It is still asserted, and the rule still holds: the boards
+    sync as files, so the other host's board — and anything restored from it —
+    is sitting right there, and a watcher that fired on content alone would put
+    two agents on one job the day somebody copied one back.
 
     The defence is the stamp the board app writes beside his answer
     (`boardparse.set_answer_host`): the machine he typed it on works it. This
     asserts all three cases against ONE store, which is the point — the same
     bytes, read by two hosts, must fire exactly once between them.
     """
-    print("host affinity - two machines, one board.md")
+    print("host affinity - the answer stamp, read by two hosts")
     d = tempfile.mkdtemp(prefix="board-watch-host-")
     try:
         r = Rig(d)

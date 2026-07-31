@@ -1,7 +1,7 @@
 { pkgs, lib, host, config, ... }:
 
-# Put a bullet on `docs/board.md` when a condition he named comes true, and
-# then shut up about it.
+# Put a bullet on this host's board (`docs/board.<hostname>.md`) when a
+# condition he named comes true, and then shut up about it.
 #
 # He asked for one on 2026-07-30: a reminder that fires AFTER his weekly Claude
 # usage window resets, so the FOCUS-signal work (`docs/focus-signal.md`) gets
@@ -9,18 +9,18 @@
 # reset instant is not guessed — Claude Code caches it in `~/.claude.json`
 # under `cachedUsageUtilization`, and the script reads it. All of the behaviour
 # (where the timestamp comes from, the two ways a reset is observed, the
-# fallback when it cannot be read, the host affinity and the disarm) is in
+# fallback when it cannot be read, and the disarm) is in
 # board-reminder-files/board-reminder.py; read its docstring before changing
 # anything here.
 #
-# BOTH MACHINES, ONE BULLET. `docs/` syncs both ways every five minutes, so a
-# single bullet is already visible on both boards; two would be a duplicate,
-# not coverage. `home/` is evaluated by BOTH hosts, so the unit exists on both
-# and the duplicate is prevented in the script the way board-watch.nix prevents
-# its own: `top` owns the write, book waits out a 24h grace and only writes if
-# top never did, and either way the bullet's marker is looked for in the live
-# board before writing. Nothing host-specific reaches this file — deliberately,
-# since the affinity is data (a hostname) and not a build-time gate.
+# BOTH MACHINES, ONE BULLET EACH. There is one board per host since 2026-07-30
+# (`docs/board.top.md`, `docs/board.book.md` — the files sync, but only the
+# machine a board is named for writes it), so each host simply writes its own
+# bullet onto its own board. The host affinity and the 24h grace this used to
+# carry are gone with the shared file that made them necessary; the marker check
+# against the live board stays as the idempotence backstop. The condition is
+# per-machine anyway — `~/.claude.json` does not sync. Nothing host-specific
+# reaches this file, deliberately.
 #
 # NO PATH UNIT, unlike board-watch: nothing on this desktop writes a file when
 # a usage window rolls over, so the timer is the only trigger there can be.
@@ -39,7 +39,7 @@
   };
 
   systemd.user.services.board-reminder = {
-    Unit.Description = "Write a due reminder onto ~/nix/docs/board.md";
+    Unit.Description = "Write a due reminder onto this host's board";
     Service = {
       Type = "oneshot";
       # Same shape as board-watch.nix's, and for the same reason: the ambient

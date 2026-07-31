@@ -4,15 +4,16 @@
 Everything runs against a scratch board, a scratch `~/.claude.json` and a
 scratch clock (`BOARD_REMINDER_NOW`) in a temp directory — his board, his
 state and his real usage cache are never read or written. Run it after
-touching the script, the reminder list or the affinity rule:
+touching the script or the reminder list:
 
     python3 tools/board-reminder-test.py
 
 Covers: arming from the cached weekly reset; not firing early; firing on the
 clock; firing because the cached window moved; firing at most once; the
-idempotence check against a board somebody else already wrote; host affinity
-and its 24h grace; and a missing/garbage `~/.claude.json` being a no-op that
-retries rather than an error.
+idempotence check against a board that already carries the bullet; each host
+writing its OWN board with no affinity or grace (one board per host since
+2026-07-30); and a missing/garbage `~/.claude.json` being a no-op that retries
+rather than an error.
 """
 
 import json
@@ -62,7 +63,7 @@ def check(name, cond, detail=""):
 class Scratch:
     def __init__(self, tmp, reset=RESET):
         self.dir = pathlib.Path(tmp)
-        self.board = self.dir / "board.md"
+        self.board = self.dir / "board.top.md"
         self.board.write_text(BOARD_SKELETON)
         self.state = self.dir / "state"
         self.claude = self.dir / "claude.json"
@@ -82,7 +83,7 @@ class Scratch:
             }},
         }))
 
-    def tick(self, now, host="top"):
+    def tick(self, now):
         env = dict(os.environ)
         env.update({
             "BOARD_REMINDER_STATE": str(self.state),
@@ -90,7 +91,6 @@ class Scratch:
             "BOARD_REMINDER_BOARD": str(self.board),
             "BOARD_REMINDER_BOARDCTL": str(BOARDCTL),
             "BOARD_REMINDER_NOW": now,
-            "BOARD_REMINDER_HOST": host,
         })
         # An agent id would make boardctl attribute the bullet to a card and
         # mark that agent as having reported; a timer is nobody.
@@ -167,7 +167,8 @@ def t_garbage_cache(s):
 
 def t_already_on_board(s):
     s.tick(BEFORE)
-    # What top wrote, arriving on book through the five-minute docs sync.
+    # The bullet already sitting there — he moved it back, or a `.done` stamp
+    # was deleted. Never a second copy.
     s.board.write_text(s.board.read_text().replace(
         "## WAITING ON YOU TO DO (not decide)\n",
         "## WAITING ON YOU TO DO (not decide)\n\n- INFORMATION: **FOCUS "
@@ -179,20 +180,19 @@ def t_already_on_board(s):
     check("stamped done", (s.state / "focus-signal-after-weekly-reset.done").exists())
 
 
-def t_host_affinity(s):
-    s.tick(BEFORE, host="book")
-    r = s.tick(AFTER, host="book")
-    check("book waits out the grace", not s.bullets(), r.stdout)
-    check("book says top owns it", "top owns this" in r.stdout, r.stdout)
-    r = s.tick(MUCH_LATER, host="book")
-    check("book writes it if top never did", len(s.bullets()) == 1,
-          r.stdout + r.stderr)
-
-
-def t_owner_does_not_wait(s):
-    s.tick(BEFORE, host="top")
-    r = s.tick(AFTER, host="top")
-    check("top writes immediately", len(s.bullets()) == 1, r.stdout + r.stderr)
+def t_no_affinity(s):
+    """Every host writes its own board, at once. There is no owner and no
+    grace: one board per host since 2026-07-30, so a bullet on top's board is
+    not a bullet on book's and waiting for the other machine would just mean
+    book never got told."""
+    s.tick(BEFORE)
+    r = s.tick(AFTER)
+    check("writes immediately, whichever host this is",
+          len(s.bullets()) == 1, r.stdout + r.stderr)
+    check("nothing waits for another machine",
+          "grace" not in r.stdout and "owns this" not in r.stdout, r.stdout)
+    r = s.tick(MUCH_LATER)
+    check("and only once", len(s.bullets()) == 1, r.stdout)
 
 
 def main():
@@ -200,9 +200,8 @@ def main():
     case("the cached window moving is a reset", t_window_moved)
     case("no cached reset yet", t_no_cache, reset=None)
     case("unreadable cache", t_garbage_cache)
-    case("the other host got there first", t_already_on_board)
-    case("host affinity and its grace", t_host_affinity)
-    case("the owner does not wait", t_owner_does_not_wait)
+    case("the bullet is already there", t_already_on_board)
+    case("no affinity, no grace: this host writes its own board", t_no_affinity)
     print()
     if fails:
         print("FAILED: " + ", ".join(fails))

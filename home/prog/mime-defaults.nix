@@ -86,7 +86,7 @@ let
 
   # painter and board get NOTHING, on purpose. painter generates images from a
   # prompt and has no open-a-file path at all; board is a GUI over the one file
-  # ~/nix/docs/board.md and is not a markdown viewer (that is reader). An app
+  # ~/nix/docs/board.<hostname>.md and is not a markdown viewer (that is reader). An app
   # with no honest file type gets no association — see board.nix's own comment.
 
   surferTypes = [

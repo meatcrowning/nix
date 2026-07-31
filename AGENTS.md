@@ -387,8 +387,8 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   chrome through.
     - **`apps/board/` is the program called `goetia`** — that is the only name it
       presents to him (window title, desktop entry, binary). The store it reads
-      and writes is still `docs/board.md`, and every path and identifier is
-      still `board*`: this directory, `boardctl.py`, `home/prog/board.nix`,
+      and writes is still `docs/board.<hostname>.md` (one board per host since
+      2026-07-30), and every path and identifier is still `board*`: this directory, `boardctl.py`, `home/prog/board.nix`,
       `board-watch`. Prose keeps calling the FILE "the board".
     - It lives **outside** `home/`/`sys/` on purpose: `umport` would try to
       eval an app's own `flake.nix` as a NixOS module. Nothing in the NixOS or
@@ -447,18 +447,32 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   script is parametrized by `CM_SYNC_REPO`/`REMOTE`/`LOG`/`SEED`/`LABEL`, so a
   second systemd user unit was all it took. Log `~/.cache/nix-docs-sync.log`;
   force a run with `systemctl --user start nix-docs-sync.service`.
-  **Prose here still conflicts loudly for a human — `board.md` does not.** It is
-  a store with an unattended writer and a GUI on *both* machines, so two-sided
-  edits are routine, and an unresolved conflict does not merely flag that file:
-  it aborts the tick and stops docs/ syncing in either direction until someone
-  notices. `board.md merge=boardrecent` (seeded `.gitattributes`, registered by
-  `nix-docs-setup.sh`) runs the real 3-way merge first, so non-overlapping edits
-  on the two hosts both survive, and only a genuine collision falls back to
-  **the more recent side wins, whole** — his rule, 2026-07-29, and symmetric, so
-  neither host is privileged. Losing sides stay in history. Harness:
-  `tools/board-merge-test.sh` — re-run it after touching the driver, the
-  attributes or the registration, since a missing registration makes the rule
-  inert with no error.
+  **ONE BOARD PER HOST, and nothing merges them.** Since 2026-07-30 the store
+  is `docs/board.top.md` on `top` and `docs/board.book.md` on `book`; each
+  host's app, watcher and reminder read and write only their own, and the other
+  file is carried purely as a backup and a history. His words: *"i actually want
+  to change it so neither board on top or air syncs … i dont want that
+  overwriting … to overwrite anything i do on air. commits obviously will stay
+  synced."* The FILES still sync like everything else here — what is gone is any
+  writer on one machine touching the other machine's board. The name comes from
+  the OS hostname (`top` / `book`), never the flake attribute (`top` / `air`),
+  because every runtime writer has only the hostname; `boardparse.board_path()`
+  states the rule once and `ensure_board()` seeds an empty board on a machine
+  that has never had one.
+  **Prose here still conflicts loudly for a human — a board does not.** A board
+  is a store with an unattended writer and a GUI, and an unresolved conflict
+  does not merely flag that file: it aborts the tick and stops docs/ syncing in
+  either direction until someone notices. `board.top.md` / `board.book.md`
+  (and the pre-split `board.md`, for old history) carry `merge=boardrecent` —
+  seeded `.gitattributes`, registered by `nix-docs-setup.sh`, named one by one
+  rather than globbed so `agents/board-watch.md` stays prose. The driver runs
+  the real 3-way merge first and only a genuine collision falls back to **the
+  more recent side wins, whole** — his rule, 2026-07-29, and symmetric, so
+  neither host is privileged. Losing sides stay in history. With one writer per
+  file that path should now never be taken; it is the net for a hand edit on the
+  wrong machine. Harness: `tools/board-merge-test.sh` — re-run it after touching
+  the driver, the attributes or the registration, since a missing registration
+  makes the rule inert with no error.
   Deliberately **not** a submodule: `git
   pull` does not update submodule contents, so the other machine would read a
   stale runbook. There are now three callers of that script; a fourth **must**
@@ -488,7 +502,8 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `xdg-desktop-portal-hyprland` reads, which unit wrapping cannot reach) and is
   called by all three nested harnesses on teardown.
 - `home/srvs/board-watch.nix` + `board-watch-files/` — **acts on his answers to
-  `docs/board.md` without waiting to be told about them.** A `path` unit on the
+  this host's board (`docs/board.<hostname>.md`) without waiting to be told
+  about them.** A `path` unit on the
   file plus a 5-minute timer; when a decision becomes *newly answered* it spawns
   one headless `claude -p` on that one decision. Two rules from him, both
   settled: the agent **works, and since 2026-07-29 it may rebuild and reload
@@ -497,16 +512,18 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   left such work undone with a note) — and it fires **only while he is at the
   machine**: locked or away, the answer is queued, not dropped. The filter is semantic, never authorship: an agent
   moving an item to LANDED, or the docs sync pulling somebody's prose edit, adds
-  no answer and must not fire. It runs on **both** machines; the duplicate two
-  watchers over one synced file would otherwise cause is prevented by HOST
-  AFFINITY — the board app stamps which machine he answered on, and each watcher
-  fires only on its own stamp (an unstamped answer, i.e. a hand edit, belongs to
-  `top`). Typed input needs no rule: the inbox is machine-local. No automatic
+  no answer and must not fire. It runs on **both** machines, each watching its
+  OWN board, so one answer cannot be seen twice in the first place. HOST
+  AFFINITY survives as belt-and-braces — the board app stamps which machine he
+  answered on and each watcher fires only on its own stamp (an unstamped answer,
+  i.e. a hand edit, belongs to `top`) — which is what keeps a board restored
+  from the other host's synced copy harmless. Typed input needs no rule: the
+  inbox is machine-local. No automatic
   takeover — re-answer on the other machine to hand an item over. Kill switch:
   `touch ~/.local/state/board-watch/off`. Log `~/.cache/board-watch.log`;
   harness `tools/board-watch-test.py`; runbook `docs/agents/board-watch.md`.
 - `home/srvs/board-reminder.nix` + `board-reminder-files/board-reminder.py` —
-  **writes a bullet onto `docs/board.md` when a condition he named comes true,
+  **writes a bullet onto this host's board when a condition he named comes true,
   once, and then never again.** A quarter-hourly timer, no path unit (nothing
   writes a file when the condition changes). The one reminder in it fires after
   his **weekly Claude usage window resets** — the instant is read, not guessed,
@@ -514,10 +531,11 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   (`cachedUsageUtilization.utilization.limits[kind=weekly_all].resets_at`;
   that file is NOT under `~/.claude`, so it does not sync). A reset counts as
   observed either when the clock passes the recorded target or when the cached
-  window moves past it; unreadable cache is a no-op that retries. **One bullet,
-  both boards**: `docs/` syncs both ways, so `top` owns the write, `book` waits
-  out a 24h grace in case top is off, and either way the bullet's marker is
-  looked for in the live board first. Self-disarms via
+  window moves past it; unreadable cache is a no-op that retries. **One bullet
+  per board, written by the host it belongs to**: with the boards per-host there
+  is nothing to arbitrate, so the old `top`-owns-the-write / 24h-grace pair is
+  gone; the bullet's marker is still looked for in the live board first, as the
+  idempotence backstop. Self-disarms via
   `~/.local/state/board-reminder/<id>.done` (delete to re-arm). Harness
   `tools/board-reminder-test.py`.
 - `home/srvs/lid.nix` + `lid-files/lid-close.sh` — **what closing the lid does,
