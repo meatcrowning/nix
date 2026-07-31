@@ -335,7 +335,7 @@ Window {
         // §6.1: the maintenance mechanism must not be visible, so the scroll
         // position is put back where it was rather than jumping to the top —
         // and, since 2026-07-30, nothing is said about it either. It used to
-        // put `board.md changed on disk - reloaded` in the titlebar footer,
+        // put `the board changed on disk - reloaded` in the titlebar footer,
         // which is the same rule breaking itself: every agent write and every
         // five-minute sync flashed text onto the inner bar for something he
         // did not do and cannot act on. The rows changing is the report.

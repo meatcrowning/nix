@@ -1,4 +1,5 @@
-"""board's store: `~/nix/docs/board.md` in, drawable rows out — and back again.
+"""board's store: `~/nix/docs/board.<hostname>.md` in, drawable rows out — and
+back again.
 
 THE FILE IS THE DATABASE, and it is plain markdown on purpose: agents read and
 write it as text, it lives in the private `docs/` repo and syncs between the two
@@ -70,9 +71,106 @@ import time
 
 from glyphs import px
 
-# The store. Absolute like every other path in this tree (`apps/AGENTS.md`):
-# `$HOME` is /home/lam on both machines this repo builds.
-BOARD_PATH = os.path.expanduser("~/nix/docs/board.md")
+# ------------------------------------------------------------------ the store
+# PER HOST, since 2026-07-30. `docs/` syncs both ways every five minutes, so one
+# shared `board.md` meant an overnight agent on `top` and his own typing on
+# `book` resolving against each other — *"i dont want that overwriting ... to
+# overwrite anything i do on air"*. So `top` owns `docs/board.top.md`, `book`
+# owns `docs/board.book.md`, BOTH files stay committed and stay synced AS FILES
+# (each machine keeps a history and a backup of the other's board), and every
+# reader and writer on a host touches only its own. Nothing merges the two, ever.
+#
+# The token is `os.uname().nodename` — the OS hostname, `top` / `book` — and
+# deliberately NOT the flake attribute (`top` / `air`), which exists only inside
+# nix eval: every runtime writer has the hostname and nothing else, so there is
+# no hostname->attribute table anywhere on this path. `BOARD_FILE` overrides the
+# whole thing, for a harness or a one-off. Paths absolute like everything else in
+# this tree (`apps/AGENTS.md`): `$HOME` is /home/lam on both machines.
+#
+# `home/srvs/board-watch*` and `board-reminder*` import `board_path()` and
+# `ensure_board()` from here rather than restating the rule; keep both names.
+BOARD_DIR = os.path.expanduser("~/nix/docs")
+
+#: The single pre-split store. Nothing here creates or deletes it: the migration
+#: is a `git mv docs/board.md docs/board.top.md` inside the `docs/` repo, so the
+#: history follows the file. It is named here only so that a board program run
+#: BEFORE that lands still finds his board — see `ensure_board()`.
+LEGACY_BOARD_PATH = os.path.join(BOARD_DIR, "board.md")
+
+#: The empty board a host that has never had one starts from. `book`'s is
+#: deliberately empty rather than a copy of `top`'s: duplicating the open
+#: questions onto both boards would let both watchers work the same item.
+#: The headings are the ones `_section_of()` keys on, verbatim — a skeleton the
+#: parser did not recognise would draw an empty board that silently swallowed
+#: every later write.
+_SKELETON = """# Board
+
+**What needs you, what is moving, what landed.** Maintained by whichever agent
+is orchestrating; edited freely by him.
+
+**How to answer:** edit this file. Tick a `[ ]` to `[x]`, or write your own
+answer under the item after `>`. Free text always beats the options offered.
+
+This board is this machine's own: it is never merged with the other machine's,
+which keeps its own file beside it.
+
+---
+
+## NEEDS YOU
+
+Decisions only you can make. Each says what happens if you never answer.
+
+---
+
+## WAITING ON YOU TO DO (not decide)
+
+
+---
+
+## LANDED
+
+Newest first. Append-only.
+"""
+
+
+def board_path():
+    """This host's store. Pure: no stat, no side effect, no I/O."""
+    return os.environ.get("BOARD_FILE") or os.path.join(
+        BOARD_DIR, "board.%s.md" % os.uname().nodename)
+
+
+BOARD_PATH = board_path()
+
+
+def ensure_board(path=None):
+    """The path a reader or a writer should actually use, brought into
+    existence. Returns it; a missing board is never an error anywhere.
+
+    Two cases, and the second is the whole reason this is not a one-liner:
+
+      * the per-host file is missing and the PRE-SPLIT `board.md` is still
+        there — the migration has not landed on this checkout yet. Then this
+        creates NOTHING (an empty `board.top.md` sitting in the way is exactly
+        what would make that `git mv` fail, and he would be shown an empty
+        board with his real one one directory away) and hands back the old
+        file, which is still the right one until the move happens.
+      * neither exists — seed the empty skeleton and use it.
+    """
+    path = path or BOARD_PATH
+    if os.path.exists(path):
+        return path
+    # ...and only for the DEFAULT store. A `--board` or a `$BOARD_FILE` names a
+    # file deliberately; handing that caller `docs/board.md` instead would point
+    # a harness straight at his real board.
+    if (path == BOARD_PATH and not os.environ.get("BOARD_FILE")
+            and os.path.isfile(LEGACY_BOARD_PATH)):
+        return LEGACY_BOARD_PATH
+    with locked(path):
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(os.path.abspath(path)) or ".",
+                        exist_ok=True)
+            write(path, _SKELETON)
+    return path
 
 _H2 = re.compile(r"^##\s+(.*?)\s*#*\s*$")
 _H3 = re.compile(r"^###\s+(.*?)\s*#*\s*$")
@@ -116,8 +214,8 @@ _PLACED = re.compile(r"^\s*<!--\s*placed:\s*([0-9T:+.\-]+)\s*-->\s*$")
 #: WHO put an item on the board — the agent's name if one wrote it, otherwise the
 #: program that did. Same shape as `placed` above, same reasons, and the same
 #: OPTIONALITY, which here is not a nicety: every entry that predates this stamp
-#: has none, `board.md` syncs between `top` and `book` with either app on either
-#: end, and some entries have no author to name at all — a housekeeping bullet
+#: has none, the two machines' boards may be written by different copies of this
+#: app, and some entries have no author to name at all — a housekeeping bullet
 #: written by whichever tick noticed, a LANDED row (a table cell, with the
 #: commit's own git author beside it). So an
 #: unstamped entry parses and draws exactly as it always did, with the gutter
@@ -402,8 +500,8 @@ def parse(src):
                 # parse with an empty time, and an older copy of this app
                 # reading a newer file simply never looks at cells[2]. That is
                 # why it is last and not between the two — `what` stays at a
-                # fixed index whatever the row's age, and `board.md` syncs
-                # between the two machines with either app on either end.
+                # fixed index whatever the row's age, and either machine's
+                # board may be written by either version of this app.
                 date["rows"].append({
                     "commit": text(cells[0] if cells else ""),
                     "what": text(cells[1]) if len(cells) > 1 else "",
@@ -703,9 +801,10 @@ def set_answer(lines, item, answer):
 def set_answer_host(lines, item, host):
     """Stamp (or clear) the machine an answer was given on. One line, no prose.
 
-    board-watch runs on BOTH machines now and `docs/board.md` syncs both ways,
-    so "he answered this" is not on its own enough to fire: two watchers would
-    read the same `[x]` and put two agents on one job. **The host an answer was
+    board-watch runs on BOTH machines. The per-host split (2026-07-30) means a
+    watcher can no longer read the other machine's answers at all, so this is a
+    backstop rather than the mechanism — kept because it costs one comment line
+    and a board file can still be copied or restored across the two. **The host an answer was
     typed on works it** — race-free by construction, and it matches how he uses
     the two machines. This is where that fact is recorded.
 
@@ -911,9 +1010,9 @@ LANDED_HEAD = ["| Commit | What | When |\n", "|---|---|---|\n"]
 #: puts it back word for word when the agent dies. Only the row is gone.
 #:
 #: `parse()` still reads an `## IN FLIGHT` section into `doc["flight"]` if the
-#: store has one, and deliberately: `board.md` syncs to the other machine, which
-#: may be running the older app, and a store this parser could not read is a
-#: store neither program can write. Nothing draws it and nothing appends to it.
+#: store has one, and deliberately: the store outlives any one version of this
+#: app — his hand edits, an older copy still running — and a store this parser
+#: could not read is a store neither program can write. Nothing draws it and nothing appends to it.
 
 
 def remove_row(lines, line_index):
@@ -1644,9 +1743,9 @@ def edit(path, fn, attempts=5):
             if digest(read(path)) == doc["digest"]:
                 write(path, new)
                 return True
-            last = "board.md changed under the edit"
+            last = "the board changed under the edit"
         time.sleep(0.15 * (n + 1))
-    raise BoardError(last or "could not get a clean read of board.md")
+    raise BoardError(last or "could not get a clean read of the board")
 
 
 def digest(src):
@@ -1666,7 +1765,7 @@ def write(path, src):
     the whole new one, and an interruption anywhere leaves the original exactly
     as it was. That matters more here than usual: this file is a git checkout
     that a systemd timer commits and pushes every five minutes, and half a
-    board.md would sync to the other machine.
+    board would sync to the other machine.
 
     (`atomicsave.atomic_save` itself is mutagen's, for audio containers, so the
     rules are reused rather than the function.)

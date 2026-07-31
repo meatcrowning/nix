@@ -1,4 +1,4 @@
-# The store: `docs/board.md`, its five sections and the rules for writing them
+# The store: `docs/board.<host>.md`, its five sections and the rules for writing them
 
 *What the file looks like, what a bullet must say, one board item per ask, the stamps every entry carries, and what answering a decision sets off.*
 
@@ -9,11 +9,41 @@ rules are in [`../AGENTS.md`](../AGENTS.md); read that first.
 
 ## It is a GUI over ONE file, and that file is not this app's to redesign
 
-**The store is `~/nix/docs/board.md`** — plain markdown, in the private `docs/`
-repo, synced between `top` and `book` every five minutes, written by whichever
-agent is orchestrating and edited by hand by him. board **parses it, draws it,
-and writes his answers back into the same lines**. It does not own it, does not
-migrate it, and must never become the only way to edit it.
+**The store is `~/nix/docs/board.<hostname>.md`** — `board.top.md` on `top`,
+`board.book.md` on `book` — plain markdown, in the private `docs/` repo, written
+by whichever agent is orchestrating and edited by hand by him. board **parses
+it, draws it, and writes his answers back into the same lines**. It does not own
+it, does not migrate it, and must never become the only way to edit it.
+
+**ONE BOARD PER MACHINE, and they are never merged** [his, 2026-07-30]. Both
+files are committed and both sync, so each machine keeps a full history and a
+backup of the other's board — but **every reader and writer on a host touches
+only its own**, and nothing anywhere reconciles the two. That is the whole point:
+*"specifically for this reason now of an overnight test i dont want that
+overwriting ... to overwrite anything i do on air"*. An overnight agent on `top`
+and his own typing on `book` can no longer land on the same lines.
+
+Resolve the path, never spell it:
+
+- **`boardparse.board_path()`** — this host's store. Pure, no I/O:
+  `$BOARD_FILE` if set, else `~/nix/docs/board.<os.uname().nodename>.md`. The
+  token is the OS **hostname** (`top` / `book`) and deliberately not the flake
+  attribute (`top` / `air`), which exists only inside nix eval — every runtime
+  writer has the hostname and nothing else, so there is no mapping table on this
+  path at all. `boardparse.BOARD_PATH` is that call made once at import, and is
+  the default in every `boardmove` signature.
+- **`boardparse.ensure_board(path=None)`** — the path to actually *use*, brought
+  into existence: a host that has never had a board gets the empty skeleton
+  rather than an error. Every entry point calls it (`main.py`'s `Board`,
+  `boardctl`'s `--board` default, `board-watch`, `board-reminder`), so a missing
+  board is never an error anywhere. A host's first board is EMPTY on purpose and
+  never a copy of the other's: duplicating the open questions onto both boards
+  would let both watchers work the same item.
+- One temporary branch inside `ensure_board`: while the pre-split
+  `docs/board.md` still exists and this host's file does not, it creates nothing
+  and returns the old file. Seeding an empty `board.top.md` in front of the
+  migration's `git mv` would have shown him an empty board with his real one a
+  filename away. Dead code once the move has landed on both machines.
 
 **...and this app kicks that sync at both ends of a session** (`main.sync_now`,
 2026-07-29): `systemctl --user start --no-block nix-docs-sync.service` on
@@ -28,9 +58,10 @@ when the timer would have run anyway, so the honest report for a miss is the
 timer's, not a dialog over a board he has just closed. `BOARD_NO_SYNC=1` turns
 it off for a harness.
 
-Two-sided edits are resolved by `board.md merge=boardrecent`, not by luck: the
-real 3-way merge first, most recent side wins a genuine collision. Root
-`AGENTS.md` → the `docs/` bullet; harness `tools/board-merge-test.sh`.
+`board.*.md merge=boardrecent` stays registered — real 3-way merge first, most
+recent side wins a genuine collision — but with one writer per file it is now a
+backstop rather than the mechanism. Root `AGENTS.md` → the `docs/` bullet;
+harness `tools/board-merge-test.sh`.
 
 Consequences that are rules, not preferences:
 
@@ -45,8 +76,8 @@ Consequences that are rules, not preferences:
 - **Writes are atomic** — temp file in the target's own directory, fsync,
   `os.replace()`. Same rules as `apps/player/atomicsave.py` (that function is
   mutagen's, for audio containers, so the rules are reused rather than the code).
-  This file is a git checkout a timer commits and pushes; half a `board.md`
-  would sync to the other machine.
+  This file is a git checkout a timer commits and pushes; half a board would
+  sync to the other machine.
 
 ### The store's shape
 

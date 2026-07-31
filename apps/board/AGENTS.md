@@ -2,7 +2,9 @@
 
 **The program is called Goetia** (lowercase `goetia` in the window title, the
 desktop entry and the binary, like every other app here). Only the presentation
-carries the name: the store it reads and writes is still `docs/board.md`, and
+carries the name: the store it reads and writes is still the board — since
+2026-07-30 one file PER MACHINE, `docs/board.top.md` on `top` and
+`docs/board.book.md` on `book`, never merged (`guide/store.md`) — and
 every path and identifier is still `board*` — this directory, `boardctl.py`,
 `board.nix`, `board-watch`, `~/.local/state/board/`, the `Board` context
 property. Renamed 2026-07-29, his call; the prose here goes on calling the FILE
@@ -18,7 +20,7 @@ Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 `~/nix/docs/DESIGN.md` before you draw anything.
 
 ```bash
-goetia                      # ~/nix/docs/board.md
+goetia                      # ~/nix/docs/board.<hostname>.md, this host's own
 goetia /path/to/other.md    # any file with the same shape
 ```
 
@@ -28,7 +30,7 @@ goetia /path/to/other.md    # any file with the same shape
 should use minister instead"*. So every string he can read — goetia's own labels,
 placeholders and framing prose, the cap dropdown (`4 ministers`), everything
 `boardctl.py` prints back at him, and every template that writes a line into
-`docs/board.md`, `board-watch.py`'s included — says **minister** / **ministers**,
+the board, `board-watch.py`'s included — says **minister** / **ministers**,
 never *agent* or *worker*.
 
 **Identifiers do not move.** `kind="worker"`, `board-worker-*.service`,
@@ -57,7 +59,7 @@ of every part is listed below, so `grep` still finds the section from here.
 **Read the part, then grep it.** Nothing under `guide/` is small enough to
 swallow whole for one change.
 
-### [`guide/store.md`](guide/store.md) — the STORE — `docs/board.md` and how anything writes to it
+### [`guide/store.md`](guide/store.md) — the STORE — `docs/board.<host>.md` and how anything writes to it
 
 513 lines. Its sections:
 

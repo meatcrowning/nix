@@ -48,7 +48,8 @@ outside the store, and there are three ways back:
 
 **There used to be a fourth, and losing the need for it is the point.** All
 three above are keyed on the stash, and the stash is MACHINE-LOCAL state while
-`board.md` syncs between the machines — so a row `top` started was, from `book`,
+the board synced between the machines (one shared file, back then) — so a row
+`top` started was, from `book`,
 indistinguishable from a row nobody started. Add the rows written before the
 stash existed and the rows added by hand, and IN FLIGHT could only ever grow:
 `stall()` was the manual exit for the ones no mechanism here could reach, and he

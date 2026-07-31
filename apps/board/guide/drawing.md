@@ -37,7 +37,7 @@ The store is edited by agents and by a sync timer **while this window is open**.
 2. **A write refuses on a race.** `Board._commit` re-reads the file and compares
    its sha256 against the parse the edit was computed from. Different means
    somebody else moved the lines: it reloads, says
-   `board.md changed on disk - reloaded, nothing written`, and writes nothing.
+   `the board changed on disk - reloaded, nothing written`, and writes nothing.
    Clicking again works. **This is asserted in the harness**; a stale line index
    landing his answer inside someone else's paragraph is the one failure this
    app must never have.
@@ -278,7 +278,7 @@ failing it:
   permanently and *before* he picks, so the four-second version bought no
   honesty. A failed pick still reports — that outcome has nowhere else to go,
   and §10 is about those.
-- **A reload says nothing.** `board.md changed on disk - reloaded` fired on every
+- **A reload says nothing.** `the board changed on disk - reloaded` fired on every
   agent write and every five-minute sync, i.e. §6.1's own rule (the maintenance
   mechanism must not be visible) breaking itself in the one slot he cannot look
   away from. The rows changing is the report.
