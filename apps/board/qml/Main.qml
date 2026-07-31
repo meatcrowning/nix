@@ -1370,6 +1370,63 @@ Window {
                                             mx, my)
                         }
                     }
+
+                    // PENDING ORDERS — what he typed that is waiting for the
+                    // next summoner, either because nothing was running when he
+                    // sent it or because a minister went away without reading
+                    // it. Drawn because an order he cannot see is one he has to
+                    // assume was lost.
+                    // ...and one he has changed his mind about can be rewritten,
+                    // taken back from the menu, or undone with ctrl+z, up until
+                    // the moment board-watch drains it (`QueuedNote.qml` carries
+                    // what that race costs him).
+                    //
+                    // THE WORD IS ORDERS, not messages — [his, 2026-07-29]
+                    // *"instead of messages it says orders"*, of this list. The
+                    // group is labelled rather than left to speak for itself
+                    // because that is the section he named; it appears with the
+                    // first order and goes with the last.
+                    //
+                    // IT SITS AT THE FOOT OF THE SUMMONER SECTION, not of the
+                    // triangle — [his, 2026-07-30] *"pending orders for solomon
+                    // should be shown at the bottom of the summoner section NOT
+                    // at the bottom of the triangle"*. An order is addressed to
+                    // the summoner and is waiting on HIM to pick it up; the
+                    // triangle is the ministers already bound, which is a
+                    // different question.
+                    PixelText {
+                        width: summonerCol.width
+                        visible: win.queuedNotes.length > 0
+                        height: visible ? implicitHeight : 0
+                        topPadding: visible ? 6 : 0
+                        color: Theme.dim
+                        text: "pending orders"
+                    }
+
+                    Repeater {
+                        model: win.keysOf(win.queuedNotes, "id")
+                        delegate: QueuedNote {
+                            id: qNote
+                            required property int index
+                            readonly property var modelData:
+                                win.queuedNotes[qNote.index] || ({})
+                            width: summonerCol.width
+                            note: qNote.modelData
+                            fgDim: win.fgDim
+                            fgText: win.fgText
+                            fgAccent: win.fgAccent
+                            draft: win.draftOf("queued:" + qNote.modelData.id)
+                            openCaret: win.caretOf("queued:" + qNote.modelData.id)
+                            onCaretHeld: (p) => win.caretHeld("queued:" + qNote.modelData.id, p)
+                            onCaretLeft: () => win.caretLeft("queued:" + qNote.modelData.id)
+                            onDraftEdited: (b) => win.setDraft("queued:" + qNote.modelData.id, b)
+                            onStatusMessage: (t) => { if (t !== "") win.status = t; }
+                            onMenuRequested: (mx, my, head, tail) =>
+                                menu.open(mx, my, head.concat(win.fileItems())
+                                                      .concat(win.undoItems())
+                                                      .concat(tail))
+                        }
+                    }
                 }
             }
 
@@ -1504,55 +1561,6 @@ Window {
                                                + agRow.modelData.detail)
                                             + "  (" + agRow.modelData.title + ")",
                                             mx, my)
-                        }
-                    }
-
-                    // PENDING ORDERS — what he typed that is waiting for the
-                    // next summoner, either because nothing was running when he
-                    // sent it or because a minister went away without reading
-                    // it. Drawn because an order he cannot see is one he has to
-                    // assume was lost.
-                    // ...and one he has changed his mind about can be rewritten,
-                    // taken back from the menu, or undone with ctrl+z, up until
-                    // the moment board-watch drains it (`QueuedNote.qml` carries
-                    // what that race costs him).
-                    //
-                    // THE WORD IS ORDERS, not messages — [his, 2026-07-29]
-                    // *"instead of messages it says orders"*, of this list. The
-                    // group is labelled rather than left to speak for itself
-                    // because that is the section he named; it appears with the
-                    // first order and goes with the last.
-                    PixelText {
-                        width: agentsCol.width
-                        visible: win.queuedNotes.length > 0
-                        height: visible ? implicitHeight : 0
-                        topPadding: visible ? 6 : 0
-                        color: Theme.dim
-                        text: "pending orders"
-                    }
-
-                    Repeater {
-                        model: win.keysOf(win.queuedNotes, "id")
-                        delegate: QueuedNote {
-                            id: qNote
-                            required property int index
-                            readonly property var modelData:
-                                win.queuedNotes[qNote.index] || ({})
-                            width: agentsCol.width
-                            note: qNote.modelData
-                            fgDim: win.fgDim
-                            fgText: win.fgText
-                            fgAccent: win.fgAccent
-                            draft: win.draftOf("queued:" + qNote.modelData.id)
-                            openCaret: win.caretOf("queued:" + qNote.modelData.id)
-                            onCaretHeld: (p) => win.caretHeld("queued:" + qNote.modelData.id, p)
-                            onCaretLeft: () => win.caretLeft("queued:" + qNote.modelData.id)
-                            onDraftEdited: (b) => win.setDraft("queued:" + qNote.modelData.id, b)
-                            onStatusMessage: (t) => { if (t !== "") win.status = t; }
-                            onMenuRequested: (mx, my, head, tail) =>
-                                menu.open(mx, my, head.concat(win.fileItems())
-                                                      .concat(win.undoItems())
-                                                      .concat(tail))
                         }
                     }
 
