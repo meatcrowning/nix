@@ -27,6 +27,16 @@ Escape hatches, both honoured here and in main.py:
 
     SURFER_SOCKET=<path>       override the socket path (test isolation)
     SURFER_NO_SINGLETON=1      disable entirely — always a fresh process
+    SURFER_ALLOW_HANDOFF=1     opt back in to a bare, no-URL invocation
+    SURFER_DESKTOP_LAUNCH=1    set by surfer.desktop; "a human asked for this"
+
+**A bare `surfer` from a script is refused** — see `refusal()`. It hands the
+running browser an empty OPEN, i.e. a new home-page tab in the window the user
+is looking at, and that has happened for real: on 2026-07-30 an agent borrowed
+the packaged wrapper's Qt environment by sourcing it, which ran the wrapper's
+own probe line three times and put three DuckDuckGo tabs in his live session.
+A URL is never refused (link clicks are the whole point); a *no-URL* invocation
+with no tty and no marker is never something anybody meant.
 
 **The fallback must stay intact.** Every failure mode in here returns "carry on
 and launch normally". A default browser that refuses to start is far worse than
@@ -65,6 +75,62 @@ def socket_path():
 
 def enabled():
     return not os.environ.get("SURFER_NO_SINGLETON", "")
+
+
+REFUSAL = """surfer: refusing a bare, no-URL launch from a non-interactive caller.
+
+  With a surfer already running this opens a home-page tab in the window he is
+  looking at; with none running it opens a window on his screen. Neither is
+  something a script or an agent shell ever means to do. (Three DuckDuckGo tabs
+  appeared in his live browser this way on 2026-07-30 — see singleton.py.)
+
+  If you wanted surfer's Qt environment:  surfer-qtenv <command> [args...]
+                                          eval "$(surfer-qtenv)"    # in a subshell
+  If you wanted a window to test in:      QT_QPA_PLATFORM=offscreen, or
+                                          ~/nix/tools/sandbox.sh
+  If you really meant this:               SURFER_ALLOW_HANDOFF=1 surfer
+"""
+
+
+def _has_tty():
+    """A human is plausibly on the other end of one of our three fds.
+
+    Checked BEFORE the wrapper's `exec > ~/.cache/surfer.log` redirect, which is
+    why the probe line has to stay ahead of it.
+    """
+    for fd in (0, 1, 2):
+        try:
+            if os.isatty(fd):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def refusal(url):
+    """The message to print instead of acting, or None to carry on.
+
+    Deliberately keyed on "no URL", not on "no tty": every legitimate
+    programmatic caller — a link click through `surfer.desktop`, anything using
+    `$BROWSER` — names a URL, and refusing those would break the default
+    browser. Nothing legitimate runs `surfer` with no arguments from a script.
+    """
+    if url:
+        return None
+    if os.environ.get("SURFER_ALLOW_HANDOFF", ""):
+        return None
+    if os.environ.get("SURFER_DESKTOP_LAUNCH", ""):
+        return None
+    if _has_tty():
+        return None
+    # The one blameless no-URL launch: offscreen AND with the handoff disabled,
+    # so it can reach neither his screen nor his running browser. Offscreen
+    # alone is NOT enough — the socket handoff happens before Qt exists and
+    # would still put a tab in his window.
+    if (not enabled()) and os.environ.get("QT_QPA_PLATFORM", "") in (
+            "offscreen", "minimal", "vnc"):
+        return None
+    return REFUSAL
 
 
 def pick_url(argv):
@@ -120,8 +186,13 @@ def try_handoff(argv):
     """Called at the top of main.py. Exits the process if a surfer is running.
 
     Returns normally (== "you are the first instance, carry on") for every other
-    outcome, including any unexpected exception.
+    outcome, including any unexpected exception — EXCEPT a refused bare launch,
+    which exits 3 without starting a browser at all.
     """
+    why = refusal(pick_url(argv))
+    if why:
+        sys.stderr.write(why)
+        sys.exit(3)
     if not enabled():
         return
     try:
@@ -134,4 +205,11 @@ def try_handoff(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(0 if (enabled() and send(pick_url(sys.argv[1:]))) else 10)
+    # Exit 0 means "handled, wrapper stops here". A refusal is deliberately 0:
+    # the point is that the wrapper must NOT go on to launch a browser either.
+    _url = pick_url(sys.argv[1:])
+    _why = refusal(_url)
+    if _why:
+        sys.stderr.write(_why)
+        sys.exit(0)
+    sys.exit(0 if (enabled() and send(_url)) else 10)
