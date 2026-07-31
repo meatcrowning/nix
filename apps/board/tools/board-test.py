@@ -5766,18 +5766,30 @@ def test_card_output(tmp):
     check("no transcript and an empty log is honestly nothing",
           agents.output("w-live") == [], agents.output("w-live"))
 
-    say({"type": "text", "text": "looking at the seed drift"})
-    say({"type": "tool_use", "name": "Edit", "input": {"file_path": "/a/b/Main.qml"}})
-    check("a running agent's own words and tools ARE the drawer, log or no log",
-          agents.output("w-live") == ["looking at the seed drift",
-                                      "editing Main.qml"],
+    # LITERAL, not a summary of it — [his, 2026-07-30] *"its literal actual
+    # thinking / tool call / coding output"*. Every line of the real payload.
+    say({"type": "thinking", "thinking": "the seed drift is\nthe suspect"})
+    say({"type": "tool_use", "name": "Edit",
+         "input": {"file_path": "/a/b/Main.qml", "new_string": "visible: true"}})
+    check("a running agent's own thinking and tool ARGUMENTS are the drawer",
+          agents.output("w-live") == ["Edit /a/b/Main.qml", "new_string:",
+                                      "visible: true"],
           agents.output("w-live"))
 
     # ...and it keeps up: the next poll sees what was appended since.
     say({"type": "tool_use", "name": "Bash",
          "input": {"command": "git push", "description": "Push to main"}})
-    check("...and a later poll shows what it did next, unreloaded",
-          agents.output("w-live")[-1] == "push to main", agents.output("w-live"))
+    check("...and a Bash call is the COMMAND, not a description of it",
+          agents.output("w-live")[-1] == "$ git push", agents.output("w-live"))
+
+    # A tool RESULT rides on a `user` entry and is the one thing in one that is
+    # the agent's log rather than his words.
+    with open(tsc, "a") as f:
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "content": "3 files changed\n1 insertion"}]}}) + "\n")
+    check("...and the tool's own OUTPUT lands in the log under it",
+          agents.output("w-live")[-2:] == ["3 files changed", "1 insertion"],
+          agents.output("w-live"))
 
     # Only the last few, however long it ran.
     for i in range(8):
@@ -5791,7 +5803,7 @@ def test_card_output(tmp):
     with open(tsc, "a") as f:
         f.write(json.dumps({"type": "user", "message": {
             "role": "user", "content": [{"type": "text", "text": "HIS PROMPT"}]}}) + "\n")
-    check("...and it is the AGENT's voice only, not his prompt read back",
+    check("...and his own prompt read back is NOT the agent's output",
           "HIS PROMPT" not in agents.output("w-live"), agents.output("w-live"))
 
     # After the run: no transcript at all, and the log finally has the output.

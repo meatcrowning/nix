@@ -733,16 +733,70 @@ class Agents(QObject):
     #: is not — and it is still only the end of the file.
     TRANSCRIPT_TAIL = 256 * 1024
 
+    #: How wide one line of the drawer may be before it is cut. The drawer
+    #: elides to the card's width itself; this only stops a 40kB tool result
+    #: from arriving as one line and being carried around as one.
+    OUTPUT_WIDTH = 400
+
+    @staticmethod
+    def _tool_use_lines(name, inp):
+        """A tool CALL as its literal arguments, not as a description of it.
+
+        [his, 2026-07-30] *"you are saying we cannot actually see its real live
+        log i.e. not what its saying its doing but its literal actual thinking /
+        tool call / coding output?"* — so a `Bash` is the command it ran, an
+        `Edit` is the replacement text, a `Write` is what was written. The
+        one-line-per-event summary `boardphase.describe_call` builds is still
+        right for the card's OBSERVED line, which is a summary by design; it is
+        the wrong thing in a drawer that is supposed to be the running log.
+
+        A header naming the tool, then whichever of its inputs is the payload —
+        by key, so a tool this does not know about still shows its arguments
+        rather than nothing.
+        """
+        inp = inp or {}
+        head = str(name or "tool")
+        # The one argument that IS the call, per tool, in the order it reads.
+        lead = ("command", "file_path", "path", "pattern", "url", "query",
+                "prompt", "description")
+        first = next((str(inp[k]) for k in lead if inp.get(k)), "")
+        out = ["$ " + " ".join(first.split()) if head == "Bash" and first
+               else (head + " " + first).rstrip()]
+        # ...and the BODY, which is the part he is actually asking to see.
+        for k in ("old_string", "new_string", "content", "replace_all"):
+            v = inp.get(k)
+            if isinstance(v, str) and v.strip():
+                out.append(k + ":")
+                out.extend(v.split("\n"))
+        return out
+
+    @staticmethod
+    def _result_lines(part):
+        """A tool RESULT as its own text — the output of the command, the error
+        the compiler printed. The transcript carries it as a string or as a list
+        of content blocks; both shapes are the same lines."""
+        body = part.get("content")
+        if isinstance(body, str):
+            return body.split("\n")
+        out = []
+        for b in body if isinstance(body, list) else []:
+            if isinstance(b, dict) and b.get("type") == "text":
+                out.extend(str(b.get("text") or "").split("\n"))
+        return out
+
     @staticmethod
     def _transcript_lines(session):
-        """The last few things the agent actually said or did, live.
+        """THE AGENT'S LITERAL OUTPUT, live, newest at the tail.
 
-        One line per transcript entry, in the order it happened. Assistant text
-        is quoted as-is; a tool call goes through `boardphase.describe_call`, so
-        the drawer speaks the same vocabulary as the card's observed line above
-        it. Everything else in the file — user turns, tool RESULTS, meta — is
-        somebody else's voice or an entire file's contents, and neither belongs
-        in three lines.
+        Not a summary of it: his words are *"its literal actual thinking / tool
+        call / coding output"*. So every line of every assistant `text` and
+        `thinking` block, every tool call's own arguments
+        (`_tool_use_lines`) and every tool result's own text
+        (`_result_lines`), flattened in the order the file has them. The
+        drawer then shows the last few, which is `tail` on a running log.
+
+        The only entries skipped are his own turns — a user message is his
+        prompt read back at him, and it is not the agent's output.
 
         Reads only the tail, and only whole lines: the file is being appended to
         while this runs, so a final fragment is skipped rather than parsed as a
@@ -772,24 +826,34 @@ class Agents(QObject):
             except ValueError:
                 continue
             msg = o.get("message") if isinstance(o.get("message"), dict) else None
-            if not msg or msg.get("role") != "assistant":
+            if not msg:
                 continue
+            role = msg.get("role")
             body = msg.get("content")
             if isinstance(body, str):
                 body = [{"type": "text", "text": body}]
-            for part in body if isinstance(body, list) else []:
+            if not isinstance(body, list):
+                continue
+            for part in body:
                 if not isinstance(part, dict):
                     continue
-                if part.get("type") == "text":
-                    said = " ".join(str(part.get("text") or "").split())
-                    if said:
-                        out.append(said)
-                elif part.get("type") == "tool_use":
-                    did = boardphase.describe_call(part.get("name") or "",
-                                                   part.get("input"))
-                    if did:
-                        out.append(did)
-        return out
+                kind = part.get("type")
+                if kind == "tool_result":
+                    # Carried on a `user` entry by the platform, but it is the
+                    # TOOL's output and not his words — the one thing in a user
+                    # turn that belongs in the log.
+                    out.extend(Agents._result_lines(part))
+                elif role != "assistant":
+                    continue
+                elif kind == "text":
+                    out.extend(str(part.get("text") or "").split("\n"))
+                elif kind == "thinking":
+                    out.extend(str(part.get("thinking") or "").split("\n"))
+                elif kind == "tool_use":
+                    out.extend(Agents._tool_use_lines(part.get("name"),
+                                                      part.get("input")))
+        # Blank lines are structure in prose and noise in three lines of tail.
+        return [x.rstrip()[:Agents.OUTPUT_WIDTH] for x in out if x.strip()]
 
     @Slot(str, result="QVariantList")
     def output(self, agent_id):
