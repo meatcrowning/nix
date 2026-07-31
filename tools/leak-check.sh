@@ -26,7 +26,11 @@
 #      window or on an off-screen monitor, or the pointer parked inside a
 #      HEADLESS-* output. Same report: "they keep moving my mouse around". A
 #      cursor on a monitor with no cable in it is not a state a real session
-#      reaches by itself.
+#      reaches by itself. Since 2026-07-30 it also NOTES a pointer sitting on
+#      the exact centre of a real monitor — where Hyprland snaps it when an
+#      output is removed, which is what "the mouse randomly moves to the centre
+#      of the screen" turned out to be. tools/sandbox.sh now undoes that snap
+#      (sg_pointer_pin); the note catches a harness that does not.
 #
 # WARNS ONLY, AND MUST STAY THAT WAY. Every one of these states is one a real
 # login can legitimately be in — he starts nested compositors himself, and a
@@ -153,6 +157,16 @@ if x is not None:
             continue
         if m["x"] <= x < m["x"] + m["width"] and m["y"] <= y < m["y"] + m["height"]:
             print("POINTER\t%d,%d is inside %s" % (x, y, m["name"]))
+    # The AFTER-THE-FACT warp signature. CMonitor::onDisconnect snaps the cursor
+    # to exactly the centre of the surviving monitor, so a pointer sitting on
+    # that one pixel is very likely an output removal that did not go through
+    # sg_pointer_pin. He can of course park it there himself, which is why this
+    # only ever warns.
+    for m in mons:
+        if m["name"].startswith("HEADLESS-"):
+            continue
+        if (x, y) == (m["x"] + m["width"] // 2, m["y"] + m["height"] // 2):
+            print("SNAP\t%d,%d is the exact centre of %s" % (x, y, m["name"]))
 PY
 )
   vis=$(printf '%s\n' "$seat" | sed -n 's/^VISIBLE\t//p')
@@ -175,6 +189,12 @@ PY
     "      No session reaches that by itself, so something WARPED it. Find the" \
     "      harness that moves the cursor and delete that line; nothing under" \
     "      tools/ is allowed to."
+  snap=$(printf '%s\n' "$seat" | sed -n 's/^SNAP\t//p')
+  [ -n "$snap" ] && warn \
+    "NOTE: the pointer is at a monitor centre: $snap" \
+    "      That is where Hyprland snaps it when an output is REMOVED, so it may" \
+    "      be a harness that tore a sandbox down without tools/lib/session-guard.sh's" \
+    "      sg_pointer_pin. It is also just a place a pointer can be - hence NOTE."
 fi
 
 exit "$found"
