@@ -3462,15 +3462,13 @@ def test_window(app, tmp):
                                    and round(t[0].width()) == round(m.width())
                                    for m, t in tips),
           [(round(m.width()), len(t)) for m, t in tips])
-    # TWO sentences in the one chip: what the number is, then when the window
-    # comes back. The second half used to be the only tooltip and the first was
-    # written into the window's `status` on hover — which is the footer the
-    # hyprvtb bar draws, so hovering a meter put stray text in the inner
-    # titlebar. §8 is where a hover explanation goes.
-    check("...saying what THAT window measures and when it resets, in "
-          "boardusage's own words",
-          all((m.property("row") or {}).get("reset") in t[0].property("text")
-              and (m.property("row") or {}).get("detail") in t[0].property("text")
+    # ONE line, and it is the countdown: [his, 2026-07-30] *"the tooltip should
+    # just say `resets in ____`"*. It carried `detail` above that line until
+    # then; nothing else may creep back in, which is what the equality (rather
+    # than a containment) is here to hold.
+    check("...saying how long until THAT window resets, and nothing else",
+          all(t[0].property("text") == (m.property("row") or {}).get("reset")
+              and t[0].property("text").startswith("resets in")
               for m, t in tips),
           [(t[0].property("text") if t else None) for m, t in tips])
     chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
@@ -3517,6 +3515,49 @@ def test_window(app, tmp):
     check("...and the retraction snaps back the way it came, in one frame (8)",
           chip.width() == 0 and not chip.isVisible(),
           (chip.x(), chip.width(), chip.isVisible()))
+
+    # ---- ...and CLICKING one refreshes it, out loud ----
+    # [his, 2026-07-30] a click on a usage meter must fetch that reading now.
+    # The row is the target (a 7px bar is not one), and §10 is the other half:
+    # the harness runs with `BOARD_USAGE_OFFLINE=1`, so this click can achieve
+    # nothing at all — and the whole point is that it SAYS so in the footer
+    # instead of looking like it worked. A silent one would be the inert control
+    # with a pointing cursor over it.
+    from PySide6.QtCore import Qt                                       # noqa: E402
+    usage_obj = keep[6]
+    said = []
+    usage_obj.refreshed.connect(lambda why: said.append(why))
+    sent[:] = []
+    hit = meter.mapToItem(win.contentItem(),
+                          QPoint(int(meter.width() / 2), int(meter.height() / 2)))
+    QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier,
+                     QPoint(int(hit.x()), int(hit.y())))
+    for _ in range(20):
+        spin(20)
+        if said:
+            break
+    feet = [t for k, t in sent if k == "footer" and t]
+    check("clicking a usage meter runs a fetch, there and then",
+          said == ["off"], said)
+    check("...and reports it in the footer, both while it runs and how it ended",
+          any("refreshing" in t for t in feet)
+          and any("usage" in t and "showing the last reading" in t for t in feet),
+          feet)
+    # The in-flight state has to reach the ROW, not only the footer — a fetch is
+    # a round trip and the row he clicked is where he is looking. Driven rather
+    # than raced: the offline fetch settles in microseconds, so the wire is what
+    # is asserted, one notify to both meters.
+    usage_obj._busy = True
+    usage_obj.busyChanged.emit()
+    spin(20)
+    lit = [m.property("busy") for m in meters]
+    usage_obj._busy = False
+    usage_obj.busyChanged.emit()
+    spin(20)
+    check("...and every meter draws the in-flight state, from `Usage.busy`",
+          lit == [True, True]
+          and [m.property("busy") for m in meters] == [False, False],
+          (lit, [m.property("busy") for m in meters]))
 
     # ---- the model chooser sits to the RIGHT of the box he types in ----
     # His words placed it: "a drop down to the right of the top prompt box".
@@ -5164,18 +5205,22 @@ def test_usage(tmp):
           rows[0]["label"] == "5h" and "5 hour" in rows[0]["detail"],
           rows[0]["detail"])
 
-    # ---- the tooltip sentence: WHEN this limit comes back ----
-    # [his, 2026-07-29] *"add a tooltip to each usage indicator that says when
-    # that limit next resets"*. It is per-row and names its own window, because a
-    # chip is read on its own, away from the label it grew out of. This payload
-    # has one window with a `resets_at` and one without, which is the whole
-    # point: neither may end up with an empty chip (§10), and the one that cannot
-    # say a time must say THAT rather than nothing.
-    check("each window's tooltip says when THAT window resets, by name",
-          rows[1]["reset"] == "the 7d window resets Sat 6:59pm", rows[1]["reset"])
-    check("...and a window with no reset time in the payload says so",
-          rows[0]["reset"] == "this reading carries no reset time for the 5h window",
+    # ---- the tooltip line: HOW LONG until this limit comes back ----
+    # [his, 2026-07-30] *"the tooltip should just say `resets in ____`"* — one
+    # line, a countdown, nothing else. This payload has one window with a
+    # `resets_at` and one without, which is the whole point: neither may end up
+    # with an empty chip (§10), and the one that cannot say a span must say THAT
+    # rather than nothing.
+    check("each window's tooltip is a countdown and nothing else",
+          rows[1]["reset"] == "resets in 3d" and "\n" not in rows[1]["reset"],
+          rows[1]["reset"])
+    check("...and a window with no reset time in the payload still says `resets in`",
+          rows[0]["reset"] == "resets in ? - this reading carries no reset time",
           rows[0]["reset"])
+    check("...and a reset time already gone by is not counted down to 0m",
+          bu.readings(real, now + 4 * 86400)[1]["reset"]
+          == "resets in ? - this reading's reset time has gone by",
+          bu.readings(real, now + 4 * 86400)[1]["reset"])
     check("...in ASCII, so the chip cannot clip on a missing glyph (2.3)",
           all(ord(c) < 128 for c in rows[0]["reset"] + rows[1]["reset"]),
           [rows[0]["reset"], rows[1]["reset"]])
@@ -5197,7 +5242,7 @@ def test_usage(tmp):
               all(r["known"] is False and r["text"] == "unknown" for r in rows),
               rows)
         check("...and its tooltip says why there is no reset time either (%s)" % name,
-              all(r["reset"].startswith("no usage reading yet") and r["label"] in r["reset"]
+              all(r["reset"] == "resets in ? - no usage reading on this host yet"
                   for r in rows), [r["reset"] for r in rows])
 
     # The old payload shape, before `limits` existed: the two flat totals are

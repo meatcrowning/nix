@@ -318,6 +318,28 @@ Window {
         }
     }
 
+    // A refresh HE asked for, reported in his own words rather than in a reason
+    // word (§10): a click on a meter that cannot reach the account has to say
+    // that it could not, or it is an inert control with a pointing cursor over
+    // it. Only hand-driven fetches emit this — the 60s and 300s clocks stay
+    // silent, since nothing just happened at his hand (§10.4).
+    Connections {
+        target: Usage
+        function onRefreshed(why) {
+            if (why === "ok")
+                win.status = "usage reading refreshed";
+            else if (why === "off")
+                win.status = "usage fetching is off here - showing the last reading";
+            else if (why === "offline")
+                win.status = "no network - showing the last reading, with its age";
+            else if (why === "expired" || why === "no-token" || why === "unauthorized")
+                win.status = "claude-code needs signing in again - showing the last reading";
+            else
+                win.status = "could not refresh usage (" + why
+                             + ") - showing the last reading, with its age";
+        }
+    }
+
     // ---- hyprvtb titlebar: board's whole chrome (§12, §7.4) ----
     // ASCII, lowercase, one or two characters (§12.1). The three section cells
     // are jumps AND a position readout — the lit one is the section the top of
@@ -694,6 +716,16 @@ Window {
                             row: modelData
                             fgDim: win.fgDim
                             fgText: win.fgText
+                            // A click is a refresh [his, 2026-07-30]. The meter
+                            // draws the in-flight state itself; the OUTCOME is a
+                            // report, so it goes where every other report in
+                            // this window goes — the footer (§10, and `PickBox`'s
+                            // note on why a hover is not allowed there).
+                            busy: Usage.busy
+                            onRefreshRequested: {
+                                win.status = "refreshing the usage reading...";
+                                Usage.refreshNow();
+                            }
                         }
                     }
                 }

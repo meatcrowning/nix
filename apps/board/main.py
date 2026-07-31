@@ -1129,12 +1129,24 @@ class Usage(QObject):
     file nobody wrote. It is `Agents.lives`, not `Agents.changed`, because the
     latter fires for ordinary per-poll churn and that would make this a 2.5s
     fetch; `KICK_SEC` is the floor under it either way.
+
+    **And a CLICK on a meter is the third trigger** [his, 2026-07-30]:
+    `refreshNow()` is the same fetch with the gap set to zero, `busy` says it is
+    happening and `refreshed` says how it went. A clickable readout that cannot
+    report its own failure would be §10's inert control with a cursor over it.
     """
 
     changed = Signal()
     #: A fetch finished, with its reason word. Emitted from the worker thread —
     #: a queued connection is what carries it back to the GUI one.
     _fetched = Signal(str)
+    #: A fetch is or is not in flight. The meters are clickable (below), so this
+    #: is what lets a click look like it did something while the network is out.
+    busyChanged = Signal()
+    #: A fetch HE asked for has settled, with its reason word (`ok` when it
+    #: worked). Only ever emitted for a hand-driven refresh: the clocks must not
+    #: put a report in the footer he did not ask for.
+    refreshed = Signal(str)
 
     #: Seconds between fetches on the idle clock, and the floor under a
     #: lifecycle-triggered one. A percentage moves by single digits in five
@@ -1153,6 +1165,7 @@ class Usage(QObject):
         self._fetched_at = 0.0
         self._nudged_at = 0.0
         self._why = "ok"
+        self._by_hand = False
         self._fetched.connect(self._settled)
         self._poll = QTimer(self)
         self._poll.setInterval(60000)
@@ -1182,12 +1195,33 @@ class Usage(QObject):
         self._start(self.KICK_SEC)
         self.refresh()
 
+    @Slot()
+    def refreshNow(self):
+        """He CLICKED a meter: fetch now, with both clocks ignored.
+
+        [his, 2026-07-30] the meters must refresh on a click. The clocks stay
+        exactly as they were — this is the same fetch path, with the gap set to
+        zero, so there is one place where a reading comes from and one place
+        where a failure is worded.
+
+        It reports either way (docs/DESIGN.md §10): `busy` goes true for as long
+        as the round trip lasts, and `refreshed` carries the outcome — including
+        `off`, `expired` and `offline`, the three ways a click here can honestly
+        achieve nothing. A fetch already in flight IS his refresh: `_start`
+        declines to open a second one, and marking it by hand means its result
+        still reaches the footer.
+        """
+        self._by_hand = True
+        self._start(0.0)
+        self.refresh()
+
     def _start(self, min_gap):
         """Fetch on a worker thread, unless one is running or it is too soon."""
         now = time.time()
         if self._busy or now - self._fetched_at < min_gap:
             return
         self._busy, self._fetched_at = True, now
+        self.busyChanged.emit()
         threading.Thread(target=self._work, daemon=True,
                          name="board-usage").start()
 
@@ -1215,7 +1249,19 @@ class Usage(QObject):
                 print("usage: no live reading (%s) - drawing the last one, with "
                       "its age" % why, file=sys.stderr)
         self._busy = False
+        self.busyChanged.emit()
+        # Only for a refresh HE drove: the 60s and 300s clocks must not put a
+        # sentence in the footer he did not ask for (§10.4 — a report is about
+        # something that just happened at his hand).
+        if self._by_hand:
+            self._by_hand = False
+            self.refreshed.emit(why)
         self.refresh()
+
+    @Property(bool, notify=busyChanged)
+    def busy(self):
+        """A fetch is in flight. The meters draw it, so a click is never silent."""
+        return self._busy
 
     @Slot()
     def refresh(self):
