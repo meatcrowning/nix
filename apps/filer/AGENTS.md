@@ -231,6 +231,14 @@ spawning the real `filer --pick`. Most of it is failure paths — cancel, crash,
 missing binary, `Close()` mid-flight — because each of those is a candidate
 hang.
 
+**Run it through `portal-tests.sh`, not by hand.** The two halves need two
+different interpreters and on `top` they live in two different wrappers —
+PySide6 in `filer`'s, `gi` in `filer-portal`'s — and the script resolves both
+(overridable: `FILER_TEST_PYTHON`, `FILER_TEST_PYTHON_GI`), falling back to
+`/usr/bin/python3`, which is book's answer to both. That fallback used to be
+hardcoded, so the whole suite was unrunnable on `top`, which is exactly the
+pressure that ends with somebody opening a real dialog to see if it works.
+
 ## File operations REPORT — every one of them
 
 Every `cp`/`mv`/`ln`/`rm`/`mkdir`/`gio trash` goes through `FileOps.run`

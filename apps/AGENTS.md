@@ -464,6 +464,35 @@ Fixed plugin-side in v2.45, but guard on the app side too.
 - **Never open a test window on the user's screen** — use `tools/sandbox.sh`
   (off-screen virtual monitor: `start` / `exec CMD` / `shot` / `clients` /
   `stop`).
+- **Every harness in `apps/*/tools/` opens with the same four lines, and a new
+  one copies them** (2026-07-30, after he reported test windows appearing and
+  his pointer being moved while agents worked):
+
+  ```python
+  os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+  os.environ.pop("WAYLAND_DISPLAY", None)       # and nothing to fall back TO
+  os.environ.pop("DISPLAY", None)
+  ...
+  app = QGuiApplication(sys.argv)
+  if app.platformName() != "offscreen":
+      raise SystemExit("refusing to run on platform %r, not offscreen" % ...)
+  ```
+
+  `setdefault` was the hole: an exported `QT_QPA_PLATFORM` — his session's, or a
+  packaged wrapper's, which several of these harnesses borrow — silently won,
+  and the test mapped a real window. With no display there is nothing to fall
+  back to, so Qt aborts loudly instead, and the assertion says so in one line
+  rather than after a screenful of Qt noise. A child process gets the same
+  treatment in its `env` dict (surfer's `split-test.py`, filer's `e2e-test.py`,
+  askpass's selftest).
+- **Tear down in a trap** (`try/finally`, or `atexit.register`), never at the
+  end of the happy path: the harnesses that leak into his session are the ones
+  that failed halfway.
+- **Never script hyprvtb's Lua actions to probe behaviour** — `hl.dsp.focuswindow`
+  is nil there, so `rollup`/`minimize_active` land on HIS active window. Play
+  the plugin's part instead: bind a scratch `hyprvtb-buttons.sock` in a scratch
+  `XDG_RUNTIME_DIR` and read the wire (`surfer/tools/split-test.py` is the
+  pattern), or stub `Titlebar` outright.
 - Syntax-check QML headlessly: `qmllint -I <qml import paths> qml/Main.qml`
   (import paths from the app's wrapper env). The "Failed to import" lines are
   missing paths, not errors.
