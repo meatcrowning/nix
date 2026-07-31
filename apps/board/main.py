@@ -616,7 +616,11 @@ class Agents(QObject):
         self._proc.start(Agents.SYSTEMCTL,
                          ["--user", "show", "board-watch.service",
                           "board-watch.path",
-                          "-p", "ActiveState", "-p", "SubState", "-p", "Result"])
+                          "-p", "ActiveState", "-p", "SubState", "-p", "Result",
+                          # ...and LoadState, which is the ONLY thing that tells
+                          # a stopped watcher from one that was never deployed
+                          # on this host at all. See `watcher_state`.
+                          "-p", "LoadState"])
 
     def _on_systemctl(self, *_a):
         raw = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
@@ -1003,6 +1007,18 @@ class Agents(QObject):
         # ...and, since ctrl+z, that it is still HIS. Saying so here is the one
         # honest place for it: the key is live exactly now, and the hint inside
         # the box cannot say it (with his caret in there Ctrl+Z is text undo).
+        #
+        # AND IT SAYS SO WHEN NOTHING WILL ACT — §10, the rule that a control
+        # must not promise what it cannot do. The inbox is machine-local by
+        # design, so a sentence typed here is worked HERE or not at all; with no
+        # armed watcher on this host it sits in `inbox/queue/` unread and
+        # unreported, and the old wording ("until a summoner acts") reads as a
+        # promise that one will. 2026-07-30: an order typed on book did exactly
+        # that and he had no way to see it. `armed` is three-valued and only a
+        # definite False earns this — an unknown is not a no.
+        if self._armed is False:
+            return "in the inbox on %s, but NOT being worked - %s" % (
+                boardwork.HOST, self._watcher)
         return "in the inbox - ctrl+z takes it back until a summoner acts"
 
     # ---- his second thoughts about something already queued ----

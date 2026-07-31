@@ -2018,6 +2018,20 @@ def test_agents(tmp):
     check("...but a stopped path unit is NOT armed, however idle the service",
           ba.watcher_state("ActiveState=inactive\n\nActiveState=inactive\n")
             ["armed"] is False)
+    # NEVER DEPLOYED here is a different sentence from STOPPED, because only one
+    # of them tells him what to run. `systemctl show` answers for a unit that
+    # does not exist with an ordinary `ActiveState=inactive`, so LoadState is
+    # the only tell.
+    NOTHERE = ("ActiveState=inactive\nLoadState=not-found\n\n"
+               "ActiveState=inactive\nLoadState=not-found\n")
+    check("a watcher that was never deployed on this host says so, and names it",
+          ba.watcher_state(NOTHERE)["armed"] is False
+          and "not installed" in ba.watcher_state(NOTHERE)["text"]
+          and os.uname().nodename in ba.watcher_state(NOTHERE)["text"])
+    check("...and a LOADED but stopped one keeps the old wording",
+          "path unit is" in ba.watcher_state(
+              "ActiveState=inactive\nLoadState=loaded\n\n"
+              "ActiveState=inactive\nLoadState=loaded\n")["text"])
     open(ba.watch_kill_switch(), "w").close()
     check("...and neither is one he has switched off at the kill switch",
           ba.watcher_state(ARMED)["armed"] is False
