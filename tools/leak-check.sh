@@ -8,7 +8,7 @@
 # catch the *residue* every leaked test leaves behind, at the one moment every
 # agent here is already required to pass through: preflight.
 #
-# Four states, all of them things a harness is supposed to have cleaned up:
+# Six states, all of them things a harness is supposed to have cleaned up:
 #   1. The systemd user manager pointing at a compositor that is not his
 #      (hypr-session-env.sh --check — reused, never reimplemented; the full
 #      story of why that store goes wrong is in AGENTS.md under
@@ -18,6 +18,15 @@
 #      compositor still running, still able to hold a seat and a clipboard.
 #   4. A sandbox monitor left standing (/tmp/vtb-sandbox), i.e. `sandbox.sh
 #      start` without its `stop`.
+#   5. A TEST WINDOW ON HIS REAL MONITOR — a sandbox-tagged (or probe-titled)
+#      client that is not on a HEADLESS-* output. Added 2026-07-30, because 1-4
+#      caught only residue and he was reporting the live symptom: "test windows
+#      keep popping up".
+#   6. HIS SEAT LEFT SOMEWHERE HE DID NOT PUT IT — keyboard focus on a test
+#      window or on an off-screen monitor, or the pointer parked inside a
+#      HEADLESS-* output. Same report: "they keep moving my mouse around". A
+#      cursor on a monitor with no cable in it is not a state a real session
+#      reaches by itself.
 #
 # WARNS ONLY, AND MUST STAY THAT WAY. Every one of these states is one a real
 # login can legitimately be in — he starts nested compositors himself, and a
@@ -78,6 +87,88 @@ fi
 if [ -d "$SBOX" ] && [ -z "${heads:-}" ]; then
   warn "WARN: sandbox state left behind at $SBOX (no headless monitor, so the" \
        "      monitor half was torn down).  repair:  $HOME/nix/tools/sandbox.sh stop"
+fi
+
+# 5 + 6. The live symptoms, not the residue: a test window he can SEE, and his
+#        seat left where a harness put it. One python call over three hyprctl
+#        reads (~30ms total) — this runs inside preflight, so it stays cheap and
+#        it stays read-only.
+if hyprctl version >/dev/null 2>&1; then
+  seat=$(python3 - <<'PY' 2>/dev/null
+import json, subprocess
+def j(*a):
+    return json.loads(subprocess.check_output(["hyprctl", "-j", *a]))
+try:
+    mons = j("monitors")
+    clients = j("clients")
+    active = j("activewindow")
+except Exception:
+    raise SystemExit(0)
+byid = {m["id"]: m for m in mons}
+head = lambda mid: byid.get(mid, {}).get("name", "").startswith("HEADLESS-")
+
+def owned(c):
+    tags = [t.rstrip("*") for t in c.get("tags") or []]
+    if "sandbox" in tags:
+        return "tagged sandbox"
+    # tools/vtb-*-test.sh name their probe windows *PROBE; a real app of his
+    # does not. Cheap second net for a client that lost its tag (a rule that
+    # did not match, a window re-created by the client).
+    if "PROBE" in (c.get("title") or "") or "PROBE" in (c.get("initialTitle") or ""):
+        return "probe-titled"
+    return None
+
+for c in clients:
+    why = owned(c)
+    if why and not head(c.get("monitor")):
+        mon = byid.get(c.get("monitor"), {}).get("name", "?")
+        print("VISIBLE\t%s\t%s\t%s\t%s" % (
+            c["address"], c.get("class") or "?", mon, why))
+
+addr = active.get("address") or ""
+if addr:
+    for c in clients:
+        if c["address"] != addr:
+            continue
+        if owned(c):
+            print("FOCUS\ttest window %s (%s)" % (addr, c.get("class") or "?"))
+        elif head(c.get("monitor")):
+            print("FOCUS\t%s, which is on an off-screen monitor"
+                  % (c.get("class") or addr))
+
+try:
+    x, y = (int(v) for v in subprocess.check_output(
+        ["hyprctl", "cursorpos"]).decode().split(","))
+except Exception:
+    x = y = None
+if x is not None:
+    for m in mons:
+        if not m["name"].startswith("HEADLESS-"):
+            continue
+        if m["x"] <= x < m["x"] + m["width"] and m["y"] <= y < m["y"] + m["height"]:
+            print("POINTER\t%d,%d is inside %s" % (x, y, m["name"]))
+PY
+)
+  vis=$(printf '%s\n' "$seat" | sed -n 's/^VISIBLE\t//p')
+  if [ -n "$vis" ]; then
+    warn "WARN: a TEST WINDOW is on a monitor he can see:"
+    printf '%s\n' "$vis" | sed 's/^/        /'
+    warn "      A harness put a window in front of him and did not take it away." \
+         "      repair:  $HOME/nix/tools/sandbox.sh stop   (closes tagged windows" \
+         "               wherever they ended up), or close it by hand."
+  fi
+  foc=$(printf '%s\n' "$seat" | sed -n 's/^FOCUS\t//p')
+  [ -n "$foc" ] && warn \
+    "WARN: his keyboard focus is on $foc." \
+    "      A harness took the seat and never gave it back. Nothing to repair" \
+    "      from here - click where you meant to be - but the harness that did" \
+    "      it is the bug: AGENTS.md -> Testing without interfering with the user."
+  ptr=$(printf '%s\n' "$seat" | sed -n 's/^POINTER\t//p')
+  [ -n "$ptr" ] && warn \
+    "WARN: the pointer is parked off-screen: $ptr" \
+    "      No session reaches that by itself, so something WARPED it. Find the" \
+    "      harness that moves the cursor and delete that line; nothing under" \
+    "      tools/ is allowed to."
 fi
 
 exit "$found"
