@@ -96,6 +96,7 @@ import boardagents  # noqa: E402  (beside this file)
 import boardwork  # noqa: E402  (beside this file)
 import boardusage  # noqa: E402  (beside this file)
 import boardundo  # noqa: E402  (beside this file)
+import boardphase  # noqa: E402  (beside this file — the card drawer tails its transcript)
 
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) \
     / "board" / "state.json"
@@ -676,10 +677,28 @@ class Agents(QObject):
     # lines"* of that minister's output. The card's three lines are this app's
     # account of the agent; this is the agent's own voice, unedited.
     #
-    # The file is the one `boardwork` gives the worker its stdout in
+    # THE LIVE SOURCE IS THE TRANSCRIPT, NOT THE `.log`. [his, 2026-07-30]
+    # *"the drop down log in agent cards should be the last couple lines of
+    # their REAL LIVE OUTPUT... agent card logs should really never read as
+    # 'nothing logged yet' which they do now pretty much all the time"*.
+    #
+    # The `.log` is the file `boardwork` gives the worker its stdout in
     # (`~/.cache/board-work/<id>.log`, through its own `_log_path` so the
     # `XDG_CACHE_HOME` a harness sets is honoured — a test must never read his
-    # real cache, which is the reason that helper exists).
+    # real cache, which is the reason that helper exists). It is real, and it is
+    # EMPTY FOR THE WHOLE RUN: `claude -p` with no tty writes its result once, at
+    # the end. Measured on top 2026-07-30 while two workers were live — both
+    # their logs were 0 bytes, and of ~200 finished ones every single non-empty
+    # file was written at exit. So the drawer said "nothing logged yet" for
+    # exactly as long as there was anything to watch, which is the complaint.
+    #
+    # The agent's transcript is appended to as it works, and `boardphase` already
+    # reads it for the observed line and the context tally — so it is the same
+    # file, no new pipe, and each entry becomes one line: what the agent SAID, or
+    # `describe_call` on the tool it reached for, which is the same vocabulary
+    # the card's own observed line uses. The `.log` is the fallback, and it is
+    # the right one after the run: a dead worker has no more transcript but its
+    # final output is on disk.
     #
     # Read here rather than in QML because QML cannot read a file at all, and
     # cleaned here rather than there because §2.3 says to map glyphs at INGEST:
@@ -703,10 +722,77 @@ class Agents(QObject):
                        r"|\x1b[@-Z\\-_]")
     _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
+    #: How far back into the transcript one poll reads. Entries are large (a
+    #: tool result can be tens of kB), so this is generous where the log's tail
+    #: is not — and it is still only the end of the file.
+    TRANSCRIPT_TAIL = 256 * 1024
+
+    @staticmethod
+    def _transcript_lines(session):
+        """The last few things the agent actually said or did, live.
+
+        One line per transcript entry, in the order it happened. Assistant text
+        is quoted as-is; a tool call goes through `boardphase.describe_call`, so
+        the drawer speaks the same vocabulary as the card's observed line above
+        it. Everything else in the file — user turns, tool RESULTS, meta — is
+        somebody else's voice or an entire file's contents, and neither belongs
+        in three lines.
+
+        Reads only the tail, and only whole lines: the file is being appended to
+        while this runs, so a final fragment is skipped rather than parsed as a
+        truncated object (the same rule `boardphase._tool_calls` follows).
+        """
+        path = boardphase.transcript(session)
+        if not path:
+            return []
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                start = max(0, f.tell() - Agents.TRANSCRIPT_TAIL)
+                f.seek(start)
+                raw = f.read()
+        except OSError:
+            return []
+        rows = raw.decode("utf-8", "replace").split("\n")
+        if start:
+            rows = rows[1:]          # a partial first line, cut by the seek
+        out = []
+        for row in rows:
+            row = row.strip()
+            if not row:
+                continue
+            try:
+                o = json.loads(row)
+            except ValueError:
+                continue
+            msg = o.get("message") if isinstance(o.get("message"), dict) else None
+            if not msg or msg.get("role") != "assistant":
+                continue
+            body = msg.get("content")
+            if isinstance(body, str):
+                body = [{"type": "text", "text": body}]
+            for part in body if isinstance(body, list) else []:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    said = " ".join(str(part.get("text") or "").split())
+                    if said:
+                        out.append(said)
+                elif part.get("type") == "tool_use":
+                    did = boardphase.describe_call(part.get("name") or "",
+                                                   part.get("input"))
+                    if did:
+                        out.append(did)
+        return out
+
     @Slot(str, result="QVariantList")
     def output(self, agent_id):
         if not (agent_id or "").strip():
             return []
+        rec = boardagents.record(agent_id) or {}
+        live = Agents._transcript_lines(rec.get("session"))
+        if live:
+            return [px(x) for x in live[-Agents.OUTPUT_LINES:]]
         try:
             path = boardwork._log_path(agent_id)
             with open(path, "rb") as f:

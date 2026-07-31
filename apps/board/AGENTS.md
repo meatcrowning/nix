@@ -1508,17 +1508,35 @@ agent's own voice, uncut except for width.
   key list changes — one agent finishing is enough — so a drawer remembered in
   the delegate, or by list index, would shut itself on the next 2.5s poll or
   reopen under somebody else's card. Several open at once is the point.
-- **The text is read in PYTHON, and it is `boardwork._log_path`'s file**
-  (`~/.cache/board-work/<id>.log`, through that helper so a harness's
-  `XDG_CACHE_HOME` is honoured — a test must never read his real cache).
-  `Agents.output()` takes the last 64k, drops ANSI/C0 junk and blank lines,
-  keeps only what a `\r`-rewritten progress line settled on, and maps glyphs
-  with `px()` because §2.3 says to map at INGEST. Three lines, and only the
-  width-dependent elide is the drawer's (§2.7 — the font is monospace).
+- **The LIVE source is the agent's TRANSCRIPT; the `.log` is the fallback.**
+  [his, 2026-07-30] *"the drop down log in agent cards should be the last couple
+  lines of their REAL LIVE OUTPUT... agent card logs should really never read as
+  'nothing logged yet' which they do now pretty much all the time"*. The
+  `.log` (`boardwork._log_path`, `~/.cache/board-work/<id>.log`) is real output
+  and is **empty for the entire run** — `claude -p` with no tty writes its
+  result once, at exit. Measured on top 2026-07-30: both live workers' logs were
+  0 bytes, and every non-empty one of ~200 finished workers was written at exit.
+  So the drawer said `nothing logged yet` for exactly as long as there was
+  anything to watch. `Agents._transcript_lines()` now reads
+  `boardphase.transcript(rec["session"])` instead — the same file
+  `boardphase` already tails for the observed line, appended to as the agent
+  works — one line per assistant entry: what it SAID, or `describe_call` on the
+  tool it reached for, which is the vocabulary the card's observed line above it
+  already speaks. Tool *results* and user turns are skipped: those are somebody
+  else's voice, and one of them is a whole file.
+- **Both readers are in PYTHON** (QML cannot open a file), and both are trimmed
+  there rather than in the drawer. Transcript: the last 256k, whole lines only —
+  it is being appended to while this runs. Log: the last 64k, ANSI/C0 junk and
+  blank lines dropped, and only what a `\r`-rewritten progress line settled on.
+  Either way `px()` maps the glyphs, because §2.3 says to map at INGEST; three
+  lines, and only the width-dependent elide is the drawer's (§2.7 — the font is
+  monospace).
 - **Nothing logged says so in words** — `nothing logged yet`, not an empty box
   and not an error colour (§10; a worker that has not written yet is not a
-  machine fault). A missing file, an unreadable one and one holding only control
-  junk are the same honest answer.
+  machine fault). No transcript, a missing log, an unreadable one and one
+  holding only control junk are the same honest answer. It should now be RARE:
+  an agent registered with no `session` at all (an interactive one nothing here
+  spawned) is the case that still reads that way before it exits.
 - **It follows the poll while it is open** and reads no file at all while it is
   shut. The look is §6.2's clipped growth from the card's bottom edge and §9.1's
   indented block with a `Theme.border` spine — never `accent`, which two pixels

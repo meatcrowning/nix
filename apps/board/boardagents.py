@@ -412,13 +412,24 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     return rec
 
 
+def record(agent_id):
+    """One agent's registration as it sits on disk, or `None`.
+
+    The whole record, because callers want different fields of it — the name for
+    a sentence he reads, the `session` uuid for the transcript the card's drawer
+    tails.
+    """
+    if not (agent_id or "").strip():
+        return None
+    return _read_json(os.path.join(agents_dir(), clean_id(agent_id) + ".json"))
+
+
 def name_of(agent_id):
     """The name in one agent's record, or `""` for anything that has none — a
     decision he answered, an interactive session, a task with no worker yet.
     Reads the record rather than deriving, so what the UI says back to him is
     what the card beside it is drawing."""
-    rec = _read_json(os.path.join(agents_dir(), clean_id(agent_id) + ".json"))
-    return (rec or {}).get("name") or ""
+    return (record(agent_id) or {}).get("name") or ""
 
 
 def unregister(agent_id):
