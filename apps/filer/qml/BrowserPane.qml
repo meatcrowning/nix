@@ -260,7 +260,7 @@ Rectangle {
         // job with its own toast.
         if (!e.isDir && VideoConv.isVideo(e.path))
             items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path) });
-        return items.concat([
+        return items.concat(sendToPhoneItems()).concat([
             { separator: true },
             { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },
             { label: "copy" + n, trigger: () => { clip = { op: "copy", paths: selection.slice() }; } },
@@ -286,6 +286,46 @@ Rectangle {
         if (!plan.ok) { VideoConv.start(p); return; }   // start() toasts the reason
         if (plan.ask) { compressDlg.targetPath = p; compressDlg.text = plan.warning; compressDlg.open(); }
         else VideoConv.start(p);
+    }
+
+    // "send to phone" — KDE Connect, acting on the whole selection.
+    //
+    // ONE ENTRY PER DEVICE, named after the device. CtxMenu has no submenus, and
+    // with one or two phones paired a flat row each is both shorter to reach and
+    // more honest than "send to phone" over an invisible choice. The devices are
+    // enumerated HERE, as the menu is built (Phone.devices() is a ~10ms
+    // kdeconnect-cli call), never once at startup: a phone that walked out of
+    // wifi range must leave the menu rather than linger as a row that fails.
+    //
+    // docs/DESIGN.md 10 decides the two empty cases: a row that would quietly do
+    // nothing is not offered, so with nothing reachable — or nothing sendable —
+    // the entry is greyed AND says which of the two it is. Sending is
+    // FileOps.run like every other shell-out, so a failure is the same critical
+    // toast a failed copy is (apps/filer/AGENTS.md, "File operations REPORT").
+    function sendToPhoneItems() {
+        const paths = Phone.sendable(selection);
+        const devs = Phone.devices();
+        if (devs.length === 0)
+            return [{ label: "send to phone - no device reachable", enabled: false }];
+        if (paths.length === 0)
+            return [{ label: "send to phone - directories cannot be sent", enabled: false }];
+        // The count is in the label rather than implied, so a 12-file send never
+        // looks like a 1-file one; it counts the SENDABLE files, so a selection
+        // of five files and a folder reads (5) and sends five.
+        const n = paths.length > 1 ? " (" + paths.length + ")" : "";
+        return devs.map(d => ({ label: "send to " + d.name + n,
+                                trigger: () => sendToPhone(d.id, paths) }));
+    }
+
+    // One kdeconnect-cli per file, so a multi-file send is a BATCH exactly like
+    // a multi-item paste: three failures out of ten report once, as
+    // "send to phone: 3 of 10 failed", instead of ten separate toasts or none.
+    // endBatch is mandatory — without it failures are collected and never shown.
+    function sendToPhone(devId, paths) {
+        const tok = FileOps.beginBatch("send to phone");
+        for (let i = 0; i < paths.length; i++)
+            FileOps.run(["kdeconnect-cli", "-d", devId, "--share", paths[i]], "", tok);
+        FileOps.endBatch(tok);
     }
 
     // Menu over empty space: dir-level actions.

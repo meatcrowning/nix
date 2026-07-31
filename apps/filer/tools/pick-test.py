@@ -79,6 +79,7 @@ def build(app, spec, start_dir):
     ctx.setContextProperty("Titlebar", StubTitlebar())
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("VideoConv", filermain.VideoConv())
+    ctx.setContextProperty("Phone", filermain.Phone())
     ctx.setContextProperty("Picker", picker)
     ctx.setContextProperty("startDir", start_dir)
     ctx.setContextProperty("startSortField", "name")

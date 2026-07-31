@@ -114,12 +114,13 @@ def build(app, start_dir, ops):
     ctx = engine.rootContext()
     keep = (ops, filermain.Palette(filermain.PANEL_THEME), filermain.Settings(),
             filermain.DirWatch(), filermain.WinCtl(), filermain.VideoConv(),
-            StubTitlebar(), filermain.Picker(None), DeskStyle(parent=engine))
+            StubTitlebar(), filermain.Picker(None), DeskStyle(parent=engine),
+            filermain.Phone())
     for name, obj in (("FileOps", keep[0]), ("WalPalette", keep[1]),
                       ("Settings", keep[2]), ("DirWatch", keep[3]),
                       ("WinCtl", keep[4]), ("VideoConv", keep[5]),
                       ("Titlebar", keep[6]), ("Picker", keep[7]),
-                      ("DeskStyle", keep[8])):
+                      ("DeskStyle", keep[8]), ("Phone", keep[9])):
         ctx.setContextProperty(name, obj)
     ctx.setContextProperty("startDir", start_dir)
     ctx.setContextProperty("startSortField", "name")

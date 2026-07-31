@@ -47,6 +47,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
+from phone import Phone  # noqa: E402  (next to this file; KDE Connect "send to phone")
 
 # Preview classification. `kind` is the scaffold for file previews: the QML side
 # groups/renders entries by it (images get a thumbnail grid at the top of the
@@ -346,7 +347,7 @@ def _op_label(argv):
             os.path.dirname(rest[0]) == os.path.dirname(rest[1]):
         return "rename"          # same directory: that is a rename, not a move
     return {"cp": "copy", "mv": "move", "rm": "delete", "ln": "link",
-            "mkdir": "new folder"}.get(prog, prog)
+            "mkdir": "new folder", "kdeconnect-cli": "send to phone"}.get(prog, prog)
 
 
 def _stderr_lines(text, keep=3):
@@ -875,6 +876,7 @@ def main():
     titlebar = Titlebar()
     dirwatch = DirWatch()
     videoconv = VideoConv()
+    phone = Phone()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
     # Quick type name and would shadow the context property.
     # WalPalette first, so Theme's bindings resolve it when Theme is instantiated.
@@ -886,6 +888,7 @@ def main():
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("VideoConv", videoconv)
+    ctx.setContextProperty("Phone", phone)
     ctx.setContextProperty("Picker", picker)
     ctx.setContextProperty("startDir", start_dir)
     # Last-used sort + hidden-files toggle, restored into the view on startup.
