@@ -640,6 +640,11 @@ class Agents(QObject):
             "kind": a["kind"], "title": a["title"],
             "where": a["where"], "state": a["state"],
             "running": a["state"] == "running",
+            # ...and whether a STOPPED one had reported its result first. The
+            # card draws it as finished rather than abandoned — words and
+            # accent gutter both. `boardagents` derives it from
+            # `boardwork.reported`, the same fact `reap()` files it by.
+            "finished": bool(a.get("finished")),
             "phase": a.get("phase", ""),
             # THE TWO STATEMENTS, and they cross into QML as two fields. Never
             # merged here and never defaulted from each other: `boardphase.py`

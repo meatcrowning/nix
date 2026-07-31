@@ -162,6 +162,8 @@ Item {
     visible: !agent || agent.speaks !== false
 
     readonly property bool running: agent && agent.running === true
+    //: It stopped, and it had recorded its result first. See the accent gutter.
+    readonly property bool finished: agent && agent.finished === true
     // WHO IT IS, in one short name — his call: *"i think itd be
     // interesting to have them referred to by regular names"*. The coded id is
     // still the key underneath (the inbox this card's box writes to is named by
@@ -333,10 +335,17 @@ Item {
     // [his, 2026-07-29] *"he doesnt need a line to the left of his card"*, and he
     // is right that it says nothing there: the mark distinguishes a running card
     // from a stopped one in a LIST of them, and his section holds one card.
+    // ...AND A WORKER THAT FINISHED KEEPS IT — [his, 2026-07-30] about a card
+    // that *"still sits and proclaims 'exited without finishing - nothing was
+    // committed..' ... and no vertical line on the left EVEN THOUGH its task has
+    // been completed"*. A stopped worker used to be drawn the same way whether it
+    // reported or was abandoned; `finished` is `boardwork.reported`, the same
+    // fact `reap()` files it by, so the mark now says "this one did the work"
+    // rather than only "this one is still breathing".
     Rectangle {
         width: 2
         height: parent.height - 6
-        visible: row.running && !row.summoner
+        visible: (row.running || row.finished) && !row.summoner
         color: row.fgAccent
     }
 

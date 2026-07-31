@@ -5830,6 +5830,32 @@ def test_card_output(tmp):
           by_id.get("w-hush", {}).get("saysLine"))
     ba.unregister("w-hush")
 
+    # ---- FINISHED is not ABANDONED ----
+    # [his, 2026-07-30] a worker that had completed its task sat on the board
+    # proclaiming `exited without finishing - nothing was committed on its
+    # behalf`, greyed and with no accent gutter. `reap()` always knew better;
+    # the card did not, until it was given the same fact.
+    dead = os.fork()
+    if dead == 0:
+        os._exit(0)
+    os.waitpid(dead, 0)
+    ba.register("w-quit", "T", dead, kind="worker", where="apps/x/**")
+    ba.register("w-fin", "T", dead, kind="worker", where="apps/x/**")
+    bw.mark_reported("w-fin", "it said what it did")
+    by_id = {a["id"]: a for a in ba.agents()}
+    check("a stopped worker that reported is drawn as FINISHED",
+          by_id["w-fin"]["finished"] is True
+          and "finished" in ba.describe(by_id["w-fin"]),
+          ba.describe(by_id.get("w-fin", {})))
+    check("...and one that simply stopped is still abandoned, in words",
+          by_id["w-quit"]["finished"] is False
+          and "without finishing" in ba.describe(by_id["w-quit"]),
+          ba.describe(by_id.get("w-quit", {})))
+    check("...and neither claim is made about a worker still running",
+          by_id["w-live"]["finished"] is False)
+    ba.unregister("w-quit")
+    ba.unregister("w-fin")
+
     # The registrations are in the ONE shared state dir every later test reads,
     # and two strangers in the agents list is enough to fail the window's own
     # "with nothing running" checks. Take them back out.
