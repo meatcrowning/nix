@@ -110,6 +110,16 @@ from outside the plugin before suspecting `apps/`:** a bare
 Do not replace either half with an `unlink()`; both causes (2.92) were an
 unlink with a gap after it.
 
+**The render path never reads the app-button server (≥2.97).** `CVtbDeco` keeps a
+snapshot of its own registration (`m_regSnap`, handed out by `appReg()`); only
+`mainThreadTick` advances it, and it prewarms that snapshot's glyphs before anything
+can draw them. Drawing or hit-testing straight off `VtbIpc::get` reintroduces the
+titlebar text flash — `renderBar` used to stamp `m_lastIpcSerial` too, which hid the
+app's change from the tick, so nothing prewarmed and nothing repainted. The serial is
+GLOBAL (player's `PLAYBAR` bumps it several times a second), so it only means "somebody
+changed something"; what decides is comparing the fresh registration against the
+snapshot. Story: `docs/hyprvtb-titlebar-flash.md`.
+
 Also note `hyprctl keyword` refuses outright here ("keyword can't work with
 non-legacy parsers") — use `hyprctl eval`. And dispatchers are `hl.dsp.*`
 objects passed to `hyprctl dispatch`; a bare dispatcher name is a nil global.

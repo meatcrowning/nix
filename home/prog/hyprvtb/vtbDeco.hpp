@@ -136,7 +136,11 @@ class CVtbDeco : public IHyprWindowDecoration {
     // App-button column (the inner half of the double-wide bar) — buttons a
     // client registered for this window's PID over the vtbIpc socket.
     pid_t                m_appPid        = -1; // -1 = not resolved yet, 0 = none
-    uint64_t             m_lastIpcSerial = 0;  // damage when VtbIpc::serial moves
+    uint64_t             m_lastIpcSerial = 0;  // last global VtbIpc::serial this deco looked at
+    // The registration this bar DRAWS and HIT-TESTS from. Only mainThreadTick
+    // refreshes it — never the render path. See appReg().
+    SVtbAppReg           m_regSnap;
+    bool                 m_bHasReg = false;
     SP<Render::ITexture> m_pFooterTex;         // stacked footer text, bottom of the inner column
     std::string          m_szLastFooter;
     int                  m_iLastFooterRun = -1;
@@ -365,6 +369,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 ensureEditCaretVisible();       // scroll so the caret row is on-screen
 
     pid_t                appPid();
+    // This window's registration as of the last tick, or false if it has none.
+    // Everything that draws or hit-tests the bar reads THIS, not VtbIpc::get —
+    // the snapshot is only ever advanced by mainThreadTick, which prewarms the
+    // glyphs for it first, so the render path can never draw text whose texture
+    // is being created in the same tiler job (the flash-blank).
+    bool                 appReg(SVtbAppReg& out) const;
     int                  appCellAt(const Vector2D& localCoords, const SVtbAppReg& reg);
     // The media scrub track, bar-local LOGICAL px (x,y = top of the track, w =
     // the full inner-column width used as the click/scroll hit region, h = track

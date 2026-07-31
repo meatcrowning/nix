@@ -75,6 +75,9 @@ struct SVtbAppButton {
     bool        isSep() const {
         return id == "-";
     }
+    // Decos keep a snapshot of their own registration and compare against it to
+    // tell a change to THIS window from a bump by any other (see CVtbDeco::mainThreadTick).
+    bool operator==(const SVtbAppButton&) const = default;
 };
 
 struct SVtbAppReg {
@@ -95,6 +98,8 @@ struct SVtbAppReg {
     // bottom-anchored buttons — so the player's position readout ends up
     // against its own scrub bar rather than at the far end of the column.
     bool                       footerBottom = false;
+
+    bool operator==(const SVtbAppReg&) const = default;
 };
 
 namespace VtbIpc {

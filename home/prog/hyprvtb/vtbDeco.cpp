@@ -911,7 +911,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             }
             damageEntire(); // keep the blink ticking on a still cursor
         }
-    } else if (VtbIpc::titleTextEnabled(appPid())) {
+    } else if (!m_bHasReg || m_regSnap.titleText) { // == VtbIpc::titleTextEnabled(), off the snapshot
         // ...unless the app has declared its title region carries no text
         // (TITLETEXT 0 — goetia). [his, 2026-07-29] *"really for now there
         // should be no title text in the left side inner bar of goetia"*: its
@@ -938,7 +938,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // above the address), cycle | \ - / ~8fps while the browser reports loading.
     {
         SVtbAppReg lreg;
-        if (VtbIpc::get(appPid(), lreg) && lreg.titleEdit && lreg.loading) {
+        if (appReg(lreg) && lreg.titleEdit && lreg.loading) {
             static const char* FRAMES[4] = {"|", "\\", "-", "/"};
             const long         ms        = std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow().time_since_epoch()).count();
             drawGlyphXY(sysColX(), titleTop(), FRAMES[(ms / 120) % 4], FOCUSED ? accentColor : inactiveColor);
@@ -947,9 +947,14 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     }
 
     // ---- inner column: app-registered buttons + stacked footer (vtbIpc) ----
-    m_lastIpcSerial = VtbIpc::serial.load(std::memory_order_relaxed);
+    // The render path is a pure READER of the snapshot: it no longer stamps
+    // m_lastIpcSerial. Stamping here was the second half of the titlebar text
+    // flash — a frame drawn between an app's change and the next tick advanced
+    // the serial past the bump, so mainThreadTick saw nothing to prewarm or
+    // repaint and the new text could stay missing until something else damaged
+    // the bar. docs/hyprvtb-titlebar-flash.md.
     SVtbAppReg reg;
-    if (VtbIpc::get(appPid(), reg)) {
+    if (appReg(reg)) {
         const double CONTENTH  = DECOBOX.h;
         double       appBottom = VTB_PAD; // bottom of the TOP group (footer stays below it)
 
@@ -1319,7 +1324,7 @@ std::string CVtbDeco::tooltipForCell(int cell) {
     }
     if (cell >= VTB_APPCELL) {
         SVtbAppReg reg;
-        if (VtbIpc::get(appPid(), reg)) {
+        if (appReg(reg)) {
             const size_t i = cell - VTB_APPCELL;
             if (i < reg.buttons.size())
                 return reg.buttons[i].tooltip;
@@ -1334,7 +1339,7 @@ double CVtbDeco::cellCenterY(int cell) {
         return VTB_PAD + cell * (CELL + VTB_CELL_GAP) + CELL / 2.0;
     if (cell >= VTB_APPCELL) {
         SVtbAppReg reg;
-        if (VtbIpc::get(appPid(), reg)) {
+        if (appReg(reg)) {
             const size_t want = cell - VTB_APPCELL;
             double       cy   = -1;
             walkAppLayout(reg.buttons, effectiveBoxGlobal().h, [&](size_t i, double y) {
@@ -1538,10 +1543,24 @@ void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
     // flash-blank fix) then repaint the bar. This runs from the timer, off the
     // render pass, which is exactly the separate GPU submission we need; it's
     // also why the serial check lives here and not in onMouseMove any more.
+    //
+    // The serial is GLOBAL, so it moves for every deco on the screen whenever
+    // any app changes anything — player's PLAYBAR bumps it several times a
+    // second. So the serial only says "somebody changed something": what
+    // decides is whether THIS window's own registration differs from the
+    // snapshot we are drawing. Refresh it here, off the render pass, and
+    // prewarm + damage only on a real change to our own bar. Everyone else pays
+    // one map lookup and a compare.
     if (ipcSerial != m_lastIpcSerial) {
         m_lastIpcSerial = ipcSerial;
-        prewarmGlyphs();
-        damageEntire();
+        SVtbAppReg fresh;
+        const bool have = VtbIpc::get(appPid(), fresh); // leaves `fresh` default on false
+        if (have != m_bHasReg || (have && fresh != m_regSnap)) {
+            m_regSnap = std::move(fresh);
+            m_bHasReg = have;
+            prewarmGlyphs(); // reads the snapshot we just advanced
+            damageEntire();
+        }
     }
 
     // address editor open: keep frames coming so the caret blinks on a still
@@ -1581,6 +1600,16 @@ void CVtbDeco::mainThreadTick(uint64_t ipcSerial) {
         // cursor leaving our bar) — retract it.
         hideTooltip();
     }
+}
+
+// The registration this bar draws and hit-tests, as of the last tick. Declared
+// in vtbDeco.hpp; see mainThreadTick for who advances it and why nothing on the
+// render path may read VtbIpc::get directly.
+bool CVtbDeco::appReg(SVtbAppReg& out) const {
+    if (!m_bHasReg)
+        return false;
+    out = m_regSnap;
+    return true;
 }
 
 pid_t CVtbDeco::appPid() {
@@ -1731,7 +1760,7 @@ void CVtbDeco::prewarmGlyphs() {
     const auto textColor     = FOCUSED ? accentColor : inactiveColor;
 
     SVtbAppReg reg;
-    if (!VtbIpc::get(appPid(), reg))
+    if (!appReg(reg))
         return;
     for (const auto& b : reg.buttons) {
         if (b.isSep() || b.label.empty())
@@ -1766,7 +1795,7 @@ int CVtbDeco::appDropSlot(const Vector2D& c, const SVtbAppReg& reg) {
 
 bool CVtbDeco::titleEditEnabled() {
     SVtbAppReg reg;
-    return VtbIpc::get(appPid(), reg) && reg.titleEdit;
+    return appReg(reg) && reg.titleEdit;
 }
 
 // titleTop() plus a one-cell spinner slot reserved while a browser window's page
@@ -1775,7 +1804,7 @@ bool CVtbDeco::titleEditEnabled() {
 // together while loading and stay in sync.
 int CVtbDeco::titleTopEff() {
     SVtbAppReg reg;
-    const bool spin = VtbIpc::get(appPid(), reg) && reg.titleEdit && reg.loading;
+    const bool spin = appReg(reg) && reg.titleEdit && reg.loading;
     return titleTop() + (spin ? (cellSize() + VTB_CELL_GAP) : 0);
 }
 
@@ -2000,7 +2029,7 @@ bool CVtbDeco::consumesAxisAt(const Vector2D& mouse) {
         if (!PW)
             return false;
         SVtbAppReg reg;
-        if (!VtbIpc::get(appPid(), reg) || !reg.playbar)
+        if (!appReg(reg) || !reg.playbar)
             return false;
         const auto   MON = PW->m_monitor.lock();
         const double scl = MON ? MON->m_scale : 1.0;
@@ -2043,7 +2072,7 @@ void CVtbDeco::onMouseAxis(Event::SCallbackInfo& info, const IPointer::SAxisEven
 
     if (!m_bEditing) {
         SVtbAppReg reg;
-        if (!VtbIpc::get(appPid(), reg))
+        if (!appReg(reg))
             return;
         // Cancelled unconditionally, even when the accumulated remainder is too
         // small to move anything yet: the track owns this wheel either way, and
@@ -2596,7 +2625,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         SVtbAppReg   reg;
         CBox         track;
         const auto   LOCAL = Hl::mouse() - assignedBoxGlobal().pos();
-        if (PWINDOW && VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track)) {
+        if (PWINDOW && appReg(reg) && playbarTrackLocal(reg, assignedBoxGlobal().h, scl, track)) {
             const double f = std::clamp((LOCAL.y - track.y) / track.h, 0.0, 1.0);
             if (f != m_playbarDragFrac) {
                 m_playbarDragFrac = f;
@@ -2701,7 +2730,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         }
         if (m_bAppDragging) {
             SVtbAppReg reg;
-            if (VtbIpc::get(appPid(), reg)) {
+            if (appReg(reg)) {
                 const auto LOCAL = Hl::mouse() - assignedBoxGlobal().pos();
                 const int  tgt   = appDropSlot(LOCAL, reg);
                 if (tgt != m_iAppDragTarget)
@@ -2720,7 +2749,7 @@ void CVtbDeco::onMouseMove(Vector2D coords) {
         int        cell   = VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h) ? cellAt(LOCAL) : -1;
         if (cell == -1 && VECINRECT(LOCAL, 0, 0, BOX.w, BOX.h)) {
             SVtbAppReg reg;
-            if (VtbIpc::get(appPid(), reg)) {
+            if (appReg(reg)) {
                 const int AI = appCellAt(LOCAL, reg);
                 if (AI >= 0 && reg.buttons[AI].state != 2) // disabled cells don't light
                     cell = VTB_APPCELL + AI;
@@ -2834,7 +2863,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
     // draggable button. Disabled cells are inert but still swallow the press.
     {
         SVtbAppReg reg;
-        if (VtbIpc::get(appPid(), reg)) {
+        if (appReg(reg)) {
             const int AI = appCellAt(COORDS, reg);
             if (AI >= 0) {
                 if (reg.buttons[AI].state == 2)
@@ -2858,7 +2887,7 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
         CBox         track;
         const auto   MON = PWINDOW->m_monitor.lock();
         const double scl = MON ? MON->m_scale : 1.0;
-        if (VtbIpc::get(appPid(), reg) && playbarTrackLocal(reg, BOX.h, scl, track) && track.containsPoint(COORDS)) {
+        if (appReg(reg) && playbarTrackLocal(reg, BOX.h, scl, track) && track.containsPoint(COORDS)) {
             m_bPlaybarDragging = true;
             m_playbarScrollAcc = 0.0; // a grab supersedes any carried scroll remainder
             m_playbarDragFrac  = std::clamp((COORDS.y - track.y) / track.h, 0.0, 1.0);
@@ -2931,7 +2960,7 @@ void CVtbDeco::handleUpEvent(Event::SCallbackInfo& info) {
         if (dragging) {
             if (tgt >= 0 && tgt != src) {
                 SVtbAppReg reg;
-                if (VtbIpc::get(appPid(), reg) && tgt < (int)reg.buttons.size())
+                if (appReg(reg) && tgt < (int)reg.buttons.size())
                     VtbIpc::sendReorder(appPid(), srcId, reg.buttons[tgt].id);
             }
             damageEntire();
