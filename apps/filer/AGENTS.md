@@ -317,3 +317,44 @@ notifications on the user's screen, and the assertions need the exact strings.
     a short clip. book has no NVENC and falls through to x264 automatically.
   - The output is verified against the 10MB line after the encode; one
     corrective pass runs if it somehow overshot.
+
+## "send to phone" — KDE Connect, in the file context menu
+
+`phone.py` + `sendToPhoneItems()`/`sendToPhone()` in `qml/BrowserPane.qml`. It
+sits with `open` / `open with...` / `compress to <10MB`, before the first
+separator: nothing about it is destructive and it must not be next to `trash`.
+
+- **One row per device, named after the device.** `CtxMenu` has no submenus, and
+  with one or two phones paired a flat row each is shorter to reach *and* says
+  where the file is going. The devices are enumerated **as the menu is built** —
+  `Phone.devices()` is a fresh `kdeconnect-cli --list-available --id-name-only`,
+  ~10ms measured on `top` — never once at startup: a phone that left wifi has to
+  leave the menu, not linger as a row that fails.
+- **The two empty cases are greyed and SAY WHICH** (docs/DESIGN.md §10): `send to
+  phone - no device reachable` when nothing is paired-and-reachable, `send to
+  phone - directories cannot be sent` when the selection holds no file. Every
+  way `devices()` can go wrong — no daemon, no binary, non-zero exit, timeout,
+  an unparseable line — collapses to *no devices*, which is the greyed row. A
+  half-parsed device would be a row that quietly fails, which is the thing the
+  rule forbids.
+- **Directories are counted out of the label, not failed afterwards.**
+  `--share` takes a file, so `Phone.sendable()` filters, and a selection of five
+  files and a folder reads `(5)` and sends five.
+- **The send is `FileOps.run`, in a `beginBatch`/`endBatch`** — one process per
+  file, so it reports exactly as a multi-item paste does: `send to phone: 3 of
+  10 failed`, once. `_op_label` maps `kdeconnect-cli` to `send to phone` so a
+  standalone run is not named after the binary either.
+- **PACKAGING: nothing was added to `filer.nix` and nothing needs to be.**
+  `kdeconnect-cli` comes from `kdeconnect-kde` in `home/pkgs/desktop/kde.nix`,
+  which is ungated, so **both** `top` and `book` get it, and `notify.tool`'s
+  profile-dir fallback resolves it on each (`/etc/profiles/per-user/lam/bin` on
+  `top`, `~/.nix-profile/bin` on `book`, which the graphical session's PATH does
+  not carry there). On `book` the entry simply greys out whenever Fedora's
+  `kdeconnectd` is not running — which is the honest answer, not a bug.
+
+Verify with `tools/phone-test.py` (offscreen, ~38 checks). `Phone.devices` is
+scripted and `FileOps` is a collector: it asserts the exact labels and enabled
+flags for none/one/two devices, that the count is the *sendable* count, that a
+row's own JS closure runs one `kdeconnect-cli -d <id> --share <file>` per file
+inside one batch, and where the entry lands relative to the separators.
+**It never runs the real binary and never sends anything to a real device.**

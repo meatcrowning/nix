@@ -85,7 +85,7 @@ def build(app, start_dir):
     ops = filermain.FileOps()
     keep = (ops, filermain.Palette(filermain.PANEL_THEME), filermain.Settings(),
             filermain.DirWatch(), filermain.WinCtl(), filermain.VideoConv(),
-            StubTitlebar(), filermain.Picker(None))
+            StubTitlebar(), filermain.Picker(None), filermain.Phone())
     ctx.setContextProperty("FileOps", keep[0])
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[1])
@@ -98,6 +98,7 @@ def build(app, start_dir):
     ctx.setContextProperty("VideoConv", keep[5])
     ctx.setContextProperty("Titlebar", keep[6])
     ctx.setContextProperty("Picker", keep[7])
+    ctx.setContextProperty("Phone", keep[8])
     ctx.setContextProperty("startDir", start_dir)
     ctx.setContextProperty("startSortField", "name")
     ctx.setContextProperty("startSortAsc", True)
