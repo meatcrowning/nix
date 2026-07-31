@@ -41,20 +41,46 @@
 #   sg_require_offscreen        die unless QT_QPA_PLATFORM=offscreen is exported
 #                               (or a nested target is in force). For harnesses
 #                               that mean to render headless.
+#   sg_require_nested_sig SIG   the same check for a harness that aims hyprctl
+#                               with `-i SIG` instead of by environment: die
+#                               unless SIG is set and is NOT his session's.
 #   sg_seat_snapshot            record what he is focused on and where his
 #                               pointer is.
 #   sg_seat_assert              compare against that snapshot and warn on any
 #                               change. Deliberately warn-only and deliberately
 #                               NOT self-repairing: focusing something "back" is
-#                               itself a focus grab, and warping the pointer
-#                               "back" is itself a warp. The repair is to stop
+#                               itself a focus grab. The repair is to stop
 #                               moving them.
+#   sg_pointer_pin CMD...       the ONE sanctioned pointer warp: run CMD and put
+#                               his pointer back if the COMPOSITOR moved it as a
+#                               side effect. See below.
 #
-# Every function here is read-only against his session.
+# Every function here except sg_pointer_pin is read-only against his session,
+# and sg_pointer_pin only ever writes back the position it read.
 #
-# NOTE ON THE POINTER. `cursor:no_warps = true` in hyprland.lua, so focus
-# changes do not drag the cursor along on this config — a pointer that moved
-# means something warped it explicitly. That is worth catching by name.
+# NOTE ON THE POINTER — and this note was WRONG until 2026-07-30, which is how
+# the bug below survived an audit. `cursor:no_warps = true` in hyprland.lua does
+# NOT mean "nothing moves the cursor but an explicit warp". Read in the pinned
+# Hyprland 0.56 source, two paths warp his pointer with no reference to that
+# setting at all:
+#
+#   * `CMonitor::onDisconnect` (src/output/Monitor.cpp) — "Cleanup everything.
+#     Move windows back, snap cursor, shit." — unconditionally
+#     `warpTo(BACKUPMON->m_position + BACKUPMON->m_transformedSize / 2)`. On a
+#     one-monitor desktop that is **the exact centre of his screen**, every time
+#     any output goes away. `tools/sandbox.sh stop` removes a headless output,
+#     so every harness teardown did this to him. THIS was "the mouse still gets
+#     stolen / randomly moved to the center of the screen".
+#   * `Actions::focusMonitor` -> `tryMoveFocusToMonitor`
+#     (src/config/shared/actions/ConfigActions.cpp) — warps to the target
+#     workspace's focus candidate `middle()`, or to `monitor->middle()` if that
+#     workspace is empty. `no_warps` gates only the extra
+#     `simulateMouseMovement()` underneath, never the warp itself. That is
+#     `hl.dsp.focus({ monitor = ... })`, which `sandbox.sh exec` used as its
+#     focus-restore net.
+#
+# So a pointer that moved does NOT imply somebody called a cursor dispatcher.
+# It can equally mean somebody removed an output.
 
 # Guard against being sourced twice (a harness may source a sibling that
 # sources this).
@@ -116,6 +142,23 @@ sg_require_nested() {
   return 0
 }
 
+# Same check, for a harness that never exports the nested instance into its own
+# environment but aims each call with `hyprctl -i "$SIG"`. Call it once, as soon
+# as SIG is resolved; keep any per-call refusal you already have, which is
+# strictly stronger.
+sg_require_nested_sig() {
+  local sig="${1:-}" live
+  [ -n "$sig" ] || sg_die \
+    "no nested instance signature. The nested compositor did not come up, and
+    every hyprctl from here would drive HIS session (\`hyprctl -i ''\` does not
+    fail — it connects to the live one)."
+  live=$(sg_live_sig)
+  [ -n "$live" ] && [ "$sig" = "$live" ] && sg_die \
+    "the 'nested' instance signature IS his session's ($live).
+    This run would drive his desktop."
+  return 0
+}
+
 # For a harness that renders headless. A nested target counts as satisfying it.
 sg_require_offscreen() {
   [ "${QT_QPA_PLATFORM:-}" = offscreen ] && return 0
@@ -162,4 +205,49 @@ sg_seat_assert() {
     moved=1
   fi
   return $((moved ? 1 : 0))
+}
+
+# --- sg_pointer_pin: the one sanctioned warp ---------------------------------
+#
+#   sg_pointer_pin hyprctl output remove HEADLESS-2
+#
+# Wrap a call whose COMPOSITOR-SIDE side effect is a cursor snap (see the two
+# paths named in the header). Reads his pointer position, runs the command,
+# reads it again, and if it moved, puts it back exactly where it was. Returns
+# the wrapped command's own status.
+#
+# This is the ONLY place under tools/ allowed to move his pointer, and it is
+# allowed only because it moves it BACK. It may never be used to put the pointer
+# somewhere it has not just been taken from: the destination is not a parameter,
+# it is what was read a moment earlier. A harness that wants the pointer
+# somewhere new wants a nested compositor with its own seat.
+#
+# The race — he flicks the mouse inside the wrapped call and we undo his own
+# movement — is real but bounded by the call, which is a single hyprctl round
+# trip (single-digit ms). Leaving his pointer dumped in the centre of the screen
+# is the alternative, and that is the bug being fixed.
+sg_pointer_pin() {
+  local before after rc
+  hyprctl version >/dev/null 2>&1 || { "$@"; return $?; }
+  before=$(hyprctl cursorpos 2>/dev/null | tr -d ' ')
+  "$@"; rc=$?
+  case "$before" in ''|*[!0-9,-]*) return $rc ;; esac
+  after=$(hyprctl cursorpos 2>/dev/null | tr -d ' ')
+  [ -n "$after" ] && [ "$after" != "$before" ] || return $rc
+  # `hl.dsp.cursor.move` is a DISPATCHER object, so it goes through `dispatch`,
+  # not `eval` — under the Lua config `eval` builds it without running it and
+  # moves nothing.
+  hyprctl dispatch "hl.dsp.cursor.move({ x = ${before%,*}, y = ${before#*,} })" \
+    >/dev/null 2>&1
+  local now
+  now=$(hyprctl cursorpos 2>/dev/null | tr -d ' ')
+  if [ "$now" = "$before" ]; then
+    # Said out loud on purpose: it is the evidence that the snap is real and
+    # that the undo took, and it is what a harness log should carry.
+    sg_warn "the compositor snapped his pointer to $after; put it back at $before"
+  else
+    sg_warn "the compositor moved his pointer ($before -> $after) and putting it
+    back did not take (now $now). Say so wherever this ran."
+  fi
+  return $rc
 }

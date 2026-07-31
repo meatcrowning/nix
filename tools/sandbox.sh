@@ -73,6 +73,13 @@
 #    stops this script driving a compositor that is NOT his session — a stale
 #    `HYPRLAND_INSTANCE_SIGNATURE` from somebody's nested test is an abort, not
 #    a target.
+#  * HIS POINTER IS PUT BACK, because the COMPOSITOR moves it and this script
+#    cannot ask it not to. Removing an output makes Hyprland snap the cursor to
+#    the centre of the surviving monitor, and `hl.dsp.focus({monitor=...})`
+#    warps it to the focused window's middle; neither obeys `cursor:no_warps`.
+#    Both call sites go through `sg_pointer_pin`, which restores the position it
+#    read a moment earlier and nothing else. Nothing here may move his pointer
+#    any other way.
 #  * `stop` closes the sandbox's windows BEFORE removing the output — Hyprland
 #    migrates the windows of a removed monitor onto a real one, which is
 #    exactly what this exists to prevent. It then prunes the classes it
@@ -105,6 +112,10 @@ die() {
 # half dead.
 have_hypr() {
   sg_require_live_session
+}
+
+output_remove() {
+  hyprctl output remove "$1" >/dev/null 2>&1
 }
 
 find_headless() {
@@ -254,7 +265,11 @@ case "${1:-}" in
     sleep 2
     if [ -n "$prev" ] && [ "$(focused_mon)" != "$prev" ]; then
       echo "sandbox: warning — focus left $prev despite the no_focus rule; restoring it. Check that hyprland.lua's 'sandbox-never-takes-the-seat' rule is live (hyprctl configerrors)." >&2
-      hyprctl dispatch "hl.dsp.focus({ monitor = \"$prev\" })" >/dev/null
+      # PINNED: `hl.dsp.focus({monitor=...})` is `Actions::focusMonitor`, which
+      # warps the pointer to the target workspace's focus candidate `middle()`
+      # (or the monitor's, if empty) — `cursor:no_warps` does not gate it. So
+      # giving his keyboard back used to take his mouse. See sg_pointer_pin.
+      sg_pointer_pin hyprctl dispatch "hl.dsp.focus({ monitor = \"$prev\" })" >/dev/null
     fi
     # DID IT ACTUALLY LAND OFF-SCREEN? Nothing verified this before, and a
     # window the exec rule missed is a window on HIS monitor. Close it, and fail
@@ -325,7 +340,15 @@ for c in rows:
     for addr in $(ws_windows "$WS"); do # anything that ignored the close
       hyprctl dispatch "hl.dsp.window.kill({ window = \"address:$addr\" })" >/dev/null 2>&1
     done
-    hyprctl output remove "$MON" >/dev/null 2>&1
+    # PINNED, and this is THE line he was feeling. `CMonitor::onDisconnect`
+    # unconditionally snaps the cursor to the centre of the surviving monitor —
+    # on a one-screen desktop, the middle of his screen — so every harness
+    # teardown threw his mouse into the centre. Nothing in this script called a
+    # cursor dispatcher, which is why an audit that grepped for one found
+    # nothing. See sg_pointer_pin.
+    # (Quiet inside the wrapper, not around it — sg_pointer_pin's own warning
+    # about a failed restore must still reach the log.)
+    sg_pointer_pin output_remove "$MON"
 
     G="$HOME/.local/state/hyprvtb/geometry.tsv"
     if [ -f "$G" ] && [ -s "$CLASSES" ]; then
