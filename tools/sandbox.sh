@@ -52,6 +52,17 @@
 #    still there, as a net, and now warns if it ever fires.
 #    The intended cost: nothing here can be typed into. A harness that must send
 #    input to its subject wants a nested compositor with its own seat.
+#  * WHAT YOU HAND `exec` MUST `exec` ALL THE WAY DOWN, or the rules above do
+#    not apply and the window opens in front of him. Hyprland keys the
+#    `[workspace N silent; tag +sandbox]` rule on the PID it forked; if anything
+#    in the chain forks instead of exec-ing — a wrapper script that runs its
+#    payload as a child, a shell that cannot tail-call because of a redirection
+#    written into the exec string — the client is a grandchild, the rule matches
+#    nothing, and with no `sandbox` tag it has no `no_focus` either, so it takes
+#    his keyboard too. Put any redirection INSIDE a launcher script, after an
+#    explicit `exec` (home/prog/hyprvtb/tools/nested-smoke.sh does exactly this).
+#    The placement check below turns a miss into an abort rather than a surprise,
+#    but it is a net, not a substitute.
 #  * A window launched here is also DEAF — `exec` prepends
 #    `env PIPEWIRE_REMOTE=/dev/null PULSE_SERVER=/dev/null` so a test program
 #    cannot play over whatever he is listening to. `SANDBOX_AUDIO=1` opts out.
