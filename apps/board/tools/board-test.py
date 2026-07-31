@@ -1263,8 +1263,8 @@ def test_todo_tags(tmp):
                           "FAILED", "SUMMONED", "COMMANDED"), B.TODO_TAGS)
     check("...and only the two summon words are written without a colon",
           B.BARE_TAGS == ("SUMMONED", "COMMANDED"), B.BARE_TAGS)
-    check("...both of which are DRAWN under information, as he asked",
-          [B.section_of(t) for t in B.BARE_TAGS] == ["INFORMATION"] * 2)
+    check("...both of which share a sub-section of their own, as he asked",
+          [B.section_of(t) for t in B.BARE_TAGS] == ["SUMMONED"] * 2)
 
     # ---- an untagged bullet is REFUSED, and nothing is written ----
     before = B.read(path)
@@ -1515,6 +1515,8 @@ def test_todo_tags(tmp):
           [g["tag"] for g in groups]
           == ["", "QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION"],
           [g["tag"] for g in groups])
+    check("...and the summon group is LAST when there is one, after the facts",
+          B.TODO_ORDER[-1] == "SUMMONED", B.TODO_ORDER)
     check("...QUESTION first, because nothing moves until he says a word",
           groups[1]["tag"] == "QUESTION" and groups[1]["label"] == "question")
     check("...and FAILED is not buried under the good news",
@@ -1644,9 +1646,10 @@ def test_summon_cleared(tmp):
     # ---- THE SHAPE HE ASKED FOR, 2026-07-30 ----
     # *"the message posted to the board when a minister is summoned should read
     # `SUMMONED [agent] [for/to] [task]` ... it should NOT say INFORMATION: at
-    # the beginning HOWEVER the summoned message should still appear in the
-    # information subsection of todo"*. So `SUMMONED` is a tag of its own, with
-    # nothing in front of it, filed under `information` by `TAG_SECTION`.
+    # the beginning"*. So `SUMMONED` is a tag of its own, with nothing in front
+    # of it — and, [his, 2026-07-30, later the same day] *"SUMMONED messages
+    # should go in their own sub section"*, it heads that sub-section too, with
+    # `COMMANDED` filed beside it by `TAG_SECTION`.
     NEW_A = "SUMMONED Marbas (`wd690a4`) to add commit times"
     NEW_B = "COMMANDED Zepar (`w4f82de`) for the flashing titlebar"
     check("a bare `SUMMONED <Name> ...` line is a tagged bullet",
@@ -1660,11 +1663,14 @@ def test_summon_cleared(tmp):
     board(NEW_A, NEW_B)
     groups = {g["tag"]: [i["text"] for i in g["items"]]
               for g in B.parse(B.read(path))["todoGroups"]}
-    check("...while both are DRAWN in the information subsection, as he asked",
-          sorted(groups.get("INFORMATION", []))
+    check("...while both are DRAWN in the summon subsection, as he asked",
+          sorted(groups.get("SUMMONED", []))
           == sorted(B.text(t) for t in (NEW_A, NEW_B)), groups)
-    check("...and no subsection is headed by either word",
-          "SUMMONED" not in groups and "COMMANDED" not in groups, list(groups))
+    check("...under one heading that says what those lines ARE",
+          B.label_of("SUMMONED").startswith("summoned - "),
+          B.label_of("SUMMONED"))
+    check("...and `COMMANDED` heads no second subsection of its own",
+          "COMMANDED" not in groups, list(groups))
     bm.note("COMPLETION: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     check("...and the new shape is retired by its worker's result too",

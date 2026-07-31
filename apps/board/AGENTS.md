@@ -161,8 +161,9 @@ the elaboration if needed. it shouldnt really elaborate that much though"*. So:
     this window by agents and by the docs sync, so a remembered line would come
     back folded over a *different* chore. The text moves with the bullet;
     rewording one unfolds it, which is right. Nothing is persisted: the section
-    collapse in `Settings` is three named permanent sections, not a map of his
-    prose growing an entry per chore he ever folded.
+    collapse in `Settings` is named headings — the sections, the tag groups, a
+    day in `landed` — and not a map of his prose growing an entry per chore he
+    ever folded.
   - The mark's hit band is wider than its ink and takes the LEFT button only
     (§5.1, §10) — a right-click anywhere still opens the row's menu, and the
     double-click-that-removes is swallowed in that band on purpose.
@@ -183,14 +184,23 @@ Seven tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 only two written that way (`boardparse.BARE_TAGS`). [his, 2026-07-30] *"the
 message posted to the board when a minister is summoned should read `SUMMONED
 [agent] [for/to] [task]` instead of what it is now ... it should NOT say
-INFORMATION: at the beginning HOWEVER the summoned message should still appear
-in the information subsection of todo"*. So the line is
+INFORMATION: at the beginning"*. So the line is
 `SUMMONED Marbas (`wd690a4`) to add commit times` — the `for`/`to` is whichever
-is grammatical — and it is DRAWN under `information` all the same, via
-`boardparse.TAG_SECTION`/`section_of()`, which is the one place a tag and the
-subsection it files under are allowed to differ. Reading is unchanged: the store
+is grammatical.
+
+**They are DRAWN in a sub-section of their own**, headed
+`summoned - who is on what right now` — [his, later on 2026-07-30] *"SUMMONED
+messages should go in their own sub section"*, which reverses the half of the
+rule above that filed them under `information`. `COMMANDED` is filed beside
+`SUMMONED` by `boardparse.TAG_SECTION`/`section_of()` (the one place a tag and
+the sub-section it files under are allowed to differ), and the heading text is
+`TAG_LABEL`/`label_of()` because `summoned` alone would read as one more tag in
+a column of tags. It is LAST in `TODO_ORDER`: not a report at all but the state
+of the triangle, and every line in it is retired by its own minister's result.
+Reading is unchanged: the store
 is full of the old `INFORMATION: **subject** - SUMMONED: Marbas (...)` shape and
-every one of them still parses, still groups under `information` and still gets
+every one of them still parses, still groups under `information` (its tag is
+`INFORMATION`, and the store keeps the tag he reads) and still gets
 retired by its worker's result (`tag_of` tries the colon first, `summon_of`
 accepts either). A `SUMMONED:` further along a line is deliberately NOT read as
 a second ask by `check_one_ask` — that IS the old shape.
@@ -310,11 +320,21 @@ and every one of those paths reads the flat one.
 - **An untagged bullet — the store is full of ones written before the tag rule —
   is drawn FIRST, under no heading**, so nothing claims it as something it is
   not. Reading stays untouched by the tag rule, and by this.
-- **The sub-heading is `SectionHead`, one rung quieter**: `interactive: false`
-  (no `[-]`, no click — it groups, it does not collapse) and not `accented`, so
-  it is the dim label plus the border hairline. No new chrome, and **it is a
+- **The sub-heading is `SectionHead`, one rung quieter**: not `accented`, so it
+  is the dim label plus the border hairline. No new chrome, and **it is a
   heading and NOT a count**: no tally, no badge, no severity colour, exactly as
   the flat list had none.
+- **EVERY heading on this page collapses, and they all do it the same way** —
+  [his, 2026-07-30] *"all sections / subsections should be collapseable like the
+  top decisions one"*. One component (`SectionHead`), one gesture (the whole
+  band), one persisted map (`Settings`' `collapsed`), one container idiom
+  (`Item { visible: !collapsed; implicitHeight: visible ? col.implicitHeight : 0 }`).
+  So the sub-headings lost the `interactive: false` they shipped with, and
+  `to do, when you feel like it` and each DAY in `landed` became bands instead
+  of bare dim lines. The keys are namespaced by what they name and never by
+  position — `todo:<TAG>`, `landed:<date>` — because a group's index changes
+  with what is on the board and would hand one group's fold to another. The
+  untagged group has no band, so it has no fold: there would be no way back.
 - The empty state still keys off the section being empty, and an empty section
   draws no headings because there are no groups. What it SAYS is now one line —
   see the empty state below.

@@ -32,8 +32,8 @@ parser keys on):
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions. Each one
                               starts with a TAG (`QUESTION:`, `INFORMATION:`,
                               `COMPLETION:`, `PARTIAL:`, `FAILED:` — or a
-                              colonless `SUMMONED`/`COMMANDED`, which are drawn
-                              under `information`) and then a
+                              colonless `SUMMONED`/`COMMANDED`, which share a
+                              sub-section of their own) and then a
                               summary of about a dozen words at most; background
                               goes on indented continuation lines under it.
                               `add_todo_bullet` refuses one that does not —
@@ -520,12 +520,24 @@ def parse(src):
 #                the bottom of a list of good news.
 #   PARTIAL      some of it landed and some did not; there is a remainder.
 #   COMPLETION   done, and on his machine. A record.
-#   INFORMATION  a fact; nothing is asked of him at all. Last for that reason.
+#   INFORMATION  a fact; nothing is asked of him at all.
+#   SUMMONED     who is working on what right now. Last: it is not a report at
+#                all but the state of the triangle, and every line in it is
+#                retired by its own minister's result without him touching it.
 #
 # An untagged bullet — the store is full of ones written before the tag rule —
 # comes FIRST, under no heading at all, so nothing claims it as something it is
 # not. Reading is untouched by the tag rule and it is untouched by this too.
-TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION")
+TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION",
+              "SUMMONED")
+
+#: The heading a group is DRAWN with, when the tag's own word is not enough.
+#: Only the summon group: `summoned` alone would read as one more tag in a
+#: column of tags, and what he asked for is a sub-section that says what those
+#: lines ARE — [his, 2026-07-30] *"SUMMONED messages should go in their own sub
+#: section"*, the who-is-working-on-what lines. ASCII hyphen, never `-`: the
+#: font has no dash and a missing glyph clips the line (docs/DESIGN.md §2.3).
+TAG_LABEL = {"SUMMONED": "summoned - who is on what right now"}
 
 
 def tag_of(text):
@@ -545,9 +557,15 @@ def tag_of(text):
 
 def section_of(tag):
     """The subsection a tag is DRAWN under — itself, unless `TAG_SECTION` says
-    otherwise. `SUMMONED` reads as `SUMMONED` on the line and files under
-    `information`, which is exactly what he asked for."""
+    otherwise. Only `COMMANDED`, which is drawn beside `SUMMONED`: the two are
+    the same announcement, one for a new minister and one for a running one."""
     return TAG_SECTION.get(tag, tag)
+
+
+def label_of(tag):
+    """The heading text for a group of `tag` — `TAG_LABEL`, else the tag's own
+    word in lower case, which is what every band on this page wears."""
+    return TAG_LABEL.get(tag, tag.lower())
 
 
 def todo_groups(todos):
@@ -562,11 +580,11 @@ def todo_groups(todos):
     if untagged:
         out.append({"tag": "", "label": "", "items": untagged})
     for tag in TODO_ORDER:
-        # By SECTION, not by tag: a `SUMMONED` bullet keeps its own word on the
-        # line and is drawn under `information` with the rest of the facts.
+        # By SECTION, not by tag: a `COMMANDED` bullet keeps its own word on the
+        # line and is drawn under `summoned` with the other announcement.
         items = [t for t in todos if section_of(t.get("tag")) == tag]
         if items:
-            out.append({"tag": tag, "label": tag.lower(), "items": items})
+            out.append({"tag": tag, "label": label_of(tag), "items": items})
     return out
 
 
@@ -1044,7 +1062,7 @@ TODO_TAGS = (
     "QUESTION",
     #: a fact he may want and nothing is being asked of him. `stall`'s moved
     #: row, and a knob the orchestrator turned. A SUMMON is no longer one of
-    #: these — it has its own tag now (below) and files under this one.
+    #: these — it has its own tag now (below) and its own sub-section with it.
     "INFORMATION",
     #: the work is finished and on his machine.
     "COMPLETION",
@@ -1058,10 +1076,9 @@ TODO_TAGS = (
     #: a minister was started for a piece of work. [his, 2026-07-30] *"the
     #: message posted to the board when a minister is summoned should read
     #: `SUMMONED [agent] [for/to] [task]` instead of what it is now. it should
-    #: NOT say INFORMATION: at the beginning HOWEVER the summoned message
-    #: should still appear in the information subsection of todo"*. So it is a
-    #: tag of its own that FILES under information (`TAG_SECTION`) rather than
-    #: a sentence sitting behind `INFORMATION:`.
+    #: NOT say INFORMATION: at the beginning"*. So it is a tag of its own
+    #: rather than a sentence sitting behind `INFORMATION:` — and, since later
+    #: the same day, its own sub-section too (`TAG_SECTION`, `TAG_LABEL`).
     "SUMMONED",
     #: ...and the same announcement for an item handed to a worker that was
     #: ALREADY running. The two words are the whole difference he reads off the
@@ -1076,10 +1093,14 @@ TODO_TAGS = (
 BARE_TAGS = ("SUMMONED", "COMMANDED")
 
 #: Which SUBSECTION a tag is drawn under, when that is not the tag itself. Only
-#: the two summon words, and only because he asked for the word `SUMMONED` on
-#: the line and the bullet under `information` — the grouping is a view over the
-#: store and the store keeps the tag he reads.
-TAG_SECTION = {"SUMMONED": "INFORMATION", "COMMANDED": "INFORMATION"}
+#: `COMMANDED`, drawn beside `SUMMONED`. [his, 2026-07-30] *"SUMMONED messages
+#: should go in their own sub section"* — which REVERSES the half of his
+#: 2026-07-30 morning rule that filed them under `information` (*"the summoned
+#: message should still appear in the information subsection"*); the later call
+#: wins and the earlier one is kept here so it is not "fixed" back. Nothing
+#: about the STORE moves either way: the grouping is a view and the bullet still
+#: carries the tag he reads.
+TAG_SECTION = {"COMMANDED": "SUMMONED"}
 
 #: `TAG:` for every tag, or a bare `TAG ` for the two summon words.
 _TAG_ALT = "(?:%s):|(?:%s)" % ("|".join(TODO_TAGS), "|".join(BARE_TAGS))
