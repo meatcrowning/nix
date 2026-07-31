@@ -2,10 +2,16 @@
 """board — what needs you, what is moving, what landed.
 
 The eighth vendored app. It is a GUI over ONE markdown file,
-`~/nix/docs/board.md`, which already existed and is not replaced: agents read
-and write it as text, it lives in the private `docs/` repo and syncs between
-`top` and `book` every five minutes, and he can edit it by hand in any editor.
-board parses it, draws it, and writes his answers back into the same lines.
+`~/nix/docs/board.<hostname>.md`, which already existed and is not replaced:
+agents read and write it as text, it lives in the private `docs/` repo, and he
+can edit it by hand in any editor. board parses it, draws it, and writes his
+answers back into the same lines.
+
+ONE BOARD PER MACHINE since 2026-07-30 — `board.top.md` and `board.book.md`.
+Both files sync, so each machine keeps a copy of the other's, but every reader
+and writer on a host touches only its own and nothing merges them: an overnight
+agent on `top` must not overwrite what he types on `book`. The path comes from
+`boardparse.board_path()` / `ensure_board()`, never from a literal.
 
 WHY IT EXISTS, in his words:
 
@@ -297,7 +303,12 @@ class Board(QObject):
 
     def __init__(self, path=None, parent=None):
         super().__init__(parent)
-        self._path = os.path.abspath(os.path.expanduser(path or boardparse.BOARD_PATH))
+        # PER-HOST store (`boardparse.board_path()`): this app shows and writes
+        # THIS machine's board and never the other's. `ensure_board` brings it
+        # into existence, so a first run on a host that has never had one draws
+        # an empty board rather than a `cannot read` footer.
+        self._path = os.path.abspath(os.path.expanduser(
+            path or boardparse.ensure_board()))
         self._doc = {}
         self._landedFile = []
         self._err = ""
@@ -431,12 +442,11 @@ class Board(QObject):
     def _stamp(self, lines, key):
         """Record WHICH MACHINE he just answered on, in the same write.
 
-        board-watch runs on `top` AND on `book` now and `docs/board.md` syncs
-        both ways every five minutes, so an unstamped answer is read by two
-        watchers and worked by two agents on two checkouts of the same repos.
-        The stamp is what makes the host an answer was typed on the host that
-        works it. `boardparse.set_answer_host()` owns the line; this only
-        decides which host, and that no answer means no stamp.
+        board-watch runs on `top` AND on `book`. Since the per-host split
+        (2026-07-30) each watcher only ever sees its own machine's board, so
+        this is a backstop rather than the mechanism — it still records the
+        host an answer was typed on, which is the host that works it.
+        `boardparse.set_answer_host()` owns the line; this only decides which host, and that no answer means no stamp.
 
         Re-parsed from the lines the caller has ALREADY computed, because
         `set_answer` can change how many lines the `>` block occupies and every
@@ -460,17 +470,17 @@ class Board(QObject):
         try:
             src = boardparse.read(self._path)
         except OSError as e:
-            self.status.emit("cannot read board.md - " + (e.strerror or "?"))
+            self.status.emit("cannot read the board - " + (e.strerror or "?"))
             return False
         if boardparse.digest(src) != self._doc.get("digest"):
             self._load()
             self.reloaded.emit()
-            self.status.emit("board.md changed on disk - reloaded, nothing written")
+            self.status.emit("the board changed on disk - reloaded, nothing written")
             return False
         try:
             boardparse.write(self._path, "".join(lines))
         except OSError as e:
-            self.status.emit("could not write board.md - " + (e.strerror or "?"))
+            self.status.emit("could not write the board - " + (e.strerror or "?"))
             return False
         self._load()
         return True
@@ -612,7 +622,7 @@ class Agents(QObject):
     it — a poll, a systemctl query that does not block the GUI thread, and the
     strings the section draws.
 
-    IT WRITES NOTHING TO `board.md`. Everything here lives under
+    IT WRITES NOTHING TO THE BOARD. Everything here lives under
     `~/.local/state/board/`; the store's only writers stay `boardparse.edit()`'s
     three (the app's answers, boardctl, board-watch).
     """

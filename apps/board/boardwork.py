@@ -746,7 +746,8 @@ some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
 `QUESTION:` you need a word from him before anything else moves; \
 `INFORMATION:` a fact, nothing asked of him.
 
-   `docs/board.md` is a store three programs parse and write concurrently; \
+   The board (`docs/board.<hostname>.md`, this host's own — the two machines \
+no longer share one) is a store three programs parse and write concurrently; \
 every edit is a targeted line edit under a lock. Do not open it in an editor. \
 `docs/` is its own git repo inside this checkout, so commit from inside `docs/`.
 

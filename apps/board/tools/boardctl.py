@@ -444,7 +444,10 @@ def _gated(a):
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="boardctl", description=__doc__.split("\n")[0])
-    p.add_argument("--board", default=bp.BOARD_PATH)
+    # Resolved AFTER parsing, not here: `bp.ensure_board()` may create the file,
+    # and `boardctl --help` must not write anything.
+    p.add_argument("--board", default=None,
+                   help="the store; defaults to this host's own board")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("start", help="take an answered decision off NEEDS YOU "
@@ -564,6 +567,10 @@ def main(argv=None):
     s.set_defaults(fn=cmd_inbox)
 
     a = p.parse_args(argv)
+    # PER-HOST store: `top` writes `docs/board.top.md`, `book` `docs/board.book.md`,
+    # and neither ever touches the other's. `ensure_board` also covers the run
+    # that happens before this host has a board at all.
+    a.board = a.board or bp.ensure_board()
     if _gated(a) and not bu.claim():
         # HE PRESSED CTRL+Z. `boardundo.py` is the mechanism; this is the whole
         # of its teeth. Solomon is a model run and cannot be reasoned with, but

@@ -10,8 +10,9 @@ drives the real cap dropdown's `trigger()` through `QQmlExpression`, and prints
 every line the app sent, timestamped from the moment of the change.
 
 Everything the app touches is redirected into a scratch tree — the cap file,
-`state.json`, and the board itself — so his live cap, his drafts and
-`docs/board.md` are untouched. Nothing is drawn: `QT_QPA_PLATFORM=offscreen`.
+`state.json`, and the board itself — so his live cap, his drafts and this
+host's `docs/board.<hostname>.md` are untouched. Nothing is drawn:
+`QT_QPA_PLATFORM=offscreen`.
 
     apps/board/tools/vtb-cap-probe.py           # trace, then PASS/FAIL
     apps/board/tools/vtb-cap-probe.py --keep    # keep the scratch tree
@@ -124,8 +125,14 @@ def _read(c, stop):
 
 def main():
     keep = "--keep" in sys.argv
-    shutil.copyfile(os.path.join(os.path.dirname(os.path.dirname(APP)),
-                                 "docs", "board.md"), BOARD)
+    # A COPY of the live store — this host's own, `docs/board.<hostname>.md`,
+    # resolved by the app's own rule so the probe cannot drift from it. Copied,
+    # never opened in place: nothing this probe does may reach his board.
+    import boardparse as _bp
+    src = _bp.BOARD_PATH
+    if not os.path.isfile(src):
+        src = _bp.LEGACY_BOARD_PATH
+    shutil.copyfile(src, BOARD)
 
     stop = threading.Event()
     threading.Thread(target=fake_plugin, args=(stop,), daemon=True).start()

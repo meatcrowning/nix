@@ -150,7 +150,8 @@ Rules that fall out of it, all of them load-bearing:
   person or a session at a terminal: it sits well clear of both board-watch's
   45-minute agent cap and `ESCALATE_AFTER_S`.
 - **All three are keyed on the STASH, and the stash is machine-local — which is
-  why the section had to go.** `board.md` syncs both ways;
+  why the section had to go.** The board synced both ways (it was one shared
+  file until 2026-07-30, and is now one per machine);
   `~/.local/state/board/inflight/` does not. So from either machine, a row the
   *other* one started was indistinguishable from a row nobody started — and so
   was a row written before the stash existed, or one added by hand. `reconcile()`
