@@ -50,6 +50,24 @@ dead agent look alive. A stash with no owner pid (an interactive session started
 it) is never reclaimed automatically — nothing here can tell whether that
 session is still thinking.
 
+**THE OWNER IS THE AGENT, NOT THE TICK** (`adopt()`, and it is why that function
+exists). `start()` is called before the agent process exists, so the only pid it
+can stash is the caller's — and the caller is `board-watch.service`, a oneshot
+that home-manager STOPS on every `switch`. Measured on top 2026-07-30: a rebuild
+at 19:23:50 killed the tick working decision 1 seventy-seven seconds in, the
+agent itself survived (`KillMode=process`), and the next tick's `reconcile()`
+read the dead tick's pid, announced "its agent is gone" and put the decision back
+in NEEDS YOU — where the answer read as newly answered and fired a SECOND agent
+at 19:33:04. Two agents did one job. So the spawner calls `adopt()` the moment
+the agent process exists and liveness follows THAT process for the rest of the
+run.
+
+`retire_finished()` closes the other end of the same window: an agent that
+outlives its tick has nobody left to call `land()` or `forget()`, so when it
+finally exits its stash still names a dead pid and case 3 would hand back work
+that was done. An agent that recorded a result on the board (`boardwork.reported`
+— the same fact `reap()` files a worker by) is retired instead of reclaimed.
+
 **Case 4 is the one the first three do not cover, and it is bigger than it
 sounds.** 1-3 are all keyed on the stash, and the stash is MACHINE-LOCAL state
 while `board.md` syncs between the two machines — so from `book`, a row `top`
@@ -268,6 +286,77 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
     with open(stash_file(rec["key"]), "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)
     return rec
+
+
+def adopt(key, pid):
+    """Hand a stash's ownership to the process that is actually doing the work.
+
+    `start()` runs BEFORE the agent exists, so the pid it stashes is the
+    spawner's — and a spawner is not what the item's liveness means. On `top`
+    the spawner is `board-watch.service`, which home-manager stops on every
+    `sudo rebuild-top`; the agent it started is a detached `claude` that
+    survives (`KillMode=process`). Between those two facts, one rebuild made
+    `reconcile()` declare a live agent gone and the decision fired twice (the
+    module docstring has the timings). Called with the agent's own pid the
+    moment `Popen` returns, so the window where the two disagree is the fork
+    itself.
+
+    Returns the updated record, or None if there is no stash for `key` — a
+    caller whose `start()` failed still spawns the agent, and adopting nothing
+    is not an error.
+    """
+    path = stash_file(key)
+    try:
+        with open(path) as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    rec["pid"] = pid
+    rec["pidStart"] = _proc_start(pid) if pid else None
+    # What it was, kept: the only reader is a person working out why an item
+    # was or was not reclaimed, and "the tick that started this is not the
+    # process being watched" is the first thing they need to know.
+    rec["spawnerPid"] = rec.get("spawnerPid") or rec.get("pid")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(rec, f, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+    return rec
+
+
+def retire_finished():
+    """Drop the stash of every agent that finished and then exited unwatched.
+
+    THE OTHER HALF OF `adopt()`. An agent whose tick was killed mid-run has
+    nobody left to call `land()` or `forget()` for it, so its stash outlives it
+    naming a dead pid — and `reconcile()` below would read that as a death and
+    hand back work that is already done, which is the same duplicate by a
+    slower route.
+
+    The fact that tells them apart is `boardwork.reported()`: whether the agent
+    put its result on the board with `note`, `land` or `ask`. It is the same
+    fact `reap()` sorts a worker into done/ rather than failed/ by, so there is
+    one definition of "it finished" in this tree and not two. Imported lazily —
+    `boardwork` imports `boardagents`, which imports this module.
+
+    Returns the records retired, for the caller to log.
+    """
+    try:
+        import boardwork as bw
+    except Exception:
+        return []
+    out = []
+    for rec in _stashes():
+        if not rec.get("pid") or _alive(rec):
+            continue
+        try:
+            if not bw.reported(rec["key"]):
+                continue
+        except OSError:
+            continue
+        forget(rec["key"])
+        out.append(rec)
+    return out
 
 
 def _stash_for(sel):
