@@ -61,6 +61,11 @@ env.update(HOME=str(home), XDG_RUNTIME_DIR=str(rt), XDG_STATE_HOME=str(state),
            QT_QPA_PLATFORM="offscreen", SURFER_NO_SINGLETON="1", SURFER_NO_SYNC="1",
            QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --disable-dev-shm-usage")
 env.pop("SURFER_SOCKET", None)
+# The child launches the PACKAGED wrapper, whose Qt env we do not control. With
+# no display to connect to it aborts loudly instead of mapping a window on his
+# monitor, whatever it decides about the platform plugin.
+env.pop("WAYLAND_DISPLAY", None)
+env.pop("DISPLAY", None)
 
 log = open(root / "surfer.log", "wb")
 proc = subprocess.Popen([SURFER], env=env, stdout=log, stderr=log)

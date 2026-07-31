@@ -14,7 +14,9 @@ import os
 import sys
 import tempfile
 
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 
 FILER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, FILER)
@@ -101,6 +103,9 @@ def build(app, spec, start_dir):
 
 def main():
     app = QGuiApplication(sys.argv)
+    if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+        raise SystemExit("refusing to run on platform %r, not offscreen"
+                         % app.platformName())
     tmp = tempfile.mkdtemp(prefix="t_pick-")
 
     # a small tree with a predictable mix of types

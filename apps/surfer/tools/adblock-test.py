@@ -53,7 +53,9 @@ def main():
     (home / "config").mkdir(parents=True, exist_ok=True)
     os.environ["XDG_CACHE_HOME"] = str(home / "cache")
     os.environ["XDG_CONFIG_HOME"] = str(home / "config")
-    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+    os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+    os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
     os.environ["SURFER_NO_SINGLETON"] = "1"
 
     import main as surfer                                   # noqa: E402

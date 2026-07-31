@@ -23,6 +23,11 @@ import time
 
 RUN = tempfile.mkdtemp(prefix="qsrv-")
 os.environ["XDG_RUNTIME_DIR"] = RUN
+# It imports player's main.py, which imports QtGui: decide the platform here
+# rather than trusting the caller to have typed the prefix in the usage line.
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 APP = str(pathlib.Path(__file__).resolve().parent.parent)
 sys.path.insert(0, APP)
 sys.path.insert(0, str(pathlib.Path(APP).parent / "pylib"))

@@ -31,7 +31,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 MAIN_QML = HERE.parent / "qml" / "Main.qml"
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 
 # A bare `python3` on top is not the interpreter surfer runs under and has no
 # PySide6; the packaged wrapper names the one that does, so re-exec into it
@@ -68,6 +70,9 @@ def extract_block(text):
 BLOCK = extract_block(MAIN_QML.read_text(encoding="utf-8"))
 
 app = QGuiApplication(sys.argv)
+if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+    raise SystemExit("refusing to run on platform %r, not offscreen"
+                     % app.platformName())
 engine = QQmlEngine()
 comp = QQmlComponent(engine)
 comp.setData(("import QtQuick\nItem { id: win\n%s\n}\n" % BLOCK).encode(),

@@ -29,7 +29,9 @@ import time
 import wave
 from pathlib import Path
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 
 SCRATCH = tempfile.mkdtemp(prefix="player-open-test-")
 LIB = os.path.join(SCRATCH, "lib")
@@ -48,6 +50,9 @@ from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 
 app = QGuiApplication([])
+if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+    raise SystemExit("refusing to run on platform %r, not offscreen"
+                     % app.platformName())
 
 import main as P  # noqa: E402
 

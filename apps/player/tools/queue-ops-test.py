@@ -21,12 +21,17 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
+os.environ.pop("WAYLAND_DISPLAY", None)  # no way back to his session: with no
+os.environ.pop("DISPLAY", None)          # display Qt aborts, it cannot fall back
 sys.path.insert(0, "/home/lam/nix/apps/player")
 sys.path.insert(0, "/home/lam/nix/apps/pylib")
 
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 app = QGuiApplication([])
+if app.platformName() != "offscreen":   # a mapped window would be HIS screen
+    raise SystemExit("refusing to run on platform %r, not offscreen"
+                     % app.platformName())
 
 import main as P  # noqa: E402
 
