@@ -297,6 +297,16 @@ Singleton {
             // (a theme change rebuilds the QML tree), which otherwise snapped
             // the screen back to full brightness. SysInfo owns the writes.
             property int    gammaLevel: 100
+            // The HARDWARE half of the same range (0-100), or -1 while the
+            // user has never moved brightness through the panel — then we
+            // leave whatever the machine came up with alone. Live STATE like
+            // gammaLevel, and stored for the same reason one level down: the
+            // hardware is not a store we control. book's backlight is only
+            // written back by systemd-backlight on a CLEAN shutdown, and top's
+            // level lives in the monitor's own NVRAM over DDC. This file is
+            // machine-local, so each host keeps its own. SysInfo owns the
+            // writes and re-applies it once per session.
+            property int    brightnessHw: -1
         }
     }
 
@@ -337,6 +347,6 @@ Singleton {
         weatherLon: -134.42, weatherPlace: "juneau", weatherUnit: "F", weatherRefreshMin: 20,
         worldClocks: ["America/Indiana/Indianapolis", "America/New_York", "Europe/London", "Asia/Tokyo"],
         brightnessStep: 5, brightnessBackend: "auto", nightLight: false,
-        nightTemp: 4000, gammaFloor: 20, gammaLevel: 100
+        nightTemp: 4000, gammaFloor: 20, gammaLevel: 100, brightnessHw: -1
     })
 }
