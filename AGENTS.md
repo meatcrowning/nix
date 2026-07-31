@@ -16,10 +16,18 @@ not a red build. Work like a colleague who has to sit at this desk afterwards.
   visual checks. Your evidence is IPC, logs and traces — and your test never
   touches his session; see "Testing without interfering with the user".
 - **These files are the source of truth for agent instructions here.**
-  `CLAUDE.md` is a symlink to this one, and so is every nested `CLAUDE.md` —
-  edit the `AGENTS.md`. Per-area detail lives in nested
-  `AGENTS.md` files — **the closest one to the file you are editing wins**, and
-  an explicit instruction from the user overrides all of them.
+  `CLAUDE.md` at this root is a symlink to this one — edit the `AGENTS.md`.
+  Per-area detail lives in nested `AGENTS.md` files — **the closest one to the
+  file you are editing wins**, and an explicit instruction from the user
+  overrides all of them. **Those nested guides are yours to OPEN, not
+  free**: the nested `CLAUDE.md` symlinks were deleted on 2026-07-30 because
+  each one injected its whole guide into any agent that touched a file
+  underneath it, on every turn — measured, reading a 3.6 KB `Theme.qml` cost
+  **45.8k tokens** against 27.7k for the same read outside those trees, the
+  difference being `home/prog` + `quickshell-files` swallowed entire. So read
+  the nearest guide deliberately and in slices (see rule 6 in
+  `boardwork.RULES`, and "Nested guides" below), and **never re-add a nested
+  `CLAUDE.md`**.
 
 ---
 
