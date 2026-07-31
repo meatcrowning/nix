@@ -100,7 +100,13 @@ let
   # types shared-mime-info actually assigns to .md/.markdown are listed; plain
   # text stays with whatever the user has, because reader renders markdown and
   # is not a text editor.
-  readerTypes = [ "text/markdown" "text/x-markdown" ];
+  #
+  # `application/pdf` joined it when reader gained its page mode: nothing on
+  # this desktop claimed that type before, so a PDF out of filer reached
+  # whatever xdg-open happened to guess. reader renders PDFs itself now
+  # (apps/reader/pdfdoc.py), so it is the honest answer rather than a new
+  # preference over an incumbent.
+  readerTypes = [ "text/markdown" "text/x-markdown" "application/pdf" ];
 
   assoc =
     (map (t: "${t}=filer.desktop") filerTypes)

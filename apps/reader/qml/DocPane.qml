@@ -31,7 +31,14 @@ Item {
     readonly property color fgAccent: winActive ? Theme.accent  : Theme.inactive
 
     // ---- the loaded document ----
+    // TWO document modes, and this is the only place that picks between them:
+    // markdown is `mdparse` -> blocks -> `Block.qml`, a PDF is `pdfdoc.py` ->
+    // rendered pages -> `PdfView.qml`. Everything else in this pane — history,
+    // the outline, the footer, the find cursor, the persisted position — is
+    // written against `path`, `outline`, `topIndex` and `matches`, which both
+    // modes fill in, so there is one reader and not two.
     property var doc: ({})
+    readonly property bool isPdf: doc.kind === "pdf"
     readonly property var blocks: doc.blocks || []
     readonly property var outline: doc.outline || []
     readonly property string docName: doc.name || ""
@@ -71,7 +78,7 @@ Item {
         var h = target.indexOf("#");
         if (h >= 0) { frag = target.slice(h + 1); target = target.slice(0, h); }
         if (target === "") { pane.doc = {}; pane.path = ""; return; }
-        pane.doc = Docs.load(target);
+        pane.doc = Docs.load(target, pane.watchKey);
         pane.path = pane.doc.path || target;
         pane.matches = [];
         pane.matchAt = -1;
@@ -111,7 +118,16 @@ Item {
     }
 
     // ---- moving about ----
+    // An index is a BLOCK in markdown and a PAGE in a PDF. Both are "where in
+    // this document am I", both are what history records and what the state
+    // file remembers, and both are what the outline pane jumps to — so they
+    // share the one entry point rather than growing a second vocabulary.
     function jumpIndex(i) {
+        if (pane.isPdf) {
+            if (pdfLoader.item) pdfLoader.item.jumpIndex(i);
+            pane.topIndex = Math.max(0, Math.min((doc.pageCount || 1) - 1, i || 0));
+            return;
+        }
         var n = Math.max(0, Math.min(blocks.length - 1, i || 0));
         view.positionViewAtIndex(n, ListView.Beginning);
         pane.topIndex = n;
@@ -123,6 +139,14 @@ Item {
             view.positionViewAtIndex(n, ListView.Beginning);
             pane.topIndex = n;
         });
+    }
+    // A jump the USER asked for, inside the document already open: the place
+    // they left is recorded first, so the side buttons walk back to it
+    // (docs/DESIGN.md §11.1). Never re-`load()` for this — in PDF mode that
+    // would re-open the file and throw away every page already rasterized.
+    function jumpTo(i) {
+        if (pane.path !== "") hist.record();
+        jumpIndex(i);
     }
     function jumpAnchor(a) {
         var want = String(a).toLowerCase();
@@ -149,7 +173,7 @@ Item {
     function reload() {
         if (pane.path === "") return;
         var at = pane.topIndex;
-        pane.doc = Docs.load(pane.path);
+        pane.doc = Docs.load(pane.path, pane.watchKey);
         if (pane.query !== "") refreshMatches();
         jumpIndex(at);
     }
@@ -157,6 +181,16 @@ Item {
     // ---- search inside this document ----
     function refreshMatches() {
         var q = pane.query.toLowerCase(), out = [];
+        // In a PDF the matches are PAGES, extracted in Python (pdfdoc.py) —
+        // so Ctrl+F, Enter/Shift+Enter and the `n/m` footer are the one
+        // mechanism in both modes rather than a control that quietly does
+        // nothing in this one (docs/DESIGN.md §10.2).
+        if (pane.isPdf) {
+            pane.matches = q.length > 1 ? Pdf.search(pane.watchKey, pane.query) : [];
+            if (pane.matches.length === 0) pane.matchAt = -1;
+            else if (pane.matchAt < 0 || pane.matchAt >= pane.matches.length) pane.matchAt = 0;
+            return;
+        }
         if (q.length > 1)
             for (var i = 0; i < blocks.length; i++)
                 if (String(blocks[i].text || "").toLowerCase().indexOf(q) >= 0)
@@ -180,9 +214,42 @@ Item {
             pane.statusChanged("could not open " + href);
     }
 
+    // ---- zoom: the PDF mode's own controls, proxied so the window's chrome
+    // and keys talk to the pane rather than reaching into the loader ----
+    readonly property string fit: (isPdf && pdfLoader.item) ? pdfLoader.item.fit : ""
+    readonly property real zoomPct: (isPdf && pdfLoader.item) ? pdfLoader.item.pageScale * 100 : 100
+    readonly property int pageCount: doc.pageCount || 0
+    function zoomIn()   { if (pdfLoader.item) pdfLoader.item.zoomIn(); }
+    function zoomOut()  { if (pdfLoader.item) pdfLoader.item.zoomOut(); }
+    function fitWidth() { if (pdfLoader.item) pdfLoader.item.fitWidth(); }
+    function fitPage()  { if (pdfLoader.item) pdfLoader.item.fitPage(); }
+    function pageStep(dir) {
+        if (!pdfLoader.item) return;
+        if (dir > 0) pdfLoader.item.pageDown(); else pdfLoader.item.pageUp();
+    }
+
     // ---- the view ----
+    // The PDF one, when the open document is a PDF. Synchronous: nothing on
+    // screen loads asynchronously (docs/DESIGN.md §6.1).
+    Loader {
+        id: pdfLoader
+        anchors.fill: parent
+        active: pane.isPdf && pane.ok
+        asynchronous: false
+        sourceComponent: PdfView {
+            doc: pane.doc
+            docKey: pane.watchKey
+            winActive: pane.winActive
+            cellW: pane.cellW
+            matches: pane.matches
+            matchAt: pane.matchAt
+            onPageChanged: (p) => pane.topIndex = p
+        }
+    }
+
     KineticListView {
         id: view
+        visible: !pane.isPdf
         anchors.fill: parent
         anchors.margins: 10        // the house content inset (docs/DESIGN.md §4.1)
         clip: true

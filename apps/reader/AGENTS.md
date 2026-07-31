@@ -1,7 +1,7 @@
-# `reader` — the markdown reader
+# `reader` — the document reader (markdown, and PDFs)
 
-Vendored source of the standalone markdown reader: `main.py`, `mdparse.py` and
-`qml/`. Built and installed by `home/prog/reader.nix`, which mirrors
+Vendored source of the standalone document reader: `main.py`, `mdparse.py`,
+`pdfdoc.py` and `qml/`. Built and installed by `home/prog/reader.nix`, which mirrors
 `viewer.nix` exactly (including the `air` system-python split) and runs the
 **live** source at `/home/lam/nix/apps/reader/main.py`, so `.py`/`.qml` edits
 need no rebuild. See [`../AGENTS.md`](../AGENTS.md) for the rules shared by all
@@ -16,9 +16,72 @@ in the abstract.
 
 ```bash
 reader ~/nix/docs/DESIGN.md     # a file
-reader ~/nix                    # a directory: opens its README, else its first .md
-reader                          # the document you had open last
+reader ~/some.pdf               # a PDF: the page mode, below
+reader ~/nix                    # a directory: opens its README, else its first document
+reader                          # the document you had open last, whichever kind
 ```
+
+## Two DOCUMENT modes, and `doc.kind` is the only place that picks
+
+A PDF is a rendered-page pipeline, not a block pipeline, so it is a **second
+mode beside** the markdown one rather than a widening of `mdparse.py`:
+
+| | markdown | PDF |
+|---|---|---|
+| parse | `mdparse.parse()` -> blocks | — the file is already laid out |
+| model | a flat list of blocks | a page count and each page's size **in points** |
+| view | `KineticListView` of `Block.qml` | `KineticListView` of `Image`s, `qml/PdfView.qml` |
+| an *index* is | a block | a page |
+| the outline pane holds | headings | bookmarks, else a page list |
+
+`Docs.load(path, paneKey)` returns one map either way, and everything else in
+the app is written against the fields both modes fill in — `ok`, `path`,
+`name`, `error`, `outline`, plus the pane's `topIndex` and `matches`. That is
+why history, the sidebar, the footer, the split, the drop target, the
+last-document memory and the reload-in-place watch needed **no second version
+of themselves**, and why a change to any of them must stay in those terms. The
+branch itself is `DocPane.qml`'s `isPdf`, and it is one `Loader`.
+
+- **`pdfdoc.py` is `PySide6.QtPdf`, and that is deliberate.** `QPdfDocument`
+  renders a page straight to a `QImage` and is in this nixpkgs' PySide6
+  already, so a whole document format cost no dependency — verified against the
+  interpreter `reader.nix` wraps, `python3 -c "from PySide6 import QtPdf"`.
+  **`QtPdfQuick` is NOT there**: there is no `PdfMultiPageView`/`PdfScrollablePageView`
+  QML type on this machine, which is why the continuous view is the app's own
+  `KineticListView` — which it would have to be anyway (§9.2: momentum belongs
+  to the compositor, and no view adds its own).
+- **Pages reach QML through an image provider**, `image://pdfpage/<paneKey>/<gen>/<page>`,
+  with `sourceSize` carrying the zoom. The URL is a pure function of what is
+  drawn, so Qt's pixmap cache *is* the page cache and scrolling back up
+  redraws nothing — and `gen`, bumped on every open, is what makes a file that
+  changed on disk actually re-rasterize instead of redrawing the old pages
+  (§6.1).
+- **One `QPdfDocument` per PANE**, keyed the way `Docs.watch` is keyed, so a
+  split can hold two PDFs. `PdfLibrary.render` takes a lock: Qt may call the
+  provider off the GUI thread, and one PDFium document is not two callers' to
+  share.
+- **Zoom is `fit` (a MODE) plus `zoom` (a number).** `width` and `page` survive
+  a window resize and are what the `fw`/`fp` cells light for; stepping in or
+  out drops to `none`, because that is the only honest reading of "fit"
+  (§10.1). Fit-width measures the **widest** page, so one landscape plate in a
+  portrait document does not make that page scroll sideways. A zoom re-pins the
+  page you were on afterwards — never the pixel offset, which at page 40 of 400
+  lands you at page 3.
+- **Find inside a PDF is `Pdf.search`**, page text out of PDFium, filling the
+  same `matches` list the markdown mode fills with block indices — so Ctrl+F,
+  Enter/Shift+Enter and the `n/m` footer are one mechanism. The hit is **not**
+  marked inside the page (its geometry would have to come out of PDFium too);
+  the page holding the current match takes the `accent` hairline instead of the
+  `border` one. **Cross-document search skips PDFs** — matching a query against
+  a PDF's bytes finds nothing a reader would recognise — and that is the one
+  place the two modes are not equal.
+- **Chrome: `−` `+` `fw` `fp` `gp`**, inserted between the find cell and the
+  splits and present only in this mode. `−` is U+2212, never a hyphen: a bare
+  `-` is the SPACER token in the vtb button-array protocol. Keys are viewer's
+  (`+` `−` `0`), plus `w` for fit-width, PageUp/PageDown, Home/End and
+  **Ctrl+G**, which slides out a page-number chip beside the find chip. A page
+  outside the document is refused **in the footer**, never silently (§10.2).
+- The footer reads `<page>/<count>  <zoom>%  <name>`.
 
 ## The parse is ours, and Qt's `Text.MarkdownText` is not used
 
@@ -117,8 +180,13 @@ lit says which:
 | cell | mode |
 |---|---|
 | `ol` | this document's headings, indented by level, **with the section the viewport is inside marked** — so it doubles as a position readout |
-| `fl` | every `.md` under the document's git root (else its own directory), by relative path, naturally sorted |
+| `fl` | every document under the document's git root (else its own directory) — `.md` **and `.pdf`**, by relative path, naturally sorted |
 | — | search results, while a query is live |
+
+`main.py`'s `OPEN_EXTS` is `mdparse.DOC_EXTS | pdfdoc.PDF_EXTS` and is the ONE
+answer to "does reader open this?" — the files pane, the drop target, a
+directory argument and the last-document memory all read it, and they have to
+agree.
 
 The two buttons behave exactly like filer's two split buttons: the lit one
 closes the pane, the other re-modes it in place. Both are toggles; neither
@@ -219,8 +287,9 @@ visible.
 
 ## Integration
 
-- **`text/markdown` → `reader.desktop`**, set centrally in
-  `home/prog/mime-defaults.nix`. That is also the whole of filer's integration:
+- **`text/markdown` and `application/pdf` → `reader.desktop`**, set centrally in
+  `home/prog/mime-defaults.nix`. Nothing claimed `application/pdf` on this
+  desktop before, so that is a gap filled and not a preference overridden. That is also the whole of filer's integration:
   filer opens a non-image with `xdg-open`, so a `.md` lands here with no change
   to filer at all.
 - The `.desktop` entry uses **`%f`**, not `%F`: reader shows one document per
@@ -236,7 +305,7 @@ W=$(readlink -f "$(which reader)"); sed '$d' "$W" > /tmp/rdrenv.sh
     apps/reader/tools/reader-test.py )
 ```
 
-`tools/reader-test.py`, 74 checks, offscreen, three layers: the parse (pure
+`tools/reader-test.py`, 110 checks, offscreen, four layers: the parse (pure
 Python), **the font** (every drawable string this repo's markdown produces, put
 to `QRawFont.glyphIndexesForString` — the only audit that does not lie), and the
 real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen` — wrapping, the outline,
@@ -248,5 +317,14 @@ propagation and not in the pane's own property). It redirects `XDG_STATE_HOME` i
 harness here **must** do or it rewrites where the user's own reader reopens, and
 it stubs the Titlebar, because the real one registers buttons against the
 harness's pid in the live compositor.
+
+The fourth layer is **the PDF mode**, on a document the harness WRITES with
+`QPdfWriter` — no fixture file in the repo, and real extractable text: the mode
+switch, the page count, the bookmark fallback, PDFs listed beside `.md` in the
+files pane, all four zoom controls, a jump and the history it records, a
+go-to-page refused in words, find-by-page, the titlebar's extra cells, and the
+page actually rasterizing — asserted twice, once on the provider's `QImage`
+(ink on the sheet) and once on a `grabWindow()` PNG of the whole window (a
+sheet drawn in the view at all).
 
 The *appearance* is the user's check, as always.

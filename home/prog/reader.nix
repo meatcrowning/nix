@@ -1,6 +1,7 @@
 { pkgs, lib, host, ... }:
 
-# reader — the desktop's markdown reader (source at ~/nix/apps/reader).
+# reader — the desktop's document reader: markdown, and PDFs (source at
+# ~/nix/apps/reader).
 # Packaging mirrors viewer.nix exactly, including the air split:
 #
 #   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
@@ -8,8 +9,15 @@
 #     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with
 #     Fedora's python3-pyside6.
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
-#     env. reader draws only text — no image or media plugins are needed, which
-#     is why this buildInputs list is shorter than viewer's.
+#     env. reader draws text and rasterized PDF pages — no media plugins are
+#     needed, which is why this buildInputs list is shorter than viewer's.
+#
+# The PDF mode needs NO new dependency: `PySide6.QtPdf` (QPdfDocument, rendering
+# straight to a QImage) is in this nixpkgs' PySide6, checked against the very
+# interpreter built below. `QtPdfQuick` is NOT, so there is no PdfMultiPageView
+# QML type here and apps/reader/qml/PdfView.qml builds the page view out of the
+# app's own KineticListView instead. If a future nixpkgs drops QtPdf, the
+# fallback is `ps.pymupdf` and apps/reader/pdfdoc.py is the only file to change.
 #
 # Both run the LIVE source at ~/nix/apps/reader/main.py, so QML/Python edits need
 # no rebuild — only changing the runtime deps does.
@@ -48,7 +56,8 @@ in
 {
   home.packages = [ reader ];
 
-  # Desktop entry, so reader is in the runner and is eligible for markdown.
+  # Desktop entry, so reader is in the runner and is eligible for markdown and
+  # for PDFs.
   # Being the DEFAULT for text/markdown is set centrally, in
   # home/prog/mime-defaults.nix — a MimeType= line only makes an app eligible.
   # That is also the whole of filer's integration: filer opens a non-image with
@@ -63,13 +72,13 @@ in
     [Desktop Entry]
     Type=Application
     Name=reader
-    GenericName=Markdown Reader
-    Comment=Browse and read markdown documents
+    GenericName=Document Reader
+    Comment=Browse and read markdown documents and PDFs
     Exec=${reader}/bin/reader %f
     Icon=text-x-generic
     Terminal=false
     Categories=Office;Viewer;TextEditor;
-    Keywords=bespoke;markdown;md;
-    MimeType=text/markdown;text/x-markdown;
+    Keywords=bespoke;markdown;md;pdf;
+    MimeType=text/markdown;text/x-markdown;application/pdf;
   '';
 }
