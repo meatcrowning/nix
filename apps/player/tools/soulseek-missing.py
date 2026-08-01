@@ -411,6 +411,7 @@ def main():
                           "isrc": row.get("isrc", ""), "status": "error",
                           "user": "", "filename": f"ERR {e}", "when": time.strftime("%Y-%m-%d %H:%M:%S")}
             changed = True
+            save_state(state_path, state)
             continue
 
         if not cand:
@@ -419,6 +420,7 @@ def main():
                           "isrc": row.get("isrc", ""), "status": "nofind",
                           "user": "", "filename": "", "when": time.strftime("%Y-%m-%d %H:%M:%S")}
             changed = True
+            save_state(state_path, state)
             continue
 
         user, filename, size = cand
@@ -429,6 +431,7 @@ def main():
                           "user": user, "filename": filename,
                           "when": time.strftime("%Y-%m-%d %H:%M:%S")}
             changed = True
+            save_state(state_path, state)
             continue
 
         if args.dry_run:
@@ -455,6 +458,7 @@ def main():
                               "user": user, "filename": f"ERR {e}",
                               "when": time.strftime("%Y-%m-%d %H:%M:%S")}
         changed = True
+        save_state(state_path, state)
 
         # be polite to the network between searches
         time.sleep(1)
