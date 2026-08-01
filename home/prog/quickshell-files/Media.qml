@@ -109,7 +109,7 @@ Singleton {
                 const ti = Glyphs.px(r.title), ar = Glyphs.px(r.artist);
                 if (ti === r.title && ar === r.artist) { if (out) out.push(r); continue; }
                 if (!out) out = t.slice(0, i);
-                out.push({ title: ti, artist: ar, dur: r.dur });
+                out.push({ title: ti, artist: ar, dur: r.dur, favorite: !!r.favorite });
             }
             return out || t;
         } catch (e) { return []; }
@@ -118,6 +118,42 @@ Singleton {
         if (queueJson === "") return -1;
         try { const i = JSON.parse(queueJson).index; return i === undefined ? -1 : i; }
         catch (e) { return -1; }
+    }
+    // ---- the current track's favourite, straight from the raw wire --------
+    // Read from queueJson, not the display-safe `queue`: the mapping above can
+    // slice and rebuild the array (dropping any field it does not copy), and
+    // the heart must not depend on whether a row needed a glyph substitution.
+    readonly property bool fav: {
+        if (queueJson === "") return false;
+        try {
+            const d = JSON.parse(queueJson);
+            const i = d.index;
+            const t = (i !== undefined && i >= 0 && d.tracks && i < d.tracks.length)
+                ? d.tracks[i] : null;
+            if (!t || t.favorite === undefined) return false;
+            return !!t.favorite;
+        } catch (e) { return false; }
+    }
+    // Can the heart act at all: the player is up and serving, and it is an
+    // instance that speaks the favourite protocol — i.e. it actually sent the
+    // `favorite` field on the current track. Gated on that field rather than
+    // the socket alone so a player still running the old snapshot leaves the
+    // button DISABLED instead of clickable-but-inert (DESIGN.md §10: never
+    // offer an action that can silently fail). The field arrives the moment he
+    // relaunches onto the new main.py, and the button lights up on its own.
+    readonly property bool canFav: {
+        if (queueJson === "") return false;
+        try {
+            const d = JSON.parse(queueJson);
+            const i = d.index;
+            if (i === undefined || i < 0 || !d.tracks || i >= d.tracks.length) return false;
+            return d.tracks[i] && d.tracks[i].favorite !== undefined;
+        } catch (e) { return false; }
+    }
+    function toggleFav() {
+        if (!queueSock.connected) return;
+        queueSock.write("TOGGLE_FAV\n");
+        queueSock.flush();
     }
     // ---- the current track's lyrics, down the same socket -----------------
     // Lyrics live entirely inside the player process: `LyricsProvider` resolves

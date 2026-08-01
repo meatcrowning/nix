@@ -38,20 +38,25 @@ Item {
     // ---- a transport button: pixel-font glyph, themed frame -------------
     component MediaButton: Rectangle {
         id: btn
-        property string kind: "play"   // prev | next | play | pause | shuffle | repeat
+        property string kind: "play"   // prev | next | play | pause | shuffle | repeat | fav
         property bool active: true
         property bool toggled: false   // lit accent even without hover (repeat/shuffle on)
+        // true draws the favourite as a REAL red heart instead of the pixel
+        // glyph + fill-invert every other transport toggle uses
+        property bool heart: false
         // non-empty replaces the kind-derived glyph — the repeat button uses it
         // to swap `o` (repeat-all) for `1` (repeat-one), matching the app
         property string glyphOverride: ""
         signal clicked()
 
-        // glyph per kind: skip << >>, play/pause > ||, shuffle *, repeat o
+        // glyph per kind: skip << >>, play/pause > ||, shuffle *, repeat o,
+        // favourite heart \u2665
         readonly property string glyph: glyphOverride !== "" ? glyphOverride
             : kind === "prev" ? "<<"
             : kind === "next" ? ">>"
             : kind === "pause" ? "||"
             : kind === "shuffle" ? "*"
+            : kind === "fav" ? "\u2665"
             : kind === "repeat" ? "o"
             : ">"   // play
 
@@ -62,15 +67,36 @@ Item {
         height: 24
         // toggled (repeat/shuffle on) inverts like the titlebar roll button:
         // accent fill + background-coloured glyph. Hover is the lighter bgAlt tint.
-        color: btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
+        // The heart does NOT fill-invert — its own red colour carries the state.
+        color: btn.heart
+            ? ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
+            : btn.toggled ? Theme.accent : ((mba.containsMouse && active) ? Theme.bgAlt : "transparent")
         border.width: 1
-        border.color: !active ? Theme.border : ((btn.toggled || mba.containsMouse) ? Theme.accent : Theme.border)
+        border.color: !active ? Theme.border
+            : btn.heart ? ((mba.containsMouse ? Theme.accent : Theme.border))
+            : (btn.toggled ? Theme.accent : ((mba.containsMouse) ? Theme.accent : Theme.border))
         opacity: active ? 1 : 0.4
 
         PixelText {
             anchors.centerIn: parent
+            visible: !btn.heart
             text: btn.glyph
             color: btn.toggled ? Theme.bg : ((mba.containsMouse && btn.active) ? Theme.accent : Theme.text)
+        }
+        // The favourite is a REAL red heart, not a single-colour pixel button:
+        // U+2665 is not in the pixel font's cmap (docs/DESIGN.md §2.3), so it is
+        // drawn with a smooth fallback-font Text and coloured Theme.crit when
+        // favourited — the now-playing window's "heart = red" meaning, and the
+        // "real red heart in an in-window row" the board question asked for.
+        Text {
+            anchors.fill: parent
+            visible: btn.heart
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: btn.glyph
+            textFormat: Text.PlainText
+            font.pixelSize: Theme.fontSize + 1
+            color: btn.toggled ? Theme.crit : ((mba.containsMouse && btn.active) ? Theme.accent : Theme.dim)
         }
 
         MouseArea {
@@ -637,11 +663,17 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 5
 
+            // The favourite heart sits where shuffle used to (the row's left
+            // edge) and shuffle moved to the RIGHT of repeat — the two-change
+            // order this row was asked for. A real red heart: lit Theme.crit
+            // while the current track is favourited, dim otherwise, disabled
+            // until the player is up with a current track (Media.canFav).
             MediaButton {
-                kind: "shuffle"
-                active: Media.hasPlayer && Media.player.shuffleSupported
-                toggled: Media.hasPlayer && Media.player.shuffle
-                onClicked: Media.player.shuffle = !Media.player.shuffle
+                kind: "fav"
+                heart: true
+                active: Media.canFav
+                toggled: Media.fav
+                onClicked: Media.toggleFav()
             }
             MediaButton {
                 kind: "prev"
@@ -666,6 +698,12 @@ Item {
                 // `o` that also serves the all-loop, per DESIGN.md §12.1
                 glyphOverride: Media.repeatMode === 1 ? "1" : "o"
                 onClicked: Media.cycleRepeat()
+            }
+            MediaButton {
+                kind: "shuffle"
+                active: Media.hasPlayer && Media.player.shuffleSupported
+                toggled: Media.hasPlayer && Media.player.shuffle
+                onClicked: Media.player.shuffle = !Media.player.shuffle
             }
         }
 
