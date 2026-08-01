@@ -1072,6 +1072,19 @@ Window {
                                             // what the key is and why it is the text.
                                             readonly property bool folded:
                                                 win.isTodoFolded(todoRow.modelData.text)
+                                            // The author and the when, joined for the
+                                            // COLLAPSED one-line form: the message folded
+                                            // to a single row puts them on one line
+                                            // together, so that combined string and its
+                                            // width are computed once here. Open, the
+                                            // gutter draws them as its usual two rows;
+                                            // folded, this is the one row that stays.
+                                            readonly property string metaBy:
+                                                todoRow.modelData.by ? todoRow.modelData.by : ""
+                                            readonly property string metaWhen:
+                                                todoRow.modelData.when ? todoRow.modelData.when : ""
+                                            readonly property string metaCombined:
+                                                (metaBy ? metaBy + "  " : "") + metaWhen
                                             width: needsCol.width
                                             implicitHeight: bar.implicitHeight
                                                             + (replying ? replyBox.height + 4 : 0)
@@ -1093,7 +1106,9 @@ Window {
                                                     + todoFor.height
                                                     + (todoMore.visible
                                                        ? todoMore.implicitHeight + 6 : 0),
-                                                    gutter.implicitHeight)
+                                                    todoRow.folded
+                                                      ? todoMeta.implicitHeight
+                                                      : gutter.implicitHeight)
                                                 height: implicitHeight
                                                 Rectangle {
                                                     anchors.fill: parent
@@ -1159,7 +1174,10 @@ Window {
                                                         ? todoRow.modelData.summary
                                                         : todoRow.modelData.text
                                                     x: todoMark.width + 8
-                                                    width: parent.width - x - (15 * win.cellW + 8)
+                                                    width: parent.width - x - 8
+                                                           - (todoRow.folded
+                                                              ? todoRow.metaCombined.length * win.cellW
+                                                              : 15 * win.cellW)
                                                     color: win.fgText
                                                     maximumLineCount: todoRow.folded ? 1 : 9999
                                                     text: todoRow.folded
@@ -1246,8 +1264,33 @@ Window {
                                                 // collapses with it, so the time is
                                                 // back on the first line and those
                                                 // bullets draw exactly as they did.
+                                                // Folded, the message is ONE row — his
+                                                // *"collapse to a single line"* — so the
+                                                // author and the time share that row, on
+                                                // the same `dim` rung and the same
+                                                // trailing edge the two rows use open. Its
+                                                // width is the CHARACTER COUNT the summary
+                                                // just reserved for it, so the right edge
+                                                // never clips and folding reflows the
+                                                // summary by exactly that much (`metaBy  `
+                                                // + `metaWhen`, or just whichever exists).
+                                                PixelText {
+                                                    id: todoMeta
+                                                    visible: todoRow.folded && text !== ""
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
+                                                    width: text.length * win.cellW
+                                                    horizontalAlignment: Text.AlignRight
+                                                    color: Theme.dim
+                                                    // Populated only when folded: an open
+                                                    // row does not carry a ghost copy of the
+                                                    // combined line for anything to read.
+                                                    text: todoRow.folded
+                                                          ? todoRow.metaCombined : ""
+                                                }
                                                 Column {
                                                     id: gutter
+                                                    visible: !todoRow.folded
                                                     anchors.right: parent.right
                                                     anchors.top: parent.top
                                                     width: 15 * win.cellW
@@ -1267,8 +1310,8 @@ Window {
                                                         width: parent.width
                                                         horizontalAlignment: Text.AlignRight
                                                         color: Theme.dim
-                                                        text: todoRow.modelData.placed
-                                                              ? todoRow.modelData.placed : ""
+                                                        text: todoRow.modelData.when
+                                                              ? todoRow.modelData.when : ""
                                                     }
                                                 }
                                                 MouseArea {

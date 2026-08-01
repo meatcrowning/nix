@@ -967,6 +967,21 @@ def test_placed(tmp):
               for m in range(1, 13)) <= 15,
           sorted({B.format_placed("2026-%02d-28T23:04" % m) for m in range(1, 13)}))
 
+    # The same-day clock is `placed_clock` (what a message's `when` is drawn
+    # from): a stamp read on its OWN calendar day drops the date to the bare
+    # clock — which cannot be misread there, and whose shorter string is what
+    # lets a COLLAPSED message hold its author and time on one row — while a
+    # stamp read on any later day stays absolute, exactly `format_placed`.
+    import datetime as dt  # noqa: E402
+    now = dt.datetime(2026, 7, 29, 20, 0)
+    check("...but read on its own day, a message drops the date to the bare clock",
+          (B.placed_clock("2026-07-29T15:42", now),
+           B.placed_clock("2026-07-29T15:42:33", now)) == ("3:42 pm", "3:42 pm")
+          and B.placed_clock("2026-07-04T09:05", now) == "jul 4 9:05 am"
+          and B.placed_clock("2026-07-04", now) == "jul 4"
+          and B.placed_clock("bouh", now) == "",
+          B.placed_clock("2026-07-29T15:42", now))
+
     path = os.path.join(tmp, "board.md")
     B.write(path, FIXTURE)
     doc = B.parse(B.read(path))
@@ -2092,6 +2107,73 @@ def test_todo_remove(tmp):
           len(B.parse(B.read(path))["todo"]) == 2
           and not [n for n in os.listdir(tmp) if n.startswith(".board-")],
           os.listdir(tmp))
+
+
+# ------------------------------------------ removing a whole multi-choice question
+def test_decision_remove(tmp):
+    """Remove a whole multi-choice question (heading + options) off NEEDS YOU.
+
+    The question-block twin of `test_todo_remove`: the bytes that leave are
+    exactly the decision's own block, nothing around it moves, and the undo
+    (`cut_item` + `add_needs_item`) puts it back byte-for-byte wherever it sat
+    -- the same one-level, this-session undo a removed chore gets.
+    """
+    import boardparse as B
+
+    src = FIXTURE
+    doc = B.parse(src)
+    needs = doc["needs"]
+    check("the two questions parse", len(needs) == 2,
+          [d["title"] for d in needs])
+
+    # ---- removing the whole block takes exactly its own lines ----
+    d = B.parse(src)
+    item = d["needs"][0]
+    a, b = B.item_span(d["lines"], item)
+    out_lines, block = B.cut_item(d["lines"], item)
+    out = "".join(out_lines)
+    check("removing a question takes its whole block (heading to next rule)",
+          len(block) > 3 and block[0].startswith("### 1.")
+          and block[-1].strip() == "",      # its own trailing blank goes too
+          repr(block[0]))
+    check("...and every other line is byte-identical",
+          "".join(d["lines"][:a] + d["lines"][b:]) == out,
+          "%d vs %d chars" % (len("".join(d["lines"][:a] + d["lines"][b:])),
+                              len(out)))
+    d2 = B.parse(out)
+    check("...and the other question is still there, unchanged",
+          [q["title"] for q in d2["needs"]] == [needs[1]["title"]],
+          [q["title"] for q in d2["needs"]])
+    check("...and nothing outside the section moved",
+          all(s in out for s in ("Preamble prose that must survive",
+                                 "## WAITING ON YOU TO DO (not decide)",
+                                 "| `abc1234` | did a thing |",
+                                 "*If unanswered:* still nothing.")))
+
+    # ---- the undo, for each position, byte-for-byte ----
+    for i, where in ((0, "the first"), (1, "the last")):
+        d = B.parse(src)
+        item = d["needs"][i]
+        a, b = B.item_span(d["lines"], item)
+        block = d["lines"][a:b]
+        after = d["lines"][b].rstrip("\n") if b < len(d["lines"]) else ""
+        before = after if after.startswith("###") else ""
+        out = B.cut_item(d["lines"], item)[0]
+        put = "".join(B.add_needs_item(B.parse("".join(out))["lines"],
+                                       block, before))
+        check("putting %s question back restores the file exactly" % where,
+              put == src, "%d vs %d chars" % (len(put), len(src)))
+
+    # ---- the section can empty completely, and stays a section ----
+    cur = src
+    for _ in range(2):
+        d = B.parse(cur)
+        cur = "".join(B.cut_item(d["lines"], d["needs"][0])[0])
+    empty = B.parse(cur)
+    check("removing every question empties NEEDS YOU", empty["needs"] == [],
+          [d["title"] for d in empty["needs"]])
+    check("...with its heading and everything around it untouched",
+          "## NEEDS YOU\n" in cur and "## IN FLIGHT\n" in cur)
 
 
 # ------------------------------------------------- 1c. who is running, and the box
@@ -5687,12 +5769,18 @@ def test_placed_window(app, tmp):
              if it.property("text") is not None]
     check("a decision draws the time it was placed on the board",
           texts.count(stamp) >= 1, [t for t in texts if ":" in t and " " in t][:6])
-    check("...and so does a `to do` bullet, in the same words",
-          texts.count(stamp) >= 2, texts.count(stamp))
-    # Exactly the two that HAVE a stamp: the fixture's own two decisions and its
+    # The decision keeps the full stamp; the same-day MESSAGE drops its date to
+    # the bare clock (`placed_clock` -> `when`), per his same-day rule.
+    whenShort = [t["when"] for t in doc["todo"] if t["when"]][0]
+    check("...and so does a `to do` bullet, as the same-day bare clock",
+          texts.count(whenShort) == 1 and texts.count(stamp) == 1,
+          (stamp, whenShort, texts.count(stamp), texts.count(whenShort)))
+    # Exactly the two that HAVE a stamp — the decision (full date) and the
+    # message (same-day clock) — while the fixture's own two decisions and its
     # chore predate it, and they draw no time rather than a made-up one.
     check("...and only the items that have one - the older ones draw nothing",
-          texts.count(stamp) == 2, [t for t in texts if t == stamp])
+          texts.count(stamp) == 1 and texts.count(whenShort) == 1,
+          [t for t in texts if t in (stamp, whenShort)])
 
     # The reservation is unconditional, so nothing reflows as the board fills.
     # ---- the bullet's two blocks are two items, with a gap, or one and none ----
@@ -5833,6 +5921,7 @@ def test_placed_window(app, tmp):
         del os.environ["BOARD_AGENT_ID"]
         del os.environ["BOARD_ORDER"]
     stamp = [d["placed"] for d in B.parse(B.read(path))["needs"] if d["placed"]][0]
+    clock = [t["when"] for t in B.parse(B.read(path))["todo"] if t["when"]][0]
     engineB, winB, keepB = build(app, path)
     spin(400)
 
@@ -5846,7 +5935,10 @@ def test_placed_window(app, tmp):
                 out.append((round(p.y(), 1), round(p.x() + it.property("width"), 1)))
         return sorted(out)
 
-    authors, times = boxes(who), boxes(stamp)
+    # The decision draws the full stamp; the same-day message draws its bare
+    # clock instead (his same-day rule), so the two shapes' two times are the
+    # full string and the clock.
+    authors, times = boxes(who), sorted(boxes(stamp) + boxes(clock))
     check("both shapes draw who put them there - the decision and the bullet",
           who and len(authors) == 2 and len(times) == 2, (who, authors, times))
     check("...ABOVE the time, in the same trailing-edge column (§9.1)",
@@ -5872,6 +5964,52 @@ def test_placed_window(app, tmp):
         check("a stamped row is at least as tall as its own gutter",
               row.height() >= it.parentItem().height() > 0,
               (row.height(), it.parentItem().height()))
+
+    # ---- ...and folding an AUTHORED message collapses it to ONE row --------
+    # His *"collapse to a single line"*: the two-row gutter (author above time)
+    # becomes one line — author and time together — so a folded, authored
+    # message is no taller than the one-line row beside it.
+    from PySide6.QtTest import QTest                                 # noqa: E402
+    from PySide6.QtCore import QPointF, Qt                           # noqa: E402
+    authored = None
+    for it in descendants(winB.contentItem()):
+        if it.property("folded") is None:
+            continue
+        a = prop(it, "modelData")
+        if isinstance(a, dict) and "attributed chore" in str(a.get("text", "")):
+            authored = it
+    amark = [m for m in descendants(authored)
+             if str(m.property("text")) in ("-", "+")]
+    openH = authored.height() if authored is not None else 0
+    QTest.mouseClick(winB, Qt.LeftButton, Qt.NoModifier,
+                     (authored.mapToScene(QPointF(4, 8)).toPoint() if authored else QPointF()))
+    spin(250)
+    combined = who + "  " + clock
+    combos = [it for it in descendants(winB.contentItem())
+              if str(it.property("text")) == combined and it.isVisible()]
+    filledAfter = [it for it in descendants(winB.contentItem())
+                   if it.objectName() == "gutterBy" and it.isVisible()]
+    check("folding an authored message puts author and time on ONE line",
+          authored is not None and bool(amark) and len(combos) == 1,
+          (combined, [str(c.property("text")) for c in combos]))
+    check("...and the message is now exactly one row tall",
+          authored is not None and authored.height() < openH
+          and authored.height() == 15.0,
+          (openH, authored is not None and authored.height()))
+    check("...the two-row gutter gone: only the decision's author still draws one",
+          len(filledAfter) == 1
+          and all(str(it.property("text")) == who for it in filledAfter),
+          [str(it.property("text")) for it in filledAfter])
+    QTest.mouseClick(winB, Qt.LeftButton, Qt.NoModifier,
+                     (authored.mapToScene(QPointF(4, 8)).toPoint() if authored else QPointF()))
+    spin(250)
+    restored = [it for it in descendants(winB.contentItem())
+                if it.objectName() == "gutterBy" and it.isVisible()]
+    check("...and unfolding puts the author back above the time",
+          len(restored) == 2
+          and not any(str(it.property("text")) == combined
+                      for it in descendants(winB.contentItem()) if it.isVisible()),
+          [str(it.property("text")) for it in restored])
 
     # ---- ...and WHICH OF HIS ASKS it came out of, BETWEEN the two lines ----
     # *"...between the top line and the second verbose line"*, so the check is
@@ -6929,6 +7067,8 @@ def main():
         test_by(os.path.join(tmp, "by"))
         os.makedirs(os.path.join(tmp, "td"))
         test_todo_remove(os.path.join(tmp, "td"))
+        os.makedirs(os.path.join(tmp, "dq"))
+        test_decision_remove(os.path.join(tmp, "dq"))
         test_agents(tmp)
         test_phase(tmp)
         os.makedirs(os.path.join(tmp, "un"))
