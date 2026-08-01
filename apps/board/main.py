@@ -567,9 +567,47 @@ class Board(QObject):
         after = lines[b] if b < len(lines) else ""
         if not self._commit(out):
             return False
-        self._undo = {"block": block, "before": after, "text": it.get("text", "")}
+        self._undo = {"kind": "todo", "block": block, "before": after,
+                      "text": it.get("text", "")}
         self.undoChanged.emit()
         self.status.emit("removed - `put it back` is in the right-click menu")
+        return True
+
+    @Slot(str, result=bool)
+    def removeDecision(self, key):
+        """Remove a whole multi-choice question (heading + options) from NEEDS
+        YOU. The question-block analog of `removeTodo`, and the same one-level
+        undo: the block's raw lines are kept and `put it back` restores it
+        byte-for-byte -- the misclick you notice immediately, covered the same
+        way a removed chore is.
+
+        NOT the same act as `boardmove.start`: that one is for an ANSWERED
+        decision moving out to be worked. This is for a question he no longer
+        wants asked at all, so it does not consult the stash and does not care
+        whether anything is answered.
+        """
+        it = self._item(key)
+        if it is None:
+            self.status.emit("that question is no longer there - reloaded")
+            self._load()
+            return False
+        lines = self._doc["lines"]
+        try:
+            a, b = boardparse.item_span(lines, it)
+            out, block = boardparse.cut_item(lines, it)
+        except boardparse.BoardError as e:
+            self.status.emit(str(e) + " - reloaded")
+            self._load()
+            return False
+        after = lines[b].rstrip("\n") if b < len(lines) else ""
+        before = after if after.startswith("###") else ""
+        if not self._commit(out):
+            return False
+        title = boardparse.raw_title(lines, it) or it.get("title", "")
+        self._undo = {"kind": "needs", "block": block, "before": before,
+                      "text": title}
+        self.undoChanged.emit()
+        self.status.emit("question removed - `put it back` is in the right-click menu")
         return True
 
     @Slot(result=bool)
@@ -578,8 +616,12 @@ class Board(QObject):
         if not u:
             return False
         try:
-            out = boardparse.add_todo_block(self._doc["lines"], self._doc,
-                                            u["block"], u["before"])
+            if u.get("kind") == "needs":
+                out = boardparse.add_needs_item(self._doc["lines"], u["block"],
+                                                u.get("before"))
+            else:
+                out = boardparse.add_todo_block(self._doc["lines"], self._doc,
+                                                u["block"], u.get("before"))
         except boardparse.BoardError as e:
             self.status.emit(str(e))
             return False

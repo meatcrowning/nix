@@ -2028,7 +2028,16 @@ Window {
               } },
             { separator: true },
         ];
-        menu.open(x, y, items.concat(fileItems()));
+        items = items.concat(fileItems()).concat(undoItems());
+        // §7.2: the destructive entry LAST, behind a separator of its own, so
+        // the pointer never lands on it over a list that re-numbers itself when
+        // the question goes. No confirm -- the right-click is act one, this
+        // entry is act two (§10.3), and `put it back` above is what covers the
+        // misclick, exactly as it does a removed chore.
+        items.push({ separator: true });
+        items.push({ label: "remove this question",
+                     trigger: () => Board.removeDecision(d.key) });
+        menu.open(x, y, items);
     }
 
     // The undo for a removed `to do` bullet. Absent, not greyed, when there is
