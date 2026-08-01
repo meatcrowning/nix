@@ -41,6 +41,34 @@ pm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pm)
 
 
+# The queue server calls these on the object it is handed (main.py
+# start_queue_server). The real bug this guards: the server was calling
+# `player.setFavorite` on the REAL Player, which had no such method — the
+# AttributeError was swallowed, the snapshot re-pushed unchanged, and the
+# panel heart did nothing. The fake had a setFavorite, so the old test
+# passed against the broken real path. Insist on the real shape here.
+for _m in ("index", "queue_dicts", "currentTrackDict", "jumpTo", "setFavorite"):
+    if not hasattr(pm.Player, _m):
+        raise SystemExit(f"queue server contract broken: real Player lacks {_m!r}")
+
+
+class FakeLibrary(QObject):
+    """The DB+tags half of the real `Library`: owns the canonical row store and
+    emits trackChanged when a write lands — exactly what the real Library does,
+    so `FakePlayer` can mirror `Bridge._on_track_changed` -> `apply_track_update`."""
+
+    trackChanged = Signal(int)
+
+    def __init__(self, rows):
+        super().__init__()
+        # canonical store, keyed by id; the player's queue holds COPIES
+        self._db = {r["id"]: dict(r) for r in rows}
+
+    def setFavorite(self, tid, fav):
+        self._db[tid]["favorite"] = 1 if fav else 0
+        self.trackChanged.emit(tid)
+
+
 class FakePlayer(QObject):
     queueChanged = Signal()
     indexChanged = Signal()
@@ -48,11 +76,14 @@ class FakePlayer(QObject):
 
     def __init__(self):
         super().__init__()
-        self._q = [{"id": 11, "title": "One", "artist": "A", "duration": 100.0,
-                    "favorite": 0},
-                   {"id": 22, "title": "Two", "artist": "B", "duration": 200.0,
-                    "favorite": 1}]
+        rows = [{"id": 11, "title": "One", "artist": "A", "duration": 100.0,
+                 "favorite": 0},
+                {"id": 22, "title": "Two", "artist": "B", "duration": 200.0,
+                 "favorite": 1}]
+        self._library = FakeLibrary(rows)
+        self._q = [dict(r) for r in rows]
         self._i = 0
+        self._library.trackChanged.connect(self._on_track_changed)
 
     @property
     def index(self):
@@ -69,10 +100,19 @@ class FakePlayer(QObject):
         self.indexChanged.emit()
         self.currentChanged.emit()
 
-    def setFavorite(self, tid, fav):
+    def _on_track_changed(self, tid):
+        # mirror Bridge._on_track_changed -> Player.apply_track_update: patch
+        # the cached queue dict in place so the NEXT snapshot reflects the write
+        row = self._library._db[tid]
         for t in self._q:
             if t["id"] == tid:
-                t["favorite"] = 1 if fav else 0
+                t.update(dict(row))
+        self.currentChanged.emit()
+
+    def setFavorite(self, tid, fav):
+        # mirror the real Player: delegate to the library, let trackChanged
+        # patch the cached queue dicts
+        self._library.setFavorite(tid, bool(fav))
 
 
 class FakeLyrics(QObject):
@@ -238,6 +278,13 @@ def step():
     check("TOGGLE_FAV flips the current track's favourite off",
           d is not None and d["tracks"][1]["favorite"] is False,
           str(d["tracks"]) if d else "no push")
+    # TOGGLE_FAV pushes TWICE in the real architecture: the cache patch
+    # (setFavorite -> trackChanged -> apply_track_update) emits currentChanged
+    # -> on_track -> push, then the handler's own push(). Drain the leftover so
+    # the read below sees the second toggle's outcome, not a stale copy of the
+    # first.
+    while readline(120) is not None:
+        pass
     sock.write(b"TOGGLE_FAV\n")
     sock.flush()
     d = readline()
