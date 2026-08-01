@@ -27,6 +27,17 @@
   # loopback too, so it can't be presented from anywhere but this box.
   # (Key names/structure per slskd's slskd.example.yml `web:` block.)
   #
+  # Web authentication is DISABLED (`authentication.disabled: true`) on
+  # purpose: the UI is loopback-only and belongs to one user, so there is
+  # nothing to keep out and a login wall is pure friction. slskd's web auth is
+  # ON by default (user/pass `slskd`/`slskd`) unless `disabled` is set, and
+  # that default was the 401 wall he hit — the config never turned it off, and
+  # a JWT-only session lapses the moment the service restarts (random JWT
+  # secret each start). Disabled routes every endpoint through passthrough
+  # auth (Anonymous/Administrator), so the API key below is now a no-op —
+  # kept only because soulseek-missing.py still sends it and the check is
+  # bypassed either way.
+  #
   # `shares.directories` is pinned to empty on purpose. slskd's default is to
   # share `~/`, the whole home directory — which is both something this repo
   # must not leak and a full-tree scan that leaves the service stuck in D-state
@@ -58,7 +69,7 @@
       run mkdir -p "$HOME/.local/share/slskd"
       # home.file used to own this path as a store symlink — replace it.
       [ -L "$HOME/.local/share/slskd/slskd.yml" ] && run rm "$HOME/.local/share/slskd/slskd.yml"
-      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nshares:\n  directories: []\n" "$(cat '"$keyFile"')" > "$HOME/.local/share/slskd/slskd.yml"'
+      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nshares:\n  directories: []\n" "$(cat '"$keyFile"')" > "$HOME/.local/share/slskd/slskd.yml"'
       usrFile="$HOME/.secrets/slskd-username"
       pwdFile="$HOME/.secrets/slskd-password"
       if [ -f "$usrFile" ] && [ -f "$pwdFile" ]; then
