@@ -69,5 +69,11 @@
       export WEBUI_SECRET_KEY="$(cat "$keyfile")"
     fi
     exec ${pkgs.open-webui}/bin/open-webui "$@"
-  '');
+  '')
+  # hermes-agent, off the same numtide/llm-agents.nix that supplies claude-code
+  # — a prebuilt binary with no aarch64 build in the flake's `available` filter,
+  # so it is gated to x86_64 the way open-webui is and lands on `top` only
+  # (`air`/book is aarch64 and misses it).
+  ++ lib.optional pkgs.stdenv.hostPlatform.isx86_64
+     inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.hermes-agent;
 }
