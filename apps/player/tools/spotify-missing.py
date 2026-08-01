@@ -70,11 +70,13 @@ def load_local(db_path):
 
 
 def unique_spotify_tracks(data):
-    """Dedupe across saved tracks + every playlist, remembering where each
-    one came from."""
+    """Dedupe across saved tracks + every playlist + every saved album's
+    tracks, remembering where each one came from."""
     rows = list(data.get("saved_tracks", []))
     for pl in data.get("playlists", []):
         rows.extend(pl.get("tracks", []))
+    for alb in data.get("saved_albums", []):
+        rows.extend(alb.get("tracks", []))
 
     uniq = {}
     for r in rows:

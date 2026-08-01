@@ -315,14 +315,29 @@ def fetch_all(token):
 
     print("Saved albums:", flush=True)
     albums = paged(f"{API}/me/albums?limit=50", token, label="albums")
-    out["saved_albums"] = [{
-        "name": i["album"]["name"],
-        "artists": ", ".join(a["name"] for a in i["album"]["artists"]),
-        "year": (i["album"].get("release_date") or "")[:4],
-        "total_tracks": i["album"].get("total_tracks", 0),
-        "spotify_id": i["album"]["id"],
-        "added_at": i.get("added_at", ""),
-    } for i in albums]
+    out["saved_albums"] = []
+    for i in (albums or []):
+        alb = i["album"]
+        name = alb["name"]
+        entry = {
+            "name": name,
+            "artists": ", ".join(a["name"] for a in alb["artists"]),
+            "year": (alb.get("release_date") or "")[:4],
+            "total_tracks": alb.get("total_tracks", 0),
+            "spotify_id": alb["id"],
+            "added_at": i.get("added_at", ""),
+        }
+        # Expand each saved album into its tracks so a saved album can count
+        # as real downloads; spotify-missing.py folds these into the work list
+        # like liked/playlist tracks. /albums/{id}/tracks returns simplified
+        # track objects, which track_row flattens the same way.
+        album_tracks = paged(f"{API}/albums/{alb['id']}/tracks?limit=50",
+                             token, label=f"{name} tracks")
+        entry["tracks"] = [
+            row for t in (album_tracks or [])
+            if (row := track_row(t, "album", name))
+        ]
+        out["saved_albums"].append(entry)
 
     print("Followed artists:", flush=True)
     artists = paged(f"{API}/me/following?type=artist&limit=50",
