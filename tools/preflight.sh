@@ -43,6 +43,29 @@ if [ -n "$staged" ]; then
   echo "        git commit -m msg -- <paths>     # immune to a dirty index"
 fi
 
+# 8. Tracked files carrying a LARGE uncommitted diff vs HEAD — the "mixed WIP"
+#    smell. A file another minister is mid-edit on, on top of your own change,
+#    shows up here. The hazard: a pathspec commit takes the WHOLE working-tree
+#    copy, so it silently sweeps their half-finished edits into your commit
+#    (really happened: 9c1f477). This is a HEURISTIC — a big single change is
+#    legitimate — so it warns and never fails (a false failure blocking a
+#    rebuild would be worse than the bug); the HARD gate is tools/git-commit.sh,
+#    which fronts every commit and refuses a plausibly-mixed path. Thresholds
+#    gelded high here and tunable: GIT_PREFLIGHT_MAX_HUNKS / _MAX_LINES.
+MH="${GIT_PREFLIGHT_MAX_HUNKS:-8}"
+ML="${GIT_PREFLIGHT_MAX_LINES:-120}"
+for f in $(git -C "$REPO" diff --name-only HEAD); do
+  [ -f "$REPO/$f" ] || continue
+  hunks=$(git -C "$REPO" diff --unified=0 HEAD -- "$f" | grep -c '^@@')
+  churn=$(git -C "$REPO" diff --numstat HEAD -- "$f" | awk '{s=$1+$2} END{print s+0}')
+  if [ "$hunks" -ge "$MH" ] || [ "$churn" -ge "$ML" ]; then
+    echo "WARN: $f carries $hunks uncommitted hunks / $churn changed lines vs HEAD —"
+    echo "      possibly another minister's WIP in the same file. A pathspec commit"
+    echo "      would sweep it all in. Commit through tools/git-commit.sh (or --hunks"
+    echo "      to take only your part), not bare 'git commit -- $f'."
+  fi
+done
+
 echo "eval: nixosConfigurations.top ..."
 if ! nix eval --raw "$REPO#nixosConfigurations.top.config.system.build.toplevel.drvPath" >/dev/null; then
   echo "FAIL: system eval failed"

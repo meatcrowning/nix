@@ -808,6 +808,35 @@ git add -N path/new-file.qml               # NEW files: intent-to-add only. Enou
 for untracked files, and warns (never fails) when content is sitting staged.
 Corollary: stage and commit adjacently, or don't stage.
 
+**A pathspec is not enough when somebody else holds the same file.** `git commit
+-- f.py` takes the WORKING-TREE copy of it — verified empirically: even your own
+partially-staged hunks are ignored and the whole working tree is committed, their
+half-finished edits and debug probes included. That is what happened at 9c1f477:
+boardwork.py held another minister's decision-unit WIP in the working tree, and
+the pathspec commit swept both agents' work into one commit. **Commit through
+`tools/git-commit.sh`, not a bare `git commit`.** It is the enforcement half of
+"confirm every hunk is yours":
+
+- Default mode: prints the exact diff that will land (the whole working-tree
+  copy), and REFUSES any path whose uncommitted change is large enough to be
+  plausibly not entirely yours — because a pathspec commit cannot separate
+  hunks. Narrow the pathspec, `--hunks` it, or `--yes-file <path>` when you've
+  reviewed the printed diff and accept sweeping that file.
+- `tools/git-commit.sh -m "subj" --hunks -- path`: `git add -p` only the hunks
+  you own, then commits the index
+  — your hunks land, the other minister's WIP stays behind, unstaged, exactly
+  as you found it. (An index commit, safe only because it first asserts the
+  index holds nothing but your own staged hunks.)
+- It refuses bare/`-a` invocations mechanically, so the shared index is never
+  swept by accident.
+
+`tools/preflight.sh` adds the warn (never fail) complement: a file whose
+uncommitted diff vs HEAD is large gets flagged as the mixed-WIP smell before a
+rebuild, so the hazard is visible even if you commit by hand. `tools/git-commit-test.sh`
+exercises both halves in a throwaway repo — re-run it after touching the helper
+or that preflight block.
+
+
 ### Never clobber the user's own edits
 
 The user routinely hand-edits files here and may leave those changes
