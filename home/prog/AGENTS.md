@@ -61,6 +61,45 @@ Never trust a written claim about current drift state — run the script.
 
 ---
 
+## Powering the display off DESTROYS the output
+
+Not DPMS: the monitor drops its DisplayPort link, so the compositor destroys
+the output and re-adds it when the screen wakes. Measured on `top` 2026-08-01
+in Hyprland's own log — `Connector DP-5 disconnected` / `Disabling output DP-5`
+in the evening, a matching reconnect in the morning. Because this desktop is
+every-window-floating on a single workspace, windows carry absolute coordinates
+across the gap and come back at coordinates that are on no screen: running,
+listed, focusable, invisible. The only way out used to be closing every window
+and reopening it.
+
+`hyprland.lua`'s `monitor.added` handler puts them back. Two rules in it are
+the whole design, and both are load-bearing:
+
+- **WHETHER to move is judged against the monitor rect**, with a
+  `HOTPLUG_MIN_VISIBLE` floor — a window hanging off an edge is something he
+  does on purpose, and "recovering" it would rearrange his desktop every time
+  the screen wakes. That is a worse bug than the one being fixed, and the first
+  draft had it: subtracting the panel's full layer width moved a window he had
+  deliberately placed.
+- **WHERE to put it may use the panel width**, because `hl.get_monitors()` does
+  not expose the reserved rect and the qs-bar layer (634) is wider than the true
+  reserve (376). Fine for choosing a destination, wrong for choosing a victim.
+
+Harness: `tools/monitor-reclaim-test.sh`. It **extracts the real block** from
+`hyprland.lua` between its `>>> monitor-reclaim >>>` markers and runs it against
+a stubbed `hl`, so it tests the source rather than a copy — keep those markers,
+and keep the block free of anything needing a live compositor at load time.
+There is deliberately no nested compositor: reproducing a monitor loss for real
+is the one operation that migrates windows onto a monitor he can see.
+
+Lua event names come from Hyprland's own `CLuaEventHandler::knownEvents()`
+(`monitor.added` / `.removed` / `.focused` / `.layout_changed`, `window.*`,
+`layer.*`, `workspace.*`, `config.reloaded`, `hyprland.start` / `.shutdown`).
+`hl.on` does **not** validate the name — a typo registers silently and never
+fires, so read that list rather than guessing.
+
+---
+
 ## Plugin actions are Lua functions, never dispatchers
 
 `addDispatcherV2` is useless under the Lua config: `hyprctl dispatch X`
