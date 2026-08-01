@@ -426,6 +426,17 @@ Code + **PKCE**, so no client secret exists to leak; token cached 0600 in
 matched/suspect/**missing** TSVs — the last being the work list for finding
 copies elsewhere. Both stdlib-only, same reason as `dbsync.py`.
 
+`tools/soulseek-missing.py` acts on that work list: for each `missing.tsv` row
+still **not** in the live `library.db`, it submits one slskd search over the
+loopback HTTP API (key from `~/.secrets/slskd-api-key`, pinned in
+`home/prog/slskd.nix`), matches a peer's offered file by the same
+`trackmatch` artist/title folding + a duration check, and queues the download.
+Stdlib-only, so it needs no runtime dependency and runs on both hosts; it keeps
+a per-dump-dir `soulseek-state.tsv` so re-runs never re-search or re-download
+what is already handled, and `--dry-run` shows picks without enqueueing. It
+requires slskd to be **running and logged in** — which the generated
+`slskd.yml` alone does not provide (see `home/prog/slskd.nix`).
+
 Three things worth knowing before touching them:
 
 1. **`GET /playlists/{id}/tracks` no longer exists** — Spotify's Feb–Mar 2026
