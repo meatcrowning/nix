@@ -765,7 +765,7 @@ with "still too long", so the length is mechanical. **Every elaboration or \
 background goes on INDENTED continuation lines under the summary, and it is a \
 sentence or two, not a paragraph** — *"it shouldnt really elaborate that much \
 though"*. Pick the one that is true:
-`COMPLETION:` it is done and on his machine; `PARTIAL:` some of it landed and \
+`ENACTED:` it is done and on his machine; `PARTIAL:` some of it landed and \
 some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
 `INFORMATION:` a fact, nothing asked of him. **A question is NEVER a note \
 bullet** — the ONLY place a question to him belongs is the decisions section, \
@@ -782,7 +782,7 @@ board says "you".
    **A completion note is AS SHORT as its result.** When nothing surprising
 happened — it worked, nothing failed, you deviated from nothing, there is no
 decision he needs to make — then the note for that ask IS one short line and
-nothing under it: `COMPLETION: done, no errors. pushed.` Detail (an indented
+nothing under it: `ENACTED: done, no errors. pushed.` Detail (an indented
 line, a second clause) earns its place only for what would otherwise surprise
 him — something that did not work, a choice you made on his behalf, a rebuild
 left pending, work deliberately left out. Never dress a plain success up.

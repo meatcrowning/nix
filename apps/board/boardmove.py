@@ -667,7 +667,7 @@ def note(text, path=bp.BOARD_PATH, agent_id=None, by=None):
     process writing the failure is not the worker that failed.
 
     It must start with one of `boardparse.TODO_TAGS` — `INFORMATION:`,
-    `COMPLETION:`, `PARTIAL:`, `FAILED:`, or a colonless
+    `ENACTED:`, `PARTIAL:`, `FAILED:`, or a colonless
     `SUMMONED`/`COMMANDED` — then a summary of AT
     MOST about a dozen words on that same line, then whatever background it
     needs on INDENTED continuation lines. **A `QUESTION:` bullet is refused ALWAYS**

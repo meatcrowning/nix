@@ -11,7 +11,7 @@ happen. This is the third way, and it is the one an agent should use:
     boardctl.py land 'cover art' --commit a3c2aac --what 'player: dim the art'
     boardctl.py back 'cover art' --why 'FAILED: **cover art** - blocked on FOCUS'
     boardctl.py note 'PARTIAL: **Relaunch `player`** - live source, no hot reload.'
-    boardctl.py note 'COMPLETION: **the fade** - landed.' \\
+    boardctl.py note 'ENACTED: **the fade** - landed.' \\
                      'PARTIAL: **the tooltip** - needs a rebuild.'   # TWO items
     boardctl.py list
 
@@ -135,7 +135,7 @@ def _note_text(argv):
     """The argv of `note`, as one MESSAGE PER ASK.
 
     Ordinary use is one quoted string and joins with a space as it always did.
-    But `note 'COMPLETION: a' 'PARTIAL: b'` is two messages, and joining those
+    But `note 'ENACTED: a' 'PARTIAL: b'` is two messages, and joining those
     with a space made one bullet claiming to be both — the bundling his
     separation rule exists to stop (`boardparse.check_one_ask`). Every argument
     after the first that STARTS with a tag is therefore its own line, which

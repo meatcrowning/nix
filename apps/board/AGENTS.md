@@ -170,7 +170,7 @@ new and are the ones to read first if the fan-out misbehaves:
   carry the rule in the words the refusal uses.
 
 - **the summon note dies with its result** (`test_summon_cleared`) — a worker's
-  `COMPLETION:`/`PARTIAL:`/`FAILED:` takes its own `SUMMONED <Name> (`<id>`)`
+  `ENACTED:`/`PARTIAL:`/`FAILED:` takes its own `SUMMONED <Name> (`<id>`)`
   note with it — and a `COMMANDED <Name>` handoff note the same way, the
   lowercase verbs and the `INFORMATION: ... SUMMONED:` shape they replaced
   included — whole,
