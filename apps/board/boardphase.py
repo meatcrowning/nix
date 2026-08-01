@@ -345,6 +345,53 @@ def read_sidecar(agent_id):
         return {}
 
 
+# ------------------------------------------- a minister on the OTHER runtime
+# Everything above is written around a transcript whose path the spawner CHOSE.
+# A hermes minister has no such file and no choosable id (`boardhermes`'s
+# docstring has the measurements), so a spawn on that runtime ARMS the sidecar
+# with a fingerprint of the query instead, and the session is discovered from
+# hermes's own store on the next poll. Two keys, and the rest of this module
+# does not change: `probe` is what it is found BY, `hsession` is what was found.
+#
+# It is the sidecar and not the agent record because both spawners
+# (`boardwork._spawn_worker` and board-watch's `spawn`) know the agent id and
+# only one of them writes a record — a decision agent is a stash, not a
+# registration — and because this is the file `observe()` already locks.
+def arm(agent_id, query, at=None):
+    """Bind a hermes spawn to the query it was started with. Called with the
+    exact `-q` text, at the spawn; `boardhermes.resolve` finds the session by
+    it. A no-op for a backend that names its own session."""
+    import boardhermes as bhx
+    aid = ba.clean_id(agent_id or "")
+    if not aid or not query:
+        return {}
+    with bp.locked(sidecar(aid), timeout=5.0):
+        rec = read_sidecar(aid)
+        rec["id"] = aid
+        if rec.get("hsession"):
+            # RE-ARMED, so this is a NEW run under an id that already had one —
+            # board-watch retries a run that died on a transient API error, with
+            # the same prompt and therefore the same fingerprint. The session
+            # bound to the dead run must not go on being read as this one's, and
+            # only this function can tell a re-arm from a poll. The time floor
+            # cannot rule that session out (the retry is seconds behind it), so
+            # it is remembered by NAME and `resolve` skips it.
+            rec["bound"] = (list(rec.get("bound") or []) + [rec["hsession"]])[-8:]
+            rec.pop("hsession", None)
+            rec["offset"] = 0
+        rec["probe"] = bhx.fingerprint(query)
+        rec["armedAt"] = float(at or time.time())
+        ba._write_json(sidecar(aid), rec)
+    return rec
+
+
+def hermes_session(agent_id):
+    """The hermes session id bound to this agent, or `""` — for the callers
+    outside this module that want the run itself (the card's drawer, the
+    confirmation of a summon, the log's pointer at what it actually did)."""
+    return (read_sidecar(agent_id) or {}).get("hsession") or ""
+
+
 #: The five the CLASSIFIER can produce from a transcript, and the vocabulary the
 #: observed phase is filed under. An agent's own claim is NOT limited to these —
 #: see `clean_phase_word` — but the machine's reading of it still is: nothing
@@ -982,6 +1029,35 @@ def forget(agent_id):
         return False
 
 
+def _bind_hermes(rec):
+    """Find the hermes session for an armed spawn, once, and record it.
+
+    Returns the id or `""`. Called on every poll until it answers — the store
+    row appears a moment after `execve`, and asking again is one indexed SELECT
+    (`boardhermes.resolve`).
+
+    When it answers it also writes the id into the worker's own log, which is
+    the file that has been TELLING HIM WHERE TO LOOK since the log stopped
+    being the record (`boardwork` — "a log that survives a kill"). Only if that
+    log already exists: a decision agent has no such file and this must not
+    invent one.
+    """
+    import boardhermes as bhx
+    sid = bhx.resolve(rec.get("probe"), rec.get("armedAt") or 0,
+                      exclude=rec.get("bound") or ())
+    if not sid:
+        return ""
+    rec["hsession"] = sid
+    try:
+        import boardwork as bw
+        if os.path.isfile(bw._log_path(rec.get("id") or "")):
+            bw._log_line(rec["id"], "hermes session %s - read it with: %s"
+                         % (sid, bhx.hint(sid)))
+    except Exception:                                          # noqa: BLE001
+        pass          # a log line is never worth failing a poll over
+    return sid
+
+
 def observe(agent_id, session=None):
     """Read whatever is new in this agent's transcript and update its record.
 
@@ -1000,11 +1076,22 @@ def observe(agent_id, session=None):
         rec["id"] = aid
         if session:
             rec["session"] = str(session)
-        path = rec.get("path")
-        if not path or not os.path.isfile(path):
-            path = transcript(rec.get("session"))
-            rec["path"] = path
-        if not path:
+        # WHICH RUNTIME. An armed sidecar (`arm`) is a hermes spawn: there is no
+        # transcript file to find, and the session is discovered out of hermes's
+        # own store instead. Everything below — the states, the grace, the
+        # window, the wording — is the same for both; only where the tool calls
+        # are read from differs.
+        hermes = bool(rec.get("probe"))
+        path = None
+        if hermes:
+            source = rec.get("hsession") or _bind_hermes(rec)
+        else:
+            path = rec.get("path")
+            if not path or not os.path.isfile(path):
+                path = transcript(rec.get("session"))
+                rec["path"] = path
+            source = path
+        if not source:
             # Nothing to observe — but WHICH nothing. No session id was ever
             # recorded (an interactive session this system did not spawn) is the
             # real unknown; a session id we chose ourselves whose transcript has
@@ -1013,7 +1100,9 @@ def observe(agent_id, session=None):
             # quietly become the first: past `START_GRACE_S` it is `unlinked`
             # again. Falling back to the CLAIM in either case stays the one
             # thing this module must not do.
-            if str(rec.get("session") or ""):
+            # An ARMED hermes spawn is linked in exactly the same sense: we know
+            # which run is ours and are waiting for it to appear in the store.
+            if hermes or str(rec.get("session") or ""):
                 if not rec.get("linkedAt"):
                     rec["linkedAt"] = time.time()
                 young = time.time() - float(rec.get("linkedAt") or 0) \
@@ -1025,7 +1114,16 @@ def observe(agent_id, session=None):
             rec.setdefault("recent", [])
             ba._write_json(sidecar(aid), rec)
             return rec
-        calls, offset, last = _tool_calls(path, int(rec.get("offset") or 0))
+        if hermes:
+            import boardhermes as bhx
+            # No context tally: `messages.token_count` is NULL for every row
+            # hermes writes, and the session counters are cumulative totals
+            # rather than what is standing in the window. Absence, drawn as
+            # absence — see `boardhermes`.
+            calls, offset = bhx.tool_calls(source, int(rec.get("offset") or 0))
+            last = None
+        else:
+            calls, offset, last = _tool_calls(path, int(rec.get("offset") or 0))
         rec["offset"] = offset
         # The tally is carried in the record like everything else here, so a
         # poll that reads no new assistant entry keeps the last MEASURED

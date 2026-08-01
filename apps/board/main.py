@@ -953,7 +953,16 @@ class Agents(QObject):
         if not (agent_id or "").strip():
             return []
         rec = boardagents.record(agent_id) or {}
-        live = Agents._transcript_lines(rec.get("session"))
+        # A minister on the hermes runtime has no transcript FILE; its history is
+        # rows in `~/.hermes/state.db`, bound to this agent by the query it was
+        # spawned with. Same drawer, same three lines, same rule about whose
+        # words belong in it — only the reader differs (`boardhermes.lines`).
+        hsession = boardphase.hermes_session(agent_id)
+        if hsession:
+            import boardhermes
+            live = boardhermes.lines(hsession)
+        else:
+            live = Agents._transcript_lines(rec.get("session"))
         if live:
             return [px(x) for x in live[-Agents.OUTPUT_LINES:]]
         try:

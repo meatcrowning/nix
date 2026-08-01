@@ -6540,6 +6540,177 @@ def test_card_output(tmp):
     del os.environ["BOARD_TRANSCRIPTS"]
 
 
+def _hermes_db(path):
+    """A synthetic `~/.hermes/state.db` with the columns this reads.
+
+    The real schema is hermes's and much wider; what is asserted here is that
+    the reader finds a run by its query, follows it live and never touches his
+    own store — `BOARD_HERMES_DB` is what keeps the test off it.
+    """
+    import sqlite3
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL,
+                               model TEXT, started_at REAL NOT NULL);
+        CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               session_id TEXT NOT NULL, role TEXT NOT NULL,
+                               content TEXT, tool_calls TEXT, tool_name TEXT,
+                               reasoning_content TEXT, timestamp REAL NOT NULL);
+    """)
+    con.commit()
+    return con
+
+
+def _hsession(con, sid, query, at):
+    con.execute("INSERT INTO sessions (id, source, model, started_at)"
+                " VALUES (?, 'tool', 'deepseek/x', ?)", (sid, at))
+    con.execute("INSERT INTO messages (session_id, role, content, timestamp)"
+                " VALUES (?, 'user', ?, ?)", (sid, query, at))
+    con.commit()
+
+
+def _hcall(con, sid, name, args, at=0.0):
+    con.execute("INSERT INTO messages (session_id, role, tool_calls, timestamp)"
+                " VALUES (?, 'assistant', ?, ?)",
+                (sid, json.dumps([{"type": "function",
+                                   "function": {"name": name,
+                                                "arguments": json.dumps(args)}}]),
+                 at))
+    con.commit()
+
+
+def test_hermes(tmp):
+    """A MINISTER ON THE OTHER RUNTIME IS WATCHED THE SAME WAY.
+
+    Hermes has no `--session-id` and no transcript file, so until 2026-07-31 a
+    hermes minister's card was claim-only and its log pointed at a
+    `~/.claude/projects/*.jsonl` that was never written. The run is bound by a
+    hash of the query hermes stores verbatim instead; everything downstream —
+    the observed phase, the drawer, the confirmation of the summon — has to
+    reach the same answers it reaches for a Claude worker, out of a database.
+    """
+    import boardhermes as bhx
+    import boardphase as bph
+    import boardagents as ba
+    import boardwork as bw
+    import main as brd
+    print("\n=== a hermes minister is observed out of hermes's own store ===")
+    db = os.path.join(tmp, "state.db")
+    os.environ["BOARD_HERMES_DB"] = db
+    con = _hermes_db(db)
+    now = time.time()
+
+    q = "You are running headless...\n--- your task ---\nDRAW THE PANEL\n"
+    check("nothing is bound before the run exists",
+          bhx.resolve(bhx.fingerprint(q), now) == "")
+
+    # ARMED at the spawn, from the argv the backend built — the same call
+    # `boardwork._spawn_worker` and board-watch's `spawn` both make.
+    argv = bw.HermesBackend().args(prompt=q, session=None, role="worker",
+                                   label="board: x")
+    bw.HermesBackend().arm("h-one", argv)
+    sent = argv[argv.index("-q") + 1]
+    check("the query the backend actually sends is what the run is keyed on",
+          bph.read_sidecar("h-one").get("probe") == bhx.fingerprint(sent))
+
+    r = bph.observe("h-one")
+    check("an armed spawn whose session has not opened yet is STARTING",
+          r["observed"] == "starting" and bph.actually(r) == "nothing yet", r)
+
+    # ...and hermes opens it. A DIFFERENT run started a moment earlier must not
+    # be mistaken for it: the fingerprint is the key, not the clock.
+    _hsession(con, "20260731_1_aaa", "somebody else's prompt", now - 1)
+    _hsession(con, "20260731_2_bbb", sent, now + 1)
+    r = bph.observe("h-one")
+    check("the run is found by ITS OWN query, not by whatever started nearby",
+          bph.read_sidecar("h-one").get("hsession") == "20260731_2_bbb",
+          bph.read_sidecar("h-one").get("hsession"))
+    check("...and a bound-but-idle minister says nothing yet, like any other",
+          r["observed"] == "none", r["observed"])
+    check("...and that binding is the proof its summon completed",
+          ba._confirmed({"id": "h-one", "confirmed": False}, False) is True)
+
+    # THE OBSERVED LINE, in the SAME vocabulary a Claude worker's is in.
+    _hcall(con, "20260731_2_bbb", "read_file", {"path": "/a/b/Theme.qml"}, now)
+    r = bph.observe("h-one")
+    check("a hermes read_file reads as researching, and says the file",
+          r["phase"] == "researching" and r["doing"] == "reading Theme.qml",
+          (r["phase"], r["doing"]))
+    _hcall(con, "20260731_2_bbb", "patch",
+           {"path": "/a/b/Bar.qml", "old_string": "a", "new_string": "b"}, now)
+    r = bph.observe("h-one")
+    check("...a patch is EDITING, in our word for it",
+          r["phase"] == "coding" and r["doing"] == "editing Bar.qml",
+          (r["phase"], r["doing"]))
+    _hcall(con, "20260731_2_bbb", "terminal",
+           {"command": "git commit -m x -- a"}, now)
+    r = bph.observe("h-one")
+    check("...and a terminal call is classified by what it RAN",
+          r["phase"] == "finishing", r["phase"])
+    _hcall(con, "20260731_2_bbb", "process", {"action": "list"}, now)
+    r = bph.observe("h-one")
+    check("...a hermes tool we have no word for keeps its own name",
+          r["doing"] == "using process", r["doing"])
+    check("...and claims no phase, so the window still reads the real work",
+          r["phase"] == "finishing", r["phase"])
+
+    # ONLY WHAT IS NEW, poll to poll — the rowid is the byte offset's analogue.
+    before = bph.read_sidecar("h-one").get("offset")
+    r = bph.observe("h-one")
+    check("a poll with nothing new advances nothing and changes nothing",
+          bph.read_sidecar("h-one").get("offset") == before
+          and r["doing"] == "using process")
+
+    # THE DRAWER: literal output, out of the database, newest at the tail.
+    agents = brd.Agents.__new__(brd.Agents)
+    ba.register("h-one", "T", 1, kind="worker", where="", session="")
+    con.execute("INSERT INTO messages (session_id, role, content, timestamp)"
+                " VALUES (?, 'tool', ?, ?)",
+                ("20260731_2_bbb",
+                 json.dumps({"output": "3 files changed\n1 insertion",
+                             "exit_code": 0}), now))
+    con.commit()
+    check("a tool RESULT is its own output, unwrapped from the json",
+          agents.output("h-one")[-2:] == ["3 files changed", "1 insertion"],
+          agents.output("h-one"))
+    con.execute("INSERT INTO messages (session_id, role, content, timestamp)"
+                " VALUES (?, 'user', 'HIS PROMPT', ?)", ("20260731_2_bbb", now))
+    con.commit()
+    check("...and his own prompt read back is NOT the minister's output",
+          "HIS PROMPT" not in agents.output("h-one"), agents.output("h-one"))
+    _hcall(con, "20260731_2_bbb", "terminal", {"command": "hyprctl layers"}, now)
+    check("...and a terminal call is the command, the same as a Bash one",
+          agents.output("h-one")[-1] == "$ hyprctl layers",
+          agents.output("h-one"))
+
+    # WHERE TO READ THE WHOLE RUN. The log header is written before the session
+    # exists, so it names the store; once bound it names the run itself, and
+    # NEITHER of them is ever a `~/.claude/projects` path (the 2026-07-31 bug).
+    hint = bw.HermesBackend().history_hint("h-one", None)
+    check("a bound run is pointed at by the command that prints it",
+          hint == "hermes sessions export 20260731_2_bbb", hint)
+    check("...and an unbound one names the store rather than a file that is not there",
+          ".claude" not in bw.HermesBackend().history_hint("h-none", None),
+          bw.HermesBackend().history_hint("h-none", None))
+
+    # A RETRY runs the same prompt again under the same agent id. The dead
+    # session must not go on being read as the live one.
+    bw.HermesBackend().arm("h-one", argv)
+    check("re-arming drops the session bound to the run that died",
+          not bph.read_sidecar("h-one").get("hsession")
+          and bph.read_sidecar("h-one").get("offset") == 0,
+          bph.read_sidecar("h-one"))
+    _hsession(con, "20260731_3_ccc", sent, time.time() + 1)
+    bph.observe("h-one")
+    check("...and the retry binds to the LATER session with the same query",
+          bph.read_sidecar("h-one").get("hsession") == "20260731_3_ccc",
+          bph.read_sidecar("h-one").get("hsession"))
+
+    con.close()
+    ba.unregister("h-one")
+    del os.environ["BOARD_HERMES_DB"]
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -6563,7 +6734,8 @@ def main():
         # from a plain shell. The env is an input; a test must supply it.
         for k in ("BOARD_ORDER", "BOARD_AGENT_ID", "BOARD_WORK_SESSION",
                   "BOARD_WORK_TASK", "BOARD_WATCH_KEY", "BOARD_FILE",
-                  "BOARD_WORK_SPAWN", "BOARD_MAX_WORKERS", "BOARD_TRANSCRIPTS"):
+                  "BOARD_WORK_SPAWN", "BOARD_MAX_WORKERS", "BOARD_TRANSCRIPTS",
+                  "BOARD_HERMES_DB"):
             os.environ.pop(k, None)
         os.makedirs(os.path.join(tmp, "rt"))
         os.makedirs(os.path.join(tmp, "mv"))
@@ -6605,6 +6777,8 @@ def main():
         test_usage_fetch(os.path.join(tmp, "usf"))
         os.makedirs(os.path.join(tmp, "out"))
         test_card_output(os.path.join(tmp, "out"))
+        os.makedirs(os.path.join(tmp, "herm"))
+        test_hermes(os.path.join(tmp, "herm"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
         test_real_store()

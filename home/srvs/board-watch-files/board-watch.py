@@ -728,14 +728,20 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
     """
     stub = os.environ.get("BOARD_WATCH_SPAWN")
     env = dict(os.environ, BOARD_WATCH_KEY=agent_id, BOARD_AGENT_ID=agent_id)
-    # SAY SO, LOUDLY, rather than failing as a bare ENOENT. `claude` reaches
-    # this unit through the PATH pinned in `board-watch.nix`, and that PATH has
-    # to name two different profile layouts: NixOS's `/etc/profiles/per-user`
-    # on top, and standalone home-manager's `~/.nix-profile/bin` on book. If it
-    # is missing, every run fails identically and the board must say why.
-    if not stub and not shutil.which("claude", path=env.get("PATH")):
-        why = ("without starting at all (`claude` is not on this unit's PATH "
-               "on %s; PATH=%s)" % (HOST, env.get("PATH", "")))
+    # SAY SO, LOUDLY, rather than failing as a bare ENOENT. The CLI reaches this
+    # unit through the PATH pinned in `board-watch.nix`, and that PATH has to
+    # name two different profile layouts: NixOS's `/etc/profiles/per-user` on
+    # top, and standalone home-manager's `~/.nix-profile/bin` on book. If it is
+    # missing, every run fails identically and the board must say why.
+    #
+    # **It is the BACKEND'S binary, not `claude`.** [top, 2026-07-31] with the
+    # minister model set to a hermes one and no `hermes` on the box, every
+    # dispatch died at `execve` with a bare `[Errno 2] 'hermes'` — while this
+    # check, looking for a binary that run was never going to use, passed.
+    backend = bw.get_backend_for_role(role)
+    if not stub and not shutil.which(backend.name, path=env.get("PATH")):
+        why = ("without starting at all (`%s` is not on this unit's PATH "
+               "on %s; PATH=%s)" % (backend.name, HOST, env.get("PATH", "")))
         log("cannot spawn: " + why)
         return 127, why, 0.0
     if stub:
@@ -745,8 +751,13 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
         # allowed/denied sets, and the appended RULES system-prompt block —
         # live in `boardwork.AgentBackend`. Which backend follows the chosen
         # model: hermes models spawn via `hermes`, everything else via `claude`.
-        cmd = bw.get_backend_for_role(role).args(prompt=prompt, session=session,
-                                                 role=role, label=label)
+        cmd = backend.args(prompt=prompt, session=session,
+                           role=role, label=label)
+        # ...and a backend whose session id we cannot choose is bound to its run
+        # by the query text instead (`boardphase.arm`), so the card for a
+        # decision or an orchestrator can say what it is doing on either
+        # runtime. No-op for claude, which took our `--session-id`.
+        backend.arm(agent_id, cmd)
     t0 = time.time()
     cap = timeout or AGENT_TIMEOUT_S
     try:
