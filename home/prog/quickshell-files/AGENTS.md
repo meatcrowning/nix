@@ -1003,14 +1003,21 @@ qs ipc call brightness status  # level/hw/gamma/floor/backend, without driving i
   labels are four characters of jargon each and the card has no room to explain
   itself; the tooltip is where "psi" or "res" gets to say what it measures.
 - **The filter box is the only thing on this desktop that takes the keyboard**,
-  and it gives it back. `shell.qml` sets `WlrLayershell.keyboardFocus: OnDemand`
-  on the bar while `Procs.filterHover || Procs.filterFocus || Procs.filterLatch`
-  (and dock mode), and `None` otherwise. Three halves, all load-bearing:
-  - **HOVER is what arms it.** Hyprland grants an on-demand layer surface the
-    keyboard on the next pointer MOTION over it — measured in a nested
-    compositor, not on a click (`processMouseDownNormal` only calls `refocus()`
-    when the press lands on a *window*). So the surface has to already be
-    focusable before the pointer gets to the box.
+  and it gives it back. `shell.qml` sets `WlrLayershell.keyboardFocus` on the
+  bar (in dock mode): `Exclusive` for the one-frame PRESS grab
+  (`Procs.filterGrab`), else `OnDemand` while `Procs.filterFocus ||
+  Procs.filterLatch`, else `None`. Three halves, all load-bearing:
+  - **HOVER does not arm it, and changes nothing about focus at all.** Hyprland
+    grants an on-demand layer surface the keyboard on the next pointer MOTION
+    over it — measured in a nested compositor, not on a click
+    (`processMouseDownNormal` only calls `refocus()` when the press lands on a
+    *window*) — and a None→OnDemand commit grants nothing either. So a bar that
+    went OnDemand the moment the pointer reached the box *was* the "hover steals
+    focus from the window" report. The surface is made focusable only by a
+    **PRESS** on the box, which takes the keyboard through the one mode a commit
+    can switch to that grabs it outright — `Exclusive` — then settles back to
+    `OnDemand` the instant the box holds focus (`filterFocus`), restoring the
+    click-into-a-window hand-back.
   - **`filterLatch` is what makes giving it back safe, and it is the fix for
     "focus is stolen and no window ends up focused".** Dropping the surface from
     on-demand to none *while it holds the keyboard and the pointer is still over
@@ -1021,18 +1028,21 @@ qs ipc call brightness status  # level/hw/gamma/floor/backend, without driving i
     until the user clicks. The transition posts Hyprland's `activewindow>>,`;
     both the window and the panel then report no keyboard. That is exactly what
     the documented "click somewhere else in the dock to blur the box" gesture
-    did. So the latch holds the surface focusable from the hover until the
-    pointer leaves the **bar** (a passive `HoverHandler` on `barBody` clears it),
-    and the hand-back happens with the pointer over a window — the case the
-    compositor gets right. Repro harness: a nested Hyprland plus a probe layer
-    surface, driven by `hl.dsp.cursor.move` and read back through each surface's
-    own `activeFocus`. `hyprctl activewindow` is **not** an instrument here: it
-    reports `CFocusState::window()`, which `rawSurfaceFocus` never clears, so it
-    keeps naming a window that has not had the keyboard for minutes.
-  - **OnDemand, not Exclusive.** Exclusive keeps sending us the keyboard after
-    the user clicks into a window, so their next keystroke goes to the filter box
-    instead of what they just clicked on. OnDemand hands it back as part of that
-    click.
+    did. So the latch, set together with the press that grabs, holds the surface
+    focusable until the pointer leaves the **bar** (a passive `HoverHandler` on
+    `barBody` clears it), and the hand-back happens with the pointer over a
+    window — the case the compositor gets right. Repro harness: a nested Hyprland
+    plus a probe layer surface, driven by `hl.dsp.cursor.move` and read back
+    through each surface's own `activeFocus`. `hyprctl activewindow` is **not**
+    an instrument here: it reports `CFocusState::window()`, which
+    `rawSurfaceFocus` never clears, so it keeps naming a window that has not had
+    the keyboard for minutes.
+  - **OnDemand once focused — never sticky-Exclusive.** Exclusive keeps sending
+    us the keyboard after the user clicks into a window, so their next keystroke
+    would go to the filter box instead of what they just clicked on. That is why
+    the Exclusive state is only the one frame that makes the click grant
+    anything; the moment the box holds focus it is back to OnDemand, which hands
+    the keyboard back as part of the click into a window.
 
   **"Click anywhere outside the box and it stops taking keystrokes" has THREE
   cases, one per kind of thing that can be under the click, and each is

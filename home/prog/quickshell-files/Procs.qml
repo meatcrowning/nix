@@ -35,21 +35,24 @@ Singleton {
     // (see stateJson), because a reload is not the user putting it down.
     property string filter: ""
     function setFilter(t) { root.filter = t || ""; }
-    // Whether the filter box holds the keyboard, and whether the pointer is
-    // over it. The bar's layer surface only offers keyboard focus while one of
-    // these is true (shell.qml) — an always-focusable panel would swallow a
-    // keystroke meant for the window you were typing in. `filterHover` is what
-    // ARMS it: measured in a nested Hyprland, an on-demand layer surface is
-    // granted the keyboard by the compositor on the next pointer MOTION over it
-    // — not on a click — so the surface has to already be focusable before the
-    // pointer gets there.
+    // Whether the filter box currently holds the keyboard. The bar's layer
+    // surface offers keyboard focus only while this (or `filterLatch`) is true
+    // (shell.qml) — an always-focusable panel would swallow a keystroke meant
+    // for the window you were typing in.
     property bool filterFocus: false
-    property bool filterHover: false
+    // Transient, set for the duration of a PRESS on the box: makes the bar
+    // Exclusive so the compositor grants it the keyboard. Hyprland grants an
+    // on-demand layer surface the keyboard on pointer MOTION over it, never on
+    // a click — so a click cannot arm OnDemand itself. Exclusive is the one
+    // mode a commit can switch to that grabs the keyboard outright; it is
+    // dropped back to OnDemand the moment the box actually has focus, so
+    // clicking into a real window still hands the keyboard back.
+    property bool filterGrab: false
     // Bumped to ask the box to give the keyboard back — clicking anywhere else
     // in the panel. The box watches this rather than being reached into,
     // because it lives inside an asynchronous Loader in the dock grid.
     property int blurSeq: 0
-    function blurFilter() { root.blurSeq++; }
+    function blurFilter() { root.blurSeq++; root.filterGrab = false; }
 
     // ---- letting go of the keyboard ----------------------------------------
     //
@@ -79,9 +82,10 @@ Singleton {
     // while `rawSurfaceFocus(nullptr)` has reset `m_focusSurface`, so both
     // halves match and the call is a no-op.
     //
-    // So `filterLatch` holds the surface focusable from the hover until the
-    // pointer has LEFT THE BAR (shell.qml's HoverHandler clears it), which is
-    // the only moment the hand-back is the compositor's to get right.
+    // So `filterLatch` holds the surface focusable from a PRESS (not from
+    // hover) until the pointer has LEFT THE BAR (shell.qml's HoverHandler
+    // clears it), which is the only moment the hand-back is the compositor's
+    // to get right.
     //
     // THE CARET IS A SEPARATE QUESTION, and that separation is the whole
     // design. "Click anywhere outside the box and it stops taking the
