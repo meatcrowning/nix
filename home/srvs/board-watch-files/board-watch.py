@@ -616,11 +616,10 @@ file. Do not pick up any other item.
 
 His answer: {answer}
 
-RULES, in force for this session — the SAME block every board worker gets \
-(`boardwork.RULES`, quoted verbatim; a hand-written paraphrase here is how a \
-rule comes to be true nowhere):
-
-{rules}
+RULES are in force for this session and not negotiable — the SAME block every
+board worker gets (`boardwork.RULES`, appended verbatim to the system prompt by
+the spawner, never paraphrased — a hand-written paraphrase is how a rule comes
+to be true nowhere).
 
 8. **When you are done, record it on the board — with the tool, never by \
 hand.** This decision has ALREADY been moved out of NEEDS YOU and into IN \
@@ -742,22 +741,11 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
     if stub:
         cmd = ["/bin/sh", "-c", stub]
     else:
-        cmd = ["claude", "-p", prompt,
-               *(["--session-id", session] if session else []),
-               # WHICH MODEL, and how hard it thinks, is per role: see
-               # `boardwork.ROLES`. A decision agent inherits his settings.json
-               # default; the orchestrator does not, because it only plans.
-               *bw.role_flags(role),
-               # ...and how much CONTEXT it starts with, same per-role split and
-               # imported for the same reason: `boardwork.context_flags`. A
-               # minister gets the trimmed tool set and no superpowers; Solomon
-               # keeps both and gets only the cache-prefix flag.
-               *bw.context_flags(role),
-               "--permission-mode", "acceptEdits",
-               "--allowedTools", *ALLOW,
-               "--disallowedTools", *DENY,
-               "--output-format", "text",
-               "-n", label]
+        # All the Claude-isms — model/effort, cache flags, trimmed tools, the
+        # allowed/denied sets, and the appended RULES system-prompt block —
+        # live in `boardwork.AgentBackend`; `BOARD_BACKEND` can switch it.
+        cmd = bw.get_backend().args(prompt=prompt, session=session,
+                                    role=role, label=label)
     t0 = time.time()
     cap = timeout or AGENT_TIMEOUT_S
     try:
@@ -842,7 +830,7 @@ def _summon(notes, index, total):
     try:
         rc, how, secs = spawn(
             bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
-                                          notes=text, rules=bw.RULES,
+                                          notes=text,
                                           cap=bw.cap()),
             aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
             role="orchestrator")
@@ -1301,7 +1289,7 @@ def tick():
     said = ". ".join(parts) if parts else "(answered, but the text is empty)"
 
     log("firing on decision %s (%s) - %s" % (item["num"] or "?", item["key"], why))
-    prompt = PROMPT.format(repo=REPO, host=bw.host_line(), rules=bw.RULES,
+    prompt = PROMPT.format(repo=REPO, host=bw.host_line(),
                            item=item_span(doc["lines"], item),
                            answer=said, key=item["key"])
 
