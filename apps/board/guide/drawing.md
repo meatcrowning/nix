@@ -97,7 +97,7 @@ the gutter is reserved from its own `barW`, never a literal.
 
 ### Clearing a chore: the one thing in this app that DELETES his prose
 
-*"i should be able to clear the 'to do, when you feel like it' stuff if i wish.
+*"i should be able to clear the 'to do' stuff if i wish.
 currently i cannot remove it via board program"*. Agents add bullets to WAITING
 ON YOU TO DO (`boardmove.note`, the watcher's failure paths) and until now
 nothing ever took one away, so the section only ever grew.
@@ -106,7 +106,7 @@ nothing ever took one away, so the section only ever grew.
 click** on the row and the row's right-click menu. Every point of it is a rule:
 
 - **A DOUBLE CLICK removes it**, because that is how he asked: *"i should be
-  able to just double click on stuff in the to do when you feel like it section
+  able to just double click on stuff in the to do section
   to remove them"*. It did nothing for a day and the reason is worth keeping:
   the row's `MouseArea` was `acceptedButtons: Qt.RightButton`, so the left
   button never reached it at all and the double click landed on nothing. **A

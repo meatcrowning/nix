@@ -191,13 +191,15 @@ INFORMATION: at the beginning"*. So the line is
 is grammatical.
 
 **They are DRAWN in a sub-section of their own**, headed
-`summoned - who is on what right now` — [his, later on 2026-07-30] *"SUMMONED
-messages should go in their own sub section"*, which reverses the half of the
-rule above that filed them under `information`. `COMMANDED` is filed beside
-`SUMMONED` by `boardparse.TAG_SECTION`/`section_of()` (the one place a tag and
-the sub-section it files under are allowed to differ), and the heading text is
-`TAG_LABEL`/`label_of()` because `summoned` alone would read as one more tag in
-a column of tags. It is LAST in `TODO_ORDER`: not a report at all but the state
+`summoned` — [his, later on 2026-07-30] *"SUMMONED messages should go in their
+own sub section"*, which reverses the half of the rule above that filed them
+under `information`. `COMMANDED` is filed beside `SUMMONED` by
+`boardparse.TAG_SECTION`/`section_of()` (the one place a tag and the sub-section
+it files under are allowed to differ), and the heading text is
+`TAG_LABEL`/`label_of()`. [his, 2026-07-31] it used to read
+`summoned - who is on what right now` so the bare word would not read as one
+more tag in a column of tags; he has since asked for the heading to be just
+`summoned`. It is LAST in `TODO_ORDER`: not a report at all but the state
 of the triangle, and every line in it is retired by its own minister's result.
 Reading is unchanged: the store
 is full of the old `INFORMATION: **subject** - SUMMONED: Marbas (...)` shape and
@@ -293,7 +295,7 @@ disguise:
 
 *"the information, completion, partial etc of a message should be used to
 organize them on the board. under the needs you section there should be sub
-sections for each of these headers"*. So `to do, when you feel like it` is no
+sections for each of these headers"*. So `to do` is no
 longer one flat list: each tag that has bullets gets a sub-heading with its own
 bullets under it.
 
@@ -332,7 +334,7 @@ and every one of those paths reads the flat one.
   band), one persisted map (`Settings`' `collapsed`), one container idiom
   (`Item { visible: !collapsed; implicitHeight: visible ? col.implicitHeight : 0 }`).
   So the sub-headings lost the `interactive: false` they shipped with, and
-  `to do, when you feel like it` and each DAY in `landed` became bands instead
+  `to do` and each DAY in `landed` became bands instead
   of bare dim lines. The keys are namespaced by what they name and never by
   position — `todo:<TAG>`, `landed:<date>` — because a group's index changes
   with what is on the board and would hand one group's fold to another. The
