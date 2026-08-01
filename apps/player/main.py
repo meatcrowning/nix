@@ -88,6 +88,14 @@ STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
 ART = CACHE / "art"
 DB_PATH = DATA / "library.db"
 
+# Where slskd drops completed downloads (home/prog/slskd.nix). They are not in
+# the library root, so the player scan never sees them until tools/player-add.py
+# moves them into aud/ and rescans — see AutoScanner, which makes that step
+# automatic so a freshly downloaded track lands in "recently added" without a
+# manual rescan. top-only in practice (air has no slskd), but guarded on
+# existence so the same module is inert where the dir is absent.
+SLSKD_DOWNLOADS = Path(os.path.expanduser("~/.local/share/slskd/downloads"))
+
 # The panel's palette file, rewritten by wal-set.sh between the wal markers.
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
 PALETTE_KEYS = ["bg", "bgAlt", "border", "accent", "dim", "text", "textDim",
@@ -2865,6 +2873,99 @@ def handoff_paths(paths, timeout=2.0):
         s.close()
 
 
+class AutoScanner(QObject):
+    """Pick newly-downloaded tracks up without a manual rescan.
+
+    Two paths feed the library and neither is watched:
+
+      * slskd drops completed downloads into ~/.local/share/slskd/downloads,
+        which is NOT under LIBRARY_ROOT, so the scan (which walks aud/) never
+        sees them until tools/player-add.py moves them into aud/ and rescans.
+        That tool only ran as the tail of a soulseek-missing.py pass, so a
+        download that completed afterwards sat in downloads/ invisible to the
+        player — clicking Rescan could not help, because there was nothing new
+        under the scanned root. This watches the downloads dir and runs the
+        import when it changes (and once at startup for any backlog).
+      * files dropped straight into aud/ (a manual copy, a ripper) were only
+        seen on the next launch's one-shot scan or a manual Rescan. This
+        watches LIBRARY_ROOT too and rescans when it changes.
+
+    Both are debounced and both converge on Library.rescan(), whose `changed`
+    signal re-opens the open smart playlist — so a freshly added track appears
+    in "recently added" without the button. player-add.py is run as a child of
+    this process (sys.executable is the player's python env, which it needs);
+    the module is never reimplemented here — see AGENTS.md's atomicsave rule.
+    """
+
+    RESCAN_DEBOUNCE_MS = 2000
+    IMPORT_DEBOUNCE_MS = 3000
+    REWATCH_S = 30
+
+    def __init__(self, library, parent=None):
+        super().__init__(parent)
+        self._library = library
+        self._proc = None
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.directoryChanged.connect(self._on_dir_changed)
+        # Debounce: a download or copy writes a burst of filesystem events.
+        self._rescan_timer = QTimer(self)
+        self._rescan_timer.setSingleShot(True)
+        self._rescan_timer.timeout.connect(self._library.rescan)
+        self._import_timer = QTimer(self)
+        self._import_timer.setSingleShot(True)
+        self._import_timer.timeout.connect(self._run_import)
+        # Low-frequency re-arm so a dir that appears later (SSD remount, slskd
+        # first started after the app) starts being watched.
+        self._rewatch_timer = QTimer(self)
+        self._rewatch_timer.timeout.connect(self._watch_dirs)
+        self._rewatch_timer.start(self.REWATCH_S * 1000)
+        self._watch_dirs()
+        # Catch up anything already sitting in downloads/ from a previous session.
+        if SLSKD_DOWNLOADS.is_dir() and _has_audio(SLSKD_DOWNLOADS):
+            self._import_timer.start(500)
+
+    def _watch_dirs(self):
+        for p in (str(LIBRARY_ROOT), str(SLSKD_DOWNLOADS)):
+            if os.path.isdir(p) and p not in self._watcher.directories():
+                self._watcher.addPath(p)
+
+    def _on_dir_changed(self, path):
+        self._watch_dirs()  # in case the dir structure changed under us
+        if path == str(LIBRARY_ROOT):
+            self._rescan_timer.start(self.RESCAN_DEBOUNCE_MS)
+        elif path == str(SLSKD_DOWNLOADS):
+            self._import_timer.start(self.IMPORT_DEBOUNCE_MS)
+
+    def _run_import(self):
+        if self._proc is not None:
+            return  # an import is already moving the current batch
+        self._proc = QProcess(self)
+        self._proc.finished.connect(self._on_import_done)
+        self._proc.start(sys.executable, [str(HERE / "tools" / "player-add.py")])
+
+    def _on_import_done(self, _code, _status):
+        self._proc = None
+        # player-add rescans the DB itself, but out-of-process: this app's
+        # models are untouched, so re-scan in-process to refresh the open smart
+        # playlist ("recently added" included). The scan is incremental and
+        # emits `changed`, which re-opens the current smart playlist.
+        self._library.rescan()
+
+
+def _has_audio(d):
+    """True if `d` or any descendant holds an audio file (cheap, early out)."""
+    try:
+        for e in os.scandir(d):
+            if e.is_dir(follow_symlinks=False):
+                if _has_audio(e.path):
+                    return True
+            elif os.path.splitext(e.name)[1].lower() in AUDIO_EXTS:
+                return True
+    except OSError:
+        return False
+    return False
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -2884,6 +2985,7 @@ def main():
     player = Player(library, prefs)
     lyrics = LyricsProvider(prefs)
     bridge = Bridge(library, player, lyrics)
+    autoscan = AutoScanner(library, app)
     titlebar = Titlebar()
     palette = Palette(PANEL_THEME)
     style = DeskStyle()
