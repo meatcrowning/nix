@@ -28,10 +28,14 @@ Item {
         property string kind: "play"   // prev | next | play | pause | shuffle | repeat
         property bool active: true
         property bool toggled: false   // lit accent even without hover (repeat/shuffle on)
+        // non-empty replaces the kind-derived glyph — the repeat button uses it
+        // to swap `o` (repeat-all) for `1` (repeat-one), matching the app
+        property string glyphOverride: ""
         signal clicked()
 
         // glyph per kind: skip << >>, play/pause > ||, shuffle *, repeat o
-        readonly property string glyph: kind === "prev" ? "<<"
+        readonly property string glyph: glyphOverride !== "" ? glyphOverride
+            : kind === "prev" ? "<<"
             : kind === "next" ? ">>"
             : kind === "pause" ? "||"
             : kind === "shuffle" ? "*"
@@ -419,6 +423,9 @@ Item {
                 kind: "repeat"
                 active: Media.canRepeat
                 toggled: Media.repeatMode !== 0
+                // repeat-one gets its own mark, repeat-all (and off) keep the
+                // `o` that also serves the all-loop, per DESIGN.md §12.1
+                glyphOverride: Media.repeatMode === 1 ? "1" : "o"
                 onClicked: Media.cycleRepeat()
             }
         }
