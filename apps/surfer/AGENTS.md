@@ -85,6 +85,32 @@ WebEngineView still needs `qtwebenginequickplugin` on the QML import path) but
 never runs the wrapper — its third line would hand the arguments to the user's
 live browser.
 
+## Downloads — the progress toast gate is TIME, not size
+
+Downloads land in `~/Downloads`. Every download gets a completion/failure toast;
+a **slow or large** one also gets a live progress toast that updates in place
+(`notify-send -p` then `-r <id>`, `-t 0` so it persists) with a CP437 block bar —
+docs/DESIGN.md §10.4. The decision lives in the `Downloads` bridge in `main.py`
+(`Downloads.progress`), not in QML: a toast appears when the download has run
+`SLOW_MS` (1.5 s) **or** is bigger than `LARGE_BYTES` (3 MB). The size-only gate
+that used to sit in `Main.qml` (`totalBytes > 3145728`) was the bug — a small
+file on a slow connection never qualified, so the user waited on a silent screen
+for a download that was slow only in *time* (§10.4 is explicitly about
+"longer downloads"). `Main.qml` now feeds every byte change to
+`Downloads.progress(key, name, received, total, elapsed_ms)` and the bridge
+decides, throttling to whole-percent updates and leaving fast small downloads to
+their single completion toast rather than a flash.
+
+Verified headlessly by **[`tools/download-test.py`](tools/download-test.py)**: a
+real offscreen QtWebEngine download of a 320 KB file streamed slowly over
+loopback — `--old` replays the pre-fix size gate and reproduces the missing
+toast; the default path asserts the same slow small download now emits a
+persisted, in-place-morphed progress toast, and drives the `Downloads` decision
+gate directly (fast-small silent, slow-small toasts, same-percent throttled,
+large-fast toasts on size, unknown total never toasts) plus a drift-guard that
+`Main.qml` still calls the bridge with elapsed time. Run it after touching
+either half.
+
 ## Ad blocking — the engine is only half of it
 
 `AdBlocker` + `Cosmetic` in `main.py`. The engine is Brave's adblock-rust (the

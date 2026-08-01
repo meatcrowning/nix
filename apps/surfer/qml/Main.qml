@@ -709,17 +709,23 @@ Window {
         // never get marked. Calling the setters once the tree is built makes it
         // stick. Needs the en-US Hunspell dict compiled to .bdic on
         // QTWEBENGINE_DICTIONARIES_PATH (surfer.nix builds it + points there).
-        // downloads land in ~/Downloads; large ones get a live progress toast
-        // (updated in place), every one gets a completion/failure toast — see
-        // the Downloads bridge in main.py.
+        // downloads land in ~/Downloads; slow or large ones get a live progress
+        // toast (updated in place), every one gets a completion/failure toast —
+        // see the Downloads bridge in main.py.
         onDownloadRequested: (download) => {
             download.downloadDirectory = downloadDir;
             download.accept();
             var key = "dl" + (win.dlSeq++);
             var name = download.downloadFileName;
+            var started = Date.now();
             download.receivedBytesChanged.connect(function() {
-                if (!download.isFinished && download.totalBytes > 3145728) // >3 MB
-                    Downloads.progress(key, name, download.receivedBytes, download.totalBytes);
+                if (download.isFinished)
+                    return;
+                // The bridge owns the size/time gate (DESIGN 10.4 — a download
+                // that takes TIME deserves a live toast even when small), so
+                // feed it every byte change and let it decide + throttle.
+                Downloads.progress(key, name, download.receivedBytes,
+                                   download.totalBytes, Date.now() - started);
             });
             download.isFinishedChanged.connect(function() {
                 if (!download.isFinished)
