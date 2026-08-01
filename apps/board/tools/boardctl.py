@@ -277,7 +277,8 @@ def cmd_dispatch(a):
         print("boardctl: nothing to dispatch", file=sys.stderr)
         return 1
     if rec["state"] == "queued":
-        print("queued (%d already running, the cap is %d) - a later tick starts it: %s"
+        print("queued above the cap (%d already bound, the cap is %d) - a later "
+              "summoning starts it: %s"
               % (len(bw.live_workers()), bw.cap(), rec["task"][:70]))
         _warn_overlaps(rec)
         return 0
@@ -332,7 +333,7 @@ def cmd_cap(a):
     if a.n is None:
         print(bw.cap())
         return 0
-    print("at most %d ministers at once" % bw.set_cap(a.n))
+    print("at most %d ministers bound in the triangle at once" % bw.set_cap(a.n))
     return 0
 
 
@@ -359,7 +360,7 @@ def cmd_minister(a):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    print("the next minister runs on %s at %s effort" % (flag, effort))
+    print("the next minister answers on %s at %s effort" % (flag, effort))
     return 0
 
 
@@ -372,7 +373,7 @@ def cmd_model(a):
             print("%s %-28s %s" % ("*" if flag == cur else " ", flag, label))
         return 0
     try:
-        print("the next orchestrator runs on %s" % bw.set_orch_model(a.name))
+        print("the next summoner, Solomon, runs on %s" % bw.set_orch_model(a.name))
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
@@ -504,7 +505,7 @@ def main(argv=None):
     s = sub.add_parser("agents", help="who is running right now, by phase")
     s.set_defaults(fn=cmd_agents)
 
-    s = sub.add_parser("dispatch", help="hand one piece of work to a minister")
+    s = sub.add_parser("dispatch", help="summon a minister to one piece of work")
     s.add_argument("task", nargs="+")
     s.add_argument("--where", default="", help="the files it will touch")
     s.add_argument("--context", default="",
@@ -536,7 +537,7 @@ def main(argv=None):
                    help="what you were working on when it came up")
     s.set_defaults(fn=cmd_ask)
 
-    s = sub.add_parser("cap", help="how many ministers may run at once")
+    s = sub.add_parser("cap", help="how many ministers may be bound at once")
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_cap)
 
