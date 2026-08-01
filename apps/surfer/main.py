@@ -275,12 +275,24 @@ class Notifier(QObject):
 
 class Downloads(QObject):
     """Desktop toasts for downloads, driven from Main.qml's onDownloadRequested.
-    A large download gets a live progress toast that updates IN PLACE (notify-send
-    --replace-id) with a CP437 block bar in the body — which the pixel DOS font
-    renders as a real bar; every download gets a completion (or failure) toast.
-    The progress toast is sent expire-never (-t 0) so it survives the gaps
-    between updates — see _send. Keyed by an opaque per-download string from
-    QML."""
+    A SLOW or LARGE download gets a live progress toast that updates IN PLACE
+    (notify-send --replace-id) with a CP437 block bar in the body — which the
+    pixel DOS font renders as a real bar; every download gets a completion (or
+    failure) toast. The progress toast is sent expire-never (-t 0) so it
+    survives the gaps between updates — see _send. Keyed by an opaque
+    per-download string from QML.
+
+    The decision to show a progress toast at all lives here, not in QML, so it
+    is testable. DESIGN 10.4 is about a download that takes TIME ("longer
+    downloads ... stay on the screen until they are finished"), which is why
+    the gate is duration-aware: a download that has run SLOW_MS or longer gets
+    a live toast even when it is small (a small file on a slow connection waits
+    just as long), while a fast download of any size is left to its single
+    completion toast rather than a useless flash. LARGE_BYTES keeps the
+    size-only trigger for genuinely big transfers regardless of speed."""
+
+    LARGE_BYTES = 3 * 1024 * 1024   # a download this big toasts on size alone
+    SLOW_MS = 1500.0                # ...or one that has run this long (time)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -327,12 +339,23 @@ class Downloads(QObject):
         except Exception:
             pass
 
-    @Slot(str, str, float, float)
-    def progress(self, key, name, received, total):
+    def _wants_progress(self, total, elapsed_ms):
+        """Would a live progress toast help yet? Size alone for big transfers,
+        or TIME for anything that has run long — even a small file on a slow
+        connection waits visibly (DESIGN 10.4)."""
+        if total > self.LARGE_BYTES:
+            return True
+        return elapsed_ms >= self.SLOW_MS
+
+    @Slot(str, str, float, float, float)
+    def progress(self, key, name, received, total, elapsed_ms=0.0):
         if total <= 0:
-            return
+            return  # no denominator → no honest bar
+        shown = key in self._pct
+        if not shown and not self._wants_progress(total, elapsed_ms):
+            return  # too fast AND too small — a toast would only flash
         pct = int(received * 100 / total)
-        if self._pct.get(key) == pct:
+        if shown and self._pct.get(key) == pct:
             return  # throttle: only re-toast on a whole-percent change
         self._pct[key] = pct
         body = "%s %d%%\n%s / %s" % (self._bar(pct), pct,
