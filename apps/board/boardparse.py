@@ -690,12 +690,13 @@ TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION",
               "SUMMONED")
 
 #: The heading a group is DRAWN with, when the tag's own word is not enough.
-#: Only the summon group: `summoned` alone would read as one more tag in a
-#: column of tags, and what he asked for is a sub-section that says what those
-#: lines ARE — [his, 2026-07-30] *"SUMMONED messages should go in their own sub
-#: section"*, the who-is-working-on-what lines. ASCII hyphen, never `-`: the
-#: font has no dash and a missing glyph clips the line (docs/DESIGN.md §2.3).
-TAG_LABEL = {"SUMMONED": "summoned - who is on what right now"}
+#: Only the summon group — and since [his, 2026-07-31] its own word IS enough:
+#: the band's heading reads just `summoned`, written out here rather than left
+#: to `label_of`'s fallback so a future change of mind lands in one obvious
+#: place. (It used to read `summoned - who is on what right now`, set aside
+#: because `summoned` alone read as one more tag in a column of tags; he has
+#: since asked for the bare word.)
+TAG_LABEL = {"SUMMONED": "summoned"}
 
 
 def tag_of(text):
@@ -1023,7 +1024,7 @@ def remove_row(lines, line_index):
 
 
 # --------------------------------------------- clearing a chore off the TO DO list
-# His words: *"i should be able to clear the 'to do, when you feel like it' stuff
+# His words: *"i should be able to clear the 'to do' stuff
 # if i wish. currently i cannot remove it via board program"*. Agents add bullets
 # there (`add_todo_bullet`, `boardmove.note`) and nothing ever took one away, so
 # the section only grew.
