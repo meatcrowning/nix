@@ -599,15 +599,23 @@ Singleton {
     property int eqNumBands: 0
     property bool eqWriteLive: false
     property int _eqWatchers: 0
+    // The user has scrolled the spectrum (the direct EQ path) while the widget
+    // is on screen, so the socket must stay up even with no overlay open.
+    property bool _eqEngaged: false
 
-    // Connect the EE socket only while a copy of the widget has the overlay
-    // open (a blind always-on connect logs a ServerNotFoundError into the
-    // cumulative `qs log` all day on a machine with no EasyEffects — same rule
-    // as the player queue socket).
+    // Connect the EE socket only while something actually wants the EQ — the
+    // overlay open, or the user wheel-scrolling the spectrum. A blind
+    // always-on connect logs a ServerNotFoundError into the cumulative
+    // `qs log` all day on a machine with no EasyEffects — same rule as the
+    // player queue socket.
     function watchEq(on) {
         if (on) root._eqWatchers++; else if (root._eqWatchers > 0) root._eqWatchers--;
-        eeSock.connected = root._eqWatchers > 0;
-        if (root._eqWatchers > 0) eqProbeTimer.restart();
+        root._syncEq();
+    }
+    function _syncEq() {
+        const want = root._eqWatchers > 0 || root._eqEngaged;
+        eeSock.connected = want;
+        if (want) eqProbeTimer.restart();
     }
     function probeEqWrite() {
         if (!eeSock.connected || root.eqWriteLive) return;
@@ -620,6 +628,61 @@ Singleton {
         id: eqProbeTimer
         interval: 300
         onTriggered: root.probeEqWrite()
+    }
+
+    // The spectrum is a DIRECT EQ surface: wheeling over it adjusts the band
+    // under the cursor in place (no click-the-spectrum-first to open the
+    // overlay). `eqEnsure` brings the write socket up the first time; the
+    // widget calls `eqRelease` when it leaves the screen to drop it again.
+    function eqEnsure() {
+        if (!root._eqEngaged) { root._eqEngaged = true; root._syncEq(); }
+        if (!root.eqWriteLive && eeSock.connected) root.probeEqWrite();
+    }
+    function eqRelease() {
+        if (!root._eqEngaged) return;
+        root._eqEngaged = false;
+        root._syncEq();
+    }
+
+    // The frequency axis both EQ surfaces share: 30..16000 Hz, log-scaled.
+    readonly property real eqFmin: 30
+    readonly property real eqFmax: 16000
+    function eqFreqFrac(f) {
+        const ff = (f > 0) ? f : root.eqFmin;
+        return (Math.log(ff) - Math.log(root.eqFmin))
+             / (Math.log(root.eqFmax) - Math.log(root.eqFmin));
+    }
+    // Nearest EQ band to an x given as a fraction of the surface width. Same
+    // proximity rule as Equalizer's bandAt — within ~7 px or it is not a hit.
+    function eqBandAtXFrac(xf, width) {
+        if (root.eqBands.length === 0) return -1;
+        let best = -1, bestD = 1e9;
+        for (let i = 0; i < root.eqBands.length; i++) {
+            const b = root.eqBands[i];
+            const d = Math.abs(xf - root.eqFreqFrac((b && b.freq > 0) ? b.freq : root.eqFmin));
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return (bestD * width) <= 7 ? best : -1;
+    }
+
+    // One wheel step over the spectrum. `steps` is the whole-notch count from
+    // WheelNotch (each 1 dB). Writes through setBandGain — the SAME socket /
+    // EasyEffects-autosave persist path the overlay uses, untouched. Refuses
+    // when the write is KNOWN impossible (the probe answered "error"), so a
+    // dead write path never pretends to adjust the audio.
+    function eqWheelStep(x, width, steps) {
+        if (root.eqBands.length === 0) return false;
+        root.eqEnsure();
+        const i = root.eqBandAtXFrac(width > 0 ? (x / width) : 0, width);
+        if (i < 0 || steps === 0) return false;
+        // Write path not decided yet (probe still out) -> optimistically move
+        // the band; the probe lands within a frame and the next notch writes.
+        if (!root.eqWriteLive && !root._probing) return false;
+        const cur = root.eqBands[i].gain || 0;
+        const db = Math.max(-36, Math.min(36, Math.round((cur + steps) * 100) / 100));
+        root.eqBands[i].gain = db;          // move immediately (§6.4 direct manipulation)
+        if (root.eqWriteLive) root.setBandGain(i, db);
+        return true;
     }
 
     FileView {
