@@ -851,6 +851,23 @@ def _hermes_span(now):
     return tokens, cost, span_days
 
 
+def _prox_reset(renews, now):
+    """The hermes proximity row's TOOLTIP — `resets in ____` on the nous
+    account's `renews`, the one reset the row's "% used" is a share of.
+
+    Same register as `readings()`'s `reset`, so the two tooltips read alike:
+    a COUNTDOWN (`resets in 2h 14m`), and never empty — no `renews` read yet,
+    or one whose time has gone by, each words itself rather than inventing a
+    countdown (docs/DESIGN.md §10).
+    """
+    if not renews:
+        return "resets in ? - the nous account has not been read on this host yet"
+    left = _left(renews, now)
+    if left:
+        return "resets in %s" % left
+    return "resets in ? - this renewal time has gone by"
+
+
 def hermes_proximity(now=None):
     """The ONE signal the display binds for "how much of hermes is left".
 
@@ -916,6 +933,7 @@ def hermes_proximity(now=None):
                 return {
                     "known": True, "fraction": fraction, "remaining": left,
                     "level": level, "text": text, "detail": detail,
+                    "reset": _prox_reset(bal["renews"] if bal else None, now),
                 }
     if bal is not None:
         remaining = bal["remaining"]
@@ -945,6 +963,7 @@ def hermes_proximity(now=None):
         return {
             "known": True, "fraction": fraction, "remaining": remaining,
             "level": level, "text": text, "detail": detail,
+            "reset": _prox_reset(bal["renews"], now),
         }
     # No real balance to count down from: the ledger-only honest shrug. Same
     # wording as before the decision — spend and burn rate, and the reason the
@@ -956,6 +975,7 @@ def hermes_proximity(now=None):
             "level": "unknown", "text": "unknown",
             "detail": ("no hermes ledger on this host yet - it needs one hermes "
                        "minister run to have written state.db"),
+            "reset": _prox_reset(None, now),
         }
     per_day = cost / span_days if span_days else 0.0
     text = "~$%.2f in 7d · ~$%.2f/day" % (cost, per_day)
@@ -965,6 +985,7 @@ def hermes_proximity(now=None):
     return {
         "known": False, "fraction": None, "remaining": None,
         "level": "unknown", "text": text, "detail": detail,
+        "reset": _prox_reset(None, now),
     }
 
 

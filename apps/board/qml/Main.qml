@@ -795,6 +795,17 @@ Window {
                     // publishes (remaining + monthly % used when the plan
                     // defines a cap), or the honest unknown when it has not read
                     // one here yet. Bound, never derived (§5.3, §10).
+                    //
+                    // It used to pair a "balance" label against the figure on
+                    // the same line; at the column's width the two could not
+                    // both fit and the figure's left edge ran under the label,
+                    // so the reading looked broken. §5.4 says the content
+                    // identifies itself — "13% used · $19.06 left" needs no word
+                    // in front of it — so the label came off and the figure is
+                    // the whole clean line. The two FIGURE rows that used to sit
+                    // under it (5h and 7d tokens+cost) are gone too: the
+                    // percentage is the entire readout now, and what it does not
+                    // say about itself lives in the tooltip.
                     Item {
                         id: hproxrow
                         width: usageCol.width
@@ -802,37 +813,22 @@ Window {
                         readonly property int lineH: Theme.fontSize + 4
                         PixelText {
                             y: Math.round((hproxrow.lineH - height) / 2)
-                            color: Theme.textDim
-                            text: "balance"
-                        }
-                        PixelText {
-                            y: Math.round((hproxrow.lineH - height) / 2)
-                            x: hproxrow.width - width
                             color: Usage.hprox && Usage.hprox.known
                                    ? Theme.text : Theme.textDim
                             text: Usage.hprox ? (Usage.hprox.text || "unknown")
                                               : "unknown"
                         }
-                    }
-                    Repeater {
-                        model: Usage.hrows
-                        delegate: Item {
-                            id: hero
-                            required property var modelData
-                            readonly property int lineH: Theme.fontSize + 4
-                            width: usageCol.width
-                            height: lineH
-                            PixelText {
-                                y: Math.round((hero.lineH - height) / 2)
-                                color: Theme.textDim
-                                text: hero.modelData.label
-                            }
-                            PixelText {
-                                y: Math.round((hero.lineH - height) / 2)
-                                x: hero.width - width
-                                color: hero.modelData.known ? Theme.text : Theme.textDim
-                                text: hero.modelData.text
-                            }
+                        // ...and when this window COMES BACK is the row's own
+                        // tooltip — `boardusage.hermes_proximity()`'s
+                        // `resets in ____` (`_left` on the nous account's
+                        // `renews`), one short line, never empty (§10), the same
+                        // wording every usage meter's tooltip uses. [his,
+                        // 2026-07-30] "the tooltip should just say `resets in
+                        // ____`".
+                        ToolTipArea {
+                            anchors.fill: parent
+                            text: (Usage.hprox && Usage.hprox.reset)
+                                  ? Usage.hprox.reset : ""
                         }
                     }
                 }
