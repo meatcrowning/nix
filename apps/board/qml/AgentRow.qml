@@ -144,22 +144,24 @@ Item {
         function onChanged() { row.refreshOutput(); }
     }
 
-    // ---- A CARD IS WITHHELD UNTIL ITS TOP LINE IS A REAL SENTENCE ----
-    // [his, 2026-07-30] *"minister cards should only show up once the top line
-    // of their card reads [agent] is [verb] - as right now they can appear
-    // before that with the text 'nothing yet' at the top which looks bad"*. The
-    // judgement is `boardagents`' (`speaks`), off the observation STATE and not
-    // off the words, and it flips on the ordinary 2.5s poll — so the card
-    // appears by itself the moment the agent claims a phase or is first seen
-    // acting, with nothing reloaded. `!== false` and not a truthiness test:
-    // `boardwork`'s synthetic cards carry no such field and stay drawn.
+    // ---- A CARD IS NEVER WITHHELD; ONE WITH NOTHING TO SAY YET RISES ----
+    // [his, 2026-07-31] *"instead of hiding the card until it shows the name on
+    // the top line etc, can we just put a card in there that reads '[agent]
+    // arises...' with an animated elipsies ... the card should just show the
+    // rising text and nothing else until the agent card actually starts
+    // producing stuff like before"*.
     //
-    // An invisible child is out of a Column's layout entirely, so a withheld
-    // card leaves no gap. The triangle's own empty state is counted off the
-    // CARDS (`Main.qml`'s `nothingRunning`), not off what is visible, so it does
-    // not claim nothing is running while one is merely withheld — the section is
-    // briefly blank instead, which is the honest reading of "no placeholder".
-    visible: !agent || agent.speaks !== false
+    // There is no `visible` binding here on purpose, and putting one back is a
+    // regression. The gate this replaced (`speaks`) withheld a card until its
+    // top line was a real sentence [his, 2026-07-30] — correct for the two
+    // seconds a healthy spawn takes, and the reason a minister wedged before
+    // its first API call was undrawable and burned a core behind an empty
+    // triangle for 45 minutes [top, 2026-07-31].
+    //
+    // `boardagents` decides (`arising`) off the observation STATE, and it flips
+    // on the ordinary 2.5s poll, so the card fills itself in the moment the
+    // agent claims a phase or is first seen acting, with nothing reloaded.
+    readonly property bool arising: agent && agent.arising === true
 
     readonly property bool running: agent && agent.running === true
     //: It stopped, and it had recorded its result first. See the accent gutter.
@@ -385,7 +387,10 @@ Item {
     PixelText {
         id: tallyT
         readonly property bool onDoing: row.saysLine === ""
-        visible: row.contextLine !== ""
+        // ...and never on a rising card: *"nothing else"* is his, and a tally
+        // of a context nothing has been put in yet is exactly the noise the
+        // rising line replaces.
+        visible: row.contextLine !== "" && !row.arising
                  && (row.saysLine !== "" || row.doingLine !== "")
         anchors.right: col.right
         y: 0
@@ -416,7 +421,9 @@ Item {
     // `where`.
     PixelText {
         id: bornT
-        visible: row.workedLine !== ""
+        // Not while it is rising, same rule as the tally: *"working for 2
+        // seconds"* beside *"arises..."* is two ways of saying it just started.
+        visible: row.workedLine !== "" && !row.arising
                  && (row.saysLine !== "" || row.doingLine !== "")
         anchors.right: tallyT.visible ? tallyT.left : col.right
         anchors.rightMargin: tallyT.visible ? 8 : 0
@@ -510,7 +517,15 @@ Item {
         // which is the same condition, `row.titleFirst`.
         Item {
             width: col.width
-            implicitHeight: titleT.implicitHeight
+            // THE RISING LINE IS THE WHOLE CARD — *"the card should just show
+            // the rising text and nothing else"* [his, 2026-07-31]. What it was
+            // handed and where it works are fixed for the life of the card and
+            // will still be here a second later; the one thing worth reading in
+            // that second is that it is coming up. Height 0 as well as
+            // invisible, or the card keeps the row's gap and rises as a
+            // one-line card in a three-line box.
+            visible: !row.arising
+            implicitHeight: visible ? titleT.implicitHeight : 0
             height: implicitHeight
 
             readonly property bool wide: width > 56 * row.cellW
@@ -563,7 +578,8 @@ Item {
         // and not colour (§3.5).
         Para {
             width: col.width
-            visible: row.showDetail && row.agent && row.agent.detail !== ""
+            visible: row.showDetail && !row.arising
+                     && row.agent && row.agent.detail !== ""
             height: visible ? implicitHeight : 0
             color: Theme.dim
             text: row.agent ? row.agent.detail : ""

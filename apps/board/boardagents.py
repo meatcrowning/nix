@@ -982,37 +982,38 @@ def agents(procs=None):
                                             who or ORCHESTRATOR_NAME)
             if orch_line:
                 a["doingLine"] = orch_line
-        # MAY THE CARD BE DRAWN AT ALL? [his, 2026-07-30] *"minister cards should
-        # only show up once the top line of their card reads [agent] is [verb] -
-        # as right now they can appear before that with the text 'nothing yet' at
-        # the top which looks bad"*. A card leads with its claim and falls back
-        # to the observation, so its top line is `nothing yet` exactly when the
-        # agent has claimed nothing AND nothing has been observed of it yet —
-        # `doing_line`'s `none`/`starting` branch, the placeholder for an ABSENCE
-        # of observation. That is the state, not the string: matching the words
-        # would break the moment either sentence is reworded, and Solomon's own
-        # startup pair (`orch_line`, above) is a real line in the same states.
+        # A CARD IS ALWAYS DRAWN, AND ONE WITH NOTHING TO SAY YET SAYS THAT.
+        # [his, 2026-07-31] *"instead of hiding the card until it shows the name
+        # on the top line etc, can we just put a card in there that reads
+        # '[agent] arises...' with an animated elipsies ... the card should just
+        # show the rising text and nothing else until the agent card actually
+        # starts producing stuff like before"*.
         #
-        # NOT A GATE FOREVER, AND THAT IS LOAD-BEARING. The card appears on the
-        # poll after the agent's first phase OR its first observed act, which
-        # for a live worker is seconds; a spawn whose transcript never appears
-        # is `unlinked` past `boardphase.START_GRACE_S` (120s) and is drawn
-        # then, and one that is linked but has written nothing by then is
-        # `silent` and is drawn too.
+        # THE CONDITION IS THE OLD GATE'S, INVERTED — the same set of cards,
+        # drawn instead of withheld. What it replaced (`speaks`) held a card back
+        # until its top line was a real sentence [his, 2026-07-30], which was
+        # right for the two seconds a healthy spawn takes and was also why a
+        # wedged minister was invisible for 45 minutes while burning a core
+        # [top, 2026-07-31]: one that never reached its first API call is
+        # registered, linked and has genuinely done nothing — precisely the
+        # withheld state. A placeholder that is ALWAYS drawn has no such hole,
+        # and there is now no state in which a running agent has no card.
         #
-        # This paragraph used to end "the one card that stays hidden is one
-        # that is registered, linked, and has genuinely never done anything —
-        # which is what he asked for." It was wrong, and the state it waved
-        # through is the one that cost him an evening [top, 2026-07-31]: a
-        # worker wedged before its first API call is registered, linked and has
-        # genuinely never done anything, and stayed invisible for 40 minutes
-        # while burning a core. He asked for a card withheld for the SECONDS
-        # before it speaks, because "nothing yet" at the top looks bad — not
-        # for a stuck minister to be undrawable. `boardphase` bounds the
-        # silence now; nothing here withholds a card that is past that bound.
-        a["speaks"] = bool(a["saysLine"] or orch_line) \
-            or a["state"] != "running" \
-            or (obs.get("observed") or "") not in ("none", "starting")
+        # It is the observation STATE, never the words: matching the sentences
+        # would break the moment either is reworded. Solomon is excluded because
+        # `orch_line` already gives him a real line in exactly these states.
+        a["arising"] = a["state"] == "running" \
+            and not a["saysLine"] and not orch_line \
+            and (obs.get("observed") or "") in ("none", "starting")
+        if a["arising"]:
+            # ...AND NOTHING ELSE ON THE CARD — his words, and not decoration.
+            # The observation under it could only say `nothing yet`, which is
+            # the placeholder this line exists to replace, so drawing both says
+            # the same absence twice. `AgentRow` drops the title row and the
+            # trailing metadata off this same flag.
+            a["saysLine"] = bph.arises_line(who)
+            a["saysDetail"] = ""
+            a["doingLine"] = ""
         # `ok` / `quiet` / `none` / `starting` / `unlinked` — which of the honest
         # outcomes the observation is, so the card can label the line correctly
         # (`doing` while it runs, `last` once it has stopped) without

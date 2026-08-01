@@ -558,6 +558,40 @@ def _subject(who):
     return who or "it"
 
 
+def arises_line(who=""):
+    """*"<name> arises..."* — the whole of a card that has nothing to say yet.
+
+    [his, 2026-07-31] *"instead of hiding the card until it shows the name on the
+    top line etc, can we just put a card in there that reads '[agent] arises...'
+    with an animated elipsies ... the card should just show the rising text and
+    nothing else until the agent card actually starts producing stuff like
+    before"*.
+
+    THIS REPLACED A GATE, and that is the point of it. A card used to be
+    WITHHELD until its top line was a real sentence, which read fine for the two
+    seconds a healthy spawn takes and hid a wedged minister completely: one that
+    never reached its first API call was registered, linked and had genuinely
+    done nothing, so it was undrawable, and it burned a core for 45 minutes
+    behind an empty triangle before he noticed [top, 2026-07-31]. A placeholder
+    that is always drawn cannot have that failure mode — there is no state left
+    in which a running agent has no card.
+
+    It is §10.6-honest for the same reason Solomon's startup pair is: every word
+    is written HERE, as the placeholder for an ABSENCE of observation, and
+    nothing is derived from an observation that has not happened. It claims only
+    that the thing is arriving, which the live process is evidence for.
+
+    The trailing `...` is three ASCII periods, never U+2026 (docs/DESIGN.md
+    §2.3), and `AgentRow.qml` animates those three cells because this lands on
+    the card's TOP line — the only line that may tick.
+
+    It is NOT the end state. Past `START_GRACE_S` with an empty transcript the
+    observation becomes `silent` and the card stops saying this and says so,
+    because "arises..." forever is the old invisibility in better clothes.
+    """
+    return "%s arises..." % _subject(who)
+
+
 def says_line(rec, who=""):
     """The claim as a sentence, or "" when the agent has said nothing.
 
@@ -1015,13 +1049,17 @@ def observe(agent_id, session=None):
             # LINKED, AND IT HAS NOT ACTED — but for how long. `none` is the
             # spawn that is two seconds old and about to work; `silent` is the
             # one that never did anything at all, and the two must not share a
-            # state, because `boardagents.speaks` WITHHOLDS THE CARD for `none`
-            # and would then withhold it forever. Measured on top 2026-07-31:
-            # a worker wedged before its first API call held a card that was
-            # built, confirmed and correctly ordered, and was drawn by nobody
-            # for 40 minutes — the one failure that most needed showing was the
-            # one shape the triangle could not show. Bounded the same way and
-            # by the same constant that turns `starting` into `unlinked` above.
+            # state: `none` is what puts a card in its bare *"<name> arises..."*
+            # form (`boardagents.arising`), which is the right thing to say for
+            # a few seconds and a lie after a minute. Measured on top
+            # 2026-07-31: a worker wedged before its first API call held a card
+            # that was built, confirmed and correctly ordered, and was drawn by
+            # nobody for 45 minutes — the one failure that most needed showing
+            # was the one shape the triangle could not show. (That was the older
+            # `speaks` gate, which WITHHELD the card outright; a rising card
+            # replaced it, and this bound is what stops the rising line becoming
+            # the same silence in better clothes.) Bounded by the same constant
+            # that turns `starting` into `unlinked` above.
             if not rec.get("linkedAt"):
                 rec["linkedAt"] = time.time()
             young = time.time() - float(rec.get("linkedAt") or 0) \
