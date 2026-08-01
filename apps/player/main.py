@@ -1609,6 +1609,16 @@ class Player(QObject):
         if touched:
             self.currentChanged.emit()
 
+    def setFavorite(self, track_id, fav):
+        """Forward a favourite flip from the queue server (the panel heart).
+
+        `Library.setFavorite` writes the DB + tag queue and emits trackChanged;
+        `Bridge._on_track_changed` answers that by patching this queue's cached
+        dicts (`apply_track_update`), so a TOGGLE_FAV is reflected in the next
+        queue snapshot without a queue/index change. The server calls this on
+        the Player, not the Library — both expose the same method names."""
+        self._library.setFavorite(track_id, bool(fav))
+
     # ---- properties for QML ----
 
     @Property("QVariant", notify=currentChanged)

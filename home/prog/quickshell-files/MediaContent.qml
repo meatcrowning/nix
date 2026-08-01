@@ -242,7 +242,13 @@ Item {
         readonly property real fmin: 30
         readonly property real fmax: 16000
         readonly property var bands: Media.eqBands
-        readonly property int n: bands.length
+        // `bands` is a property `var`, which arrives UNDEFINED on the other
+        // QML engine for a beat during a panel reload (see Media.qml reload
+        // continuity). Coerce that to 0 here — it gates delegate creation, so
+        // every delegate-level read (freq, refresh's `.gain`) is skipped for
+        // the undefined window instead of throwing "Cannot read property gain
+        // of undefined" into the cumulative `qs log`.
+        readonly property int n: (eq.bands && eq.bands.length) || 0
         readonly property bool editable: Media.eqWriteLive
         // One wheel notch = one 1 dB step (a discrete stepper, §9.2 — not a
         // scroll surface), clamped to the EQ's ±36 dB range in `setBandGain`.
@@ -352,7 +358,8 @@ Item {
                     color: eq.editable ? Theme.accent : Theme.textDim
                 }
                 function refresh() {
-                    gain = (index < eq.bands.length) ? (eq.bands[index].gain || 0) : 0;
+                    gain = (eq.bands && index < eq.bands.length && eq.bands[index])
+                        ? (eq.bands[index].gain || 0) : 0;
                 }
                 function setGain(db) { gain = db; }
                 Component.onCompleted: refresh()
@@ -365,7 +372,8 @@ Item {
             visible: eq.editable && eq.hoverBand >= 0
             anchors { top: parent.top; topMargin: 2; horizontalCenter: parent.horizontalCenter }
             text: {
-                const b = (eq.hoverBand >= 0 && eq.hoverBand < eq.bands.length) ? eq.bands[eq.hoverBand] : null;
+                const b = (eq.bands && eq.hoverBand >= 0 && eq.hoverBand < eq.bands.length)
+                    ? eq.bands[eq.hoverBand] : null;
                 if (!b) return "";
                 return (b.gain > 0 ? "+" : "") + b.gain.toFixed(1) + " dB";
             }
@@ -700,12 +708,17 @@ Item {
                 // write), so it tracks every notch live.
                 PixelText {
                     id: eqHoverReadout
+                    // `Media.eqBands` is a property `var` that arrives undefined
+                    // for a beat during a panel reload — gate on it being an
+                    // array so neither readout (visible nor text) dereferences
+                    // undefined into the cumulative `qs log`.
+                    readonly property var bands: Media.eqBands && Media.eqBands.length ? Media.eqBands : []
                     visible: !root.eqOpen && eqTrigger.hoverBand >= 0
-                              && eqTrigger.hoverBand < Media.eqBands.length
+                             && eqTrigger.hoverBand < bands.length
                     anchors { bottom: parent.bottom; bottomMargin: 2; horizontalCenter: parent.horizontalCenter }
                     text: Media.eqWriteLive
-                        ? (eqTrigger.hoverBand >= 0 && eqTrigger.hoverBand < Media.eqBands.length
-                            ? root.fmtDb(Media.eqBands[eqTrigger.hoverBand].gain) : "")
+                        ? (eqTrigger.hoverBand >= 0 && eqTrigger.hoverBand < bands.length
+                            ? root.fmtDb(bands[eqTrigger.hoverBand].gain) : "")
                         : "EQ read-only"
                     color: Media.eqWriteLive ? Theme.text : Theme.textDim
                 }
