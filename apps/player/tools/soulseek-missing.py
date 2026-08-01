@@ -120,14 +120,25 @@ def snapshot_db(src, dest):
 
 def library_keys(db_path):
     """Every (artist, title) folded key present in the live player library, so
-    a track that has arrived since missing.tsv was written is never queued."""
-    snap = db_path + ".soulseek-snapshot"
-    snapshot_db(db_path, snap)
-    conn = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
-    keys = set()
-    for artist, title in conn.execute("SELECT artist, title FROM tracks"):
-        keys |= trackmatch.keys(artist, title)
-    conn.close()
+    a track that has arrived since missing.tsv was written is never queued.
+    The WAL-safe snapshot is transient: it lives in the dump dir for the
+    duration of the run and is removed afterwards, so a run never drops a
+    17 MB copy next to the live library."""
+    import tempfile
+    fd, snap = tempfile.mkstemp(prefix="soulseek-lib-", suffix=".db",
+                                dir=DUMP_DIR)
+    os.close(fd)
+    try:
+        snapshot_db(db_path, snap)
+        conn = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
+        keys = set()
+        for artist, title in conn.execute("SELECT artist, title FROM tracks"):
+            keys |= trackmatch.keys(artist, title)
+        conn.close()
+    finally:
+        for p in (snap, snap + "-wal", snap + "-shm"):
+            if os.path.exists(p):
+                os.remove(p)
     return keys
 
 
