@@ -166,18 +166,17 @@ Window {
     // gesture and nothing else: the store is not touched, and the byte-identical
     // round trip is untouched with it.
     //
-    // KEYED ON THE BULLET'S OWN TEXT, and SESSION-ONLY, and both halves are
-    // deliberate. A bullet's line number is what the rest of this app addresses
-    // it by, and it is exactly the wrong key here: the file is rewritten under
-    // this window by agents and by the docs sync, so a line remembered as
-    // folded would come back folded over a DIFFERENT chore — the one failure
-    // this list may not have. The text moves with the bullet and cannot do
-    // that; two identical bullets folding together is a tie, not a lie, and an
-    // agent rewording one unfolds it, which is right. Session-only because
-    // `collapsed` above is for the three sections, which are few, named and
-    // permanent — a map of his prose growing an entry per chore he ever folded
-    // is not state worth keeping, and a fold he does not remember making is
-    // worse than one he has to make again.
+    // KEYED ON THE BULLET'S OWN TEXT. A bullet's line number is what the rest
+    // of this app addresses it by, and it is exactly the wrong key here: the
+    // file is rewritten under this window by agents and by the docs sync, so a
+    // line remembered as folded would come back folded over a DIFFERENT chore —
+    // the one failure this list may not have. The text moves with the bullet
+    // and cannot do that; two identical bullets folding together is a tie, not
+    // a lie, and an agent rewording one unfolds it, which is right.
+    //
+    // PERSISTED (§14), by the same `Settings` the section folds use: the text
+    // key survives a relaunch because the bullet itself survives on disk, so
+    // his per-message fold is restored the next time this window opens.
     property var todoFolded: ({})
     function isTodoFolded(t) { return todoFolded[t] === true; }
     function toggleTodoFolded(t) {
@@ -185,6 +184,7 @@ Window {
         for (var i in todoFolded) f[i] = todoFolded[i];
         f[t] = !(f[t] === true);
         todoFolded = f;          // reassigned: a mutated object notifies nothing
+        Settings.set("todoFolded", f);
     }
 
     // ---- ...and which cards have their output drawer open ----
@@ -311,6 +311,8 @@ Window {
         var d = Settings.get("drafts", {});
         drafts = (d && typeof d === "object") ? d : ({});
         allLogs = Settings.get("allLogs", false) === true;
+        var tf = Settings.get("todoFolded", {});
+        todoFolded = (tf && typeof tf === "object") ? tf : ({});
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
     }
