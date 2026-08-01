@@ -540,4 +540,121 @@ Singleton {
         target: SettingsStore.d
         function onMediaSpectrumBarsChanged() { if (root.live) cavaBounce.restart(); }
     }
+
+    // ---- the EQ overlay's data: reflect + live-edit the EasyEffects EQ ----
+    // The spectrum is the EQ's tap-in: clicking it opens an in-panel overlay
+    // that shows the same parametric EQ EasyEffects applies to the output chain
+    // and, when the write path exists, edits its bands in real time.
+    //
+    // The request path is EasyEffects' local socket (`set_property` /
+    // `get_property` against the per-channel DB, e.g. `equalizer#0#left` with
+    // `band2Gain`). Upstream added the per-channel field only after 8.2.7 —
+    // the version this nixpkgs ships — so on the installed build the socket
+    // cannot address band gains. `eqWriteLive` is PROBED, not assumed: the
+    // socket asks for one band and lights the write path only if it answers.
+    // Until then the overlay draws the EQ read-only, with the edit disabled
+    // and a reason shown (docs/DESIGN.md 10.2 — refuse visibly, never no-op).
+    //
+    // The band values themselves come from the persisted equalizerrc here
+    // (EasyEffects autosaves it), because that is what the panel can read on
+    // the stock build; the socket read/gate lives next to it so the same code
+    // upgrades to live when EasyEffects does.
+    property var eqBands: []        // [{freq, gain}] -- the real EQ, L to R
+    property int eqNumBands: 0
+    property bool eqWriteLive: false
+    property int _eqWatchers: 0
+
+    // Connect the EE socket only while a copy of the widget has the overlay
+    // open (a blind always-on connect logs a ServerNotFoundError into the
+    // cumulative `qs log` all day on a machine with no EasyEffects — same rule
+    // as the player queue socket).
+    function watchEq(on) {
+        if (on) root._eqWatchers++; else if (root._eqWatchers > 0) root._eqWatchers--;
+        eeSock.connected = root._eqWatchers > 0;
+        if (root._eqWatchers > 0) eqProbeTimer.restart();
+    }
+    function probeEqWrite() {
+        if (!eeSock.connected || root.eqWriteLive) return;
+        root._probing = true;
+        eeSock.write("get_property:output:equalizer:0:left:band0Gain\n");
+        eeSock.flush();
+    }
+    property bool _probing: false
+    Timer {
+        id: eqProbeTimer
+        interval: 300
+        onTriggered: root.probeEqWrite()
+    }
+
+    FileView {
+        id: eqFile
+        path: (Quickshell.env("HOME") || "") + "/.config/easyeffects/db/equalizerrc"
+        watchChanges: true
+        onFileChanged: reload()
+        onLoadFailed: () => {}
+        onLoaded: root._parseEq(text())
+    }
+    function _parseEq(text) {
+        // INI-ish keyfile: groups `[soe][Equalizer#0]` / `[soe][Equalizer#0#left]`
+        // with `band<i>Gain=` / `band<i>Frequency=` keys on the left channel.
+        const gain = {}, freq = {};
+        let num = 8;
+        let cur = "";
+        for (const raw of text.split("\n")) {
+            if (raw.length === 0) continue;
+            const g = raw.match(/^\[soe\]\[([^\]]+)\]$/);
+            if (g) { cur = g[1]; continue; }
+            if (cur !== "Equalizer#0" && cur !== "Equalizer#0#left") continue;
+            const kv = raw.match(/^(\w+)=(.*)$/);
+            if (!kv) continue;
+            const k = kv[1], v = kv[2];
+            if (cur === "Equalizer#0" && k === "numBands") { num = parseInt(v, 10) || 8; continue; }
+            if (cur !== "Equalizer#0#left") continue;
+            let m;
+            if ((m = k.match(/^band(\d+)Gain$/))) gain[+m[1]] = parseFloat(v);
+            else if ((m = k.match(/^band(\d+)Frequency$/))) freq[+m[1]] = parseFloat(v);
+        }
+        const bands = [];
+        let nonZero = false;
+        for (let i = 0; i < num; i++) {
+            const gv = gain[i] || 0;
+            bands.push({ freq: freq[i] || 0, gain: gv });
+            if (gv !== 0 || (freq[i] || 0) !== 0) nonZero = true;
+        }
+        if (!nonZero) return;                       // empty/default file: keep last known
+        root.eqNumBands = bands.length;
+        root.eqBands = bands;
+    }
+
+    Socket {
+        id: eeSock
+        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/EasyEffectsServer"
+        parser: SplitParser {
+            onRead: line => {
+                const l = line.trim();
+                if (l === "") return;
+                // The probing reply resolves `eqWriteLive`.
+                if (root._probing) {
+                    root._probing = false;
+                    // a real band gain answers a number; errors start with "error"
+                    root.eqWriteLive = l.indexOf("error") !== 0 && /^-?\d/.test(l);
+                }
+            }
+        }
+    }
+
+    // Write one band gain, L/R together (the EQ is a stereo pair, and leaving
+    // the unison copy stale would split a stereo curve).
+    // NOTE: on the stock 8.2.7 build this socket cannot address a channel, so
+    // callers must gate on `eqWriteLive`; the probe decides that for us.
+    function setBandGain(i, db) {
+        if (!root.eqWriteLive || i < 0 || i >= root.eqBands.length) return false;
+        const v = Math.max(-36, Math.min(36, db));
+        const prec = Math.round(v * 100) / 100;
+        root.eqBands[i].gain = prec;
+        eeSock.write("set_property:output:equalizer:0:left:band" + i + "Gain:" + prec.toFixed(2) + "\n"
+                   + "set_property:output:equalizer:0:right:band" + i + "Gain:" + prec.toFixed(2) + "\n");
+        eeSock.flush();
+        return true;
+    }
 }
