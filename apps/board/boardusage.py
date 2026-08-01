@@ -759,6 +759,53 @@ PROXIMITY_WORD = {
 }
 
 
+# ----------------------------------------------------------- his own budget
+#: The allowance HE can set for the hermes minister window — ONE number, a
+#: dollar budget, stored where the board keeps its other settings
+#: (`~/.local/state/board/`, the same dir `boardwork` uses for `cap` and
+#: `summoners`). It is the fallback denominator for `hermes_proximity` when the
+#: real nous account publishes no monthly `monthly_credits` cap (a pay-as-you-go
+#: plan) or no balance has been read at all; with none set, the honest-unknown
+#: path stands. It is only ever his number, never invented (docs/DESIGN.md §10).
+def _hermes_budget_file():
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    return os.path.join(base, "board", "hermes_budget")
+
+
+def hermes_budget():
+    """His dollar budget for the minister window, or None when unset."""
+    try:
+        with open(_hermes_budget_file(), "r", encoding="utf-8") as f:
+            v = float(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    return v if math.isfinite(v) and v > 0 else None
+
+
+def set_hermes_budget(v):
+    """Persist his budget, returning it. Raises ValueError for a non-positive one."""
+    v = float(v)
+    if not math.isfinite(v) or v <= 0:
+        raise ValueError("a budget is a positive dollar amount")
+    p = _hermes_budget_file()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("%.2f\n" % v)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)
+    return v
+
+
+def clear_hermes_budget():
+    """Remove his budget; the honest-unknown path stands again."""
+    try:
+        os.remove(_hermes_budget_file())
+    except OSError:
+        pass
+
+
 def _hermes_span(now):
     """`(tokens, cost_usd, span_days)` for ministers in the LAST 7 DAYS.
 
@@ -832,9 +879,44 @@ def hermes_proximity(now=None):
     honest unknown — spend and burn rate only, `known` False — the exact
     behaviour before this decision, because a number we cannot verify is the
     one thing this function must never draw as real.
+
+    The one case the real account cannot answer is his settable budget
+    (`hermes_budget`): when the plan publishes no monthly denominator, or no
+    balance has been read at all, a budget he set becomes the allowance and the
+    signal counts his minister spend against it — `used`, `left`, `fraction`
+    and the level are then real arithmetic on his own number, never invented.
+    With no budget set and no real figure, the honesty above stands.
     """
     now = time.time() if now is None else now
     bal = _nous_balance(now=now)
+    # ---- his OWN budget: the settable fallback (see `hermes_budget`) ----
+    # Consulted only when the real account data cannot answer used-vs-left by
+    # itself: the plan publishes no `monthly_credits` denominator, or no balance
+    # has been read at all. A real balance WITH a fraction always wins, so his
+    # number never overrides it. With no budget set this block is skipped and
+    # the honest-unknown paths below stand exactly as before.
+    if bal is None or bal["fraction"] is None:
+        budget = hermes_budget()
+        if budget is not None:
+            tokens, cost, span_days = _hermes_span(now)
+            if tokens is not None:
+                per_day = cost / span_days if span_days else 0.0
+                left = max(0.0, budget - cost)
+                fraction = min(1.0, cost / budget) if budget > 0 else None
+                level = _level_for(fraction) or "unknown"
+                burn = (" · ~$%.2f/day" % per_day) if per_day else ""
+                text = "$%.2f used of $%.2f budget - $%.2f left%s" % (
+                    cost, budget, left, burn)
+                detail = ("his $%.2f budget for the minister window; hermes "
+                          "ministers spent $%.2f in 7d, $%.2f left%s" % (
+                              budget, cost, left, burn))
+                if bal is not None:
+                    detail += ("; the nous account itself shows $%.2f usable"
+                               % bal["remaining"])
+                return {
+                    "known": True, "fraction": fraction, "remaining": left,
+                    "level": level, "text": text, "detail": detail,
+                }
     if bal is not None:
         remaining = bal["remaining"]
         cap = bal["cap"]

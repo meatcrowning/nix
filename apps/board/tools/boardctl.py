@@ -101,6 +101,7 @@ import boardparse as bp                                            # noqa: E402
 import boardphase as bph                                           # noqa: E402
 import boardundo as bu                                             # noqa: E402
 import boardwork as bw                                             # noqa: E402
+import boardusage as busage                                        # noqa: E402
 
 
 def cmd_start(a):
@@ -380,6 +381,29 @@ def cmd_model(a):
     return 0
 
 
+def cmd_budget(a):
+    """His dollar budget for the hermes minister window: the settable fallback
+    allowance `boardusage.hermes_proximity` counts against when the real nous
+    account publishes no monthly cap (pay-as-you-go) or no balance has been
+    read. `clear` (or `off`) unsets it and the readout is honest-unknown again.
+    This is the scriptable half of the one number the board stores for him."""
+    if a.amount is None or a.amount == "show":
+        b = busage.hermes_budget()
+        print(("$%.2f" % b) if b is not None else "(no hermes budget set)")
+        return 0
+    if a.amount in ("clear", "off", "none"):
+        busage.clear_hermes_budget()
+        print("cleared the hermes budget; the readout is honest-unknown again")
+        return 0
+    try:
+        v = busage.set_hermes_budget(a.amount)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    print("hermes minister budget set to $%.2f for the window" % v)
+    return 0
+
+
 def cmd_inbox(a):
     if a.what == "take":
         msgs = ba.take(a.id, include_queue=a.queue)
@@ -566,6 +590,12 @@ def main(argv=None):
                    help="take: drain the queue too (board-watch only)")
     s.add_argument("--quiet", action="store_true", help="take: print nothing if empty")
     s.set_defaults(fn=cmd_inbox)
+
+    s = sub.add_parser("budget", help="his dollar budget for the hermes minister "
+                       "window (the settable fallback allowance)")
+    s.add_argument("amount", nargs="?", default=None,
+                   help="dollars, or 'clear' to unset; empty shows it")
+    s.set_defaults(fn=cmd_budget)
 
     a = p.parse_args(argv)
     # PER-HOST store: `top` writes `docs/board.top.md`, `book` `docs/board.book.md`,
