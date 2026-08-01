@@ -751,6 +751,14 @@ some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
 `QUESTION:` you need a word from him before anything else moves; \
 `INFORMATION:` a fact, nothing asked of him.
 
+   **A completion note is AS SHORT as its result.** When nothing surprising
+happened — it worked, nothing failed, you deviated from nothing, there is no
+decision he needs to make — then the note for that ask IS one short line and
+nothing under it: `COMPLETION: done, no errors. pushed.` Detail (an indented
+line, a second clause) earns its place only for what would otherwise surprise
+him — something that did not work, a choice you made on his behalf, a rebuild
+left pending, work deliberately left out. Never dress a plain success up.
+
    The board (`docs/board.<hostname>.md`, this host's own — the two machines \
 no longer share one) is a store three programs parse and write concurrently; \
 every edit is a targeted line edit under a lock. Do not open it in an editor. \
