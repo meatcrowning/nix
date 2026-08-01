@@ -29,6 +29,13 @@ PopupWindow {
     // that stopping on one feels answered.
     property int delayMs: 350
 
+    // Short-freeze: while the Screenshot overlay is up (TooltipState.frozen) its
+    // full-screen surface steals the pointer and this tooltip's hover goes false
+    // — which would retract the chip the instant Meta+Shift+S fires, before the
+    // capture. A tooltip that is already displayed holds while frozen, then
+    // finishes its retract when the freeze lifts if the hover is still gone.
+    readonly property bool frozen: TooltipState.frozen
+
     // True only once the target is actually attached to a window; itemRect
     // throws before that (and re-evaluates via windowChanged once it is).
     readonly property bool ready: target && target.QsWindow && target.QsWindow.window
@@ -49,7 +56,16 @@ PopupWindow {
             // already left, and a tooltip that lingers is in the way.
             reposition();
             dwell.restart();
-        } else {
+        } else if (!frozen) {
+            dwell.stop();
+            slide = 0;
+        }
+    }
+    // When the screenshot overlay lifts its freeze, a chip that was held out
+    // while its hover is gone must finish the retract now; one still being
+    // hovered just stays (its show->true path takes over).
+    onFrozenChanged: {
+        if (!frozen && !show && slide > 0.001) {
             dwell.stop();
             slide = 0;
         }
