@@ -1834,7 +1834,7 @@ def test_summon_cleared(tmp):
           sorted(groups.get("SUMMONED", []))
           == sorted(B.text(t) for t in (NEW_A, NEW_B)), groups)
     check("...under one heading that says what those lines ARE",
-          B.label_of("SUMMONED").startswith("summoned - "),
+          B.label_of("SUMMONED") == "summoned",
           B.label_of("SUMMONED"))
     check("...and `COMMANDED` heads no second subsection of its own",
           "COMMANDED" not in groups, list(groups))
@@ -3191,7 +3191,7 @@ def test_work(tmp):
           not os.path.exists(bw.orch_model_file())
           and bw.orch_model() == bw.DEFAULT_ORCH_MODEL, bw.orch_model())
     check("a name he half-remembers resolves, ambiguity does not",
-          bw.resolve_model("opus") == "claude-opus-5"
+          bw.resolve_model("opus 5") == "claude-opus-5"
           and bw.resolve_model("haiku") == "claude-haiku-4-5-20251001")
     for bad in ("5", "gpt", ""):
         try:
@@ -3206,7 +3206,7 @@ def test_work(tmp):
           bw.role_flags("orchestrator"))
     # The whole of "changing it mid-run applies to the NEXT prompt" is that this
     # is a file read per spawn, with nothing cached and nothing signalled.
-    bw.set_orch_model("opus")
+    bw.set_orch_model("opus 5")
     check("...and changing it again changes the next spawn, with no restart",
           bw.role_flags("orchestrator")[:2] == ["--model", "claude-opus-5"],
           bw.role_flags("orchestrator"))
@@ -3945,10 +3945,11 @@ def test_window(app, tmp):
               for m, t in tips),
           [(t[0].property("text") if t else None) for m, t in tips])
     chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
-    # SIX now: two meters and the four dropdowns, which carry their `hint` here
-    # rather than in the footer for the same reason.
+    # SEVEN now: the two meters, the four dropdowns (which carry their `hint`
+    # here rather than in the footer for the same reason) and the hermes
+    # proximity row's reset tooltip.
     check("...and no chip is on screen until he dwells on one (8)",
-          len(chips) == 6 and all(c.width() == 0 and not c.isVisible() for c in chips),
+          len(chips) == 7 and all(c.width() == 0 and not c.isVisible() for c in chips),
           [(c.width(), c.isVisible()) for c in chips])
 
     # ---- ...and it slides out to the LEFT, out of a fixed right edge ----
@@ -6653,7 +6654,12 @@ def _hermes_db(path):
     con = sqlite3.connect(path)
     con.executescript("""
         CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL,
-                               model TEXT, started_at REAL NOT NULL);
+                               model TEXT, started_at REAL NOT NULL,
+                               input_tokens INTEGER, output_tokens INTEGER,
+                               cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+                               reasoning_tokens INTEGER,
+                               estimated_cost_usd REAL, actual_cost_usd REAL,
+                               cost_status TEXT, cost_source TEXT);
         CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,
                                session_id TEXT NOT NULL, role TEXT NOT NULL,
                                content TEXT, tool_calls TEXT, tool_name TEXT,
@@ -6813,6 +6819,67 @@ def test_hermes(tmp):
     del os.environ["BOARD_HERMES_DB"]
 
 
+def test_hermes_proximity(tmp):
+    """THE HERMES LIMIT IS HONESTLY UNKNOWN — NOT A FAKED MARGIN.
+
+    He asked "how will I know when I'm getting close to hitting my limit with
+    hermes". The board's only source on the hermes (deepseek via the nous
+    inference API) spend is hermes' own ledger, which records ESTIMATED cost
+    and no balance; no endpoint this repo has exposes a remaining allowance.
+    So `hermes_proximity` reports an explicit unknown (`known` False, `level`
+    "unknown") and carries only what the ledger genuinely has — 7-day spend and
+    a per-day burn rate. It must never turn spend into a "$X left" (no balance)
+    or a percentage (no denominator).
+    """
+    import boardusage as bu
+    print("\n=== the hermes limit is an honest unknown, with real spend figures ===")
+    # No ledger at all: unknown, nothing that reads as a margin.
+    os.environ["BOARD_HERMES_DB"] = os.path.join(tmp, "missing.db")
+    p = bu.hermes_proximity()
+    check("with no ledger the limit is 'unknown' and the level is 'unknown'",
+          p["known"] is False and p["level"] == "unknown"
+          and p["fraction"] is None and p["remaining"] is None, p)
+
+    # A ledger with real figures: still unknown, and text is spend, never "$X left".
+    db = os.path.join(tmp, "prox.db")
+    con = _hermes_db(db)
+    now = time.time()
+    con.execute("INSERT INTO sessions (id, source, model, started_at,"
+                " input_tokens, output_tokens, reasoning_tokens,"
+                " estimated_cost_usd, actual_cost_usd, cost_status, cost_source)"
+                " VALUES ('p1','tool','deepseek/x',?,100000,50000,10000,0.90,"
+                "        NULL,'estimated','provider_models_api')",
+                (now - 3 * 86400,))
+    con.execute("INSERT INTO sessions (id, source, model, started_at,"
+                " input_tokens, output_tokens, reasoning_tokens,"
+                " estimated_cost_usd, actual_cost_usd, cost_status, cost_source)"
+                " VALUES ('p2','tool','deepseek/x',?,200000,100000,20000,0.40,"
+                "        NULL,'estimated','provider_models_api')",
+                (now - 3600,))
+    # A non-tool session at $50 must be excluded (his interactive sessions).
+    con.execute("INSERT INTO sessions (id, source, model, started_at,"
+                " estimated_cost_usd) VALUES ('p3','cli','deepseek/x',?,50.0)",
+                (now - 3600,))
+    con.commit()
+    os.environ["BOARD_HERMES_DB"] = db
+    p = bu.hermes_proximity(now=now)
+    check("the limit is still unknown even with spend present",
+          p["known"] is False and p["level"] == "unknown", p)
+    check("text is 7-day spend and a rate, never '$X left'",
+          "$1.30" in p["text"] and "0.43" in p["text"] and "left" not in p["text"],
+          p["text"])
+    check("the hover says the margin is unknown and names why",
+          "margin is unknown" in p["detail"]
+          and "nous account balance" in p["detail"], p["detail"])
+    check("the thresholds live in one place, ok -> warning -> critical",
+          [l for l, _, _ in bu.PROXIMITY_LEVELS] ==
+          ["ok", "warning", "critical"], bu.PROXIMITY_LEVELS)
+    con.close()
+    del os.environ["BOARD_HERMES_DB"]
+
+
+
+
 def main():
     from PySide6.QtGui import QGuiApplication
     global SHOTS
@@ -6881,6 +6948,8 @@ def main():
         test_card_output(os.path.join(tmp, "out"))
         os.makedirs(os.path.join(tmp, "herm"))
         test_hermes(os.path.join(tmp, "herm"))
+
+        test_hermes_proximity(os.path.join(tmp, "herm"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
         test_real_store()
