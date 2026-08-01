@@ -295,10 +295,11 @@ def main():
     if not server.get("isLoggedIn"):
         raise SystemExit(
             "slskd is up but not logged in to the Soulseek network.\n"
-            "The generated slskd.yml only carries the web API key; add the"
-            " Soulseek username/password (a secret this repo does not hold) to"
-            " ~/.local/share/slskd/slskd.yml and restart, or the searches below"
-            " would 409.")
+            "Your Soulseek login is a secret this repo does not hold; add it as\n"
+            "two one-line files ~/.secrets/slskd-username and\n"
+            "~/.secrets/slskd-password (mode 600), then `sudo rebuild-top` (the\n"
+            "slskd activation regenerates slskd.yml from them) and\n"
+            "`systemctl --user restart slskd`, or the searches below would 409.")
 
     # --- 1. load the work list and skip what the live library now has --------
     rows = load_missing(args.tsv)
