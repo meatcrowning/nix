@@ -31,14 +31,17 @@ parser keys on):
                               own host. `set_answer_host()` is its only writer
         *If unanswered:* ...  what happens if he never answers
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions. Each one
-                              starts with a TAG (`QUESTION:`, `INFORMATION:`,
+                              starts with a TAG (`INFORMATION:`,
                               `COMPLETION:`, `PARTIAL:`, `FAILED:` — or a
                               colonless `SUMMONED`/`COMMANDED`, which share a
                               sub-section of their own) and then a
                               summary of about a dozen words at most; background
                               goes on indented continuation lines under it.
-                              `add_todo_bullet` refuses one that does not —
-                              READING is unaffected, an old untagged bullet
+                              `add_todo_bullet` refuses one that does not — a
+                              `QUESTION:` bullet is refused ALWAYS, whatever
+                              else is right about it (a question to him goes
+                              through `boardctl ask`, never a note) — READING is
+                              unaffected, an old untagged bullet
                               parses and draws exactly as it always did
     ## IN FLIGHT              a | table |: what / where / notes
     ## LANDED                 `### <date>` groups of | commit | what | when |
@@ -1211,8 +1214,15 @@ def add_landed_row(lines, commit, what, date=None, when=""):
 TODO_TAGS = (
     #: it asks him something and nothing moves until he answers. NOT a decision
     #: — a decision is an item in NEEDS YOU (`boardmove.ask`), with options and
-    #: an `*If unanswered:*` line. This is the small "say the word and X" an
-    #: agent leaves behind on its way out.
+    #: an `*If unanswered:*` line.
+    #:
+    #: **[his, 2026-08-01] A question is NEVER written as a note bullet.** *"the
+    #: ONLY place a question to him belongs is the decisions section... they are
+    #: basically just duplicate but with less"* — so `boardctl ask` (via
+    #: `boardmove.ask`) is the only writer of a question, and `QUESTION` here is
+    #: READ-ONLY: bullets already in the store must keep parsing and grouping
+    #: under `question`, but `add_todo_bullet` refuses to ADD one
+    #: (`check_no_question`), telling the caller to use `ask` instead.
     "QUESTION",
     #: a fact he may want and nothing is being asked of him. `stall`'s moved
     #: row, and a knob the orchestrator turned. A SUMMON is no longer one of
@@ -1348,6 +1358,35 @@ def check_short_summary(bullet):
                 "one has %d) - move the elaboration to INDENTED continuation "
                 "lines under it. Got: %s"
                 % (SUMMARY_MAX_WORDS, len(words), line.strip()[:80]))
+    return bullet
+
+
+def check_no_question(bullet):
+    """Refuse a `QUESTION:` note bullet — the only tag no writer may emit.
+
+    [his, 2026-08-01] *"unless these ever pop up without throwing a multiple
+    choice question to the user in the other section, these should never show
+    up on the board. they are basically just duplicate but with less."* So a
+    question to him belongs ONLY in the decisions section (`boardctl ask`, with
+    its options and its `--if-unanswered`), and a `QUESTION:`-tagged note is a
+    strictly worse duplicate — **it is REFUSED here, at the one choke point
+    every writer of this section goes through**, and the message tells the
+    caller to use `ask` instead rather than cooking up another wording.
+
+    `QUESTION` STAYS in `TODO_TAGS` for READING — bullets already in the store
+    keep parsing and grouping — but nothing may add one. This runs first, so
+    the `use ask` message wins over the generic tag/one-ask/length refusals.
+    """
+    for line in bullet.split("\n"):
+        if not line.strip() or line[:1].isspace():
+            continue
+        if tag_of(re.sub(r"^[-*+][ \t]+", "", line.strip())) == "QUESTION":
+            raise BoardError(
+                "a QUESTION-tagged note bullet is not allowed - a question to "
+                "him belongs ONLY in the decisions section, written with "
+                "`boardctl.py ask '<the question>' --context '...' "
+                "--option '<a way>' --if-unanswered '<what stays undone>'`. "
+                "Use `ask`, not a note tag. Got: %s" % line.strip()[:80])
     return bullet
 
 
@@ -1504,6 +1543,7 @@ def add_todo_bullet(lines, doc, bullet, when=None, by=None, order=None):
     leave the rest looking older than the file itself. An indented line is a
     wrapped continuation and keeps its place above the stamp.
     """
+    check_no_question(bullet)   # runs first: a QUESTION is refused, use `ask`
     check_todo_tag(bullet)
     check_one_ask(bullet)
     # After the bundling check on purpose: a message that is two asks in one is

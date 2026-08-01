@@ -636,9 +636,12 @@ on that same first line — the tool refuses more.** Every elaboration or \
 background goes on INDENTED continuation lines under it, a sentence or two, \
 not a paragraph. The tag is one of `COMPLETION:` (it is done and on his \
 machine), `PARTIAL:` (some of it landed, some did not — including "it needs a \
-rebuild, which you may not run"), `FAILED:` (nothing landed), `QUESTION:` (you \
-need a word from him before anything else moves) or `INFORMATION:` (a fact, \
-nothing asked of him). The tool refuses an untagged bullet too; tag and short \
+rebuild, which you may not run"), `FAILED:` (nothing landed) or `INFORMATION:` \
+(a fact, nothing asked of him). **A question is NEVER a note bullet** — it \
+belongs only in the decisions section, written with `boardctl.py ask '<the \
+question>' --option '<a way>' --if-unanswered '<what stays undone>'`; a \
+`QUESTION:` note is refused, the tool telling you to use `ask`. The tool refuses \
+an untagged bullet too; tag and short \
 summary are how he tells at a glance what a line on that list is about.
 
    **Write board text TO the person at the machine** — every note, question, \

@@ -666,14 +666,20 @@ def note(text, path=bp.BOARD_PATH, agent_id=None, by=None):
     `BOARD_AGENT_ID` — board-watch passes it explicitly, because there the
     process writing the failure is not the worker that failed.
 
-    It must start with one of `boardparse.TODO_TAGS` — `QUESTION:`,
-    `INFORMATION:`, `COMPLETION:`, `PARTIAL:`, `FAILED:` — then a summary of AT
+    It must start with one of `boardparse.TODO_TAGS` — `INFORMATION:`,
+    `COMPLETION:`, `PARTIAL:`, `FAILED:`, or a colonless
+    `SUMMONED`/`COMMANDED` — then a summary of AT
     MOST about a dozen words on that same line, then whatever background it
-    needs on INDENTED continuation lines. `add_todo_bullet` refuses an untagged
+    needs on INDENTED continuation lines. **A `QUESTION:` bullet is refused ALWAYS**
+    (`boardparse.check_no_question`, before any other check): a question to him
+    belongs only in the decisions section, written with `boardctl.py ask`
+    (`boardmove.ask`, with its options and its `--if-unanswered`) — a
+    QUESTION-tagged note is a strictly worse duplicate, so the tool tells the
+    caller to use `ask` instead. `add_todo_bullet` refuses an untagged
     one, and since 2026-07-29 an over-long first line too
     (`boardparse.check_short_summary`); this deliberately does not paper over
-    either with a default or a truncation: the writer knows which of the five
-    it is and what the summary is, and nothing downstream can work either out
+    either with a default or a truncation: the writer knows which of the four
+    tags it is and what the summary is, and nothing downstream can either work out
     afterwards.
 
     The `- ` is added PER LINE, not once for the whole string. The orchestrator

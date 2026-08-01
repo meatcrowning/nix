@@ -1039,12 +1039,12 @@ def test_placed(tmp):
     B.write(path, FIXTURE.replace(
         "- **Relaunch `reader`** - live source, no hot reload.",
         "- **Relaunch `reader`** - live source,\n  no hot reload."))
-    bm.note("QUESTION: after the wrap, please", path=path)
+    bm.note("INFORMATION: after the wrap, please", path=path)
     doc = B.parse(B.read(path))
     check("a new bullet lands after a wrapped one, never inside it",
           [t["text"] for t in doc["todo"]]
           == ["Relaunch reader - live source, no hot reload.",
-              "QUESTION: after the wrap, please"],
+              "INFORMATION: after the wrap, please"],
           [t["text"] for t in doc["todo"]])
 
     # ---- nothing here is a clock running against him ----
@@ -1369,6 +1369,24 @@ def test_todo_tags(tmp):
     check("an empty note writes nothing and says so",
           bm.note("", path=path) is False and B.read(path) == before)
 
+    # ---- a QUESTION note bullet is REFUSED: questions go through `ask` ----
+    # [his, 2026-08-01] the ONLY place a question to him belongs is the
+    # decisions section, written with `boardctl ask`; a `QUESTION:`-tagged note
+    # is a strictly worse duplicate and must never be written.
+    for bad in ("QUESTION: say the word?",
+                "- QUESTION: **how far?** - which order?"):
+        before = B.read(path)
+        try:
+            bm.note(bad, path=path)
+            check("a QUESTION note bullet is refused (use `ask`): %r"
+                  % bad[:30], False, "it was written")
+        except B.BoardError as e:
+            check("a QUESTION note bullet is refused (use `ask`): %r"
+                  % bad[:30],
+                  B.read(path) == before and "ask" in str(e)
+                  and "not allowed" in str(e),
+                  str(e)[:110])
+
     # ...and a TAGGED one lands, with his ordering intact: tag, short
     # description, then the elaboration.
     check("a tagged bullet lands",
@@ -1649,9 +1667,14 @@ def test_todo_tags(tmp):
     # one flat list, `parse()` buckets it, and a bullet in a group is the same
     # dict (same `line`) the flat list holds, so removing and restoring one is
     # the edit it always was.
-    open(path, "w").write(FIXTURE)
+    open(path, "w").write(FIXTURE.replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- QUESTION: say the word?\n- **Relaunch `reader`** - live source, no hot reload."))
+    # A `QUESTION:` bullet can no longer be WRITTEN (it is refused, use `ask`),
+    # so the one here is a legacy line injected straight into the store — the
+    # read side must still group it under `question`.
     for b in ("INFORMATION: a fact.", "COMPLETION: it landed.",
-              "FAILED: nothing landed.", "QUESTION: say the word?",
+              "FAILED: nothing landed.",
               "PARTIAL: half of it.", "COMPLETION: this one too."):
         bm.note(b, path=path)
     d = B.parse(B.read(path))
@@ -1724,7 +1747,7 @@ def test_summon_cleared(tmp):
              "(`w4f82de`) to add commit times")
 
     # ---- the note goes, and only that note ----
-    board(SUM_A, SUM_B, "QUESTION: **how far?** - say the word.")
+    board(SUM_A, SUM_B, "INFORMATION: **how far?** - say the word.")
     n = len(texts())
     bm.note("COMPLETION: **the landed section** - it reads the commit log.",
             path=path, agent_id="wd690a4")
@@ -1733,16 +1756,15 @@ def test_summon_cleared(tmp):
           not [t for t in left if "SUMMONED: Marbas" in t], left)
     check("...and the OTHER worker's summon note is untouched",
           any("SUMMONED: Zepar" in t for t in left), left)
-    check("...and his QUESTION is untouched",
-          any(t.startswith("QUESTION:") for t in left), left)
+    check("...and his non-summon message is untouched",
+          any("how far?" in t for t in left), left)
     check("...one out, one in: the section is the same length",
           len(left) == n, (len(left), n))
     check("...and the preamble survives byte for byte",
           B.read(path).startswith(FIXTURE.split("## NEEDS YOU")[0]))
     check("...and the note's `placed` stamp goes with it, leaving no orphan",
           B.read(path).count("<!-- placed:") == len([t for t in left
-                                                     if t.startswith(("QUESTION",
-                                                                      "INFORMATION",
+                                                     if t.startswith(("INFORMATION",
                                                                       "COMPLETION"))]),
           B.read(path).count("<!-- placed:"))
 
@@ -1841,9 +1863,13 @@ def test_summon_cleared(tmp):
               not [t for t in texts() if "SUMMONED: Marbas" in t], texts())
 
     # ---- what must NEVER be removed ----
-    board(SUM_A)
-    bm.note("QUESTION: **the landed section** - which order?", path=path,
-            agent_id="wd690a4")
+    # A `QUESTION:` is a legacy bullet now (it cannot be written), so it is
+    # injected straight into the store; a QUESTION is not a result, so nothing
+    # may ever retire a summon note for it.
+    open(path, "w").write(FIXTURE.replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- QUESTION: **the landed section** - which order?\n- **Relaunch `reader`** - live source, no hot reload."))
+    bm.note(SUM_A, path=path)
     check("a QUESTION is not a result, so the summon note stays",
           any("SUMMONED: Marbas" in t for t in texts()), texts())
 
@@ -4305,8 +4331,13 @@ def test_window(app, tmp):
     check("an untagged chore alone draws NO sub-heading over it",
           not [h for h in heads() if h in [t.lower() for t in B.TODO_TAGS]],
           heads())
-    for b in ("- COMPLETION: it landed.\n", "- QUESTION: say the word?\n",
-              "- FAILED: nothing landed.\n"):
+    # `QUESTION:` cannot be written anymore (refused, use `ask`), so the one
+    # tested here is a legacy line in the store — the read side must still draw
+    # its `question` sub-heading.
+    B.write(path, B.read(path).replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- QUESTION: say the word?\n- **Relaunch `reader`** - live source, no hot reload."))
+    for b in ("- COMPLETION: it landed.\n", "- FAILED: nothing landed.\n"):
         B.edit(path, lambda d, b=b: B.add_todo_bullet(d["lines"], d, b))
     spin(400)
     drawn = [h for h in heads() if h in [t.lower() for t in B.TODO_TAGS]]
