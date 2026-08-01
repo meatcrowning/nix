@@ -201,6 +201,14 @@ Window {
     // ---- hyprvtb titlebar: transport + views + sort + search + settings ----
     readonly property var tbButtons: {
         const has = Player.queueLength > 0 ? 0 : 2;
+        const cur = Player.current;
+        // The favourite toggle follows the now-playing track exactly like the
+        // header heart (NowPlaying.qml): lit while the current track is
+        // favourited, dim while it is not, disabled when nothing is playing.
+        // It lives here because this is the row shuffle/repeat live in — the
+        // titlebar renders it in the transport's own on/off look, since it
+        // has no per-button colour and its pixel font has no heart glyph.
+        const favState = (cur && cur.id !== undefined) ? (cur.favorite ? 1 : 0) : 2;
         const sortLabel = sortMode === "orig_year" ? "yr" : (sortMode === "artist" ? "ar" : "al");
         const sortTip = "sort: " + (sortMode === "orig_year" ? "year" : sortMode) + " (click to cycle)";
         return [
@@ -208,9 +216,11 @@ Window {
             { id: "playpause", label: Player.playing ? "||" : ">", state: has,
               tip: Player.playing ? "pause" : "play" },
             { id: "next",      label: ">>", state: has, tip: "next" },
-            { id: "shuffle",   label: "*",  state: Player.shuffle ? 1 : 0, tip: "shuffle" },
+            // shuffle sits RIGHT of repeat now; this slot is where it used to be.
+            { id: "favorite",  label: "♥",  state: favState, tip: "favourite" },
             { id: "loop",      label: Player.loop === 1 ? "1" : "o", state: Player.loop > 0 ? 1 : 0,
               tip: Player.loop === 1 ? "repeat track" : (Player.loop === 2 ? "repeat all" : "repeat") },
+            { id: "shuffle",   label: "*",  state: Player.shuffle ? 1 : 0, tip: "shuffle" },
             "-",
             { id: "albums",    label: "a", state: view === "albums" ? 1 : 0, tip: "albums" },
             { id: "playlists", label: "p", state: view === "playlists" ? 1 : 0, tip: "playlists" },
@@ -276,6 +286,9 @@ Window {
             case "next":      Player.next();                      break;
             case "shuffle":   Player.setShuffle(!Player.shuffle); break;
             case "loop":      Player.cycleLoop();                 break;
+            case "favorite":  if (Player.current && Player.current.id !== undefined)
+                                Library.setFavorite(Player.current.id, !Player.current.favorite);
+                              break;
             case "albums":    win.setView("albums");              break;
             case "playlists": win.setView("playlists");           break;
             case "now":       win.setView("now");                 break;
