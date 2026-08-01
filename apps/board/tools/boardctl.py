@@ -513,7 +513,9 @@ def main(argv=None):
                                     "line; any background goes on INDENTED "
                                     "continuation lines. ONE ASK PER BULLET - "
                                     "pass several tagged strings, or several "
-                                    "lines, for several items"
+                                    "lines, for several items. The bullet is "
+                                    "read by the person at the machine: write "
+                                    "it to them as 'you', never 'he'/'him'"
                                     % "/".join(
                                         t + ("" if t in bp.BARE_TAGS else ":")
                                         for t in bp.TODO_TAGS))
@@ -549,14 +551,15 @@ def main(argv=None):
     s.add_argument("--id", default=None, help="default: $BOARD_AGENT_ID")
     s.set_defaults(fn=cmd_phase)
 
-    s = sub.add_parser("ask", help="park a question for him in NEEDS YOU")
+    s = sub.add_parser("ask", help="park a question in NEEDS YOU, written to "
+                                   "the reader as 'you' (never 'he'/'him')")
     s.add_argument("question", nargs="+")
     s.add_argument("--context", action="append", default=[],
                    help="a paragraph of what raises it; repeatable")
     s.add_argument("--option", action="append", default=[],
-                   help="an alternative he can tick; repeatable")
+                   help="an alternative the reader can tick; repeatable")
     s.add_argument("--if-unanswered", dest="if_unanswered", default="",
-                   help="REQUIRED: what happens if he never answers")
+                   help="REQUIRED: what happens if the reader does not answer")
     s.add_argument("--asked-by", dest="asked_by", default=None,
                    help="what you were working on when it came up")
     s.set_defaults(fn=cmd_ask)

@@ -390,6 +390,11 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
       and writes is still `docs/board.<hostname>.md` (one board per host since
       2026-07-30), and every path and identifier is still `board*`: this directory, `boardctl.py`, `home/prog/board.nix`,
       `board-watch`. Prose keeps calling the FILE "the board".
+    - **Board-facing text is written to the person at the machine, so it says
+      `you`, never `he`/`him`.** Every bullet, note, question, option and
+      `--if-unanswered` line rendered into `docs/board.<hostname>.md` is read
+      by him and must address him as `you`. Prompts, comments and commit
+      messages are internal and keep third person.
     - It lives **outside** `home/`/`sys/` on purpose: `umport` would try to
       eval an app's own `flake.nix` as a NixOS module. Nothing in the NixOS or
       home evaluation imports `apps/` — it is inert vendored source.
