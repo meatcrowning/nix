@@ -33,6 +33,7 @@ Run it with goetia's own Qt env, not the bare system python:
 rewrite where the user's own app reopens — and every write test runs against a
 COPY of the store in that scratch dir. This harness never writes board.md.
 """
+import importlib.util
 import json
 import os
 import re
@@ -1548,6 +1549,75 @@ def test_todo_tags(tmp):
     tmpl = re.findall(r'^\s*"- (.*?)\*\*', src, re.M)
     check("every board-watch failure template starts with FAILED:",
           bool(tmpl) and all(t.strip() == "FAILED:" for t in tmpl), tmpl)
+
+    # ...and it is RENDERED and run through the real write-path checks, not just
+    # regexed. Reading the tag off the source proved the template was tagged and
+    # nothing else: `WORKER_FAIL` wrapped `{task}` in backticks the formatter had
+    # already added, and a DOUBLED span is not a span — `boardparse._CODE` matches
+    # the empty pair at each end and the whole task reverts to countable prose. On
+    # 2026-07-31 that refused the note for a worker killed on its runtime limit
+    # (35 words against a cap of 12) and Halphas left his board with no trace at
+    # all, which is the single failure this file exists to prevent. So every
+    # failure bullet is now built from a HOSTILE record — a task carrying
+    # backticks, `**`, a tag word and a newline, which is what his own typed
+    # orders look like — and put through the checks `add_todo_bullet` applies.
+    watch_mod = None
+    if src:
+        # Import-time, board-watch resolves its store as
+        # `$BOARD_WATCH_BOARD or bp.ensure_board()` — and the fallback SEEDS a
+        # board on a machine that has none. Point it at a scratch path (it is
+        # only bound to a name here, never read) so importing the module cannot
+        # reach his own store.
+        old = os.environ.get("BOARD_WATCH_BOARD")
+        os.environ["BOARD_WATCH_BOARD"] = os.path.join(
+            tempfile.gettempdir(), "board-test-watchboard-%d.md" % os.getpid())
+        try:
+            spec = importlib.util.spec_from_file_location("board_watch", watch)
+            watch_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(watch_mod)
+        except Exception as e:                     # noqa: BLE001 - reported below
+            check("board-watch imports for template rendering", False, e)
+        finally:
+            if old is None:
+                os.environ.pop("BOARD_WATCH_BOARD", None)
+            else:
+                os.environ["BOARD_WATCH_BOARD"] = old
+
+    if watch_mod is not None:
+        hostile = ("In the `reader` app - add **two** viewport interactions\n"
+                   "COMPLETION: and do not fold this into another ask")
+        rendered = {
+            "the dead-worker note": watch_mod.worker_fail_bullet(
+                {"agent": "wa5844f", "task": hostile,
+                 "transcript": "`~/.claude/projects/*/a05125*.jsonl`"}),
+            # ...and the same one with no transcript recorded, which takes the
+            # other branch of `where` and is what an older record looks like.
+            "the dead-worker note with only a log": watch_mod.worker_fail_bullet(
+                {"agent": "wa5844f", "task": hostile}),
+            "the unfinished-decision note": watch_mod.FAIL_TEMPLATE.format(
+                num=1, how="on a `timeout`",
+                title=B.oneline(hostile, 120, code=True)),
+            "the undispatched-order note": watch_mod.QUEUE_FAIL.format(
+                how="on a `timeout`", text=B.oneline(hostile, 300, code=True)),
+        }
+        for label, bullet in rendered.items():
+            try:
+                B.check_todo_tag(bullet)
+                B.check_one_ask(bullet)
+                B.check_short_summary(bullet)
+                ok, why = True, ""
+            except B.BoardError as e:
+                ok, why = False, str(e)[:120]
+            check("%s survives the checks that would refuse it" % label, ok, why)
+        # The defect itself, named. Read off the template VALUES, not the file:
+        # the prose above them cites `{task}` and `{title}` in spans on purpose,
+        # and a source regex only saw those. The four placeholders below are the
+        # ones fed `oneline(code=True)`; `{aid}` is fed the plain form and its
+        # backticks in `WHERE_LOG` are correct.
+        doubled = [n for n, v in vars(watch_mod).items()
+                   if isinstance(v, str)
+                   and re.search(r"`\{(task|title|text|transcript)\}`", v)]
+        check("no board-watch template doubles a code span", not doubled, doubled)
 
     # ---- and every tag in the set has a writer that can emit it ----
     prompts = src + open(os.path.join(BOARD, "boardwork.py")).read() \

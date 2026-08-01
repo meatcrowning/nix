@@ -509,10 +509,17 @@ def save_state(d):
 #: else and a refused failure note is the one failure this file must not have.
 #: `{how}` and the interpolated titles stay OFF the first line for that reason:
 #: their length is not this file's to choose.
+#:
+#: **`oneline(code=True)` brings its OWN backticks — the template must not add
+#: a second pair.** A doubled span (``x``) is not a span at all: the empty pair
+#: at each end is what `boardparse._CODE` matches, and everything between them
+#: reverts to countable prose. That is what refused the dead-worker note below
+#: on 2026-07-31 (35 words against a cap of 12), so Halphas died leaving nothing
+#: on his board at all — the exact failure this file exists to prevent.
 FAIL_TEMPLATE = (
     "- FAILED: **board-watch did not finish decision {num}** - nothing was "
     "committed.\n"
-    "    It was `{title}`; the minister exited {how}. The answer is still "
+    "    It was {title}; the minister exited {how}. The answer is still "
     "above. Log: `~/.cache/board-watch.log`\n")
 
 
@@ -527,9 +534,12 @@ FAIL_TEMPLATE = (
 #: to make the template's second line an untagged bullet — either way the note
 #: saying a worker died would be refused, which is the one failure this file
 #: exists to prevent. Same for `{title}` and `{text}` below.
+#:
+#: ...and the span is the FORMATTER'S, never the template's — see FAIL_TEMPLATE
+#: above for what the doubled pair cost.
 WORKER_FAIL = (
     "- FAILED: **a minister stopped without finishing** - it was working on "
-    "`{task}`.\n"
+    "{task}.\n"
     "    Dispatched from something you typed into the box; it recorded "
     "nothing on this board, so nothing landed for it. Answer or type it "
     "again to have another go. {where}\n")

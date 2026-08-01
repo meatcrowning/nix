@@ -122,6 +122,17 @@ the elaboration if needed. it shouldnt really elaborate that much though"*. So:
   (interpolated data must not make a mechanical note refusable) and counting
   the `**headline**`'s words like any others (a twenty-word headline is the
   disease, not an exemption).
+  **That exemption is only as good as the span**, and a DOUBLED one voids it:
+  `oneline(code=True)` returns the backticks itself, so a template that also
+  wraps the placeholder emits ``x``, whose empty pair at each end is what
+  `_CODE` matches — the data between them reverts to countable prose. It cost
+  the one note that must never be refusable: board-watch's dead-worker bullet
+  measured 35 words and was rejected, so Halphas (`wa5844f`) died on its
+  runtime limit leaving nothing at all on the board (2026-07-31). Interpolate
+  the formatter's span; never add a second pair. `tools/board-test.py`
+  renders every board-watch failure template from a hostile record and puts it
+  through the real checks, which is the half that was missing — reading the
+  tag off the source proved only that it was tagged.
 - **The elaboration, if there has to be one, goes on INDENTED continuation lines
   under it — and it is a sentence or two, not a paragraph.** "it shouldnt really
   elaborate that much" is the instruction to the writers, not a layout note: a
