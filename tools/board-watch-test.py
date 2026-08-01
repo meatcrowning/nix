@@ -1358,10 +1358,13 @@ def main():
         # "When it is okay to rebuild or hot-reload" replaced "NEVER rebuild"
         # here on 2026-07-29: an agent may rebuild now, and what the prompt must
         # still carry is the POINTER to the one written rule (`~/nix/AGENTS.md`)
-        # rather than a paraphrase of it.
-        for want in ("`top`", "When it is okay to rebuild or hot-reload",
-                     "-- <explicit> <paths>",
-                     "Push to `main`", "never drive his running apps",
+        # rather than a paraphrase of it. Since 2026-07-31 the rules THEMSELVES
+        # live in the appended system prompt (see the `..and that rules block is
+        # the same one` check below, which proves a decision run gets `bw.RULES`
+        # verbatim), so this body is asserted for the pointer and the decision
+        # content, not for RULES prose that moved out of it.
+        for want in ("`top`",
+                     "RULES are in force for this session and not negotiable",
                      "First question?", "Do it the short way"):
             check("prompt carries %r" % want, want in prompt)
         check("prompt names only the answered decision",

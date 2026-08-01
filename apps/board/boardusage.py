@@ -74,6 +74,7 @@ The account is the same; the freshness is not.
 """
 import json
 import os
+import sqlite3
 import subprocess
 import time
 import urllib.error
@@ -431,3 +432,99 @@ def nudge():
     except (OSError, subprocess.SubprocessError):
         return False
     return True
+
+
+# ------------------------------------------------- hermes minister usage
+#: Hermes' session store. Read-only from here, never written: it is Hermes'
+#: own ledger (`hermes insights` reads the same file).
+HERMES_DB = os.path.join(os.path.expanduser("~"), ".hermes", "state.db")
+
+#: Minister spawns run hermes with `--source tool` (`HermesBackend.args`), so a
+#: query filtered on this source is exactly the hermes usage this board's
+#: ministers produced — never his interactive sessions or his other agents.
+HERMES_SOURCE = "tool"
+
+#: The two recency windows the hermes readout mirrors the settings with, in the
+#: same `(key, label, hover)` tuple shape the Anthropic meters use. Labels are
+#: recency, not "session limit": there is no published hermes limit to be a %
+#: of, so these are FIGURES (tokens + cost), never a percentage — see the
+#: module docstring for that rule (docs/DESIGN.md §10).
+HERMES_WINDOWS = (
+    ("h5", "5h", "hermes minister usage in the last 5 hours - tokens and cost"),
+    ("d7", "7d", "hermes minister usage in the last 7 days - tokens and cost"),
+)
+
+
+def _fmt_tokens(n):
+    """A token count as the short, human figure the readouts use: `1.2M`,
+    `48k`, or the bare number below a thousand."""
+    n = int(n or 0)
+    if n >= 1_000_000:
+        v = ("%.2f" % (n / 1_000_000.0)).rstrip("0").rstrip(".")
+        return v + "M"
+    if n >= 1_000:
+        v = ("%.1f" % (n / 1_000.0)).rstrip("0").rstrip(".")
+        return v + "k"
+    return str(n)
+
+
+def _hermes_query(seconds, now):
+    """`(tokens, cost_usd)` for ministers in the last `seconds`, or `(None, 0)`
+    if the ledger is unreachable. Public for the harness; the board draws via
+    `hermes_readings()`."""
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % HERMES_DB, uri=True)
+    except (OSError, sqlite3.Error):
+        return None, 0.0
+    try:
+        row = db.execute(
+            "SELECT COALESCE(SUM(input_tokens),0)"
+            ", COALESCE(SUM(output_tokens),0)"
+            ", COALESCE(SUM(cache_read_tokens),0)"
+            ", COALESCE(SUM(cache_write_tokens),0)"
+            ", COALESCE(SUM(reasoning_tokens),0)"
+            ", COALESCE(SUM(estimated_cost_usd),0)"
+            " FROM sessions WHERE source=? AND started_at>=?",
+            (HERMES_SOURCE, now - seconds)).fetchone()
+    except sqlite3.Error:
+        return None, 0.0
+    finally:
+        try:
+            db.close()
+        except sqlite3.Error:
+            pass
+    if row is None:
+        return None, 0.0
+    tokens = sum(int(x or 0) for x in row[:5])
+    return tokens, float(row[5] or 0.0)
+
+
+def hermes_readings(now=None):
+    """The hermes minister usage rows the window draws, in `HERMES_WINDOWS`
+    order. Each is `{key, label, known, text, note, detail}` where `known` is
+    false when the ledger is unreachable (nothing drawn), and `text` is real
+    figures — `<tokens> · $<cost>` — never a percentage. Honest by the same
+    rule as the Anthropic meters: a number here is what Hermes recorded, and
+    `known=False` reports the absence rather than inventing a zero."""
+    now = time.time() if now is None else now
+    rows = []
+    for key, label, hover in HERMES_WINDOWS:
+        tokens, cost = _hermes_query(_WINDOW_SECS.get(key, 0), now)
+        if tokens is None:
+            rows.append({
+                "key": key, "label": label, "known": False,
+                "text": "unknown", "note": "",
+                "detail": ("no hermes ledger on this host yet - it needs one "
+                           "hermes minister run to have written state.db"),
+            })
+            continue
+        rows.append({
+            "key": key, "label": label, "known": True,
+            "text": "%s · $%.2f" % (_fmt_tokens(tokens), cost),
+            "note": "", "detail": hover,
+        })
+    return rows
+
+
+#: Seconds per `HERMES_WINDOWS` key.
+_WINDOW_SECS = {"h5": 5 * 3600, "d7": 7 * 86400}
