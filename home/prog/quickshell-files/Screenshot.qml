@@ -26,6 +26,31 @@ PanelWindow {
 
     property bool open: false
     visible: open
+
+    // Short-freeze tooltips while this overlay is up. A visible, hover-driven
+    // tooltip retracts the instant this full-screen overlay steals the pointer
+    // — so the capture always missed it. Hold TooltipState.frozen from open,
+    // through the capture settle, then release (immediately on a plain exit).
+    property bool freezePending: false
+    Timer {
+        id: freezeRelease
+        onTriggered: TooltipState.frozen = false
+    }
+    function holdTools() {
+        TooltipState.frozen = true;
+        freezeRelease.stop();
+    }
+    // ms <= 0 releases now; otherwise release after a delay (the capture
+    // settle + grim's own sleep) so the chip is still out when the frame grabs.
+    function releaseTools(ms) {
+        if (ms <= 0) {
+            TooltipState.frozen = false;
+            freezeRelease.stop();
+        } else {
+            freezeRelease.interval = ms;
+            freezeRelease.start();
+        }
+    }
     color: "transparent"
 
     anchors { top: true; bottom: true; left: true; right: true }
@@ -100,6 +125,9 @@ PanelWindow {
 
     onOpenChanged: {
         if (open) {
+            // Freeze visible tooltips now, before the surface maps and steals
+            // the pointer (see holdTools / TooltipState.frozen).
+            holdTools();
             // A fresh invocation always starts in screenshot mode; an
             // in-flight recording keeps running independently (its toast lives
             // in RecordingToast.qml, outside this window's visibility).
@@ -114,6 +142,11 @@ PanelWindow {
             optsProc.running = true;     // frame extents for window mode
             monitorsProc.running = true; // refresh rate + output for recording
             grab.forceActiveFocus();
+        } else if (!freezePending) {
+            // Plain exit (Escape / the exit button / startRecording): no
+            // capture follows, so release the freeze straight away. A capture
+            // keeps it armed through the settle (see capture()).
+            releaseTools(0);
         }
     }
 
@@ -268,7 +301,16 @@ PanelWindow {
         const g = Math.round(gx) + "," + Math.round(gy) + " " + Math.round(gw) + "x" + Math.round(gh);
         const wait = 0.2 + delaySec;
         const copy = SettingsStore.d.screenshotCopy ? "1" : "0";
+        // The overlay must not appear in the shot, so it closes before grim —
+        // but that close must not drop the tooltip freeze until the frame is
+        // actually grabbed (grim runs `sleep wait` then captures). freezePending
+        // stops onOpenChanged from releasing on this close; we release on a
+        // timer past the settle instead.
+        root.freezePending = true;
         root.open = false;
+        root.freezePending = false;
+        holdTools();
+        releaseTools(Math.round(wait * 1000) + 600);
         Quickshell.execDetached(["sh", "-c",
             'sleep ' + wait + '; ' +
             'd="$1"; case "$d" in "~"*) d="$HOME${d#"~"}";; esac; mkdir -p "$d"; ' +

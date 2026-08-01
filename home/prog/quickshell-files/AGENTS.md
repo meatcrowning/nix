@@ -658,6 +658,14 @@ The window is FULL SIZE throughout and the clip inside it grows. Animating the
 popup's own width instead would be a surface resize per frame — a configure
 roundtrip behind every step of the animation it is supposed to be.
 
+**The screenshot overlay short-freezes visible tooltips.** The full-screen
+`Screenshot` overlay (`Meta+Shift+S`) maps on top of the bar and steals the
+pointer, so a hover-driven tooltip retracts the instant the hotkey fires — before
+the capture. `Screenshot.qml` holds `TooltipState.frozen` (a `pragma Singleton`)
+from overlay-open, through the capture settle, then releases it; `Tooltip.qml`
+keeps its chip out while frozen and finishes the retract when the freeze lifts.
+Any new tooltip surface that wants the same grace reads `TooltipState.frozen`.
+
 ### The dock grid is ONE PAGE, and must stay one
 
 `DockGrid.qml` is `columns` x `rows` (4 x 29) filling the panel exactly: the row
