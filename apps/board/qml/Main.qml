@@ -583,7 +583,7 @@ Window {
                     fgText: win.fgText
                     fgDim: win.fgDim
                     draft: win.draftOf("msg:queue")
-                    placeholder: "type anything - press enter and it goes to the inbox"
+                    placeholder: "type anything and press enter to command Solomon and his ministers"
                     hintText: "enter sends - shift+enter is a new line - esc keeps a draft"
                     // This box is never a delegate and is never rebuilt, so it
                     // takes no `openCaret` — it reports only, which is what
