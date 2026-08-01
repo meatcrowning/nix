@@ -74,6 +74,16 @@
   # — a prebuilt binary with no aarch64 build in the flake's `available` filter,
   # so it is gated to x86_64 the way open-webui is and lands on `top` only
   # (`air`/book is aarch64 and misses it).
+  #
+  # Patched for Python 3.14: upstream tools/daemon_pool.py still mirrors the
+  # 3.8–3.13 ThreadPoolExecutor internals (_initializer/_initargs), which 3.14
+  # removed in favour of a per-instance worker context. Reaching for those
+  # attributes raised AttributeError and silently killed every tool/agent call
+  # that ran through the pool. The override applies hermes-agent-python314.patch,
+  # which matches the 3.14 _worker(ctx) signature. Revisit on the next
+  # `nix flake update llm-agents` — drop it once upstream lands the port.
   ++ lib.optional pkgs.stdenv.hostPlatform.isx86_64
-     inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.hermes-agent;
+     (inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.hermes-agent.overrideAttrs (old: {
+       patches = (old.patches or [ ]) ++ [ ./hermes-agent-python314.patch ];
+     }));
 }
