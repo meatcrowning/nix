@@ -543,6 +543,19 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   idempotence backstop. Self-disarms via
   `~/.local/state/board-reminder/<id>.done` (delete to re-arm). Harness
   `tools/board-reminder-test.py`.
+- `home/srvs/board-notify.nix` + `board-notify-files/board-notify.py` — **a toast
+  when a finishing worker's completion lands on this host's board**, unless
+  goetia is already the focused window. It is `Type=simple` — a persistent
+  daemon, unlike its two siblings, because the one thing it needs cannot be a
+  one-shot: goetia focus is read from Hyprland's **event socket** (never
+  `hyprctl activewindow`, which lies — the `hyprctl-activewindow-lies` memory)
+  and the socket only pushes on change. It watches the same file board-watch
+  does, dedupes on fingerprints exactly like board-watch's newly-answered
+  semantics (first run seeds, fires nothing; a docs-sync pull re-fires nothing)
+  and matches the worker result **by its tag, whatever the word** — currently
+  `ENACTED` (renamed from `COMPLETION` 2026-08-01), both accepted, so the
+  rename cannot stop it. Kill switch `~/.local/state/board-notify/off`. Harness
+  `tools/board-notify-test.py`.
 - `home/srvs/lid.nix` + `lid-files/lid-close.sh` — **what closing the lid does,
   on `book` only** (`top` is a desktop; the module is gated on `host == "air"`).
   The setting is `lidClose` in `~/.config/quickshell/settings.json`
