@@ -24,16 +24,24 @@ Item {
     property bool eqOpen: false
     property int pad: 10
     readonly property real inner: Math.max(180, width - 24)
+    // A band gain, rendered for the EQ readouts: always one decimal, sign-prefixed.
+    function fmtDb(db) {
+        const v = db || 0;
+        return (v > 0 ? "+" : "") + v.toFixed(1) + " dB";
+    }
 
     onActiveChanged: {
         Media.watch(root, active);
         // An invisible copy must not keep the overlay open (and with it the
         // EasyEffects socket): close it when we stop being watched.
-        if (!active && root.eqOpen) root.eqOpen = false;
+        if (!active) {
+            if (root.eqOpen) root.eqOpen = false;
+            Media.eqRelease();          // drop the direct-scroll socket too
+        }
     }
     onEqOpenChanged: { if (root.active) Media.watchEq(eqOpen); }
     Component.onCompleted: { Media.watch(root, active); Media.watchEq(eqOpen); drawerOut = Media.queueOpen; noteRestSlack(); }
-    Component.onDestruction: { Media.watch(root, false); Media.watchEq(false); }
+    Component.onDestruction: { Media.watch(root, false); Media.watchEq(false); Media.eqRelease(); }
 
     // ---- a transport button: pixel-font glyph, themed frame -------------
     component MediaButton: Rectangle {
@@ -633,6 +641,37 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.eqOpen = true
+                    // The spectrum is a DIRECT EQ surface too: wheeling over it
+                    // steps the band under the cursor in place — no click to
+                    // open the overlay first. Same 1 dB/notch discrete stepper
+                    // and the same setBandGain write/persist path as the
+                    // overlay (the overlay's own wheel still handles itself,
+                    // sitting above this at z:1 while open).
+                    WheelNotch { id: eqSpectrumNotch }
+                    property int hoverBand: -1
+                    function bandAt(x) {
+                        return Media.eqBandAtXFrac(width > 0 ? (x / width) : 0, width);
+                    }
+                    onWheel: (wheel) => {
+                        const n = eqSpectrumNotch.steps(wheel);
+                        if (n === 0) return;
+                        Media.eqWheelStep(wheel.x, width, n);
+                    }
+                    onPositionChanged: (m) => { hoverBand = bandAt(m.x); }
+                    onExited: hoverBand = -1
+                }
+                // Direct-scroll readout: the hovered band's gain, no overlay
+                // needed. Reads Media.eqBands (which eqWheelStep/setBandGain
+                // write), so it tracks every notch live.
+                PixelText {
+                    id: eqHoverReadout
+                    visible: !root.eqOpen && eqTrigger.hoverBand >= 0
+                              && eqTrigger.hoverBand < Media.eqBands.length
+                    anchors { bottom: parent.bottom; bottomMargin: 2; horizontalCenter: parent.horizontalCenter }
+                    text: Media.eqWriteLive
+                        ? root.fmtDb(Media.eqBands[eqTrigger.hoverBand].gain)
+                        : "EQ read-only"
+                    color: Media.eqWriteLive ? Theme.text : Theme.textDim
                 }
                 Equalizer {
                     visible: root.eqOpen
