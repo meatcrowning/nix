@@ -48,8 +48,10 @@ class FakePlayer(QObject):
 
     def __init__(self):
         super().__init__()
-        self._q = [{"id": 11, "title": "One", "artist": "A", "duration": 100.0},
-                   {"id": 22, "title": "Two", "artist": "B", "duration": 200.0}]
+        self._q = [{"id": 11, "title": "One", "artist": "A", "duration": 100.0,
+                    "favorite": 0},
+                   {"id": 22, "title": "Two", "artist": "B", "duration": 200.0,
+                    "favorite": 1}]
         self._i = 0
 
     @property
@@ -66,6 +68,11 @@ class FakePlayer(QObject):
         self._i = i
         self.indexChanged.emit()
         self.currentChanged.emit()
+
+    def setFavorite(self, tid, fav):
+        for t in self._q:
+            if t["id"] == tid:
+                t["favorite"] = 1 if fav else 0
 
 
 class FakeLyrics(QObject):
@@ -122,6 +129,9 @@ def step():
 
     d = readline()
     check("connect snapshot has tracks", len(d["tracks"]) == 2)
+    check("track carries its favorite flag", d["tracks"][0]["favorite"] is False
+          and d["tracks"][1]["favorite"] is True,
+          str(d["tracks"]))
     check("no lyrics before subscribing", d["lyrics"] is None)
     check("no resolve before subscribing", lyr.asked == [], str(lyr.asked))
 
@@ -215,6 +225,25 @@ def step():
     sock.flush()
     d = readline()
     check("GOTO still moves the index", player.index == 1)
+
+    # TOGGLE_FAV flips the current track (index 1 = id 22, favourite on) and
+    # re-pushes a fresh snapshot so the panel heart re-lights immediately.
+    # Drain first: GOTO fires indexChanged AND currentChanged, so the last
+    # readline above may have left a stale snapshot buffered.
+    while readline(120) is not None:
+        pass
+    sock.write(b"TOGGLE_FAV\n")
+    sock.flush()
+    d = readline()
+    check("TOGGLE_FAV flips the current track's favourite off",
+          d is not None and d["tracks"][1]["favorite"] is False,
+          str(d["tracks"]) if d else "no push")
+    sock.write(b"TOGGLE_FAV\n")
+    sock.flush()
+    d = readline()
+    check("TOGGLE_FAV toggles, it does not set",
+          d is not None and d["tracks"][1]["favorite"] is True,
+          str(d["tracks"]) if d else "no push")
 
     # an unknown verb must not throw
     sock.write(b"BOGUS 1\n")

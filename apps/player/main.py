@@ -2470,8 +2470,11 @@ def start_queue_server(player, app, lyrics=None):
 
         server -> client   one JSON line, {"index": n, "tracks": [...],
                            "lyrics": {...}|null}, on connect and again on every
-                           queue/index change
+                           queue/index change. Each track carries its
+                           `favorite` flag (the panel's media widget draws the
+                           heart from the current one).
         client -> server   GOTO <index>
+                           TOGGLE_FAV  — flip favourite on the current track
                            LYRICS <0|1>     — "I am showing a lyrics box"
                            OPEN <enc> [<enc> …]  — play these files now
 
@@ -2543,7 +2546,8 @@ def start_queue_server(player, app, lyrics=None):
         # of words it has no field for, on every push, forever.
         tracks = [{"title": t.get("title") or "",
                    "artist": t.get("artist") or "",
-                   "dur": float(t.get("duration") or 0.0)}
+                   "dur": float(t.get("duration") or 0.0),
+                   "favorite": bool(t.get("favorite"))}
                   for t in player.queue_dicts()]
         lyr = state["payload"] if (with_lyrics and state["tid"] == cur_id()) else None
         return (json.dumps({"index": player.index, "tracks": tracks,
@@ -2605,6 +2609,19 @@ def start_queue_server(player, app, lyrics=None):
                     player.jumpTo(int(parts[1]))
                 except Exception as e:
                     print("queue server: bad GOTO:", e, flush=True)
+            elif parts and parts[0] == "TOGGLE_FAV":
+                # Flip favourite on the current track (the panel's media widget
+                # heart). setFavorite writes DB + tag queue and emits
+                # trackChanged, which is not one of the server's push triggers,
+                # so push() is explicit here — the heart must re-light from the
+                # fresh snapshot, not from a later queue/index change.
+                t = player.currentTrackDict()
+                if t and t.get("id") is not None:
+                    try:
+                        player.setFavorite(t["id"], not bool(t.get("favorite")))
+                    except Exception as e:
+                        print("queue server: bad TOGGLE_FAV:", e, flush=True)
+                push()
             elif len(parts) >= 2 and parts[0] == "OPEN":
                 # Percent-encoded because this protocol splits on whitespace and
                 # a filename may hold any byte but NUL and '/'.
