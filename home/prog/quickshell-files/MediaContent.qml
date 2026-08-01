@@ -250,6 +250,20 @@ Item {
         // The band under the cursor — the wheel target and the hover affordance.
         property int hoverBand: -1
 
+        // The faint signal backdrop beneath the faders. Same cava buckets the
+        // main spectrum draws, re-projected onto the EQ's LOG frequency axis so
+        // each column lines up horizontally with the band that affects it — the
+        // whole point of drawing it is to see how much signal a band has to
+        // work with. It is a BACKDROP, not a second spectrum: low opacity, in
+        // the same textDim tone the real bars use, so the faders stay the
+        // bright thing. See DESIGN.md §3.2 (bulk dim, indicator bright).
+        readonly property int nbars: SettingsStore.d.mediaSpectrumBars
+        readonly property real backOpacity: 0.30
+        // The low edge of cava bar i, in Hz. cava lays its buckets out linearly
+        // across the 30..16000 Hz cutoffs, so each bar's log-x span is its own
+        // slice of the same axis the EQ bands sit on.
+        function barFreqLo(i) { return eq.fmin + (eq.fmax - eq.fmin) * i / eq.nbars; }
+
         // Log frequency -> x. A missing or non-positive freq falls back to the
         // low end rather than producing NaN.
         function freqX(f) {
@@ -269,6 +283,29 @@ Item {
             color: Theme.bgAlt
             border.width: 1
             border.color: Theme.border
+        }
+
+        // The signal backdrop: one column per cava bucket, sitting on the same
+        // log axis as the bands plus a hairline gap so a full-height bar does
+        // not touch the frame's inner edge. Height maps the level exactly like
+        // the main spectrum (gamma 0.55, bottom-anchored) so the shape matches
+        // what he already watches; only the placement (log-x) and the opacity
+        // (low) are new. The 25ms low-pass mirrors the main bars, so a dropped
+        // cava frame does not freeze the backdrop in place.
+        Repeater {
+            model: eq.nbars
+            Rectangle {
+                required property int index
+                readonly property real x0: eq.freqX(eq.barFreqLo(index))
+                x: x0
+                width: Math.max(1, eq.freqX(eq.barFreqLo(index + 1)) - x0)
+                anchors { bottom: eq.bottom; bottomMargin: 1 }
+                height: Math.max(1, eq.height
+                    * Math.pow(Math.max(0, Media.spectrumLevels[index] || 0) / 100, 0.55))
+                color: Theme.textDim
+                opacity: eq.backOpacity
+                Behavior on height { NumberAnimation { duration: 25 } }
+            }
         }
 
         Rectangle {                       // the 0 dB line
