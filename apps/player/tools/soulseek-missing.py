@@ -34,7 +34,10 @@ runs under a bare python3 on both hosts and adds no runtime dependency.
 import argparse
 import json
 import os
+import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import time
 import urllib.error
@@ -51,6 +54,10 @@ DEFAULT_TSV = os.path.join(DUMP_DIR, "missing.tsv")
 DEFAULT_KEY_FILE = os.path.expanduser("~/.secrets/slskd-api-key")
 DEFAULT_HOST = "http://127.0.0.1:5030"
 STATE_FILE = os.path.join(DUMP_DIR, "soulseek-state.tsv")
+# slskd drops completed downloads here; this script queues them, player-add.py
+# (the import step) moves them into the library and rescans.
+DOWNLOAD_DIR = os.path.expanduser("~/.local/share/slskd/downloads")
+PLAYER_ADD = str(Path(__file__).resolve().parent / "player-add.py")
 
 # A Soulseek file whose length differs from the target by more than this is
 # probably a different edit, not a source copy worth downloading.
@@ -193,6 +200,57 @@ def track_key(row):
         f"{row.get('artists','')}||{row.get('title','')}")
 
 
+def player_python():
+    """The player's python env (mutagen + PySide6), so the import step can
+    import main.py's read_tags/open_db/rebuild_albums. Resolved the same way
+    the runbook does: read the `player` wrapper and grep the env path out of
+    it. Falls back to `python3` (book's system python has these dnf'd)."""
+    p = shutil.which("player")
+    if p:
+        try:
+            text = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            text = ""
+        m = re.search(r"/nix/store/[^\" ]+-env/bin/python3[0-9.]*", text)
+        if m:
+            return m.group(0)
+    return "python3"
+
+
+def import_downloads(import_step):
+    """Move completed slskd downloads into aud/ and rescan, via player-add.py.
+
+    This is the step the trailing print used to describe but never take: the
+    player only sees a track once it is moved into the library dir and
+    rescanned. Best-effort — a failure here is reported, not fatal to the
+    search/enqueue work already done."""
+    if not import_step:
+        print("  (--no-import: skipping the move-into-library step)")
+        return
+    if not os.path.isdir(DOWNLOAD_DIR):
+        print("  (no slskd downloads dir yet; nothing to import)")
+        return
+    if not os.path.exists(PLAYER_ADD):
+        print(f"  ! import step missing: {PLAYER_ADD}")
+        return
+    py = player_python()
+    print(f"\nimporting completed downloads into the library via {os.path.basename(PLAYER_ADD)}:")
+    try:
+        r = subprocess.run(
+            [py, PLAYER_ADD, "--downloads-dir", DOWNLOAD_DIR, "--meta-dir", DUMP_DIR],
+            capture_output=True, text=True)
+    except OSError as e:
+        print(f"  ! could not run the import step: {e}")
+        return
+    sys.stdout.write("  " + r.stdout.replace("\n", "\n  "))
+    if r.stdout:
+        sys.stdout.write("\n")
+    if r.returncode != 0:
+        sys.stderr.write("  ! import step failed:\n")
+        sys.stderr.write("  " + (r.stderr or "").replace("\n", "\n  ") + "\n")
+
+
+
 def file_matches(basename, artists, title):
     """Does this peer file look like the track we want (artist + title)?
 
@@ -277,6 +335,10 @@ def main():
     ap.add_argument("--library-skip/--no-library-skip",
                     dest="library_skip", action="store_true", default=True,
                     help="re-check the live library and skip what is present")
+    ap.add_argument("--no-import", dest="import_step", action="store_false",
+                    default=True,
+                    help="skip the move-into-library + rescan import step "
+                         "(default: run it)")
     args = ap.parse_args()
 
     api_key = read_api_key(args.key_file)
@@ -468,9 +530,12 @@ def main():
 
     print(f"\ndone. {budget} track(s) processed this run.")
     print(f"  state -> {state_path}")
-    print("  downloads land in slskd's download dir"
-          " (~/.local/share/slskd/downloads); the player only sees them once"
-          " they are moved into aud/ and rescanned.")
+
+    # The player only sees a track once it is moved into aud/ and rescanned —
+    # previously this was a note for a human to do by hand; now the import step
+    # does it. Skipped in --dry-run, which must not touch the filesystem.
+    if not args.dry_run:
+        import_downloads(args.import_step)
 
 
 if __name__ == "__main__":

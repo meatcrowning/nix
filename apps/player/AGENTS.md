@@ -437,6 +437,22 @@ what is already handled, and `--dry-run` shows picks without enqueueing. It
 requires slskd to be **running and logged in** — which the generated
 `slskd.yml` alone does not provide (see `home/prog/slskd.nix`).
 
+slskd drops completed downloads into `~/.local/share/slskd/downloads/`, and the
+player only ever sees a track once it is moved into `aud/` and rescanned. The
+pipeline's last step (`tools/player-add.py`, run automatically by
+soulseek-missing.py unless `--no-import`) closes that gap: it moves each
+completed download into `aud/<Artist>/<Album>/` following the library's folder
+convention, fills missing tags from the same `missing.tsv` (a Soulseek file can
+arrive bare — the 0181 mp3 had no artist/title), and does an incremental
+rescan of `library.db`. Because the scan is tag-driven, the DB row comes from
+the file's own tags; a file whose tags arrive empty is only metadata-correct
+once the importer tags it from the pipeline's own record of what was queued.
+`player-add.py` runs under the **player's** python env (it reuses
+`main.py`'s `read_tags`/`open_db`/`rebuild_albums`), which soulseek-missing.py
+resolves from the `player` wrapper; it writes the DB out-of-process in WAL
+(busy-timeout 60s) like `tools/dbsync.py`, and never touches the running
+player's session.
+
 Three things worth knowing before touching them:
 
 1. **`GET /playlists/{id}/tracks` no longer exists** — Spotify's Feb–Mar 2026
