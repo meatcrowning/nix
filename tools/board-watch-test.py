@@ -1391,9 +1391,25 @@ def main():
         check("...carrying what he wrote, verbatim",
               "have another look at the panel spacing" in note_prompt)
         check("...under the same rules a decision run gets",
-              "When it is okay to rebuild or hot-reload" in note_prompt
-              and "-- <explicit> <paths>" in note_prompt
-              and "Push to `main`" in note_prompt)
+              "RULES bind you and every worker you dispatch" in note_prompt
+              and "they are in your system prompt" in note_prompt)
+        # The rules themselves now live in the appended SYSTEM prompt, not the
+        # `-p` body (see docs/agents/minister-context.md), so the channel that
+        # carries them to the agent is the spawn argv, and "the same rules a
+        # decision run gets" means: the same RULES block is appended for the
+        # orchestrator as for a decision agent.
+        import boardwork as bw
+        def _appended(argv):
+            return argv[argv.index("--append-system-prompt") + 1]
+        orch = bw.get_backend().args(prompt="x", session=None,
+                                     role="orchestrator", label="l")
+        dec = bw.get_backend().args(prompt="x", session=None,
+                                    role="decision", label="l")
+        check("..and that rules block is the same one a decision run gets, verbatim",
+              "When it is okay to rebuild or hot-reload" in _appended(orch)
+              and "-- <explicit> <paths>" in _appended(orch)
+              and "Push to `main`" in _appended(orch)
+              and _appended(orch) == _appended(dec) == bw.RULES)
         # WHAT THAT AGENT IS NOW FOR. It used to do the work itself; since he
         # asked for a control surface it ORCHESTRATES — it splits the input up,
         # dispatches workers and asks him when only he can decide. The prompt is

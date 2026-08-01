@@ -544,8 +544,12 @@ def host_line():
 
 
 #: The rules every agent this system spawns runs under. They are HIS decisions,
-#: already settled (see `home/srvs/board-watch-files/board-watch.py`), and the
-#: two new prompts below quote them verbatim rather than paraphrasing.
+#: already settled (see `home/srvs/board-watch-files/board-watch.py`), and every
+#: spawner appends them VERBATIM to the system prompt (`--append-system-prompt`)
+#: via `AgentBackend.system_blocks`, rather than paraphrasing — a constant block
+#: appended to the identical cached system prompt, so RULES is a cache read (see
+#: `docs/agents/minister-context.md`). This block is never interpolated into a
+#: prompt body; the prompts point at it.
 #:
 #: Rule 1 was the reverse of this until 2026-07-29 — no rebuild, ever, work left
 #: undone with a note. He lifted it himself, in these words: *"it should be any
@@ -666,9 +670,8 @@ files in this same checkout right now.
 --- end ---
 
 {context}
-RULES, in force for this session, and not negotiable:
-
-{rules}
+RULES are in force for this session and not negotiable — the block is in your
+system prompt.
 
 8. **Say what you are working on.** He is looking at a card for this agent, and \
 it shows two lines: what you SAY you are doing, and what you are OBSERVED doing \
@@ -990,9 +993,8 @@ THE CAP. There is a limit on how many workers run at once ({cap} right now). \
 a later tick starts it when a slot frees. So dispatch everything the input \
 genuinely implies and do not ration it yourself — but do not invent work either.
 
-RULES that bind you and every worker you dispatch:
-
-{rules}
+RULES bind you and every worker you dispatch — they are in your system prompt,
+in force for this session, and not negotiable.
 
 YOUR NOTE REPORTS A START, NOT A RESULT — AND IT IS TWO LINES, NOT A \
 PARAGRAPH. Finish with one `note`, to this budget: **one line per task you \
@@ -1117,6 +1119,87 @@ TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Task",
 #: what to read.
 MINISTER_SETTINGS = json.dumps(
     {"enabledPlugins": {"superpowers@claude-plugins-official": False}})
+
+
+# ---------------------------------------------- which agent runtime spawns
+#: The seam that keeps goetia from hardening onto Claude Code / Anthropic.
+#: Everything on the DATA layer (inbox, store, `BOARD_*` env, the unit
+#: lifecycle, the paper trail) is backend-neutral by construction; this owns
+#: the four things that are not — how the run is invoked (the argv), where its
+#: live transcript lives, and the per-backend tool names. A second backend is
+#: additive: subclass `AgentBackend`, register it, select it at spawn with the
+#: `BOARD_BACKEND` env (a runtime knob like `cap`, no rebuild). See
+#: `docs/agents/minister-context.md` for the invariants a backend must keep.
+#
+#: `context_flags` and `role_flags` below stay public module functions because
+#: the prompt-argv tests call them by name; the backend COMPOSES them rather
+#: than replacing them, so the seam is additive and the Claude path is
+#: byte-identical except for RULES' relocation to the system prompt.
+class AgentBackend:
+    """One agent runtime goetia can spawn and observe. Abstract."""
+
+    name = None
+
+    def system_blocks(self, role):
+        """Constant instruction blocks appended to the cached system prompt for
+        `role`. Backend-neutral contract: EVERY spawn of a role must get
+        byte-identical blocks, so they form a stable cache prefix across
+        spawns, and must never be interpolated after variable content."""
+        return []
+
+    def args(self, *, prompt, session, role, label):
+        """The full argv for one headless run. THE only place a backend's CLI
+        is named. `session` may be None (no observable transcript -> claim-only
+        card); `label` is the human name bound to the run."""
+        raise NotImplementedError
+
+    def transcript(self, session):  # type: (str | None) -> str | None
+        """Path to this agent's live transcript, or None. None is the honest
+        degradation: a card shows the claim only, with no observed line."""
+        return None
+
+
+class ClaudeBackend(AgentBackend):
+    """The Claude Code CLI. `--append-system-prompt` merges RULES into the
+    default system prompt that `--exclude-dynamic-system-prompt-sections` has
+    already made identical across spawns, so the whole constant prefix is one
+    cache entry (see the Phase 1 note in `docs/agents/minister-context.md`)."""
+    name = "claude"
+
+    def system_blocks(self, role):
+        return [RULES]
+
+    def args(self, *, prompt, session, role, label):
+        argv = ["claude", "-p", prompt]
+        if session:
+            argv += ["--session-id", session]
+        argv += role_flags(role)            # model + effort (his choice, capped)
+        argv += context_flags(role)         # cache prefix + trimmed tools (NO superpowers)
+        for block in self.system_blocks(role):
+            argv += ["--append-system-prompt", block]
+        argv += ["--permission-mode", "acceptEdits",
+                 "--allowedTools", *ALLOW,
+                 "--disallowedTools", *DENY,
+                 "--output-format", "text",
+                 "-n", label]
+        return argv
+
+    def transcript(self, session):
+        return bph.transcript(session)
+
+
+_BACKENDS = {"claude": ClaudeBackend()}
+
+
+def get_backend(name=None):
+    """The spawner backend for this run — `BOARD_BACKEND` env, default claude.
+    Read at spawn time, like `cap()`, so a runtime switch needs no rebuild."""
+    want = (name or os.environ.get("BOARD_BACKEND") or "claude").strip().lower()
+    try:
+        return _BACKENDS[want]
+    except KeyError:
+        raise ValueError("no board backend %r (have: %s)"
+                         % (want, ", ".join(sorted(_BACKENDS))))
 
 
 def context_flags(role):
@@ -1309,12 +1392,15 @@ def _log_line(aid, text):
 
 def transcript_hint(session):
     """Where a worker's full history is, as a path — even before the file
-    exists, because a header is written before the agent has opened it."""
+    exists, because a header is written before the agent has opened it. Routed
+    through the backend; only `claude` has an on-disk home a hint can guess."""
     if not session:
         return ""
-    found = bph.transcript(session)
+    found = get_backend().transcript(session)
     if found:
         return found
+    if get_backend().name != "claude":
+        return ""                       # no known transcript home to name
     # Not there yet (or the project directory was renamed) — a glob is still an
     # answer he can paste into a shell, and it is honest about what is known.
     return os.path.join(bph.projects_dir(), "*", "%s.jsonl" % session)
@@ -1634,7 +1720,7 @@ def _spawn_worker(rec):
     name = ba.pick_name(aid)
     session = str(uuid.uuid4())
     prompt = WORKER_PROMPT.format(
-        repo=REPO, host=host_line(), task=rec["task"], rules=RULES,
+        repo=REPO, host=host_line(), task=rec["task"],
         name=name, aid=aid, phase_words=phase_word_menu(),
         context=("--- what the orchestrator knows that you do not ---\n%s\n--- end ---\n\n"
                  % rec["context"]) if rec.get("context") else "")
@@ -1642,15 +1728,13 @@ def _spawn_worker(rec):
     if stub:
         cmd = ["/bin/sh", "-c", stub]
     else:
-        cmd = ["claude", "-p", prompt,
-               "--session-id", session,
-               *role_flags("worker"),
-               *context_flags("worker"),
-               "--permission-mode", "acceptEdits",
-               "--allowedTools", *ALLOW,
-               "--disallowedTools", *DENY,
-               "--output-format", "text",
-               "-n", "board: " + rec["task"][:50]]
+        # All the Claude-isms — the model/effort, the cache flags, the trimmed
+        # tools, the allowed/denied sets, and the appended RULES system-prompt
+        # block — live in the backend. `BOARD_BACKEND` can point this at
+        # another one (`docs/agents/minister-context.md`).
+        cmd = get_backend().args(
+            prompt=prompt, session=session, role="worker",
+            label="board: " + rec["task"][:50])
     # `BOARD_ORDER` is HIS sentence, and it rides the environment for the same
     # reason `BOARD_AGENT_ID` does: every `boardctl` this worker runs inherits
     # it, so the bullet it eventually writes can say which of his own asks it
