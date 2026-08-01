@@ -13,6 +13,9 @@ what the two gestures have to be true of:
     written per notch, which is what an unguarded zoom does.
   - middle-drag moves the content 1:1 with the pointer in both axes, clamps at
     the page edge, and stops at the release
+  - the page is ON SCREEN in every frame of the gesture, the settle included —
+    read off `grabWindow()`, with the provider held back so the window in which
+    a raster is in flight is long enough to watch
 
 Two rules this file is shaped by, both paid for once already:
 
@@ -32,6 +35,7 @@ interpreter it names.
 import os
 import sys
 import tempfile
+import time
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)       # and nothing to fall back TO
@@ -43,7 +47,7 @@ sys.path.insert(0, APP)
 sys.path.insert(0, os.path.join(os.path.dirname(APP), "pylib"))
 
 from PySide6.QtCore import QPoint, QPointF, QTimer, QUrl, QObject, Slot, Qt
-from PySide6.QtGui import QGuiApplication, QWheelEvent, QMouseEvent
+from PySide6.QtGui import QGuiApplication, QWheelEvent, QMouseEvent, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 import PySide6.QtQuick  # noqa: F401  (registers the QQuickItem converter)
 
@@ -62,6 +66,23 @@ Window {
     // tools/pdf-profile.py takes, and asserting it here is what would catch a
     // new item being declared ahead of the view.
     property var lv: v.children[0]
+    // How many 8ms samples have caught a delegate Image mid-load. The blank
+    // check needs to know a load was actually in flight while it was
+    // watching, or it asserts nothing at all.
+    property int loadsSeen: 0
+    Timer {
+        interval: 8; repeat: true; running: true
+        onTriggered: {
+            var n = 0;
+            var items = lv.contentItem.children;
+            for (var k = 0; k < items.length; k++) {
+                var sheet = items[k].children.length ? items[k].children[0] : null;
+                var img = sheet && sheet.children.length ? sheet.children[0] : null;
+                if (img && img.status === Image.Loading) n++;
+            }
+            if (n > 0) win.loadsSeen++;
+        }
+    }
     PdfView { id: v; anchors.fill: parent; docKey: "left" }
     Timer {
         interval: 400; running: true
@@ -80,8 +101,15 @@ def check(name, cond, detail=""):
 
 
 def make_pdf(path, pages=30):
-    """Enough pages to scroll, written by Qt — no fixture file in the repo."""
-    from PySide6.QtGui import QPdfWriter, QPainter, QFont, QPageSize
+    """Enough pages to scroll, written by Qt — no fixture file in the repo.
+
+    Every page carries a big RED block as well as its number: the blank check
+    below reads a `grabWindow()` and counts that red. A line of text is a few
+    dozen dark pixels in a megapixel of paper, and grey will not do either —
+    the palette is his wallpaper's, so `Theme.bgAlt` (what a blanked sheet
+    shows) can land anywhere on the grey scale. Nothing on this desktop is
+    saturated red."""
+    from PySide6.QtGui import QPdfWriter, QPainter, QFont, QPageSize, QColor
     w = QPdfWriter(path)
     w.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
     w.setTitle("Zoom Harness")
@@ -92,6 +120,7 @@ def make_pdf(path, pages=30):
     for i in range(pages):
         if i:
             w.newPage()
+        p.fillRect(700, 1000, 8000, 12000, QColor(255, 0, 0))
         p.drawText(400, 800, "page %d" % (i + 1))
     p.end()
 
@@ -103,10 +132,19 @@ class _Probe(pdfdoc.PageProvider):
     def __init__(self, lib):
         super().__init__(lib)
         self.iids = []
+        # Seconds to hold every request for. The blank check needs the window
+        # in which a page is on its way to be observable from the GUI thread,
+        # and this harness' pages rasterize in ~3ms against ~45ms for his
+        # image-heavy ones. Set for that one block, 0 everywhere else — and it
+        # holds a cache HIT too, since the delegate's pixmap is dropped when
+        # the load STARTS and knows nothing about where the page comes from.
+        self.slow = 0.0
 
     def requestImage(self, iid, size, requested):
         img = super().requestImage(iid, size, requested)
         self.iids.append("%s@%dx%d" % (iid, requested.width(), requested.height()))
+        if self.slow:
+            time.sleep(self.slow)
         return img
 
 
@@ -168,6 +206,27 @@ class _Driver(QObject):
 
     def release(self, x, y):
         self._mouse(QMouseEvent.Type.MouseButtonRelease, x, y)
+
+    def onPage(self):
+        """Fraction of the window covered by the pages' red block.
+
+        A page drawn at any scale has plenty of it; a page blanked while its
+        raster is on its way is a flat `Theme.bgAlt` sheet and has none. The
+        colour is the point: a luminance test cannot tell a sheet from a page,
+        because the palette comes from his wallpaper and `bgAlt` can be pale
+        enough to read as paper or dark enough to read as ink."""
+        img = self.win.grabWindow()
+        if img.isNull():
+            return -1.0
+        img = img.convertToFormat(QImage.Format.Format_RGB32)
+        red = tot = 0
+        for y in range(40, img.height() - 40, 9):
+            for x in range(40, img.width() - 40, 9):
+                c = img.pixel(x, y)
+                tot += 1
+                if (c >> 16 & 255) > 190 and (c >> 8 & 255) < 90 and (c & 255) < 90:
+                    red += 1
+        return red / max(1, tot)
 
     def p(self, n):
         return self.v.property(n)
@@ -353,6 +412,56 @@ def script(d):
         check("the debounce is what keeps the rasters down",
               n > st["debounced"] * 3, "%d vs %d" % (n, st["debounced"]))
     yield 600, naive_report
+
+    # ---- 6. the page never goes blank, least of all at the settle -----------
+    # The regression this exists for: writing `sourceSize` CLEARS the Image's
+    # pixmap, so the sheet painted nothing at all from the moment the settle
+    # fired until the new raster arrived — 275ms of empty page at the end of
+    # every ctrl+wheel zoom, measured this way. `retainWhileLoading` keeps the
+    # old pixmap up, scaled, until the sharp one is ready (§6.1).
+    #
+    # It reads PIXELS, off `grabWindow()`, because nothing else tells the
+    # truth here: `Image.paintedWidth` stayed at its old value all through the
+    # blank window and `status` alone says a load is in flight, not whether
+    # anything is on screen while it is.
+    def blank_setup():
+        d.v.setProperty("fit", "width")    # a page filling the pane, so a
+        d.prov.slow = 0.06                 # blank has somewhere to show
+    yield 500, blank_setup
+
+    def blank_start():
+        st["cov0"] = d.onPage()
+        st["cov"] = []
+        st["r0"] = len(d.prov.iids)
+        st["l0"] = d.win.property("loadsSeen")
+        for _ in range(4):
+            d.wheel(500, 450, 120, True)
+    yield 400, blank_start
+
+    for _ in range(24):
+        yield 25, (lambda: st["cov"].append((d.p("rasterScale"), d.onPage())))
+
+    def blank_check():
+        d.prov.slow = 0.0
+        lo = min(i for _, i in st["cov"])
+        end = st["cov"][-1][1]
+        after = [i for s, i in st["cov"] if abs(s - d.p("pageScale")) < 1e-9]
+        loads = d.win.property("loadsSeen") - st["l0"]
+        check("the settle re-rasterized inside the sampled window",
+              len(d.prov.iids) - st["r0"] > 0 and len(after) > 3 and loads > 2,
+              "%d rasters, %d samples at the settled scale, %d ticks with a "
+              "load in flight" % (len(d.prov.iids) - st["r0"], len(after), loads))
+        check("...and there is a page in frame to lose (a flat window is vacuous)",
+              st["cov0"] > 0.10 and end > 0.10,
+              "page %.3f of the window at rest, %.3f at the end" % (st["cov0"], end))
+        check("the page stays on screen for EVERY frame of the zoom",
+              lo > end * 0.5,
+              "page %.3f of the window at rest, %.3f at the emptiest frame, %.3f at the end"
+              % (st["cov0"], lo, end))
+        check("...including while the re-raster at the new scale is in flight",
+              after and min(after) > end * 0.5,
+              "%.3f" % (min(after) if after else -1))
+    yield 40, blank_check
 
 
 def main(path):

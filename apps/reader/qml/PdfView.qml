@@ -302,12 +302,23 @@ Item {
                     // geometry never moves (§6.1).
                     asynchronous: true
                     cache: true
+                    // The page STAYS ON SCREEN while the re-raster at the new
+                    // scale is on its way. Without this, writing `sourceSize`
+                    // clears the pixmap and the sheet paints nothing until the
+                    // new one arrives — measured offscreen 2026-07-31: the ink
+                    // in the viewport went to ZERO for 275 ms the moment the
+                    // settle fired, which is the flash at the end of every
+                    // ctrl+wheel zoom (§6.1 — never blank something the user is
+                    // reading to redraw it).
+                    retainWhileLoading: true
                     // A rasterized page is normally already at the size it is
                     // drawn at, and filtering it then costs quality for
                     // nothing — but that stops being true the moment a zoom is
                     // in flight and the pixmap is being scaled to a size it was
-                    // not drawn for.
-                    smooth: pdfv.scaling
+                    // not drawn for. The retained pixmap above is in exactly
+                    // that state too, at a scale `pdfv.scaling` already reads
+                    // as settled, so it is filtered for as long as it stands in.
+                    smooth: pdfv.scaling || status === Image.Loading
                     sourceSize.width: pageItem.rxW
                     sourceSize.height: pageItem.rxH
                     source: "image://pdfpage/" + pdfv.docKey + "/" + pdfv.gen
