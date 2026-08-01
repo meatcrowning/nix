@@ -34,6 +34,24 @@
   # started). This downloader only pulls missing tracks; it serves nothing, so
   # an empty share list is the honest config. Add real share dirs here if that
   # ever changes.
+  #
+  # THAT IS NOT ENOUGH ON ITS OWN, because the empty share list stops the SCAN
+  # and not the WATCHER. slskd registers a recursive inotify watch rooted at its
+  # **current working directory**, whatever that is and whatever it shares —
+  # measured on `top` 2026-08-01: the service reported "Sharing 0 directories
+  # and 0 files" while holding **524,006 of the box's 524,288 inotify watches**,
+  # the first one on `/home/lam` itself (a user unit's default cwd) and 322k of
+  # them inside `~/drives/nixos-old`, an old NixOS install's /nix/store with
+  # 355k directories. It reaches that ceiling ~15s after start and stays there,
+  # so every other inotify user on this uid is starved: `board-inbox.path` could
+  # not arm ("Failed to add a watch ... inotify watch limit reached") and
+  # anything typed into goetia went nowhere for 8.5 hours.
+  #
+  # So the fix is a `WorkingDirectory` with nothing under it. It is cwd and NOT
+  # `$HOME` — that was measured too, because the obvious guess is wrong and cost
+  # a rebuild to disprove: empty cwd + real HOME gives **25** watches, while
+  # `cwd=/home/lam` + an empty HOME still gives **524,025**. `--app-dir` is
+  # named explicitly so none of slskd's own paths depend on either.
   home.activation.slskdConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     keyFile="$HOME/.secrets/slskd-api-key"
     if [ -f "$keyFile" ]; then
@@ -62,7 +80,14 @@
       Wants = [ "network-online.target" ];
     };
     Service = {
-      ExecStart = "${pkgs.slskd}/bin/slskd --no-logo";
+      # --app-dir is what HOME would otherwise have decided; state is unmoved.
+      ExecStart = "${pkgs.slskd}/bin/slskd --no-logo "
+        + "--app-dir ${config.home.homeDirectory}/.local/share/slskd";
+      # An empty cwd, so slskd's recursive watcher has nothing to walk. See the
+      # measurement above; without this it eats the machine's whole inotify
+      # budget. systemd creates the directory under $XDG_STATE_HOME.
+      StateDirectory = "slskd-cwd";
+      WorkingDirectory = "%S/slskd-cwd";
       Restart = "on-failure";
       RestartSec = 5;
     };
