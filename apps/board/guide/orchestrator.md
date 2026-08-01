@@ -564,6 +564,12 @@ assumed.
   its card leaves the list the moment it dies.
 - A worker's prompt therefore says to run `note` **even when it finished
   nothing**, and says why.
+- **A completion note is AS SHORT as its result.** [his, 2026-07-31] When
+  nothing surprising happened — it worked, nothing failed, no deviation from
+  the task, no decision he needs — the note IS `COMPLETION: done, no errors.
+  pushed.` and nothing under it. Detail earns its place only for what he would
+  otherwise be surprised by: a failure, a choice made on his behalf, a rebuild
+  left pending, work deliberately left out. Never dress a plain success up.
 - **A transient platform death is REQUEUED once, not failed** (2026-07-29). A
   worker that recorded nothing and whose log ENDS on an API 5xx/overload line
   (`boardwork.TRANSIENT_RE`) died at the platform's hand, usually before its
