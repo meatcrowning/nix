@@ -5387,8 +5387,8 @@ def test_window(app, tmp):
           board.removeTodo(9999) is False)
 
     # ---- and a DOUBLE click does it too, which is how he asked to do it ----
-    # *"i should be able to just double click on stuff in the to do when you
-    # feel like it section to remove them"*. It did nothing for a day: the
+    # *"i should be able to just double click on stuff in the to do
+    # section to remove them"*. It did nothing for a day: the
     # row's MouseArea was `acceptedButtons: Qt.RightButton`, so the left button
     # never reached it at all. Driven with real QMouseEvents against the real
     # delegate, because that is the only thing that would have caught it — the
