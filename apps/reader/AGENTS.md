@@ -99,6 +99,14 @@ branch itself is `DocPane.qml`'s `isPdf`, and it is one `Loader`.
       0.25% grid so the same visual zoom reached twice reuses one raster — at
       settle and never live, because gridding a live gesture is §6's "never
       quantize a live drag".
+    - **And the old raster STAYS UP while the new one is on its way** —
+      `retainWhileLoading: true` on the delegate's `Image`. Writing
+      `sourceSize` otherwise clears the pixmap the instant the load starts, so
+      the settle at the end of every ctrl+wheel zoom emptied the page:
+      measured offscreen 2026-07-31, the page vanished from the window for
+      275 ms and came back at the new scale (§6.1 — the outgoing frame stays
+      on screen). `smooth` covers that window too, since the pixmap standing
+      in is being scaled while `pdfv.scaling` already reads as settled.
     - Harness: `tools/pdf-zoom-test.py` (offscreen, real `QWheelEvent`s and
       `QMouseEvent`s, writes its own 30-page PDF; takes a real path too).
 - **Zoom is `fit` (a MODE) plus `zoom` (a number).** `width` and `page` survive
@@ -384,6 +392,15 @@ The *appearance* is the user's check, as always.
 **`tools/pdf-zoom-test.py` is the viewport gestures'** — ctrl+scroll and
 middle-drag, driven with real events at an offscreen `PdfView`, including what
 the `sourceSize` debounce is worth in rasters. Same env recipe.
+
+Its last block is the one that reads PIXELS: it holds every provider request
+for 60 ms (his image-heavy pages are ~45 ms), zooms, and samples
+`grabWindow()` across the settle, asserting the page is on screen in every
+frame. It counts the RED block its own PDF carries, not brightness — the
+palette is the wallpaper's, so a blanked `Theme.bgAlt` sheet can read as
+paper or as ink, and a luminance test passed happily against a page that was
+not there. `Image.paintedWidth` is no better: it kept its old value all the
+way through the blank.
 
 **`tools/pdf-profile.py` is the PDF mode's measuring tape**, same env recipe,
 three modes: no flag times `Pdf.open`, a spread of page rasters and one
