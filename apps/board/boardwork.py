@@ -1732,16 +1732,23 @@ def dispatch(task, phase="", where="", context="", cap_=None):
 #: is the shape he asked for the agents section in.
 UNIT_PREFIX = "board-worker-"
 
+#: ...and the one a DECISION runs as. Same mechanism, its own namespace: a
+#: decision is not a worker — nothing counts it against the cap, `reap()` never
+#: looks at it, and its liveness is its stash — so sharing the worker prefix
+#: would put it in front of every `board-worker-*` glob in this tree.
+DECISION_PREFIX = "board-decision-"
+
 #: Set to `1` to force the old detached-`Popen` path. For a machine with no
 #: systemd user manager only — a worker started that way DIES WITH THE TICK when
 #: the caller is `board-watch.service`, which is the bug this replaced.
 NO_UNIT = os.environ.get("BOARD_WORK_NO_UNIT") == "1"
 
-def unit_name(agent_id):
-    return UNIT_PREFIX + ba.clean_id(agent_id)
+def unit_name(agent_id, prefix=UNIT_PREFIX):
+    return prefix + ba.clean_id(agent_id)
 
 
-def _start_unit(aid, cmd, env, logpath, title):
+def _start_unit(aid, cmd, env, logpath, title, prefix=UNIT_PREFIX,
+                kind="worker", runtime=None):
     """Ask the user manager for one transient unit. Returns a pid, or None.
 
     None means "nothing was started" — the caller may safely fall back. A pid of
@@ -2251,6 +2258,18 @@ def cards(agents=None, pend=None):
     urgent. There is no urgency in this app.
     """
     rows = _drawable(ba.agents() if agents is None else agents)
+    # HIS OWN SESSIONS ARE NOT BOARD WORK — [his, 2026-07-31] *"agents started
+    # by the user can be hidden from the triangle"*. The anonymous `session`
+    # rows that `boardagents.agents()` walks out of /proc — bare interactive
+    # Claude Code sessions with no name and no `--where`, e.g. "s831183 an
+    # interactive Claude Code session" — are HIS terminals, not summoned
+    # ministers, so they are dropped here at the one surface that draws the
+    # triangle. Deliberately NOT in `_drawable()`: `groups()` (which is what
+    # `boardctl.py agents` lists) keeps showing them, because that is an
+    # agent-facing collision check where a live session of his still matters.
+    # Board-dispatched workers (named rows) and Solomon are unaffected —
+    # neither is ever a `session`.
+    rows = [a for a in rows if a.get("kind") != "session"]
     pend = pending() if pend is None else pend
     out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
     orch = [a for a in out if _is_orchestrator(a)]

@@ -469,6 +469,15 @@ all of it.
   listed as what can actually be observed — a process — and described as
   `running - board sees the process, not what it is doing`. Nothing invents a
   title for it.
+- **...but it is not drawn any more — [his, 2026-07-31] *"agents started by the
+  user can be hidden from the triangle"*.** Those anonymous rows (no name, no
+  `--where`, an id like `s831183`) are HIS terminals, not summoned ministers,
+  so `boardwork.cards()` drops every `kind == "session"` row and the triangle
+  no longer shows them. The filter lives in `cards()`, the one surface that
+  draws the window — **not** in `_drawable()`, so `boardctl.py agents` (which
+  reads `groups()`) still lists them, because that is an agent-facing
+  collision check where a live session of his still matters. Board-dispatched
+  workers (named rows) and Solomon are never a `session` and are unaffected.
 - **THE SECTION DESCRIBES ITSELF WITH CARDS — it has no description of its
   own.** [his, 2026-07-30] bound ministers → the cards and nothing else; none
   bound → the one empty line below and nothing else. Two things went for that:
@@ -481,6 +490,17 @@ all of it.
 - **Empty is the resting state**: `binds ministers.`, in `Theme.dim`, with the
   box still there — [his, 2026-07-29] what the triangle IS, rather than a report
   that it currently holds nobody.
+- **The band says how many it BINDS, in words — [his, 2026-07-31] *"the
+  triangle binds three ministers"*.** Once any minister is running the
+  `SectionHead` label reads `the triangle binds <n> minister(s)` (one/two/
+  three/four, matching the cap); with none it falls back to the plain `the
+  triangle`, because the dim `binds ministers.` line below already says the
+  empty state and `binds no ministers` would contradict it. The number is
+  `Agents.boundMinisters` (`main.py`), counting the RUNNING, non-orchestrator
+  cards in the exact set the triangle draws — so it inherits the session
+  filter (`cards()` drops `kind == "session"`), and an anonymous session the
+  user started is never counted. A queued task (no process yet) and an exited
+  card are unbound and do not count.
 - **...and a SECOND line only when nothing will ever start.** Armed, that
   sentence is the only text the section draws. Not armed, it reads
   `board-watch is not armed`. The verdict is `Agents.armed`, three-valued —

@@ -2095,6 +2095,7 @@ def test_agents(tmp):
     import glob
     import boardagents as ba
     import boardmove as bm
+    import boardwork as bw
 
     def where_is(text):
         found = []
@@ -2305,6 +2306,18 @@ def test_agents(tmp):
           [(a["id"], a["kind"], a["title"]) for a in got if a["pid"] == 900002]
           == [("s900002", "session", "an interactive Claude Code session")],
           [(a["id"], a["kind"]) for a in got if a["pid"] == 900002])
+    # HIS OWN SESSIONS ARE NOT BOARD WORK — [his, 2026-07-31] *"agents started
+    # by the user can be hidden from the triangle"*. The row above (no name, no
+    # --where) is HIS terminal, so it is dropped from the window's cards while
+    # the agent-facing CLI listing (`groups()`, which is `boardctl.py agents`)
+    # keeps it: that is a collision check where a live session of his matters.
+    bom = ba.agents(procs=fake)
+    cli = [a["id"] for g in bw.groups(agents=bom) for a in g["rows"]
+           if a["kind"] == "session"]
+    tri = [a["id"] for a in bw.cards(agents=bom) if a["kind"] == "session"]
+    check("his interactive session stays in the CLI listing, hidden from the triangle",
+          [a["id"] for a in bom if a["kind"] == "session"] == cli and not tri,
+          ([a["id"] for a in bom if a["kind"] == "session"], cli, tri))
     for aid in ("unit-worker", "tick-agent"):
         p = os.path.join(ba.agents_dir(), "%s.json" % aid)
         if os.path.exists(p):
@@ -4503,6 +4516,27 @@ def test_window(app, tmp):
           rows.get("drawn-dead", {}).get("running") is False
           and "exited" in rows.get("drawn-dead", {}).get("detail", ""),
           rows.get("drawn-dead"))
+
+    # ---- the triangle header says how many it BINDS, in words ----
+    # [his, 2026-07-31] *"the triangle binds three ministers"*. The band's
+    # count (`Agents.boundMinisters`) must equal the RUNNING, non-orchestrator
+    # cards actually drawn (`win.agentCards` is `Agents.workers`, the set the
+    # triangle renders — sessions the user started are already filtered out by
+    # `cards()`, so a live anonymous session here can never be one of them).
+    # Drawn-live is running; drawn-dead is not.
+    _n = prop(agents, "boundMinisters")
+    _running = [a for a in prop(win, "agentCards")
+                if a.get("state") == "running"]
+    check("the header count is exactly the running ministers drawn",
+          _n == len(_running) and _n >= 1, (_n, [a["id"] for a in _running]))
+    _words = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+    _want = ("the triangle binds " + _words.get(_n, str(_n))
+             + (" minister" if _n == 1 else " ministers"))
+    _band = [str(it.property("label") or "") for it in descendants(win.contentItem())
+             if it.property("interactive") is not None
+             and str(it.property("label") or "").startswith("the triangle")]
+    check("...and the band says it in the same voice as the cards",
+          _band and _band[-1] == _want, (_band, _want))
 
     # ---- a RISING card is one line ON SCREEN, not just in the model ----
     # *"the card should just show the rising text and nothing else"* [his,

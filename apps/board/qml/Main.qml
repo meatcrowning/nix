@@ -1525,8 +1525,22 @@ Window {
             SectionHead {
                 width: page.width
                 // "the triangle", with the article, matching "the circle" on
-                // Solomon's own card - [his, 2026-07-29].
-                label: "the triangle"
+                // Solomon's own card - [his, 2026-07-29]. Since 2026-07-31 the
+                // band also says how many ministers the triangle is BINDING
+                // right now, in the same voice as the rest of the card — his
+                // call, *"the triangle binds three ministers"*. The count is
+                // `Agents.boundMinisters`, which counts the running minister
+                // cards drawn HERE — sessions he started are already filtered
+                // out of the drawn set, so an anonymous terminal of his is
+                // never counted. With none bound the band keeps the plain name
+                // and lets the dim `binds ministers.` line below say the empty
+                // state, so the two never contradict.
+                label: Agents.boundMinisters === 0 ? "the triangle"
+                     : "the triangle binds " + ({
+                            1: "one", 2: "two", 3: "three", 4: "four",
+                            5: "five", 6: "six"
+                        }[Agents.boundMinisters] || Agents.boundMinisters)
+                       + " minister" + (Agents.boundMinisters === 1 ? "" : "s")
                 collapsed: win.isCollapsed("agents")
                 fgAccent: win.fgAccent
                 fgDim: win.fgDim
