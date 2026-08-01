@@ -329,6 +329,7 @@ ORCH_MODELS = [
     ("claude-opus-5", "opus 5"),
     ("claude-sonnet-5", "sonnet 5"),
     ("claude-haiku-4-5-20251001", "haiku 4.5"),
+    ("deepseek/deepseek-v4-flash-0731", "deepseek v4 flash"),
 ]
 
 #: What orchestrates when he has never chosen. Unchanged from the value that was
@@ -422,6 +423,7 @@ MINISTER_MODELS = [
     ("claude-sonnet-5", "low", "sonnet 5 low"),
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("claude-haiku-4-5-20251001", "low", "haiku 4.5 low"),
+    ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
 ]
 
 #: The ceiling, named once. It is the first row of the list above and the value
@@ -1188,7 +1190,51 @@ class ClaudeBackend(AgentBackend):
         return bph.transcript(session)
 
 
-_BACKENDS = {"claude": ClaudeBackend()}
+# ------------------------------------------------------- the hermes backend
+#: The models that live on the Hermes runtime rather than Claude Code, and the
+#: provider they run under on this machine. A model in `HERMES_MODELS` routes a
+#: spawn to `HermesBackend`; everything else stays on Claude. [his, 2026-07-31]
+#: the summoner and minister dropdowns should offer `deepseek-v4-flash-0731`
+#: via hermes.
+HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731"}
+HERMES_PROVIDER = os.environ.get("BOARD_HERMES_PROVIDER", "nous")
+#: The Hermes toolsets a minister may reach. Mirrors the Claude `TOOLS` idea:
+#: a minister gets the shell, the file tools and the web pair — nothing bigger.
+HERMES_TOOLSETS = os.environ.get("BOARD_HERMES_TOOLSETS",
+                                 "file,terminal,web,search")
+#: Cap on tool-calling iterations, the Hermes analog of the 45-minute unit cap.
+HERMES_MAX_TURNS = int(os.environ.get("BOARD_HERMES_MAX_TURNS", "150"))
+
+
+class HermesBackend(AgentBackend):
+    """The Hermes Agent CLI (`hermes chat -q ...`). Everything a Claude run
+    gets through a flag, a hermes run gets through the same surfaces with the
+    hermes names: the model+provider, the toolsets, and RULES (which hermes has
+    no `--append-system-prompt` for, so they ride in the query body — same
+    verbatim block, different channel). No pre-bindable session id exists, so
+    `transcript()` is None and a hermes minister's card is claim-only: the
+    observed line does not fill (see docs/agents/minister-context.md)."""
+    name = "hermes"
+
+    def system_blocks(self, role):
+        return [RULES]
+
+    def args(self, *, prompt, session, role, label):
+        q = prompt
+        for b in self.system_blocks(role):
+            q += "\n\n" + b
+        return ["hermes", "chat", "-q", q, "-Q",
+                "--source", "tool",
+                "-m", _role_model(role), "--provider", HERMES_PROVIDER,
+                "-t", HERMES_TOOLSETS,
+                "--max-turns", str(HERMES_MAX_TURNS),
+                "--yolo"]
+
+    def transcript(self, session):
+        return None
+
+
+_BACKENDS = {"claude": ClaudeBackend(), "hermes": HermesBackend()}
 
 
 def get_backend(name=None):
@@ -1200,6 +1246,26 @@ def get_backend(name=None):
     except KeyError:
         raise ValueError("no board backend %r (have: %s)"
                          % (want, ", ".join(sorted(_BACKENDS))))
+
+
+def _role_model(role):
+    """The model string the NEXT `role` spawn runs on — the same source
+    `role_flags` reads, so a spawn and its flags never disagree."""
+    if role in MINISTER_ROLES:
+        return minister_model()[0]
+    if role == "orchestrator":
+        return orch_model()
+    return ""
+
+
+def get_backend_for_model(model):
+    """Which backend hosts `model` — hermes for `HERMES_MODELS`, else claude."""
+    return get_backend("hermes" if model in HERMES_MODELS else "claude")
+
+
+def get_backend_for_role(role):
+    """The backend the NEXT `role` spawn runs on, from its chosen model."""
+    return get_backend_for_model(_role_model(role))
 
 
 def context_flags(role):
@@ -1730,9 +1796,10 @@ def _spawn_worker(rec):
     else:
         # All the Claude-isms — the model/effort, the cache flags, the trimmed
         # tools, the allowed/denied sets, and the appended RULES system-prompt
-        # block — live in the backend. `BOARD_BACKEND` can point this at
-        # another one (`docs/agents/minister-context.md`).
-        cmd = get_backend().args(
+        # block — live in the backend. Which backend this task runs on follows
+        # the model its drop down chose (`get_backend_for_role`); hermes models
+        # spawn via `hermes`, everything else via `claude`.
+        cmd = get_backend_for_role("worker").args(
             prompt=prompt, session=session, role="worker",
             label="board: " + rec["task"][:50])
     # `BOARD_ORDER` is HIS sentence, and it rides the environment for the same

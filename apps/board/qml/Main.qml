@@ -743,7 +743,7 @@ Window {
                     anchors.topMargin: 4
                     anchors.right: ministerPick.right
                     width: ministerPick.width
-                    visible: Usage.rows.length > 0
+                    visible: (Usage.rows.length + Usage.hrows.length) > 0
                     // Zero: each meter already carries its own line box (§4.1),
                     // and stacked readouts butt together like every other tiled
                     // thing here (§5.1). Nothing invents a gap.
@@ -769,6 +769,43 @@ Window {
                             onRefreshRequested: {
                                 win.status = "refreshing the usage reading...";
                                 Usage.refreshNow();
+                            }
+                        }
+                    }
+
+                    // ===================== hermes minister usage =====================
+                    // [his, 2026-07-31] when a minister runs on the hermes
+                    // (deepseek) backend, keep his Anthropic bars as they are and
+                    // show the real hermes usage here. These are FIGURES — tokens
+                    // and cost Hermes recorded for `source='tool'` sessions
+                    // (`boardusage.hermes_readings`) — never a percentage, because
+                    // there is no published hermes limit to be a % of
+                    // (docs/DESIGN.md §10; `boardusage`'s docstring). Same
+                    // paired-edge row as the meters, without the bar: window name
+                    // hard left, figures hard right.
+                    Item { width: 1; height: 4 }
+                    PixelText {
+                        text: "hermes ministers"
+                        color: Theme.textDim
+                    }
+                    Repeater {
+                        model: Usage.hrows
+                        delegate: Item {
+                            id: hero
+                            required property var modelData
+                            readonly property int lineH: Theme.fontSize + 4
+                            width: usageCol.width
+                            height: lineH
+                            PixelText {
+                                y: Math.round((hero.lineH - height) / 2)
+                                color: Theme.textDim
+                                text: hero.modelData.label
+                            }
+                            PixelText {
+                                y: Math.round((hero.lineH - height) / 2)
+                                x: hero.width - width
+                                color: hero.modelData.known ? Theme.text : Theme.textDim
+                                text: hero.modelData.text
                             }
                         }
                     }

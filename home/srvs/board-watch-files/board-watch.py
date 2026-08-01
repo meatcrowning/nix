@@ -743,9 +743,10 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
     else:
         # All the Claude-isms — model/effort, cache flags, trimmed tools, the
         # allowed/denied sets, and the appended RULES system-prompt block —
-        # live in `boardwork.AgentBackend`; `BOARD_BACKEND` can switch it.
-        cmd = bw.get_backend().args(prompt=prompt, session=session,
-                                    role=role, label=label)
+        # live in `boardwork.AgentBackend`. Which backend follows the chosen
+        # model: hermes models spawn via `hermes`, everything else via `claude`.
+        cmd = bw.get_backend_for_role(role).args(prompt=prompt, session=session,
+                                                 role=role, label=label)
     t0 = time.time()
     cap = timeout or AGENT_TIMEOUT_S
     try:

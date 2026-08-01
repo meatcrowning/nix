@@ -1425,6 +1425,7 @@ class Usage(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
+        self._hrows = []
         self._stamp = None
         self._busy = False
         self._fetched_at = 0.0
@@ -1540,14 +1541,28 @@ class Usage(QObject):
         # supposed to say so — so a re-read is skipped only while the rows come
         # out identical, never merely because the mtimes held still.
         rows = boardusage.readings()
-        if rows == self._rows and stamps == self._stamp:
+        # The hermes minister readout rides the same clocks (not a fetch — it is
+        # a read of Hermes' own ledger, so there is nothing to fetch).
+        hrows = boardusage.hermes_readings()
+        if (rows == self._rows and stamps == self._stamp
+                and hrows == self._hrows):
             return
         self._rows, self._stamp = rows, stamps
+        self._hrows = hrows
         self.changed.emit()
+        self.hchanged.emit()
 
     @Property("QVariantList", notify=changed)
     def rows(self):
         return self._rows
+
+    #: The hermes minister readout (one row per `boardusage.HERMES_WINDOWS`),
+    #: real token/cost figures — see `boardusage.hermes_readings`.
+    hchanged = Signal()
+
+    @Property("QVariantList", notify=hchanged)
+    def hrows(self):
+        return self._hrows
 
 
 class Settings(QObject):

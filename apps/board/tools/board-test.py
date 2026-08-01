@@ -4234,8 +4234,13 @@ def test_window(app, tmp):
         # moved the column.
         box = (sums or picks)[0].parentItem()
         bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
-        colBottom = max(it.mapToItem(win.contentItem(), QPointF(0, 0)).y()
-                        + it.height() for it in bars)
+        # Bottom of the WHOLE usage column, not just the % meters: the box is
+        # derived to fill it end to end, and since 2026-07-31 the column also
+        # carries the hermes minister readout below the meters (plain Items with
+        # no `hovering`, so `bars` alone would stop at the second meter).
+        col = bars[0].parentItem()
+        cb = col.mapToItem(win.contentItem(), QPointF(0, 0))
+        colBottom = cb.y() + col.height()
         ap = top.mapToItem(win.contentItem(), QPointF(0, 0))
         check("the box he types in is as tall as chooser + meters, top flush",
               abs(ap.y() - bp.y()) < 1
