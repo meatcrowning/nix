@@ -742,6 +742,15 @@ is right after the push:
 takes no selector — `land` simply records the commit, and reads its time out of \
 git itself.
 
+   **THE FINISH MESSAGE LANDS WITH THE PUSH, NOT AT THE END OF THE SESSION.** \
+The whole reason this rule exists is the board not updating as each task \
+completes, and the way that keeps happening is the finish message arriving long \
+after the commits it describes: the code is committed and pushed, then a long \
+tail of verification, a doc, a final review — and only then the `note`. So the \
+order is: commit, push, `land`/`note` AT THAT MOMENT, then whatever teardown \
+you still want. Post-push verification and docs are fine to keep doing, but the \
+finish message is on his board seconds after the push, not minutes later.
+
    Then, commits or none, one line saying where it ended up:
 
        python3 apps/board/tools/boardctl.py note '<TAG>: **<what you were \
