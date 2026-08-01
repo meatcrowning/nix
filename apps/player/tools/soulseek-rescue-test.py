@@ -93,6 +93,26 @@ def test_transfer_failed():
     check("missing state is not failed", not S.transfer_failed({}))
 
 
+def test_alive_transfers_excludes_failed():
+    print("alive_transfers: failed terminals do not guard re-queueing")
+    dl = dl_response(
+        failed_transfer("rejector", REJECTED_FILENAME, reason="Completed, Rejected",
+                        tid="t1"),
+        {"username": "ongoing", "filename": "o\\one.mp3", "state": "InProgress"},
+        {"username": "done", "filename": "d\\two.mp3",
+         "state": "Completed, Succeeded"},
+        failed_transfer("erro", REJECTED_FILENAME, reason="Completed, Errored",
+                        tid="t2"),
+    )
+    alive = S.alive_transfers(dl)
+    check("the rejected transfer is excluded", ("rejector", REJECTED_FILENAME)
+          not in alive)
+    check("the errored transfer is excluded", ("erro", REJECTED_FILENAME)
+          not in alive)
+    check("in-progress transfer is included", ("ongoing", "o\\one.mp3") in alive)
+    check("succeeded transfer is included", ("done", "d\\two.mp3") in alive)
+
+
 def test_rescue_rejected_resources_and_blocks():
     print("rescue_rejected: re-source + block")
     rows = [dict(TRACK)]
@@ -105,6 +125,60 @@ def test_rescue_rejected_resources_and_blocks():
     check("drops the queued marker (track becomes wanted)",
           "SPOTID00001" not in state)
     check("remembers the rejected transfer id", "t1" in rescued)
+
+
+def test_rescue_rejected_errored_resources():
+    print("rescue_rejected: errored download is re-sourced and blocked")
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": queued("SPOTID00001", "rejector", REJECTED_FILENAME)}
+    rescued = set()
+    dl = dl_response(failed_transfer("rejector", REJECTED_FILENAME,
+                                     reason="Completed, Errored", tid="t1"))
+    blocked, n = S.rescue_rejected(rows, state, rescued, dl, dry_run=False)
+    check("blocks the peer that errored", blocked == {"rejector"})
+    check("re-sources the errored track", n == 1)
+    check("drops the queued marker", "SPOTID00001" not in state)
+    check("remembers the errored transfer id", "t1" in rescued)
+
+
+def test_rescue_rejected_no_state_does_not_burn_id():
+    print("rescue_rejected: a transfer with no matching queued state is not "
+          "recorded as handled")
+    # A failed transfer can map to a work-list track that has no "queued"
+    # state record (e.g. it is already "nofind"/error, or the entry was
+    # dropped). Recording its id in rescued_ids then would burn it forever
+    # with nothing re-sourced -- and once the track is queued again later, the
+    # same lingering rejection could never be acted on. The id must only be
+    # remembered (and the peer only blocked) when a queue actually happened.
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": {"spotify_id": "SPOTID00001", "isrc": "",
+                             "status": "nofind", "user": "", "filename": "",
+                             "when": "2026-08-01 00:00:00"}}
+    rescued = set()
+    dl = dl_response(failed_transfer("rejector", REJECTED_FILENAME, tid="t1"))
+    blocked, n = S.rescue_rejected(rows, state, rescued, dl, dry_run=False)
+    check("no re-source (track was not queued)", n == 0)
+    check("no peer blocked for an unacted rejection", blocked == set())
+    check("transfer id NOT burned", rescued == set())
+
+
+def test_rescue_rejected_no_state_then_queued_still_handled():
+    print("rescue_rejected: a no-state rejection can be re-sourced once the "
+          "track is later queued")
+    rows = [dict(TRACK)]
+    rescued = set()
+    dl = dl_response(failed_transfer("rejector", REJECTED_FILENAME, tid="t1"))
+    # first pass: the track has no state yet
+    state1 = {}
+    blocked, n = S.rescue_rejected(rows, state1, rescued, dl, dry_run=False)
+    check("nothing burned when nothing queued", rescued == set() and n == 0)
+    # later the same track is queued (from a different peer), and the OLD
+    # rejection is still lingering in slskd's list
+    state2 = {"SPOTID00001": queued("SPOTID00001", "goodpeer", GOOD_FILENAME)}
+    blocked, n = S.rescue_rejected(rows, state2, rescued, dl, dry_run=False)
+    check("the lingering rejection is now re-sourced", n == 1)
+    check("track re-queued becomes wanted", "SPOTID00001" not in state2)
+    check("id remembered only after acting", "t1" in rescued)
 
 
 def test_rescue_rejected_divergent_source_still_resources():

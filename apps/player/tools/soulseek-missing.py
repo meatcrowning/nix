@@ -375,6 +375,24 @@ def transfer_failed(f):
     return any(tok in st for tok in FAILED_TRANSFER_TOKENS)
 
 
+def alive_transfers(dl):
+    """(user, filename) pairs still worth guarding against re-queueing.
+
+    A transfer in a failed terminal state (rejected / errored / cancelled /
+    timed out / aborted) never landed on disk and is exactly what the rescue
+    re-sources -- leaving it in this set would make the never-re-queue guard
+    re-mark the track "queued" pointing at the dead transfer without ever
+    enqueueing a fresh one. So only transfers that might still produce a file
+    (queued / in-progress / succeeded) belong here.
+    """
+    out = set()
+    for tr in iter_transfers(dl):
+        user, filename = tr.get("username"), tr.get("filename")
+        if user and filename and not transfer_failed(tr):
+            out.add((user, filename))
+    return out
+
+
 def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
     """Re-source every missing track whose enqueued download ended failed
     (rejected / cancelled / errored / aborted -- slskd reports these as a
@@ -421,17 +439,26 @@ def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
                                    r.get("title", ""))]
         if not matches:
             continue
-        blocked.add(user)
-        rescued_ids.add(key)
-        # re-source the matching queued tracks (from a peer other than `user`,
-        # which pick_candidate now avoids via the returned blocklist)
+        # Re-source each currently-queued track this failed transfer maps to.
+        # Only count the rejection as HANDLED (and only block the refusing
+        # peer) once at least one queued track was actually re-sourced --
+        # recording the dedup for a transfer whose matching track is not
+        # currently "queued" (nofind/error, no state entry, already dropped)
+        # would burn the id and the peer permanently with nothing re-sourced,
+        # and every later poll would skip the same lingering transfer before
+        # it could ever act once the track is queued again.
+        acted = 0
         for row in matches:
             sid = track_key(row)
             rec = state.get(sid)
             if rec and rec.get("status") == "queued":
+                acted += 1
                 resourced += 1
                 if not dry_run:
                     del state[sid]
+        if acted:
+            blocked.add(user)
+            rescued_ids.add(key)
     return blocked, resourced
 
 
@@ -506,17 +533,12 @@ def main():
     # saw no `filename`, and silently matched nothing) and notice transfers
     # that ended failed. Both are best-effort: a failed API call degrades to
     # no re-queue protection and no rescue, never a crash.
-    queued_files = set()
-    blocked_users = set()
     dl = None
     try:
         dl = http("GET", f"{base}/api/v0/transfers/downloads", api_key)
     except SlskdError:
         pass
-    for tr in iter_transfers(dl):
-        user, filename = tr.get("username"), tr.get("filename")
-        if user and filename:
-            queued_files.add((user, filename))
+    queued_files = alive_transfers(dl)
     blocked_users, resourced = rescue_rejected(rows, state, rescued_ids, dl,
                                                args.dry_run)
     if resourced:
