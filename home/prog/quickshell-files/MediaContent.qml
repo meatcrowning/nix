@@ -210,6 +210,11 @@ Item {
         readonly property var bands: Media.eqBands
         readonly property int n: bands.length
         readonly property bool editable: Media.eqWriteLive
+        // One wheel notch = one 1 dB step (a discrete stepper, §9.2 — not a
+        // scroll surface), clamped to the EQ's ±36 dB range in `setBandGain`.
+        readonly property real stepDb: 1
+        // The band under the cursor — the wheel target and the hover affordance.
+        property int hoverBand: -1
 
         // Log frequency -> x. A missing or non-positive freq falls back to the
         // low end rather than producing NaN.
@@ -259,13 +264,18 @@ Item {
                 width: 1
                 height: parent.height
 
+                Rectangle {               // hover/scroll target: lights under the cursor
+                    visible: eq.editable && eq.hoverBand === index
+                    x: -4; y: 0; width: 9; height: parent.height
+                    color: Theme.highlight
+                }
                 Rectangle {               // grab column (a bit wider than drawn)
                     x: -3; y: 0; width: 7; height: parent.height
                     color: "transparent"
                 }
                 Rectangle {               // vertical track
                     x: -1; y: 1; width: 2; height: parent.height - 2
-                    color: Theme.border
+                    color: (eq.editable && eq.hoverBand === index) ? Theme.accent : Theme.border
                 }
                 Rectangle {               // the handle, riding at the gain level
                     x: -4; y: eq.gainY(gain) - 1
@@ -278,6 +288,19 @@ Item {
                 function setGain(db) { gain = db; }
                 Component.onCompleted: refresh()
             }
+        }
+
+        // Live gain readout for the band under the cursor (the wheel target).
+        // Reads `eq.bands`, which `setBandGain` writes, so it tracks a scroll.
+        PixelText {
+            visible: eq.editable && eq.hoverBand >= 0
+            anchors { top: parent.top; topMargin: 2; horizontalCenter: parent.horizontalCenter }
+            text: {
+                const b = (eq.hoverBand >= 0 && eq.hoverBand < eq.bands.length) ? eq.bands[eq.hoverBand] : null;
+                if (!b) return "";
+                return (b.gain > 0 ? "+" : "") + b.gain.toFixed(1) + " dB";
+            }
+            color: Theme.text
         }
 
         // The disabled-edit footer (visible only while EQ writes are off).
@@ -317,14 +340,35 @@ Item {
                 if (active >= 0) setFromY(active, m.y);
             }
             onPositionChanged: (m) => {
+                // Track the wheel/hover target regardless of press state.
+                eq.hoverBand = bandAt(m.x);
                 if (active < 0) return;
                 if (Math.abs(m.x - downX) > 2 || Math.abs(m.y - downY) > 2) dragged = true;
                 setFromY(active, m.y);
             }
+            onExited: eq.hoverBand = -1
             onReleased: {
                 // A tap that was not on a fader closes the overlay.
                 if (active < 0) { root.eqOpen = false; }
                 active = -1;
+            }
+
+            // Scroll over a band steps its gain (a discrete stepper, so the
+            // notch accumulator, never a sign test). The handle and the live
+            // readout move immediately — direct manipulation, no easing (§6.4).
+            WheelNotch { id: eqNotch }
+            onWheel: (wheel) => {
+                if (!eq.editable) return;           // read-only: refused, footer says why
+                const i = bandAt(wheel.x);
+                if (i < 0) return;
+                const n = eqNotch.steps(wheel);
+                if (n === 0) return;
+                const del = bandRep.itemAt(i);
+                const cur = del ? del.gain : 0;
+                // Clamped to ±36 dB; setBandGain clamps again at the socket.
+                const db = Math.max(-36, Math.min(36, Math.round((cur + n * eq.stepDb) * 100) / 100));
+                if (del) del.setGain(db);
+                Media.setBandGain(i, db);
             }
         }
 
