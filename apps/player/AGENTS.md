@@ -453,6 +453,26 @@ resolves from the `player` wrapper; it writes the DB out-of-process in WAL
 (busy-timeout 60s) like `tools/dbsync.py`, and never touches the running
 player's session.
 
+**Automatic pickup (`main.py`'s `AutoScanner`).** Both feeds into the library
+are watched by the app now, so a freshly downloaded track reaches "recently
+added" with no manual Rescan:
+
+- the **downloads dir** — on change (debounced 3s) the app runs `player-add.py`
+  as a child of itself (`sys.executable`, the player's python env) to move/tag
+  new downloads into `aud/` and rescan, then re-scans in-process so the open
+  smart playlist refreshes. A startup pass imports anything already sitting in
+  `downloads/`. One import runs at a time; a change while one is in flight is
+  debounced and picked up next.
+- the **library root** — on change (debounced 2s) a rescan picks up files
+  dropped straight into `aud/` (a manual copy, a ripper).
+
+Both converge on `Library.rescan()`, whose `changed` signal re-opens the open
+smart playlist — that is what makes the track appear in "recently added"
+without the button. `AutoScanner` is inert on `air` (no slskd dir) and wherever
+`aud/` is unmounted, and the dirs are re-watched every 30s so a remount or a
+first slskd launch is picked up. It never reimplements the move/tag logic — it
+runs the tool.
+
 Three things worth knowing before touching them:
 
 1. **`GET /playlists/{id}/tracks` no longer exists** — Spotify's Feb–Mar 2026
