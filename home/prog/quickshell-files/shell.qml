@@ -847,16 +847,21 @@ Scope {
             // first screen's panel wins, which is the one the fractions are
             // measured against anyway.
             readonly property bool _reports: screen === Quickshell.screens[0]
-            // Reserve one window-border less than the bar's real width. The bar
-            // still occupies its full barWidth (it's anchored right and this
-            // layer sits above windows), but a maximized window is now allowed
-            // to extend that 2px further right — tucking its right border UNDER
-            // the accent strip below instead of leaving it visible just to the
-            // left of it. Otherwise the window's 2px border and the bar's 2px
-            // accent stack side by side and read as one double-width border on
-            // maximized windows. This mirrors the left screen edge, where the
-            // EdgeAccent and a window's left border already share the same
-            // pixels. Keep in sync with the window border (hypr border_size).
+            // Reserve one window-border less than the bar's real width, so a
+            // maximized window's edge lands flush with the bar's inner edge
+            // instead of stacking its 2px border against the bar's 2px accent
+            // and reading as one double-width border. Keep in sync with the
+            // window border (hypr border_size).
+            //
+            // The bar sits on the BOTTOM layer (see WlrLayershell.layer below):
+            // normal windows draw OVER it, which is the desktop's stacking.
+            // Inside that, the reserved strip is what keeps a maximized or
+            // tiled window from covering the bar — they are arranged beside it,
+            // where the pointer can still reach the panel. A floating window
+            // dragged over the bar covers it (windows float by default here),
+            // and a fullscreen one covers it entirely — both are the point, and
+            // the latter is thrown off by the next mod+F.
+            //
             // Frozen at the COMMITTED width during a drag. Changing the
             // exclusive zone makes Hyprland recompute the monitor's reserved
             // area and re-run the layout, and doing that on every pointer event
@@ -867,6 +872,7 @@ Scope {
                                               : ViewMode.liveWidth)
                            - Theme.windowBorderWidth
 
+            WlrLayershell.layer: WlrLayer.Bottom
             WlrLayershell.namespace: "qs-bar"
 
             // The bar is focusable ONLY around the task manager's filter box,
