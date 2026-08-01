@@ -570,7 +570,7 @@ assumed.
   nothing**, and says why.
 - **A completion note is AS SHORT as its result.** [his, 2026-07-31] When
   nothing surprising happened — it worked, nothing failed, no deviation from
-  the task, no decision he needs — the note IS `COMPLETION: done, no errors.
+  the task, no decision he needs — the note IS `ENACTED: done, no errors.
   pushed.` and nothing under it. Detail earns its place only for what he would
   otherwise be surprised by: a failure, a choice made on his behalf, a rebuild
   left pending, work deliberately left out. Never dress a plain success up.
@@ -613,7 +613,7 @@ summon information message should be removed since the user would already know
 that part."* [his, 2026-07-29]
 
 A start and a result are two bullets about one piece of work, and the start is
-only true until the result lands. So posting a `COMPLETION:`/`PARTIAL:`/`FAILED:`
+only true until the result lands. So posting a `ENACTED:`/`PARTIAL:`/`FAILED:`
 (`boardparse.RESULT_TAGS`) retires the `SUMMONED <Name> (`<id>`)` note that
 announced it — **or the `COMMANDED <Name>` one**, which is
 the same announcement for a worker that was already running, and either of them

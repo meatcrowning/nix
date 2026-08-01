@@ -32,7 +32,7 @@ parser keys on):
         *If unanswered:* ...  what happens if he never answers
     ## WAITING ON YOU TO DO   `- ` bullets. Actions, not decisions. Each one
                               starts with a TAG (`INFORMATION:`,
-                              `COMPLETION:`, `PARTIAL:`, `FAILED:` — or a
+                              `ENACTED:`, `PARTIAL:`, `FAILED:` — or a
                               colonless `SUMMONED`/`COMMANDED`, which share a
                               sub-section of their own) and then a
                               summary of about a dozen words at most; background
@@ -712,7 +712,7 @@ def parse(src):
 #                one thing this system must never do is let a failure sink to
 #                the bottom of a list of good news.
 #   PARTIAL      some of it landed and some did not; there is a remainder.
-#   COMPLETION   done, and on his machine. A record.
+#   ENACTED      done, and on his machine. A record.
 #   INFORMATION  a fact; nothing is asked of him at all.
 #   SUMMONED     who is working on what right now. Last: it is not a report at
 #                all but the state of the triangle, and every line in it is
@@ -721,7 +721,7 @@ def parse(src):
 # An untagged bullet — the store is full of ones written before the tag rule —
 # comes FIRST, under no heading at all, so nothing claims it as something it is
 # not. Reading is untouched by the tag rule and it is untouched by this too.
-TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION",
+TODO_ORDER = ("QUESTION", "FAILED", "PARTIAL", "ENACTED", "INFORMATION",
               "SUMMONED")
 
 #: The heading a group is DRAWN with, when the tag's own word is not enough.
@@ -745,6 +745,11 @@ def tag_of(text):
     head = s.split(":", 1)[0].strip()
     if head in TODO_TAGS:
         return head
+    # Read-side backward compatibility: bullets written `COMPLETION:` before the
+    # 2026-08-01 rename to `ENACTED` keep parsing as the result tag, so old
+    # store lines still group under it and still retire their summon note.
+    if head == "COMPLETION":
+        return "ENACTED"
     head = s.split(None, 1)[0] if s else ""
     return head if head in BARE_TAGS else ""
 
@@ -1261,7 +1266,10 @@ TODO_TAGS = (
     #: these — it has its own tag now (below) and its own sub-section with it.
     "INFORMATION",
     #: the work is finished and on his machine.
-    "COMPLETION",
+    #:
+    #: Written `ENACTED:` since 2026-08-01, when the word replaced the old
+    #: `COMPLETION` (still read, still grouped under this tag — see `tag_of`).
+    "ENACTED",
     #: part of it landed and part did not — including "it needs a rebuild, which
     #: an agent may not run". The honest tag for most of what a worker writes.
     "PARTIAL",
@@ -1307,7 +1315,7 @@ _TODO_TAG = re.compile(r"^\s*[-*+]\s+(?:%s)\s+\S" % _TAG_ALT)
 def _tag_refusal(line):
     return BoardError(
         "a WAITING ON YOU TO DO bullet starts with one of %s, then a SHORT "
-        "description, then any background - e.g. `- COMPLETION: **the thing** - "
+        "description, then any background - e.g. `- ENACTED: **the thing** - "
         "what it does now`, or `- SUMMONED Marbas (`w1ff021`) for the thing`. "
         "Got: %s"
         % ("/".join(t + ("" if t in BARE_TAGS else ":") for t in TODO_TAGS),
@@ -1315,7 +1323,7 @@ def _tag_refusal(line):
 
 
 def is_tagged(text):
-    """Does this text START a message — `COMPLETION: ...`, with or without its
+    """Does this text START a message — `ENACTED: ...`, with or without its
     `- `? The public half of `_TODO_TAG`, for the writers that have to tell one
     message from the next (`boardctl._note_text`, `check_one_ask`)."""
     return bool(_TODO_TAG.match("- " + text.lstrip().lstrip("-*+ ")))
@@ -1625,7 +1633,7 @@ def add_todo_bullet(lines, doc, bullet, when=None, by=None, order=None):
 # (`wd690a4`) to add commit times"*, and did the same behind an `INFORMATION:`
 # tag before 2026-07-30, which the store still holds. That line is worth reading for as long as
 # nothing has come back, and the moment the worker posts its own
-# `COMPLETION:`/`PARTIAL:`/`FAILED:` it is worse than noise: two bullets about
+# `ENACTED:`/`PARTIAL:`/`FAILED:` it is worse than noise: two bullets about
 # one piece of work, the upper one announcing what the lower one has finished.
 #
 # It happens HERE rather than in `boardctl`, because the store has more than one
@@ -1645,7 +1653,7 @@ def add_todo_bullet(lines, doc, bullet, when=None, by=None, order=None):
 #     moved off a live agent (`boardagents.pick_name`), an id never is.
 #   * ambiguity is a REFUSAL to act: two candidates for one worker, or none,
 #     and every summon note stays exactly where it is.
-RESULT_TAGS = ("COMPLETION", "PARTIAL", "FAILED")
+RESULT_TAGS = ("ENACTED", "PARTIAL", "FAILED")
 
 #: `SUMMONED Marbas` — or `COMMANDED Marbas`, which is the same announcement
 #: for a worker that was already running (his rule, 2026-07-29: `SUMMONED:` is a

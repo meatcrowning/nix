@@ -176,7 +176,7 @@ Seven tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 | --- | --- | --- |
 | `QUESTION:` | nothing moves until he says a word | **no one — the tool refuses it** (2026-08-01); a question goes through `ask` |
 | `INFORMATION:` | a fact; nothing is asked of him | the orchestrator's note, `stall` |
-| `COMPLETION:` | done, and on his machine | a worker's or decision agent's `note` |
+| `ENACTED:` | done, and on his machine | a worker's or decision agent's `note` |
 | `PARTIAL:` | some landed, some did not — a pending rebuild counts | the same |
 | `FAILED:` | attempted, nothing landed | every failure path in `board-watch.py`, and `reconcile`'s dead-agent bullet |
 | `SUMMONED` | a minister was started for a piece of work | the orchestrator's note |
@@ -320,12 +320,12 @@ exactly as they did; `Main.qml` still keeps `win.todo` beside `win.todoGroups`
 and every one of those paths reads the flat one.
 
 - **The order is `boardparse.TODO_ORDER`: QUESTION, FAILED, PARTIAL,
-  COMPLETION, INFORMATION** — by what the bullet ASKS OF HIM, and fixed by tag.
+  ENACTED, INFORMATION** — by what the bullet ASKS OF HIM, and fixed by tag.
   `QUESTION` first because nothing moves until he says a word, and it is the
   only group waiting on him. `FAILED` second because the one thing this system
   must never do is let a failure sink to the bottom of a list of good news
   (the same reason the tag exists at all). Then the one with a remainder
-  (`PARTIAL`), then the two that are pure record (`COMPLETION`, `INFORMATION`).
+  (`PARTIAL`), then the two that are pure record (`ENACTED`, `INFORMATION`).
   **This is not sort-by-urgency and must not become one**: the order is a
   constant, not a function of age, count or arrival, so a bullet never moves
   between two readings and no group is ranked against a clock.

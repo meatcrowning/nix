@@ -1022,7 +1022,7 @@ def test_placed(tmp):
 
     # ---- a bullet: the stamp goes under its LAST line ----
     B.write(path, FIXTURE)
-    bm.note("INFORMATION: one\nCOMPLETION: two", path=path)
+    bm.note("INFORMATION: one\nENACTED: two", path=path)
     doc = B.parse(B.read(path))
     check("EVERY bullet of a multi-bullet note is stamped, not just the last",
           [t["placed"] != "" for t in doc["todo"]] == [False, True, True],
@@ -1072,7 +1072,7 @@ def test_placed(tmp):
     # split only: `text` stays the joined string every other consumer reads.
     B.write(path, FIXTURE.replace(
         "- **Relaunch `reader`** - live source, no hot reload.",
-        "- COMPLETION: **the thing** - it works now\n"
+        "- ENACTED: **the thing** - it works now\n"
         "  Why it did not before, and what to watch.\n"
         "- INFORMATION: nothing under this one"))
     src = B.read(path)
@@ -1080,17 +1080,17 @@ def test_placed(tmp):
     check("the store still round-trips byte for byte", "".join(doc["lines"]) == src)
     long_, short = doc["todo"]
     check("a bullet with continuations splits into a summary and its elaboration",
-          long_["summary"] == "COMPLETION: the thing - it works now"
+          long_["summary"] == "ENACTED: the thing - it works now"
           and long_["detail"] == "Why it did not before, and what to watch.",
           (long_["summary"], long_["detail"]))
     check("...with the joined text left exactly as every other consumer reads it",
-          long_["text"] == "COMPLETION: the thing - it works now Why it did not "
+          long_["text"] == "ENACTED: the thing - it works now Why it did not "
                            "before, and what to watch.", long_["text"])
     check("...and a bullet with nothing under it grows no empty second block",
           short["summary"] == short["text"] and short["detail"] == "",
           (short["summary"], short["detail"]))
     check("...and the tag is still read off the whole line, as it always was",
-          [t["tag"] for t in doc["todo"]] == ["COMPLETION", "INFORMATION"],
+          [t["tag"] for t in doc["todo"]] == ["ENACTED", "INFORMATION"],
           [t["tag"] for t in doc["todo"]])
 
     import inspect
@@ -1259,14 +1259,14 @@ def test_by(tmp):
     # through the same call is named by its id, because the name is the word he
     # reads on this board.
     B.write(path, FIXTURE)
-    bm.note("COMPLETION: he ran it himself", path=path, by="boardctl")
+    bm.note("ENACTED: he ran it himself", path=path, by="boardctl")
     check("a bullet with no agent behind it names the PROGRAM that wrote it",
           B.parse(B.read(path))["todo"][-1]["by"] == "boardctl",
           B.parse(B.read(path))["todo"][-1]["by"])
     B.write(path, FIXTURE)
     os.environ["BOARD_AGENT_ID"] = "w2502ad"
     try:
-        bm.note("COMPLETION: an agent ran it", path=path, by="boardctl")
+        bm.note("ENACTED: an agent ran it", path=path, by="boardctl")
     finally:
         del os.environ["BOARD_AGENT_ID"]
     check("...and an agent behind the same call outranks that fallback",
@@ -1357,7 +1357,7 @@ def test_todo_tags(tmp):
     open(path, "w").write(FIXTURE)
 
     check("the tag set is short and is his three plus what the machine needs",
-          B.TODO_TAGS == ("QUESTION", "INFORMATION", "COMPLETION", "PARTIAL",
+          B.TODO_TAGS == ("QUESTION", "INFORMATION", "ENACTED", "PARTIAL",
                           "FAILED", "SUMMONED", "COMMANDED"), B.TODO_TAGS)
     check("...and only the two summon words are written without a colon",
           B.BARE_TAGS == ("SUMMONED", "COMMANDED"), B.BARE_TAGS)
@@ -1370,8 +1370,8 @@ def test_todo_tags(tmp):
                 "- **Relaunch `board`** - live source.",
                 "- relaunch: it is live source",        # not one of the tags
                 "- completion: **it** - lowercase is not a tag",
-                "- COMPLETION:**it** - no space after the tag",
-                "- COMPLETION:"):                       # tag and nothing else
+                "- ENACTED:**it** - no space after the tag",
+                "- ENACTED:"):                       # tag and nothing else
         try:
             bm.note(bad, path=path)
             wrote = B.read(path) != before
@@ -1405,12 +1405,12 @@ def test_todo_tags(tmp):
     # ...and a TAGGED one lands, with his ordering intact: tag, short
     # description, then the elaboration.
     check("a tagged bullet lands",
-          bm.note("COMPLETION: **the tag rule** - every writer emits one now.\n"
+          bm.note("ENACTED: **the tag rule** - every writer emits one now.\n"
                   "    This sentence is the background, on its own line.",
                   path=path))
     doc = B.parse(B.read(path))
     check("...and it reads tag first, description second",
-          doc["todo"][-1]["text"].startswith("COMPLETION: the tag rule - "),
+          doc["todo"][-1]["text"].startswith("ENACTED: the tag rule - "),
           doc["todo"][-1]["text"][:60])
 
     # ---- the first line is AT MOST about a dozen words, mechanically ----
@@ -1420,7 +1420,7 @@ def test_todo_tags(tmp):
     # indented lines, which are not measured.
     before = B.read(path)
     try:
-        bm.note("COMPLETION: **the cap** - " + " ".join(["word"] * 13),
+        bm.note("ENACTED: **the cap** - " + " ".join(["word"] * 13),
                 path=path)
         check("a first line past about a dozen words is refused", False,
               "it was written")
@@ -1428,7 +1428,7 @@ def test_todo_tags(tmp):
         check("a first line past about a dozen words is refused",
               B.read(path) == before and "dozen" in str(e), str(e)[:80])
     check("...a dozen exactly still lands (the headline's words count too)",
-          bm.note("COMPLETION: **the cap** - " + " ".join(["w"] * 10),
+          bm.note("ENACTED: **the cap** - " + " ".join(["w"] * 10),
                   path=path))
     check("...a code span is ONE word, so interpolated data cannot refuse a "
           "mechanical note",
@@ -1471,11 +1471,11 @@ def test_todo_tags(tmp):
     # arrives in — each of these landed silently before it existed.
     before = B.read(path)
     for bad, why in (
-            ("COMPLETION: **a** - landed. PARTIAL: **b** - not yet.",
+            ("ENACTED: **a** - landed. PARTIAL: **b** - not yet.",
              "a second tag further along the line"),
-            ("COMPLETION: **a** - landed, and also **b** - landed",
+            ("ENACTED: **a** - landed, and also **b** - landed",
              "a second **headline** on one line"),
-            ("PARTIAL: **a** - landed.\n  COMPLETION: **b** - this one too",
+            ("PARTIAL: **a** - landed.\n  ENACTED: **b** - this one too",
              "an ask tagged but INDENTED, hiding in the elaboration"),
             ("PARTIAL: **a** - two of them.\n  - one\n  - two",
              "a list under a bullet"),
@@ -1496,7 +1496,7 @@ def test_todo_tags(tmp):
     n = len(B.parse(B.read(path))["todo"])
     stamps = B.read(path).count("<!-- placed:")
     check("...and the sanctioned way to report several is several bullets",
-          bm.note("COMPLETION: **the fade** - landed.\n"
+          bm.note("ENACTED: **the fade** - landed.\n"
                   "PARTIAL: **the tooltip** - a rebuild is pending.",
                   path=path)
           and len(B.parse(B.read(path))["todo"]) == n + 2,
@@ -1512,13 +1512,13 @@ def test_todo_tags(tmp):
     p = subprocess.run([sys.executable, os.path.join(BOARD, "tools",
                                                      "boardctl.py"),
                         "--board", path, "note",
-                        "COMPLETION: **argv one**", "-", "landed",
+                        "ENACTED: **argv one**", "-", "landed",
                         "PARTIAL: **argv two** - pending"],
                        capture_output=True, text=True)
     texts = [t["text"] for t in B.parse(B.read(path))["todo"]]
     check("boardctl splits its argv at each tag, and only there",
           p.returncode == 0 and len(texts) == n + 2
-          and texts[-2].startswith("COMPLETION: argv one - landed")
+          and texts[-2].startswith("ENACTED: argv one - landed")
           and texts[-1].startswith("PARTIAL: argv two - pending"),
           (p.stderr.strip()[:120], texts[-2:]))
 
@@ -1527,14 +1527,14 @@ def test_todo_tags(tmp):
     # that says a worker DIED must never be refused for how he phrased the thing
     # it died on — and before `oneline`, a newline in it made the template's
     # second line an untagged bullet and the whole failure note was refused.
-    hostile = ("do the **thing**\nand COMPLETION: the other,\nplus two more "
+    hostile = ("do the **thing**\nand ENACTED: the other,\nplus two more "
                "items while you are there")
     check("a bullet quoting his words survives every one of those",
           bm.note("FAILED: **a worker stopped without finishing** - it was "
                   "working on %s." % B.oneline(hostile, 200, code=True),
                   path=path))
     check("...with what he typed intact inside the code span, on one line",
-          "`do the **thing** and COMPLETION: the other, plus two more items "
+          "`do the **thing** and ENACTED: the other, plus two more items "
           "while you are there`" in B.read(path),
           B.parse(B.read(path))["todo"][-1]["text"][:120])
     check("...and a glob keeps its `**`, which a blanket strip ate",
@@ -1618,7 +1618,7 @@ def test_todo_tags(tmp):
 
     if watch_mod is not None:
         hostile = ("In the `reader` app - add **two** viewport interactions\n"
-                   "COMPLETION: and do not fold this into another ask")
+                   "ENACTED: and do not fold this into another ask")
         rendered = {
             "the dead-worker note": watch_mod.worker_fail_bullet(
                 {"agent": "wa5844f", "task": hostile,
@@ -1688,15 +1688,15 @@ def test_todo_tags(tmp):
     # A `QUESTION:` bullet can no longer be WRITTEN (it is refused, use `ask`),
     # so the one here is a legacy line injected straight into the store — the
     # read side must still group it under `question`.
-    for b in ("INFORMATION: a fact.", "COMPLETION: it landed.",
+    for b in ("INFORMATION: a fact.", "ENACTED: it landed.",
               "FAILED: nothing landed.",
-              "PARTIAL: half of it.", "COMPLETION: this one too."):
+              "PARTIAL: half of it.", "ENACTED: this one too."):
         bm.note(b, path=path)
     d = B.parse(B.read(path))
     groups = d["todoGroups"]
     check("the WAITING bullets are grouped by their tag, in TODO_ORDER",
           [g["tag"] for g in groups]
-          == ["", "QUESTION", "FAILED", "PARTIAL", "COMPLETION", "INFORMATION"],
+          == ["", "QUESTION", "FAILED", "PARTIAL", "ENACTED", "INFORMATION"],
           [g["tag"] for g in groups])
     check("...and the summon group is LAST when there is one, after the facts",
           B.TODO_ORDER[-1] == "SUMMONED", B.TODO_ORDER)
@@ -1704,7 +1704,7 @@ def test_todo_tags(tmp):
           groups[1]["tag"] == "QUESTION" and groups[1]["label"] == "question")
     check("...and FAILED is not buried under the good news",
           [g["tag"] for g in groups].index("FAILED")
-          < [g["tag"] for g in groups].index("COMPLETION"))
+          < [g["tag"] for g in groups].index("ENACTED"))
     check("...an untagged bullet is first and gets NO heading",
           groups[0]["tag"] == "" and groups[0]["label"] == ""
           and len(groups[0]["items"]) == 1, groups[0]["items"])
@@ -1725,6 +1725,19 @@ def test_todo_tags(tmp):
     before = B.read(path)
     B.parse(before)
     check("...and grouping writes nothing", B.read(path) == before)
+
+    # A result written `COMPLETION:` before the 2026-08-01 rename to `ENACTED`
+    # can no longer be written (refused, like QUESTION) but the read side must
+    # still group it under enacted — old store lines keep parsing as a result.
+    B.write(path, B.read(path).replace(
+        "- **Relaunch `reader`** - live source, no hot reload.",
+        "- **Relaunch `reader`** - live source, no hot reload.\n"
+        "- COMPLETION: a legacy result"))
+    d2 = B.parse(B.read(path))
+    legacy = [t for t in d2["todo"] if "legacy result" in t["text"]]
+    check("a legacy COMPLETION bullet still reads as the ENACTED result tag",
+          len(legacy) == 1 and legacy[0]["tag"] == "ENACTED",
+          (len(legacy), legacy[0]["tag"] if legacy else None))
 
 
 # ------------------------- 1b1. a summon note dies when its result arrives
@@ -1764,10 +1777,10 @@ def test_summon_cleared(tmp):
     # ---- the note goes, and only that note ----
     board(SUM_A, SUM_B, "INFORMATION: **how far?** - say the word.")
     n = len(texts())
-    bm.note("COMPLETION: **the landed section** - it reads the commit log.",
+    bm.note("ENACTED: **the landed section** - it reads the commit log.",
             path=path, agent_id="wd690a4")
     left = texts()
-    check("a worker's COMPLETION takes its own summon note with it",
+    check("a worker's ENACTED takes its own summon note with it",
           not [t for t in left if "SUMMONED: Marbas" in t], left)
     check("...and the OTHER worker's summon note is untouched",
           any("SUMMONED: Zepar" in t for t in left), left)
@@ -1780,14 +1793,14 @@ def test_summon_cleared(tmp):
     check("...and the note's `placed` stamp goes with it, leaving no orphan",
           B.read(path).count("<!-- placed:") == len([t for t in left
                                                      if t.startswith(("INFORMATION",
-                                                                      "COMPLETION"))]),
+                                                                      "ENACTED"))]),
           B.read(path).count("<!-- placed:"))
 
     # A summon note that WRAPPED is removed whole — a bullet is its first line
     # plus whatever ran on under it, and leaving half of one behind would put an
     # orphan paragraph where the note used to be.
     board(SUM_A + "\n    It is already in those files.")
-    bm.note("COMPLETION: **the landed section** - done.", path=path,
+    bm.note("ENACTED: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     check("a wrapped summon note is removed whole, continuation and all",
           "already in those files" not in B.read(path), B.read(path))
@@ -1804,7 +1817,7 @@ def test_summon_cleared(tmp):
     check("a handoff note announces a summon just as a dispatch note does",
           B.summon_of(CMD_A) == {"name": "Marbas", "id": "wd690a4"},
           B.summon_of(CMD_A))
-    bm.note("COMPLETION: **the reset tooltip** - it slides left now.",
+    bm.note("ENACTED: **the reset tooltip** - it slides left now.",
             path=path, agent_id="wd690a4")
     check("...so a worker's result retires its `commanded` note too",
           not [t for t in texts() if "COMMANDED: Marbas" in t], texts())
@@ -1853,7 +1866,7 @@ def test_summon_cleared(tmp):
           B.label_of("SUMMONED"))
     check("...and `COMMANDED` heads no second subsection of its own",
           "COMMANDED" not in groups, list(groups))
-    bm.note("COMPLETION: **the landed section** - done.", path=path,
+    bm.note("ENACTED: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     check("...and the new shape is retired by its worker's result too",
           not [t for t in texts() if t.startswith("SUMMONED")], texts())
@@ -1895,25 +1908,25 @@ def test_summon_cleared(tmp):
           any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     board(SUM_A, "INFORMATION: **the cap** - it is 6 now.")
-    bm.note("COMPLETION: **the landed section** - done.", path=path,
+    bm.note("ENACTED: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     check("a plain INFORMATION note that announces no summon is untouched",
           any("the cap" in t for t in texts()), texts())
 
     board(SUM_B)
-    bm.note("COMPLETION: **something else** - done.", path=path,
+    bm.note("ENACTED: **something else** - done.", path=path,
             agent_id="wd690a4")
     check("a result from a DIFFERENT worker removes nothing",
           any("SUMMONED: Zepar" in t for t in texts()), texts())
 
     board(SUM_A)
-    bm.note("COMPLETION: **the landed section** - done.", path=path)
+    bm.note("ENACTED: **the landed section** - done.", path=path)
     check("a result from nobody in particular removes nothing",
           any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     # ---- ambiguity is a refusal, never a guess ----
     board(SUM_A, SUM_A.replace("the landed section", "a second job"))
-    bm.note("COMPLETION: **the landed section** - done.", path=path,
+    bm.note("ENACTED: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     check("two summon notes naming one id: both stay, and nothing is guessed",
           len([t for t in texts() if "SUMMONED: Marbas" in t]) == 2, texts())
@@ -1922,20 +1935,20 @@ def test_summon_cleared(tmp):
     # the fallback is deliberately only for a note that carries no id at all: a
     # name can be moved off a live agent (`boardagents.pick_name`), an id never.
     board("INFORMATION: **an older summon** - summoned Marbas, nothing yet.")
-    bm.note("COMPLETION: **an older summon** - done.", path=path,
+    bm.note("ENACTED: **an older summon** - done.", path=path,
             agent_id=_id_named("Marbas"))
     check("an id-less summon note is matched by NAME",
           not [t for t in texts() if "summoned Marbas" in t], texts())
 
     board(SUM_A)
-    bm.note("COMPLETION: **the landed section** - done.", path=path,
+    bm.note("ENACTED: **the landed section** - done.", path=path,
             agent_id=_id_named("Marbas"))
     check("...but a name match never overrides an id that says otherwise",
           any("SUMMONED: Marbas" in t for t in texts()), texts())
 
     # ---- the several-results case: each takes its own, one call at a time ----
     board(SUM_A, SUM_B)
-    bm.note("COMPLETION: **the landed section** - done.", path=path,
+    bm.note("ENACTED: **the landed section** - done.", path=path,
             agent_id="wd690a4")
     bm.note("PARTIAL: **the commit times** - a rebuild is pending.", path=path,
             agent_id="w4f82de")
@@ -4420,12 +4433,12 @@ def test_window(app, tmp):
     B.write(path, B.read(path).replace(
         "- **Relaunch `reader`** - live source, no hot reload.",
         "- QUESTION: say the word?\n- **Relaunch `reader`** - live source, no hot reload."))
-    for b in ("- COMPLETION: it landed.\n", "- FAILED: nothing landed.\n"):
+    for b in ("- ENACTED: it landed.\n", "- FAILED: nothing landed.\n"):
         B.edit(path, lambda d, b=b: B.add_todo_bullet(d["lines"], d, b))
     spin(400)
     drawn = [h for h in heads() if h in [t.lower() for t in B.TODO_TAGS]]
     check("each tag that has bullets draws its own sub-heading, in order",
-          drawn == ["question", "failed", "completion"], drawn)
+          drawn == ["question", "failed", "enacted"], drawn)
     check("...and the ones nothing carries draw none",
           "partial" not in drawn and "information" not in drawn, drawn)
     rows = [it for it in descendants(win.contentItem())
@@ -5786,7 +5799,7 @@ def test_placed_window(app, tmp):
     # ---- the bullet's two blocks are two items, with a gap, or one and none ----
     B.write(path, FIXTURE.replace(
         "- **Relaunch `reader`** - live source, no hot reload.",
-        "- COMPLETION: **the thing** - it works now\n"
+        "- ENACTED: **the thing** - it works now\n"
         "  Why it did not before, and what to watch.\n"
         "- INFORMATION: nothing under this one"))
     engine2, win2, keep2 = build(app, path)
@@ -5794,7 +5807,7 @@ def test_placed_window(app, tmp):
     drawn = [str(it.property("text")) for it in descendants(win2.contentItem())
              if it.property("text") is not None and it.isVisible()]
     check("the elaboration is drawn as its OWN block, under the summary",
-          "COMPLETION: the thing - it works now" in drawn
+          "ENACTED: the thing - it works now" in drawn
           and "Why it did not before, and what to watch." in drawn,
           [t for t in drawn if "the thing" in t or "watch" in t])
     # ...and the one with nothing under it is SHORTER, because the gap and the
@@ -5806,10 +5819,10 @@ def test_placed_window(app, tmp):
         texts = [str(t.property("text")) for t in descendants(it)
                  if t.property("text") is not None]
         for t in texts:
-            if t.startswith(("COMPLETION:", "INFORMATION:")):
+            if t.startswith(("ENACTED:", "INFORMATION:")):
                 rows[t.split(":")[0]] = it.property("height")
     check("...and a bullet with none is SHORTER: no gap, no empty second block",
-          len(rows) == 2 and rows["INFORMATION"] < rows["COMPLETION"], rows)
+          len(rows) == 2 and rows["INFORMATION"] < rows["ENACTED"], rows)
     shot(win2, "07-todo-summary")
 
     # ---- FOLDING ONE CHORE, from the mark to the left of it ----

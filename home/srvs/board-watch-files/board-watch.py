@@ -634,7 +634,7 @@ is done, what is not, and whether a rebuild is now pending and why>'
    **A note STARTS WITH A TAG, then a summary of AT MOST about a dozen words \
 on that same first line — the tool refuses more.** Every elaboration or \
 background goes on INDENTED continuation lines under it, a sentence or two, \
-not a paragraph. The tag is one of `COMPLETION:` (it is done and on his \
+not a paragraph. The tag is one of `ENACTED:` (it is done and on his \
 machine), `PARTIAL:` (some of it landed, some did not — including "it needs a \
 rebuild, which you may not run"), `FAILED:` (nothing landed) or `INFORMATION:` \
 (a fact, nothing asked of him). **A question is NEVER a note bullet** — it \
@@ -651,7 +651,7 @@ commit messages — stays third person; only what lands on the board says "you".
 
    **A completion note is AS SHORT as its result.** When nothing surprising \
 happened — it worked, nothing failed, you deviated from nothing, there is no \
-decision he needs — then the note IS `COMPLETION: done, no errors. pushed.` \
+decision he needs — then the note IS `ENACTED: done, no errors. pushed.` \
 and nothing under it. Detail (an indented line, a second clause) earns its \
 place only for what would otherwise surprise him — something that did not \
 work, a choice you made on his behalf, work left undone. Never dress a plain \
