@@ -468,12 +468,19 @@ def _fmt_tokens(n):
     return str(n)
 
 
+def _hermes_db_path():
+    """The ledger path, honouring the `BOARD_HERMES_DB` redirect `boardhermes`
+    sets up for a harness. This module opens the same file through its own
+    read-only connection; one path rule, so a test cannot miss it."""
+    return os.environ.get("BOARD_HERMES_DB") or HERMES_DB
+
+
 def _hermes_query(seconds, now):
     """`(tokens, cost_usd)` for ministers in the last `seconds`, or `(None, 0)`
     if the ledger is unreachable. Public for the harness; the board draws via
     `hermes_readings()`."""
     try:
-        db = sqlite3.connect("file:%s?mode=ro" % HERMES_DB, uri=True)
+        db = sqlite3.connect("file:%s?mode=ro" % _hermes_db_path(), uri=True)
     except (OSError, sqlite3.Error):
         return None, 0.0
     try:
@@ -524,6 +531,125 @@ def hermes_readings(now=None):
             "note": "", "detail": hover,
         })
     return rows
+
+
+# ------------------------------------------------- hermes proximity signal
+#: The coarse level the display draws for the hermes minister spend, and the
+#: two FRACTION bounds each level means (level, low, high). CHOSEN AND STATED
+#: HERE, IN ONE PLACE, so the QML binds the `level` string and never does
+#: arithmetic. Today the limit itself is not discoverable (see
+#: `hermes_proximity`), so `fraction` is None and `level` is "unknown"; these
+#: thresholds exist so the day a real denominator appears it maps to a level
+#: without further design. Bands are spend-fraction of the limit: below 60%
+#: ok, to 85% warning, beyond critical.
+PROXIMITY_LEVELS = (
+    ("ok",       0.0,  0.60),
+    ("warning",  0.60, 0.85),
+    ("critical", 0.85, 1.01),
+)
+
+#: What each level means, for the hover sentence when the day a fraction can
+#: be computed. Kept beside the thresholds so the wording moves with them.
+PROXIMITY_WORD = {
+    "ok": "well within the limit",
+    "warning": "getting close to the limit",
+    "critical": "very close to the limit",
+}
+
+
+def _hermes_span(now):
+    """`(tokens, cost_usd, span_days)` for ministers in the LAST 7 DAYS.
+
+    `span_days` is how much real history that window contains (clamped to at
+    least an hour, at most 7) — the honest denominator for a per-day burn
+    rate, so a machine that only started running ministers yesterday is not
+    assumed to have spent across a full week. `(None, 0.0, 0.0)` when the
+    ledger is unreachable.
+    """
+    secs = _WINDOW_SECS["d7"]
+    now = time.time() if now is None else now
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % _hermes_db_path(), uri=True)
+    except (OSError, sqlite3.Error):
+        return None, 0.0, 0.0
+    try:
+        row = db.execute(
+            "SELECT COALESCE(SUM(input_tokens),0)"
+            ", COALESCE(SUM(output_tokens),0)"
+            ", COALESCE(SUM(cache_read_tokens),0)"
+            ", COALESCE(SUM(cache_write_tokens),0)"
+            ", COALESCE(SUM(reasoning_tokens),0)"
+            ", COALESCE(SUM(estimated_cost_usd),0)"
+            ", MIN(started_at), COUNT(*) FROM sessions"
+            " WHERE source=? AND started_at>=?",
+            (HERMES_SOURCE, now - secs)).fetchone()
+    except sqlite3.Error:
+        return None, 0.0, 0.0
+    finally:
+        try:
+            db.close()
+        except sqlite3.Error:
+            pass
+    if row is None or row[1] is None:
+        return None, 0.0, 0.0
+    tokens = sum(int(x or 0) for x in row[:5])
+    cost = float(row[5] or 0.0)
+    n = int(row[7] or 0)
+    if n == 0:
+        return 0, 0.0, 0.0
+    min_start = float(row[6] or now)
+    span_days = max(1 / 24.0, min(7.0, (now - min_start) / 86400.0))
+    return tokens, cost, span_days
+
+
+def hermes_proximity(now=None):
+    """The ONE signal the display binds for "how close are we to running hermes out".
+
+    The real limiting resource for the hermes minister spend
+    (deepseek-v4-flash-0731 served by the NOUS inference API) is the account's
+    balance/allowance on that API — and NO figure for it reaches this desktop:
+    hermes' own ledger records only ESTIMATED cost (`actual_cost_usd` is NULL,
+    `cost_status` is "estimated", `cost_source` is the pricing API, not a
+    billed total), `hermes portal info` shows login state and nothing about a
+    remaining allowance, and there is no usage/credit endpoint this repo holds
+    credentials for. A percentage "of the limit" needs a denominator nobody
+    publishes, and a "$X left" needs a balance nobody exposes. So this signal
+    is an explicit UNKNOWN rather than an invented number — the same refusal
+    the Anthropic meters make about an unpublished denominator
+    (docs/DESIGN.md §10).
+
+    Returns a dict:
+      known     bool        False today: the limit is not discoverable
+      fraction  float|None  0..1 of the limit used, or None (no denominator)
+      remaining float|None  $ of the limit left, or None (no balance known)
+      level     str         "ok" | "warning" | "critical" | "unknown" — see
+                            PROXIMITY_LEVELS for the thresholds that will map a
+                            fraction to a level the day one can be computed
+      text      str         one short data-backed line for the row
+      detail    str         the hover sentence: what is known and why not more
+
+    A display binds `text`/`level` directly and does no arithmetic; when
+    `known` is False it draws the unknown state (nothing that reads as a real
+    margin), exactly as `hermes_readings` draws an absent ledger as "unknown".
+    """
+    now = time.time() if now is None else now
+    tokens, cost, span_days = _hermes_span(now)
+    if tokens is None:
+        return {
+            "known": False, "fraction": None, "remaining": None,
+            "level": "unknown", "text": "unknown",
+            "detail": ("no hermes ledger on this host yet - it needs one hermes "
+                       "minister run to have written state.db"),
+        }
+    per_day = cost / span_days if span_days else 0.0
+    text = "~$%.2f in 7d · ~$%.2f/day" % (cost, per_day)
+    detail = ("hermes ministers spent ~$%.2f in 7d (~$%.2f/day); the real limit "
+              "is the nous account balance, and no figure for it is exposed "
+              "here, so the margin is unknown") % (cost, per_day)
+    return {
+        "known": False, "fraction": None, "remaining": None,
+        "level": "unknown", "text": text, "detail": detail,
+    }
 
 
 #: Seconds per `HERMES_WINDOWS` key.
