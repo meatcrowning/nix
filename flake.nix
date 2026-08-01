@@ -142,8 +142,22 @@
       };
     });
 
+    # Backport the upstream local-server per-channel IPC (wwmm/easyeffects
+    # 76a3f9a5 "Improved equalizer handling in our local server", 2026-07-17;
+    # discussion #5196). Stock 8.2.7's socket can address only the base plugin
+    # DB (`equalizer#0`), so the panel EQ cannot set per-band gains that live in
+    # the per-channel DBs (`equalizer#0#left`/`#right`). The patch lets
+    # `set_property`/`get_property` take an optional `left`/`right` field. The
+    # panel probes for this before enabling live-edit, so this overlay is what
+    # flips the panel's EQ from read-only to editable.
+    easyeffects-overlay = (final: prev: {
+      easyeffects = prev.easyeffects.overrideAttrs (old: {
+        patches = (old.patches or []) ++ [ ./home/srvs/easyeffects-perchannel.patch ];
+      });
+    });
+
     # re add ollama-overlay im taking it out after updating lock and not backing up lole
-    overlays = [ vcv-rack-overlay breeze-square-overlay ];
+    overlays = [ vcv-rack-overlay breeze-square-overlay easyeffects-overlay ];
 
     mkPkgs = system: overlays: import nixpkgs {
       inherit system overlays;
@@ -159,7 +173,7 @@
     # round there until this gets added back.
 
     #also readd ollama-overlay here 
-    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay ];
+    pkgsAir = mkPkgs "aarch64-linux" [ vcv-rack-overlay easyeffects-overlay ];
 
   in
   {
