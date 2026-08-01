@@ -663,9 +663,11 @@ will use if he types something at you. Your id is `{aid}`; it is what your \
 systemd unit, your log and your inbox are keyed on, and it is what the tools \
 below want when one asks for an agent id.
 
-An orchestrator split up something he asked for and gave you one piece of it. \
-This is your whole job; another agent has the rest, and may be editing other \
-files in this same checkout right now.
+An orchestrator, Solomon, split up something he asked for and bound you to one
+piece of it. This is your whole job; another minister has the rest, and may be
+editing other files in this same checkout right now.
+
+When it is done you record it, and you are then at liberty to depart.
 
 --- your task ---
 {task}
@@ -1771,15 +1773,15 @@ def _start_unit(aid, cmd, env, logpath, title, prefix=UNIT_PREFIX,
     """
     if NO_UNIT or not shutil.which("systemd-run"):
         return None
-    unit = unit_name(aid)
+    unit = unit_name(aid, prefix)
     run = ["systemd-run", "--user", "--quiet", "--collect",
            "--unit", unit, "--service-type=exec",
            "--working-directory", REPO,
-           "--description", "board worker: " + title[:60],
+           "--description", "board %s: %s" % (kind, title[:60]),
            # The 45 minutes `WORKER_TIMEOUT_S` always claimed and a detached
            # Popen could never enforce. One wedged worker must not hold a slot
            # against the cap for the rest of the day.
-           "--property=RuntimeMaxSec=%d" % WORKER_TIMEOUT_S,
+           "--property=RuntimeMaxSec=%d" % (runtime or WORKER_TIMEOUT_S),
            "--property=StandardInput=null",
            "--property=StandardOutput=append:%s" % logpath,
            "--property=StandardError=append:%s" % logpath]
