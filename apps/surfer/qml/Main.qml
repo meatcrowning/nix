@@ -348,10 +348,12 @@ Window {
 
     // ---- dark mode (DarkMode bridge) ----
     // The config panel slides out from the left edge; the "dm" titlebar button
-    // toggles it. DarkMode.js(url) returns the JS that applies OR strips the
-    // whole-page invert filter for that url — run on each page load and, live,
-    // on every settings change. dmRev bumps on `changed` so the QML bindings
-    // below (this-site state, slider values) re-evaluate.
+    // toggles it. The page style is applied by the profile's document-creation
+    // courier (PAGE_STYLE_RUNTIME_JS — see Main.qml's profile block), so it
+    // lands before the first frame; this function only LIVE-refreshes
+    // already-painted pages when a setting changes, by asking each open page's
+    // courier to re-fetch Python's current CSS. dmRev bumps on `changed` so the
+    // QML bindings below (this-site state, slider values) re-evaluate.
     property bool dmPanelOpen: false
     property int dmRev: 0
     readonly property string dmCurUrl: win.current ? win.current.url.toString() : ""
@@ -364,7 +366,7 @@ Window {
     function reinjectDark() {
         for (var i = 0; i < viewRep.count; i++) {
             var v = viewRep.itemAt(i);
-            if (v) v.runJavaScript(DarkMode.js("" + v.url));
+            if (v) v.runJavaScript("window.__surferPageStyleRefresh()");
         }
     }
     Connections {
@@ -700,7 +702,10 @@ Window {
         // does not bind QQuickWebEngineScriptCollection — `profile.userScripts`
         // is unreachable from Python, while QML reaches it and takes the same
         // Python-made QWebEngineScript list each view takes for userscripts.
-        Component.onCompleted: userScripts.collection = CosmeticInject.scripts
+        // Cosmetic ad-blocking + the dark-mode/system-font courier ride the
+        // same collection.
+        Component.onCompleted: userScripts.collection =
+            CosmeticInject.scripts.concat(PageStyle.scripts)
         // Spell-checking (red squiggle + right-click suggestions in
         // showContextMenu) is enabled IMPERATIVELY in main.py's _wire_profile,
         // NOT declaratively here: setting spellCheckEnabled/spellCheckLanguages
@@ -814,9 +819,13 @@ Window {
                         if (Math.abs(webview.zoomFactor - Zoom.level) > 0.001)
                             webview.zoomFactor = Zoom.level;
                         webview.runJavaScript(win.scrollbarJs());
-                        // dark mode + system-font overrides: apply (or strip)
-                        // the page-style <style> for this url. No-op when off.
-                        webview.runJavaScript(DarkMode.js("" + webview.url));
+                        // NOTE: dark mode + system-font are NOT applied here any
+                        // more. They used to be, at load-finished — the page
+                        // painted light first and flipped dark only once images
+                        // finished loading. They now ride the shared profile as
+                        // a document-creation script (PAGE_STYLE_RUNTIME_JS) that
+                        // adopts the style before the first frame; live settings
+                        // changes go through win.reinjectDark() below.
                         // click a plain content image -> open it in a new tab
                         webview.runJavaScript(imageClickJs);
                         // air only (empty string on top): sample which GL

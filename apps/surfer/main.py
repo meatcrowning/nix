@@ -1213,6 +1213,83 @@ def _scriptlet_of(js):
     return tail[4:end] if end >= 0 else None
 
 
+# The profile-level dark-mode / system-font courier. It exists for the same
+# reason COSMETIC_RUNTIME_JS does: load-finished injection is too late by
+# definition. The old per-view `runJavaScript(DarkMode.js(url))` ran at
+# `LoadSucceededStatus` — after images and scripts had finished, so the page
+# painted light first and flipped dark only once everything loaded. This runs
+# at DocumentCreation and adopts the page's style CSS as a constructed
+# CSSStyleSheet before the first frame, so the theme is on the page as it
+# paints. Python stays the single source of truth: the sheet is re-fetched
+# (a) at each document creation and (b) whenever the app side calls
+# `window.__surferPageStyleRefresh()` after a settings change, so open pages
+# follow a toggle or a slider without a reload.
+PAGE_STYLE_RUNTIME_JS = r"""
+(function(){
+  if (window.__surferPageStyle) return;
+  window.__surferPageStyle = true;
+
+  var SCHEME = 'surferstyle://';
+  var SHEET_ID = '__surfer_pagestyle__';
+  var sheet = null;
+
+  function b64(o){
+    var s = JSON.stringify(o), t = '';
+    try {
+      var b = new TextEncoder().encode(s);
+      for (var i = 0; i < b.length; i++) t += String.fromCharCode(b[i]);
+    } catch(e) { t = unescape(encodeURIComponent(s)); }
+    return btoa(t).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  function addr(kind, payload){ return SCHEME + kind + '/' + b64(payload); }
+
+  // Set (or strip) the page-style sheet to exactly `css` ('' strips it, which
+  // is how an OFF toggle or an exception-site page drops the theme). One sheet
+  // owned here, never a <style>, so no other writer and no flash.
+  function apply(css){
+    try {
+      if (!css){
+        if (sheet){
+          var a = Array.prototype.slice.call(document.adoptedStyleSheets);
+          var i = a.indexOf(sheet);
+          if (i >= 0){ a.splice(i, 1); document.adoptedStyleSheets = a; }
+          sheet = null;
+        }
+        return;
+      }
+      if (!sheet){
+        sheet = new CSSStyleSheet();
+        sheet.id = SHEET_ID;
+        // concat, never clobber — the cosmetic courier's sheet may already be
+        // adopted and must survive.
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat([sheet]);
+      }
+      sheet.replaceSync(css);
+    } catch(e){}
+  }
+
+  // Synchronous, so it works at document-creation with no DOM — the same reason
+  // the cosmetic courier is synchronous. `location.href` is this document's url
+  // even before <html> exists.
+  function fetch(){
+    var css = '';
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', addr('s', { u: location.href }), false);
+      x.send();
+      css = (x.status === 200 || x.status === 0) ? (x.responseText || '') : '';
+    } catch(e){}
+    apply(css);
+  }
+
+  window.__surferPageStyleRefresh = fetch;
+
+  // Adopt at document-creation so the theme is present from the first frame.
+  fetch();
+})();
+"""
+
+
 class CosmeticInjector(QWebEngineUrlSchemeHandler):
     """The other half of COSMETIC_RUNTIME_JS: the profile-level QWebEngineScript
     that carries it, and the ``surfercos://`` scheme that feeds it rules.
@@ -1367,6 +1444,60 @@ class CosmeticInjector(QWebEngineUrlSchemeHandler):
             job.reply(ctype, buf)
         except RuntimeError:
             pass  # the job (page) went away before we could reply
+
+
+class PageStyleHandler(QWebEngineUrlSchemeHandler):
+    """The `surferstyle://` feed for PAGE_STYLE_RUNTIME_JS: serves the current
+    page-style (dark mode + system-font) CSS for a url, computed by the
+    DarkMode bridge.
+
+    One host, `s`, taking a base64url JSON blob ``{"u": href}`` as its path (the
+    same gmxhr convention as surfercos). The reply is `text/css` and is adopted
+    by the courier as a constructed CSSStyleSheet, so it never hits `style-src`
+    and needs no DOM parent."""
+
+    def __init__(self, darkmode, parent=None):
+        super().__init__(parent)
+        self._dm = darkmode
+
+    def requestStarted(self, job):
+        body, ctype = b"", b"text/css"
+        try:
+            spec = json.loads(
+                _b64url_decode(job.requestUrl().path().lstrip("/")).decode("utf-8"))
+            url = str(spec.get("u") or "")
+            body = self._dm.css(url).encode("utf-8")
+        except Exception:
+            body = b""
+        try:
+            buf = QBuffer(job)
+            buf.setData(body)
+            buf.open(QIODevice.OpenModeFlag.ReadOnly)
+            job.reply(ctype, buf)
+        except RuntimeError:
+            pass  # the page went away before we could reply
+
+
+class PageStyle(QObject):
+    """The profile-level dark-mode/system-font courier as a QWebEngineScript.
+
+    Main.qml appends `scripts` to `sharedProfile.userScripts.collection`
+    (PySide6 6.11 does not bind QQuickWebEngineScriptCollection, so the object
+    is assembled here and handed to QML — the same route CosmeticInject.scripts
+    and UserScripts.scriptObjects take). DocumentCreation + MainWorld, and
+    deliberately NOT RunsOnSubFrames: the top view already composites its
+    iframes through the whole-page `html` filter, so a subframe copy would
+    invert embedded content a second time."""
+
+    @Property("QVariantList", constant=True)
+    def scripts(self):
+        s = QWebEngineScript()
+        s.setName("surfer-pagestyle")
+        s.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+        s.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        s.setRunsOnSubFrames(False)
+        s.setSourceCode(PAGE_STYLE_RUNTIME_JS)
+        return [s]
 
 
 class CmdHandler(QWebEngineUrlSchemeHandler):
@@ -1848,13 +1979,17 @@ class DarkMode(QObject):
         of hostnames); family only, so site font-sizes and layout survive. It
         combines with dark mode rather than replacing it.
 
-    All state persists to the "dark" key of prefs.json. QML calls js(url) on each
-    page load and again on every `changed` (live re-inject into open tabs); the
-    same call both applies AND strips the combined style, so toggles are clean.
+    All state persists to the "dark" key of prefs.json. Application is NOT
+    per-view at load-finished (that painted light first and flipped once images
+    finished): a profile-level DocumentCreation courier (PAGE_STYLE_RUNTIME_JS)
+    adopts the combined style as a constructed CSSStyleSheet before the first
+    frame, and `css(url)` re-feeds it whenever a toggle or a slider moves —
+    see PageStyleHandler. `js(url)` below remains the in-process/manual apply
+    used by offscreen harnesses, not the live path.
 
-    v1 limit (shared with Dark Reader's filter mode): a full-page CSS filter can
-    interfere with `position:fixed` containment on some sites, and injection is
-    at load-finished, so a brief light flash is possible before it lands."""
+    Known limit (shared with Dark Reader's filter mode): a full-page CSS filter
+    can interfere with `position:fixed` containment on some sites.
+"""
 
     changed = Signal()
 
@@ -2062,6 +2197,14 @@ class DarkMode(QObject):
         f = json.dumps(self._SYSTEM_FONT)
         return "*,*::before,*::after{font-family:" + f + ",monospace!important}"
 
+    @Slot(str, result=str)
+    def css(self, url):
+        """The page-style CSS Python computes for this url right now (dark mode
+        and/or the system-font override, whichever applies) — the body the
+        `surferstyle://` courier adopts at document-creation and re-fetches on
+        a settings change. Empty string = the theme should be stripped here."""
+        return self._css(url)
+
     def _css(self, url):
         parts = []
         if self._enabled and self.isSiteEnabled(url):
@@ -2073,7 +2216,13 @@ class DarkMode(QObject):
     @Slot(str, result=str)
     def js(self, url):
         """JS that installs OR removes the page-style <style> for this url given
-        the current state — one call handles both apply and un-apply."""
+        the current state — one call handles both apply and un-apply.
+
+        This is the in-process/manual apply (the offscreen find-pixel harness
+        drives it directly). The live page path is the DocumentCreation courier
+        (PAGE_STYLE_RUNTIME_JS + PageStyleHandler), which is what lands before
+        the first paint; this remains a faithful equivalent of that CSS so the
+        two can never disagree about what dark mode looks like."""
         css = self._css(url)
         return (
             "(function(){var id='__surfer_pagestyle__';"
@@ -3481,6 +3630,18 @@ def main():
                        | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
     QWebEngineUrlScheme.registerScheme(cosscheme)
 
+    # surferstyle:// — how PAGE_STYLE_RUNTIME_JS (dark mode + system font) asks
+    # Python for the current page's style CSS at document-creation. Same flags:
+    # the reply is adopted as a constructed CSSStyleSheet, and Sandbox/script-src
+    # never sees it. Registered before Chromium initializes, like surfercos.
+    stylescheme = QWebEngineUrlScheme(b"surferstyle")
+    stylescheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+    stylescheme.setFlags(QWebEngineUrlScheme.Flag.SecureScheme
+                         | QWebEngineUrlScheme.Flag.CorsEnabled
+                         | QWebEngineUrlScheme.Flag.FetchApiAllowed
+                         | QWebEngineUrlScheme.Flag.ContentSecurityPolicyIgnored)
+    QWebEngineUrlScheme.registerScheme(stylescheme)
+
     # Chromium must be initialized before the QGuiApplication exists.
     QtWebEngineQuick.initialize()
 
@@ -3540,6 +3701,13 @@ def main():
     # _wire_profile installs this same object as the scheme handler.
     cosinject = CosmeticInjector(cosmetic, app)
     ctx.setContextProperty("CosmeticInject", cosinject)
+    # The profile-level dark-mode/system-font courier: PAGE_STYLE_RUNTIME_JS on
+    # `surferstyle://`. Main.qml concats `PageStyle.scripts` onto the profile's
+    # userScripts collection; _wire_profile installs pshandler as the scheme
+    # handler. See PageStyle/PageStyleHandler.
+    pagestyle = PageStyle(app)
+    ctx.setContextProperty("PageStyle", pagestyle)
+    pshandler = PageStyleHandler(darkmode, app)
     pagecmd = CmdHandler(app)
     ctx.setContextProperty("PageCmd", pagecmd)
     ctx.setContextProperty("imageClickJs", IMAGE_CLICK_JS)
@@ -3591,6 +3759,7 @@ def main():
                     prof.installUrlSchemeHandler(b"gmxhr", gmxhr)
                     prof.installUrlSchemeHandler(b"surfercmd", pagecmd)
                     prof.installUrlSchemeHandler(b"surfercos", cosinject)
+                    prof.installUrlSchemeHandler(b"surferstyle", pshandler)
                 except RuntimeError:
                     pass
                 # give gmxhr the SAME UA the views send, so userscript fetches

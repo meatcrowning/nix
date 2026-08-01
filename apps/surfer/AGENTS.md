@@ -350,6 +350,42 @@ styling, an unknown operator hiding nothing, a 1500-node mutation storm, and
 both string seams (including the "seam is gone" case). Run it after touching
 either half.
 
+## Dark mode applies at DOCUMENT-CREATION, not after images load
+
+The dark-mode (and system-font) page style used to be injected per-view at
+`LoadSucceededStatus`, i.e. AFTER images and scripts had finished — the page
+painted light first and flipped dark only once everything loaded. It is now a
+profile-level **document-creation courier**, exactly like cosmetic ad-blocking:
+
+- `PAGE_STYLE_RUNTIME_JS` in `main.py` + `PageStyle.scripts` (a
+  `QWebEngineScript`, `DocumentCreation` / `MainWorld`, **not** `RunsOnSubFrames`
+  — the top view already composites its iframes through its own `html` filter,
+  a subframe copy would double-invert) is assigned onto
+  `sharedProfile.userScripts.collection` in `Main.qml`, **concatenated** after
+  `CosmeticInject.scripts`.
+- At document creation it pulls the page's style CSS from Python over the
+  `surferstyle://` scheme (`PageStyleHandler`, a `QWebEngineUrlSchemeHandler`
+  fed by `DarkMode.css(url)`) and adopts it as a constructed `CSSStyleSheet` via
+  `document.adoptedStyleSheets` — CSS rules match as the DOM builds, so the
+  theme is on the page from its first frame. CSP-proof (`style-src` never sees
+  it), and it never `replaceSync`-clobbers cosmetic's sheet (concat-only).
+- **Live settings changes** (global toggle, brightness/contrast sliders,
+  per-site exceptions/font toggles) still re-apply to open pages with no
+  reload: `DarkMode.changed` → `win.reinjectDark()` → each view runs
+  `window.__surferPageStyleRefresh()`, which re-fetches and re-adopts (or
+  **strips** the sheet when the new state is off). `DarkMode.js(url)` remains
+  the in-process/manual apply (the find-pixel harness drives it directly); it is
+  *not* the live path any more.
+
+Verified headlessly by **[`tools/pagestyle-test.py`](tools/pagestyle-test.py)** —
+a real offscreen profile carrying **both** couriers via the exact `concat` line
+Main.qml uses: the invert filter is present at the page's own parse-time inline
+script *and* in its first `requestAnimationFrame` (both before any paint), still
+present once settled, and a brightness change live-refreshes an open page while
+turning dark off strips it back to `none`. Run it after touching `main.py`'s
+dark-mode block, `PAGE_STYLE_RUNTIME_JS`, `PageStyle`/`PageStyleHandler`, or the
+`Main.qml` profile/courier wiring.
+
 ## Split view — two tabs in one window, kitty's two buttons
 
 **`|` splits right (side by side) and `_` splits down (stacked)** — kitty's own
