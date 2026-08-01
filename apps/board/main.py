@@ -1053,6 +1053,22 @@ class Agents(QObject):
                 if c.get("kind") != boardagents.ORCHESTRATOR_KIND]
 
     @Property(int, notify=changed)
+    def boundMinisters(self):
+        """How many ministers the triangle is BINDING right now — the running,
+        non-orchestrator cards it draws. [his, 2026-07-31] the triangle header
+        says it in words; this is the number behind the sentence.
+
+        Derived from `_cards`, which is exactly what `boardwork.cards()` built
+        — the sessions the user started are already filtered out of there, so
+        this cannot disagree with what is on screen (an anonymous session of
+        his is never counted). Queued tasks have no process yet and exited
+        cards are unbound, so only `running` counts.
+        """
+        return sum(1 for c in self._cards
+                   if c.get("kind") != boardagents.ORCHESTRATOR_KIND
+                   and c.get("state") == "running")
+
+    @Property(int, notify=changed)
     def cap(self):
         return boardwork.cap()
 
