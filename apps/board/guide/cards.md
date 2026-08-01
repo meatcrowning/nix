@@ -161,6 +161,11 @@ doing XYZ. the third line should be what the current first line is"*. What the
 agent was handed, and the `where` it works in, are fixed for the life of the
 card; the two live lines are what he re-reads. The detail line, any note
 waiting in the agent's inbox, and the box he types into stay below all three.
+**So the third line is the ORIGINAL PROMPT the card was created from** — the
+task it was handed (a worker's `rec["task"]`) or the decision it answers (its
+title) — and it holds that fixed for the life of the card, never the user's
+most recent answer: a note he sends later goes to the inbox below, not to this
+line.
 
 The short version, and every line of it is a rule:
 
