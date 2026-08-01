@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, host, ... }:
 
 {
   # slskd's web API key lives OUTSIDE this repo in ~/.secrets/slskd-api-key
@@ -38,13 +38,27 @@
   # kept only because soulseek-missing.py still sends it and the check is
   # bypassed either way.
   #
-  # `shares.directories` is pinned to empty on purpose. slskd's default is to
-  # share `~/`, the whole home directory — which is both something this repo
-  # must not leak and a full-tree scan that leaves the service stuck in D-state
-  # on an old Nix install under $HOME (measured: read 2.8GB and never fully
-  # started). This downloader only pulls missing tracks; it serves nothing, so
-  # an empty share list is the honest config. Add real share dirs here if that
-  # ever changes.
+  # `shares.directories` points the music library at `top` and stays empty on
+  # `book`. An empty share list is the honest config for a downloader that
+  # serves nothing, but it also means NO files are advertised — no browse, no
+  # search hits — so the network reads him as a leech and he hits share-ratio /
+  # leech download refusals. Sharing fixes that: there is no separate "browse"
+  # flag in slskd, a non-empty `directories` list is what makes files browsable
+  # and searchable by peers.
+  #
+  # Keep the share dirs real and explicit — never slskd's own default of sharing
+  # `~/` (the whole home dir), which is both something this repo must not leak
+  # and a full-tree scan that leaves the service stuck in D-state on an old Nix
+  # install under $HOME (measured: read 2.8GB and never fully started).
+  #
+  # `top` shares `/run/media/lam/SSD/aud`, the same 208GB tree the player scans
+  # (546 dirs ≈ a few hundred inotify watches — no risk to the watch budget, and
+  # slskd's recursive CWD watcher is already quarantined to the empty
+  # `WorkingDirectory` below). `book` deliberately keeps `[]`: the library
+  # physically lives on `top`'s SSD and `book` sees it only as an SMB mount back
+  # to `top`, so serving the same files from `book` over the LAN to the internet
+  # would double the read load on `top`'s samba for identical content. Gated on
+  # `host`, not on path, so both machines evaluate the same file.
   #
   # THAT IS NOT ENOUGH ON ITS OWN, because the empty share list stops the SCAN
   # and not the WATCHER. slskd registers a recursive inotify watch rooted at its
@@ -69,7 +83,15 @@
       run mkdir -p "$HOME/.local/share/slskd"
       # home.file used to own this path as a store symlink — replace it.
       [ -L "$HOME/.local/share/slskd/slskd.yml" ] && run rm "$HOME/.local/share/slskd/slskd.yml"
-      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nshares:\n  directories: []\n" "$(cat '"$keyFile"')" > "$HOME/.local/share/slskd/slskd.yml"'
+      # Share the music library on top (the files live on its SSD); an empty
+      # list advertises nothing and reads as a leech to the network.
+      host="${host}"
+      sharesYml="  directories: []"
+      if [ "$host" = "top" ]; then
+        sharesYml=$'  directories:\n    - /run/media/lam/SSD/aud'
+      fi
+      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nshares:\n%s\n" "$1" "$2" > "$3"' _ \
+        "$(cat "$keyFile")" "$sharesYml" "$HOME/.local/share/slskd/slskd.yml"
       usrFile="$HOME/.secrets/slskd-username"
       pwdFile="$HOME/.secrets/slskd-password"
       if [ -f "$usrFile" ] && [ -f "$pwdFile" ]; then
