@@ -52,10 +52,29 @@ branch itself is `DocPane.qml`'s `isPdf`, and it is one `Loader`.
   to the compositor, and no view adds its own).
 - **Pages reach QML through an image provider**, `image://pdfpage/<paneKey>/<gen>/<page>`,
   with `sourceSize` carrying the zoom. The URL is a pure function of what is
-  drawn, so Qt's pixmap cache *is* the page cache and scrolling back up
-  redraws nothing — and `gen`, bumped on every open, is what makes a file that
+  drawn — and `gen`, bumped on every open, is what makes a file that
   changed on disk actually re-rasterize instead of redrawing the old pages
   (§6.1).
+- **`pdfdoc.py` holds the page cache, because Qt's cannot.** The rule used to
+  be "the URL is pure, so Qt's pixmap cache *is* the page cache and scrolling
+  back up redraws nothing", and it was **false**: `QQuickPixmapStore` drops
+  unreferenced pixmaps past a hardcoded 2 MB with no env knob (Qt 6.11.1), and
+  ONE fit-width page in a 1000px pane is 980×1270 RGB32 ≈ 5 MB — so no page
+  ever survived leaving the delegate range. Measured on `top` 2026-07-31,
+  scrolling a 340-page novel down and back: **20 provider calls, 13 distinct
+  pages, 7 of them re-rasterized** at 0.3-29 ms each. `PdfLibrary.render` now
+  keeps an LRU of `QImage`s keyed `(paneKey, gen, page, w, h)` under a 96 MB
+  budget (`CACHE_BYTES`, `READER_PDF_CACHE_BYTES` to override): the same scroll
+  rasterizes 12 and serves 7 from the cache, a hit costing **0.0014 ms against
+  a 2-50 ms raster**. It matters more than a raster time suggests, because
+  `QPdfDocument.render` **does not release the GIL** — Python on the GUI thread
+  runs at 15% of its rate while a page rasterizes (measured).
+    - The cache key carries the pixel size, so **a zoom that changes
+      `sourceSize` on every wheel notch mints a new 5 MB raster per visible
+      page per notch**. A continuous zoom must settle before it re-rasterizes,
+      or quantize the scale it hands `sourceSize`.
+    - `_forget(key)` on every open and close: the `gen` in the key stops a
+      stale page being *served*, but nothing would ever evict it.
 - **One `QPdfDocument` per PANE**, keyed the way `Docs.watch` is keyed, so a
   split can hold two PDFs. `PdfLibrary.render` takes a lock: Qt may call the
   provider off the GUI thread, and one PDFium document is not two callers' to
@@ -75,6 +94,17 @@ branch itself is `DocPane.qml`'s `isPdf`, and it is one `Loader`.
   `border` one. **Cross-document search skips PDFs** — matching a query against
   a PDF's bytes finds nothing a reader would recognise — and that is the one
   place the two modes are not equal.
+    - **The page text is extracted once, never per keystroke.**
+      `DocPane.onQueryChanged` calls `Pdf.search` on every key, and that used
+      to re-run `getAllText` over the whole document each time — **508 ms per
+      keystroke on a 340-page novel, 235 ms on a 153-page one, on the GUI
+      thread** (measured on `top`, 2026-07-31; typing five characters froze the
+      window for 2.5 s). `PdfLibrary` caches the lowercased text per
+      `(key, gen, page)`, which takes every keystroke after the first to
+      **0.1-0.5 ms**, and a `threading.Timer` 1.5 s after the open warms the
+      whole document in the background, a page at a time under the lock, which
+      takes the FIRST one to 0.2 ms as well. The delay is deliberate: the first
+      screenful of pages rasterizes before anything else touches PDFium.
 - **Chrome: `−` `+` `fw` `fp` `gp`**, inserted between the find cell and the
   splits and present only in this mode. `−` is U+2212, never a hyphen: a bare
   `-` is the SPACER token in the vtb button-array protocol. Keys are viewer's
@@ -328,3 +358,13 @@ page actually rasterizing — asserted twice, once on the provider's `QImage`
 sheet drawn in the view at all).
 
 The *appearance* is the user's check, as always.
+
+**`tools/pdf-profile.py` is the PDF mode's measuring tape**, same env recipe,
+three modes: no flag times `Pdf.open`, a spread of page rasters and one
+`Pdf.search`; `--view` scrolls the real `PdfView.qml` offscreen and reports the
+provider's thread, GUI-thread stalls and rasterized-vs-cached counts; and
+`--selftest` asserts the caches (a repeat is served, a reload is not, a stale
+generation is refused, the byte budget evicts). **Drive that view from QML, never
+from Python** — setting `doc` from the main thread deadlocks the process, the
+GIL against Qt's `QQuickPixmapReader`; the harness says so where it matters.
+Numbers, before and after, are in `docs/perf-cpu-hotspots.md`.

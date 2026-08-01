@@ -22,6 +22,8 @@ of redrawing the old pages (§6.1 — reload in place, and actually reload).
 """
 import os
 import threading
+import time
+from collections import OrderedDict
 
 from PySide6.QtCore import QObject, Slot, QSize, Qt
 from PySide6.QtGui import QImage
@@ -44,6 +46,17 @@ MAX_RENDER_PX = 5000
 #: keystroke is not a find, and the footer reports the truncation (§10.6).
 MAX_SEARCH_PAGES = 3000
 
+#: How much rasterized page to keep, in bytes. **Qt's pixmap cache cannot do
+#: this job**: `QQuickPixmapStore`'s limit for unreferenced pixmaps is a
+#: hardcoded 2 MB with no env knob (checked in this Qt, 6.11.1), and ONE
+#: fit-width page in a 1000px pane is 980x1270 RGB32 ~ 5 MB. So every page that
+#: scrolled out of the delegate range was evicted the moment it was released,
+#: and scrolling back up re-rasterized it — measured 2026-07-31 on `top`,
+#: scrolling a 340-page novel down and back: 20 provider calls for 13 distinct
+#: pages, 7 of them redraws at 0.3-29 ms each. 96 MB is ~19 fit-width pages, which
+#: covers a scroll-and-come-back without holding a book.
+CACHE_BYTES = int(os.environ.get("READER_PDF_CACHE_BYTES", 96 * 1024 * 1024))
+
 
 def is_pdf(path):
     return os.path.splitext(str(path))[1].lower() in PDF_EXTS
@@ -64,6 +77,21 @@ class PdfLibrary(QObject):
         # `render` is reached from the image provider, which Qt may call on its
         # own texture thread; one PDFium document is not two callers' to share.
         self._lock = threading.Lock()
+        #: (key, gen, page, w, h) -> QImage, in use order. THE page cache — see
+        #: CACHE_BYTES for why Qt's own one cannot be it.
+        self._raster = OrderedDict()
+        self._raster_bytes = 0
+        #: (key, gen, page) -> lowercased page text. A find re-ran `getAllText`
+        #: over the whole document on EVERY KEYSTROKE: 500 ms per key on a
+        #: 340-page novel, 235 ms on a 153-page one, all of it on the GUI
+        #: thread (measured 2026-07-31 on `top`). The text of a page cannot
+        #: change without a reload, and a reload bumps `gen`.
+        self._text = {}
+        #: rasters actually drawn vs served from the cache — what
+        #: `tools/pdf-profile.py` reports, and the only way to tell a page that
+        #: was re-REQUESTED from one that was re-RASTERIZED.
+        self.rastered = 0
+        self.cached = 0
 
     # ---- loading -----------------------------------------------------------
 
@@ -96,6 +124,7 @@ class PdfLibrary(QObject):
             self._docs[key] = doc
             self._gen[key] = self._gen.get(key, 0) + 1
             self._paths[key] = p
+            self._forget(key)
         if old is not None:
             old.close()
             old.deleteLater()
@@ -109,6 +138,13 @@ class PdfLibrary(QObject):
             # the vtb socket — hyprvtb's renderRect aborts the compositor on a
             # zero-size box (docs/DESIGN.md §12). Floor it here, once.
             pages.append({"w": w if w > 1 else 612.0, "h": h if h > 1 else 792.0})
+
+        # Warm the find index in the background — see `_warm_text`. A timer
+        # rather than a thread started here, so the first screenful of pages
+        # rasterizes before anything else touches PDFium.
+        t = threading.Timer(1.5, self._warm_text, args=(key, self._gen[key]))
+        t.daemon = True
+        t.start()
 
         base.update({"ok": True, "pageCount": n, "pages": pages,
                      "gen": self._gen[key], "key": key,
@@ -142,11 +178,59 @@ class PdfLibrary(QObject):
         return [{"text": "page " + str(i + 1), "index": i, "level": 1, "anchor": ""}
                 for i in range(pageCount)]
 
+    # ---- the caches --------------------------------------------------------
+
+    def _forget(self, key):
+        """Drop everything remembered about one pane. Caller holds the lock.
+
+        Called on every (re)open as well as on close: the generation in the key
+        already keeps a stale raster from being SERVED, but nothing would ever
+        evict it, so a document reloaded ten times would hold ten copies."""
+        for k in [k for k in self._raster if k[0] == key]:
+            self._raster_bytes -= self._raster.pop(k).sizeInBytes()
+        for k in [k for k in self._text if k[0] == key]:
+            del self._text[k]
+
+    def _warm_text(self, key, gen):
+        """Extract the document's text in the background, a page at a time.
+
+        The find bar calls `search` on EVERY KEYSTROKE, and the first call is
+        the one that pays for the whole document — 508 ms on a 340-page novel,
+        on the GUI thread. Caching made every keystroke after the first free
+        (0.1-0.5 ms); this is what makes the first one free too.
+
+        It starts a beat after the open, so it is never competing with the
+        first screenful of pages, and it takes the lock **per page** rather
+        than for the sweep, so a page the reader is actually waiting for is
+        never behind more than one extraction (~1.5 ms)."""
+        i = 0
+        while True:
+            with self._lock:
+                doc = self._docs.get(key)
+                if doc is None or gen != self._gen.get(key, 0):
+                    return
+                if i >= min(doc.pageCount(), MAX_SEARCH_PAGES):
+                    return
+                self._page_text(key, gen, doc, i)
+            i += 1
+            time.sleep(0.002)   # stay out of the renderer's way
+
+    def _page_text(self, key, gen, doc, page):
+        """One page's text, lowercased, remembered. Caller holds the lock."""
+        ck = (key, gen, page)
+        hit = self._text.get(ck)
+        if hit is None:
+            sel = doc.getAllText(page)
+            hit = (sel.text() or "").lower() if sel is not None else ""
+            self._text[ck] = hit
+        return hit
+
     @Slot(str)
     def close(self, key):
         with self._lock:
             doc = self._docs.pop(key, None)
             self._paths.pop(key, None)
+            self._forget(key)
         if doc is not None:
             doc.close()
             doc.deleteLater()
@@ -168,27 +252,50 @@ class PdfLibrary(QObject):
             doc = self._docs.get(key)
             if doc is None:
                 return []
+            gen = self._gen.get(key, 0)
             out = []
             for i in range(min(doc.pageCount(), MAX_SEARCH_PAGES)):
-                sel = doc.getAllText(i)
-                if sel is not None and q in (sel.text() or "").lower():
+                if q in self._page_text(key, gen, doc, i):
                     out.append(i)
         return out
 
     # ---- rendering ---------------------------------------------------------
 
     def render(self, key, gen, page, size):
-        """One page as a QImage at `size` pixels. Called by the image provider
-        only; the lock is what makes it safe from Qt's loader thread."""
+        """One page as a QImage at `size` pixels, from the cache if it is there.
+
+        Called by the image provider only; the lock is what makes it safe from
+        Qt's loader thread. A hit costs a dict lookup instead of the 3-50 ms
+        PDFium raster — and the raster does not release the GIL, so it is not
+        only the reader thread it costs (measured: Python on the GUI thread
+        runs at 15% of its rate while a page is rasterizing)."""
+        w = max(1, min(int(size.width()), MAX_RENDER_PX))
+        h = max(1, min(int(size.height()), MAX_RENDER_PX))
+        ck = (key, gen, page, w, h)
         with self._lock:
+            hit = self._raster.get(ck)
+            if hit is not None:
+                self._raster.move_to_end(ck)
+                self.cached += 1
+                return hit
+
             doc = self._docs.get(key)
             if doc is None or gen != self._gen.get(key, 0):
                 return None
             if page < 0 or page >= doc.pageCount():
                 return None
-            w = max(1, min(int(size.width()), MAX_RENDER_PX))
-            h = max(1, min(int(size.height()), MAX_RENDER_PX))
-            return doc.render(page, QSize(w, h))
+            img = doc.render(page, QSize(w, h))
+            self.rastered += 1
+            if img is None or img.isNull():
+                return img
+
+            self._raster[ck] = img
+            self._raster_bytes += img.sizeInBytes()
+            # Evict oldest-first, but never the page just rendered: a single
+            # page larger than the whole budget must still be served.
+            while self._raster_bytes > CACHE_BYTES and len(self._raster) > 1:
+                self._raster_bytes -= self._raster.popitem(last=False)[1].sizeInBytes()
+            return img
 
 
 class PageProvider(QQuickImageProvider):
@@ -196,9 +303,10 @@ class PageProvider(QQuickImageProvider):
     `sourceSize` the delegate asked for.
 
     An image provider and not a rendered-to-a-temp-file scheme because the URL
-    is then a pure function of (document, generation, page, zoom) and Qt's own
-    pixmap cache does the caching a page view needs — scrolling back up a
-    document re-uses what it drew on the way down.
+    is then a pure function of (document, generation, page, zoom). The CACHING
+    is `PdfLibrary`'s, not Qt's: `QQuickPixmapStore` drops an unreferenced
+    pixmap past 2 MB and a page is ~5 MB, so scrolling back up used to
+    re-rasterize every page. See CACHE_BYTES.
     """
 
     def __init__(self, lib):
