@@ -54,6 +54,10 @@ DEFAULT_TSV = os.path.join(DUMP_DIR, "missing.tsv")
 DEFAULT_KEY_FILE = os.path.expanduser("~/.secrets/slskd-api-key")
 DEFAULT_HOST = "http://127.0.0.1:5030"
 STATE_FILE = os.path.join(DUMP_DIR, "soulseek-state.tsv")
+# Rejected-download transfer ids this pipeline has already re-sourced. Once a
+# rejection is acted on it is recorded here so a transfer that lingers in
+# slskd's list never re-triggers a re-source on every poll.
+RESCUED_FILE = os.path.join(DUMP_DIR, "soulseek-rescued.json")
 # slskd drops completed downloads here; this script queues them, player-add.py
 # (the import step) moves them into the library and rescans.
 DOWNLOAD_DIR = os.path.expanduser("~/.local/share/slskd/downloads")
@@ -200,6 +204,23 @@ def save_state(state_path, state):
     os.replace(tmp, state_path)
 
 
+def load_rescued(path):
+    """Rejected-download transfer ids this pipeline has already re-sourced,
+    so a rejection lingering in slskd's list is only acted on once."""
+    try:
+        with open(path) as f:
+            return set(json.load(f).get("handled", []))
+    except (OSError, ValueError):
+        return set()
+
+
+def save_rescued(path, ids):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"handled": sorted(ids)}, f)
+    os.replace(tmp, path)
+
+
 def track_key(row):
     return row.get("spotify_id") or row.get("isrc") or (
         f"{row.get('artists','')}||{row.get('title','')}")
@@ -292,14 +313,19 @@ def duration_ok(file_len, want_ms):
     return abs(got - want) <= DURATION_TOLERANCE
 
 
-def pick_candidate(responses, artists, title, want_ms):
+def pick_candidate(responses, artists, title, want_ms, skip_users=()):
     """From slskd search responses, choose the best (user, filename, size).
     Keeps files whose name matches artist+title and whose length agrees with
-    the target, then prefers the closest length and the highest bitrate."""
+    the target, then prefers the closest length and the highest bitrate.
+    Files from a peer in `skip_users` (one that has just rejected/errored a
+    download this run) are never chosen, so a re-sourced track lands on a
+    different source rather than the one that refused it."""
     best = None
     best_score = None
     for resp in responses or []:
         user = resp.get("username", "")
+        if user in skip_users:
+            continue
         free = bool(resp.get("hasFreeUploadSlot", False))
         for f in resp.get("files", []):
             fn = f.get("filename", "")
@@ -317,6 +343,96 @@ def pick_candidate(responses, artists, title, want_ms):
                 best_score = score
                 best = (user, fn, f.get("size"))
     return best
+
+
+# slskd's own "Failed" terminal set (TransferStateCategories.Failed): a
+# download reached a terminal state but the file never arrived. Every one
+# renders as a "Completed, <reason>" composite -- the familiar one being
+# "Completed, Rejected", where the peer accepted the request then refused the
+# actual transfer (often "Transfer rejected: Banned"), so the track never lands
+# on disk. A state carrying any of these reason tokens is never a success.
+FAILED_TRANSFER_TOKENS = ("Rejected", "Cancelled", "TimedOut", "Errored",
+                          "Aborted")
+
+
+def iter_transfers(dl):
+    """Yield every file-level download transfer from a /transfers/downloads
+    response, which nests as username -> directories -> files. Each file object
+    already carries its own username, filename, state and (on failure)
+    exception, so flattening the nesting is all that is needed to reach them."""
+    for entry in dl or []:
+        for directory in entry.get("directories") or []:
+            for f in directory.get("files") or []:
+                yield f
+
+
+def transfer_failed(f):
+    """True when a download ended in a state where the file never arrived
+    (slskd's Failed set: rejected / cancelled / timed out / errored / aborted).
+    These are the transfers that would otherwise leave a track silently
+    missing while the poller kept counting it as queued."""
+    st = f.get("state") or ""
+    return any(tok in st for tok in FAILED_TRANSFER_TOKENS)
+
+
+def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
+    """Re-source every missing track whose enqueued download ended failed
+    (rejected / cancelled / errored / aborted -- slskd reports these as a
+    "Completed, <reason>" state with bytesTransferred 0).
+
+    For each failed transfer that maps back to a track still on the work list
+    (matched by the same artist/title folding the search uses, since the
+    recorded source for a track often diverges from a stale rejected one), we:
+
+      - remember its peer's username so this run's searches never pick another
+        file from a peer that just refused us, and
+      - drop the "queued" marker for the matching track(s) so the normal pass
+        re-searches them and re-enqueues the same missing track from a
+        different source.
+
+    Each failed transfer is acted on once per its stable `id` (recorded in
+    `rescued_ids`, persisted across runs) -- that is what keeps a rejected
+    transfer that lingers in slskd's list from re-triggering on every poll.
+
+    Never mutates `state` under --dry-run (a preview must not unqueue a real
+    download); the returned count still reports what a real run would
+    re-source, and the peer blocklist always applies.
+
+    Returns (blocked_user_set, n_would_resource). Mutates `state` and
+    `rescued_ids`; the caller persists `rescued_ids` only for a real run."""
+    blocked = set()
+    resourced = 0
+    for f in iter_transfers(dl):
+        if not transfer_failed(f):
+            continue
+        user = f.get("username")
+        filename = f.get("filename")
+        if not (user and filename):
+            continue
+        # a transfer is keyed by its stable id, falling back to user+filename
+        # for the (unlikely) transfer that has none
+        key = f.get("id") or f"{user}\x00{filename}"
+        if key in rescued_ids:
+            continue  # already acted on this exact rejection
+        # does this failed transfer map to a track still on the work list?
+        base = os.path.basename(filename)
+        matches = [r for r in rows
+                   if file_matches(base, r.get("artists", ""),
+                                   r.get("title", ""))]
+        if not matches:
+            continue
+        blocked.add(user)
+        rescued_ids.add(key)
+        # re-source the matching queued tracks (from a peer other than `user`,
+        # which pick_candidate now avoids via the returned blocklist)
+        for row in matches:
+            sid = track_key(row)
+            rec = state.get(sid)
+            if rec and rec.get("status") == "queued":
+                resourced += 1
+                if not dry_run:
+                    del state[sid]
+    return blocked, resourced
 
 
 def main():
@@ -380,6 +496,40 @@ def main():
         print("  (--no-library-skip: not checking the live library)")
 
     state = {} if args.retry else load_state(state_path)
+    rescued_ids = load_rescued(os.path.join(args.dump_dir,
+                                            os.path.basename(RESCUED_FILE)))
+
+    # --- 1.5 re-source downloads the peer rejected/cancelled/errored ---------
+    # The /transfers/downloads response nests (username -> directories ->
+    # files); flatten it into every individual download so we can both rebuild
+    # the never-re-queue guard (which previously walked only the top level,
+    # saw no `filename`, and silently matched nothing) and notice transfers
+    # that ended failed. Both are best-effort: a failed API call degrades to
+    # no re-queue protection and no rescue, never a crash.
+    queued_files = set()
+    blocked_users = set()
+    dl = None
+    try:
+        dl = http("GET", f"{base}/api/v0/transfers/downloads", api_key)
+    except SlskdError:
+        pass
+    for tr in iter_transfers(dl):
+        user, filename = tr.get("username"), tr.get("filename")
+        if user and filename:
+            queued_files.add((user, filename))
+    blocked_users, resourced = rescue_rejected(rows, state, rescued_ids, dl,
+                                               args.dry_run)
+    if resourced:
+        print(f"  re-sourcing {resourced} track(s) whose download ended "
+              f"rejected/cancelled/errored")
+        if not args.dry_run:
+            save_state(state_path, state)
+            save_rescued(os.path.join(args.dump_dir,
+                                      os.path.basename(RESCUED_FILE)),
+                         rescued_ids)
+    if blocked_users:
+        print(f"  avoiding {len(blocked_users)} peer(s) that refused a download "
+              f"this run")
 
     def wanted(row):
         if row.get("spotify_id") not in state or args.retry:
@@ -411,18 +561,7 @@ def main():
     print(f"searching {budget} track(s); --dry-run is "
           f"{'ON' if args.dry_run else 'OFF'}\n")
 
-    # --- 2. known slskd downloads, so we never re-queue the same file --------
-    queued_files = set()
-    try:
-        dl = http("GET", f"{base}/api/v0/transfers/downloads", api_key)
-        for t in dl or []:
-            if t.get("username") and t.get("filename"):
-                queued_files.add((t["username"], t["filename"]))
-                if t.get("state") in ("Completed", "Succeeded"):
-                    queued_files.add(("/grab/", t["filename"]))  # already grabbed
-    except SlskdError:
-        pass  # non-fatal; re-queue protection is best-effort
-
+    # --- 2. search and enqueue ----------------------------------------------
     changed = False
     processed = 0
     for row in net[:budget]:
@@ -481,7 +620,8 @@ def main():
                 except SlskdError:
                     responses = responses or []
 
-            cand = pick_candidate(responses, artists, title, want_ms)
+            cand = pick_candidate(responses, artists, title, want_ms,
+                                  blocked_users)
         except SlskdError as e:
             print(f"    ! search failed: {e}")
             state[sid] = {"spotify_id": row.get("spotify_id", ""),
