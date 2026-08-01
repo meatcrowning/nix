@@ -17,6 +17,94 @@ hl.monitor({
     scale    = host.scale or "1",
 })
 
+-- Windows come back when the screen does.
+--
+-- Powering the display off drops its DisplayPort link ENTIRELY — this is not
+-- DPMS, the output is gone as far as the compositor is concerned. Measured on
+-- `top` 2026-08-01 in Hyprland's own log: "Connector DP-5 disconnected" ->
+-- "Disabling output DP-5" in the evening, a matching reconnect in the morning.
+-- This desktop is every-window-floating on a single workspace, so those windows
+-- carry absolute coordinates across the gap; the output returns and they are
+-- still at coordinates that are no longer on any screen. They run, they are
+-- listed, they take focus, and they cannot be seen. The only way out was to
+-- close every one and open it again.
+--
+-- So when an output appears, put back whatever is no longer on it.
+--
+-- >>> monitor-reclaim >>>  tools/monitor-reclaim-test.sh EXTRACTS the block
+-- between these two markers and runs it against a stubbed `hl`, so the test
+-- exercises this source and not a copy of it. Keep them, and keep everything
+-- between them free of anything that needs a live compositor at load time.
+-- How much of a window has to be on the monitor before it counts as reachable.
+-- A window hanging off an edge is a thing he does on purpose; a window with
+-- nothing on screen is the bug. This is the line between them.
+local HOTPLUG_MIN_VISIBLE = 64
+
+local function hotplug_panel_width(mon)
+    -- The panel occupies part of the right edge. `hl.get_monitors()` does not
+    -- expose the reserved rect, so this is the qs-bar layer's own width — which
+    -- is WIDER than the true reserve (634 vs 376). That is fine for choosing
+    -- where to put a window and wrong for deciding whether to move one, which
+    -- is why only the destination below uses it.
+    local wide = 0
+    for _, l in ipairs(hl.get_layers() or {}) do
+        if l.namespace == "qs-bar" and l.monitor and l.monitor.name == mon.name then
+            wide = math.max(wide, l.w or 0)
+        end
+    end
+    return wide
+end
+
+local function hotplug_reclaim(mon)
+    local mx, my, mw, mh = mon.x, mon.y, mon.width, mon.height
+    local reserve = hotplug_panel_width(mon)
+    for _, w in ipairs(hl.get_windows() or {}) do
+        if w.floating and w.mapped and w.monitor and w.monitor.name == mon.name then
+            local ax, ay = w.at.x, w.at.y
+            local sx, sy = w.size.x, w.size.y
+            -- WHETHER to move is judged against the MONITOR, never against the
+            -- panel-free area: a window tucked partly under the panel is where
+            -- he put it, and "recovering" it would rearrange his desktop every
+            -- single time the screen wakes — a worse bug than the one this
+            -- exists to fix.
+            local visx = math.min(ax + sx, mx + mw) - math.max(ax, mx)
+            local visy = math.min(ay + sy, my + mh) - math.max(ay, my)
+            local needx = math.min(HOTPLUG_MIN_VISIBLE, sx)
+            local needy = math.min(HOTPLUG_MIN_VISIBLE, sy)
+            if visx < needx or visy < needy then
+                -- WHERE to put it may use the panel width: land it clear of the
+                -- panel when it fits there, anywhere on the monitor when it
+                -- does not.
+                local uw = mw - reserve
+                if sx > uw then uw = mw end
+                local nx = math.max(mx, math.min(ax, mx + math.max(0, uw - sx)))
+                local ny = math.max(my, math.min(ay, my + math.max(0, mh - sy)))
+                if nx ~= ax or ny ~= ay then
+                    hl.dispatch(hl.dsp.window.move({ x = nx, y = ny, window = w }))
+                end
+            end
+        end
+    end
+end
+
+hl.on("monitor.added", function(mon)
+    local name = mon and mon.name
+    if not name then return end
+    -- Deferred, and re-resolved by NAME rather than closing over the object:
+    -- on the frame the output returns the panel has not re-anchored its layer
+    -- yet, so the usable area read now would be the whole screen and every
+    -- recovered window would land underneath the panel.
+    hl.timer(function()
+        for _, m in ipairs(hl.get_monitors() or {}) do
+            if m.name == name then
+                hotplug_reclaim(m)
+                return
+            end
+        end
+    end, { timeout = 1200 })
+end)
+-- <<< monitor-reclaim <<<
+
 ---------------------
 ---- MY PROGRAMS ----
 ---------------------
