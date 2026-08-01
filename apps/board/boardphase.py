@@ -515,6 +515,11 @@ def actually(rec):
     # reaches the screen.
     if state in ("none", "starting"):
         return "nothing yet"
+    # Linked, and past the grace with an empty transcript: not "not yet" but
+    # "not at all". Said plainly, because this is what a wedged agent looks
+    # like from outside and the card is the only place it shows.
+    if state == "silent":
+        return "not started - nothing in its transcript at all"
     # Unlinked: no session id was ever recorded, so there is no transcript to
     # find. One sentence that is both halves of the truth — we cannot see the
     # work, and we CAN see the process — rather than two lines saying it twice.
@@ -759,6 +764,8 @@ def doing_line(rec, who="", running=True):
     # seconds old.
     if state in ("none", "starting"):
         return "nothing yet"
+    if state == "silent":
+        return "not started - nothing in its transcript at all"
     return "board cannot see what %s is doing - only that the process is there" \
         % subj
 
@@ -1005,7 +1012,21 @@ def observe(agent_id, session=None):
         rec["doing"] = recent[-1]["doing"] if recent else ""
         rec["lastTool"] = recent[-1]["name"] if recent else ""
         if not recent:
-            rec["observed"] = "none"        # linked, but it has not acted yet
+            # LINKED, AND IT HAS NOT ACTED — but for how long. `none` is the
+            # spawn that is two seconds old and about to work; `silent` is the
+            # one that never did anything at all, and the two must not share a
+            # state, because `boardagents.speaks` WITHHOLDS THE CARD for `none`
+            # and would then withhold it forever. Measured on top 2026-07-31:
+            # a worker wedged before its first API call held a card that was
+            # built, confirmed and correctly ordered, and was drawn by nobody
+            # for 40 minutes — the one failure that most needed showing was the
+            # one shape the triangle could not show. Bounded the same way and
+            # by the same constant that turns `starting` into `unlinked` above.
+            if not rec.get("linkedAt"):
+                rec["linkedAt"] = time.time()
+            young = time.time() - float(rec.get("linkedAt") or 0) \
+                <= START_GRACE_S
+            rec["observed"] = "none" if young else "silent"
         elif time.time() - float(rec.get("seen") or 0) > QUIET_AFTER_S:
             rec["observed"] = "quiet"       # it has stopped doing anything
         else:
