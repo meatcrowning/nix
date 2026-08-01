@@ -445,11 +445,17 @@ never lands in the library yet the state file keeps it `queued`. It reads
 (by the same artist/title folding the search uses), drops that track's
 `queued` marker so the normal pass re-searches it, and blocks the refusing
 peer from the pick so the re-source lands on a different source. Each failed
-transfer's id is remembered in a per-dump-dir `soulseek-rescued.json`, so a
-rejection lingering in slskd's list is only ever re-sourced once (not on every
-poll). This is also what actually populates the never-re-queue guard: the
-`/transfers/downloads` response nests as username → directories → files, and
-the guard was previously walking only the top level and matching nothing.
+transfer's id is remembered in a per-dump-dir `soulseek-rescued.json` — only
+once a matching queued track was actually re-sourced — so a rejection lingering
+in slskd's list is only ever acted on when there is something to do (not on
+every poll, and never while the track is in a nofind/error state that would
+leave the id burned with nothing re-sourced). Transfers that ended in a failed
+terminal state are also excluded from the never-re-queue guard, so a re-sourced
+track is not re-marked "queued" pointing at the dead transfer; they only guard
+the re-queue while they might still produce a file. This is also what actually
+populates the never-re-queue guard: the `/transfers/downloads` response nests
+as username → directories → files, and the guard was previously walking only
+the top level and matching nothing.
 
 slskd drops completed downloads into `~/.local/share/slskd/downloads/`, and the
 player only ever sees a track once it is moved into `aud/` and rescanned. The
