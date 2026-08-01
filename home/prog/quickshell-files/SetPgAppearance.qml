@@ -34,11 +34,17 @@ Column {
             }
         }
         SetRow {
-            label: "font family"
-            SetTextField {
-                fieldWidth: 200
+            // The desktop's pixel font. One key (fontFamily) drives Theme.font in
+            // the panel AND DeskStyle.fontFamily in the apps, so flipping it here
+            // switches the whole desktop live via settings.json. The two faces are
+            // the shipped members of the DOS VGA family (home/pkgs/desktop/font.nix).
+            label: "pixel font"
+            desc: "the DOS VGA face the desktop draws with"
+            SetSelect {
+                options: ["More Perfect DOS VGA", "Perfect DOS VGA 437"]
+                labels: ({ "More Perfect DOS VGA": "more perfect", "Perfect DOS VGA 437": "perfect dos vga 437" })
                 value: page.d.fontFamily
-                onCommitted: (t) => { page.d.fontFamily = t; SettingsStore.save(); }
+                onChanged: (v) => { page.d.fontFamily = v; SettingsStore.save(); }
             }
         }
         SetRow {

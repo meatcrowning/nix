@@ -15,7 +15,26 @@ let
     python3 ${./font-files/merge-vga.py} \
       ${./font-files/MorePerfectDOSVGA.ttf} \
       ${pkgs.ultimate-oldschool-pc-font-pack}/share/fonts/truetype/PxPlus_IBM_VGA_9x16.ttf \
-      $out/share/fonts/truetype/MorePerfectDOSVGA.ttf
+      $out/share/fonts/truetype/MorePerfectDOSVGA.ttf \
+      "More Perfect DOS VGA"
+  '';
+
+  # Perfect DOS VGA 437 — the other face in the same 8x16 DOS VGA family (the one
+  # Zeh Fernando made first; More Perfect is its refinement). Vendored, because
+  # it is not in nixpkgs: source _home/pkgs/desktop/font-files/PerfectDOSVGA437.ttf_
+  # (.ttf pulled from bh/cool-old-term@master, itself Zeh Fernando's
+  # fatorcaos.com.br face — free for personal and commercial use). Like More
+  # Perfect it covers only its 437-page glyphs, so the same PxPlus import applies
+  # (256 -> 788, existing glyphs untouched) — otherwise switching to it would
+  # reintroduce the DESIGN.md S2.3 clipping. Exposed as its own family name.
+  perfectDOSVGA437 = pkgs.runCommand "perfect-dos-vga-437-merged" {
+    nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.fonttools ])) ];
+  } ''
+    python3 ${./font-files/merge-vga.py} \
+      ${./font-files/PerfectDOSVGA437.ttf} \
+      ${pkgs.ultimate-oldschool-pc-font-pack}/share/fonts/truetype/PxPlus_IBM_VGA_9x16.ttf \
+      $out/share/fonts/truetype/PerfectDOSVGA437.ttf \
+      "Perfect DOS VGA 437"
   '';
 in
 
@@ -34,6 +53,12 @@ in
   # everything that names the family keeps working untouched.
   home.file.".local/share/fonts/MorePerfectDOSVGA.ttf".source =
     "${morePerfectDOSVGA}/share/fonts/truetype/MorePerfectDOSVGA.ttf";
+
+  # The second pixel face. Same runtime-dir pattern, its own family name, on
+  # both hosts (this is home/, not sys/). settings.json's fontFamily points at
+  # whichever face is live; both resolve here.
+  home.file.".local/share/fonts/PerfectDOSVGA437.ttf".source =
+    "${perfectDOSVGA437}/share/fonts/truetype/PerfectDOSVGA437.ttf";
 
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —
@@ -56,6 +81,25 @@ in
       </match>
       <match target="font">
         <test name="family"><string>More Perfect DOS VGA</string></test>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Perfect DOS VGA 437 also ships Regular-only, so the same faux-bold rule must
+  # cover it — otherwise a switch to the second face brings the smearing back.
+  xdg.configFile."fontconfig/conf.d/50-perfect-dos-vga-437-regular.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="pattern">
+        <test name="family"><string>Perfect DOS VGA 437</string></test>
+        <edit name="weight"   mode="assign"><const>regular</const></edit>
+        <edit name="slant"    mode="assign"><const>roman</const></edit>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+      <match target="font">
+        <test name="family"><string>Perfect DOS VGA 437</string></test>
         <edit name="embolden" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>

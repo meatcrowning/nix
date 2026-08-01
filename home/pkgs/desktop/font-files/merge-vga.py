@@ -2,11 +2,16 @@
 """Build the shipped More Perfect DOS VGA: the original, plus the codepoints it
 lacks, imported from PxPlus IBM VGA 9x16.
 
-    merge-vga.py <base.ttf> <donor.ttf> <out.ttf>
+    merge-vga.py <base.ttf> <donor.ttf> <out.ttf> [label]
 
 Run inside a derivation (home/pkgs/desktop/font.nix), never by hand — the file
 that lands in ~/.local/share/fonts is this script's output, so editing the
-script is how the desktop's font changes.
+script is how the desktop's font changes. label (optional, defaults to the
+source file's stem) names the base face in the PxPlus attribution.
+
+It builds EVERY shipped face in this family: the More Perfect DOS VGA default,
+and the Perfect DOS VGA 437 alternative (same 8x16 VGA grid, same em-relative
+geometry, so the same exact import applies). font.nix calls it once per face.
 
 WHY, and what is guaranteed
 ---------------------------
@@ -51,14 +56,16 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 
-CREDIT = (
-    "More Perfect DOS VGA; glyphs it lacked imported from PxPlus IBM VGA 9x16 "
-    "by VileR, CC BY-SA 4.0, https://int10h.org/oldschool-pc-fonts/"
-)
 LICENSE_URL = "http://creativecommons.org/licenses/by-sa/4.0/"
 
+# % (label) is the base font's family, so each face carries its own attribution.
+CREDIT = (
+    "%s; glyphs it lacked imported from PxPlus IBM VGA 9x16 "
+    "by VileR, CC BY-SA 4.0, https://int10h.org/oldschool-pc-fonts/"
+)
 
-def merge(base_path, donor_path):
+
+def merge(base_path, donor_path, label):
     base = TTFont(base_path)
     donor = TTFont(donor_path)
 
@@ -101,14 +108,15 @@ def merge(base_path, donor_path):
     # Attribution rides in the file, per CC BY-SA 4.0. The family name is NOT
     # touched: fontconfig's regular-only rule, Theme.qml, kitty.conf and eight
     # apps all address this face as "More Perfect DOS VGA".
-    base["name"].setName(CREDIT, 13, 3, 1, 0x409)
+    base["name"].setName(CREDIT % label, 13, 3, 1, 0x409)
     base["name"].setName(LICENSE_URL, 14, 3, 1, 0x409)
     return base, bcm, missing
 
 
 def main():
-    base_path, donor_path, out_path = sys.argv[1:4]
-    merged, before, imported = merge(base_path, donor_path)
+    base_path, donor_path, out_path, *rest = sys.argv[1:5]
+    label = rest[0] if rest else Path(base_path).stem
+    merged, before, imported = merge(base_path, donor_path, label)
 
     after = merged.getBestCmap()
     for cp, name in before.items():  # nothing that existed may have moved
