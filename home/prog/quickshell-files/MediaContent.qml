@@ -669,7 +669,8 @@ Item {
                               && eqTrigger.hoverBand < Media.eqBands.length
                     anchors { bottom: parent.bottom; bottomMargin: 2; horizontalCenter: parent.horizontalCenter }
                     text: Media.eqWriteLive
-                        ? root.fmtDb(Media.eqBands[eqTrigger.hoverBand].gain)
+                        ? (eqTrigger.hoverBand >= 0 && eqTrigger.hoverBand < Media.eqBands.length
+                            ? root.fmtDb(Media.eqBands[eqTrigger.hoverBand].gain) : "")
                         : "EQ read-only"
                     color: Media.eqWriteLive ? Theme.text : Theme.textDim
                 }
