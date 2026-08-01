@@ -1,6 +1,6 @@
 # The triangle: what a minister's card says
 
-*The `agents` section — the only part of the window that is not the store. A summon becoming a card, names, claimed vs observed work, withholding, and the output drawer.*
+*The `agents` section — the only part of the window that is not the store. A summon becoming a card, names, claimed vs observed work, the rising card, and the output drawer.*
 
 Part of goetia's guide — the map and the shared
 rules are in [`../AGENTS.md`](../AGENTS.md); read that first.
@@ -481,33 +481,42 @@ all of it.
   state is `inactive` whether or not the path unit exists, so the old sentence
   claimed armed for a watcher that could never fire.
 
-### A card is WITHHELD until its top line is a real sentence
+### A card with nothing to say yet RISES; it is never withheld
 
-[his, 2026-07-30] *"minister cards should only show up once the top line of
-their card reads [agent] is [verb] - as right now they can appear before that
-with the text 'nothing yet' at the top which looks bad"*.
+[his, 2026-07-31] *"instead of hiding the card until it shows the name on the top
+line etc, can we just put a card in there that reads '[agent] arises...' with an
+animated elipsies ... the card should just show the rising text and nothing else
+until the agent card actually starts producing stuff like before"*.
 
-- **`boardagents`' `speaks` decides, off the observation STATE**, never off the
-  words: a card is withheld exactly while it is *running*, has claimed no phase,
-  has no orchestrator startup line of its own, and its observation is `none` or
-  `starting` — which is `boardphase.doing_line`'s placeholder branch for an
-  ABSENCE of observation, i.e. the one that renders `nothing yet`. Matching the
-  string would break the moment either sentence is reworded.
-- **`AgentRow`'s `visible` is the whole drawing half** (`agent.speaks !== false`
-  — `!==` and not truthiness, so `boardwork`'s synthetic cards, which carry no
-  such field, stay drawn). An invisible child is outside a Column's layout, so a
-  withheld card leaves no gap.
-- **It is not a gate forever.** The card appears on the next 2.5s poll after the
-  agent's first `boardctl.py phase` OR its first observed act — seconds, for a
-  live worker — with nothing reloaded. A spawn whose transcript never appears
-  goes `unlinked` past `boardphase.START_GRACE_S` (120s) and is drawn then,
-  saying honestly that the work cannot be seen. Only an agent that is
-  registered, linked, and has genuinely never done anything stays hidden.
-- **A stopped card is never withheld**, whatever it said: its top line is the
-  title row, which is real.
-- The triangle's empty state counts CARDS (`Main.qml`'s `nothingRunning`), not
-  visible ones, so it does not claim nothing is running while one is merely
-  withheld — the section is briefly blank instead.
+- **`boardagents`' `arising` decides, off the observation STATE**, never off the
+  words: a card rises exactly while it is *running*, has claimed no phase, has no
+  orchestrator startup line of its own, and its observation is `none` or
+  `starting`. Matching the string would break the moment either sentence is
+  reworded.
+- **The rising line is the WHOLE card.** `boardagents` blanks `doingLine` and
+  `saysDetail` and writes `boardphase.arises_line()` into `saysLine`; `AgentRow`
+  drops the title row, the context tally and the worked-for stamp off the same
+  flag. His *"nothing else"*, and it is also honest — the observed line under it
+  could only read `nothing yet`, which is the placeholder the rising line
+  replaces, so drawing both says one absence twice.
+- **The dots animate for free.** The line ends in three ASCII periods and lands
+  on the card's TOP line, which is the only line `AgentRow` ticks (never U+2026 —
+  the font has no such glyph, docs/DESIGN.md §2.3).
+- **There is no `visible` binding on `AgentRow`, and putting one back is a
+  regression.** This replaced `speaks`, a gate that withheld a card until its top
+  line was a real sentence [his, 2026-07-30] — right for the two seconds a
+  healthy spawn takes, and the reason a minister wedged before its first API call
+  was *undrawable*: registered, linked, and having genuinely never done anything
+  was exactly the withheld state. One burned a core behind an empty triangle for
+  45 minutes [top, 2026-07-31]. There is now no state in which a running agent
+  has no card.
+- **It does not rise forever.** Past `boardphase.START_GRACE_S` (120s) with an
+  empty transcript the observation becomes `silent`, the rising stops, and the
+  card says `not started - nothing in its transcript at all`. A spawn whose
+  transcript never appears at all goes `unlinked` on the same bound and says it
+  cannot see the work. Both are the point of the change: the failure is VISIBLE.
+- **A stopped card never rises**, whatever it said: its top line is the title
+  row, which is real.
 
 ### ...and clicking the card opens what it is ACTUALLY SAYING
 

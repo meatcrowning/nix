@@ -677,9 +677,18 @@ class Agents(QObject):
     #: `systemctl` is not on this app's wrapped PATH on every machine, and a
     #: QProcess that cannot start reports nothing at all — which would read as
     #: "the watcher is fine" instead of "we could not ask" (§10). Find it.
-    SYSTEMCTL = next((p for p in ("/run/current-system/sw/bin/systemctl",
-                                  "/usr/bin/systemctl", "/bin/systemctl")
-                      if os.path.exists(p)), "systemctl")
+    #:
+    #: `$BOARD_SYSTEMCTL` overrides it, for the harness alone and in the spirit
+    #: of `BOARD_USAGE_OFFLINE`: the window's own suite asserts the sentence a
+    #: typed note gets back, which names the summoner only while the watcher is
+    #: ARMED — so without this a green suite depends on whether board-watch
+    #: happens to be running on the machine under it, and stopping the units for
+    #: an unrelated reason turns a check red that has nothing to do with them.
+    #: (`top`, 2026-07-31.) Never set in production; the fallbacks below are.
+    SYSTEMCTL = os.environ.get("BOARD_SYSTEMCTL") or \
+        next((p for p in ("/run/current-system/sw/bin/systemctl",
+                          "/usr/bin/systemctl", "/bin/systemctl")
+              if os.path.exists(p)), "systemctl")
 
     def _ask_systemd(self):
         if self._proc.state() != QProcess.NotRunning:
@@ -735,12 +744,14 @@ class Agents(QObject):
             # is doing, which used to follow a hyphen on the line above.
             "saysDetail": a.get("saysDetail", ""),
             "doingLine": a.get("doingLine", ""),
-            # ...and whether that top line is a real sentence yet at all. False
-            # WITHHOLDS the card (`AgentRow.visible`) — see `boardagents` for
-            # what the state means and why it is not a permanent gate. Absent
-            # defaults to True, which is what keeps `boardwork`'s own synthetic
-            # cards (a queued task, Solomon's standing row) drawn.
-            "speaks": a.get("speaks", True),
+            # ...and whether this card is the bare *"<name> arises..."* one: an
+            # agent that is running and has neither claimed nor been seen doing
+            # anything yet. True makes the rising line the WHOLE card
+            # (`AgentRow` drops the title row and the trailing metadata off it);
+            # `boardagents` carries why it is drawn rather than withheld.
+            # Absent defaults to False, which is what keeps `boardwork`'s own
+            # synthetic cards (a queued task, Solomon's standing row) whole.
+            "arising": a.get("arising", False),
             "observed": a.get("observed", "unlinked"),
             # How much context it is standing in, against what it can hold —
             # already formatted, and "" when nothing could be measured.

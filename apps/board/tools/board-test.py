@@ -59,6 +59,30 @@ os.environ["BOARD_CONFIRM_GRACE"] = "-1"
 # the `<!-- placed: -->` stamp down a line and failed three checks that had
 # nothing to do with the change. Tests that want an author set it themselves.
 os.environ.pop("BOARD_AGENT_ID", None)
+# ...and the WATCHER'S state is the harness's own, never the live one. The kill
+# switch is a FILE (`~/.local/state/board-watch/off`), so a suite that does not
+# scope this reads whether board-watch happens to be switched off on the machine
+# it is running on: `test_send_box` asserts the message for a typed note names
+# the summoner, and with the switch on it says "board-watch is switched off"
+# instead and the check fails. Found the hard way on `top` 2026-07-31, while the
+# watcher was deliberately off — a green suite must not depend on that. Two
+# tests scope it themselves to a scratch dir and still do; this is the floor
+# under everything else, and it points at a directory that cannot exist.
+WATCH_STATE = os.environ.setdefault(
+    "BOARD_WATCH_STATE",
+    os.path.join(tempfile.gettempdir(), "board-test-watch-%d" % os.getpid()))
+# ...and the other half of the same answer. `watcher_state` reads the kill
+# switch off the filesystem (above) AND a `systemctl show` of the two units, so
+# scoping only the file still left the suite asking the live service manager
+# whether board-watch is running here. A stub that prints the armed pair — the
+# service idle between ticks, the path unit active — makes it a constant.
+_SYSTEMCTL_STUB = os.path.join(tempfile.gettempdir(),
+                               "board-test-systemctl-%d" % os.getpid())
+with open(_SYSTEMCTL_STUB, "w") as _f:
+    _f.write("#!/bin/sh\nprintf 'ActiveState=inactive\\nLoadState=loaded\\n\\n"
+             "ActiveState=active\\nLoadState=loaded\\n'\n")
+os.chmod(_SYSTEMCTL_STUB, 0o755)
+os.environ.setdefault("BOARD_SYSTEMCTL", _SYSTEMCTL_STUB)
 
 BOARD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS = os.path.dirname(BOARD)
@@ -2350,10 +2374,12 @@ def test_phase(tmp):
           r["phase"] == "unreported", r["phase"])
     # ...and `none` is a GRACE too, for the same reason `starting` is. A worker
     # that wedges before its first API call is linked, has a transcript, and
-    # writes nothing into it ever; `none` withholds its card
-    # (`boardagents.speaks`), so an unbounded `none` made a stuck minister
-    # UNDRAWABLE — measured on top 2026-07-31, 40 minutes invisible at 100% of
-    # one core. Past the grace it is `silent`, which is drawn.
+    # writes nothing into it ever; `none` is what holds a card in its bare
+    # *"<name> arises..."* form (`boardagents.arising`), so an unbounded `none`
+    # would leave a stuck minister claiming forever that it is on its way —
+    # and under the older `speaks` gate it was UNDRAWABLE outright, measured on
+    # top 2026-07-31 at 45 minutes invisible on 100% of one core. Past the
+    # grace it is `silent`, which says so.
     bph.observe("ph-silent", session=u)          # its own id: `ph-a` is reused
     p = bph.sidecar("ph-silent")                 # further down and must not move
     rec = json.load(open(p))
@@ -3208,7 +3234,10 @@ def test_work(tmp):
         answers = json.load(f)["answers"]
     check("...so his answer to it is an ordinary change to a known decision",
           answers.get(key) == "idx:|ans:", answers)
-    del os.environ["BOARD_WATCH_STATE"]
+    # Back to the HARNESS's scratch dir, never unset: deleting it drops every
+    # later test through to the live `~/.local/state/board-watch`, kill switch
+    # and all (see the note beside the default at the top of this file).
+    os.environ["BOARD_WATCH_STATE"] = WATCH_STATE
     del os.environ["BOARD_WORK_SPAWN"]
 
 
@@ -4400,6 +4429,67 @@ def test_window(app, tmp):
           rows.get("drawn-dead", {}).get("running") is False
           and "exited" in rows.get("drawn-dead", {}).get("detail", ""),
           rows.get("drawn-dead"))
+
+    # ---- a RISING card is one line ON SCREEN, not just in the model ----
+    # *"the card should just show the rising text and nothing else"* [his,
+    # 2026-07-31]. `boardagents` blanks the two sentence fields, but the title
+    # row, the context tally and the worked-for stamp are QML's own and are
+    # dropped by `AgentRow`'s `arising` — so this is checked against the drawn
+    # items, which is the only place that half of the rule exists.
+    tdir = os.path.join(tmp, "rising-transcripts")
+    os.makedirs(tdir, exist_ok=True)
+    old_tsc = os.environ.get("BOARD_TRANSCRIPTS")
+    os.environ["BOARD_TRANSCRIPTS"] = tdir
+    open(os.path.join(tdir, "ses-rising.jsonl"), "w").close()   # exists, empty
+    ba.register("w-rising", "Make the scrollbar wider", os.getpid(),
+                kind="worker", where="apps/x/**", session="ses-rising")
+    agents.refresh()
+    spin(250)
+    rising = [a for a in prop(win, "agents") if a["id"] == "w-rising"]
+    check("a freshly spawned worker is drawn, and it is RISING",
+          len(rising) == 1 and rising[0].get("arising") is True, rising)
+    card = [it for it in descendants(win.contentItem())
+            if it.property("arising") is True]
+    check("...and exactly one card on screen is in that state", len(card) == 1,
+          len(card))
+    if card:
+        # The message box is EXCLUDED from "nothing else", deliberately. It is
+        # the card's control surface rather than one of its lines — every
+        # addressable card carries one — and the first seconds of a spawn are
+        # exactly when he might want to correct it before it goes wrong, so
+        # hiding it would take away a thing he did not ask to lose. Everything
+        # that is a LINE of the card is what the rule covers.
+        # One walk that PRUNES the box subtree, rather than two walks and a set
+        # of `id()`s: PySide mints a fresh Python wrapper per traversal, so the
+        # ids never match and the exclusion silently does nothing (it did).
+        shown = []
+
+        def _lines(it):
+            if it.property("placeholder") is not None:
+                return                       # the message box, and all of it
+            t = it.property("text")
+            if t is not None and it.isVisible() and str(t).strip():
+                shown.append(str(t))
+            for ch in it.childItems():
+                _lines(ch)
+        for ch in card[0].childItems():
+            _lines(ch)
+        # The three dots are ANIMATED, so the drawn cell is `.`, `..` or `...`
+        # padded to three cells — assert the stem, never the current frame.
+        check("...drawing the rising line and NOTHING else - his 'nothing else'",
+              len(shown) == 1
+              and shown[0].strip().startswith("%s arises" % rising[0]["name"]),
+              shown)
+        check("...so the title, the tally and the worked-for stamp are all gone",
+              not any(rising[0]["title"] in s or "/" in s or "working for" in s
+                      for s in shown), shown)
+    ba.unregister("w-rising")
+    if old_tsc is None:
+        del os.environ["BOARD_TRANSCRIPTS"]
+    else:
+        os.environ["BOARD_TRANSCRIPTS"] = old_tsc
+    agents.refresh()
+    spin(150)
     said = agents.send("drawn-live", "Dim the cover art", "decision",
                        "also dim the tracklist")
     agents.refresh()
@@ -6292,21 +6382,54 @@ def test_card_output(tmp):
     check("a finished worker with no transcript falls back to its log",
           agents.output("w-done") == ["finished", "last word"],
           agents.output("w-done"))
-    # ---- and whether the card may be DRAWN at all yet (`speaks`) ----
-    # His: a card must not appear reading `nothing yet` at the top.
+    # ---- a card with nothing to say yet RISES; it is never withheld ----
+    # [his, 2026-07-31] *"instead of hiding the card ... '[agent] arises...'
+    # with an animated elipsies ... nothing else until the agent card actually
+    # starts producing stuff"*. This replaced `speaks`, whose withheld state was
+    # exactly the one a wedged minister sat in, invisibly, for 45 minutes.
     ba.register("w-hush", "T", os.getpid(), kind="worker", where="apps/x/**",
                 session="ses-never")          # linked, transcript never appears
     by_id = {a["id"]: a for a in ba.agents()}
-    check("a running agent that has neither claimed nor been seen is withheld",
-          by_id["w-hush"]["speaks"] is False, by_id.get("w-hush", {}).get("speaks"))
-    check("...while one whose transcript already shows work is drawn",
-          by_id["w-live"]["speaks"] is True, by_id.get("w-live", {}).get("speaks"))
+    check("a running agent that has neither claimed nor been seen RISES",
+          by_id["w-hush"]["arising"] is True, by_id.get("w-hush", {}).get("arising"))
+    check("...and the rising line names it and ends in three ASCII dots",
+          by_id["w-hush"]["saysLine"]
+          == "%s arises..." % (by_id["w-hush"]["name"] or "it"),
+          by_id.get("w-hush", {}).get("saysLine"))
+    check("...and it is the WHOLE card - no observed line, no metadata",
+          by_id["w-hush"]["doingLine"] == ""
+          and by_id["w-hush"]["saysDetail"] == "",
+          (by_id["w-hush"]["doingLine"], by_id["w-hush"]["saysDetail"]))
+    check("...while one whose transcript already shows work is not rising",
+          by_id["w-live"]["arising"] is False, by_id.get("w-live", {}).get("arising"))
     bph.claim("w-hush", "researching", "the vtbclient parser")
     by_id = {a["id"]: a for a in ba.agents()}
-    check("...and its first phase is enough to draw it, nothing else changed",
-          by_id["w-hush"]["speaks"] is True and by_id["w-hush"]["saysLine"],
+    check("...and its first phase ends the rising, nothing else changed",
+          by_id["w-hush"]["arising"] is False and by_id["w-hush"]["saysLine"],
           by_id.get("w-hush", {}).get("saysLine"))
     ba.unregister("w-hush")
+
+    # AND IT DOES NOT RISE FOREVER. Past `START_GRACE_S` with an empty
+    # transcript the observation is `silent`, and the card stops claiming it is
+    # on its way and says plainly that it never started — the whole point of the
+    # change being that a wedged minister is VISIBLE, not that it looks tidy.
+    # An EMPTY transcript that exists is the wedged shape: a file was opened and
+    # not one entry was ever written to it. (A session id with no file at all is
+    # the other failure, `unlinked`, and has its own sentence.)
+    open(os.path.join(d, "ses-wedged.jsonl"), "w").close()
+    ba.register("w-wedged", "T", os.getpid(), kind="worker", where="apps/x/**",
+                session="ses-wedged")
+    old_grace = bph.START_GRACE_S
+    try:
+        bph.START_GRACE_S = -1                # everything is instantly past it
+        by_id = {a["id"]: a for a in ba.agents()}
+        check("a minister wedged past the grace stops rising and says so",
+              by_id["w-wedged"]["arising"] is False
+              and "not started" in by_id["w-wedged"]["doingLine"],
+              (by_id["w-wedged"]["arising"], by_id["w-wedged"]["doingLine"]))
+    finally:
+        bph.START_GRACE_S = old_grace
+    ba.unregister("w-wedged")
 
     # ---- FINISHED is not ABANDONED ----
     # [his, 2026-07-30] a worker that had completed its task sat on the board
