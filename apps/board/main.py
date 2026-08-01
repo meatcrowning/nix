@@ -1451,6 +1451,7 @@ class Usage(QObject):
         super().__init__(parent)
         self._rows = []
         self._hrows = []
+        self._hprox = {}
         self._stamp = None
         self._busy = False
         self._fetched_at = 0.0
@@ -1528,6 +1529,11 @@ class Usage(QObject):
             self._nudged_at = time.time()
             if boardusage.nudge():
                 why = boardusage.fetch()
+        # The hermes balance is its own fetch, with its own cache and its own
+        # token (hermes' nous oauth, not the CLI's) — read on the same worker
+        # so a clock/click/lifecycle kick refreshes both at once. Best effort:
+        # a failure keeps the last nous reading and honesty is `hermes_proximity`'s.
+        boardusage.fetch_nous()
         self._fetched.emit(why)
 
     @Slot(str)
@@ -1569,13 +1575,28 @@ class Usage(QObject):
         # The hermes minister readout rides the same clocks (not a fetch — it is
         # a read of Hermes' own ledger, so there is nothing to fetch).
         hrows = boardusage.hermes_readings()
+        # ...and so does the REAL-balance proximity — the one hermes "left"
+        # figure that counts down from the nous account balance
+        # (`boardusage.hermes_proximity`, itself a read of the nous.json cache
+        # that `_work`'s `fetch_nous()` keeps fresh).
+        hprox = boardusage.hermes_proximity()
         if (rows == self._rows and stamps == self._stamp
-                and hrows == self._hrows):
+                and hrows == self._hrows and hprox == self._hprox):
             return
+        rows_changed = rows != self._rows or stamps != self._stamp
+        hrows_changed = hrows != self._hrows
+        hprox_changed = hprox != self._hprox
         self._rows, self._stamp = rows, stamps
         self._hrows = hrows
-        self.changed.emit()
-        self.hchanged.emit()
+        self._hprox = hprox
+        # Emit only the row kind that actually moved, so a nous-only change
+        # never forces the Anthropic bars to redraw (and vice versa).
+        if rows_changed:
+            self.changed.emit()
+        if hrows_changed:
+            self.hchanged.emit()
+        if hprox_changed:
+            self.hproxChanged.emit()
 
     @Property("QVariantList", notify=changed)
     def rows(self):
@@ -1588,6 +1609,16 @@ class Usage(QObject):
     @Property("QVariantList", notify=hchanged)
     def hrows(self):
         return self._hrows
+
+    #: The hermes "how much I have left" signal — one dict
+    #: (`boardusage.hermes_proximity`): the real nous account balance the
+    #: readout counts down FROM, the % used when the portal publishes a monthly
+    #: cap, and the honest unknown fallback when it has not been read yet.
+    hproxChanged = Signal()
+
+    @Property("QVariantMap", notify=hproxChanged)
+    def hprox(self):
+        return self._hprox
 
 
 class Settings(QObject):

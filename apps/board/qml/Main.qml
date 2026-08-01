@@ -788,6 +788,32 @@ Window {
                         text: "hermes ministers"
                         color: Theme.textDim
                     }
+                    // The one hermes "how much I have left" figure [his,
+                    // 2026-07-31]: he chose to count DOWN FROM THE REAL NOUS
+                    // ACCOUNT BALANCE, so this row is `Usage.hprox` —
+                    // `boardusage.hermes_proximity()`, the balance the portal
+                    // publishes (remaining + monthly % used when the plan
+                    // defines a cap), or the honest unknown when it has not read
+                    // one here yet. Bound, never derived (§5.3, §10).
+                    Item {
+                        id: hproxrow
+                        width: usageCol.width
+                        height: lineH
+                        readonly property int lineH: Theme.fontSize + 4
+                        PixelText {
+                            y: Math.round((hproxrow.lineH - height) / 2)
+                            color: Theme.textDim
+                            text: "balance"
+                        }
+                        PixelText {
+                            y: Math.round((hproxrow.lineH - height) / 2)
+                            x: hproxrow.width - width
+                            color: Usage.hprox && Usage.hprox.known
+                                   ? Theme.text : Theme.textDim
+                            text: Usage.hprox ? (Usage.hprox.text || "unknown")
+                                              : "unknown"
+                        }
+                    }
                     Repeater {
                         model: Usage.hrows
                         delegate: Item {

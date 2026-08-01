@@ -73,6 +73,7 @@ the `~/.claude` tree that syncs between `top` and `book`
 The account is the same; the freshness is not.
 """
 import json
+import math
 import os
 import sqlite3
 import subprocess
@@ -434,6 +435,207 @@ def nudge():
     return True
 
 
+# ------------------------------------------- nous (hermes) account balance
+#: Hermes' own OAuth credentials. Read for the `nous` access token, NEVER
+#: written — same rule as `~/.claude/.credentials.json` above: the refresh
+#: token rotates and a rewrite here would race the CLI and risk logging him out
+#: of every hermes session on the machine. It is machine-local (hermes is
+#: installed per host; `~/.claude` syncs, `~/.hermes` does not), which is
+#: exactly the split every other reading here already relies on.
+NOUS_CREDS = os.path.join(os.path.expanduser("~"), ".hermes", "auth.json")
+
+#: Where `fetch_nous()` puts what it read. A file the board app owns, under the
+#: same `XDG_STATE_HOME/board` tree as `LIVE_PATH`, machine-local like it.
+NOUS_LIVE_PATH = os.path.join(
+    os.environ.get("XDG_STATE_HOME")
+    or os.path.join(os.path.expanduser("~"), ".local", "state"),
+    "board", "nous.json")
+
+#: The portal account endpoint Hermes itself calls for the real balance
+#: (`GET {portal_base}/api/oauth/account`, with the oauth access token). It is
+#: the same call `hermes_cli.nous_account.__fetch_nous_account_info` makes, so
+#: the figure here is the account's own, not derived (§2). The scope on the
+#: token is `inference:invoke`; the endpoint is the one that publishes the
+#: subscription and usable-credit fields below, so it is reachable with the
+#: token hermes already holds.
+NOUS_ACCOUNT_PATH = "/api/oauth/account"
+
+#: The portal's own base when the credentials do not name one.
+NOUS_PORTAL_DEFAULT = "https://portal.nousresearch.com"
+
+
+def _nous_token():
+    """`(access token, portal base)` from Hermes' credentials, or `(None, None)`.
+
+    Every failure is one answer — unreadable, not JSON, no nous provider, no
+    token. The token is never refreshed or rewritten from here (see `NOUS_CREDS`).
+    """
+    try:
+        with open(NOUS_CREDS, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return None, None
+    prov = doc.get("providers", {}).get("nous") if isinstance(doc, dict) else None
+    if not isinstance(prov, dict):
+        return None, None
+    token = prov.get("access_token")
+    if not isinstance(token, str) or not token:
+        return None, None
+    base = prov.get("portal_base_url")
+    return token, base if isinstance(base, str) and base.strip() else None
+
+
+def _nous_read(path=None):
+    """`(account payload dict, fetched-at seconds)` from the board's own cache,
+    or `(None, 0)`. Every failure is one answer, like `_read`."""
+    p = NOUS_LIVE_PATH if path is None else path
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return None, 0
+    if not isinstance(doc, dict):
+        return None, 0
+    payload = doc.get("account")
+    if not isinstance(payload, dict):
+        return None, 0
+    try:
+        fetched = float(doc.get("fetchedAtMs") or 0) / 1000.0
+    except (TypeError, ValueError):
+        fetched = 0.0
+    return payload, fetched
+
+
+def _num(v):
+    """`v` as a finite float, or None for anything not a usable number.
+
+    Non-finite values (NaN/Inf) slip past `isinstance` and are refused the same
+    way `agent.account_usage` refuses them — "$nan of $22 left" would be a lie.
+    """
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    return None if (f != f or f in (float("inf"), float("-inf"))) else f
+
+
+def _nous_account_fields(payload):
+    """`(cap, remaining, renews)` parsed out of a portal account payload.
+
+    `cap` is the subscription's `monthly_credits` — a real denominator the
+    portal publishes only when a subscription defines one. `remaining` is the
+    usable balance: the subscription's `credits_remaining`, falling back
+    through `paid_service_access.subscription_credits_remaining` to
+    `total_usable_credits` for an account whose subscription object is lean.
+    `renews` is the `current_period_end`, when present. `remaining` may be
+    None (nothing usable published); `cap` and `renews` may be None too.
+    """
+    sub = payload.get("subscription") if isinstance(payload, dict) else None
+    psa = payload.get("paid_service_access") if isinstance(payload, dict) else None
+    sub = sub if isinstance(sub, dict) else None
+    psa = psa if isinstance(psa, dict) else None
+    cap = _num(sub.get("monthly_credits")) if sub else None
+    remaining = _num(sub.get("credits_remaining")) if sub else None
+    if remaining is None and psa is not None:
+        remaining = _num(psa.get("subscription_credits_remaining"))
+    if remaining is None and psa is not None:
+        remaining = _num(psa.get("total_usable_credits"))
+    renews = sub.get("current_period_end") if sub else None
+    renews = renews if isinstance(renews, str) else None
+    return cap, remaining, renews
+
+
+def _nous_store(payload, now):
+    """Write `payload` to `NOUS_LIVE_PATH`, atomically, in our own envelope."""
+    doc = {"fetchedAtMs": int(now * 1000), "account": payload}
+    tmp = NOUS_LIVE_PATH + ".new"
+    try:
+        os.makedirs(os.path.dirname(NOUS_LIVE_PATH), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        os.replace(tmp, NOUS_LIVE_PATH)
+    except OSError:
+        return False
+    return True
+
+
+def fetch_nous(timeout=FETCH_TIMEOUT, now=None):
+    """Read the account's REAL balance from the portal API and cache it.
+
+    Never raises. Returns a short reason word like `fetch()`: `off`, `no-token`,
+    `unauthorized`, `http-<code>`, `offline`, `bad-payload`, `unwritable`, or
+    `ok`. A failure leaves the previous reading in place, and a payload that
+    yields no usable balance at all is refused rather than stored — overwriting
+    a real reading with a shape we cannot use would blank the bar for as long as
+    the endpoint stayed odd, the same rule `fetch()` applies.
+
+    This is the balance route the board's hermes readout had no figure for: the
+    account's own `remaining` of the account's own `monthly_credits`, published
+    by the portal, fetched here with the token hermes already holds.
+    """
+    if os.environ.get(OFFLINE_ENV):
+        return "off"
+    now = time.time() if now is None else now
+    token, base = _nous_token()
+    if not token:
+        return "no-token"
+    url = ((base or NOUS_PORTAL_DEFAULT).rstrip("/") + NOUS_ACCOUNT_PATH)
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + token,
+        "Accept": "application/json",
+        "User-Agent": "goetia-usage/1",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.load(resp)
+    except urllib.error.HTTPError as e:
+        return "unauthorized" if e.code in (401, 403) else "http-%d" % e.code
+    except (urllib.error.URLError, OSError, ValueError):
+        return "offline"
+    if not isinstance(payload, dict):
+        return "bad-payload"
+    if _nous_account_fields(payload)[1] is None:
+        return "bad-payload"
+    return "ok" if _nous_store(payload, now) else "unwritable"
+
+
+def _nous_balance(path=None, now=None):
+    """The cached balance as `{remaining, cap, used, fraction, renews, age}`, or
+    None when no usable reading is cached. `fraction` is the used share of
+    `cap` (0..1) and None when the portal publishes no `monthly_credits`
+    denominator. `age` is the cache's age in seconds (-1 when unknown)."""
+    now = time.time() if now is None else now
+    payload, fetched = _nous_read(path)
+    if payload is None:
+        return None
+    cap, remaining, renews = _nous_account_fields(payload)
+    if remaining is None:
+        return None
+    used = fraction = None
+    if cap is not None and cap > 0 and remaining <= cap:
+        used = cap - remaining
+        fraction = used / cap
+    return {
+        "remaining": remaining, "cap": cap, "used": used, "fraction": fraction,
+        "renews": renews,
+        "age": max(0.0, now - fetched) if fetched else -1.0,
+    }
+
+
+def _fmt_usd(v):
+    """A dollar balance in the readout's short register: `$20.50`."""
+    return "$%.2f" % v
+
+
+def _level_for(fraction):
+    """The PROXIMITY_LEVELS band a used-fraction falls in, or None."""
+    if fraction is None:
+        return None
+    for level, low, high in PROXIMITY_LEVELS:
+        if low <= fraction < high:
+            return level
+    return None
+
+
 # ------------------------------------------------- hermes minister usage
 #: Hermes' session store. Read-only from here, never written: it is Hermes'
 #: own ledger (`hermes insights` reads the same file).
@@ -537,11 +739,11 @@ def hermes_readings(now=None):
 #: The coarse level the display draws for the hermes minister spend, and the
 #: two FRACTION bounds each level means (level, low, high). CHOSEN AND STATED
 #: HERE, IN ONE PLACE, so the QML binds the `level` string and never does
-#: arithmetic. Today the limit itself is not discoverable (see
-#: `hermes_proximity`), so `fraction` is None and `level` is "unknown"; these
-#: thresholds exist so the day a real denominator appears it maps to a level
-#: without further design. Bands are spend-fraction of the limit: below 60%
-#: ok, to 85% warning, beyond critical.
+#: arithmetic. `fraction` is the USED share of the real monthly cap the portal
+#: publishes (`fetch_nous`); when the plan defines no `monthly_credits` it is
+#: None and `level` stays "unknown", because there is no margin to judge.
+#: Bands are spend-fraction of the limit: below 60% ok, to 85% warning,
+#: beyond critical.
 PROXIMITY_LEVELS = (
     ("ok",       0.0,  0.60),
     ("warning",  0.60, 0.85),
@@ -603,36 +805,68 @@ def _hermes_span(now):
 
 
 def hermes_proximity(now=None):
-    """The ONE signal the display binds for "how close are we to running hermes out".
+    """The ONE signal the display binds for "how much of hermes is left".
 
-    The real limiting resource for the hermes minister spend
-    (deepseek-v4-flash-0731 served by the NOUS inference API) is the account's
-    balance/allowance on that API — and NO figure for it reaches this desktop:
-    hermes' own ledger records only ESTIMATED cost (`actual_cost_usd` is NULL,
-    `cost_status` is "estimated", `cost_source` is the pricing API, not a
-    billed total), `hermes portal info` shows login state and nothing about a
-    remaining allowance, and there is no usage/credit endpoint this repo holds
-    credentials for. A percentage "of the limit" needs a denominator nobody
-    publishes, and a "$X left" needs a balance nobody exposes. So this signal
-    is an explicit UNKNOWN rather than an invented number — the same refusal
-    the Anthropic meters make about an unpublished denominator
-    (docs/DESIGN.md §10).
+    [his, 2026-07-31] the readout counts down FROM the account's REAL balance
+    — the nous subscription, whose `remaining` and monthly `monthly_credits`
+    the portal publishes and this module fetches (`fetch_nous`). So where this
+    function used to be an explicit unknown because "no figure reaches this
+    desktop", there is one now, read with the token hermes already holds.
 
     Returns a dict:
-      known     bool        False today: the limit is not discoverable
-      fraction  float|None  0..1 of the limit used, or None (no denominator)
-      remaining float|None  $ of the limit left, or None (no balance known)
-      level     str         "ok" | "warning" | "critical" | "unknown" — see
-                            PROXIMITY_LEVELS for the thresholds that will map a
-                            fraction to a level the day one can be computed
+      known     bool        True when a real balance is cached and readable
+      fraction  float|None  0..1 of the monthly cap used, None when the portal
+                            publishes no `monthly_credits` denominator (the
+                            % gauge then has nothing to be a share of, and is
+                            not invented — docs/DESIGN.md §10)
+      remaining float|None  $ of the balance left (None when not known)
+      level     str         "ok" | "warning" | "critical" | "unknown" — the
+                            PROXIMITY_LEVELS band the used-fraction falls in;
+                            "unknown" when there is no fraction to judge, and
+                            the fallback (broken / stale / missing cache) case
       text      str         one short data-backed line for the row
-      detail    str         the hover sentence: what is known and why not more
+      detail    str         the hover sentence: the number and why not more
 
-    A display binds `text`/`level` directly and does no arithmetic; when
-    `known` is False it draws the unknown state (nothing that reads as a real
-    margin), exactly as `hermes_readings` draws an absent ledger as "unknown".
+    When no balance is cached (never fetched, stale beyond tolerance, or a
+    payload that parses to nothing usable) it falls back to the ledger-based
+    honest unknown — spend and burn rate only, `known` False — the exact
+    behaviour before this decision, because a number we cannot verify is the
+    one thing this function must never draw as real.
     """
     now = time.time() if now is None else now
+    bal = _nous_balance(now=now)
+    if bal is not None:
+        remaining = bal["remaining"]
+        cap = bal["cap"]
+        fraction = bal["fraction"]
+        level = _level_for(fraction)
+        level = level if level is not None else "unknown"
+        if fraction is not None:
+            pct = round(fraction * 100.0)
+            text = "%d%% used · %s left" % (pct, _fmt_usd(remaining))
+        else:
+            text = "%s left" % _fmt_usd(remaining)
+        bits = ["%s left" % _fmt_usd(remaining)]
+        if cap is not None:
+            bits.append("%s this period" % _fmt_usd(cap))
+        if bal["renews"]:
+            clock = _clock(bal["renews"], now)
+            if clock:
+                bits.append("renews %s" % clock)
+        if fraction is not None and level in PROXIMITY_WORD:
+            bits.append(PROXIMITY_WORD[level])
+        detail = "; ".join(bits)
+        if bal["age"] >= 0:
+            detail += " - read " + _age(bal["age"])
+        else:
+            detail += " - read age unknown"
+        return {
+            "known": True, "fraction": fraction, "remaining": remaining,
+            "level": level, "text": text, "detail": detail,
+        }
+    # No real balance to count down from: the ledger-only honest shrug. Same
+    # wording as before the decision — spend and burn rate, and the reason the
+    # margin is unknown.
     tokens, cost, span_days = _hermes_span(now)
     if tokens is None:
         return {
@@ -643,9 +877,9 @@ def hermes_proximity(now=None):
         }
     per_day = cost / span_days if span_days else 0.0
     text = "~$%.2f in 7d · ~$%.2f/day" % (cost, per_day)
-    detail = ("hermes ministers spent ~$%.2f in 7d (~$%.2f/day); the real limit "
-              "is the nous account balance, and no figure for it is exposed "
-              "here, so the margin is unknown") % (cost, per_day)
+    detail = ("hermes ministers spent ~$%.2f in 7d (~$%.2f/day); the real nous "
+              "account balance has not been read on this host yet, so the margin "
+              "is unknown") % (cost, per_day)
     return {
         "known": False, "fraction": None, "remaining": None,
         "level": "unknown", "text": text, "detail": detail,
