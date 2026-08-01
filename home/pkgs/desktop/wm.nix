@@ -17,6 +17,11 @@ in
     networkmanagerapplet
     pamixer
     cliphist
+    # Keep the clipboard alive after the copying app closes (see the
+    # `wl-clip-persist --clipboard regular` exec-once in hyprland.lua). Without
+    # it a selection owned by a closed client is gone; with it, the persist
+    # daemon holds the data so Ctrl+V still works. Both hosts.
+    wl-clip-persist
     # screen recording (Screenshot.qml's record mode execs it by bare name) —
     # lightweight wlroots screencopy grabber, no audio, matches the display
     # refresh rate. COMMON, not in the `host != "air"` block below: unlike

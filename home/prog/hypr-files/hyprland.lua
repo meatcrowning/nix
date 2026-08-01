@@ -180,6 +180,11 @@ hl.on("hyprland.start", function()
     -- (`cliphist list` / `cliphist decode`; picker UI is future work).
     hl.exec_cmd("wl-paste --type text --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
+    -- Persist the selection so copied data survives the source app closing.
+    -- Without a persist daemon the selection is owned by the copying client
+    -- and vanishes the moment it exits (or races), which read as paste working
+    -- only while the source app is still open. wl-clip-persist holds it instead.
+    hl.exec_cmd("wl-clip-persist --clipboard regular")
     -- Vista logon sound (sound map: quickshell/Sounds.qml). Read from the
     -- Settings program's model rather than hardcoded, so `soundsEnabled`,
     -- `soundTheme` and `soundLogin` mean the same thing here as they do for
