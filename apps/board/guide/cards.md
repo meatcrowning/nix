@@ -101,11 +101,21 @@ names, until he asked for the full seventy-two.]
   title cells on its own card and nothing anywhere else. `board-test.py`
   asserts the pool's shape.
 - **Nothing that has nobody on it is given a name**: a task queued above the cap,
-  a decision he answered, an interactive session. Same rule as the inbox box —
+  an interactive session. Same rule as the inbox box —
   a name is a claim that somebody is on it. The one exception is Solomon, and
   it is an exception on purpose (below): he is a ROLE that is always there, not
   a claim that anything is in flight, and his row says `ready` in so many
   words.
+- **A decision agent has a name too — because somebody IS on it.** [his,
+  2026-08-01] two cards (an answered decision each) sat in the triangle with no
+  name on them while the minister board-watch had spawned worked on, and he
+  came back to have it fixed. A decision HE answered has a real stashed process
+  on the job, so the "claim that somebody is on it" rule is satisfied — the
+  name is derived off the stable stash key in `boardagents._stash_agents`
+  (the same `name_for` fallback a record written before names existed uses), so
+  the app, `boardctl` and the agent agree with nothing persisted and the name
+  never changes between two polls. It is the QUIET ones with nobody on them
+  that stay nameless: a queued task and an interactive session.
 
 ### ...and the orchestrator's name is SOLOMON, always, and it is pinned
 
