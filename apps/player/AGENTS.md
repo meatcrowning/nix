@@ -437,6 +437,20 @@ what is already handled, and `--dry-run` shows picks without enqueueing. It
 requires slskd to be **running and logged in** — which the generated
 `slskd.yml` alone does not provide (see `home/prog/slskd.nix`).
 
+Each run also **re-sources downloads that ended failed** — slskd's
+`Completed, Rejected` (and `Cancelled`/`TimedOut`/`Errored`/`Aborted`) states,
+where a peer accepted the request then refused the transfer, so the track
+never lands in the library yet the state file keeps it `queued`. It reads
+`/transfers/downloads`, matches each failed transfer back to its missing track
+(by the same artist/title folding the search uses), drops that track's
+`queued` marker so the normal pass re-searches it, and blocks the refusing
+peer from the pick so the re-source lands on a different source. Each failed
+transfer's id is remembered in a per-dump-dir `soulseek-rescued.json`, so a
+rejection lingering in slskd's list is only ever re-sourced once (not on every
+poll). This is also what actually populates the never-re-queue guard: the
+`/transfers/downloads` response nests as username → directories → files, and
+the guard was previously walking only the top level and matching nothing.
+
 slskd drops completed downloads into `~/.local/share/slskd/downloads/`, and the
 player only ever sees a track once it is moved into `aud/` and rescanned. The
 pipeline's last step (`tools/player-add.py`, run automatically by
