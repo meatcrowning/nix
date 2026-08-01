@@ -853,13 +853,21 @@ def _stash_agents():
             # still thinking, and boardmove refuses to reclaim it for the same
             # reason. Say so rather than pick a side.
             state = "unowned"
-        # No human name: a decision agent is not a worker out of the box, its
-        # card is headed by the decision he answered, and giving that a first
-        # name would be this app inventing a person for one of HIS items.
+        # A decision agent HAS a name — [his, 2026-08-01] two cards (an answered
+        # decision each) sat in the triangle with no name on them while the
+        # minister board-watch had spawned worked on, and he came back to have
+        # it fixed. There IS somebody on it: `boardmove.start()` has already
+        # stashed a live process. So the "a name is a claim that somebody is on
+        # it" rule is satisfied, unlike a queued task or an interactive session,
+        # which stay nameless. Derived off the stable stash key exactly like a
+        # record written before names existed, so the app, `boardctl` and the
+        # agent all agree with nothing persisted, and the name never changes
+        # between two polls.
         # Confirmed by construction: `boardmove.start()` stashes a pid whose
         # process the caller already has in hand — there is no summon to wait on.
         out.append({"id": clean_id(rec.get("key")), "kind": "decision",
-                    "name": "", "confirmed": True,
+                    "name": name_for(rec.get("key") or rec.get("id") or ""),
+                    "confirmed": True,
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
                     "session": rec.get("session") or "", "state": state,

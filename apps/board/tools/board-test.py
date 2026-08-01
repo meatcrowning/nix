@@ -2262,6 +2262,21 @@ def test_agents(tmp):
           not any(k in seen["live-one"] for k in ("started", "at", "seconds", "age")),
           sorted(seen["live-one"]))
 
+    # ---- a decision agent has a name too ---- [his, 2026-08-01] two cards (an
+    # answered decision each) sat in the triangle with no name on them while the
+    # minister on the job worked on, and he came back to have it fixed. There IS
+    # somebody on a decision agent - a stashed process - so the "a name is a
+    # claim that somebody is on it" rule gives it one: derived off the stable
+    # stash key (`name_for`), so it is the same in every process, never changes
+    # between two polls, and needs nothing persisted.
+    check("a decision agent is named, like any minister actually on the job",
+          all(seen.get(k, {}).get("name") in ba.NAMES
+              for k in ("live-one", "dead-one", "hand-one"))
+          and all(ba.name_for(seen[k]["id"]) == seen[k]["name"]
+                  for k in ("live-one", "dead-one", "hand-one")),
+          str({k: seen.get(k, {}).get("name")
+               for k in ("live-one", "dead-one", "hand-one")}))
+
     # ---- the box: a LIVE agent ----
     m = ba.send("also fix the tooltip", to="live-one", to_title="A decision")
     check("a note to a running agent is DELIVERED to its inbox",
@@ -4797,7 +4812,7 @@ def test_window(app, tmp):
           [str(b.property("placeholder")) for b in boxes])
     check("...and every other box says what it IS attached to",
           all("reply to this one" in str(b.property("placeholder"))
-              or "send it a command" in str(b.property("placeholder"))
+              or "a command, an idea or a fix" in str(b.property("placeholder"))
               or "leave a note" in str(b.property("placeholder"))
               or "rewrite this order" in str(b.property("placeholder"))
               for b in boxes if b not in unattached),
