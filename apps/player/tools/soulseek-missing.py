@@ -62,8 +62,13 @@ PLAYER_ADD = str(Path(__file__).resolve().parent / "player-add.py")
 # A Soulseek file whose length differs from the target by more than this is
 # probably a different edit, not a source copy worth downloading.
 DURATION_TOLERANCE = 12.0  # seconds, matches spotify-missing.py
-# How long to wait (in seconds) for a search's responses to come back.
-DEFAULT_SEARCH_TIMEOUT = 20
+# How long to wait (in seconds) for a search to finish. slskd always
+# terminates a search on its own ("Completed, TimedOut"/"ResponseLimitReached"),
+# so this is only a backstop against a hung search; a healthy one returns
+# well inside it. Must exceed the slowest real search (measured 18-38s),
+# which is why the old 20s default was wrong: it expired while /responses
+# was still empty and recorded a false "no match".
+DEFAULT_SEARCH_TIMEOUT = 90
 # How many tracks to search per run, so a headless run can't spam the network
 # with all 2,000+ missing tracks at once. Raise with --limit / --all.
 DEFAULT_LIMIT = 5
@@ -446,25 +451,35 @@ def main():
             if not sid_search:
                 raise SlskdError("search returned an empty id")
 
-            # Collect responses until the search completes or we time out.
-            responses = []
+            # Wait for the search to finish, then read its responses.
+            # slskd's /responses endpoint stays EMPTY until the search
+            # reaches a Completed state, so polling it against a wall-clock
+            # deadline records a slow-but-successful search as a false
+            # "no match" (measured: Daft Punk fills at 9s, obscure tracks at
+            # 18-38s, all beyond the old 20s window). Poll the search
+            # object's own state instead; slskd terminates every search on
+            # its own, so search_timeout is only a backstop, not the wait.
+            sstate = ""
             deadline = time.time() + args.search_timeout
             while time.time() < deadline:
+                try:
+                    obj = http("GET", f"{base}/api/v0/searches/{sid_search}",
+                               api_key) or {}
+                    sstate = obj.get("state", "") or ""
+                except SlskdError:
+                    break
+                if "Completed" in sstate:
+                    break
+                time.sleep(2)
+            responses = []
+            if "Completed" in sstate:
+                # The search is over; everything it found is now visible.
                 try:
                     responses = http("GET",
                                      f"{base}/api/v0/searches/{sid_search}/responses",
                                      api_key) or []
                 except SlskdError:
                     responses = responses or []
-                    break
-                if responses:
-                    # got something; give it a moment to accumulate, then stop
-                    time.sleep(2)
-                    responses = http("GET",
-                                     f"{base}/api/v0/searches/{sid_search}/responses",
-                                     api_key) or []
-                    break
-                time.sleep(2)
 
             cand = pick_candidate(responses, artists, title, want_ms)
         except SlskdError as e:
