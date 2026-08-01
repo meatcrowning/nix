@@ -2382,9 +2382,24 @@ def seed_watch_state(key):
         return False
     if not isinstance(d, dict) or not isinstance(d.get("answers"), dict):
         return False
-    if not d["answers"] or key in d["answers"]:
-        return False                 # first run pending, or already known
-    d["answers"][key] = "idx:|ans:"  # `fingerprint()` of an unanswered item
+    if key in d["answers"]:
+        return False                 # already known (answered or not)
+    # An empty `answers` is the RESTING state (NEEDS YOU empty), not "first run
+    # pending" — `answers` only ever holds the DECISIONS CURRENTLY in NEEDS YOU,
+    # so it is empty whenever the list is empty, which is now the resting state.
+    # Bailing on it meant a question asked on a resting board was NEVER seeded,
+    # so its first sighting was an unknown key and, if the answer landed in the
+    # same window, board-watch's "answered before its first sighting" path fired
+    # a decision agent on it (see board-watch.py tick() hazard 2 / commit 1016f38).
+    # The explicit `seeded` flag owns the "board-watch has never run" distinction,
+    # not a non-empty `answers`; a watcher with no state file at all fails the
+    # `open` above and is recorded by its own first run.
+    # `fingerprint()` of an unanswered item carries the `|on:` host suffix since
+    # host-affinity landed; the old literal here ("idx:|ans:") never matched it,
+    # so even a question that DID get seeded still looked fingerprint-changed on
+    # its first real sighting. Keep this string in lockstep with board-watch's
+    # `fingerprint()` (apps/srvs/board-watch.py) — it is the same canonical shape.
+    d["answers"][key] = "idx:|ans:|on:"
     tmp = path + ".tmp"
     try:
         with open(tmp, "w") as f:
