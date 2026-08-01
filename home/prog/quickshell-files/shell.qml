@@ -875,18 +875,26 @@ Scope {
             WlrLayershell.layer: WlrLayer.Bottom
             WlrLayershell.namespace: "qs-bar"
 
-            // The bar is focusable ONLY around the task manager's filter box,
-            // and only in dock mode: while the pointer is over it and while it
-            // holds focus. Hovering is what ARMS it — Hyprland grants an
-            // on-demand layer surface the keyboard on the next pointer MOTION
-            // over it, not on a click, so the surface has to be focusable
-            // before the pointer arrives.
+            // The bar is focusable only around the task manager's filter box,
+            // and only in dock mode. HOVER changes nothing about focus — an
+            // on-demand layer surface is granted the keyboard by the compositor
+            // on the next pointer MOTION over it, so a bar that became OnDemand
+            // on hover was exactly "hover steals focus from the window". The
+            // surface is made focusable only once the user presses the box.
             //
-            // OnDemand, NOT Exclusive. Exclusive means the compositor keeps
+            // OnDemand, NOT Exclusive — except for the one-frame grab that
+            // makes the click work. Exclusive means the compositor keeps
             // sending us the keyboard even after the user clicks into a window,
             // so their next keystroke goes to the filter box instead of what
             // they just clicked on. OnDemand hands it back as part of that
-            // click, which is the behaviour asked for.
+            // click, which is the behaviour asked for. But a click alone grants
+            // nothing (the press refocuses only when it lands on a window), and
+            // a None->OnDemand commit grants nothing either — so a PRESS on the
+            // box sets `filterGrab`, which flips the bar to Exclusive: the one
+            // mode a commit can switch to that grabs the keyboard outright.
+            // The moment the box actually holds focus (`filterFocus`) the grab
+            // is dropped back to OnDemand, restoring the click-into-a-window
+            // hand-back.
             //
             // The dock-mode term is the safety net: if anything ever left
             // `filterFocus` set, closing the panel still gives the keyboard back.
@@ -899,10 +907,10 @@ Scope {
             // panel, and gives up — leaving the compositor focused on nothing.
             // See Procs.filterLatch for the measurement and for why there is no
             // explicit hand-back to use instead.
-            WlrLayershell.keyboardFocus: ((Procs.filterFocus || Procs.filterHover
-                                           || Procs.filterLatch)
-                                          && ViewMode.showDock)
-                ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+            WlrLayershell.keyboardFocus:
+                (Procs.filterGrab && ViewMode.showDock) ? WlrKeyboardFocus.Exclusive
+              : ((Procs.filterFocus || Procs.filterLatch) && ViewMode.showDock)
+                  ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
             // THE VISIBLE BAR. Its width is the only thing that moves when the
             // panel is resized — a plain binding, applied in the frame it
@@ -949,7 +957,7 @@ Scope {
                 // tooltip and highlight in the dock).
                 HoverHandler {
                     id: barHover
-                    onHoveredChanged: if (!hovered) Procs.filterLatch = false;
+                    onHoveredChanged: if (!hovered) { Procs.filterLatch = false; Procs.filterGrab = false; }
                 }
 
                 // CLICKING ANYWHERE OUTSIDE THE FILTER BOX GIVES THE KEYBOARD

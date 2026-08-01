@@ -54,7 +54,7 @@ Item {
             procMenu.close();
             filterInput.focus = false;
             Procs.filterFocus = false;
-            Procs.filterHover = false;
+            Procs.filterGrab = false;
             Procs.filterLatch = false;
         }
     }
@@ -63,6 +63,7 @@ Item {
         procMenu.close();
         Procs.watch(root, false);
         Procs.filterFocus = false;
+        Procs.filterGrab = false;
         Procs.filterLatch = false;
     }
 
@@ -454,6 +455,10 @@ Item {
             clip: true
             text: Procs.filter
             onTextEdited: Procs.setFilter(text)
+            // Focus is owned by the box MouseArea below (which must grab the
+            // keyboard before this can ever be active), so a press here must
+            // not separately try to focus — the window is not active yet.
+            activeFocusOnPress: false
             // The window is only ACTIVE while this layer surface holds the
             // wl_keyboard, so losing activeFocus is how the box hears that the
             // user clicked into a window or onto the desktop — the compositor
@@ -462,6 +467,8 @@ Item {
             // the next time the pointer crosses the box.
             onActiveFocusChanged: {
                 Procs.filterFocus = activeFocus;
+                if (activeFocus)
+                    Procs.filterGrab = false;   // the press's Exclusive grab landed; settle to OnDemand
                 if (!activeFocus) filterInput.focus = false;
             }
             Keys.onEscapePressed: {
@@ -481,6 +488,8 @@ Item {
         PixelText {
             id: filterClear
             anchors { right: parent.right; rightMargin: 5; verticalCenter: parent.verticalCenter }
+            // Above the box MouseArea so its "x" stays clickable.
+            z: 3
             visible: Procs.filter !== ""
             text: Procs.sorted.length + "/" + Procs.total + " x"
             color: clearMa.containsMouse ? Theme.crit : Theme.textDim
@@ -492,22 +501,26 @@ Item {
                 onClicked: { Procs.setFilter(""); filterInput.focus = false; }
             }
         }
-        // Click anywhere in the box to type. z below the clear button so it
-        // doesn't swallow that click. Hover ARMS the layer's keyboard focus (see
-        // shell.qml) — the compositor grants it on the click, so it has to be
-        // offered before the click, not from inside its handler.
+        // Click anywhere in the box to type. Covers the whole box — including
+        // the TextInput — because the window is not active when you press, so
+        // the TextInput's own click-focus would be a silent no-op. HOVER
+        // changes nothing about focus; only a press does: it grabs the keyboard
+        // through Procs.filterGrab (an on-demand layer surface gets the keyboard
+        // on pointer MOTION, never on a click, so the click has to request the
+        // grab itself) and latches the surface until the pointer has left the
+        // bar, so the later hand-back is never done while the pointer is still
+        // over it.
         MouseArea {
             anchors.fill: parent
-            z: -1
+            z: 2
             hoverEnabled: true
             cursorShape: Qt.IBeamCursor
-            // Hovering ARMS the layer's keyboard focus and LATCHES it. The
-            // compositor grants the keyboard on the next pointer motion over
-            // the surface, so it has to be offered before the pointer gets
-            // here; the latch is what defers giving it back until the pointer
-            // has left the bar, which is the only place that is safe.
-            onEntered: { Procs.filterHover = true; Procs.filterLatch = true; }
-            onExited: Procs.filterHover = false
+            onPressed: {
+                if (!Procs.filterFocus) {
+                    Procs.filterGrab = true;
+                    Procs.filterLatch = true;
+                }
+            }
             onClicked: filterInput.forceActiveFocus()
         }
     }
