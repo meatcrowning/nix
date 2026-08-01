@@ -174,7 +174,7 @@ Seven tags, `boardparse.TODO_TAGS`, and the set is short on purpose:
 
 | | it means | who emits it |
 | --- | --- | --- |
-| `QUESTION:` | nothing moves until he says a word | an agent's own `note` |
+| `QUESTION:` | nothing moves until he says a word | **no one — the tool refuses it** (2026-08-01); a question goes through `ask` |
 | `INFORMATION:` | a fact; nothing is asked of him | the orchestrator's note, `stall` |
 | `COMPLETION:` | done, and on his machine | a worker's or decision agent's `note` |
 | `PARTIAL:` | some landed, some did not — a pending rebuild counts | the same |
@@ -209,15 +209,25 @@ retired by its worker's result (`tag_of` tries the colon first, `summon_of`
 accepts either). A `SUMMONED:` further along a line is deliberately NOT read as
 a second ask by `check_one_ask` — that IS the old shape.
 
-- **There is no tag nothing can write**, and `tools/board-test.py` asserts that.
-  His three are the starting set he opened up (*"or something like those, maybe
-  others too?"*); `PARTIAL:` and `FAILED:` exist because the writers that were
-  already there could not be honest with only three — most of what a worker
-  leaves is *some of it*, and a failure filed as information is exactly what
-  this system must never do.
-- **`QUESTION:` is not a decision.** A decision is a numbered item in NEEDS YOU
-  with options and an `*If unanswered:*` line (`boardmove.ask`). This tag is the
-  small "say the word and X" an agent leaves on its way out.
+- **There is no tag nothing can write — one exception now**, and
+  `tools/board-test.py` asserts the rest. His three are the starting set he
+  opened up (*"or something like those, maybe others too?"*); `PARTIAL:` and
+  `FAILED:` exist because the writers that were already there could not be
+  honest with only three — most of what a worker leaves is *some of it*, and a
+  failure filed as information is exactly what this system must never do. The
+  one thing nothing may now emit is `QUESTION:` — see the next bullet.
+- **`QUESTION:` is not a decision and, since 2026-08-01, not writable at all.**
+  A decision is a numbered item in NEEDS YOU
+  with options and an `*If unanswered:*` line (`boardmove.ask`) — and that is
+  now the ONLY way to put a question to him. [his] *"unless these ever pop up
+  without throwing a multiple choice question to the user in the other section,
+  these should never show up on the board. they are basically just duplicate
+  but with less."* So a `QUESTION:`-tagged note bullet is REFUSED by
+  `boardparse.check_no_question` at the one choke point
+  (`boardmove.note`, `stall`, `give_back`'s `why`, board-watch's templates
+  alike), with a message that tells the caller to use `boardctl ask`. The tag
+  itself STAYS readable — bullets already in the store keep parsing and
+  grouping under `question` — but nothing adds one.
 - **The checks are in `boardparse.add_todo_bullet`** — the one function every
   writer of that section already goes through — so a new writer cannot be added
   that forgets, and an untagged bullet or an over-long first line is

@@ -542,9 +542,13 @@ assumed.
   since 2026-07-30 that word IS the tag, with no `INFORMATION:` and no subject
   in front of it), then the worker's **name**, its coded id in
   parentheses because that is what its log is called, then `for`/`to` and a few
-  words; one more line for anything it asked, tagged `QUESTION:`. The tag
-  is *inside* this budget and not a second rule beside it — the line is still
-  one line. The prompt states that as a
+  words — and that is the WHOLE of it, one line per task: a question the
+  orchestrator wants answered is NOT a second note bullet, it belongs only in
+  the decisions section, written with `boardctl ask` (its options and its
+  `--if-unanswered`), the only writer of a question on this board since
+  2026-08-01 ([his: "they are basically just duplicate but with less"]); a
+  `QUESTION:` note is refused. The tag is *inside* that budget and not a second
+  rule beside it — the line is still one line. The prompt states that as a
   budget — *one line each, about a dozen words after the tag at the most, no
   second paragraph*, the same number `check_short_summary` enforces — because "concise"
   bought a 150-word paragraph that restated his own sentence back at him
