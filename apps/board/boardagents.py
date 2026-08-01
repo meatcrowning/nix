@@ -461,7 +461,9 @@ def _confirmed(rec, alive):
       does not opt in knows its own process is up, and a record written before
       this existed must not vanish off his board;
     - a transcript at the session id WE chose is proof the agent process exists
-      and got as far as opening its session (`boardphase.transcript`);
+      and got as far as opening its session (`boardphase.transcript`) — and on
+      a runtime whose session id we cannot choose, the same proof is its run
+      turning up in that runtime's own store (`boardphase.hermes_session`);
     - otherwise `CONFIRM_GRACE_S` from the registration, after which a LIVE
       record is drawn regardless — the bound, not a gate.
 
@@ -474,6 +476,8 @@ def _confirmed(rec, alive):
         return True
     import boardphase as bph
     if rec.get("session") and bph.transcript(rec.get("session")):
+        pass
+    elif bph.hermes_session(rec.get("id") or ""):
         pass
     elif alive and time.time() - born(rec, rec.get("pid") or 0) > CONFIRM_GRACE_S:
         pass

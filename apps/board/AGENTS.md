@@ -11,8 +11,11 @@ property. Renamed 2026-07-29, his call; the prose here goes on calling the FILE
 "the board", because that is what it is.
 
 Vendored source of the decision board: `main.py`, `boardparse.py`, `boardmove.py`,
-`boardagents.py`, `boardwork.py`, `boardphase.py`, `boardusage.py`,
-`boardundo.py` and `qml/`.
+`boardagents.py`, `boardwork.py`, `boardphase.py`, `boardhermes.py`,
+`boardusage.py`, `boardundo.py` and `qml/`. (`boardhermes.py` is the second
+runtime's half of `boardphase`: a minister spawned on hermes has no transcript
+file, so its card and its drawer are read out of hermes's own session store —
+see `guide/cards.md`.)
 Built and installed by `home/prog/board.nix`, which mirrors `reader.nix` exactly
 (including the `air` system-python split) and runs the **live** source at
 `/home/lam/nix/apps/board/main.py`, so `.py`/`.qml` edits need no rebuild. See

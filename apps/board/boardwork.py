@@ -1160,6 +1160,18 @@ class AgentBackend:
         degradation: a card shows the claim only, with no observed line."""
         return None
 
+    def arm(self, agent_id, argv):
+        """Bind a spawn we have just built to whatever identifies it in this
+        backend's OWN store, for the backends whose session id we cannot
+        choose. Called with the final argv, at the spawn, by both spawners.
+        Nothing to do for a backend that takes a `--session-id`."""
+        return
+
+    def history_hint(self, agent_id, session):
+        """Where the whole run can be read, as a path or a command he can
+        paste. `""` when there is nothing honest to name yet."""
+        return ""
+
 
 class ClaudeBackend(AgentBackend):
     """The Claude Code CLI. `--append-system-prompt` merges RULES into the
@@ -1189,6 +1201,16 @@ class ClaudeBackend(AgentBackend):
     def transcript(self, session):
         return bph.transcript(session)
 
+    def history_hint(self, agent_id, session):
+        if not session:
+            return ""
+        found = bph.transcript(session)
+        # Not there yet (or the project directory was renamed) — a glob is still
+        # an answer he can paste into a shell, and it is honest about what is
+        # known.
+        return found or os.path.join(bph.projects_dir(), "*",
+                                     "%s.jsonl" % session)
+
 
 # ------------------------------------------------------- the hermes backend
 #: The models that live on the Hermes runtime rather than Claude Code, and the
@@ -1211,9 +1233,16 @@ class HermesBackend(AgentBackend):
     gets through a flag, a hermes run gets through the same surfaces with the
     hermes names: the model+provider, the toolsets, and RULES (which hermes has
     no `--append-system-prompt` for, so they ride in the query body — same
-    verbatim block, different channel). No pre-bindable session id exists, so
-    `transcript()` is None and a hermes minister's card is claim-only: the
-    observed line does not fill (see docs/agents/minister-context.md)."""
+    verbatim block, different channel).
+
+    **There is no `--session-id`, so the run is bound by its QUERY instead**
+    (`arm` -> `boardphase.arm` -> `boardhermes.resolve`): hermes stores the
+    `-q` text verbatim as its session's first user message, so a hash of what
+    we sent finds the session in `~/.hermes/state.db`, and the card's observed
+    line and the drawer read from there. `transcript()` stays None — there is
+    no file — and that is now a statement about the SHAPE of the history, not
+    about whether it can be seen.
+    """
     name = "hermes"
 
     def system_blocks(self, role):
@@ -1232,6 +1261,29 @@ class HermesBackend(AgentBackend):
 
     def transcript(self, session):
         return None
+
+    @staticmethod
+    def _query(argv):
+        """The `-q` text out of an argv we built ourselves."""
+        try:
+            return argv[list(argv).index("-q") + 1]
+        except (ValueError, IndexError):
+            return ""
+
+    def arm(self, agent_id, argv):
+        q = self._query(argv)
+        if agent_id and q:
+            bph.arm(agent_id, q)
+
+    def history_hint(self, agent_id, session):
+        import boardhermes as bhx
+        found = bph.hermes_session(agent_id) if agent_id else ""
+        if found:
+            return bhx.hint(found)
+        # Armed and not yet bound. Naming the store and how to list it is the
+        # honest answer; naming the `--session-id` uuid we minted would be a
+        # path that will never exist, which is the bug this replaced.
+        return "hermes sessions list (its session is bound once it opens)"
 
 
 _BACKENDS = {"claude": ClaudeBackend(), "hermes": HermesBackend()}
@@ -1456,32 +1508,40 @@ def _log_line(aid, text):
         pass
 
 
-def transcript_hint(session):
-    """Where a worker's full history is, as a path — even before the file
-    exists, because a header is written before the agent has opened it. Routed
-    through the backend; only `claude` has an on-disk home a hint can guess."""
-    if not session:
-        return ""
-    found = get_backend().transcript(session)
-    if found:
-        return found
-    if get_backend().name != "claude":
-        return ""                       # no known transcript home to name
-    # Not there yet (or the project directory was renamed) — a glob is still an
-    # answer he can paste into a shell, and it is honest about what is known.
-    return os.path.join(bph.projects_dir(), "*", "%s.jsonl" % session)
+def transcript_hint(session, aid=""):
+    """Where a worker's full history is — a path before the file exists (the
+    header is written before the agent has opened it), or the command that
+    prints it on a runtime that keeps its history in a database. Routed through
+    the backend, which is the only thing that knows the shape of its own
+    store."""
+    return get_backend_for_role("worker").history_hint(aid, session)
 
 
 def log_header(aid, name, task, session):
     """Written BEFORE the worker starts, so even a kill at second one leaves a
     log that says who this was and where to read what it did. How it was
-    started is appended by the caller, which is the only thing that knows."""
+    started is appended by the caller, which is the only thing that knows.
+
+    **What it names depends on the runtime, and it never names a file that
+    cannot exist.** A Claude worker's history is the transcript at the uuid we
+    chose; a hermes worker's is a row in `~/.hermes/state.db` whose id nobody
+    knows yet, so the header says how to reach it and `boardphase._bind_hermes`
+    appends the exact id the moment the session is bound. [2026-07-31: the
+    header pointed every hermes minister at a `~/.claude/projects/*.jsonl` that
+    was never written.]
+    """
     _log_line(aid, "worker %s (%s) starting: %s" % (aid, name or "?",
                                                     " ".join((task or "").split())[:120]))
-    if session:
-        _log_line(aid, "session %s - LIVE HISTORY IS THE TRANSCRIPT, this file "
-                       "gets stdout only at exit: %s"
-                  % (session, transcript_hint(session)))
+    backend = get_backend_for_role("worker")
+    if backend.name == "claude":
+        if session:
+            _log_line(aid, "session %s - LIVE HISTORY IS THE TRANSCRIPT, this "
+                           "file gets stdout only at exit: %s"
+                      % (session, backend.history_hint(aid, session)))
+    else:
+        _log_line(aid, "LIVE HISTORY IS THE %s SESSION STORE, this file gets "
+                       "stdout only at exit: %s"
+                  % (backend.name.upper(), backend.history_hint(aid, session)))
 
 
 _LOGGED_SESSION = re.compile(
@@ -1515,12 +1575,12 @@ def log_postmortem(aid, session=None, why=""):
     line that stops a killed worker reading as `log empty`."""
     _log_line(aid, "worker stopped without reporting%s"
               % ((" - " + why) if why else ""))
-    hint = transcript_hint(session)
+    hint = transcript_hint(session, aid)
     if hint:
-        _log_line(aid, "what it actually did is in its transcript: " + hint)
+        _log_line(aid, "what it actually did is in its history: " + hint)
     else:
         _log_line(aid, "no session id was recorded for it, so there is no "
-                       "transcript to point at")
+                       "history to point at")
 
 
 def live_workers():
@@ -1799,9 +1859,15 @@ def _spawn_worker(rec):
         # block — live in the backend. Which backend this task runs on follows
         # the model its drop down chose (`get_backend_for_role`); hermes models
         # spawn via `hermes`, everything else via `claude`.
-        cmd = get_backend_for_role("worker").args(
+        backend = get_backend_for_role("worker")
+        cmd = backend.args(
             prompt=prompt, session=session, role="worker",
             label="board: " + rec["task"][:50])
+        # BEFORE the spawn, and before the header that names it: a backend whose
+        # session id we cannot choose is bound by the query instead, and the
+        # binding has to be on disk before the run it identifies can appear in
+        # that backend's store.
+        backend.arm(aid, cmd)
     # `BOARD_ORDER` is HIS sentence, and it rides the environment for the same
     # reason `BOARD_AGENT_ID` does: every `boardctl` this worker runs inherits
     # it, so the bullet it eventually writes can say which of his own asks it
@@ -1998,7 +2064,7 @@ def reap():
                 # than tell him nobody knows what happened.
                 session = _session_of(aid, rec)
                 log_postmortem(aid, session, rec.get("why") or "")
-                moved["transcript"] = transcript_hint(session)
+                moved["transcript"] = transcript_hint(session, aid)
                 moved["notesBack"] = ba.requeue_taken(aid)
             (done if ok else failed).append(moved)
         try:

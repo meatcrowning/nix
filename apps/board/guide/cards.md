@@ -335,6 +335,18 @@ The short version, and every line of it is a rule:
   load-bearing: lose it and every card silently degrades to *"cannot see what it
   is doing"* with no error anywhere. `tools/board-watch-test.py` asserts the
   spawn passes it.
+- **...and where it cannot be chosen it is BOUND, still never guessed.** A
+  minister on the hermes runtime has no transcript file and no `--session-id`:
+  its history is rows in `~/.hermes/state.db`. The spawn therefore records a
+  SHA-1 of the query it sent (`boardphase.arm`), and hermes stores that query
+  verbatim as its session's first user message, so `boardhermes.resolve` finds
+  the one run that is ours — not the one nearest in time. From there everything
+  on this page is the same: the same phases, the same wording, the same states
+  and the same grace, out of a database instead of a file, with hermes's tool
+  names translated into ours (`boardhermes.TRANSLATE`) rather than classified
+  again. What does NOT carry over is the context tally: hermes writes no
+  per-message token count, so a hermes card has no `62k/200k` line at all.
+  Covered by `test_hermes`.
 - **The second line is the OBSERVED one, never the claim, and it is the
   description ALONE** — [his, 2026-07-29] *"actually just take out the [agent]
   is actually and just display the text after it"*. An agent saying
@@ -561,7 +573,10 @@ agent's own voice, uncut except for width.
   what happened to foras as this message implies"*. So `boardwork` writes the
   file itself at both ends: a **header** before the spawn (who, the task, the
   session, and the transcript path — the spawn chooses the uuid, so the path is
-  known before the agent exists) and a **post-mortem** when `reap()` closes a
+  known before the agent exists; on a runtime whose session id we cannot choose
+  the header names the STORE and the id is appended the moment the run is
+  bound, because a header that names a file which will never exist is worse
+  than one that names none) and a **post-mortem** when `reap()` closes a
   worker that reported nothing (`log_postmortem`, plus `rec["transcript"]` on
   the failed record for whatever writes the bullet). `_session_of()` recovers
   the uuid from that header when the registration is already swept, which is
