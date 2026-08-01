@@ -79,6 +79,28 @@ branch itself is `DocPane.qml`'s `isPdf`, and it is one `Loader`.
   split can hold two PDFs. `PdfLibrary.render` takes a lock: Qt may call the
   provider off the GUI thread, and one PDFium document is not two callers' to
   share.
+- **Ctrl+wheel zooms and the MIDDLE button drags the page about** (his ask,
+  2026-07-31; `docs/DESIGN.md` §11 already made Ctrl+scroll a platform
+  convention that works unprompted). One `MouseArea` over the view owns both,
+  declared after it so it sees the wheel first — and it accepts only
+  `Qt.MiddleButton` and leaves an unmodified wheel UNACCEPTED, which is what
+  keeps plain scrolling, the left/right click and the side buttons exactly as
+  they were. The zoom is continuous, by the distance scrolled
+  (`exp(ln1.25/120 · d)`, viewer's discriminator verbatim, so one detent is one
+  press of `+`), about the pointer: it pins the page under the cursor by
+  FRACTION and re-lands through `positionViewAtIndex`, because a ListView
+  recomputes `originY` as its delegates resize and an absolute `contentY`
+  walked page 0 to page 4 over one gesture. `panX` is new state: a page zoomed
+  past fit-width could not be reached sideways at all before.
+    - **The geometry follows the wheel; `sourceSize` does NOT.** It is held at
+      the last settled scale by a 140 ms timer, with `smooth` on exactly while
+      the two differ. Measured offscreen, ten notches: **2 rasters debounced
+      against 13-32 written per notch**. At settle the free zoom snaps to a
+      0.25% grid so the same visual zoom reached twice reuses one raster — at
+      settle and never live, because gridding a live gesture is §6's "never
+      quantize a live drag".
+    - Harness: `tools/pdf-zoom-test.py` (offscreen, real `QWheelEvent`s and
+      `QMouseEvent`s, writes its own 30-page PDF; takes a real path too).
 - **Zoom is `fit` (a MODE) plus `zoom` (a number).** `width` and `page` survive
   a window resize and are what the `fw`/`fp` cells light for; stepping in or
   out drops to `none`, because that is the only honest reading of "fit"
@@ -358,6 +380,10 @@ page actually rasterizing — asserted twice, once on the provider's `QImage`
 sheet drawn in the view at all).
 
 The *appearance* is the user's check, as always.
+
+**`tools/pdf-zoom-test.py` is the viewport gestures'** — ctrl+scroll and
+middle-drag, driven with real events at an offscreen `PdfView`, including what
+the `sourceSize` debounce is worth in rasters. Same env recipe.
 
 **`tools/pdf-profile.py` is the PDF mode's measuring tape**, same env recipe,
 three modes: no flag times `Pdf.open`, a spread of page rasters and one
