@@ -574,6 +574,7 @@ assumed.
   pushed.` and nothing under it. Detail earns its place only for what he would
   otherwise be surprised by: a failure, a choice made on his behalf, a rebuild
   left pending, work deliberately left out. Never dress a plain success up.
+  Leaving another minister's work alone is implied, not news — a note never says it.
 - **A transient platform death is REQUEUED once, not failed** (2026-07-29). A
   worker that recorded nothing and whose log ENDS on an API 5xx/overload line
   (`boardwork.TRANSIENT_RE`) died at the platform's hand, usually before its
