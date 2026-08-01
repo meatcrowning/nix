@@ -5094,18 +5094,56 @@ def test_window(app, tmp):
           not prop(win, "outputOpen").get("w-code")
           and shut and shut[0].height() == 0,
           (prop(win, "outputOpen"), shut and shut[0].height()))
-    # THE BOX HE TYPES INTO KEEPS ITS OWN CLICKS. Click-anywhere is the gesture,
-    # and the one thing on the card that must be exempt is the editor: putting
-    # his caret in it would otherwise open a drawer over the words he is writing.
+    # ---- the send box is reached from the RIGHT-CLICK menu, not the card ----
+    # [his] the persistent "> send <name> a command..." field under every card
+    # was to go; right-clicking the card is now the way in. The resting card
+    # carries no field at all, the menu entry names WHO it reaches, and the
+    # box (the same draft/caret/send machinery) opens only once it is chosen —
+    # so the path it delivers to the worker's inbox is unchanged.
     box = [it for it in descendants(cardItem)
            if it.property("placeholder") is not None]
-    if box:
-        QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier,
-                         box[0].mapToScene(QPointF(box[0].width() / 2,
-                                                   box[0].height() / 2)).toPoint())
-        spin(400)
-        check("...and clicking INTO the card's box does not open one",
-              not prop(win, "outputOpen").get("w-code"), prop(win, "outputOpen"))
+    check("the card no longer carries a resting send box",
+          bool(box) and not box[0].isVisible(),
+          [b.isVisible() for b in box])
+    QTest.mouseClick(win, Qt.RightButton, Qt.NoModifier,
+                     cardItem.mapToScene(QPointF(cardItem.width() / 2, 12))
+                     .toPoint())
+    spin(200)
+    menus = [it for it in descendants(win.contentItem())
+             if it.property("items") is not None and it.isVisible()]
+    labels = [str(i.get("label", "")) for i in menus[0].property("items").toVariant()] \
+        if menus else []
+    who = card.get("name") or "it"
+    check("right-click leads with `send <name> a command...`, naming who it reaches",
+          labels[:1] == ["send %s a command, an idea or a fix" % who], labels)
+    if menus:
+        menus[0].close()
+    spin(100)
+    cardItem.beginSend()
+    spin(200)
+    check("...and choosing it opens the card's own box",
+          bool(box) and box[0].isVisible(), [b.isVisible() for b in box])
+    # ...and the OPEN box keeps its own clicks, as the resting one always did:
+    # putting his caret in the editor must not open a drawer over the words
+    # (§7.1). Click the editor itself — in the editing state that is the only
+    # part of the box with a caret, and the guarantee is about that caret.
+    edit = [it for it in descendants(box[0])
+            if "TextEdit" in it.metaObject().className()]
+    QTest.mouseClick(win, Qt.LeftButton, Qt.NoModifier,
+                     edit[0].mapToScene(QPointF(edit[0].width() / 2,
+                                                edit[0].height() / 2)).toPoint())
+    spin(400)
+    check("...and clicking INTO the open box does not open the drawer",
+          not prop(win, "outputOpen").get("w-code"), prop(win, "outputOpen"))
+    # ...and a send from the revealed box still delivers to that worker's
+    # inbox exactly once — the conservation the old inline field was held to.
+    for ch in "dim the cover art too":
+        QTest.keyClick(win, ch)
+    QTest.keyClick(win, Qt.Key_Return)
+    spin(400)
+    delivered = [str(m.get("text", "")) for m in ba.for_agent("w-code")]
+    check("...and sending from the revealed box reaches that worker's inbox",
+          any("dim the cover art too" in t for t in delivered), delivered)
 
     # ...and it says so in WORDS when there is nothing to show (§10): an empty
     # drawer would read as a broken one.

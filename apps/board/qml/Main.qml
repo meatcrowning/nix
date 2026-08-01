@@ -1466,13 +1466,14 @@ Window {
                                 win.setDraft("msg:" + sumRow.modelData.id, b)
                             onSend: (b) => win.sendTo(sumRow.modelData, b)
                             onContextRequested: (mx, my) =>
-                                win.rowMenu((sumRow.modelData.doingLine !== ""
-                                             ? sumRow.modelData.doingLine
-                                             : (sumRow.modelData.name
-                                                ? sumRow.modelData.name + " - " : "")
-                                               + sumRow.modelData.detail)
-                                            + "  (" + sumRow.modelData.title + ")",
-                                            mx, my)
+                                win.agentRowMenu(sumRow,
+                                    (sumRow.modelData.doingLine !== ""
+                                     ? sumRow.modelData.doingLine
+                                     : (sumRow.modelData.name
+                                        ? sumRow.modelData.name + " - " : "")
+                                       + sumRow.modelData.detail)
+                                    + "  (" + sumRow.modelData.title + ")",
+                                    mx, my)
                         }
                     }
 
@@ -1673,13 +1674,14 @@ Window {
                             // unseen) falls back to the line that says what it
                             // is instead.
                             onContextRequested: (mx, my) =>
-                                win.rowMenu((agRow.modelData.doingLine !== ""
-                                             ? agRow.modelData.doingLine
-                                             : (agRow.modelData.name
-                                                ? agRow.modelData.name + " - " : "")
-                                               + agRow.modelData.detail)
-                                            + "  (" + agRow.modelData.title + ")",
-                                            mx, my)
+                                win.agentRowMenu(agRow,
+                                    (agRow.modelData.doingLine !== ""
+                                     ? agRow.modelData.doingLine
+                                     : (agRow.modelData.name
+                                        ? agRow.modelData.name + " - " : "")
+                                       + agRow.modelData.detail)
+                                    + "  (" + agRow.modelData.title + ")",
+                                    mx, my)
                         }
                     }
 
@@ -1999,6 +2001,22 @@ Window {
 
     function rowMenu(text, x, y) {
         var items = [];
+        if (text !== "")
+            items.push({ label: "copy line", trigger: () => Board.copy(text) });
+        menu.open(x, y, items.concat(fileItems()).concat(undoItems()));
+    }
+
+    // Right-click on an AGENT card. The top entry is the send — the inline
+    // "send a command..." box no longer rests on the card, so this menu entry
+    // is how he reaches it: it opens the card's own box (and its caret/draft,
+    // both still keyed by the agent's id) and he types and submits from there.
+    // Below that come the same staples every other row's menu carries.
+    function agentRowMenu(ar, text, x, y) {
+        var items = [];
+        if (ar.addressable)
+            items.push({ label: "send " + (ar.name !== "" ? ar.name : "it")
+                                + " a command, an idea or a fix",
+                         trigger: () => ar.beginSend() });
         if (text !== "")
             items.push({ label: "copy line", trigger: () => Board.copy(text) });
         menu.open(x, y, items.concat(fileItems()).concat(undoItems()));
