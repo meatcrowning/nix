@@ -338,6 +338,37 @@ def format_placed(raw):
     return ""
 
 
+def placed_clock(raw, now=None):
+    """`2026-07-29T15:42` on its own calendar day -> `3:42 pm`; on any later day
+    -> exactly `format_placed`'s answer (`jul 30 3:42 pm`). `""` for unreadable.
+
+    The date is what drops. A bare clock read on the day it happened cannot be
+    mistaken for any other day, so it does not need the guard a week-old,
+    unstamped item does, and dropping it is what keeps a COLLAPSED message's
+    author and time on one line. Older than today it stays absolute, unchanged
+    — the rule `format_placed` documents (`AGENTS.md`).
+
+    Date-only and unreadable stamps fall through to `format_placed` and borrow
+    its answer rather than inventing a clock that was never recorded.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    dt = None
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            dt = datetime.datetime.strptime(s, fmt)
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        return format_placed(raw)
+    today = (now or datetime.datetime.now()).date()
+    if dt.date() == today:
+        return dt.strftime("%I:%M %p").lstrip("0").lower()
+    return format_placed(raw)
+
+
 def _section_of(title):
     t = title.strip().lower()
     if t.startswith("needs you"):
@@ -649,6 +680,7 @@ def parse(src):
         t["summary"] = t.get("summary", t["text"])
         t["detail"] = t.get("detail", "")
         t["placed"] = format_placed(t["placedRaw"])
+        t["when"] = placed_clock(t["placedRaw"])
     out["todoGroups"] = todo_groups(out["todo"])
     return out
 
