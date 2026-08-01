@@ -60,6 +60,30 @@
   # would double the read load on `top`'s samba for identical content. Gated on
   # `host`, not on path, so both machines evaluate the same file.
   #
+  # `global.download.slots` caps how many downloads proceed at once. Do not be
+  # misled by the `global:` key — 0.24.x reads that (master later renamed the
+  # block `transfers:`); it feeds the Soulseek client's
+  # `maximumConcurrentDownloads`, i.e. the number of simultaneous download
+  # connections slskd will hold. It is read once at startup (OptionsAtStartup in
+  # Program.cs), so changing it needs a `systemctl --user restart slskd`, not
+  # just the yml regen that this rebuild performs.
+  #
+  # Left unset, slskd defaults it to int.MaxValue — effectively UNLIMITED
+  # (measured: the live API reported 2147483647 before this was pinned). For a
+  # batch downloader that is the risky configuration, not the safe one: it opens
+  # one download connection per queued file at once, so a large missing-track
+  # batch fans out indiscriminately and hammers whichever peer happens to hold
+  # many of the requested files.
+  #
+  # Pinned to 50. That is enough concurrent in-flight downloads to drain a long
+  # queue across many distinct peers, and it is safe to queue that aggressively:
+  # Soulseek does NOT rate-limit or penalize a user for queuing many downloads.
+  # The only real constraint is per-uploader upload slots — each peer grants just
+  # a few simultaneous uploads, so anything queued beyond those slots simply
+  # waits in that peer's queue rather than throttling or banning you. 50 bounds
+  # the fan-out so a single peer (or this box's own connection budget) is never
+  # deluged.
+  #
   # THAT IS NOT ENOUGH ON ITS OWN, because the empty share list stops the SCAN
   # and not the WATCHER. slskd registers a recursive inotify watch rooted at its
   # **current working directory**, whatever that is and whatever it shares —
@@ -90,7 +114,7 @@
       if [ "$host" = "top" ]; then
         sharesYml=$'  directories:\n    - /run/media/lam/SSD/aud'
       fi
-      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nshares:\n%s\n" "$1" "$2" > "$3"' _ \
+      run sh -c 'printf "web:\n  ip_address: 127.0.0.1,[::1]\n  https:\n    ip_address: 127.0.0.1,[::1]\n  authentication:\n    disabled: true\n    api_keys:\n      soul_sync:\n        key: \"%s\"\n        role: Administrator\n        cidr: 127.0.0.1/32,::1/128\nglobal:\n  download:\n    slots: 50\nshares:\n%s\n" "$1" "$2" > "$3"' _ \
         "$(cat "$keyFile")" "$sharesYml" "$HOME/.local/share/slskd/slskd.yml"
       usrFile="$HOME/.secrets/slskd-username"
       pwdFile="$HOME/.secrets/slskd-password"
