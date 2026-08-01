@@ -1002,6 +1002,60 @@ def test_host_affinity():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_stamped_answer_on_first_sight():
+    """A new-to-seen decision that is ALREADY answered fires when it wears
+    THIS host's stamp.
+
+    The `not in seen` guard swallows a decision that arrives already answered
+    on the assumption that only an agent writes one that way. That is true for
+    an UNSTAMPED one (a restored board, a hand edit), but not for one stamped
+    `answered-on: <this-host>`: the board app writes that stamp in the SAME
+    write as the user's answer (`boardparse.set_answer_host`), so an answer
+    stamped for this machine is the user's, whatever state the bookkeeping was
+    in when the key first showed up. That is the real gap on 2026-08-01: the
+    user answered Asmodeus's fresh question while a long orchestrator run held
+    the tick, so the first sighting was already answered and it was swallowed.
+    """
+    print("a stamped answer seen for the first time already-answered")
+    d = tempfile.mkdtemp(prefix="board-watch-firstsight-")
+    try:
+        r = Rig(d)
+        r.run(BOARD_WATCH_HOST="top")                     # seed
+        r.clear()
+
+        # He answers a NEW question about to hit the board for the first time;
+        # the app stamps it `top` in the same write as the answer.
+        r.edit("---\n\n## WAITING ON YOU TO DO",
+               "### 2. Brand new stamped?\n\n> a brand new stamped answer\n"
+               "<!-- answered-on: top -->\n\n*If unanswered:* nothing.\n\n"
+               "---\n\n## WAITING ON YOU TO DO")
+        r.run(BOARD_WATCH_HOST="top")
+        check("the new stamped answer DOES fire",
+              r.fires() == ["brand-new-stamped"], str(r.fires()))
+        r.clear()
+
+        # The contrast: the same shape WITHOUT a stamp is still an agent's own
+        # write and must stay silent (hazard 2).
+        r.edit("---\n\n## WAITING ON YOU TO DO",
+               "### 3. Unstamped brand new?\n\n> an unstamped new answer\n\n"
+               "*If unanswered:* nothing.\n\n---\n\n## WAITING ON YOU TO DO")
+        r.run(BOARD_WATCH_HOST="top")
+        check("an unstamped new answer still does NOT fire",
+              r.fires() == [], str(r.fires()))
+        r.clear()
+
+        # And a stamp for the OTHER machine is not this host's to work.
+        r.edit("---\n\n## WAITING ON YOU TO DO",
+               "### 4. Answered elsewhere?\n\n> answered elsewhere\n"
+               "<!-- answered-on: book -->\n\n*If unanswered:* nothing.\n\n"
+               "---\n\n## WAITING ON YOU TO DO")
+        r.run(BOARD_WATCH_HOST="top")
+        check("an answer stamped for the other machine does NOT fire here",
+              r.fires() == [], str(r.fires()))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_landed_needs_no_tick():
     """**The watcher no longer touches LANDED, and that is the fix.**
 
@@ -1559,6 +1613,7 @@ def main():
     test_cancelled_summoner()
     test_the_loop()
     test_host_affinity()
+    test_stamped_answer_on_first_sight()
     test_landed_needs_no_tick()
     test_dead_worker_names_its_transcript()
     test_decision_does_not_hold_the_tick()

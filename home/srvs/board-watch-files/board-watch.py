@@ -1277,8 +1277,24 @@ def tick():
         if first_run:
             continue
         if item["key"] not in seen:
-            # A decision that arrives already answered was written that way by
-            # an agent, not answered by him. Record it; do not act on it.
+            # A decision that ARRIVES already answered was, by default, written
+            # that way by an agent (`ask()` places an UNANSWERED item; a
+            # restored or re-synced board carries stale answered copies).
+            # Record it; do not act on it.
+            #
+            # THE ONE EXCEPTION is an answer stamped for THIS machine. The
+            # stamp is written only by the board app at the instant the user
+            # answers (`boardparse.set_answer_host`, called from main.py's
+            # answer path) — an item that is new to us, answered, and stamped
+            # `top` is therefore HIM, answering while a long orchestrator run
+            # held this tick so the first sighting was already answered. That
+            # is a genuine user answer and must be worked, not swallowed.
+            if item["answered"] and item.get("answerHost") == HOST:
+                if item["key"] in busy():
+                    log("decision %s is already being worked - not firing a "
+                        "second agent on it" % (item["num"] or item["key"]))
+                    continue
+                fired_candidates.append(item)
             continue
         if fp != seen[item["key"]] and item["answered"]:
             if owns(item):
