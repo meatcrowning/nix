@@ -100,6 +100,14 @@ Item {
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
 
+    //: the RIGHT-CLICK box. The card no longer carries a resting text field —
+    //  his call — so `msgBox` below is CLOSED unless `beginSend()` revealed it
+    //  from the row's context menu, and it closes again when he submits or
+    //  leaves. The window still keys the draft and the caret by the agent's id
+    //  (`Main.qml`'s `draftOf`/`caretOf`), so a rebuild in mid-sentence comes
+    //  back with the box open and his caret where he left it.
+    property bool composing: false
+
     signal send(string body)
     signal draftEdited(string body)
     //: passed straight through to the box — see `InputBox.qml`. A card is
@@ -134,7 +142,19 @@ Item {
     onOutputOpenChanged: row.refreshOutput()
     // Rebuilt already open (see above): a binding that is true at construction
     // emits no change, so the first read has to be asked for.
-    Component.onCompleted: row.refreshOutput()
+    //
+    // ...and the SEND BOX is restored here too, for the same reason and in the
+    // same handler: QML allows exactly ONE `Component.onCompleted` per object,
+    // and a second one is a hard `Property value set multiple times` that stops
+    // the whole window loading. `openCaret` is the window's own hand-back
+    // (`Main.qml`), read at construction, so `composing` has to follow it or a
+    // card rebuilt mid-sentence would reopen its editor behind a card with no
+    // box on it.
+    Component.onCompleted: {
+        row.refreshOutput();
+        if (row.openCaret >= 0)
+            row.composing = true;
+    }
     // ...and it follows the same poll the card's own lines do, so an open drawer
     // keeps up with the agent instead of freezing at whatever it said when he
     // opened it. Only while it is open: closed, it reads no files at all.
@@ -320,7 +340,20 @@ Item {
     implicitHeight: col.implicitHeight + 8
     height: implicitHeight
 
-    function beginEdit() { msgBox.beginEdit(); }
+    // The way INTO the box now: the row's right-click menu calls this, and the
+    // resting card carries no text field at all ([his] the inline
+    // "send a command..." box on every card was to go, replaced with the
+    // menu). `msgBox.beginEdit()` opens the editor the same way clicking its
+    // resting `>` did, so the caret and the draft machinery are untouched.
+    function beginSend() {
+        if (!row.addressable)
+            return;
+        row.composing = true;
+        msgBox.beginEdit();
+    }
+    // (A card rebuilt mid-sentence keeps its box open and its caret where it
+    // was — folded into the ONE `Component.onCompleted` this object may have,
+    // above, beside the drawer's first read.)
 
     // The card lights on hover like every other row here, and now it has to:
     // the whole card is the hit target for the drawer, so the fill is what says
@@ -619,27 +652,30 @@ Item {
         // ---- the box ----
         // §10 again: a task that has not started has no process to put a
         // message in front of, so it is not offered one.
+        //
+        // [his] the box no longer rests on the card: it is CLOSED until the
+        // row's right-click menu (`beginSend()`) opens it, and it closes again
+        // on submit or on his leaving. What it still says is WHO it reaches —
+        // `send Eligos a command` is the whole point of the name — but that
+        // sentence now lives in the menu entry instead of a permanent field.
         InputBox {
             id: msgBox
             width: col.width
-            visible: row.addressable
+            visible: row.addressable && row.composing
             height: visible ? implicitHeight : 0
             draft: row.draft
             fgAccent: row.fgAccent
             fgText: row.fgText
             fgDim: row.fgDim
-            // ...and it says WHO it reaches. `send Rosa a command` is the whole
-            // point of the name: the box under a card has always gone to that
-            // one agent's inbox, and until now it said `it`.
             placeholder: row.running
                 ? "send " + (row.name !== "" ? row.name : "it")
                   + " a command, an idea or a fix"
                 : "leave a note - it goes to the next minister"
             openCaret: row.openCaret
             onDraftEdited: (b) => row.draftEdited(b)
-            onSubmitted: (b) => row.send(b)
+            onSubmitted: (b) => { row.composing = false; row.send(b); }
             onCaretHeld: (p) => row.caretHeld(p)
-            onCaretLeft: () => row.caretLeft()
+            onCaretLeft: () => { row.composing = false; row.caretLeft(); }
         }
 
         // ---- the drawer: the agent's own last few lines ----
