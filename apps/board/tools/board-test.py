@@ -1972,8 +1972,7 @@ Newest first. Append-only.
 
 
 def test_todo_remove(tmp):
-    """*"i should be able to remove items from the 'to do, when you feel like
-    it' section"*.
+    """*"i should be able to remove items from the 'to do' section"*.
 
     Byte-level, like the round trip above, because this is the first thing in
     the app that DELETES his prose. Three claims: what goes is exactly the
