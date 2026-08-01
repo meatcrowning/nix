@@ -528,7 +528,7 @@ class Board(QObject):
         return it["answer"] if it else ""
 
     # ---- clearing a chore off WAITING ON YOU TO DO ----
-    # *"i should be able to clear the 'to do, when you feel like it' stuff if i
+    # *"i should be able to clear the 'to do' stuff if i
     # wish. currently i cannot remove it via board program"*. Agents put bullets
     # there and nothing ever took one away.
     #

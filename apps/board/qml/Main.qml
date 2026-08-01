@@ -944,7 +944,7 @@ Window {
                         width: needsCol.width
                         visible: win.todo.length > 0
                         height: visible ? implicitHeight : 0
-                        label: "to do, when you feel like it"
+                        label: "to do"
                         collapsed: win.isCollapsed("todo")
                         fgDim: win.fgDim
                         onToggled: win.toggleCollapsed("todo")
@@ -1253,8 +1253,8 @@ Window {
                                                     hoverEnabled: true
                                                     // Left is here for the DOUBLE click only —
                                                     // *"i should be able to just double click
-                                                    // on stuff in the to do when you feel like
-                                                    // it section to remove them"*. A single
+                                                    // on stuff in the to do
+                                                    // section to remove them"*. A single
                                                     // left click stays inert: there is nothing
                                                     // for it to do on a bullet the store gives
                                                     // no checkbox, and a row that reacted to
