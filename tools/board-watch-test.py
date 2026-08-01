@@ -1191,6 +1191,75 @@ def test_dead_worker_names_its_transcript():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_decision_does_not_hold_the_tick():
+    """A DECISION RUNS IN ITS OWN UNIT, and the tick goes on without it.
+
+    [his, 2026-08-01] *"why is there currently a pending order for solomon yet
+    he is sitting there doing nothing"* — a decision run held `board-watch.service`
+    for its whole life (five minutes, that time), and the sentence he typed at
+    00:03 sat in the queue because the only unit that could summon Solomon was
+    busy being a decision agent. `systemctl --user list-jobs` showed exactly one
+    job, waiting on itself.
+
+    Asserted at the seam rather than by starting a real agent: `_start_unit` is
+    intercepted, so what is checked is that `spawn(detach=True)` goes through
+    it, hands back `rc=None` (nothing to report — the close-out moves to the
+    next tick's `retire_finished`/`reconcile`), adopts the AGENT's pid onto the
+    stash, and never reaches the `Popen` that would have made this tick wait.
+    """
+    print("\na decision does not hold the tick")
+    d = tempfile.mkdtemp(prefix="board-watch-detach-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        env = r.env()
+        old = dict(os.environ)
+        os.environ.update({k: v for k, v in env.items() if isinstance(v, str)})
+        os.environ.pop("BOARD_WATCH_SPAWN", None)      # the stub never detaches
+        try:
+            mod = _load_watcher(env)
+            seen, waited, adopted = {}, [], []
+
+            def fake_unit(aid, cmd, env_, logpath, title, **kw):
+                seen.update(dict(kw, aid=aid, cmd=cmd, log=logpath, env=env_))
+                return 4242
+
+            def fake_popen(cmd, **kw):
+                waited.append(cmd)
+                raise AssertionError("a detached decision must not be waited on")
+
+            real_unit, real_popen = mod.bw._start_unit, mod.subprocess.Popen
+            mod.bw._start_unit, mod.subprocess.Popen = fake_unit, fake_popen
+            try:
+                rc, how, _ = mod.spawn("a prompt", "some-key", "board: decision 1",
+                                       session="fixed-uuid-here", detach=True,
+                                       on_start=adopted.append)
+            finally:
+                mod.bw._start_unit, mod.subprocess.Popen = real_unit, real_popen
+
+            check("a detached decision is started through a transient unit",
+                  bool(seen) and not waited, str(waited[:1]))
+            check("...in its OWN namespace, not the workers'",
+                  seen.get("prefix") == mod.bw.DECISION_PREFIX
+                  and seen.get("kind") == "decision", str(seen.get("prefix")))
+            check("...with the run cap systemd can enforce and a wait cannot",
+                  seen.get("runtime") == mod.AGENT_TIMEOUT_S, str(seen.get("runtime")))
+            check("...carrying the key every guard against firing twice reads",
+                  (seen.get("env") or {}).get("BOARD_WATCH_KEY") == "some-key")
+            check("...and the session id its card is read from",
+                  "--session-id" in (seen.get("cmd") or [])
+                  and seen["cmd"][seen["cmd"].index("--session-id") + 1]
+                  == "fixed-uuid-here", str((seen.get("cmd") or [])[:6]))
+            check("the stash follows the AGENT's pid, not the watcher's",
+                  adopted == [4242], str(adopted))
+            check("...and the caller is told there is nothing to report yet",
+                  rc is None and "board-decision-" in how, (rc, how))
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     d = tempfile.mkdtemp(prefix="board-watch-test-")
     try:
@@ -1492,6 +1561,7 @@ def main():
     test_host_affinity()
     test_landed_needs_no_tick()
     test_dead_worker_names_its_transcript()
+    test_decision_does_not_hold_the_tick()
 
     print()
     if fails:
