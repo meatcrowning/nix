@@ -15,12 +15,25 @@ Item {
     // measured as a full /proc scan and a drive scan on every reload, for a
     // widget nobody was looking at.
     property bool active: false
+    // Whether the EQ overlay is out over the spectrum. TRANSIENT, not a
+    // SettingsStore key: it is a throwaway view state, and a wallpaper or
+    // theme change reloads the panel from shipped defaults, so the overlay
+    // coming back closed is the honest state — it should not re-open beside
+    // the user on a relog/theme change (see quickshell-files/AGENTS.md on
+    // transient state vs a user-picked setting).
+    property bool eqOpen: false
     property int pad: 10
     readonly property real inner: Math.max(180, width - 24)
 
-    onActiveChanged: Media.watch(root, active)
-    Component.onCompleted: { Media.watch(root, active); drawerOut = Media.queueOpen; noteRestSlack(); }
-    Component.onDestruction: Media.watch(root, false)
+    onActiveChanged: {
+        Media.watch(root, active);
+        // An invisible copy must not keep the overlay open (and with it the
+        // EasyEffects socket): close it when we stop being watched.
+        if (!active && root.eqOpen) root.eqOpen = false;
+    }
+    onEqOpenChanged: { if (root.active) Media.watchEq(eqOpen); }
+    Component.onCompleted: { Media.watch(root, active); Media.watchEq(eqOpen); drawerOut = Media.queueOpen; noteRestSlack(); }
+    Component.onDestruction: { Media.watch(root, false); Media.watchEq(false); }
 
     // ---- a transport button: pixel-font glyph, themed frame -------------
     component MediaButton: Rectangle {
@@ -173,6 +186,168 @@ Item {
                         * Math.pow(Math.max(0, Media.spectrumPeaks[index] || 0) / 100, spec.gamma)))
                     color: Theme.accent
                     visible: (Media.spectrumPeaks[index] || 0) > 0
+                }
+            }
+        }
+    }
+
+    // ---- in-panel equalizer: the output EQ EasyEffects applies, editable ----
+    // Toggled by clicking the spectrum. Draws the EQ's bands as vertical
+    // faders whose handles sit at their current gain, on the same 30..16000 Hz
+    // axis the spectrum uses. Dragging a fader writes that band's gain to
+    // EasyEffects over its local socket (Media.setBandGain), so the change
+    // lands in real time.
+    //
+    // When EasyEffects cannot take a band write (the stock 8.2.7 build does
+    // not expose the per-channel field — Media.eqWriteLive is probed, not
+    // assumed) the overlay still draws the EQ but disables the edit and says
+    // why. docs/DESIGN.md 10.2: refuse visibly, never silently no-op. Closing
+    // is "click a spot that is not on a fader".
+    component Equalizer: Item {
+        id: eq
+        readonly property real fmin: 30
+        readonly property real fmax: 16000
+        readonly property var bands: Media.eqBands
+        readonly property int n: bands.length
+        readonly property bool editable: Media.eqWriteLive
+
+        // Log frequency -> x. A missing or non-positive freq falls back to the
+        // low end rather than producing NaN.
+        function freqX(f) {
+            const ff = (f > 0) ? f : eq.fmin;
+            const x = (Math.log(ff) - Math.log(eq.fmin)) / (Math.log(eq.fmax) - Math.log(eq.fmin));
+            return Math.round(Math.max(0, Math.min(1, x)) * width);
+        }
+        // +36 dB at the top, -36 dB at the bottom, 0 dB centred.
+        function gainY(g) {
+            const c = Math.max(-36, Math.min(36, g || 0));
+            return Math.round((36 - c) / 72 * height);
+        }
+        function freqAt(b) { return (b && b.freq > 0) ? b.freq : eq.fmin; }
+
+        Rectangle {                       // the overlay surface
+            anchors.fill: parent
+            color: Theme.bgAlt
+            border.width: 1
+            border.color: Theme.border
+        }
+
+        Rectangle {                       // the 0 dB line
+            x: 0; width: parent.width
+            y: eq.gainY(0)
+            height: 1
+            color: Theme.dim
+        }
+
+        PixelText {                       // an EQ that has not been read yet
+            visible: eq.n === 0
+            anchors.centerIn: parent
+            text: "no EQ"
+            color: Theme.textDim
+        }
+
+        Repeater {
+            id: bandRep
+            model: eq.n
+            delegate: Item {
+                required property int index
+                readonly property real freq: eq.freqAt(eq.bands[index])
+                // Read on `refresh`, so a drag writes straight back through the
+                // socket without fighting the config file; reopening re-reads.
+                property real gain: 0
+                x: eq.freqX(freq)
+                width: 1
+                height: parent.height
+
+                Rectangle {               // grab column (a bit wider than drawn)
+                    x: -3; y: 0; width: 7; height: parent.height
+                    color: "transparent"
+                }
+                Rectangle {               // vertical track
+                    x: -1; y: 1; width: 2; height: parent.height - 2
+                    color: Theme.border
+                }
+                Rectangle {               // the handle, riding at the gain level
+                    x: -4; y: eq.gainY(gain) - 1
+                    width: 8; height: 3
+                    color: eq.editable ? Theme.accent : Theme.textDim
+                }
+                function refresh() {
+                    gain = (index < eq.bands.length) ? (eq.bands[index].gain || 0) : 0;
+                }
+                function setGain(db) { gain = db; }
+                Component.onCompleted: refresh()
+            }
+        }
+
+        // The disabled-edit footer (visible only while EQ writes are off).
+        PixelText {
+            anchors { bottom: parent.bottom; bottomMargin: 2; horizontalCenter: parent.horizontalCenter }
+            text: eq.editable ? "" : "EQ read-only"
+            color: Theme.textDim
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.ArrowCursor
+            property int active: -1
+            property real downX: -1
+            property real downY: -1
+            property bool dragged: false
+            function bandAt(x) {
+                let best = -1, bestD = 1e9;
+                for (let i = 0; i < eq.n; i++) {
+                    const d = Math.abs(x - eq.freqX(eq.freqAt(eq.bands[i])));
+                    if (d < bestD) { bestD = d; best = i; }
+                }
+                return bestD <= 7 ? best : -1;
+            }
+            function setFromY(i, y) {
+                const db = Math.round((36 - y / height * 72) * 10) / 10;
+                // Only fire the socket when the write path exists; the handle
+                // moves either way (a direct-manipulation drag — DESIGN.md 6.4).
+                const del = bandRep.itemAt(i);
+                if (del) del.setGain(db);
+                if (eq.editable) Media.setBandGain(i, db);
+            }
+            onPressed: (m) => {
+                downX = m.x; downY = m.y; dragged = false;
+                active = bandAt(m.x);
+                if (active >= 0) setFromY(active, m.y);
+            }
+            onPositionChanged: (m) => {
+                if (active < 0) return;
+                if (Math.abs(m.x - downX) > 2 || Math.abs(m.y - downY) > 2) dragged = true;
+                setFromY(active, m.y);
+            }
+            onReleased: {
+                // A tap that was not on a fader closes the overlay.
+                if (active < 0) { root.eqOpen = false; }
+                active = -1;
+            }
+        }
+
+        // Re-read the band values the moment the overlay opens (and after any
+        // EasyEffects autosave while it stays open), so it always reflects the
+        // real EQ rather than a stale frame.
+        Connections {
+            target: root
+            function onEqOpenChanged() {
+                if (!root.eqOpen) return;
+                for (let i = 0; i < bandRep.count; i++) {
+                    const d = bandRep.itemAt(i);
+                    if (d) d.refresh();
+                }
+            }
+        }
+        Connections {
+            target: Media
+            function onEqBandsChanged() {
+                if (!root.eqOpen) return;
+                for (let i = 0; i < bandRep.count; i++) {
+                    const d = bandRep.itemAt(i);
+                    if (d) d.refresh();
                 }
             }
         }
@@ -369,10 +544,30 @@ Item {
                 }
             }
 
-            Spectrum {
+            // The spectrum is the EQ's tap-in: the whole grid is one click
+            // band. A tap opens the overlay (which then covers the grid and
+            // handles its own close), so while the overlay is down nothing here
+            // swallows a click meant for elsewhere.
+            Item {
+                id: specZone
                 anchors {
                     top: trackLine.bottom; topMargin: 4
                     left: parent.left; right: parent.right; bottom: parent.bottom
+                }
+                Spectrum {
+                    anchors.fill: parent
+                }
+                MouseArea {
+                    id: eqTrigger
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.eqOpen = true
+                }
+                Equalizer {
+                    visible: root.eqOpen
+                    anchors.fill: parent
+                    z: 1
                 }
             }
         }
