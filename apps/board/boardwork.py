@@ -327,6 +327,7 @@ def split_for_summoners(items, n=None):
 ORCH_MODELS = [
     ("claude-fable-5", "fable 5"),
     ("claude-opus-5", "opus 5"),
+    ("claude-opus-4-8", "opus 4.8"),
     ("claude-sonnet-5", "sonnet 5"),
     ("claude-haiku-4-5-20251001", "haiku 4.5"),
     ("deepseek/deepseek-v4-flash-0731", "deepseek v4 flash"),
@@ -419,6 +420,8 @@ def set_orch_model(flag):
 MINISTER_MODELS = [
     ("claude-opus-5", "medium", "opus 5 medium"),
     ("claude-opus-5", "low", "opus 5 low"),
+    ("claude-opus-4-8", "medium", "opus 4.8 medium"),
+    ("claude-opus-4-8", "low", "opus 4.8 low"),
     ("claude-sonnet-5", "medium", "sonnet 5 medium"),
     ("claude-sonnet-5", "low", "sonnet 5 low"),
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
@@ -750,8 +753,11 @@ sentence or two, not a paragraph** — *"it shouldnt really elaborate that much 
 though"*. Pick the one that is true:
 `COMPLETION:` it is done and on his machine; `PARTIAL:` some of it landed and \
 some did not, a rebuild being pending counts; `FAILED:` nothing landed; \
-`QUESTION:` you need a word from him before anything else moves; \
-`INFORMATION:` a fact, nothing asked of him.
+`INFORMATION:` a fact, nothing asked of him. **A question is NEVER a note \
+bullet** — the ONLY place a question to him belongs is the decisions section, \
+written with `boardctl.py ask '<the question>' --option '<a way>' \
+--if-unanswered '<what stays undone>'`; a `QUESTION:` note is refused by the \
+tool, which tells you to use `ask` instead.
 
    **A completion note is AS SHORT as its result.** When nothing surprising
 happened — it worked, nothing failed, you deviated from nothing, there is no
@@ -1032,7 +1038,10 @@ point of it is that he can tell at a glance whether a new agent was started or \
 an existing one was given more work.
 
 `INFORMATION:` is still yours for a fact that is NOT a summon (a knob you \
-turned), and `QUESTION:` for something you asked him.
+turned). A question you want answered is NEVER a note — go through \
+`boardctl.py ask '<the question>' --option '<a way>' --if-unanswered \
+'<what stays undone>'`, the only writer of a question on this board; a \
+`QUESTION:` note is refused.
 
 The dozen-word budget still binds, and the tail after the name spends most of \
 what is left: keep it to a few words, not a sentence.
