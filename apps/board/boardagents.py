@@ -993,13 +993,23 @@ def agents(procs=None):
         # would break the moment either sentence is reworded, and Solomon's own
         # startup pair (`orch_line`, above) is a real line in the same states.
         #
-        # NOT A GATE FOREVER. The card appears on the poll after the agent's
-        # first phase OR its first observed act, which for a live worker is
-        # seconds; a spawn whose transcript never appears is `unlinked` past
-        # `boardphase.START_GRACE_S` (120s) and is drawn then, saying honestly
-        # that the work cannot be seen. The one card that stays hidden is one
+        # NOT A GATE FOREVER, AND THAT IS LOAD-BEARING. The card appears on the
+        # poll after the agent's first phase OR its first observed act, which
+        # for a live worker is seconds; a spawn whose transcript never appears
+        # is `unlinked` past `boardphase.START_GRACE_S` (120s) and is drawn
+        # then, and one that is linked but has written nothing by then is
+        # `silent` and is drawn too.
+        #
+        # This paragraph used to end "the one card that stays hidden is one
         # that is registered, linked, and has genuinely never done anything —
-        # which is what he asked for.
+        # which is what he asked for." It was wrong, and the state it waved
+        # through is the one that cost him an evening [top, 2026-07-31]: a
+        # worker wedged before its first API call is registered, linked and has
+        # genuinely never done anything, and stayed invisible for 40 minutes
+        # while burning a core. He asked for a card withheld for the SECONDS
+        # before it speaks, because "nothing yet" at the top looks bad — not
+        # for a stuck minister to be undrawable. `boardphase` bounds the
+        # silence now; nothing here withholds a card that is past that bound.
         a["speaks"] = bool(a["saysLine"] or orch_line) \
             or a["state"] != "running" \
             or (obs.get("observed") or "") not in ("none", "starting")

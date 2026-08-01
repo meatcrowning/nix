@@ -2348,6 +2348,29 @@ def test_phase(tmp):
           r["observed"] == "none" and bph.actually(r) == "nothing yet", r)
     check("...and is not filed under a phase it has not reached",
           r["phase"] == "unreported", r["phase"])
+    # ...and `none` is a GRACE too, for the same reason `starting` is. A worker
+    # that wedges before its first API call is linked, has a transcript, and
+    # writes nothing into it ever; `none` withholds its card
+    # (`boardagents.speaks`), so an unbounded `none` made a stuck minister
+    # UNDRAWABLE — measured on top 2026-07-31, 40 minutes invisible at 100% of
+    # one core. Past the grace it is `silent`, which is drawn.
+    bph.observe("ph-silent", session=u)          # its own id: `ph-a` is reused
+    p = bph.sidecar("ph-silent")                 # further down and must not move
+    rec = json.load(open(p))
+    rec["linkedAt"] = time.time() - bph.START_GRACE_S - 5
+    with open(p, "w") as f:
+        json.dump(rec, f)
+    r = bph.observe("ph-silent", session=u)
+    check("a linked agent that has NEVER acted goes silent past the grace",
+          r["observed"] == "silent", (r["observed"], bph.actually(r)))
+    check("...and says it never started, rather than 'nothing yet'",
+          bph.actually(r) == "not started - nothing in its transcript at all"
+          and bph.doing_line(r, "Halphas")
+          == "not started - nothing in its transcript at all",
+          (bph.actually(r), bph.doing_line(r, "Halphas")))
+    check("...and its card is NOT withheld, which is the whole point",
+          r["observed"] not in ("none", "starting"), r["observed"])
+
     r = bph.observe("ph-none")
     check("an agent with NO session says it cannot be observed, and never guesses",
           r["observed"] == "unlinked" and "cannot see what it is doing"
