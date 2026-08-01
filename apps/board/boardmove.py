@@ -88,6 +88,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (HERE, os.path.join(os.path.dirname(HERE), "pylib")):
@@ -489,6 +490,16 @@ def give_back(sel, why=None, path=bp.BOARD_PATH):
         raise BoardError(
             "no stashed decision matches '%s' - its original text is not "
             "recoverable, so it has to be moved by hand" % sel)
+    # `block` is the decision's verbatim lines and the ONLY thing that can be
+    # put back; a stash without one is unrestorable, not merely awkward. Say so
+    # as a BoardError, the failure every caller already handles, rather than
+    # letting a KeyError out of `go` — that one escaped `reconcile`'s except and
+    # crash-looped board-watch for 8.5 hours on 2026-08-01, after a worker left
+    # a hand-written probe record in the live stash dir.
+    if not rec.get("block"):
+        raise BoardError(
+            "stashed decision '%s' has no saved block - its original text is "
+            "not recoverable, so it has to be moved by hand" % rec["key"])
 
     def go(doc):
         lines = bp.add_needs_item(doc["lines"], rec["block"], rec.get("before"))
@@ -837,6 +848,16 @@ def reconcile(path=bp.BOARD_PATH):
             moved.append(rec)
         except BoardError:
             forget(rec["key"])          # the board no longer has it either
+        except Exception:
+            # ONE malformed record MUST NOT wedge the sweep. This runs at the
+            # top of every board-watch tick, so anything that escapes here stops
+            # every answer being worked, not just this row's — which is exactly
+            # what a stash missing `block` did on 2026-08-01, silently, for 8.5
+            # hours. Drop the record (it is unusable by definition if it cannot
+            # even be handed back) and keep going; the traceback goes to the
+            # journal so the shape of the bad record is still recoverable.
+            traceback.print_exc()
+            forget(rec["key"])
     return moved
 
 
