@@ -1056,6 +1056,56 @@ def test_stamped_answer_on_first_sight():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_seed_guards_a_fresh_question_on_a_resting_board():
+    """2026-08-01: an agent's `ask` places a question while NEEDS YOU is EMPTY,
+    so board-watch's `answers` dict is `{}` (the resting state — it only ever
+    holds the decisions currently in NEEDS YOU). The asker is supposed to seed
+    the new key so the watcher knows it, but `seed_watch_state` bailed on an
+    empty `answers` ("first run pending") and WROTE NOTHING. The question then
+    stayed an UNKNOWN key through its first sighting, so if any answer-state
+    touched it in that window, board-watch's "answered before its first
+    sighting" path fired a decision agent on a question he had not genuinely
+    answered. The resting-state conflation (empty `answers` == "never run") is
+    the bug: `seeded` is the explicit "never run" marker, an empty `answers`
+    is just the board at rest.
+    """
+    print("\na fresh question asked on a resting board is seeded as known-unanswered")
+    d = tempfile.mkdtemp(prefix="board-watch-seedguard-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        r.run(BOARD_WATCH_HOST="top")          # resting board -> answers {}
+        r.clear()
+        st = os.path.join(d, "state", "state.json")
+        s0 = json.load(open(st))
+        check("a resting board leaves the watcher's answers empty",
+              s0["answers"] == {}, str(s0["answers"]))
+
+        import boardwork as bw
+        saved = os.environ.get("BOARD_WATCH_STATE")
+        os.environ["BOARD_WATCH_STATE"] = os.path.join(d, "state")
+        try:
+            ok = bw.seed_watch_state("brand-new-question")
+            # The seeded key is now a KNOWN-unanswered item, so a second seed is
+            # a no-op and the watcher can no longer see it as brand-new.
+            again = bw.seed_watch_state("brand-new-question")
+        finally:
+            if saved is None:
+                os.environ.pop("BOARD_WATCH_STATE", None)
+            else:
+                os.environ["BOARD_WATCH_STATE"] = saved
+        check("ask seeds the fresh question even on a resting board",
+              ok is True)
+        check("the seeded question is known, so a second seed is a no-op",
+              again is False)
+
+        s1 = json.load(open(st))
+        check("the seed records the unanswered fingerprint (idx:|ans:|on:)",
+              s1["answers"].get("brand-new-question") == "idx:|ans:|on:",
+              str(s1.get("answers")))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_landed_needs_no_tick():
     """**The watcher no longer touches LANDED, and that is the fix.**
 
@@ -1614,6 +1664,7 @@ def main():
     test_the_loop()
     test_host_affinity()
     test_stamped_answer_on_first_sight()
+    test_seed_guards_a_fresh_question_on_a_resting_board()
     test_landed_needs_no_tick()
     test_dead_worker_names_its_transcript()
     test_decision_does_not_hold_the_tick()

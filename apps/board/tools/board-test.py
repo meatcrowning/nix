@@ -3450,8 +3450,11 @@ def test_work(tmp):
           bw.seed_watch_state(key) is True)
     with open(os.path.join(st, "state.json")) as f:
         answers = json.load(f)["answers"]
+    # `idx:|ans:|on:` is `fingerprint()` of an unanswered item (the `|on:` host
+    # suffix landed with host-affinity); the older bare "idx:|ans:" never matched
+    # it, so a seeded question still looked fingerprint-changed on its first tick.
     check("...so his answer to it is an ordinary change to a known decision",
-          answers.get(key) == "idx:|ans:", answers)
+          answers.get(key) == "idx:|ans:|on:", answers)
     # Back to the HARNESS's scratch dir, never unset: deleting it drops every
     # later test through to the live `~/.local/state/board-watch`, kill switch
     # and all (see the note beside the default at the top of this file).
