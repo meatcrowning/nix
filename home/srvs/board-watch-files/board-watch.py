@@ -699,8 +699,29 @@ DENY = bw.DENY
 
 
 def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
-          retry=True, on_start=None):
+          retry=True, on_start=None, detach=False):
     """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
+
+    **`detach=True` starts it in its OWN transient unit and returns at once**,
+    with `rc = None` — the caller then has nothing to report and must not
+    pretend otherwise. That is how a DECISION runs (see `tick`): waiting for one
+    held this unit for the whole run, and a sentence he typed in the meantime
+    sat in the queue until it returned. [his, 2026-08-01, of an order queued
+    behind a five-minute decision run: *"why is there currently a pending order
+    for solomon yet he is sitting there doing nothing"*.] The close-out is not
+    lost, it MOVES: `boardmove.retire_finished()` drops the stash of an agent
+    that reported and exited, and `reconcile()` hands the decision back if it
+    exited without reporting — both already run at the top of every tick, for
+    exactly this shape (an agent whose tick was killed under it).
+
+    What detaching gives up, and it is stated rather than papered over: the
+    immediate `rc`, the `agent said:` line in this log (its stdout goes to
+    `~/.cache/board-work/<key>.log`, which is also where the card's drawer
+    looks), and the one-shot retry on a transient API error below. A decision
+    that dies that way is handed back with his answer intact and he sees the
+    FAILED bullet, which is the same outcome the retry was avoiding one round
+    of. Orchestrator runs are still WAITED on: they are short by design and the
+    tick has nothing else to do while one plans.
 
     A run that dies on a TRANSIENT platform error — the CLI printing an API
     5xx / overload line and exiting nonzero (`boardwork.TRANSIENT_RE`, the same
@@ -768,6 +789,35 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
         backend.arm(agent_id, cmd)
     t0 = time.time()
     cap = timeout or AGENT_TIMEOUT_S
+    if detach and not stub:
+        # ITS OWN UNIT, so nothing about this run is in this tick's cgroup and
+        # the tick is free the moment it has exec'd. `--service-type=exec`
+        # returns at the exec, which is what makes the pid knowable — and that
+        # pid is what the stash is adopted onto, so the item's liveness follows
+        # the AGENT rather than the watcher (`boardmove.adopt`). `RuntimeMaxSec`
+        # is the cap this path could not otherwise enforce: the timeout below
+        # belongs to a wait that no longer happens.
+        logpath = bw._log_path(agent_id)
+        bw._log_line(agent_id, "decision agent starting: %s" % label)
+        hint = backend.history_hint(agent_id, session)
+        if hint:
+            bw._log_line(agent_id, "live history: %s" % hint)
+        pid = bw._start_unit(agent_id, cmd, env, logpath, label,
+                             prefix=bw.DECISION_PREFIX, kind="decision",
+                             runtime=cap)
+        if pid is not None:
+            if on_start:
+                try:
+                    on_start(pid)
+                except Exception as e:                         # noqa: BLE001
+                    log("could not record the agent's pid: %s" % e)
+            return None, ("as %s" % bw.unit_name(agent_id, bw.DECISION_PREFIX)), \
+                time.time() - t0
+        # No systemd-run, or it refused. Falling through to the waiting path is
+        # the honest degradation: the tick is held, which is what it always did,
+        # rather than the decision not being worked at all.
+        log("could not start the decision in its own unit - waiting on it "
+            "instead, which holds this tick")
     try:
         p = subprocess.Popen(cmd, cwd=REPO, env=env,
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1342,13 +1392,26 @@ def tick():
                           "board: decision %s" % (item["num"] or item["key"]),
                           session=session,
                           on_start=(lambda pid: bm.adopt(item["key"], pid))
-                          if moved else None)
+                          if moved else None,
+                          detach=True)
     state = load_state()
     state["runs"] = (state["runs"] + [{
         "key": item["key"], "num": item["num"], "rc": rc,
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "seconds": round(secs)}])[-20:]
     save_state(state)
+
+    if rc is None:
+        # STARTED, NOT FINISHED — and this tick is not going to hear how it
+        # went. The next one closes it out either way (`retire_finished` if it
+        # reported, `reconcile` if it died), and the whole point of getting here
+        # without waiting is that HIS TYPED INPUT IS WORKED NOW rather than
+        # after it. A decision and an order are two different agents; they
+        # stopped taking turns on 2026-08-01.
+        log("decision %s started %s - not waiting on it"
+            % (item["num"] or "?", how))
+        drain_queue()
+        return 0
 
     if rc == 0:
         log("decision %s finished in %dm%02ds" % (item["num"] or "?",
