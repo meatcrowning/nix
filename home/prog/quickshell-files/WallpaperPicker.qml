@@ -101,7 +101,18 @@ PanelWindow {
 
     // Re-scan the directory (picks up newly-added images) and re-read which
     // wallpaper is currently active, then (re)sync the selection to it.
-    function refresh() {
+    //
+    // `openSync` is true ONLY for the refresh fired when the picker opens: that
+    // one lands the selection on the current wallpaper and centres the view on
+    // it. The 3-second poll passes false — it re-reads the folder (new files,
+    // freshly generated thumbnails/palettes) but must NOT touch the selection
+    // or the scroll position. A poll that resynced dragged the highlight back
+    // to the current wallpaper and snapped the view to centre every few seconds
+    // while you were browsing — most visibly in the colour-theme grid, which
+    // never marks `dirty` and so had nothing to stop the revert.
+    property bool _openSync: false
+    function refresh(openSync) {
+        _openSync = openSync === true;
         listProc.running = false;
         listProc.running = true;
         currentProc.running = false;
@@ -116,6 +127,9 @@ PanelWindow {
         // still-active wallpaper. That race is what made the first pick after
         // opening get discarded, so the theme only changed on the *second* pick.
         if (dirty) return;
+        // Only the OPEN refresh moves the selection and the view; a poll refresh
+        // leaves both exactly where the user put them (see refresh() above).
+        if (!_openSync) return;
         const idx = currentPath ? images.indexOf(currentPath) : -1;
         const at = idx >= 0 ? idx : 0;
         // Both grids share the `images` model; sync whichever one is showing.
@@ -280,13 +294,20 @@ PanelWindow {
         interval: 3000
         running: root.open
         repeat: true
-        onTriggered: root.refresh()
+        onTriggered: root.refresh(false)
     }
 
     onOpenChanged: {
         if (open) {
+            // Read the no-wallpaper setting straight off disk before deciding
+            // which grid to show. `solid` is a binding on the polled
+            // SettingsStore, so it is normally current — but forcing the read
+            // here means a just-toggled "no wallpaper" cannot leave the picker
+            // one poll behind, showing the colour-theme grid when the mode is
+            // off (or the thumbnails when it is on).
+            SettingsStore.loadNow();
             dirty = false;
-            refresh();   // both modes browse the same wallpaper list now
+            refresh(true);   // open sync: land + centre on the current wallpaper
             if (root.solid)
                 swatchList.forceActiveFocus();
             else
@@ -345,10 +366,17 @@ PanelWindow {
                 if (currentIndex >= 0 && currentIndex < root.images.length)
                     root.pickTheme(root.images[currentIndex]);
             }
-            Keys.onLeftPressed:  currentIndex = Math.max(0, currentIndex - 1)
-            Keys.onRightPressed: currentIndex = Math.min(count - 1, currentIndex + 1)
-            Keys.onUpPressed:    currentIndex = Math.max(0, currentIndex - columns)
-            Keys.onDownPressed:  currentIndex = Math.min(count - 1, currentIndex + columns)
+            // A real user move: keep the highlight on screen AND mark the picker
+            // dirty, so a late refresh can never pull the selection back to the
+            // current wallpaper (matches the thumbnail grid's userNav).
+            function nav(i) {
+                currentIndex = Math.max(0, Math.min(i, count - 1));
+                root.dirty = true;
+            }
+            Keys.onLeftPressed:  nav(currentIndex - 1)
+            Keys.onRightPressed: nav(currentIndex + 1)
+            Keys.onUpPressed:    nav(currentIndex - columns)
+            Keys.onDownPressed:  nav(currentIndex + columns)
             Keys.onEscapePressed: root.open = false
             Keys.onReturnPressed: pick()
             Keys.onEnterPressed:  pick()
