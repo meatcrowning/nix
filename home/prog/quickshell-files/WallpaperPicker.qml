@@ -19,36 +19,27 @@ PanelWindow {
 
     // "No wallpaper" mode (Settings › Appearance › wallpaper › no wallpaper):
     // the desktop is a solid Theme.bg with no image, so there is nothing to flip
-    // THROUGH. The switcher becomes a COLOUR-THEME chooser instead — a grid of
-    // hue swatches, one per candidate theme. Picking one sets the manual accent
-    // (themeMode=manual + accentOverride), which SettingsApply.qml re-themes the
-    // whole desktop from exactly as a wallpaper's palette would. The thumbnail
-    // picker is unchanged whenever a real wallpaper is active.
+    // THROUGH. The switcher becomes a COLOUR-THEME chooser instead — the SAME
+    // wallpaper list, but each entry drawn as a strip of its own extracted
+    // palette (bgAlt…accent…status, from list-wallpapers.sh's palette field)
+    // rather than a thumbnail. Picking one runs the full wal-set.sh on that
+    // wallpaper exactly as the thumbnail picker does, so the desktop takes that
+    // wallpaper's real palette — while `wallpaperSolid` stays on, so no image is
+    // painted, only Theme.bg. The thumbnail picker is unchanged whenever a real
+    // wallpaper is active.
     readonly property bool solid: SettingsStore.d.wallpaperSolid
 
-    // Hue wheel for the swatch grid — built once, distinct enough to read as a
-    // palette. Only the HUE is used downstream (wal-extract pastel-caps it like
-    // any wallpaper accent), so the swatch's own s/v are display-only.
-    property var swatches: []
-    Component.onCompleted: {
-        const arr = [];
-        const n = 24;
-        for (let i = 0; i < n; i++) arr.push(Qt.hsva(i / n, 0.65, 0.92, 1));
-        swatches = arr;
-    }
-
-    function hexOf(c) {
-        function h(x) { return ("0" + Math.round(x * 255).toString(16)).slice(-2); }
-        return "#" + h(c.r) + h(c.g) + h(c.b);
-    }
-
-    // Apply a swatch as the theme: switch to the manual accent path and hand it
-    // the hue. SettingsApply.qml's onThemeModeChanged/onAccentOverrideChanged
-    // then re-runs wal-set.sh — the same re-theme a wallpaper pick triggers.
-    function pickSwatch(c) {
-        SettingsStore.d.themeMode = "manual";
-        SettingsStore.d.accentOverride = root.hexOf(c);
-        SettingsStore.save();
+    // Apply a wallpaper's palette as the colour theme WITHOUT leaving solid
+    // mode: run the full wal-set.sh on it (same commit the thumbnail picker
+    // defers to close), which re-extracts and re-themes the whole desktop from
+    // that image. wallpaperSolid is untouched, so WallpaperLayer keeps painting
+    // Theme.bg — the palette changes, the image does not appear.
+    function pickTheme(path) {
+        if (!path || commitProc.running) return;
+        commitProc.command = ["sh", "-c",
+            "touch \"" + root.suppressMarker + "\"; exec \"" + root.wallSetPath + "\" \"$1\" >>\"$HOME/.cache/wal/wallpaper-picker.log\" 2>&1",
+            "_", path];
+        commitProc.running = true;
         root.open = false;
     }
 
@@ -76,6 +67,7 @@ PanelWindow {
 
     property var images: []          // absolute source paths, name-sorted
     property var thumbs: []          // cached thumbnail path per image (parallel to images)
+    property var palettes: []        // "#hex,#hex,…" strip per image (parallel), solid mode
     property string currentPath: ""  // the wallpaper active when the picker opened
     // True once the user actually flipped to a different wallpaper this
     // session — opening and closing the picker without touching anything
@@ -125,14 +117,19 @@ PanelWindow {
         // opening get discarded, so the theme only changed on the *second* pick.
         if (dirty) return;
         const idx = currentPath ? images.indexOf(currentPath) : -1;
-        list.currentIndex = idx >= 0 ? idx : 0;
+        const at = idx >= 0 ? idx : 0;
+        // Both grids share the `images` model; sync whichever one is showing.
+        // In solid mode the "current" wallpaper is the palette source, so
+        // landing on it shows the theme you're already on.
+        list.currentIndex = at;
+        swatchList.currentIndex = at;
         updateSelected();
-        // Land the view ON the current wallpaper, centred — opening the picker
+        // Land the view ON the current entry, centred — opening the picker
         // should show where you already are, not the top of the list. Do it now
         // AND once more after layout settles (positionViewAtIndex is a no-op if
         // the grid hasn't laid its delegates out yet, which it often hasn't on
         // the very first frame after the model is (re)assigned).
-        list.positionViewAtIndex(list.currentIndex, GridView.Center);
+        (root.solid ? swatchList : list).positionViewAtIndex(at, GridView.Center);
         centerTimer.restart();
     }
 
@@ -143,8 +140,9 @@ PanelWindow {
         id: centerTimer
         interval: 0
         onTriggered: {
-            if (list.count > 0)
-                list.positionViewAtIndex(list.currentIndex, GridView.Center);
+            const g = root.solid ? swatchList : list;
+            if (g.count > 0)
+                g.positionViewAtIndex(g.currentIndex, GridView.Center);
         }
     }
 
@@ -153,30 +151,33 @@ PanelWindow {
         command: ["sh", "-c", root.listScriptPath]
         stdout: StdioCollector {
             onStreamFinished: {
-                // Each line is "source\tthumbnail" (see list-wallpapers.sh).
+                // Each line is "source\tthumbnail\tpalette" (see
+                // list-wallpapers.sh). The palette field is a comma-separated
+                // list of raw hex tokens (no '#'), possibly empty.
                 const lines = this.text.split("\n").map(s => s.trim()).filter(s => s.length > 0);
                 const nextImages = [];
                 const nextThumbs = [];
+                const nextPalettes = [];
                 for (const line of lines) {
-                    const tab = line.indexOf("\t");
-                    if (tab >= 0) {
-                        nextImages.push(line.substring(0, tab));
-                        nextThumbs.push(line.substring(tab + 1));
-                    } else {
-                        nextImages.push(line);
-                        nextThumbs.push(line);
-                    }
+                    const f = line.split("\t");
+                    nextImages.push(f[0]);
+                    nextThumbs.push(f.length > 1 && f[1] ? f[1] : f[0]);
+                    // "aabbcc,ddeeff,…" -> ["#aabbcc", …]; [] when unprepared.
+                    const raw = (f.length > 2 && f[2]) ? f[2] : "";
+                    nextPalettes.push(raw ? raw.split(",").filter(s => s.length > 0).map(h => "#" + h) : []);
                 }
                 // Only reassign `images` when the source set actually changed:
                 // assigning a new array (even an identical one) resets the
-                // GridView, clobbering currentIndex. `thumbs` is always refreshed
-                // — reassigning it does NOT reset the view (the model is
-                // `images`), so a thumbnail that finished generating between
-                // polls swaps in live without disturbing the selection.
+                // GridView, clobbering currentIndex. `thumbs`/`palettes` are
+                // always refreshed — reassigning them does NOT reset the view
+                // (the model is `images`), so a thumbnail or palette that
+                // finished generating between polls swaps in live without
+                // disturbing the selection.
                 if (nextImages.length !== root.images.length
                         || nextImages.some((v, i) => v !== root.images[i]))
                     root.images = nextImages;
                 root.thumbs = nextThumbs;
+                root.palettes = nextPalettes;
                 root.trySyncSelection();
             }
         }
@@ -285,15 +286,14 @@ PanelWindow {
     onOpenChanged: {
         if (open) {
             dirty = false;
-            if (root.solid) {
+            refresh();   // both modes browse the same wallpaper list now
+            if (root.solid)
                 swatchList.forceActiveFocus();
-            } else {
-                refresh();
+            else
                 list.forceActiveFocus();
-            }
         } else if (!root.solid) {
-            // Swatch picks apply immediately (pickSwatch); only the thumbnail
-            // picker defers its full apply to close.
+            // Colour-theme picks apply immediately (pickTheme); only the
+            // thumbnail picker defers its full apply to close.
             commitFinal();
         }
     }
@@ -321,8 +321,10 @@ PanelWindow {
             color: Theme.accent
         }
 
-        // Swatch grid — shown only in "no wallpaper" mode. Picking a swatch
-        // re-themes the desktop from that hue (see root.pickSwatch).
+        // Colour-theme grid — shown only in "no wallpaper" mode. Same wallpaper
+        // list as the thumbnail picker, but each cell is a strip of that
+        // wallpaper's extracted palette. Picking one re-themes the desktop from
+        // that wallpaper while staying solid (see root.pickTheme).
         GridView {
             id: swatchList
             visible: root.solid
@@ -333,41 +335,82 @@ PanelWindow {
                 margins: 10
             }
             clip: true
-            readonly property int columns: 3
+            readonly property int columns: 2
             cellWidth: Math.floor(width / columns)
             cellHeight: 90
-            model: root.swatches
+            model: root.images
             boundsBehavior: Flickable.StopAtBounds
+            cacheBuffer: 800
 
+            function pick() {
+                if (currentIndex >= 0 && currentIndex < root.images.length)
+                    root.pickTheme(root.images[currentIndex]);
+            }
             Keys.onLeftPressed:  currentIndex = Math.max(0, currentIndex - 1)
             Keys.onRightPressed: currentIndex = Math.min(count - 1, currentIndex + 1)
             Keys.onUpPressed:    currentIndex = Math.max(0, currentIndex - columns)
             Keys.onDownPressed:  currentIndex = Math.min(count - 1, currentIndex + columns)
             Keys.onEscapePressed: root.open = false
-            Keys.onReturnPressed: if (currentIndex >= 0) root.pickSwatch(root.swatches[currentIndex])
-            Keys.onEnterPressed:  if (currentIndex >= 0) root.pickSwatch(root.swatches[currentIndex])
+            Keys.onReturnPressed: pick()
+            Keys.onEnterPressed:  pick()
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, GridView.Contain)
 
             delegate: Item {
                 id: swCell
-                required property var modelData
+                required property string modelData   // image path
                 required property int index
+                readonly property var palette: (root.palettes && root.palettes[index]) || []
                 width: swatchList.cellWidth
                 height: swatchList.cellHeight
 
                 Rectangle {
+                    id: swBox
                     anchors.fill: parent
                     anchors.margins: 4
-                    color: swCell.modelData
+                    color: Theme.bgAlt
                     radius: 0
                     border.width: swCell.index === swatchList.currentIndex ? 2 : 1
                     border.color: swCell.index === swatchList.currentIndex ? Theme.accent : Theme.border
+
+                    // The palette strip: equal-width columns of the theme's
+                    // tokens. Empty (image not prepared yet) leaves the bare box.
+                    Row {
+                        anchors.fill: parent
+                        anchors.margins: swBox.border.width
+                        Repeater {
+                            model: swCell.palette
+                            delegate: Rectangle {
+                                required property string modelData
+                                required property int index
+                                width: Math.ceil(swBox.width / Math.max(1, swCell.palette.length))
+                                height: swBox.height
+                                color: modelData
+                            }
+                        }
+                    }
+
+                    // Filename label, same treatment as the thumbnail cell.
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        anchors.margins: swBox.border.width
+                        height: 18
+                        color: Qt.rgba(0, 0, 0, 0.55)
+                        PixelText {
+                            anchors.centerIn: parent
+                            width: parent.width - 8
+                            elide: Text.ElideMiddle
+                            horizontalAlignment: Text.AlignHCenter
+                            text: Glyphs.px(root.fileName(swCell.modelData))
+                            color: Theme.text
+                        }
+                    }
 
                     MouseArea {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onEntered: swatchList.currentIndex = swCell.index
-                        onClicked: root.pickSwatch(swCell.modelData)
+                        onClicked: root.pickTheme(swCell.modelData)
                     }
                 }
             }
