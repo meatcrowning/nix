@@ -485,6 +485,72 @@ def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
     return blocked, resourced
 
 
+def scan_downloaded_names():
+    """Set of folded basenames of files sitting in the slskd downloads dir.
+
+    A completed download sits here only until the import step (player-add.py)
+    moves it into aud/ and rescans. Before that it is a real file that must not
+    be re-downloaded, so it counts as "handled" for reconciliation.
+    """
+    out = set()
+    if not os.path.isdir(DOWNLOAD_DIR):
+        return out
+    for root, _dirs, files in os.walk(DOWNLOAD_DIR):
+        for fn in files:
+            f = trackmatch.fold(fn)
+            if f:
+                out.add(f)
+    return out
+
+
+def reconcile_orphaned_queued(state, alive, present, rows, downloaded,
+                              dry_run):
+    """Drop the 'queued' marker from tracks that state says are queued but that
+    no longer have a working transfer and have not landed, so the normal pass
+    re-searches and re-queues them.
+
+    A track is marked 'queued' the moment it is enqueued, but slskd keeps its
+    transfer list in memory: a daemon restart, or a failed transfer that
+    rescue_rejected could not act on before clear_handled_failures removed it,
+    leaves the transfer gone while state still says 'queued'. wanted() then
+    skips the track forever, so it is never re-searched or re-downloaded even
+    though it is still missing -- a class of silently lost tracks that
+    accumulates over runs. Reconciliation re-queues exactly those: the track is
+    still on the work list, is not in the live library, has no live transfer,
+    and has no completed file waiting in the downloads dir. Idempotent: a live
+    transfer, a landed file, or a landed library row always keeps its marker.
+
+    Never mutates state under --dry-run (a preview must not unqueue a real
+    download). Returns the number that would be re-queued.
+    """
+    rows_by_id = {r.get("spotify_id"): r for r in rows if r.get("spotify_id")}
+    reconciled = 0
+    for sid, rec in list(state.items()):
+        if rec.get("status") != "queued":
+            continue
+        if (rec.get("user"), rec.get("filename")) in alive:
+            continue  # a transfer is still working on it
+        row = rows_by_id.get(sid)
+        if row is None:
+            continue  # no longer on the work list; nothing to re-queue
+        if present and any(k in present for k in
+                           trackmatch.keys(row.get("artists", ""),
+                                           row.get("title", ""))):
+            rec["status"] = "have"  # landed; state was just stale
+            continue
+        # Soulseek peer paths use backslashes; os.path.basename on Linux only
+        # splits on "/", so normalize separators first to reach the file name
+        # before comparing against the slskd downloads dir.
+        fn = str(rec.get("filename", "")).replace("\\", "/")
+        base = trackmatch.fold(os.path.basename(fn))
+        if base and base in downloaded:
+            continue  # completed file awaiting import; do not re-download
+        if not dry_run:
+            del state[sid]
+        reconciled += 1
+    return reconciled
+
+
 def clear_handled_failures(base, api_key, dl, dry_run):
     """DELETE every failed-terminal download from slskd, so errored rows stop
     lingering in the download list the webapp reads.
@@ -634,6 +700,22 @@ def main():
     if cleared:
         print(f"  cleared {cleared} errored transfer(s) from slskd"
               + (" [dry-run]" if args.dry_run else ""))
+
+    # A track marked "queued" whose transfer has since vanished (daemon
+    # restart, or a failure cleared before rescue could act) would otherwise
+    # be skipped forever by wanted(). Re-queue exactly those still-missing
+    # orphans so the normal pass re-searches them (see
+    # reconcile_orphaned_queued). Runs after rescue + clear so this only
+    # catches tracks neither pass already recovered.
+    downloaded = scan_downloaded_names()
+    reconciled = reconcile_orphaned_queued(
+        state, queued_files, present, rows, downloaded, args.dry_run)
+    if reconciled:
+        print(f"  re-queued {reconciled} track(s) marked 'queued' with no "
+              f"live transfer"
+              + (" [dry-run]" if args.dry_run else ""))
+        if not args.dry_run:
+            save_state(state_path, state)
 
     def wanted(row):
         if row.get("spotify_id") not in state or args.retry:

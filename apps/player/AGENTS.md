@@ -507,6 +507,19 @@ transfer (a no-op) and the row stays visible; and clearing must not be gated on
 `soulseek-rescued.json`, or a failure whose track is nofind/error (never
 queued, so never rescued) accumulates in the downloads view forever.
 
+**A "queued" marker whose transfer has vanished is re-queued, not forgot.**
+slskd keeps its transfer list in memory, so a daemon restart — or a failed
+transfer `rescue_rejected` could not act on before `clear_handled_failures`
+removed it — leaves the track marked `queued` in `soulseek-state.tsv` with no
+transfer and no file. `wanted()` would then skip it forever. `reconcile_orphaned_queued()`
+drops exactly those markers so the normal pass re-searches and re-queues the
+track: it must still be on the work list, must not be in the live library, must
+have no live transfer, and must not have a completed file sitting in the
+downloads dir (Soulseek peer paths use backslashes, so the basename is matched
+after normalising separators — a completed-but-unimported file is a real file
+that must not be re-downloaded). A live transfer, a landed file or a landed
+library row always keeps its marker.
+
 slskd drops completed downloads into `~/.local/share/slskd/downloads/`, and the
 player only ever sees a track once it is moved into `aud/` and rescanned. The
 pipeline's last step (`tools/player-add.py`, run automatically by
