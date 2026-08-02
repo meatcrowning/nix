@@ -443,6 +443,14 @@ Code + **PKCE**, so no client secret exists to leak; token cached 0600 in
 matched/suspect/**missing** TSVs — the last being the work list for finding
 copies elsewhere. Both stdlib-only, same reason as `dbsync.py`.
 
+**Saved albums expand into the work list.** The dump writes each saved album's
+tracks into `saved_albums[].tracks`, and `spotify-missing.py` folds them into
+the missing list alongside saved/liked and playlist tracks — so saving an album
+counts as wanting its missing tracks downloaded. The expansion lives in the
+dump, so **`tools/spotify-dump.py` must be re-run to regenerate the dump** (and
+then `spotify-missing.py`) for the album tracks to reach `missing.tsv`; the
+album-origin rows appear under the album name in the `sources` column.
+
 `tools/soulseek-missing.py` acts on that work list: for each `missing.tsv` row
 still **not** in the live `library.db`, it submits one slskd search over the
 loopback HTTP API (key from `~/.secrets/slskd-api-key`, pinned in
