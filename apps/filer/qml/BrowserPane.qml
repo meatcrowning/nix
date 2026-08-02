@@ -512,14 +512,19 @@ Rectangle {
     // a cd but jarring for expand/collapse/refresh (the view jumps to the
     // top). Save and restore the scroll offset around those rebuilds.
     function rebuildKeepScroll() {
-        const y = list.contentY;
+        // Reassigning the model snaps contentY back to 0 on a LATER pass than
+        // Qt.callLater (Qt applies the model reset during the view's own polish,
+        // after any callLater has run), so a synchronous restore here is always
+        // clobbered. It only SHOWED on a move OUT — the list shrinks, so the
+        // snap is to the top and jarring; expand grows the list and its target
+        // was 0 anyway, hiding it. Arm a pending restore and re-assert it from
+        // onCountChanged, which fires once the model has finished repopulating,
+        // i.e. AFTER that reset. Same shape as player/AlbumGrid.qml. The settle
+        // timer disarms it so a later `cd` (which wants the top) is not caught.
+        list.armRestore(list.contentY);
         rebuild();
-        // Clamp against originY: a ListView's content does not have to
-        // start at contentY 0 once delegate sizes have changed under it
-        // (expand/collapse does exactly that). Same fix as the players'
-        // WheelScroll.qml, which carries the full explanation.
-        list.contentY = Math.max(list.originY,
-                                 Math.min(y, list.originY + list.contentHeight - list.height));
+        list.applyRestoreY();
+        Qt.callLater(list.applyRestoreY);
     }
 
     function toggleExpand(p) {
@@ -545,7 +550,7 @@ Rectangle {
     function goBack() { return navHist.back(); }
     function goForward() { return navHist.forward(); }
 
-    function _goTo(p) { path = p; clearSelection(); rebuild(); refreshDirSize(); persist(); }
+    function _goTo(p) { list.restorePending = false; path = p; clearSelection(); rebuild(); refreshDirSize(); persist(); }
     function go(p) {
         if (p === path) return;     // re-opening the current dir is not a move
         navHist.record();
@@ -679,6 +684,22 @@ Rectangle {
         clip: true
         model: view.rows
         ScrollBar.vertical: VScroll {}
+
+        // rebuildKeepScroll() restore target — see there. `restorePending` gates
+        // it so only a keep-scroll rebuild is re-asserted (a `cd` clears it and
+        // keeps the top). Clamp against the CURRENT originY (content need not
+        // begin at 0 once row sizes change) and the shrunken contentHeight.
+        property real restoreY: 0
+        property bool restorePending: false
+        function clampY(y) {
+            return Math.max(originY, Math.min(y, originY + contentHeight - height));
+        }
+        function applyRestoreY() { if (restorePending) contentY = clampY(restoreY); }
+        function armRestore(y) { restoreY = y; restorePending = true; restoreSettle.restart(); }
+        // fires after the model finishes repopulating — the reset-to-0 has run
+        // by now, so this is the restore that sticks.
+        onCountChanged: if (restorePending) Qt.callLater(applyRestoreY)
+        Timer { id: restoreSettle; interval: 200; onTriggered: list.restorePending = false }
 
         delegate: Rectangle {
             id: row
