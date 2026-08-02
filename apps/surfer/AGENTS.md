@@ -101,13 +101,23 @@ for a download that was slow only in *time* (§10.4 is explicitly about
 decides, throttling to whole-percent updates and leaving fast small downloads to
 their single completion toast rather than a flash.
 
+The **completion** toast is threaded with the downloaded file's full path
+(`Main.qml` builds `downloadDir + "/" + downloadFileName` and passes it to
+`Downloads.done(key, name, path)`); the bridge attaches it as an `x-download-image`
+hint on the toast **only when the extension is in its `IMAGE_EXTS`** (mirrors
+filer's set, so anything filer previews gets it) — the panel then shows a
+thumbnail and click-to-open in the viewer. A progress toast (file still partial)
+or a non-image download carries no path. See
+`home/prog/quickshell-files/AGENTS.md` for the panel side.
+
 Verified headlessly by **[`tools/download-test.py`](tools/download-test.py)**: a
 real offscreen QtWebEngine download of a 320 KB file streamed slowly over
 loopback — `--old` replays the pre-fix size gate and reproduces the missing
 toast; the default path asserts the same slow small download now emits a
 persisted, in-place-morphed progress toast, and drives the `Downloads` decision
 gate directly (fast-small silent, slow-small toasts, same-percent throttled,
-large-fast toasts on size, unknown total never toasts) plus a drift-guard that
+large-fast toasts on size, unknown total never toasts, an image `done()` threads
+the path while a non-image one carries none) plus a drift-guard that
 `Main.qml` still calls the bridge with elapsed time. Run it after touching
 either half.
 
