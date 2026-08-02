@@ -76,7 +76,18 @@ DURATION_TOLERANCE = 12.0  # seconds, matches spotify-missing.py
 DEFAULT_SEARCH_TIMEOUT = 90
 # How many tracks to search per run, so a headless run can't spam the network
 # with all 2,000+ missing tracks at once. Raise with --limit / --all.
-DEFAULT_LIMIT = 5
+#
+# This is also the real lever on download concurrency. The parallel transfer
+# is slskd's (global.download.slots, pinned to 50): it pulls many downloads
+# from distinct peers at once, and slskd rejects concurrent SEARCHES outright
+# (HTTP 429 "Only one concurrent operation is permitted" -- measured
+# 2026-08-01), so this loop must search one track at a time and the batch size
+# is the only thing the sweep controls. The old default of 5 fed the 50-slot
+# downloader a trickle, so a few same-peer tracks serialized behind that peer's
+# single upload slot and it read as "only one download at a time". A real batch
+# (this default, or --limit / --all) fills the parallel downloader with tracks
+# spread across distinct peers, so several transfer at once.
+DEFAULT_LIMIT = 40
 
 # Bias against enqueueing many files from the SAME peer in one run. slskd
 # serializes downloads from one peer over a single connection (the Soulseek
@@ -1009,7 +1020,20 @@ def main():
             save_state(state_path, state)
 
     def wanted(row):
-        if row.get("spotify_id") not in state or args.retry:
+        if args.retry:
+            return True
+        rec = state.get(row.get("spotify_id"))
+        if rec is None:
+            return True
+        # A transient search/enqueue failure must be retried on a later run,
+        # not abandoned forever. The `error` status records an HTTP 429
+        # "only one concurrent operation" blip or a peer going offline mid-
+        # enqueue -- evidence the transfer bounced, not that the track is
+        # unavailable. Only `nofind` is genuinely terminal (no peer offers it).
+        # Without this, one transient failure permanently dropped a track from
+        # the work list, one of the reasons the download pool read as "only one
+        # going" while it drained.
+        if rec.get("status") == "error":
             return True
         return False
 
@@ -1046,6 +1070,18 @@ def main():
           f"{'ON' if args.dry_run else 'OFF'}\n")
 
     # --- 2. search and enqueue ----------------------------------------------
+    # The parallel transfer itself is slskd's: global.download.slots (pinned to
+    # 50) lets it pull many downloads from distinct peers at once. This loop's
+    # only job is to feed that pipeline, and it has no concurrency of its own to
+    # tune: slskd rejects concurrent searches outright (HTTP 429 "Only one
+    # concurrent operation is permitted" -- measured 2026-08-01), so the search
+    # MUST be one at a time. What turned "several downloads in parallel" into
+    # "only one going" is therefore not this loop's internal parallelism but the
+    # size of the batch it feeds slskd: a run that enqueues a handful of tracks
+    # (the old --limit default of 5) gives the 50-slot downloader almost nothing
+    # to pull, so a few same-peer tracks serialize behind that peer's single
+    # upload slot and it reads as sequential. Enqueue a real batch across
+    # distinct peers (--limit / --all) and slskd downloads them in parallel.
     changed = False
     processed = 0
     # How many files each peer has been enqueued this run, so pick_candidate can
