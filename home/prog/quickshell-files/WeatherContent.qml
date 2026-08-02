@@ -424,7 +424,7 @@ Item {
             // exactly the overlap this widget was reported for.
             if (mini) return;
             ctx.fillStyle = Theme.textDim;
-            ctx.font = Theme.fontSize + "px \"" + Theme.font + "\"";
+            ctx.font = Theme.fontSize + "px \"" + Theme.fontCanvas + "\"";
             ctx.textBaseline = "top";
             ctx.fillText(Math.round(hi) + "°", 1, 0);
             ctx.textAlign = "right";

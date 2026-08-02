@@ -14,6 +14,16 @@ Singleton {
     // still owned by wal-set.sh.
     readonly property string font: SettingsStore.d.fontFamily
 
+    // Canvas-safe face. QML Canvas / Context2D cannot rasterise a NON-SCALABLE
+    // bitmap font: it logs "the font families specified are invalid" and
+    // silently falls back to a generic sans, so canvas-drawn text (the weather
+    // widget's axis labels) ignored the pixel-font pick entirely. Botis 4x6
+    // (BDF) is the only such selectable face — see home/pkgs/desktop/font.nix.
+    // Canvas text binds this, not `font`, so a bitmap pick still draws in a
+    // pixel face (the always-present default) rather than dropping to sans. A
+    // scalable pick passes through unchanged, so the canvas shows the exact face.
+    readonly property string fontCanvas: font === "Botis 4x6" ? "More Perfect DOS VGA" : font
+
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to
     // ~14.67px, so 15px here matches the terminal. NOTE: the font's native cell
