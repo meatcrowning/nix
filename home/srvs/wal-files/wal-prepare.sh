@@ -84,11 +84,21 @@ fi
 # the two parsers agreeing. The panel re-runs wal-set.sh when one of the four
 # changes (SettingsApply.qml), which is what turns this into "the toggle
 # applies immediately".
+#
+# "the extractor itself changed" cannot be an mtime test: wal-extract.py is a
+# /nix/store symlink and every store path carries the epoch mtime, so
+# `wal-extract.py -nt $THEMEFILE` is ALWAYS false and the cache would keep an
+# old palette forever after a rebuild that changed the derivation. Instead key
+# on the RESOLVED store path, which is content-addressed — it changes iff the
+# extractor's bytes change — recorded in a sidecar and compared.
 SETTINGS="$CONFIG/quickshell/settings.json"
+EXTRACT_SIG="$(readlink -f "$SCRIPTS/wal-extract.py")"
+SIGFILE="$THEMEFILE.src"
 if [ ! -f "$THEMEFILE" ] || [ "$WALL" -nt "$THEMEFILE" ] \
-   || [ "$SCRIPTS/wal-extract.py" -nt "$THEMEFILE" ] \
+   || [ "$(cat "$SIGFILE" 2>/dev/null)" != "$EXTRACT_SIG" ] \
    || { [ -f "$SETTINGS" ] && [ "$SETTINGS" -nt "$THEMEFILE" ]; }; then
     "$SCRIPTS/wal-extract.py" "$WALL" > "$THEMEFILE"
+    printf '%s\n' "$EXTRACT_SIG" > "$SIGFILE"
 fi
 
 # ---- blurred backdrop -----------------------------------------------------
