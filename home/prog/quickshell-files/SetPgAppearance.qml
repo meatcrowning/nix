@@ -72,6 +72,19 @@ Column {
                 onMoved: (v) => { page.d.fontSize = v; SettingsStore.save(); }
             }
         }
+        SetRow {
+            // Polarity axis over the same wallpaper-derived hue: wal-extract.py
+            // inverts its value ladder so the background is white and the ink is
+            // the dark end of the hue. Orthogonal to colour source and full
+            // palette; every downstream surface (kitty, Qt/KDE, hyprvtb) follows
+            // the twelve tokens with no further knowledge of polarity.
+            label: "light mode"
+            desc: "on = a light background with dark ink, from the same wallpaper hue"
+            SetToggle {
+                checked: page.d.lightMode
+                onToggled: (v) => { page.d.lightMode = v; SettingsStore.save(); }
+            }
+        }
     }
 
     SetSection {
@@ -87,7 +100,7 @@ Column {
         }
         SetRow {
             label: "pure black background"
-            desc: "off = bg drops to the darkest tone of the theme hue instead"
+            desc: "off = bg takes the theme hue's extreme tone instead (darkest, or lightest in light mode)"
             SetToggle {
                 checked: page.d.pureBlackBg
                 onToggled: (v) => { page.d.pureBlackBg = v; SettingsStore.save(); }
