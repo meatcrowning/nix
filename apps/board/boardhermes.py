@@ -359,13 +359,16 @@ def _result_lines(content):
     return out or body.split("\n")
 
 
-def lines(session, tail=TAIL_ROWS):
+def lines(session, tail=TAIL_ROWS, tools_only=False):
     """THE MINISTER'S LITERAL OUTPUT, live, newest at the tail.
 
     The hermes half of `main.Agents._transcript_lines`, and the same rule for
     what belongs in it: every assistant turn's reasoning and text, every tool
     call's own arguments, every tool result's own output — and never his own
     prompt read back at him.
+
+    With `tools_only`, ONLY the tool calls — for the shell band, which shows the
+    tools a minister uses and not its prose, reasoning or a tool's own output.
     """
     if not session:
         return []
@@ -387,17 +390,19 @@ def lines(session, tail=TAIL_ROWS):
         if role == "user":
             continue                     # his prompt, not the agent's output
         if role == "tool":
-            out.extend(_result_lines(row["content"]))
+            if not tools_only:           # a tool's output is not an invocation
+                out.extend(_result_lines(row["content"]))
             continue
         if role != "assistant":
             continue
-        think = row["reasoning_content"] if "reasoning_content" in row.keys() \
-            else ""
-        if isinstance(think, str) and think.strip():
-            out.extend(think.split("\n"))
-        body = row["content"]
-        if isinstance(body, str) and body.strip():
-            out.extend(body.split("\n"))
+        if not tools_only:
+            think = row["reasoning_content"] if "reasoning_content" in row.keys() \
+                else ""
+            if isinstance(think, str) and think.strip():
+                out.extend(think.split("\n"))
+            body = row["content"]
+            if isinstance(body, str) and body.strip():
+                out.extend(body.split("\n"))
         try:
             calls = json.loads(row["tool_calls"] or "[]")
         except (TypeError, ValueError):

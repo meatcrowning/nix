@@ -994,8 +994,14 @@ class Agents(QObject):
         return out
 
     @staticmethod
-    def _transcript_lines(session):
+    def _transcript_lines(session, tools_only=False):
         """THE AGENT'S LITERAL OUTPUT, live, newest at the tail.
+
+        With `tools_only`, ONLY the tool invocations the agent runs — its
+        commands and tool calls — and none of its prose, reasoning or a
+        command's own output. [his, 2026-08-01] the shell band under a card
+        shows only the tools the agents use, not the agent's own output; the
+        DRAWER (`output`) is the opposite request and keeps the everything.
 
         Not a summary of it: his words are *"its literal actual thinking / tool
         call / coding output"*. So every line of every assistant `text` and
@@ -1047,7 +1053,14 @@ class Agents(QObject):
                 if not isinstance(part, dict):
                     continue
                 kind = part.get("type")
-                if kind == "tool_result":
+                if kind == "tool_use" and role == "assistant":
+                    out.extend(Agents._tool_use_lines(part.get("name"),
+                                                      part.get("input")))
+                elif tools_only:
+                    # The shell band is the calls and nothing else — not prose,
+                    # not reasoning, not a command's own output.
+                    continue
+                elif kind == "tool_result":
                     # Carried on a `user` entry by the platform, but it is the
                     # TOOL's output and not his words — the one thing in a user
                     # turn that belongs in the log.
@@ -1058,9 +1071,6 @@ class Agents(QObject):
                     out.extend(str(part.get("text") or "").split("\n"))
                 elif kind == "thinking":
                     out.extend(str(part.get("thinking") or "").split("\n"))
-                elif kind == "tool_use":
-                    out.extend(Agents._tool_use_lines(part.get("name"),
-                                                      part.get("input")))
         # Blank lines are structure in prose and noise in three lines of tail.
         return [x.rstrip()[:Agents.OUTPUT_WIDTH] for x in out if x.strip()]
 
@@ -1144,9 +1154,10 @@ class Agents(QObject):
         # Rebuilt off `cards` — the SAME drawn list the triangle shows — and
         # only for running, non-orchestrator rows, so the shells section can
         # never disagree with the triangle about who is bound. Each is the
-        # agent's own literal tail (`output`, the transcript, never the
-        # exit-flush `.log`), cut to two lines. Emitted on its own signal so a
-        # moving tail does not re-broadcast `changed` to the whole window.
+        # worker's tool-call trace (`_shell_lines`, the transcript's tool_use
+        # entries only — not its prose, its reasoning or its `.log`), cut to two
+        # lines. Emitted on its own signal so a moving tail does not
+        # re-broadcast `changed` to the whole window.
         shells = self._shells_build(cards)
         if shells != self._shells:
             self._shells = shells
@@ -1246,6 +1257,25 @@ class Agents(QObject):
     # Only a worker — a card with a `board-worker-<id>` unit — can have
     # background processes; sessions and Solomon have no unit, so they read none
     # rather than guessing.
+    def _shell_lines(self, agent_id):
+        """The shell band's lines: ONLY the tool invocations a worker runs — its
+        commands and tool calls — never its prose, its reasoning, or its `.log`.
+        [his, 2026-08-01] the shell should show only the tools the agents use,
+        not the agent's own output. The DRAWER (`output`) is the opposite
+        request and still shows the literal everything, with a `.log` fallback;
+        this band is the compact tool-trace under a card, so it drops both the
+        prose and that fallback (the `.log` is the agent's own stdout — a log)."""
+        if not (agent_id or "").strip():
+            return []
+        rec = boardagents.record(agent_id) or {}
+        hsession = boardphase.hermes_session(agent_id)
+        if hsession:
+            import boardhermes
+            live = boardhermes.lines(hsession, tools_only=True)
+        else:
+            live = Agents._transcript_lines(rec.get("session"), tools_only=True)
+        return [px(x) for x in live[-Agents.OUTPUT_LINES:]]
+
     def _shells_build(self, cards):
         out = []
         for c in cards:
@@ -1253,7 +1283,7 @@ class Agents(QObject):
                 continue
             if c.get("state") != "running":
                 continue
-            lines = self.output(c.get("id", ""))
+            lines = self._shell_lines(c.get("id", ""))
             bg = self._bg_processes(c.get("id", ""))
             if not lines and not bg:
                 continue
