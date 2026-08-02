@@ -1,10 +1,17 @@
 #!/bin/sh
 # list-wallpapers.sh
 #
-# One line per image directly under ~/Pictures/wall, name-sorted, as two
+# One line per image directly under ~/Pictures/wall, name-sorted, as three
 # TAB-separated fields:
 #
-#     <source-path>\t<thumbnail-path>
+#     <source-path>\t<thumbnail-path>\t<palette>
+#
+# <palette> is a comma-separated list of nine hex tokens read from the image's
+# cached theme (~/.cache/wal/themes/<md5>.env), in the order
+# bgAlt,border,dim,textDim,accent,ok,warn,crit,info — the swatch strip
+# WallpaperPicker.qml draws in "no wallpaper" (colour-theme) mode instead of a
+# thumbnail. Empty when the theme hasn't been extracted yet (wal-prepare.sh not
+# run for it); the picker then draws a bare cell for that entry.
 #
 # The source path is the real wallpaper (what the picker sets and themes from);
 # the thumbnail path is a small cached JPEG under ~/.cache/wal/thumbs that
@@ -42,6 +49,7 @@ case "$DIR" in
 esac
 SORT="$(get wallpaperSort name)"
 THUMBS="$HOME/.cache/wal/thumbs"
+THEMES="$HOME/.cache/wal/themes"
 [ -d "$DIR" ] || exit 0
 
 # `random` must be STABLE for as long as the picker is open, not re-rolled per
@@ -73,5 +81,15 @@ find "$DIR" -maxdepth 1 -type f \( \
     key="$(printf '%s' "$real" | md5sum | cut -d' ' -f1)"
     thumb="$THUMBS/$key.jpg"
     [ -f "$thumb" ] || thumb="$img"
-    printf '%s\t%s\n' "$img" "$thumb"
+    # Palette strip from the cached theme env (sourced in a subshell — the file
+    # is `TOKEN=hex` lines this repo writes, no untrusted input). Empty if the
+    # image hasn't been prepared yet.
+    env="$THEMES/$key.env"
+    pal=""
+    if [ -f "$env" ]; then
+        # shellcheck disable=SC1090
+        pal="$( . "$env"; printf '%s,%s,%s,%s,%s,%s,%s,%s,%s' \
+            "$BGALT" "$BORDER" "$DIM" "$TEXTDIM" "$ACCENT" "$OK" "$WARN" "$CRIT" "$INFO" )"
+    fi
+    printf '%s\t%s\t%s\n' "$img" "$thumb" "$pal"
 done
