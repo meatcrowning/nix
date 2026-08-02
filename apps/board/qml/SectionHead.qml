@@ -20,8 +20,20 @@ Item {
     property color fgAccent: Theme.accent
     property color fgDim: Theme.textDim
     property bool interactive: true
+    //: [his ask, 2026-08-01] the four TOP-LEVEL bands are drag handles as well
+    //  as collapse toggles: a vertical drag on the band reorders the section it
+    //  heads, and the page turns the displacement into a target and repersists
+    //  the display order. OPT-IN — only the top-level section bands set it; every
+    //  sub-band (`to do`, a tag group, a LANDED day, `shells`) stays a plain
+    //  toggle, because a reorder that grabs a sub-section is not a thing this
+    //  page offers. The one gesture does both jobs: a drag is a drag (the
+    //  `clicked` is suppressed once the pointer crosses the threshold, so the
+    //  band never reorders on the tap that toggles it), and a tap is the usual
+    //  collapse toggle.
+    property bool reorderable: false
 
     signal toggled()
+    signal reorderRequested(real dy)
 
     implicitHeight: Theme.fontSize + 14
     height: implicitHeight
@@ -50,8 +62,8 @@ Item {
 
     // The rule runs from the label to the far edge, so the band reads as one
     // line of type with a hairline finishing it rather than as a boxed header.
-    // A band with NO label (`needs you`, [his, 2026-07-29] *"just have the line
-    // and collapse toggle"*) keeps ONE 8px gutter after the toggle rather than
+    // A band with NO label (`needs you`, [his, 2026-07-29] "just have the line
+    // and collapse toggle") keeps ONE 8px gutter after the toggle rather than
     // the two an empty label would leave behind it.
     Rectangle {
         anchors.verticalCenter: parent.verticalCenter
@@ -61,12 +73,26 @@ Item {
         color: head.accented ? head.fgAccent : Theme.border
     }
 
+    //: the drag's hidden proxy, so the band itself never moves — the page reads
+    //  the displacement off `dragProxy.y` on release, exactly like a decision's
+    //  title grip (`Decision.qml`). §6.4 direct manipulation: the pointer moves
+    //  the band's phantom 1:1, and only a real drag emits anything.
+    Item { id: dragProxy; visible: false }
+
     MouseArea {
         id: ma
         anchors.fill: parent
         hoverEnabled: true
         enabled: head.interactive
-        cursorShape: Qt.PointingHandCursor
+        cursorShape: head.reorderable && head.interactive
+                     ? Qt.SizeVerCursor : Qt.PointingHandCursor
+        drag.target: head.reorderable ? dragProxy : null
+        drag.axis: Drag.YAxis
+        drag.threshold: 8
+        onPressed: if (head.reorderable) dragProxy.y = 0
+        // A tap (no threshold crossed) never emits: it is the collapse toggle.
+        onReleased: if (head.reorderable && ma.drag.active)
+                        head.reorderRequested(dragProxy.y)
         onClicked: head.toggled()
     }
 }
