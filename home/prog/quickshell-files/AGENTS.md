@@ -1712,6 +1712,16 @@ partial), carries no hint and clicks plain-dismiss. `x-download-image` is in
 `extraHints` for the same reason the KDE Connect hints are — Quickshell drops a
 hint it was not asked for.
 
+The hinted path is **not trusted as the file's location**: `sort-downloads`
+files finished image downloads out of `~/Downloads` into `~/Pictures` within
+seconds (a .path unit on ~/Downloads), so a toast pointed at the ~/Downloads
+path it was handed would render a broken thumbnail and `xdg-open` a file that
+had already moved — that was the feature "not working". `NotificationCard.qml`
+instead resolves the file's CURRENT location through `scripts/dl-resolve.py`
+(the hinted path, then the media dirs with sort-downloads' ` (n)` collision
+suffixes) for both the thumbnail and, again, at click time just before
+`xdg-open`. That script is registered by `quickshell.nix`.
+
 ---
 
 ## The bar dims itself for the sudo modal (`Askpass.qml`)

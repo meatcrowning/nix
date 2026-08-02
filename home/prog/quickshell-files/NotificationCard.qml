@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 // A single notification toast. Text-only, coloured by urgency, click anywhere to
 // dismiss, hover to pause its auto-expiry. Styled to match OsdWindow's card:
@@ -9,7 +10,11 @@ import Quickshell
 // A surfer image-download completion toast additionally carries the downloaded
 // file's path in the `x-download-image` hint (Notifications.qml extraHints);
 // such a toast shows a thumbnail on the left and clicking it OPENS the image
-// in the viewer (xdg-open -> the default image handler) before dismissing.
+// in the viewer (xdg-open -> the default image handler) before dismissing. The
+// path surfer advertises is ~/Downloads/<name>, but `sort-downloads` files
+// image downloads out of ~/Downloads into ~/Pictures within seconds — so both
+// the thumbnail and the open resolve the file's CURRENT location via
+// scripts/dl-resolve.py rather than trusting the (possibly stale) hinted path.
 Rectangle {
     id: card
 
@@ -26,6 +31,43 @@ Rectangle {
         ? String(notif.hints["x-download-image"] || "").trim() : ""
     readonly property bool hasImage: imagePath !== ""
     readonly property int thumbSize: 48
+
+    // The file's CURRENT on-disk location, resolved via scripts/dl-resolve.py.
+    // Starts at the hinted path and is replaced by the resolver as soon as the
+    // process returns (the file may already have been sorted to ~/Pictures).
+    property string resolvedPath: ""
+    property bool _openPending: false
+
+    // Resolves the real on-disk path for the thumbnail and for the click's
+    // xdg-open. Runs on every click so a file sorted away to ~/Pictures after
+    // the card rendered still opens. (`running` auto-resets to false after the
+    // process exits, so re-setting it to true re-runs — the same one-shot
+    // trigger Procs.refresh uses.)
+    function resolve() {
+        if (!card.hasImage)
+            return;
+        dlres.running = false;
+        dlres.running = true;
+    }
+
+    Process {
+        id: dlres
+        command: [Quickshell.shellDir + "/scripts/dl-resolve.py", card.imagePath]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const p = this.text.trim();
+                if (p)
+                    card.resolvedPath = p;
+                if (card._openPending) {
+                    card._openPending = false;
+                    if (p)
+                        Quickshell.execDetached(["xdg-open", p]);
+                    if (card.notif)
+                        card.notif.dismiss();
+                }
+            }
+        }
+    }
 
     // A local absolute path -> a file:// URL QML Image can load, with each
     // segment percent-encoded (a space, `#` or `?` in a filename must not be
@@ -60,7 +102,13 @@ Rectangle {
 
     // fade in on arrival (removal is instant when the model drops the item)
     opacity: 0
-    Component.onCompleted: opacity = 1
+    Component.onCompleted: {
+        opacity = 1;
+        // Kick off resolution of the real on-disk path (the hinted ~/Downloads
+        // path may already have been sorted to ~/Pictures) so the thumbnail
+        // points at the file wherever it actually is.
+        card.resolve();
+    }
     // A fade, not a slide, so it keeps its own (shorter) duration — but it goes
     // through ViewMode.ms() like everything else, so reduceMotion and animSpeed
     // reach it. docs/DESIGN.md §6.2: the CURVE is the desktop's, the duration is a
@@ -92,7 +140,7 @@ Rectangle {
             visible: card.hasImage
             width: card.thumbSize
             height: card.thumbSize
-            source: card.hasImage ? card.fileUrl(card.imagePath) : ""
+            source: card.hasImage ? card.fileUrl(card.resolvedPath || card.imagePath) : ""
             sourceSize.width: card.thumbSize * 2
             sourceSize.height: card.thumbSize * 2
             fillMode: Image.PreserveAspectFit
@@ -176,9 +224,15 @@ Rectangle {
         onClicked: {
             if (!card.notif)
                 return;
-            if (card.hasImage)
-                Quickshell.execDetached(["xdg-open", card.imagePath]);
-            card.notif.dismiss();
+            if (card.hasImage) {
+                // Resolve at CLICK time: sort-downloads may have moved the file
+                // out of ~/Downloads since the card rendered, so the open must
+                // not trust the hinted path. dl-resolve's return opens it.
+                card._openPending = true;
+                card.resolve();
+            } else {
+                card.notif.dismiss();
+            }
         }
     }
 }

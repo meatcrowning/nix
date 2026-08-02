@@ -95,6 +95,14 @@ in
       source = ./quickshell-files/scripts/proc-list.py;
       executable = true;
     };
+    # Image-download completion toasts (NotificationCard.qml): given the
+    # ~/Downloads path surfer announced, resolve the file's CURRENT location —
+    # sort-downloads files images out of ~/Downloads into ~/Pictures within
+    # seconds, so the toast must not hard-open a path that went stale.
+    "quickshell/scripts/dl-resolve.py" = {
+      source = ./quickshell-files/scripts/dl-resolve.py;
+      executable = true;
+    };
     # Gate for both cava instances (SysInfo.qml VU, Media.qml spectrum): is any
     # application actually playing? Unconditional, that pair cost ~19.5% of a
     # core with nothing playing — see the script's header and
