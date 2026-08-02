@@ -24,6 +24,15 @@ are deliberately drawn as distinct shapes (lowercase is x-height, caps full
 height) so the face carries real case.
 
 Hand-audited character set: all 95 printable ASCII (U+0020..U+007E).
+
+SCALE (default 2) upscales every authored pixel to an SCALE-by-SCALE block at
+BDF build time, so the emitted face is 8x12 (ascent 10, descent 2, advance 10).
+The face is a pure fixed bitmap, so it is non-scalable — fontconfig pins it to
+its native cell and a requested pixelSize has no effect on it. Its "default
+size" therefore lives in this bitmap, not in the shared fontSize setting, and
+SCALE is what sets it. 2x makes the glyph ink land tall enough to read as the
+same apparent height as the desktop default (More Perfect DOS VGA at 15px,
+~10px cap ink) — see docs/DESIGN.md §2.1.
 """
 
 import sys
@@ -130,36 +139,57 @@ G = {
 }
 
 # --- metrics -----------------------------------------------------------------
-W, H = 4, 6          # 4 wide, 6 tall
+W, H = 4, 6          # 4 wide, 6 tall  (the authored grid; author here)
 ADVANCE = 5           # 1 px right side bearing
 ASCENT = 5            # rows 0..4 above/at baseline (baseline = row 4)
 DESCENT = 1           # row 5 below baseline
+SCALE = 2             # pixels per authored pixel -> emitted 8x12 face; see docstring
 FAMILY = "Botis 4x6"
 FOUNDRY = "botis"
 
+# Emitted (scaled) cell — this is the face's native size and therefore its
+# "default size". A fixed bitmap is non-scalable, so this is the only thing
+# that sets how tall it renders.
+eW, eH = W * SCALE, H * SCALE
+eADVANCE = ADVANCE * SCALE
+eASCENT = ASCENT * SCALE
+eDESCENT = DESCENT * SCALE
+
+
+def scale_glyph(rows, s):
+    """Upscale a authored WxH glyph to an (W*s)x(H*s) block, crisp: each '#'
+    pixel becomes an s-by-s block. This is what makes the face render taller."""
+    scaled = []
+    for row in rows:
+        wide = "".join(ch * s for ch in row)
+        for _ in range(s):
+            scaled.append(wide)
+    return scaled
+
 
 def row_to_hex(row):
-    """4-pixel row -> 2 hex chars (MSB = leftmost)."""
+    """Pixel row -> hex string (MSB = leftmost). Width is len(row)."""
     v = 0
+    n = len(row)
     for i, ch in enumerate(row):
         if ch == "#":
-            v |= 0x08 >> i
-    return f"{v:02X}"
+            v |= 1 << (n - 1 - i)
+    return f"{v:0{(n + 3) // 4}X}"
 
 
 def build_bdf():
     lines = []
     a = lines.append
     a("STARTFONT 2.1")
-    # XLFD; spacing m (mono — every glyph advances the same 5 px), avgwidth in
-    # tenths of px = advance *10
-    a(f"FONT -{FOUNDRY}-{FAMILY.lower().replace(' ','')}-medium-r-normal--{H}-"
-      f"{6*10}-72-72-m-{ADVANCE*10}-iso10646-1")
-    a(f"SIZE {ASCENT+DESCENT} 72 72")
-    a(f"FONTBOUNDINGBOX {W} {H} 0 -1")
+    # XLFD; spacing m (mono — every glyph advances the same eADVANCE px),
+    # avgwidth in tenths of px = advance *10
+    a(f"FONT -{FOUNDRY}-{FAMILY.lower().replace(' ','')}-medium-r-normal--{eH}-"
+      f"{6*SCALE*10}-72-72-m-{eADVANCE*10}-iso10646-1")
+    a(f"SIZE {eASCENT+eDESCENT} 72 72")
+    a(f"FONTBOUNDINGBOX {eW} {eH} 0 -1")
     a("STARTPROPERTIES 12")
-    a(f"FONT_ASCENT {ASCENT}")
-    a(f"FONT_DESCENT {DESCENT}")
+    a(f"FONT_ASCENT {eASCENT}")
+    a(f"FONT_DESCENT {eDESCENT}")
     a("DEFAULT_CHAR 32")
     a("FONT_VERSION 1.0")
     a(f"FAMILY_NAME \"{FAMILY}\"")
@@ -175,11 +205,11 @@ def build_bdf():
     for cp in sorted(G):
         a(f"STARTCHAR U+{cp:04X}")
         a(f"ENCODING {cp}")
-        a(f"SWIDTH {ADVANCE*1000} 0")
-        a(f"DWIDTH {ADVANCE} 0")
-        a(f"BBX {W} {H} 0 {ASCENT-1}")   # top row at y=ASCENT-1 above baseline
+        a(f"SWIDTH {eADVANCE*1000} 0")
+        a(f"DWIDTH {eADVANCE} 0")
+        a(f"BBX {eW} {eH} 0 {eASCENT-1}")   # top row at y=eASCENT-1 above baseline
         a("BITMAP")
-        for row in G[cp]:
+        for row in scale_glyph(G[cp], SCALE):
             a(row_to_hex(row))
         a("ENDCHAR")
     a("ENDFONT")
@@ -189,15 +219,15 @@ def build_bdf():
 def main():
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("Botis4x6.bdf")
     out.write_text(build_bdf())
-    # sanity: every codepoint is present exactly once, all rows 4 wide
+    # sanity: every codepoint is present exactly once, all rows W wide (authored)
     assert 0x20 <= min(G) and max(G) <= 0x7E, "range"
     assert len(G) == 95, f"expected 95 printable ASCII, got {len(G)}"
     for cp, rows in G.items():
-        assert len(rows) == 6, f"U+{cp:04X}: want 6 rows"
+        assert len(rows) == H, f"U+{cp:04X}: want {H} rows"
         for r in rows:
             assert len(r) == W and set(r) <= {'.', '#'}, f"U+{cp:04X}: bad row {r!r}"
-    print(f"wrote {out}: {len(G)} glyphs, {W}x{H}, advance {ADVANCE}, "
-          f"ascent {ASCENT} descent {DESCENT}")
+    print(f"wrote {out}: {len(G)} glyphs, {eW}x{eH} (authored {W}x{H}, scale {SCALE}), "
+          f"advance {eADVANCE}, ascent {eASCENT} descent {eDESCENT}")
 
 
 if __name__ == "__main__":

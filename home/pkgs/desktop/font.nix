@@ -42,11 +42,14 @@ let
   # DOS VGA pair, and fontconfig has only loose 8px IBM CGA faces), and the
   # user explicitly overrode the "do not invent a font" rule for this face — so
   # every pixel of every glyph is authored by hand in build-4x6.py. It is a
-  # pure bitmap (BDF), so it renders blocky at its native 6px — the point.
-  # Grid 4x6, baseline row 4, advance 5, all glyphs same width. Not wired to
-  # the live desktop font (that stays the DOS VGA pair); it is shipped as a
-  # selectable face like the two DOS ones. Read the script docstring for the
-  # grid and metrics before touching it.
+  # pure bitmap (BDF), so it renders blocky at its native size — the point.
+  # Authored grid 4x6, baseline row 4, advance 5; build-4x6.py SCALE=2 emits the
+  # face as 8x12 (ascent 10, descent 2, advance 10) so its native cell renders
+  # as tall as More Perfect at the desktop 15px default (a fixed bitmap is
+  # non-scalable, so the authored size IS the only thing that sets its height).
+  # Not wired to the live desktop font (that stays the DOS VGA pair); it is
+  # shipped as a selectable face like the two DOS ones. Read the script
+  # docstring for the grid and metrics before touching it.
   botis4x6 = pkgs.runCommand "botis-4x6" {
     nativeBuildInputs = [ pkgs.python3 ];
   } ''
@@ -106,10 +109,10 @@ in
   home.file.".local/share/fonts/PerfectDOSVGA437.ttf".source =
     "${perfectDOSVGA437}/share/fonts/truetype/PerfectDOSVGA437.ttf";
 
-  # The third, hand-authored pixel face — a 4-wide blocky bitmap (BDF). Not the
-  # live desktop font; shipped as a selectable face like the two DOS ones, with
-  # its own fontconfig rule below. It is NOT in nixpkgs and never will be — the
-  # whole point is that it is invented here.
+  # The third, hand-authored pixel face — a 4-wide blocky bitmap (BDF, emitted
+  # at 2x as 8x12). Not the live desktop font; shipped as a selectable face like
+  # the two DOS ones, with its own fontconfig rule below. It is NOT in nixpkgs
+  # and never will be — the whole point is that it is invented here.
   home.file.".local/share/fonts/Botis4x6.bdf".source =
     "${botis4x6}/share/fonts/Botis4x6.bdf";
 
@@ -166,7 +169,7 @@ in
 
   # Botis 4x6 is a single bitmap face too, so it gets the same guard: pin any
   # request for it to upright regular and kill synthetic emboldening, so the
-  # 6px bitmap is never faux-bolded/obliqued into a smear.
+  # 12px bitmap is never faux-bolded/obliqued into a smear.
   xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
