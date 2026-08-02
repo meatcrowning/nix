@@ -12,6 +12,7 @@
 #include <hyprutils/os/FileDescriptor.hpp>
 
 #include <pango/pangocairo.h>
+#include <fontconfig/fontconfig.h> // FcInitReinitialize — see vtbRefreshFontMap
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cmath>
@@ -437,6 +438,23 @@ void CVtbDeco::draw(PHLMONITOR pMonitor, const float& a) {
 }
 
 // ---- text rendering -------------------------------------------------------
+
+// Drop the process-global PangoCairo default font map so the NEXT titlebar
+// draw rebuilds it against a freshly-read fontconfig. Pango caches the default
+// fcfontmap (and the FcConfig behind it) for the process lifetime, so a font
+// installed after the compositor started — a new pixel face picked in Settings,
+// then `fc-cache -f` — is otherwise invisible to the bars until relogin.
+// Proven offscreen: `fc-cache -f` alone does nothing to a running process, and
+// FcInitReinitialize() alone is not enough either — only resetting the pango
+// default map picks the new family up. Called from PLUGIN_INIT, so every plugin
+// hot-swap (`sudo rebuild-top && hyprctl reload`) also refreshes the font DB.
+// Safe live: existing PangoLayouts are created fresh per draw (renderStackedTex
+// builds its own), so nothing holds a stale map across the reset — new draws
+// take the new default, anyone still holding the old one keeps it refcounted.
+void vtbRefreshFontMap() {
+    FcInitReinitialize();
+    pango_cairo_font_map_set_default(nullptr);
+}
 
 // A string as a COLUMN of upright letters ("claude" -> c/l/a/u/d/e reading
 // top-down): every UTF-8 codepoint on its own pango line, centered, with

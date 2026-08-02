@@ -21,6 +21,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     wayland-server
     xkbcommon
     pangocairo
+    fontconfig
 )
 target_link_libraries(hyprvtb PRIVATE rt PkgConfig::deps)
 
