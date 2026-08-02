@@ -33,9 +33,14 @@ Text {
 
     // Match kitty's line packing. The font's line box is exactly 1 em, but Qt
     // rounds ascent/descent UP separately (at 15px: 11.25→12 + 3.75→4 = 16px per
-    // line), so multi-line/wrapped text leads ~1px wider than kitty's 15px cell
-    // and it compounds down a paragraph. Pin the per-line height to the pixel
-    // size (== kitty's cell) so every line sits flush like a terminal row.
-    lineHeight: Theme.fontSize
+    // line), so multi-line/wrapped text leads ~1px wider than the face's own
+    // cell and it compounds down a paragraph. Pin the per-line height to that
+    // cell so every line sits flush like a terminal row.
+    //
+    // The cell is Theme.lineHeight, MEASURED off the live face — not
+    // Theme.fontSize. For the DOS faces the two are the same 15px; for Botis
+    // 4x6 the cell is 12px at that size, and pinning 15 here padded every line
+    // in the panel with 3px of leading it did not ask for.
+    lineHeight: Theme.lineHeight
     lineHeightMode: Text.FixedHeight
 }

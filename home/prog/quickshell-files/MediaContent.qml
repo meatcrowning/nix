@@ -1312,7 +1312,7 @@ Item {
                     // A wrapped line is N font cells tall and nothing more —
                     // PixelText pins its line height to the cell (docs/DESIGN.md
                     // 2.1), so this is kitty-tight at any font size.
-                    height: Math.max(Theme.fontSize, lineText.implicitHeight)
+                    height: Math.max(Theme.lineHeight, lineText.implicitHeight)
 
                     PixelText {
                         id: lineText

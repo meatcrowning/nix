@@ -3,6 +3,8 @@ import Quickshell
 import QtQuick
 
 Singleton {
+    id: root
+
     // Everything uses the same pixel font kitty uses. Font, panel geometry and
     // window-chrome sizes are read from SettingsStore (the Settings program's
     // on-disk model) rather than hardcoded here, so editing them in Settings
@@ -31,6 +33,22 @@ Singleton {
     // See PixelText.qml.
     readonly property int fontSize: SettingsStore.d.fontSize
     readonly property int clockSize: SettingsStore.d.fontSize   // same size as the rest of the panel
+
+    // The height of ONE text row in the LIVE face — measured, never assumed to
+    // be `fontSize`. `fontSize` is the em size we ask for; the cell it actually
+    // produces is the face's own ascent+descent, and the two coincide only for
+    // the two DOS faces (11 + 4 = 15 at pixelSize 15, measured). Botis 4x6 is a
+    // 4x6 grid, so at that same 15px it draws a 10 + 2 = 12px cell — and every
+    // row pinned to 15 then carried 3px of dead leading under its text, i.e.
+    // the inter-row gap docs/DESIGN.md 2.1 forbids outright, on every label in
+    // the panel at once. Anything that means "one text row" binds THIS; only an
+    // actual font size binds `fontSize`. Rebinds live with the face, like the
+    // rest of this file.
+    readonly property FontMetrics metrics: FontMetrics {
+        font.family: root.font
+        font.pixelSize: root.fontSize
+    }
+    readonly property int lineHeight: Math.max(1, Math.round(metrics.height))
 
     // Panel geometry (logical px)
     readonly property int barWidth: SettingsStore.d.barWidth
