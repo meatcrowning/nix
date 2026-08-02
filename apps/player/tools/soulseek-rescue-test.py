@@ -16,6 +16,7 @@ importlib because its filename (soulseek-missing.py) is not a valid identifier.
 
 import importlib.util
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -444,6 +445,162 @@ def test_reconcile_orphaned_queued():
           state["SPOTID-LANDED"]["status"] == "have")
     check("an entry with no work-list row is left alone",
           "SPOTID-GONE" in state and state["SPOTID-GONE"]["status"] == "queued")
+
+
+def test_stalled_transfer():
+    print("stalled_transfer: queued-behind-a-congested-peer detection")
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    huge = {"state": "Queued, Remotely", "placeInQueue": 45603}
+    check("a huge queue position is stalled",
+          S.stalled_transfer(huge, now, 1000, 24))
+    small = {"state": "Queued, Remotely", "placeInQueue": 5,
+             "enqueuedAt": "2026-08-01T00:01:00.000+00:00"}
+    check("a short queue just queued is not stalled",
+          not S.stalled_transfer(small, now, 1000, 24))
+    old = {"state": "Queued, Remotely", "placeInQueue": 0,
+           "enqueuedAt": "2026-07-30T00:00:00.000+00:00"}
+    check("a place-0 transfer stuck past the time bar is stalled",
+          S.stalled_transfer(old, now, 1000, 24))
+    fresh = {"state": "Queued, Remotely", "placeInQueue": 0,
+             "enqueuedAt": "2026-07-31T23:00:00.000+00:00"}
+    check("a place-0 transfer queued inside the time bar is not stalled",
+          not S.stalled_transfer(fresh, now, 1000, 24))
+    naive_old = {"state": "Queued, Remotely", "placeInQueue": 0,
+                 "enqueuedAt": "2026-07-30T00:00:00.000000"}  # no tz offset
+    check("a naive (UTC) timestamp past the bar is still stalled",
+          S.stalled_transfer(naive_old, now, 1000, 24))
+    check("an in-progress transfer is never stalled",
+          not S.stalled_transfer(
+              {"state": "InProgress", "placeInQueue": 40000, "filename": "x"}, now, 1000, 24))
+    check("a succeeded transfer is never stalled",
+          not S.stalled_transfer(
+              {"state": "Completed, Succeeded", "placeInQueue": 40000, "filename": "x"}, now, 1000, 24))
+    check("a failed terminal is never stalled",
+          not S.stalled_transfer(
+              {"state": "Completed, Rejected", "placeInQueue": 40000, "filename": "x"}, now, 1000, 24))
+
+
+def test_rescue_stalled_cancels_and_resources():
+    print("rescue_stalled: re-sources a transfer stuck behind a congested peer")
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": queued("SPOTID00001", "congested", REJECTED_FILENAME)}
+    rescued = set()
+    avoid = {}
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    dl = dl_response({"username": "congested", "filename": REJECTED_FILENAME,
+                      "state": "Queued, Remotely", "placeInQueue": 45603,
+                      "id": "stall-1"})
+    fake_http, saved = clear_state()
+    orig = S.http
+    S.http = fake_http
+    try:
+        blocked, n, rs_keys = S.rescue_stalled(rows, state, rescued, avoid, dl, now,
+                                      "http://x", "k", dry_run=False,
+                                      place_limit=1000, stall_hours=24)
+    finally:
+        S.http = orig
+    check("blocks the congested peer", blocked == {"congested"})
+    check("re-sources the track", n == 1)
+    check("queued marker dropped -> track wanted", "SPOTID00001" not in state)
+    check("congested peer remembered per-track",
+          avoid.get("SPOTID00001") == {"congested"})
+    check("transfer id remembered", "stall-1" in rescued)
+    check("re-sourced track key returned",
+          rs_keys == {"SPOTID00001"})
+    deletes = [u for m, u in saved["calls"] if m == "DELETE"]
+    check("cancels the frozen transfer with ?remove=true",
+          len(deletes) == 1 and deletes[0].endswith("?remove=true"))
+
+
+def test_rescue_stalled_dry_run_no_mutation():
+    print("rescue_stalled: --dry-run mutates nothing")
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": queued("SPOTID00001", "congested", REJECTED_FILENAME)}
+    rescued = set()
+    avoid = {}
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    dl = dl_response({"username": "congested", "filename": REJECTED_FILENAME,
+                      "state": "Queued, Remotely", "placeInQueue": 45603,
+                      "id": "stall-d1"})
+    fake_http, saved = clear_state()
+    orig = S.http
+    S.http = fake_http
+    try:
+        blocked, n, _rs = S.rescue_stalled(rows, state, rescued, avoid, dl, now,
+                                      "http://x", "k", dry_run=True,
+                                      place_limit=1000, stall_hours=24)
+    finally:
+        S.http = orig
+    check("reports the re-source it would do", n == 1)
+    check("queued marker preserved in a preview", "SPOTID00001" in state)
+    check("no avoid recorded in a preview", avoid == {})
+    check("no DELETE in a preview", saved.get("calls", []) == [])
+    check("peer still blocked for the preview re-search", blocked == {"congested"})
+
+
+def test_rescue_stalled_dedup_no_loop():
+    print("rescue_stalled: an already-handled stall is not re-sourced")
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": queued("SPOTID00001", "congested", REJECTED_FILENAME)}
+    rescued = {"stall-1"}  # already acted on
+    avoid = {}
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    dl = dl_response({"username": "congested", "filename": REJECTED_FILENAME,
+                      "state": "Queued, Remotely", "placeInQueue": 45603,
+                      "id": "stall-1"})
+    blocked, n, _rs = S.rescue_stalled(rows, state, rescued, avoid, dl, now,
+                                  "http://x", "k", dry_run=False,
+                                  place_limit=1000, stall_hours=24)
+    check("no re-source for an already-handled transfer", n == 0 and blocked == set())
+    check("track untouched", state["SPOTID00001"]["status"] == "queued")
+    check("no peer added to avoid", avoid == {})
+
+
+def test_rescue_stalled_unrelated_unaffected():
+    print("rescue_stalled: a stalled transfer for an unknown song touches nothing")
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": queued("SPOTID00001", "goodpeer", GOOD_FILENAME)}
+    rescued = set()
+    avoid = {}
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    dl = dl_response({"username": "stranger", "filename": "z\\\\Totally Other - Song.mp3",
+                      "state": "Queued, Remotely", "placeInQueue": 45603,
+                      "id": "stall-99"})
+    blocked, n, _rs = S.rescue_stalled(rows, state, rescued, avoid, dl, now,
+                                  "http://x", "k", dry_run=False,
+                                  place_limit=1000, stall_hours=24)
+    check("blocks nobody", blocked == set() and n == 0)
+    check("track stays queued", state["SPOTID00001"]["status"] == "queued")
+    check("nothing recorded", avoid == {} and rescued == set())
+
+
+def test_stall_avoid_persistence_roundtrip(tmp_path):
+    print("load_stall_avoid / save_stall_avoid roundtrip")
+    p = tmp_path / "soulseek-stall-avoid.json"
+    avoid = {"SPOTID00001": {"congested", "other"}}
+    S.save_stall_avoid(str(p), avoid)
+    check("roundtrip survives", S.load_stall_avoid(str(p)) == avoid)
+    check("missing file loads empty",
+          S.load_stall_avoid(str(tmp_path / "nope.json")) == {})
+
+
+def test_pick_candidate_respects_stall_avoid():
+    print("pick_candidate: a persistently-avoided peer is skipped for that track")
+    art, title = TRACK["artists"], TRACK["title"]
+    resp = {"username": "congested",
+            "files": [{"filename": f"m\\\\{art}\\\\01 {title}.mp3",
+                       "length": 213, "bitRate": 320}]}
+    resp_good = {"username": "goodpeer",
+                 "files": [{"filename": f"f\\\\{art}\\\\02 {title}.flac",
+                            "length": 215, "bitRate": 0}]}
+    sid = TRACK["spotify_id"]
+    avoid = {"SPOTID00001": {"congested"}}
+    best = S.pick_candidate([resp, resp_good], art, title, 213000,
+                            set(avoid.get(sid, ())), set())
+    check("avoided peer is skipped in favour of a fresh peer", best[0] == "goodpeer")
+    solo = S.pick_candidate([resp], art, title, 213000,
+                            set(avoid.get(sid, ())), set())
+    check("an avoided peer that is the only source -> no candidate", solo is None)
 
 
 def main():
