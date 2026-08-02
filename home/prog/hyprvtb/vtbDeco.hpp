@@ -450,6 +450,12 @@ class CVtbDeco : public IHyprWindowDecoration {
 // RENDER_PRE_WINDOWS hook, before the shade bars.
 void vtbRenderShadowLayer(PHLMONITOR pMonitor);
 
+// Reset the process-global PangoCairo font map so the next titlebar draw
+// re-reads fontconfig — the only in-process way the bars pick up a font
+// installed after the compositor started. Called from PLUGIN_INIT, so a plugin
+// hot-swap doubles as a titlebar font-DB refresh. See the definition.
+void vtbRefreshFontMap();
+
 // The bottom-left hard drop shadow's per-window half: it declares the shadow's
 // reach and damages it as the window moves, but the pixels are drawn by
 // vtbRenderShadowLayer. It exists as its OWN decoration because the titlebar is

@@ -1246,6 +1246,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState = makeUnique<SGlobalState>();
     vtbLoadGeometry();
 
+    // Rebuild pango's font map against a fresh fontconfig read, so a font
+    // installed after the compositor started (a new pixel face picked in
+    // Settings + `fc-cache -f`) shows up on the bars — pango caches it for the
+    // process lifetime otherwise, so this hot-swap doubles as a font refresh.
+    vtbRefreshFontMap();
+
     // App-button socket ($XDG_RUNTIME_DIR/hyprvtb-buttons.sock): client apps
     // register the inner titlebar column's buttons here. All I/O on its own
     // thread; see vtbIpc.hpp for the protocol.
@@ -1622,7 +1628,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.97"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.98"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
