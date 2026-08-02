@@ -392,6 +392,42 @@ Window {
         Settings.set("needsOrder", o);
     }
 
+    // ---- drag-to-reorder ACROSS the NEEDS YOU content — [his ask, 2026-08-01] ----
+    // *"i should be able to drag any subheading from any heading to any place
+    // (full cross-section free-drag), not just reorder within a section or the
+    // top-level bands."* The two orders above only move like-with-like: decisions
+    // among decisions, bands among bands. This one is the CROSS-section one — the
+    // NEEDS YOU sub-blocks (each decision, and the to-do area as a whole) share
+    // ONE flat display order, so a decision can be dropped below the to-do area
+    // and the to-do area lifted up among the decisions. Same rule as every other
+    // drag on this page: it is a DISPLAY order in state.json, `board.md` is never
+    // rewritten (`guide/drawing.md`), and a stale or hand-edited value cannot drop
+    // a block — `applyDisplayOrder` keeps any bkey the saved list does not mention
+    // in its default position, so a decision just added is drawn, never lost.
+    //
+    // The to-do AREA moves as one block (its master `to do` band is the grip);
+    // the tag groups inside it keep their own order and their own folds. Whether
+    // each tag group should also be independently placeable among the decisions is
+    // a further step left for his call — see the completion note.
+    property var needsBlockOrder: []
+    readonly property var needsBlocks: {
+        var out = [];
+        var nd = win.needs;
+        for (var i = 0; i < nd.length; i++)
+            out.push({ kind: "decision",
+                       bkey: "dec:" + String(nd[i].key),
+                       dec: nd[i] });
+        if (win.todo.length > 0)
+            out.push({ kind: "todoarea", bkey: "todoarea" });
+        return win.applyDisplayOrder(out, win.needsBlockOrder, "bkey");
+    }
+    function setNeedsBlockOrder(keys) {
+        var o = [];
+        for (var i = 0; i < keys.length; i++) o.push(String(keys[i]));
+        win.needsBlockOrder = o;
+        Settings.set("needsBlockOrder", o);
+    }
+
     // ---- ...and where his caret is, for the reload that CANNOT keep a row ----
     // A row appearing or leaving changes the key list, so that one list is built
     // again and the box he was typing in goes with it. One key and one offset,
@@ -439,6 +475,15 @@ Window {
         // any key the saved list does not mention.
         var no = Settings.get("needsOrder", null);
         win.needsOrder = Array.isArray(no) ? no.map(String) : [];
+        // The saved cross-section order of the NEEDS YOU sub-blocks (decisions +
+        // the to-do area). `applyDisplayOrder` keeps any block the saved list
+        // omits, so a stale value cannot hide one. Iterated by `.length` rather
+        // than `Array.isArray`, which is false for the QVariant list `Settings.get`
+        // returns — the same reason `normalizeOrder` iterates it directly.
+        var nb = Settings.get("needsBlockOrder", null);
+        var nbo = [];
+        if (nb) for (var bi = 0; bi < nb.length; bi++) nbo.push(String(nb[bi]));
+        win.needsBlockOrder = nbo;
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
     }
@@ -1041,33 +1086,39 @@ Component {
         // its own height and the sections below it lay out by it (2026-08-01).
         height: implicitHeight
 
-        //: drag-to-reorder a decision among its NEEDS YOU siblings. This used to
-        //  live on `win`; it moved here with the section (2026-08-01) so the grip
-        //  can reach the section's OWN `needsRepeater` — the page can no longer
-        //  name it, now that the section is a delegate. Same target math as the
-        //  section bands: resting centre + displacement, count how many siblings
-        //  centre above it. The new order is a DISPLAY order saved in state.json
-        //  ([his answer, 2026-08-01]), never a rewrite of board.md.
-        function reorderDecision(from, dy) {
-            var n = win.needs.length;
-            if (n < 2 || from < 0 || from >= n)
+        //: drag-to-reorder a NEEDS YOU sub-block to any position among the others
+        //  — a decision, or the to-do area as a whole ([his ask, 2026-08-01], full
+        //  cross-section free-drag; see `win.needsBlocks`). It lives here, not on
+        //  `win`, so the grip can reach the section's OWN `blockRepeater` — the
+        //  page can no longer name it, now that the section is a delegate. Same
+        //  target math as the section bands: the dragged block's resting centre +
+        //  displacement, count how many other blocks centre above it. The new
+        //  order is a DISPLAY order saved in state.json ([his answer, 2026-08-01]),
+        //  never a rewrite of board.md.
+        function reorderBlock(bkey, dy) {
+            var blocks = win.needsBlocks;
+            var n = blocks.length;
+            var from = -1;
+            for (var i = 0; i < n; i++)
+                if (blocks[i].bkey === bkey) { from = i; break; }
+            if (n < 2 || from < 0)
                 return;
             var center = function (i) {
-                var it = needsRepeater.itemAt(i);
+                var it = blockRepeater.itemAt(i);
                 return it ? it.y + it.height / 2 : 0;
             };
             var myCenter = center(from) + (dy || 0);
             var target = 0;
-            for (var i = 0; i < n; i++)
-                if (i !== from && myCenter >= center(i)) target++;
+            for (var k = 0; k < n; k++)
+                if (k !== from && myCenter >= center(k)) target++;
             if (target === from)
                 return;
             var keys = [];
             for (var j = 0; j < n; j++)
-                keys.push(String(win.needs[j].key));
-            var k = keys.splice(from, 1)[0];
-            keys.splice(target, 0, k);
-            win.setNeedsOrder(keys);
+                keys.push(blocks[j].bkey);
+            var moved = keys.splice(from, 1)[0];
+            keys.splice(target, 0, moved);
+            win.setNeedsBlockOrder(keys);
         }
 
                 // ================================================ what needs you
@@ -1151,16 +1202,44 @@ Component {
                             }
                         }
 
-                        // Keyed on the decision's own `key`, so an agent editing the
-                        // paragraph of one question does not take the answer editor
-                        // out from under him on another (see `keysOf`).
+                        // The NEEDS YOU content is ONE flat list of sub-blocks now
+                        // ([his ask, 2026-08-01]: cross-section free-drag). Each
+                        // decision is a block, and the whole to-do area is a block,
+                        // so a drag can interleave them (`win.needsBlocks`). Keyed on
+                        // each block's stable `bkey` (`dec:<key>` / `todoarea`), for
+                        // the same reason the old decisions Repeater keyed on `key` —
+                        // an agent editing one card must not pull the answer editor
+                        // out from under him on another (see `keysOf`). The Loader
+                        // sizes to its loaded block so the Column lays them out by
+                        // their real heights, exactly as the top-level sectionsCol.
                         Repeater {
-                            id: needsRepeater
-                            model: win.keysOf(win.needs, "key")
-                            delegate: Decision {
-                                id: decCard
+                            id: blockRepeater
+                            model: win.keysOf(win.needsBlocks, "bkey")
+                            delegate: Loader {
+                                id: blockLoader
                                 required property int index
-                                readonly property var modelData: win.needs[decCard.index]
+                                readonly property var blockData: win.needsBlocks[index]
+                                width: needsCol.width
+                                height: item ? item.height : 0
+                                sourceComponent: blockData
+                                    ? (blockData.kind === "decision"
+                                       ? decisionBlockComp : todoAreaComp)
+                                    : null
+                            }
+                        }
+
+                        // One decision as a draggable block. Its data comes from the
+                        // Loader (`parent.blockData`); the grip's displacement goes to
+                        // `reorderBlock`, which places it anywhere among the blocks and
+                        // saves the display order to state.json (board.md left intact).
+                        Component {
+                            id: decisionBlockComp
+                            Decision {
+                                id: decCard
+                                readonly property var blockData:
+                                    parent ? parent.blockData : null
+                                readonly property var modelData:
+                                    blockData ? blockData.dec : null
                                 readonly property string dkey:
                                     modelData ? String(modelData.key) : ""
                                 width: needsCol.width
@@ -1181,14 +1260,29 @@ Component {
                                 }
                                 onContextRequested: (mx, my) =>
                                     win.decisionMenu(decCard.modelData, mx, my)
-                                // drag-to-reorder among its NEEDS YOU siblings — the
-                                // grip on the title band reports the displacement and
-                                // the page computes the target and saves the display
-                                // order to state.json (board.md is left intact).
                                 onReorderRequested: (from, dy) =>
-                                    needsSectionRoot.reorderDecision(from, dy)
+                                    needsSectionRoot.reorderBlock(
+                                        decCard.blockData
+                                        ? decCard.blockData.bkey : "", dy)
                             }
                         }
+
+                        // The whole to-do area as one draggable block: its master
+                        // `to do` band is the grip (a vertical drag reorders it among
+                        // the decisions; a tap still folds). The tag groups inside
+                        // keep their own order and folds unchanged.
+                        Component {
+                            id: todoAreaComp
+                            Column {
+                                id: todoAreaRoot
+                                width: needsCol.width
+                                // Set height explicitly (like `needsSectionRoot`),
+                                // or the block Loader's `height: item.height` clamps
+                                // this Column to its initial 0 and the to-do area
+                                // renders with no height, overlapping the decisions.
+                                height: implicitHeight
+                                readonly property var blockData:
+                                    parent ? parent.blockData : null
 
                         Item { width: 1; height: win.todo.length > 0 ? 10 : 0 }
 
@@ -1208,7 +1302,12 @@ Component {
                             label: "to do"
                             collapsed: win.isCollapsed("todo")
                             fgDim: win.fgDim
+                            // The grip for the whole to-do area block: a drag
+                            // reorders it among the decisions, a tap still folds.
+                            reorderable: true
                             onToggled: win.toggleCollapsed("todo")
+                            onReorderRequested: (dy) =>
+                                needsSectionRoot.reorderBlock("todoarea", dy)
                         }
                         // ...and they are grouped by that first word — his:
                         // *"the information, completion, partial etc of a message
@@ -1652,6 +1751,8 @@ Component {
                             }
                         }
                     }
+                }
+                }
                 }
 
                 Item { width: 1; height: 18 }
