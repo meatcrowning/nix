@@ -659,7 +659,16 @@ def route_operator(text):
     # crude length stand-in for "how much context" until the classifier lands.
     if _ROUTE_MEDIUM.search(t):
         return operator_by_name("Agrippa")
-    if _ROUTE_QUICK.search(t) or len(t) <= 120:
+    # A QUESTION goes to the cheap operators; SHORTNESS IS NOT A QUESTION.
+    # `or len(t) <= 120` used to stand in for "how much context", and it sent
+    # every short WORK ORDER to Weyer — *"have another look at the panel
+    # spacing"* is 43 characters, and Weyer's flavour answers and never
+    # dispatches, so a short ask was silently answered instead of worked. That
+    # is exactly the failure this function's own bar was written against: a
+    # mis-routed Weyer answers what needed a plan, and defaulting to Solomon
+    # costs only the difference in tier. Length still decides WHICH cheap
+    # operator once something is already a question.
+    if _ROUTE_QUICK.search(t):
         return operator_by_name("Weyer" if len(t) <= 240 else "Agrippa")
     return default_operator()
 

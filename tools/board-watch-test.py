@@ -788,6 +788,21 @@ def test_summoner_fanout():
             check("...and %r reached exactly one of them" % s, len(hits) == 1,
                   str(len(hits)))
 
+        # SHORTNESS IS NOT A QUESTION. The router briefly sent everything under
+        # 120 characters to Weyer, whose flavour ANSWERS and never dispatches —
+        # so a short work order was quietly answered instead of worked, which is
+        # the exact failure `route_operator`'s own bar is written against.
+        import boardwork as bw
+        for short_order in ("have another look at the panel spacing",
+                            "the scrollbar arrows feel sluggish",
+                            "goetia's titlebar text flickers"):
+            check("a short WORK ORDER still routes to the planner: %r"
+                  % short_order[:34],
+                  bw.route_operator(short_order).flavour == "plan",
+                  bw.route_operator(short_order).name)
+        check("...while a short QUESTION still reaches the cheap operator",
+              bw.route_operator("what time is it").name == "Weyer")
+
         r.clear()
         r.note("something on its own")
         r.run(spawn=stub, BOARD_MAX_SUMMONERS=4)
