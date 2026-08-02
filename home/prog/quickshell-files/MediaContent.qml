@@ -1022,10 +1022,20 @@ Item {
         interval: ViewMode.ms(ViewMode.slideMs + 20)
         onTriggered: root.drawerOut = false
     }
+    // Re-centre the playing track once the drawer's glide settles, so it sits
+    // in the middle the moment you open it too — the advance-time centring on
+    // the list above only fires when the track changes, not on opening. The
+    // glide is the drawer's only real animation, so this must outlast it the
+    // same way closeHold does.
+    Timer {
+        id: centerOnOpen
+        interval: ViewMode.ms(ViewMode.slideMs + 20)
+        onTriggered: queueList.positionViewAtIndex(Media.queueIndex, ListView.Center)
+    }
     Connections {
         target: Media
         function onQueueOpenChanged() {
-            if (Media.queueOpen) { closeHold.stop(); root.drawerOut = true; }
+            if (Media.queueOpen) { closeHold.stop(); root.drawerOut = true; centerOnOpen.restart(); }
             else closeHold.restart();
         }
     }
@@ -1094,11 +1104,13 @@ Item {
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             model: Media.queue
-            // Keep the playing track in view as it advances — the drawer is
-            // most useful for "what is next", which is the row under it.
+            // Keep the playing track CENTRED as it advances, as the lyrics
+            // column does — the tracks that played sit above it, what is next
+            // below, so the drawer reads as a position in the queue rather
+            // than a tail of one.
             currentIndex: Media.queueIndex
             highlightFollowsCurrentItem: true
-            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Center)
 
             delegate: Item {
                 id: qrow
