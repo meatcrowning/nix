@@ -1249,11 +1249,20 @@ static CRegion vtbWindowFrames(PHLMONITOR pMonitor) {
 // rule already says a shadow never covers a window, so the only pixels it can
 // reach are desktop either way.
 //
-// False when there is nothing to draw: no animation, fully set down, or the
+// Reports the composite's shadow both mid-roll AND at rest: a window that rests
+// fully rolled up casts the same hard bottom-left drop shadow a normal window
+// does (DESIGN §4 — "the window's, not its chrome"). The offset is the constant
+// resting one throughout, so the roll's set-down beat lands the composite on
+// exactly the rest shadow with no one-frame pop (the shadow used to collapse to
+// nothing as it set down, then a resting bar had no shadow at all).
+//
+// False when there is nothing to draw: neither rolling nor rolled up, or the
 // lone bar is mid-fade (open fade-in / close fade-out), where the composite is
 // translucent and a full-strength shadow in a flat union can't follow it.
 bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
-    if (!pMonitor || m_rollAnim == ROLL_NONE || m_bBarFading || m_bBarFadingIn)
+    if (!pMonitor || m_bBarFading || m_bBarFadingIn)
+        return false;
+    if (m_rollAnim == ROLL_NONE && !m_bRolledUp)
         return false;
 
     const auto PWINDOW = m_pWindow.lock();
@@ -1262,14 +1271,13 @@ bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
     if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
         return false;
 
-    float slideT = 0.f, downT = 0.f;
-    if (!rollAnimSubProgress(slideT, downT))
-        return false;
+    // Rest state: content fully tucked behind the bar, bar set down. An in-flight
+    // animation overrides both.
+    float slideT = 1.f, downT = 1.f;
+    rollAnimSubProgress(slideT, downT);
 
     const double SCALE     = pMonitor->m_scale;
-    const double shadowOff = VTB_SHADOW_SIZE * (1.f - downT) * SCALE;
-    if (shadowOff <= 0.5)
-        return false;
+    const double shadowOff = VTB_SHADOW_SIZE * SCALE;
 
     // Same bar box renderBar draws into (effectiveBoxGlobal already carries the
     // set-down drop), in this monitor's device pixels.
@@ -3388,10 +3396,11 @@ bool CVtbDeco::pushRolledIntoBand(double reserve, bool edgeRight) {
 }
 
 // Eased sub-progress for the two beats. slideT: 0 = content fully out/visible,
-// 1 = tucked entirely behind the bar. downT: 0 = raised with full shadow, 1 =
-// set down with no shadow. Roll-out runs the beats in the reverse order (lift
-// the bar / re-grow the shadow first, then slide the content back out). Returns
-// false when no animation is in flight.
+// 1 = tucked entirely behind the bar. downT: 0 = bar raised, 1 = bar set down
+// (a shadow-offset lower); the drop shadow itself is constant across both beats
+// and at rest (rollShadowBoxDev), so it never collapses under the setting-down
+// bar. Roll-out runs the beats in the reverse order (lift the bar first, then
+// slide the content back out). Returns false when no animation is in flight.
 bool CVtbDeco::rollAnimSubProgress(float& slideT, float& downT) {
     if (m_rollAnim == ROLL_NONE)
         return false;
@@ -4029,10 +4038,11 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
         if (!DECORATED || Hl::isFullscreen(w))
             continue;
 
-        // No shadow on our custom-maximized windows, nor on a rolled-up one
-        // (the sibling titlebar knows). isRolledUp() stays true across the whole
-        // roll-up/roll-out animation too — a window mid-roll contributes the
-        // composite's shadow instead, added below.
+        // No shadow on our custom-maximized windows, and none from THIS loop for
+        // a rolled-up one (the sibling titlebar knows). isRolledUp() stays true
+        // across the whole roll-up/roll-out animation too — a window mid-roll or
+        // resting rolled up contributes the composite's shadow instead, from the
+        // rollShadowBoxDev pass below.
         bool skip = false;
         for (auto& b : g_pGlobalState->bars) {
             if (b && b->getOwner() == w) {
@@ -4052,11 +4062,11 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
         shadow.add(CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round());
     }
 
-    // Windows mid-roll are hidden, so the loop above skipped them entirely.
-    // Their shadow is the animating composite's, and it belongs in THIS union —
-    // painting it alongside the composite instead put a second 0.6 black over
-    // any shadow it crossed (~0.84 where they met) and lit up the neighbouring
-    // window's edge until the animation ended. See rollShadowBoxDev.
+    // Rolled-up windows (mid-roll or at rest) are hidden, so the loop above
+    // skipped them entirely. Their shadow is the composite's, and it belongs in
+    // THIS union — painting it alongside the composite instead put a second 0.6
+    // black over any shadow it crossed (~0.84 where they met) and lit up the
+    // neighbouring window's edge until the animation ended. See rollShadowBoxDev.
     for (auto& b : g_pGlobalState->bars) {
         CBox rollShadow;
         if (b && b->rollShadowBoxDev(pMonitor, rollShadow))
