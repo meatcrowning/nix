@@ -241,6 +241,11 @@ class Rig:
         # laptop while passing on the desktop. Pretend to be `top` by default;
         # the affinity section passes its own value and keeps it.
         e.setdefault("BOARD_WATCH_HOST", "top")
+        # COALESCING OFF by default, for the same reason the host is pinned:
+        # every step here queues a sentence and expects the very next run to
+        # work it, and the real 75-second hold would add 75 seconds to each of
+        # them. `test_coalescing` passes its own values and keeps them.
+        e.setdefault("BOARD_COALESCE_QUIET", "0")
         e.update(BOARD_WATCH_BOARD=self.board, BOARD_WATCH_STATE=self.state,
                  BOARD_WATCH_LOG=self.log, BOARD_WATCH_GATE=gate,
                  BOARD_WATCH_REPO=REPO,
@@ -798,6 +803,83 @@ def test_summoner_fanout():
               and "one of two" in open(os.path.join(d, "prompt-" + one[0])).read()
               and "two of two" in open(os.path.join(d, "prompt-" + one[0])).read(),
               str(one))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_coalescing():
+    """A BURST IS ONE PLANNING PROBLEM.
+
+    [his, 2026-08-01] *"being able to send a multitude of requests in either a
+    single or multitude of prompts"* — how he split his thinking into box-fulls
+    is not how the work divides, so the tick waits out the rest of a burst and
+    hands the whole of it to one summoner rather than planning the first
+    sentence while he is still typing the second. Bounded twice: by the quiet
+    window, and by a hard ceiling on the OLDEST item so a hold can never become
+    a stall. Nothing is ever dropped — the queue is left exactly as it was.
+    """
+    print("the coalescing window - a burst is planned as one batch")
+    d = tempfile.mkdtemp(prefix="board-watch-coal-")
+    try:
+        r = Rig(d, EMPTY_NEEDS)
+        stub = ('cat > "%s/prompt-$BOARD_WATCH_KEY"; echo "$BOARD_WATCH_KEY" >> %s'
+                % (d, r.fired))
+
+        # THE HOLD IS INSIDE THE RUN, holding the flock, rather than a return
+        # that leaves the queue full - `board-inbox.path` is level-triggered, so
+        # returning would respawn this every few hundred milliseconds for the
+        # length of the window.
+        r.note("the first half of the thought")
+        t0 = time.time()
+        r.run(spawn=stub, BOARD_COALESCE_QUIET=3, BOARD_COALESCE_MAX=600)
+        took = time.time() - t0
+        check("a just-typed sentence is waited out, not planned at once",
+              took >= 3, "%.1fs" % took)
+        check("...and the run SAYS it is holding rather than going quiet",
+              "holding" in open(r.log).read(), open(r.log).read()[-200:])
+        check("...and it is planned when the window closes, never dropped",
+              len(r.fires()) == 1 and r.queued() == [],
+              (r.fires(), r.queued()))
+
+        # A SENTENCE TYPED DURING THE HOLD JOINS THE SAME BATCH - the whole
+        # point: how he split his thinking into box-fulls is not how the work
+        # divides.
+        r.clear()
+        r.note("the first half of the thought")
+        proc = subprocess.Popen([sys.executable, WATCHER],
+                                env=r.env("open", stub,
+                                          BOARD_COALESCE_QUIET=4,
+                                          BOARD_COALESCE_MAX=600),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        time.sleep(1.5)
+        r.note("and the second half")
+        proc.communicate(timeout=120)
+        keys = r.fires()
+        check("a sentence typed DURING the hold joins the same batch",
+              len(keys) == 1, str(keys))
+        body = open(os.path.join(d, "prompt-" + keys[0])).read() if keys else ""
+        check("...so both halves reach ONE summoner, not two",
+              "the first half of the thought" in body
+              and "and the second half" in body, body[:120])
+        check("...and the queue is empty afterwards", r.queued() == [], r.queued())
+
+        # THE CEILING: a queue whose oldest item is past the hard bound is
+        # planned now, however recently he typed the newest.
+        r.clear()
+        r.note("typed a while ago")
+        for msg in r.state_home(lambda: ba.pending()):
+            rec = json.load(open(msg["file"]))
+            rec["sent"] = time.time() - 3600
+            with open(msg["file"], "w") as f:
+                json.dump(rec, f)
+        r.note("typed just now")
+        t0 = time.time()
+        r.run(spawn=stub, BOARD_COALESCE_QUIET=600, BOARD_COALESCE_MAX=60)
+        took = time.time() - t0
+        check("the hard ceiling plans the batch even mid-burst",
+              len(r.fires()) == 1 and took < 30, (r.fires(), "%.1fs" % took))
+        check("...and it took the WHOLE queue with it", r.queued() == [],
+              r.queued())
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -1678,6 +1760,7 @@ def main():
     test_a_rebuild_kills_the_tick()
     test_summoner_fanout()
     test_cancelled_summoner()
+    test_coalescing()
     test_the_loop()
     test_host_affinity()
     test_stamped_answer_on_first_sight()

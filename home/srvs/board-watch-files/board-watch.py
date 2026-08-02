@@ -1036,6 +1036,46 @@ def mark_gate_hold():
     _held_by_gate = True
 
 
+#: How long the queue must be QUIET before a burst is planned as one batch.
+#:
+#: [his, 2026-08-01] *"being able to send a multitude of requests in either a
+#: single or multitude of prompts"* — how he broke his thinking into box-fulls
+#: is not how the work divides, so a sentence typed 40 seconds after another
+#: must not be planned by a second summoner that cannot see the first. The
+#: whole batch reaches ONE planner (`boardwork.route_groups` groups it by
+#: operator) and is grouped by file set there.
+#:
+#: The cost is that a sentence waits up to this long before anything starts.
+#: The box's footer promises only *"in the inbox - ctrl+z takes it back until a
+#: summoner acts"*, so nothing drawn becomes a lie — and Ctrl+Z gets a WIDER
+#: window, not a narrower one.
+COALESCE_QUIET_S = float(os.environ.get("BOARD_COALESCE_QUIET", "75"))
+
+#: The hard ceiling on that wait, measured from the OLDEST queued item, so a
+#: steady typist is still planned promptly and a hold can never become a stall.
+COALESCE_MAX_HOLD_S = float(os.environ.get("BOARD_COALESCE_MAX", "300"))
+
+
+def coalescing(waiting, now=None):
+    """Seconds to keep waiting for the rest of the burst, or 0 to plan it now.
+
+    Zero whenever the newest item has been sitting for `COALESCE_QUIET_S`, or
+    the oldest for `COALESCE_MAX_HOLD_S`, or anything in the queue carries no
+    timestamp at all — an unstamped item is one this cannot reason about, and
+    the safe answer for a message of his is to work it, not to hold it.
+    """
+    now = time.time() if now is None else now
+    stamps = [float(m.get("sent") or 0) for m in waiting]
+    if not stamps or not all(stamps):
+        return 0.0
+    if now - min(stamps) >= COALESCE_MAX_HOLD_S:
+        return 0.0
+    quiet_for = now - max(stamps)
+    if quiet_for >= COALESCE_QUIET_S:
+        return 0.0
+    return max(0.0, COALESCE_QUIET_S - quiet_for)
+
+
 def drain_queue():
     """Work whatever he typed into the box, if the gate lets us.
 
@@ -1056,6 +1096,33 @@ def drain_queue():
         return False
     if not waiting:
         return False
+    # A BURST IS ONE PLANNING PROBLEM. Wait out the rest of what he is typing
+    # before planning any of it, so two sentences a minute apart reach ONE
+    # summoner that can group them by file set, instead of two that each
+    # dispatch a minister into the same files.
+    #
+    # It SLEEPS here rather than returning and being re-triggered, and that is
+    # deliberate twice over: `board-inbox.path` is level-triggered, so returning
+    # with the queue still full is a respawn every few hundred milliseconds for
+    # the length of the hold — and this run holds the flock, so every trigger
+    # arriving meanwhile is already a no-op. It is the same shape as waiting on
+    # a summoner (up to 15 min, `ORCH_TIMEOUT_S`) and much shorter. The queue is
+    # re-read after each sleep, so a sentence typed DURING the hold joins the
+    # same batch and pushes the window out, up to the hard ceiling.
+    while True:
+        hold = coalescing(waiting)
+        if not hold:
+            break
+        log("%d note(s) queued - holding %ds for the rest of the burst"
+            % (len(waiting), round(hold)))
+        time.sleep(hold)
+        try:
+            waiting = ba.pending()
+        except OSError as e:
+            log("could not look at the queue: %s" % e)
+            return False
+        if not waiting:     # taken by a concurrent drain - nothing to do
+            return False
     may, why = gate()
     if not may:
         _held_by_gate = True

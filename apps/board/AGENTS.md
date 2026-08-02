@@ -53,7 +53,7 @@ the write re-wrapped lines around it (`tools/board-watch-test.py` catches that).
 
 ## Where the rest of this guide is
 
-This file is the map. **The detail lives in five files under `guide/`, and you
+This file is the map. **The detail lives in six files under `guide/`, and you
 read the one your change lands in — not all of them.** It was one 2,598-line
 file until 2026-07-30, which was past `Read`'s 2,000-line cap: an agent that
 opened it paid ~44k tokens *and* silently got a truncated guide. Every heading
@@ -83,10 +83,11 @@ swallow whole for one change.
 
 ### [`guide/orchestrator.md`](guide/orchestrator.md) — the ORCHESTRATOR half (`boardwork.py`) — spawning, the cap, the handoff
 
-633 lines. Its sections:
+733 lines. Its sections:
 
 - ...and the orchestrator's half (`boardwork.py`)
   - The box at the top: this window STARTS things now
+    - The three cost levers are their own part (-> `cost.md`)
     - The concurrency cap, and what is above it
     - A NEW WORKER IS NOT THE ONLY ANSWER: handing an item to one already in those files
     - What the orchestrator and its workers are told, beyond the board
@@ -95,6 +96,14 @@ swallow whole for one change.
     - The deepseek subminister: a Claude minister OR the orchestrator delegates a chunk
     - A DISPATCH IS A START, NOT A RESULT
     - ...and the summon note GOES when the result arrives
+
+### [`guide/cost.md`](guide/cost.md) — what a RUN COSTS — the batch, the tier, the relay
+
+106 lines. Its sections:
+
+  - A BURST IS ONE PLANNING PROBLEM: the coalescing window
+  - WHICH TIER a minister runs on, per piece of work
+  - The RELAY: a minister hands the rest on rather than running long
 
 ### [`guide/cards.md`](guide/cards.md) — the TRIANGLE — what a minister's card says
 
