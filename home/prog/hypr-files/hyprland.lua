@@ -132,10 +132,13 @@ local menu        = "hyprlauncher"
 
 -- Quickshell vertical panel (bar + launcher + workspaces + tray + clock)
 hl.on("hyprland.start", function()
-    -- QS_NO_RELOAD_POPUP suppresses Quickshell's built-in top-left reload popup;
-    -- we surface reloads as our own native toasts instead (see shell.qml). The
-    -- flag is read-only from QML, so it has to be set in the environment here.
-    hl.exec_cmd("QS_NO_RELOAD_POPUP=1 qs -d")
+    -- The panel is a systemd user service (quickshell-panel, defined in
+    -- quickshell.nix) with Restart=always, so a crash, an OOM kill or a stray
+    -- `qs kill` recovers on its own in ~1s instead of leaving the desktop with
+    -- no panel or wallpaper. reset-failed clears any StartLimit state left by
+    -- the previous session's teardown before starting. QS_NO_RELOAD_POPUP (we
+    -- toast reloads ourselves — see shell.qml) is set in the service's env.
+    hl.exec_cmd("sh -c 'systemctl --user reset-failed quickshell-panel.service 2>/dev/null; exec systemctl --user start quickshell-panel.service'")
     -- Idle daemon: locks after 5 min / before sleep, blanks the screen.
     -- See ~/.config/hypr/hypridle.conf.
     hl.exec_cmd("hypridle")
