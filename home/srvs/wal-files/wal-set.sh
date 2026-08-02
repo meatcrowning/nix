@@ -274,9 +274,11 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     fi
 fi
 
-# ---- 6b. Cursor: tint GoogleDot-Black's white outline to the accent ----------
-# Regenerate ~/.icons/GoogleDot-Accent from the base theme, recoloured to this
-# wallpaper's accent, and setcursor it live (see cursor-recolor.sh). Cheap (~9ms)
+# ---- 6b. Cursor: outline -> accent, core -> bg -------------------------------
+# Regenerate ~/.icons/GoogleDot-<accent><bg> from the base theme, recoloured to
+# this wallpaper's accent (outline) and bg (core), and setcursor it live (see
+# cursor-recolor.sh — the core follows bg so the cursor matches the theme in
+# light mode too, not just the dark-mode near-black). Cheap (~9ms)
 # when the accent is unchanged; ~2.9s when it actually has to re-tint — and that
 # re-tint is pure ImageMagick/xcursorgen work the rest of the theme apply does
 # NOT depend on. It used to run inline right here, so a wallpaper switch to a new
@@ -289,7 +291,7 @@ fi
 #     teardown can't kill it — which is why it no longer has to run *before*
 #     step 7). cursor-recolor.sh flocks itself, so overlapping fires serialise
 #     and still converge on the last accent.
-setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "${XCURSOR_SIZE:-22}" \
+setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
     >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
 
 # ---- 6c. RGB hardware: DRAM sticks + motherboard headers on the accent -------
