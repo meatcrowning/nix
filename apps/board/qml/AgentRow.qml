@@ -266,6 +266,28 @@ Item {
     readonly property bool summoner: agent && agent.kind === "orchestrator"
     readonly property color leadTone: (running || summoner) ? fgText : fgDim
 
+    // ---- A DEEPSEEK SUBMINISTER, drawn INSET under its parent's card ----
+    // [his, follow-up to the subminister feature] a subminister gets its OWN
+    // card, and it reads as subordinate to the minister that spawned it: it is
+    // a §9.1 block that belongs to the row above it, so it is INDENTED one 8px
+    // step with a `Theme.border` hairline at the indent and its own text a step
+    // further — and it carries NO §9.1 accent gutter, because accent beside a
+    // row already means *current* and two accents say nothing. `main.py`'s
+    // `workers` interleaves each one directly under its parent; the card is
+    // otherwise an ordinary agent card, visuals unchanged (his call — follow
+    // the existing card, do not invent a look).
+    //
+    // ORPHANED — a subminister whose parent card is gone — drops the inset and
+    // draws as a plain top-level card, there being nothing above it to be
+    // subordinate to (`main.py` sets the flag). A parent with no subminister is
+    // just an ordinary card: nothing here fires for it.
+    readonly property bool orphaned: agent && agent.orphan === true
+    readonly property bool subminister: agent && agent.subminister === true
+                                        && !orphaned
+    //: §9.1's two steps off the parent card's own text (`col.x` 10): the
+    //  `border` hairline rule sits 8px in, this card's text 8px past that.
+    readonly property real subInset: subminister ? Theme.gap * 2 : 0
+
     // ---- the tick, and WHICH line carries it ----
     // His, three times over, and the LAST word wins. *"at the end of the second
     // row of an agents information, it should have an animated elipsies to show
@@ -365,6 +387,10 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.bottomMargin: 2
+        // An inset subminister's highlight starts at its subordination hairline
+        // (10 + one 8px step), so the lit region reads as the inset card and not
+        // the empty gutter to its left.
+        anchors.leftMargin: row.subminister ? 10 + Theme.gap : 0
         color: openArea.containsMouse ? Theme.highlight : "transparent"
     }
 
@@ -382,8 +408,25 @@ Item {
     Rectangle {
         width: 2
         height: parent.height - 6
+        // ...but NOT on an inset subminister: that card carries the §9.1
+        // subordination hairline below instead, and accent + hairline on one
+        // card would be the two-accents-say-nothing case the rule rules out.
         visible: (row.running || row.finished) && !row.summoner
+                 && !row.subminister
         color: row.fgAccent
+    }
+
+    // §9.1's subordination hairline: a subminister's card is a block that
+    // belongs to the minister's card above it, so it hangs a `Theme.border`
+    // rule (never accent) one 8px step in from that card's text (`col.x` 10),
+    // with this card's own text a further step (`subInset`, in `col.x` below).
+    Rectangle {
+        visible: row.subminister
+        x: 10 + Theme.gap
+        y: 3
+        width: 1
+        height: parent.height - 6
+        color: Theme.border
     }
 
     MouseArea {                          // §7.1: every row is right-clickable
@@ -469,7 +512,9 @@ Item {
 
     Column {
         id: col
-        x: 10
+        // 10 is every card's own text inset; a subminister adds §9.1's two 8px
+        // steps (`subInset`) so its text sits one step past its hairline.
+        x: 10 + row.subInset
         width: parent.width - x
 
         // ---- FIRST LINE: "<name> is <what it says it is doing>" ----

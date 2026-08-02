@@ -860,6 +860,16 @@ class Agents(QObject):
             "detail": boardagents.describe(a),
             "waiting": [m["text"] for m in boardagents.for_agent(a["id"])]
                        if a["id"] else [],
+            # A DEEPSEEK SUBMINISTER's card, drawn INSET under its parent
+            # minister's card (§9.1's subordinate block — `AgentRow.subminister`).
+            # `kind`, `parent` and `parentName` are `boardagents`' (Botis' seam:
+            # `register(parent=...)` + the dict `agents()` appends); the card is
+            # otherwise an ordinary agent card. `boardwork.cards()` leaves a
+            # subminister OUT of the flat list, so `workers` below is the one
+            # place it is interleaved back under its parent.
+            "subminister": a.get("kind") == "subminister",
+            "parentId": a.get("parent", ""),
+            "parentName": a.get("parentName", ""),
         }
 
     # ---- WHAT IT IS ACTUALLY SAYING: the tail of the worker's own log ----
@@ -1166,8 +1176,35 @@ class Agents(QObject):
 
     @Property("QVariantList", notify=changed)
     def workers(self):
-        return [c for c in self._cards
-                if c.get("kind") != boardagents.ORCHESTRATOR_KIND]
+        # The flat, birth-ordered worker cards `boardwork.cards()` owns — minus
+        # the orchestrator, who has his own section (`summoner`).
+        cards = [c for c in self._cards
+                 if c.get("kind") != boardagents.ORCHESTRATOR_KIND]
+        # ...with each deepseek subminister slotted back in DIRECTLY UNDER its
+        # parent minister, drawn inset (`AgentRow.subminister`, §9.1). A
+        # subminister is a real registered agent, so it is in the `agents()`
+        # walk (`self._rows`) — but `boardwork.cards()` deliberately keeps it
+        # out of the flat list, so this is where the hierarchy is rebuilt for
+        # the one surface that draws it. Ordered under its parent by id, which
+        # is stable across polls so a card never jumps.
+        subs = {}
+        for r in self._rows:
+            if r.get("subminister"):
+                subs.setdefault(r.get("parentId") or "", []).append(r)
+        for lst in subs.values():
+            lst.sort(key=lambda r: r.get("id") or "")
+        out = []
+        for c in cards:
+            out.append(c)
+            for s in subs.pop(c["id"], []):
+                out.append(dict(s, orphan=False))
+        # A subminister whose parent card is gone still draws — but with no
+        # card above it to be subordinate to, it drops the inset and reads as an
+        # ordinary top-level card (`orphan`, killing `AgentRow.subminister`).
+        for lst in subs.values():
+            for s in lst:
+                out.append(dict(s, orphan=True))
+        return out
 
     @Property(int, notify=changed)
     def boundMinisters(self):
