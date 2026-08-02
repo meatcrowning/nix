@@ -143,14 +143,12 @@ Item {
             // them to a TextEdit is a component-creation ERROR, not a no-op
             // (§19.1) — the same recorded exception the decision editor and
             // painter's prompt box carry.
-            font.family: Theme.font
-            font.pixelSize: Theme.fontSize
-            font.hintingPreference: Font.PreferFullHinting
+            // A whole QFont with NoAntialias pinned — NOT font.family/pixelSize
+            // and NOT `antialiasing: false`. An editable item ignores those and
+            // draws a scalable pixel font grey-fringed; only the font's style
+            // strategy reaches the rasteriser (docs/DESIGN.md §2.2).
+            font: Theme.editorFont
             renderType: Text.NativeRendering
-            // the same "no antialiasing" pin PixelText/CodeView carry (§2.2):
-            // without it the typed text renders subpixel-AA'd/fringed while
-            // every other label here is crisp hard-edged pixels.
-            antialiasing: false
             color: box.fgText
             selectionColor: Theme.highlight
             selectedTextColor: Theme.accent

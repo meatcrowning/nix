@@ -316,14 +316,13 @@ Item {
                     // one editor leads at Qt's rounded 16px rather than the
                     // 15px cell, the same recorded exception painter's prompt
                     // box carries.
-                    font.family: Theme.font
-                    font.pixelSize: Theme.fontSize
-                    font.hintingPreference: Font.PreferFullHinting
+                    // A whole QFont with NoAntialias pinned, like the shared
+                    // InputBox editor — an editable item ignores
+                    // `antialiasing:false`/`renderType` and draws a scalable
+                    // pixel font grey-fringed; only the font's style strategy
+                    // reaches the rasteriser (docs/DESIGN.md §2.2).
+                    font: Theme.editorFont
                     renderType: Text.NativeRendering
-                    // the "no antialiasing" pin PixelText/CodeView carry (§2.2),
-                    // same as the shared InputBox editor: crisp hard-edged
-                    // pixels, not fringed subpixel AA.
-                    antialiasing: false
                     color: card.fgText
                     selectionColor: Theme.highlight
                     selectedTextColor: Theme.accent
