@@ -639,6 +639,51 @@ class Board(QObject):
         undo with nothing behind it is not a control."""
         return (self._undo or {}).get("text", "")
 
+    # ---- drag-to-reorder: rewriting the STORE'S OWN ORDER ----
+    # [his ask, 2026-08-01] drag a section heading or a subheading to move it,
+    # and the new order is WRITTEN TO THE FILE so it survives a reload. This is
+    # the one genuinely structural write the app makes — a reorder is not a
+    # line edit, and that is fine: a reorder is precisely the thing he asked
+    # to change. Every block that moves travels whole (`boardparse`'s reorders),
+    # the reload that follows is the ordinary one (`_commit` re-reads, applies
+    # the digest check and re-lists), and the page redraws in the new order.
+    # Nothing that failed reports as a success (§10): a refused reorder (no
+    # section, a stale file) reloads and says so.
+    def _reorder(self, fn):
+        try:
+            out = fn(self._doc["lines"])
+        except boardparse.BoardError as e:
+            self._load()
+            self.status.emit(str(e) + " - reloaded")
+            return False
+        if out == self._doc["lines"] or not out:
+            return True                    # already in that order: nothing to do
+        return self._commit(out)
+
+    @Slot("QVariantList", result=bool)
+    def reorderSections(self, order):
+        """Reorder the store's `## ` sections into `order` (section names,
+        top-to-bottom). Only store sections are reorderable here — the page's
+        summoner and triangle bands are the machine, not the store, so they are
+        left out and stay put."""
+        names = [str(x) for x in (order or [])]
+        return self._reorder(lambda lines: boardparse.reorder_sections(lines, names))
+
+    @Slot("QVariantList", result=bool)
+    def reorderNeeds(self, order):
+        """Reorder the decisions of NEEDS YOU into `order` (decision `key`s) and
+        renumber their `### n.` prefixes to match."""
+        keys = [str(x) for x in (order or [])]
+        return self._reorder(lambda lines: boardparse.reorder_needs(lines, keys))
+
+    @Slot("QVariantList", result=bool)
+    def reorderLanded(self, order):
+        """Reorder LANDED's `### <date>` groups into `order` (their date
+        headings, e.g. `2026-08-01`). Dates are identifiers, so nothing is
+        renumbered."""
+        dates = [str(x) for x in (order or [])]
+        return self._reorder(lambda lines: boardparse.reorder_landed(lines, dates))
+
     # ---- things that are not this file ----
 
     @Slot(result=bool)
