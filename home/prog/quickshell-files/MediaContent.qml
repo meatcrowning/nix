@@ -30,6 +30,22 @@ Item {
         return (v > 0 ? "+" : "") + v.toFixed(1) + " dB";
     }
 
+    // ---- CJK/fullwidth queue text: a fallback that FITS the pixel cell ----
+    // The pixel font has no CJK glyphs, so Qt falls back to Noto Sans CJK for
+    // a Japanese/Chinese/fullwidth title. Noto's line metrics (ascent 17,
+    // height 21 at 15px) overflow the panel's FixedHeight 15px line box, so the
+    // whole row is pushed down inside its 16px cell and clipped along the
+    // bottom — the "CJK sits low against the Latin rows next to it" report.
+    // Unifont is the one installed CJK family whose metrics FIT the pixel
+    // cell (ascent 13 / descent 2 / height 15, all measured), and it is itself
+    // a bitmap font, so a CJK row keeps the desktop's pixel look instead of
+    // clashing with a smooth sans. Draw these rows in Unifont and they sit on
+    // (nearly) the same baseline as the ASCII rows, uncropped. A string that
+    // mixes Latin with CJK takes Unifont for the whole line — one font, one
+    // baseline — rather than re-introducing the cross-font ascent mismatch.
+    readonly property var _cjkRe: /[\u3000-\u303f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/
+    function isCjk(s) { return s !== null && s !== undefined && _cjkRe.test(s); }
+
     onActiveChanged: {
         Media.watch(root, active);
         // An invisible copy must not keep the overlay open (and with it the
@@ -1191,6 +1207,10 @@ Item {
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     text: qrow.modelData.artist || ""
+                    // CJK/fullwidth rows render in Unifont (fits the pixel line
+                    // box) instead of the overflowing Noto fallback — see the
+                    // `_cjkRe`/`isCjk` note at the top.
+                    font.family: root.isCjk(qrow.modelData.artist) ? "Unifont" : Theme.font
                     color: Theme.textDim
                 }
                 PixelText {
@@ -1200,6 +1220,7 @@ Item {
                     }
                     elide: Text.ElideRight
                     text: qrow.modelData.title || ""
+                    font.family: root.isCjk(qrow.modelData.title) ? "Unifont" : Theme.font
                     color: qrow.isCurrent ? Theme.accent : Theme.text
                 }
                 MouseArea {
