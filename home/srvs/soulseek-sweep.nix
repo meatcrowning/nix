@@ -30,17 +30,22 @@ lib.mkIf (host == "top") {
 
   systemd.user.services.soulseek-sweep = {
     Unit = {
-      Description = "Drain the Soulseek missing-track backlog via slskd";
-      # The timer fires every 30 min; a slow sweep can outlive that, but the
-      # wrapper takes a non-blocking flock so an overrun tick is a clean no-op.
-      # Keep the default start limit — this is a low-frequency timer.
+      Description = "Keep the Soulseek download pool fed via slskd";
+      # A crash must not permanently give up (the pool would sit idle until the
+      # next reboot or hand-start): disable the start-rate limit so Restart
+      # below can retry indefinitely. The timer re-checks anyway.
+      StartLimitIntervalSec = 0;
     };
     Service = {
-      Type = "oneshot";
+      # Long-running feeder (soulseek-missing.py --watch), not a one-shot batch:
+      # a periodic one-shot could not hold the pool at a low-water mark. The
+      # wrapper `exec`s the python, so systemd tracks it directly.
+      Type = "simple";
       # Pinned so the unit doesn't lean on the ambient systemd-user PATH.
-      # curl = the slskd reachability pre-check; python3 runs the sweep;
-      # coreutils/util-linux supply date and flock. python3 also needs the
-      # per-user profile for nothing here (stdlib only), but pin it anyway.
+      # curl = the slskd reachability pre-check; python3 runs the feeder;
+      # coreutils/util-linux supply date and flock.
+      # PYTHONUNBUFFERED so the days-long run's per-poll output reaches journald
+      # promptly (stdout to a pipe is block-buffered otherwise).
       Environment = [
         "PATH=${lib.makeBinPath [
           pkgs.coreutils
@@ -48,32 +53,41 @@ lib.mkIf (host == "top") {
           pkgs.curl
           pkgs.python3
         ]}"
+        "PYTHONUNBUFFERED=1"
       ];
       ExecStart = "${pkgs.bash}/bin/bash %h/.config/scripts/soulseek-sweep.sh";
-      # A batch searches up to 40 tracks one at a time (each 18-90s), so a run
-      # can take ~20-30 min. This is the outer guard on a wedged run; the flock
-      # keeps the next tick from piling on while it is still going.
-      TimeoutStartSec = "45min";
+      # Self-heal: a crash (unhandled exception, slskd dropping mid-run past the
+      # loop's own retry) restarts after 30s. A clean drain (exit 0 — nothing
+      # left to search and nothing in flight) or a slskd-down pre-check skip
+      # (also exit 0) stays stopped; the timer re-checks. The loop itself
+      # already catches per-poll blips (see watch_loop), so on-failure only
+      # fires on a genuine crash, not on a transient slskd hiccup.
+      Restart = "on-failure";
+      RestartSec = 30;
+      # SIGTERM sets STOP; the loop finishes the current search (up to the
+      # search timeout, ~90s) and exits. Give it room before SIGKILL.
+      TimeoutStopSec = "120s";
     };
   };
 
   systemd.user.timers.soulseek-sweep = {
-    Unit.Description = "Periodically drain the Soulseek missing-track backlog";
+    Unit.Description = "(Re)start the Soulseek pool feeder if it isn't running";
     Timer = {
-      # 30 min. The sweep searches a bounded batch and returns, leaving slskd's
-      # 50-slot downloader to pull them in the background; 30 min tops that
-      # queue back up as batches complete without hammering the network (queuing
-      # is free on Soulseek — no rate limit or penalty; the only real constraint
-      # is per-peer upload slots, which the sweep's own fan-out already spreads).
-      # At ~40 searches/run that drains the ~3.5k backlog over a couple of days
-      # of search while downloads follow, and a run that overruns the interval
-      # is absorbed by the wrapper's flock.
+      # The feeder normally runs continuously; `systemctl start` on an already-
+      # active simple service is a no-op, so this timer only matters after a
+      # clean drain (it re-checks for newly-missing tracks) or a reboot. On boot
+      # the pool refills by itself via OnBootSec below; no hand-start needed.
       OnBootSec = "5min";
       # Required alongside OnBootSec: it counts from system boot, but the user
       # manager starts at login; a login later than the offset would otherwise
       # leave the only elapse point in the past and never fire (see nix-docs.nix).
       OnStartupSec = "5min";
-      OnUnitActiveSec = "30min";
+      # 30 min after the service goes INACTIVE (a clean drain), re-check for
+      # newly-missing tracks. Deliberately OnUnitInactiveSec, not …ActiveSec:
+      # the service runs continuously, so an …ActiveSec timer would keep firing
+      # against an already-active unit (a no-op, but log spam); …InactiveSec
+      # fires only while it is stopped, which is the only time a re-check helps.
+      OnUnitInactiveSec = "30min";
       Persistent = true;
     };
     Install.WantedBy = [ "timers.target" ];
