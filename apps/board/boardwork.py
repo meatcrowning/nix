@@ -570,6 +570,19 @@ def set_orch_operator(name):
     return op
 
 
+def set_orch_auto():
+    """Hand the choice back to AUTO-ROUTING — clear his explicit pick (and any
+    advanced model override) so `tick_operator` routes each tick from what he
+    typed. The default state of a fresh board, and the way back to it after he
+    has pinned an operator. Idempotent: clearing an absent file is not an
+    error."""
+    for path in (orch_operator_file(), orch_model_file()):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 #: Keyword routers, tried in order — the FIRST whose pattern hits what he typed
 #: wins, so the list is ordered by how strong a signal each flavour's words are.
 #: This is the "auto-routing from the start" he asked for: deterministic,

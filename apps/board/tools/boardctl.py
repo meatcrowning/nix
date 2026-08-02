@@ -380,13 +380,19 @@ def cmd_operator(a):
     board-watch's auto-routing until he changes it. No argument lists the
     roster and marks the current pick and how each tick would route."""
     if a.name is None:
-        cur = bw.orch_operator().name
-        auto = "" if bw.orch_operator_chosen() else "  (auto-route: on)"
+        chosen = bw.orch_operator_chosen()
+        cur = bw.orch_operator().name if chosen else None
         for o in bw.OPERATORS:
             print("%s %-11s %-32s %-6s %s"
                   % ("*" if o.name == cur else " ", o.name, o.model, o.effort,
                      o.blurb))
-        print(auto.strip() or "  (his explicit pick: %s)" % cur)
+        print(("  (his explicit pick: %s)" % cur) if chosen
+              else "* auto-route: on (board-watch picks the operator from what "
+                   "you type)")
+        return 0
+    if a.name.strip().lower() in ("auto", "auto-route", "route"):
+        bw.set_orch_auto()
+        print("auto-routing on: board-watch picks the operator per tick")
         return 0
     try:
         op = bw.set_orch_operator(a.name)
