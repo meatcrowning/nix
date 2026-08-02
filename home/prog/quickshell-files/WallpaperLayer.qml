@@ -29,6 +29,16 @@ PanelWindow {
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
+    // "No wallpaper" (Settings > wallpaper): paint the theme's background colour
+    // as the desktop instead of an image. The window already clears to Theme.bg
+    // (below), so this just hides the image layers and skips the decode. The
+    // palette — and therefore Theme.bg — still comes from a wallpaper picked in
+    // the meta+w switcher; only the IMAGE is suppressed.
+    readonly property bool solid: SettingsStore.d.wallpaperSolid
+    // Re-load the image when the user turns the image back on (_apply no-ops
+    // while solid, so nothing assigned a source in the meantime).
+    onSolidChanged: if (!solid) _apply(Wall.url, Wall.mode)
+
     // ---- the blurred backdrop --------------------------------------------
     // Fills the whole monitor, behind everything, and NEVER moves or resizes.
     //
@@ -55,7 +65,7 @@ PanelWindow {
     Image {
         anchors.fill: parent
         z: -1
-        source: root.haveBlur ? Wall.blurUrl : Wall.url
+        source: root.solid ? "" : (root.haveBlur ? Wall.blurUrl : Wall.url)
         // PreserveAspectCrop over the FULL monitor, so the blur reads as a
         // continuation of the sharp copy rather than a squashed one.
         fillMode: Image.PreserveAspectCrop
@@ -83,6 +93,8 @@ PanelWindow {
         x: root.barLeft ? ViewMode.barWidth : 0
         width: Math.max(1, parent.width - ViewMode.barWidth)
         clip: true
+        // Hidden in "no wallpaper" mode — the window's Theme.bg shows through.
+        visible: !root.solid
 
         // Gated on the reload settle. A fresh tree is built before the settings
         // have been read back and before the surface has been told its size, so
@@ -171,6 +183,7 @@ PanelWindow {
     readonly property var _back: _showA ? imgB : imgA
 
     function _apply(url, mode) {
+        if (root.solid) return;   // no image drawn; the window's Theme.bg shows
         if (!url.length) return;
         if (_front.source == url && _front.mode === mode) return;
         // First paint: no fade, just show it. Fading up from an empty layer at
