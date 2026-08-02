@@ -299,12 +299,20 @@ Window {
     // tabs -> ~1.2 GB of tree RSS, and hiding them changed nothing by itself).
     // The lever that actually reclaims that memory is QtWebEngine's page
     // lifecycle: `Discarded` tears the hidden page's renderer down and frees it.
-    // The cost is that the tab RELOADS when you come back to it, so we only
-    // discard a tab once it has been off-screen for `discardAfter` (never the
-    // on-screen pane, never a just-used tab) — recently used tabs stay instant,
-    // abandoned ones give their memory back. Re-selecting a discarded tab sets
+    // The cost is that the tab RELOADS when you come back to it, so the discard
+    // is deliberately conservative — a tab is only ever reclaimed when it is
+    // BOTH off-screen long enough AND beyond the kept-warm count. Two guards
+    // keep recently used tabs instant:
+    //   * `discardKeepCount` — the most recently used hidden tabs are never
+    //     discarded at all, whatever their age (raise it to keep more warm
+    //     tabs resident; each one pins ~120 MB while it lives);
+    //   * `discardAfter` — only a hidden tab beyond that count is reclaimed,
+    //     and only once it has been off-screen this long, so it is an abandoned
+    //     tab that gives its memory back, never a just-visited one.
+    // The on-screen pane is never discarded. Re-selecting a discarded tab sets
     // it back to Active (see onPaneChanged below), which is what reloads it.
-    property int discardAfter: 10 * 60 * 1000   // ms a hidden tab keeps its renderer before discard
+    property int discardAfter: 30 * 60 * 1000   // ms a hidden tab may be off-screen before discard
+    property int discardKeepCount: 4            // most-recent hidden tabs always kept warm
     Timer {
         id: discardTimer
         interval: 30 * 1000
@@ -314,14 +322,23 @@ Window {
     }
     function discardIdleTabs() {
         if (viewRep.count === 0) return
+        // collect the hidden tabs that still hold a renderer
+        var candidates = []
         for (var i = 0; i < viewRep.count; i++) {
             var v = viewRep.itemAt(i)
             if (!v) continue
             if (v.pane >= 0) continue                                  // on-screen: keep warm
             if (v.cold) continue                                       // cold: holds no renderer
-            if (Date.now() - v.lastSeen < win.discardAfter) continue   // recently used: keep instant
             if (v.lifecycleState === WebEngineView.LifecycleState.Discarded) continue
-            v.lifecycleState = WebEngineView.LifecycleState.Discarded
+            candidates.push(v)
+        }
+        // never discard the most recently used hidden tabs, whatever their age
+        if (candidates.length <= win.discardKeepCount) return
+        candidates.sort(function (a, b) { return b.lastSeen - a.lastSeen })
+        for (var j = win.discardKeepCount; j < candidates.length; j++) {
+            var c = candidates[j]
+            if (Date.now() - c.lastSeen < win.discardAfter) continue   // recently used: keep instant
+            c.lifecycleState = WebEngineView.LifecycleState.Discarded
         }
     }
 
