@@ -1429,26 +1429,27 @@ class Agents(QObject):
 
     @Property("QVariantList", notify=modelChanged)
     def models(self):
-        """`[{flag, label, current}]`, in the order the menu draws them."""
+        """`[{name, label, current}]`, in the order the menu draws them. `name`
+        is the `<flag> <effort>` pair `resolve_model` takes: the summoner chooser
+        carries a thinking budget as well as a model now."""
         cur = boardwork.orch_model()
-        return [{"flag": f, "label": lab, "current": f == cur}
-                for f, lab in boardwork.ORCH_MODELS]
+        return [{"name": "%s %s" % (f, e), "label": lab, "current": (f, e) == cur}
+                for f, e, lab in boardwork.ORCH_MODELS]
 
     @Property(str, notify=modelChanged)
     def modelLabel(self):
-        """What the closed control reads. Never the raw flag: `claude-opus-5` is
+        """What the closed control reads. Never the raw pair: `claude-opus-5` is
         a wire value and this is a line of his desktop's prose (§2)."""
-        cur = boardwork.orch_model()
-        return next((lab for f, lab in boardwork.ORCH_MODELS if f == cur), cur)
+        return boardwork.orch_label()
 
     @Slot(str, result=bool)
-    def chooseModel(self, flag):
-        """Write his choice. It reaches the NEXT orchestrator and no other: a
-        session already running keeps the model it started with, which is his
-        rule for a change made mid-run stated as the mechanism rather than
-        enforced on top of one."""
+    def chooseModel(self, name):
+        """Write his choice — model AND effort, one pick. It reaches the NEXT
+        orchestrator and no other: a session already running keeps what it
+        started with, which is his rule for a change made mid-run stated as the
+        mechanism rather than enforced on top of one."""
         try:
-            boardwork.set_orch_model(flag)
+            boardwork.set_orch_model(name)
         except (ValueError, OSError):
             return False
         self.modelChanged.emit()
