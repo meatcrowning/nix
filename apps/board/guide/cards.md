@@ -531,9 +531,12 @@ all of it.
 ### A card with nothing to say yet RISES; it is never withheld
 
 [his, 2026-07-31] *"instead of hiding the card until it shows the name on the top
-line etc, can we just put a card in there that reads '[agent] arises...' with an
+line etc, can we just put a card in there that reads '[agent] awakens...' with an
 animated elipsies ... the card should just show the rising text and nothing else
-until the agent card actually starts producing stuff like before"*.
+until the agent card actually starts producing stuff like before"*. The word is
+**AWAKENS, not arises** — [his, 2026-08-01] *"have it just say like '[agent]
+awakens...' with an animated elipsies"* — the name-led top line he asked for on
+31 July settling on the waking verb.
 
 - **`boardagents`' `arising` decides, off the observation STATE**, never off the
   words: a card rises exactly while it is *running*, has claimed no phase, has no

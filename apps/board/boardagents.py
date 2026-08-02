@@ -997,9 +997,11 @@ def agents(procs=None):
         # A CARD IS ALWAYS DRAWN, AND ONE WITH NOTHING TO SAY YET SAYS THAT.
         # [his, 2026-07-31] *"instead of hiding the card until it shows the name
         # on the top line etc, can we just put a card in there that reads
-        # '[agent] arises...' with an animated elipsies ... the card should just
+        # '[agent] awakens...' with an animated elipsies ... the card should just
         # show the rising text and nothing else until the agent card actually
-        # starts producing stuff like before"*.
+        # starts producing stuff like before"* — the word is AWAKENS, not
+        # arises: [his, 2026-08-01] *"have it just say like '[agent] awakens...'
+        # with an animated elipsies"*.
         #
         # THE CONDITION IS THE OLD GATE'S, INVERTED — the same set of cards,
         # drawn instead of withheld. What it replaced (`speaks`) held a card back
