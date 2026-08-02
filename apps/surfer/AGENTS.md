@@ -589,11 +589,14 @@ nothing by itself (+1 MB).**
   drop.** Re-selecting a discarded tab sets it back to `Active`
   (`onPaneChanged`), which is what reloads it.
 - **It never discards the on-screen pane** (`v.pane >= 0`), **never a cold
-  restored tab** (`v.cold` holds no renderer), and **only after a tab has been
-  off-screen for `win.discardAfter`** (10 minutes by default) — the reload cost
-  is the reason, so a just-used tab stays instant and only abandoned tabs give
-  their memory back. A 30 s `Timer` walks `viewRep` and discards any hidden tab
-  whose `lastSeen` is older than the threshold.
+  restored tab** (`v.cold` holds no renderer), and it is deliberately
+  conservative about the rest: the **`discardKeepCount`** most recently used
+  hidden tabs are **never** discarded whatever their age, and only a hidden tab
+  *beyond* that count is reclaimed, and only once it has been off-screen for
+  `win.discardAfter` (**30 minutes by default**; it used to be 10). The reload
+  cost is why — a just-used tab stays instant, and only an abandoned tab gives
+  its memory back. A 30 s `Timer` walks `viewRep` and discards a hidden tab
+  only when it is both older than the threshold AND past the kept-warm count.
 - **Freezing is NOT a memory lever.** `Frozen` pauses JS/timers but keeps the
   renderer's V8 heap and caches — measured at ~+1 MB. It is a CPU/power saver,
   not an RSS one, so surfer only uses `Discarded`.
