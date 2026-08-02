@@ -33,6 +33,14 @@ Item {
     signal draftEdited(string body)
     signal contextRequested(real mx, real my)
 
+    //: drag-to-reorder, [his ask, 2026-08-01]. The grip over the TITLE band
+    //  initiates a vertical drag; on release it carries the draggable card's
+    //  index and the displacement (in pixels, positive = dragged down) and the
+    //  page works out which sibling it crossed and rewrites the store
+    //  (`Board.reorderNeeds`). The title band is the one non-interactive part
+    //  of the card, so the gesture never fights the options or the answer box.
+    signal reorderRequested(int fromIndex, real dy)
+
     //: the same caret hand-off `InputBox` carries, and for the same reason: a
     //  decision APPEARING in or LEAVING the store rebuilds every card in the
     //  list, so where his caret was has to be held by the page and given back.
@@ -115,9 +123,31 @@ Item {
         // items must draw exactly as they always did rather than reserve an
         // empty row.
         Item {
+            id: titleRow
             width: col.width
             implicitHeight: Math.max(title.implicitHeight, meta.implicitHeight)
             height: implicitHeight
+
+            // ---- drag to reorder this decision among its NEEDS YOU siblings ----
+            // [his ask, 2026-08-01]. A left-drag on the title's band is the one
+            // inert part of the card, so the gesture cannot fight the options
+            // or the answer box. Direct manipulation tracks 1:1 (§6.4) via the
+            // invisible proxy; the page turns the displacement into a target
+            // index and rewrites the store on release. A right-click still falls
+            // through to the card's own menu, and a plain click (no drag) emits
+            // a zero displacement the page ignores.
+            Item { id: reorderProxy; visible: false }
+            MouseArea {
+                id: grip
+                anchors.fill: titleRow
+                acceptedButtons: Qt.LeftButton
+                drag.target: reorderProxy
+                drag.axis: Drag.YAxis
+                drag.threshold: 8
+                cursorShape: Qt.SizeVerCursor
+                onPressed: reorderProxy.y = 0
+                onReleased: card.reorderRequested(card.index, reorderProxy.y)
+            }
 
             Para {
                 id: title

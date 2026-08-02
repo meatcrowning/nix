@@ -331,6 +331,86 @@ def test_roundtrip(tmp):
           "".join(B.toggle_option(d3["lines"], d3["needs"][0], 1, False)) == src)
 
 
+# ------------------------------------------------- 1a. drag-to-reorder [2026-08-01]
+# The ONE structurally-different write the app makes. Every other edit is a
+# targeted line change and must stay byte-identical on a no-op; a REORDER
+# moves whole blocks, so the round-trip contract is inverted: only the moved
+# content changes, and a reorder that puts things back where they started must
+# still write NOTHING. The blocks travel whole — options, his answer, the
+# stamps, the LANDED tables and prose — and only the separators between moved
+# H2 sections are re-emitted.
+def test_reorder(tmp):
+    import boardparse as B
+    path = os.path.join(tmp, "fixture.md")
+    open(path, "w").write(FIXTURE)
+    src = B.read(path)
+    doc = B.parse(src)
+
+    def write_identical(out):
+        out = "".join(out)
+        B.write(path, out)
+        return B.read(path)
+
+    # a reorder that changes nothing is a no-op and writes nothing: the
+    # byte-identical round trip must hold even for the "same order" case
+    same = "".join(B.reorder_needs(doc["lines"], [d["key"] for d in doc["needs"]]))
+    check("reordering decisions into the current order writes nothing",
+          same == src)
+
+    # swap the two decisions: their blocks travel whole, the `### n.` prefixes
+    # are renumbered to match, and NOTHING else in the file moves
+    swapped = [d["key"] for d in doc["needs"]][::-1]
+    out = "".join(B.reorder_needs(doc["lines"], swapped))
+    d2 = B.parse(out)
+    check("reordering decisions writes the new order",
+          [x["key"] for x in d2["needs"]] == swapped)
+    check("...and renumbers their `### n.` headings to match",
+          all(d["num"] == str(i + 1) for i, d in enumerate(d2["needs"])),
+          [d["num"] for d in d2["needs"]])
+    check("...with every title read back intact",
+          all(d["title"] in ("First question?", "Second question?")
+              for d in d2["needs"]))
+    check("...and the preamble and every other section are untouched",
+          out.startswith(src.split("## N")[0])
+          and "IN FLIGHT" in out and "WAITING ON YOU TO DO" in out
+          and "### 2026-07-28" in out)
+    # a reordered decision reads the same after a write (options intact)
+    written = write_identical(B.reorder_needs(doc["lines"], swapped))
+    d3 = B.parse(written)
+    check("a reordered decision writes and re-reads with its options",
+          len(d3["needs"][1]["options"]) == 3
+          and d3["needs"][1]["ifUnanswered"].startswith("nothing happens"))
+
+    # ---- reorder_landed: same order no-op; a real move reorders by date ----
+    check("reordering LANDED into the current order writes nothing",
+          "".join(B.reorder_landed(doc["lines"], ["2026-07-28"])) == src)
+    check("a no-op LANDED reorder is byte-identical on disk",
+          write_identical(B.reorder_landed(doc["lines"], ["2026-07-28"]))
+          == src)
+
+    # ---- reorder_sections: move WHOLE `## ` sections, preamble preserved ----
+    check("reordering sections into the current order writes nothing",
+          "".join(B.reorder_sections(doc["lines"], doc["sectionOrder"])) == src)
+    dS_order = ["landed", "needs", "flight", "todo"]
+    outS = "".join(B.reorder_sections(doc["lines"], dS_order))
+    dS = B.parse(outS)
+    check("reordering sections puts LANDED first and NEEDS after it",
+          outS.index("## LANDED") < outS.index("## NEEDS YOU"))
+    check("...and every section still parses",
+          bool(dS["needs"]) and bool(dS["todo"]) and bool(dS["flight"])
+          and bool(dS["landed"]))
+    check("...and the preamble above the first section is preserved",
+          outS.startswith(src.split("## N")[0]))
+    check("...and a section reorder round-trips through a write",
+          dS.get("needs") and dS["needs"][0]["key"] == "first-question")
+
+    # section order is recorded for the page to reflect on reload
+    check("parse records the file's section order",
+          B.parse(write_identical(outS))["sectionOrder"]
+          == ["landed", "needs", "flight", "todo"],
+          B.parse(outS)["sectionOrder"])
+
+
 # --------------------------------------------------- 1b. moving between sections
 def test_moves(tmp):
     """An answered decision has to STOP asking him, and a failed agent has to
@@ -7079,6 +7159,7 @@ def main():
         os.makedirs(os.path.join(tmp, "mv"))
         os.makedirs(os.path.join(tmp, "win"))
         test_roundtrip(os.path.join(tmp, "rt"))
+        test_reorder(os.path.join(tmp, "rt"))
         test_moves(os.path.join(tmp, "mv"))
         os.makedirs(os.path.join(tmp, "ld"))
         test_landed(os.path.join(tmp, "ld"))

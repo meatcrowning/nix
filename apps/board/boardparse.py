@@ -429,7 +429,8 @@ def parse(src):
 
     out = {"lines": lines, "digest": digest(src),
            "needs": [], "todo": [], "flight": [], "landed": [],
-           "intro": {"needs": [], "todo": [], "flight": [], "landed": []}}
+           "intro": {"needs": [], "todo": [], "flight": [], "landed": []},
+           "sectionOrder": []}
 
     sec = None
     item = None           # the decision being built
@@ -480,6 +481,8 @@ def parse(src):
             close_item()
             date = None
             sec = _section_of(m2.group(1))
+            if sec:
+                out["sectionOrder"].append(sec)
             continue
         if sec is None:
             continue
@@ -1033,6 +1036,167 @@ def add_needs_item(lines, block, before=None):
     if tail and tail[0].strip():              # ...restored only if the tail
         blk.append("\n")                      # does not already supply one
     return head + blk + tail
+
+
+# ------------------------------------------------------------------ reordering
+# Drag-to-reorder, [his ask, 2026-08-01]: the user rearranges the store's
+# `## ` sections and their `### ` subheadings with the pointer, and THE NEW
+# ORDER IS WRITTEN TO THE FILE so it survives a reload. This is the one place
+# in the app where the section order is deliberately *changed* — everywhere
+# else the file's own order is the display order and the round-trip contract
+# is byte-identical. A reorder is not a no-op edit: the blocks it moves travel
+# whole (their `### ` headings, prose, tables and trailing blanks), and only
+# the separators between moved sections are re-emitted. Everything *inside* a
+# moved block is preserved byte for byte.
+def _h3_ranges(lines, s, e):
+    """[(start, end)] of each `### ` block in `lines[s:e]`, end one-past-last.
+
+    A block runs from its `### ` heading to the next `### / ## / ---` boundary,
+    so it carries its own trailing blank(s) — the same unit `item_span` moves.
+    """
+    out = []
+    i = s
+    while i < e:
+        if _H3.match(lines[i].rstrip("\n")):
+            j = i + 1
+            while j < e and not _H3.match(lines[j].rstrip("\n")):
+                j += 1
+            out.append((i, j))
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def reorder_sections(lines, seq):
+    """Reorder the store's `## ` sections so their file order becomes `seq`.
+
+    `seq` names sections (from `SECTIONS`) in their new top-to-bottom order. A
+    section absent from the file is ignored; one in the file but not named in
+    `seq` keeps its relative place at the end (so a caller racing an agent's
+    write cannot lose it). The preamble above the first section and the file's
+    trailing bytes are untouched; the between-section separators are re-emitted
+    as `---`, which is the store's own rule line.
+    """
+    heads = []
+    for i, ln in enumerate(lines):
+        m = _H2.match(ln.rstrip("\n"))
+        if m:
+            heads.append((i, _section_of(m.group(1))))
+    if not heads:
+        return lines
+    blocks = []
+    for k, (i, name) in enumerate(heads):
+        end = heads[k + 1][0] if k + 1 < len(heads) else len(lines)
+        blocks.append((name, lines[i:end]))
+    # A block's trailing blank/rule belongs to the separator AFTER it; when the
+    # block moves the separator is re-emitted, so the trailing scaffold is
+    # trimmed and normalised rather than dragged along with the content.
+    trimmed = []
+    for name, blk in blocks:
+        b = list(blk)
+        while len(b) > 1:
+            s = b[-1].rstrip("\n")
+            if not s.strip() or _HR.match(s):
+                b.pop()
+            else:
+                break
+        trimmed.append((name, b))
+    pre = lines[:heads[0][0]]
+    by = {name: blk for name, blk in trimmed if name is not None}
+    ordered = []
+    for name in seq:
+        if name in by:
+            ordered.append((name, by[name]))
+    seen = {n for n, _ in ordered}
+    for name, blk in trimmed:
+        if name not in seen:
+            ordered.append((name, blk))
+            seen.add(name)
+    out = list(pre)
+    ordered = [o for o in ordered if o[1]]     # never a bare block
+    # Already in the requested order: a no-op must stay byte-identical (the
+    # round-trip contract), even though a *real* reorder re-emits separators.
+    if [name for name, _blk in trimmed] == [name for name, _blk in ordered]:
+        return lines
+    for i, (_name, blk) in enumerate(ordered):
+        out += blk
+        if i < len(ordered) - 1:
+            out.append("\n---\n\n")
+    return out
+
+
+def reorder_needs(lines, order):
+    """Reorder the decisions of NEEDS YOU into `order` (a list of decision
+    `key`s) and renumber their `### <n>. ` prefixes to match, keeping the
+    intro prose above them and the section's trailing bytes put. A decision
+    not named keeps its relative place at the end. Renumbering is safe: the
+    key is the slug of the title text after the number, so it does not move.
+    """
+    doc = parse("".join(lines))
+    items = list(doc["needs"])
+    by_key = {it["key"]: it for it in items}
+    ordered = [by_key[k] for k in order if k in by_key]
+    ordered += [it for it in items if it["key"] not in (set(order) & set(by_key))]
+    if [it["key"] for it in ordered] == [it["key"] for it in items]:
+        return lines
+    s, e = section_bounds(lines, "needs")
+    if s < 0:
+        raise BoardError("there is no `## NEEDS YOU` section to reorder")
+    ranges = _h3_ranges(lines, s + 1, e)
+    span = {a: b for a, b in ranges}
+    block_of = {it["key"]: lines[it["titleLine"]:span[it["titleLine"]]]
+                for it in items if it["titleLine"] in span}
+    first, last = ranges[0][0], ranges[-1][1]
+    out = list(lines[:s + 1]) + list(lines[s + 1:first])
+    for n, it in enumerate(ordered, 1):
+        blk = list(block_of.get(it["key"], []))
+        if blk:
+            blk[0] = "### %d. %s\n" % (n, raw_title(lines, it))
+        out += blk
+    out += list(lines[last:e]) + list(lines[e:])
+    return out
+
+
+def reorder_landed(lines, order):
+    """Reorder LANDED's `### <date>` groups so the named dates appear, in
+    `order`'s sequence, at the front; any group not named keeps its relative
+    place after them. The dates ARE the keys, because the window draws
+    `landed_view` (today and yesterday, no `line` on the row) and has nothing
+    else to identify a group by; the store's other days are untouched and stay
+    after, in their own order. Nothing is renumbered — a date is an identifier.
+    """
+    s, e = section_bounds(lines, "landed")
+    if s < 0:
+        raise BoardError("there is no `## LANDED` section to reorder")
+    ranges = _h3_ranges(lines, s + 1, e)
+    if not ranges:
+        return lines
+
+    def _head(a):
+        m = _H3.match(lines[a].rstrip("\n"))
+        return m.group(1).strip() if m else ""
+
+    cur = [(_head(a), a, b) for a, b in ranges]
+    block_of = {t: lines[a:b] for t, a, b in cur if t}
+    named = []
+    for t in (str(x).strip() for x in order):
+        if t in block_of and t not in named:
+            named.append(t)
+    cur_heads = [h for h, _, _ in cur]
+    # Already in that order at the front of the section: a no-op write must be
+    # byte-identical (the round-trip contract).
+    if cur_heads[:len(named)] == named:
+        return lines
+    first, last = ranges[0][0], ranges[-1][1]
+    out = list(lines[:s + 1]) + list(lines[s + 1:first])
+    for t in named:
+        out += block_of[t]
+    for t, a, b in cur:
+        if t not in named:
+            out += lines[a:b]
+    out += list(lines[last:e]) + list(lines[e:])
+    return out
 
 
 LANDED_HEAD = ["| Commit | What | When |\n", "|---|---|---|\n"]

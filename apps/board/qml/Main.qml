@@ -275,6 +275,39 @@ Window {
         return out;
     }
 
+    // ---- drag-to-reorder a decision among its NEEDS YOU siblings ----
+    // [his ask, 2026-08-01]. The grip on a card's title band reports `from`
+    // (the card's index) and `dy` (pixels, positive = dragged down). We take
+    // the card's RESTING centre, add the displacement, and count how many
+    // sibling cards centre above it — that is the card's new position. A no-op
+    // (it crossed no one) writes nothing and reports nothing (§12.1); a real
+    // move rewrites the store and its reload reorders the cards. Everything
+    // inside a moved card — its options, his answer, the stamps — travels
+    // whole, because `boardparse.reorder_needs` moves the raw block.
+    function reorderDecision(from, dy) {
+        var n = win.needs.length;
+        if (n < 2 || from < 0 || from >= n)
+            return;
+        var center = function (i) {
+            var it = needsRepeater.itemAt(i);
+            return it ? it.y + it.height / 2 : 0;
+        };
+        var myCenter = center(from) + (dy || 0);
+        var target = 0;
+        for (var i = 0; i < n; i++) {
+            if (i !== from && myCenter >= center(i))
+                target++;
+        }
+        if (target === from)
+            return;
+        var keys = [];
+        for (var j = 0; j < n; j++)
+            keys.push(String(win.needs[j].key));
+        var k = keys.splice(from, 1)[0];
+        keys.splice(target, 0, k);
+        Board.reorderNeeds(keys);
+    }
+
     // ---- ...and where his caret is, for the reload that CANNOT keep a row ----
     // A row appearing or leaving changes the key list, so that one list is built
     // again and the box he was typing in goes with it. One key and one offset,
@@ -925,6 +958,7 @@ Window {
                     // paragraph of one question does not take the answer editor
                     // out from under him on another (see `keysOf`).
                     Repeater {
+                        id: needsRepeater
                         model: win.keysOf(win.needs, "key")
                         delegate: Decision {
                             id: decCard
@@ -950,6 +984,11 @@ Window {
                             }
                             onContextRequested: (mx, my) =>
                                 win.decisionMenu(decCard.modelData, mx, my)
+                            // drag-to-reorder among its NEEDS YOU siblings — the
+                            // grip on the title band reports the displacement and
+                            // the page computes the target and rewrites the store.
+                            onReorderRequested: (from, dy) =>
+                                win.reorderDecision(from, dy)
                         }
                     }
 
