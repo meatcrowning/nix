@@ -27,6 +27,14 @@ QtObject {
     readonly property int fontSize: DeskStyle.fontSize
     readonly property int clockSize: DeskStyle.fontSize
 
+    // The same font, as a whole QFont with NoAntialias pinned — bound as
+    // `font:` on the TextEdit/TextInput he types into. Editable items ignore
+    // `antialiasing:false`/`renderType` and draw a scalable pixel font
+    // grey-fringed; only the font's style strategy reaches the rasteriser
+    // (docs/DESIGN.md 2.2). Labels keep `font: Theme.font` — `Text` is crisp
+    // already.
+    readonly property font editorFont: DeskStyle.editorFont
+
     // Panel geometry (logical px) — kept for component compatibility.
     readonly property int barWidth: 48
     readonly property int cell: 40

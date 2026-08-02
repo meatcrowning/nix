@@ -52,6 +52,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal
+from PySide6.QtGui import QFont
 
 # Written by the panel's SettingsStore (Quickshell.shellDir + "/settings.json").
 SETTINGS_PATH = Path.home() / ".config" / "quickshell" / "settings.json"
@@ -166,6 +167,27 @@ class DeskStyle(QObject):
     @Property(int, notify=changed)
     def fontSize(self):
         return self._size
+
+    @Property(QFont, notify=changed)
+    def editorFont(self):
+        """The desktop font as a QFont with NoAntialias pinned — for editable
+        items ONLY (`TextEdit`/`TextInput`).
+
+        A `Text` honours `antialiasing: false` and draws a scalable pixel font
+        (the default "More Perfect DOS VGA") as crisp mono glyphs. An *editable*
+        item does NOT: `QQuickTextEdit`/`QQuickTextInput` ignore the QML
+        `antialiasing` and `renderType` levers for glyph rasterisation and draw
+        grey-fringed AA glyphs regardless (a bitmap face like "Botis 4x6" is the
+        only thing that escapes it, having no antialiased form). The one lever
+        that reaches the font engine is `QFont::NoAntialias`, which the QML
+        `font` group cannot express — so it is set here and bound as a whole
+        `font:` (docs/DESIGN.md §2.2). Verified: 17 grey levels in a glyph -> 2.
+        """
+        f = QFont(self._family)
+        f.setPixelSize(self._size)
+        f.setHintingPreference(QFont.PreferFullHinting)
+        f.setStyleStrategy(QFont.NoAntialias)
+        return f
 
     @Property(bool, notify=changed)
     def reduceMotion(self):
