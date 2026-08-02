@@ -325,7 +325,7 @@ PanelWindow {
         // list as the thumbnail picker, but each cell is a strip of that
         // wallpaper's extracted palette. Picking one re-themes the desktop from
         // that wallpaper while staying solid (see root.pickTheme).
-        GridView {
+        KineticGridView {
             id: swatchList
             visible: root.solid
             focus: root.solid
@@ -339,8 +339,7 @@ PanelWindow {
             cellWidth: Math.floor(width / columns)
             cellHeight: 90
             model: root.images
-            boundsBehavior: Flickable.StopAtBounds
-            cacheBuffer: 800
+            cacheBuffer: 800   // keep a couple of off-screen rows warm for smooth scroll
 
             function pick() {
                 if (currentIndex >= 0 && currentIndex < root.images.length)
@@ -353,6 +352,11 @@ PanelWindow {
             Keys.onEscapePressed: root.open = false
             Keys.onReturnPressed: pick()
             Keys.onEnterPressed:  pick()
+            // Keyboard nav keeps the highlighted cell on screen. Do NOT drive this
+            // from hover (below): a hover-select that also repositioned the view
+            // made the grid scroll away under the pointer while browsing — the
+            // "poor handling" this grid had. Same rule as the thumbnail grid,
+            // which never selects on hover for the same reason.
             onCurrentIndexChanged: positionViewAtIndex(currentIndex, GridView.Contain)
 
             delegate: Item {
@@ -407,9 +411,13 @@ PanelWindow {
 
                     MouseArea {
                         anchors.fill: parent
-                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onEntered: swatchList.currentIndex = swCell.index
+                        // Click = pick this palette. Hover deliberately does NOT
+                        // move the selection: it used to (with a view reposition on
+                        // every currentIndex change), which scrolled the grid out
+                        // from under the pointer while browsing. Matches the
+                        // thumbnail grid, which avoids hover-select for the same
+                        // reason.
                         onClicked: root.pickTheme(swCell.modelData)
                     }
                 }
