@@ -7244,14 +7244,19 @@ def test_hermes_proximity(tmp):
 
 
 def test_subminister(tmp):
-    """A CLAUDE MINISTER CAN DELEGATE A BOUNDED CHUNK TO A DEEPSEEK SUBMINISTER.
+    """A CLAUDE MINISTER *OR THE ORCHESTRATOR* DELEGATES A CHUNK TO A DEEPSEEK
+    SUBMINISTER.
 
-    The gate: only a minister genuinely running on a Claude model may spawn the
-    deepseek subminister — a minister already on the deepseek/hermes runtime
-    gains nothing and is refused. The subminister's model is PINNED to
-    `deepseek/deepseek-v4-flash-0731` whatever the minister's own dropdown
-    says, and its chunk is carried in the query. It takes no unit and no card:
-    its whole result is the returned stdout the calling minister quotes.
+    The gate: only a caller genuinely running on a Claude model — a minister OR
+    Solomon the orchestrator — may spawn the deepseek subminister; one already
+    on the deepseek/hermes runtime gains nothing and is refused (the gate is on
+    the runtime, not the role). The subminister's model is PINNED to
+    `deepseek/deepseek-v4-flash-0731` whatever the caller's own dropdown says,
+    and its chunk is carried in the query. Its whole result is the returned
+    stdout the calling minister quotes — but while it runs it DOES get a card: a
+    demon name and a registration record carrying `kind="subminister"` and the
+    `parent`/`parentName` of the caller, so the UI can inset it under that row.
+    The record is dropped when the run ends and it counts against no cap.
     """
     import boardwork as bw
     import types
@@ -7282,6 +7287,13 @@ def test_subminister(tmp):
                      30: (1, ".claude-wrapped", [".claude-wrapped"])},
                     [10, 20, 30]) == "hermes")
 
+        # The ORCHESTRATOR is a `claude` process too, so its nearest runtime is
+        # `claude` and it is allowed exactly as a minister is — the gate never
+        # reads the role. [his follow-up, 2026-08-01: Solomon may delegate too.]
+        check("Solomon the orchestrator (a claude process) is allowed",
+              _with({10: (1, "sh", ["sh"]),
+                     20: (1, "claude", ["claude"])}, [10, 20]) == "claude")
+
         # Refusal: a hermes caller is told to do the chunk itself.
         bw.ba._procs = lambda: {10: (1, "sh", ["sh"]), 20: (1, "hermes", ["hermes"])}
         bw.ba._ancestors = lambda pid, pr: [10, 20]
@@ -7290,21 +7302,51 @@ def test_subminister(tmp):
             bw.subminister("any chunk")
         except ValueError as e:
             refused = "ALREADY on the deepseek/hermes runtime" in str(e)
-        check("a deepseek minister is refused, not delegated", refused)
+        check("a deepseek caller is refused, not delegated", refused)
 
-        # A Claude caller: the argv is pinned to deepseek flash and carries the
-        # chunk + the compact-result framing + the RULES block.
+        # A Claude caller (here standing in for BOTH a minister and Solomon):
+        # the argv is pinned to deepseek flash and carries the chunk + the
+        # compact-result framing, AND while it runs a card is registered under
+        # the caller's id. We fake `Popen` so nothing real is spawned; its
+        # `communicate()` snapshots the registration WHILE the run is "live".
         bw.ba._procs = lambda: {10: (1, "sh", ["sh"]),
                                 20: (1, ".claude-wrapped", [".claude-wrapped"])}
         bw.ba._ancestors = lambda pid, pr: [10, 20]
+        os.environ["BOARD_AGENT_ID"] = "worig01"   # the caller's inbox id
+        parent = bw.ba.clean_id("worig01")
         captured = {}
-        def fake_run(cmd, **kw):
-            captured["cmd"] = cmd
-            captured["kw"] = kw
-            return types.SimpleNamespace(returncode=0, stdout="LEAN RESULT\n",
-                                         stderr="")
-        real_run = bw.subprocess.run
-        bw.subprocess.run = fake_run
+
+        # A deterministic id, so the name it WOULD take is known — and a LIVE
+        # minister already sitting on that name, so we can prove the subminister
+        # is moved off it rather than colliding with a running agent.
+        real_urandom = bw.os.urandom
+        bw.os.urandom = lambda n: b"\xab\xcd\xef"[:n]
+        sub_aid = "sub" + b"\xab\xcd\xef".hex()
+        collide = bw.ba.name_for(sub_aid)
+        bw.ba.register("wmin001", "a live minister", os.getpid(),
+                       kind="worker", name=collide)
+
+        class FakePopen:
+            def __init__(self, cmd, **kw):
+                captured["cmd"] = cmd
+                captured["kw"] = kw
+                self.pid = os.getpid()    # a live pid, so the card reads alive
+                self.returncode = 0
+
+            def communicate(self, timeout=None):
+                # The registration exists ONLY for the length of the run — snap
+                # it here, mid-flight, before the `finally` drops it.
+                captured["regs"] = list(bw.ba._registrations())
+                captured["agents"] = bw.ba.agents()
+                captured["cards"] = bw.cards()
+                captured["workers"] = bw.live_workers()
+                return ("LEAN RESULT\n", "")
+
+            def kill(self):
+                pass
+
+        real_popen = bw.subprocess.Popen
+        bw.subprocess.Popen = FakePopen
         try:
             out = bw.subminister("read all python and list public funcs")
             cmd = captured["cmd"]
@@ -7331,8 +7373,47 @@ def test_subminister(tmp):
                   out == "LEAN RESULT\n", repr(out))
             check("it runs in the repo, where the bulk files live",
                   captured["kw"].get("cwd") == bw.REPO, captured["kw"])
+
+            # THE CARD, mid-flight. Exactly one subminister registration, named
+            # from the Lesser Key and stamped with the caller as its parent.
+            subs = [r for r in captured["regs"]
+                    if r.get("kind") == "subminister"]
+            check("a subminister registers exactly one card while it runs",
+                  len(subs) == 1, subs)
+            rec = subs[0] if subs else {}
+            check("its name is drawn from the Lesser Key demon pool",
+                  rec.get("name") in bw.ba.NAMES, rec.get("name"))
+            check("it does NOT collide with the live minister's name",
+                  rec.get("name") != collide, rec.get("name"))
+            check("the parent field carries the caller's id",
+                  rec.get("parent") == parent, rec.get("parent"))
+            check("parentName resolves the caller's demon name",
+                  rec.get("parentName") == (bw.ba.name_of(parent)
+                                            or bw.ba.name_for(parent)),
+                  rec.get("parentName"))
+            # The fields reach the UI walk with the same keys Murmur reads.
+            arow = [a for a in captured["agents"]
+                    if a.get("kind") == "subminister"]
+            check("agents() surfaces parent/parentName on the subminister row",
+                  len(arow) == 1 and arow[0]["parent"] == parent
+                  and arow[0]["parentName"] == rec.get("parentName"), arow)
+            # It is NOT a top-level card and NOT a capped worker.
+            check("it is excluded from the flat cards() list (drawn inset)",
+                  not any(c.get("kind") == "subminister"
+                          for c in captured["cards"]))
+            check("it counts against no worker cap",
+                  not any(w.get("kind") == "subminister"
+                          for w in captured["workers"]))
+            # ...and it is gone once the run returns: a transient compute card.
+            after = [r for r in bw.ba._registrations()
+                     if r.get("kind") == "subminister"]
+            check("the subminister card is dropped when the run ends",
+                  after == [], after)
         finally:
-            bw.subprocess.run = real_run
+            bw.subprocess.Popen = real_popen
+            bw.os.urandom = real_urandom
+            bw.ba.unregister("wmin001")
+            os.environ.pop("BOARD_AGENT_ID", None)
     finally:
         bw.ba._procs, bw.ba._ancestors = real_procs, real_anc
 
