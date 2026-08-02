@@ -707,7 +707,7 @@ DENY = bw.DENY
 
 
 def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
-          retry=True, on_start=None, detach=False):
+          retry=True, on_start=None, detach=False, model=None, effort=None):
     """Run the agent, and WAIT for it. Returns (exit code, how it ended, seconds).
 
     **`detach=True` starts it in its OWN transient unit and returns at once**,
@@ -775,7 +775,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
     # minister model set to a hermes one and no `hermes` on the box, every
     # dispatch died at `execve` with a bare `[Errno 2] 'hermes'` — while this
     # check, looking for a binary that run was never going to use, passed.
-    backend = bw.get_backend_for_role(role)
+    backend = bw.get_backend_for_role(role, model=model)
     if not stub and not shutil.which(backend.name, path=env.get("PATH")):
         why = ("without starting at all (`%s` is not on this unit's PATH "
                "on %s; PATH=%s)" % (backend.name, HOST, env.get("PATH", "")))
@@ -789,7 +789,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
         # live in `boardwork.AgentBackend`. Which backend follows the chosen
         # model: hermes models spawn via `hermes`, everything else via `claude`.
         cmd = backend.args(prompt=prompt, session=session,
-                           role=role, label=label)
+                           role=role, label=label, model=model, effort=effort)
         # ...and a backend whose session id we cannot choose is bound to its run
         # by the query text instead (`boardphase.arm`), so the card for a
         # decision or an orchestrator can say what it is doing on either
@@ -857,7 +857,8 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
             and bw.TRANSIENT_RE.search((out or "") + "\n" + (err or ""))):
         log("that was a transient API error - trying the run once more")
         return spawn(prompt, agent_id, label, session=None, timeout=timeout,
-                     role=role, retry=False, on_start=on_start)
+                     role=role, retry=False, on_start=on_start,
+                     model=model, effort=effort)
     return p.returncode, "with status %d" % p.returncode, time.time() - t0
 
 
@@ -880,9 +881,11 @@ ORCH_TIMEOUT_S = int(os.environ.get("BOARD_ORCH_TIMEOUT", "900"))
 def _summon(notes, index, total, op=None):
     """One summoner run: register a card, spawn, wait, unregister.
 
-    `op` is the `boardwork.Operator` this tick routed to (Solomon by default) —
-    it names the card and picks the prompt flavour. Its model/effort reach the
-    spawn through `BOARD_ORCH_MODEL`/`_EFFORT`, set once by the caller.
+    `op` is the `boardwork.Operator` this group routed to (Solomon by default) —
+    it names the card and picks the prompt flavour, and its model/effort are
+    passed EXPLICITLY to `spawn` (not through the process-global `BOARD_ORCH_*`
+    env), so two groups on different operators can run at once without the one
+    env clobbering the other.
 
     Returns the QUEUE_FAIL text for it or None. It does NOT write to the board
     itself — several of these run in threads and `note_on_board` is a
@@ -915,7 +918,7 @@ def _summon(notes, index, total, op=None):
             bw.orchestrator_prompt(op, repo=REPO, host=bw.host_line(),
                                    notes=text, cap=bw.cap()),
             aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
-            role="orchestrator")
+            role="orchestrator", model=op.model, effort=op.effort)
     finally:
         ba.unregister(aid)
         took_back = bu.end_run(aid)
@@ -958,50 +961,58 @@ def work_the_queue():
     its flock is released long before the workers finish — a decision he answers
     five minutes from now still fires on time.
 
-    HOW MANY of them is his, in the top dropdown. [his, 2026-07-29] *"number of
-    summoners"* — `boardwork.summoners()`, read here and cached nowhere, so a
-    change takes effect on the next tick with nothing restarted. What he typed is
-    split across up to that many runs (`boardwork.split_for_summoners`,
-    contiguous, none empty), and one queued sentence is one summoner however high
-    the number is: the count is a ceiling on the fan-out, not a quota to fill.
-    They run TOGETHER in threads, because the point of asking for more than one is
-    that two unrelated things he typed do not have to take turns; the tick is held
-    for the slowest of them rather than the sum.
+    ONE SUMMONER PER OPERATOR, not per sentence. [his, 2026-08-01, of a tick that
+    logged "3 thing(s) ... across 3 summoner(s) as Solomon": *"why the fuck are
+    you running multiple solomons????? multiple fable 5s for what reason?"*] So
+    what he typed is grouped by the operator each item ROUTES to
+    (`boardwork.route_groups`): every item that wants the same operator shares one
+    summoner handed the whole list, and only genuinely different operators (a
+    quick Weyer question beside a Solomon plan) get their own session. Same-
+    operator work never runs as N concurrent copies of one expensive model again.
+
+    HOW MANY run AT ONCE is his, in the top dropdown. [his, 2026-07-29] *"number
+    of summoners"* — `boardwork.summoners()`, read here and cached nowhere, so a
+    change takes effect on the next tick with nothing restarted. It is now a
+    ceiling on CONCURRENCY: the operator groups run in waves of at most that many
+    threads, so nothing is left unworked, but no more than his chosen number of
+    summoner sessions is ever alive together.
 
     Returns True if a run happened.
     """
     msgs = ba.drain()          # BEFORE the spawn: see boardagents.drain()
     if not msgs:
         return False
-    groups = bw.split_for_summoners(msgs)
-    # WHICH OPERATOR summons this tick — his explicit pick if he made one, else
-    # the auto-route from what he typed (`bw.tick_operator`). One operator for
-    # the whole tick, chosen HERE at the single-threaded top, then pinned into
-    # the environment the concurrent summoner threads all read: `role_flags`
-    # and `_role_model` honour `BOARD_ORCH_MODEL`/`_EFFORT`, so the run's
-    # `--model`, its effort and its backend (hermes vs claude) all follow the
-    # routed operator with no per-thread state to race. Per-GROUP routing is the
-    # roster doc's follow-up. [his, 2026-08-01: "build auto-routing for the start"]
-    op = bw.tick_operator("\n\n".join(m["text"] for m in msgs))
-    os.environ["BOARD_ORCH_MODEL"] = op.model
-    os.environ["BOARD_ORCH_EFFORT"] = op.effort
-    log("orchestrating %d thing(s) he typed across %d summoner(s) as %s (%s %s)"
-        % (len(msgs), len(groups), op.name, op.model, op.effort))
-    if len(groups) == 1:
-        fails = [_summon(groups[0], 0, 1, op)]
+    # WHICH OPERATOR each item wants — his explicit pick collapses the whole tick
+    # onto one, else each item is auto-routed on its own text. Grouping by
+    # operator is what stops N copies of one summoner. Each group carries its own
+    # model/effort into `_summon` -> `spawn` explicitly, so two groups on
+    # different operators do not race the process-global `BOARD_ORCH_*` env.
+    groups = bw.route_groups(msgs)
+    log("orchestrating %d thing(s) he typed as %d summoner(s): %s"
+        % (len(msgs), len(groups),
+           ", ".join("%s x%d (%s %s)" % (op.name, len(g), op.model, op.effort)
+                     for op, g in groups)))
+    total = len(groups)
+    out = {}
+
+    def one(i, op, group):
+        out[i] = _summon(group, i, total, op)
+
+    if total == 1:
+        one(0, groups[0][0], groups[0][1])
     else:
-        out = {}
-
-        def one(i, group):
-            out[i] = _summon(group, i, len(groups), op)
-
-        pool = [threading.Thread(target=one, args=(i, g), daemon=True)
-                for i, g in enumerate(groups)]
-        for t in pool:
-            t.start()
-        for t in pool:
-            t.join()
-        fails = [out.get(i) for i in range(len(groups))]
+        # In waves of at most `summoners()`: his concurrency ceiling, honoured
+        # without stranding any group — the next wave starts when this one is home.
+        width = max(1, bw.summoners())
+        for start in range(0, total, width):
+            wave = list(enumerate(groups))[start:start + width]
+            pool = [threading.Thread(target=one, args=(i, op, g), daemon=True)
+                    for i, (op, g) in wave]
+            for t in pool:
+                t.start()
+            for t in pool:
+                t.join()
+    fails = [out.get(i) for i in range(total)]
     # Serially, and after the join: every one of these is a read-modify-write of
     # `board.md` under its own lock, and a failed summoner's sentence has to reach
     # him whole rather than interleaved with another's.
