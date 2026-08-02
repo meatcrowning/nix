@@ -865,7 +865,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
 QUEUE_FAIL = (
     "- FAILED: **what you typed could not be worked** - nothing was "
     "dispatched.\n"
-    "    {who} exited {how}; nothing was committed either. What you wrote, "
+    "    Solomon exited {how}; nothing was committed either. What you wrote, "
     "so it is not lost: {text} Log: `~/.cache/board-watch.log`\n")
 
 
@@ -878,14 +878,8 @@ QUEUE_FAIL = (
 ORCH_TIMEOUT_S = int(os.environ.get("BOARD_ORCH_TIMEOUT", "900"))
 
 
-def _summon(notes, index, total, op=None):
+def _summon(notes, index, total):
     """One summoner run: register a card, spawn, wait, unregister.
-
-    `op` is the `boardwork.Operator` this group routed to (Solomon by default) —
-    it names the card and picks the prompt flavour, and its model/effort are
-    passed EXPLICITLY to `spawn` (not through the process-global `BOARD_ORCH_*`
-    env), so two groups on different operators can run at once without the one
-    env clobbering the other.
 
     Returns the QUEUE_FAIL text for it or None. It does NOT write to the board
     itself — several of these run in threads and `note_on_board` is a
@@ -904,9 +898,8 @@ def _summon(notes, index, total, op=None):
     # pins the row to the top of the list whether or not this run exists. Two
     # of them are two Solomons, both pinned, in birth order — which `cards()`
     # already said it did.
-    op = op or bw.default_operator()
     ba.register(aid, notes[0]["text"][:70], os.getpid(), kind="orchestrator",
-                where="board-watch", session=session, name=op.name)
+                where="board-watch", session=session)
     # HE CAN TAKE IT BACK UNTIL THIS RUN ACTS. Written before the spawn, like
     # the drain above it: `boardundo.py` is what ctrl+z reaches, and a run that
     # exists without a record of the orders it was given is a run he cannot
@@ -915,10 +908,11 @@ def _summon(notes, index, total, op=None):
     text = "\n\n".join(m["text"] for m in notes)
     try:
         rc, how, secs = spawn(
-            bw.orchestrator_prompt(op, repo=REPO, host=bw.host_line(),
-                                   notes=text, cap=bw.cap()),
+            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
+                                          notes=text,
+                                          cap=bw.cap()),
             aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
-            role="orchestrator", model=op.model, effort=op.effort)
+            role="orchestrator")
     finally:
         ba.unregister(aid)
         took_back = bu.end_run(aid)
@@ -937,8 +931,7 @@ def _summon(notes, index, total, op=None):
     log("a summoner FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
     # The last stop. He must never have to wonder where a sentence he typed
     # went, so the failure carries the text itself onto the board.
-    return QUEUE_FAIL.format(how=how, who=op.name,
-                             text=bp.oneline(text, 300, code=True))
+    return QUEUE_FAIL.format(how=how, text=bp.oneline(text, 300, code=True))
 
 
 def work_the_queue():
@@ -956,122 +949,51 @@ def work_the_queue():
     (a question in NEEDS YOU, answered at his leisure). `boardwork.py` owns both
     verbs and the prompt.
 
-    SOLOMON IS SUMMONED ONLY WHEN THERE ARE SEVERAL MINISTERS TO COORDINATE.
-    [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
-    there is a need to coordinate multiple ministers together?"* So `route_operator`
-    routes a lone work order to `boardwork.SOLO` — a sentinel, not an operator —
-    and a LONE solo order is DISPATCHED DIRECTLY (`bw.dispatch`, the same capped
-    worker path a summoner reaches), with no planning session in front. Solomon
-    is summoned only for an order that needs SPLITTING (`needs_coordination`:
-    several independent asks, or several disjoint areas).
-
-    A BURST OF SOLO ORDERS IS STILL A SOLOMON. Two work orders arriving in one
-    coalesced batch are several ministers who may touch one file, which is
-    exactly what coalescing exists to coordinate: the batch reaches ONE Solomon
-    that groups by file set rather than two ministers editing the same file. So
-    the split is by COUNT — one solo order goes straight to a minister (his
-    common case, the whole point of this change); two or more fold back into
-    Solomon, keeping the coalescing behaviour intact.
-
     THESE RUNS ARE WAITED ON, and the workers they start are not. That is the
     whole concurrency design: the tick blocks only for the short planning runs, so
     its flock is released long before the workers finish — a decision he answers
-    five minutes from now still fires on time. A direct solo dispatch is not
-    waited on either — `bw.dispatch` starts the minister in its own unit and
-    returns.
+    five minutes from now still fires on time.
 
-    ONE SUMMONER PER OPERATOR, not per sentence. [his, 2026-08-01, of a tick that
-    logged "3 thing(s) ... across 3 summoner(s) as Solomon": *"why the fuck are
-    you running multiple solomons????? multiple fable 5s for what reason?"*] So
-    what he typed is grouped by the operator each item ROUTES to
-    (`boardwork.route_groups`): every item that wants the same operator shares one
-    summoner handed the whole list, and only genuinely different operators (a
-    quick Weyer question beside a Solomon plan) get their own session. Same-
-    operator work never runs as N concurrent copies of one expensive model again.
-
-    HOW MANY run AT ONCE is his, in the top dropdown. [his, 2026-07-29] *"number
-    of summoners"* — `boardwork.summoners()`, read here and cached nowhere, so a
-    change takes effect on the next tick with nothing restarted. It is now a
-    ceiling on CONCURRENCY: the operator groups run in waves of at most that many
-    threads, so nothing is left unworked, but no more than his chosen number of
-    summoner sessions is ever alive together. It bounds SUMMONERS; a lone solo
-    minister rides the worker cap (`bw.cap()`), which `bw.dispatch` honours.
+    HOW MANY of them is his, in the top dropdown. [his, 2026-07-29] *"number of
+    summoners"* — `boardwork.summoners()`, read here and cached nowhere, so a
+    change takes effect on the next tick with nothing restarted. What he typed is
+    split across up to that many runs (`boardwork.split_for_summoners`,
+    contiguous, none empty), and one queued sentence is one summoner however high
+    the number is: the count is a ceiling on the fan-out, not a quota to fill.
+    They run TOGETHER in threads, because the point of asking for more than one is
+    that two unrelated things he typed do not have to take turns; the tick is held
+    for the slowest of them rather than the sum.
 
     Returns True if a run happened.
     """
     msgs = ba.drain()          # BEFORE the spawn: see boardagents.drain()
     if not msgs:
         return False
-    # WHICH OPERATOR each item wants — his explicit pick collapses the whole tick
-    # onto one, else each item is auto-routed on its own text. Grouping by
-    # operator is what stops N copies of one summoner. Each group carries its own
-    # model/effort into `_summon` -> `spawn` explicitly, so two groups on
-    # different operators do not race the process-global `BOARD_ORCH_*` env.
-    groups = bw.route_groups(msgs)
-    # SOLO items do not summon. A LONE one is dispatched straight to a minister; a
-    # BURST of two or more folds back into Solomon (merging with any real Solomon
-    # group), because a coalesced burst is exactly the file-set-collision case
-    # coalescing exists to have ONE planner coordinate.
-    solo_items = [it for op, g in groups if op.flavour == "solo" for it in g]
-    summon = [(op, g) for op, g in groups if op.flavour != "solo"]
-    happened = False
-    if len(solo_items) == 1:
-        # THE WHOLE POINT: one work order, one minister, no planning session in
-        # front. `order` carries his own sentence for the bullet's "which of his
-        # asks it came out of" — there is no summoner card to read it off, so it
-        # is passed explicitly. `bw.dispatch` is capped and never waits.
-        it = solo_items[0]
-        rec = bw.dispatch(it["text"], order=it["text"])
-        happened = True
-        log("dispatched one minister (%s) straight for: %s"
-            % ((rec or {}).get("state", "?"), it["text"][:70]))
-    elif solo_items:
-        # A burst: hand the lot to Solomon so it groups them by file set. Merge
-        # into an existing Solomon group if the batch already had one.
-        sol = bw.operator_by_name("Solomon")
-        for i, (op, g) in enumerate(summon):
-            if op.name == sol.name:
-                summon[i] = (op, g + solo_items)
-                break
-        else:
-            summon.append((sol, solo_items))
+    groups = bw.split_for_summoners(msgs)
+    log("orchestrating %d thing(s) he typed across %d summoner(s)"
+        % (len(msgs), len(groups)))
+    if len(groups) == 1:
+        fails = [_summon(groups[0], 0, 1)]
+    else:
+        out = {}
 
-    log("working %d thing(s) he typed: %d summoner(s)%s"
-        % (len(msgs), len(summon),
-           (": " + ", ".join("%s x%d (%s %s)" % (op.name, len(g), op.model,
-                                                 op.effort)
-                             for op, g in summon)) if summon else " (solo)"))
+        def one(i, group):
+            out[i] = _summon(group, i, len(groups))
 
-    total = len(summon)
-    out = {}
-
-    def one(i, op, group):
-        out[i] = _summon(group, i, total, op)
-
-    if total == 1:
-        one(0, summon[0][0], summon[0][1])
-        happened = True
-    elif total:
-        # In waves of at most `summoners()`: his concurrency ceiling, honoured
-        # without stranding any group — the next wave starts when this one is home.
-        happened = True
-        width = max(1, bw.summoners())
-        for start in range(0, total, width):
-            wave = list(enumerate(summon))[start:start + width]
-            pool = [threading.Thread(target=one, args=(i, op, g), daemon=True)
-                    for i, (op, g) in wave]
-            for t in pool:
-                t.start()
-            for t in pool:
-                t.join()
-    fails = [out.get(i) for i in range(total)]
+        pool = [threading.Thread(target=one, args=(i, g), daemon=True)
+                for i, g in enumerate(groups)]
+        for t in pool:
+            t.start()
+        for t in pool:
+            t.join()
+        fails = [out.get(i) for i in range(len(groups))]
     # Serially, and after the join: every one of these is a read-modify-write of
     # `board.md` under its own lock, and a failed summoner's sentence has to reach
     # him whole rather than interleaved with another's.
     for text in fails:
         if text:
             note_on_board(text)
-    return happened
+    return True
 
 
 #: Set by drain_queue() when there IS something queued and the gate said no. A
@@ -1094,8 +1016,8 @@ def mark_gate_hold():
 #: single or multitude of prompts"* — how he broke his thinking into box-fulls
 #: is not how the work divides, so a sentence typed 40 seconds after another
 #: must not be planned by a second summoner that cannot see the first. The
-#: whole batch reaches ONE planner (`boardwork.route_groups` groups it by
-#: operator) and is grouped by file set there.
+#: whole batch reaches ONE planner (the summoner dial defaults to 1) and is
+#: grouped by file set there.
 #:
 #: **A LONE SENTENCE WAITS FOR NOTHING.** This started as a flat 75s and he
 #: felt it within the hour — *"why does it take seemingly minutes for prompts
