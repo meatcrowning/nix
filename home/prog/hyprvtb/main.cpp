@@ -1393,6 +1393,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.buttonBorderColor = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.button_border", "Button outline colour", 0xff192c38);
     g_pGlobalState->config.accentColor       = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.accent", "Accent (maximize/minimize hover) colour", 0xff5c9fcc);
     g_pGlobalState->config.critColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.crit", "Close-hover colour", 0xff70c3fa);
+    g_pGlobalState->config.warnColor         = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.warn", "Roll-up cell colour (theme yellow)", 0xffe6c14a);
     g_pGlobalState->config.inactiveColor     = makeShared<Config::Values::CColorValue>("plugin:hyprvtb:col.inactive", "Unfocused text colour (matches general:col.inactive_border)", 0xaa595959);
 
     // THE DESKTOP'S MOTION, not just this plugin's. The window roll is the
@@ -1490,6 +1491,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         "plugin:hyprvtb:kinetic_debug", "1 = log fling start/end/cancel, 2 = also every refusal", 0, Config::Values::SIntValueOptions{.min = 0, .max = 2});
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.critColor);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.warnColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.inactiveColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.slideDurationMs);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.rollSlideFrac);
@@ -1635,7 +1637,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.00"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.01"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

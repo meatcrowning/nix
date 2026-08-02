@@ -40,7 +40,7 @@ static CHyprColor configColor(Config::INTEGER color) {
 // window: two columns of bar_width each. The INNER column (adjacent to the
 // window content) holds app-registered buttons (vtbIpc) — empty for apps that
 // registered none; the OUTER column holds the five system cells (close,
-// maximize, minimize, pin, roll-up) with the stacked title under them, exactly
+// roll-up, maximize, minimize, pin) with the stacked title under them, exactly
 // as the single-wide bar did.
 static constexpr int VTB_PAD      = 2; // inset from the bar edge
 static constexpr int VTB_CELL_GAP = 2;
@@ -697,6 +697,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     auto       borderColor   = configColor(Cfg::buttonBorderColor());
     auto       accentColor   = configColor(Cfg::accentColor());
     auto       critColor     = configColor(Cfg::critColor());
+    auto       warnColor     = configColor(Cfg::warnColor());
     auto       inactiveColor = configColor(Cfg::inactiveColor());
     bgColor.a *= a;
     bgAltColor.a *= a;
@@ -837,28 +838,29 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     drawCell(0, critColor, false);
     drawGlyph(0, "x", m_iHoverCell == 0 ? critColor : textColor);
 
+    // roll-up — windowshade toggle: [>>] hides the window down to just this
+    // bar; while shaded it shows [<<] to roll it back. Sits between close and
+    // maximize, and carries the theme WARN (yellow) role the same way close
+    // carries CRIT (red). Inverted while shaded — but NOT during the open/close
+    // animations, which borrow the roll-up machinery (m_bRolledUp goes true
+    // mid-animation) without the user having shaded anything.
+    const bool SHADED = m_bRolledUp && !m_bOpening && !m_bClosing;
+    drawCell(1, warnColor, SHADED);
+    drawGlyph(1, SHADED ? "<<" : ">>", (SHADED || m_iHoverCell == 1) ? warnColor : textColor, SHADED);
+
     // maximize [=] — inverted while maximized (held), accent while hovered
-    drawCell(1, accentColor, m_bMaximized);
-    drawGlyph(1, "=", (m_bMaximized || m_iHoverCell == 1) ? accentColor : textColor, m_bMaximized);
+    drawCell(2, accentColor, m_bMaximized);
+    drawGlyph(2, "=", (m_bMaximized || m_iHoverCell == 2) ? accentColor : textColor, m_bMaximized);
 
     // minimize [>] — slides the window off to the right
-    drawCell(2, accentColor, false);
-    drawGlyph(2, ">", m_iHoverCell == 2 ? accentColor : textColor);
+    drawCell(3, accentColor, false);
+    drawGlyph(3, ">", m_iHoverCell == 3 ? accentColor : textColor);
 
     // pin [o>] — Hyprland pin: keeps the window on top and on every
     // workspace. Inverted while pinned, like maximize while maximized.
     const bool PINNED = PWINDOW->m_pinned;
-    drawCell(3, accentColor, PINNED);
-    drawGlyph(3, "o>", (PINNED || m_iHoverCell == 3) ? accentColor : textColor, PINNED);
-
-    // roll-up — windowshade toggle: [>>] hides the window down to just this
-    // bar; while shaded it shows [<<] to roll it back. Inverted while shaded —
-    // but NOT during the open/close animations, which borrow the roll-up
-    // machinery (m_bRolledUp goes true mid-animation) without the user having
-    // shaded anything.
-    const bool SHADED = m_bRolledUp && !m_bOpening && !m_bClosing;
-    drawCell(4, accentColor, SHADED);
-    drawGlyph(4, SHADED ? "<<" : ">>", (SHADED || m_iHoverCell == 4) ? accentColor : textColor, SHADED);
+    drawCell(4, accentColor, PINNED);
+    drawGlyph(4, "o>", (PINNED || m_iHoverCell == 4) ? accentColor : textColor, PINNED);
 
     // ---- title, a column of upright letters (outer column, under the cells) ----
     // In edit mode the same region becomes the address editor: it shows the
@@ -1352,10 +1354,10 @@ void CVtbDeco::drawRollBorder(const CBox& barBoxDev, float scale, float slideT, 
 std::string CVtbDeco::tooltipForCell(int cell) {
     switch (cell) {
         case 0: return "close";
-        case 1: return m_bMaximized ? "unmaximize" : "maximize";
-        case 2: return "minimize";
-        case 3: return "pin";
-        case 4: return m_bRolledUp ? "unroll" : "roll up";
+        case 1: return m_bRolledUp ? "unroll" : "roll up";
+        case 2: return m_bMaximized ? "unmaximize" : "maximize";
+        case 3: return "minimize";
+        case 4: return "pin";
         default: break;
     }
     if (cell >= VTB_APPCELL) {
@@ -2887,10 +2889,10 @@ void CVtbDeco::handleDownEvent(Event::SCallbackInfo& info) {
 
     switch (SYSCELL) {
         case 0: closeWindow(); return;
-        case 1: toggleMaximize(); return;
-        case 2: minimizeWindow(); return;
-        case 3: togglePin(); return;
-        case 4: toggleRollup(); return;
+        case 1: toggleRollup(); return;
+        case 2: toggleMaximize(); return;
+        case 3: minimizeWindow(); return;
+        case 4: togglePin(); return;
         default: break;
     }
 
@@ -3108,7 +3110,7 @@ void CVtbDeco::handleRolledUp(Event::SCallbackInfo& info) {
     // Un-shade ONLY when the roll-up cell ([<<]) was clicked without dragging.
     // A plain click elsewhere on the bar does nothing — the button is the only
     // way to unroll (a bare-bar click used to unroll, which was too easy to hit).
-    if (WASPENDING && !WASDRAG && PRESSCELL == 4)
+    if (WASPENDING && !WASDRAG && PRESSCELL == 1)
         toggleRollup();
 
     if (CANCELLED)
