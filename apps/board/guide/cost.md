@@ -22,26 +22,36 @@ were built from is `docs/goetia-request-management.md`.
 
 [his, 2026-08-01] *"being able to send a multitude of requests in either a
 single or multitude of prompts"*. How he split his thinking into box-fulls is
-not how the work divides, so `drain_queue()` **waits for the queue to go quiet
-for `COALESCE_QUIET_S` (75 s) before planning any of it**, bounded by
-`COALESCE_MAX_HOLD_S` (300 s) measured against the OLDEST queued item so a
-steady typist is still planned promptly and a hold can never become a stall.
-Both are `BOARD_COALESCE_QUIET` / `BOARD_COALESCE_MAX`.
+not how the work divides, so `drain_queue()` can wait out the rest of a burst
+and hand the whole of it to ONE summoner (`boardwork.route_groups` groups it by
+operator), which can then group it by file set.
 
-- **TWO windows, because a flat one is paid by the common case.**
-  `COALESCE_QUIET_S` (**10 s**) while ONE thing is queued;
-  `COALESCE_BURST_S` (**40 s**) once two or more are, which is the only state
-  that proves he is mid-burst. It started at a flat 75 s and he felt it the
-  same evening — *"why does it take seemingly minutes for prompts to get picked
-  up and acted upon"*. Measured over ~190 runs in `~/.cache/board-watch.log`,
-  the SUMMONER is a median ~50 s (p90 ~2 min), so a flat 75 s roughly doubled
-  the wait and bought nothing for the single sentence that is most of the
-  traffic. Env: `BOARD_COALESCE_QUIET` / `BOARD_COALESCE_BURST` /
-  `BOARD_COALESCE_MAX`.
-- **A run already in flight coalesces the rest for free**, which is why the
-  opening window can be this short: board-watch holds the flock while it waits
-  on a summoner, so everything typed meanwhile is drained together by the next
-  tick anyway.
+- **A LONE SENTENCE WAITS FOR NOTHING** — `COALESCE_QUIET_S` is **0**. This
+  shipped as a flat 75 s and he felt it within the hour (*"why does it take
+  seemingly minutes for prompts to get picked up and acted upon"*), then at
+  10 s and he felt that too (*"it still took like a few seconds even though no
+  summoners were busy"*). Both readings are right: measured from the journal,
+  `board-inbox.path` starts the tick **~100 ms** after the queue file appears,
+  so ANY hold here is the entire delay he can see before a summoner starts —
+  and for one sentence it buys nothing, there being no second item to batch it
+  with.
+- **`COALESCE_BURST_S` (40 s) applies only once TWO OR MORE are queued**, which
+  is the only state that PROVES a burst instead of guessing at one. Nothing
+  ever waits on a guess.
+- **Bounded from both ends**, which is what stops a hold becoming a stall: it
+  ends when the newest item has been quiet for the window, AND unconditionally
+  once the OLDEST has waited one window. So a batch is planned at most `window`
+  seconds after its first sentence however fast he keeps typing, and a queue
+  that has been SITTING — behind a running summoner, say — is planned at once,
+  being already coalesced by definition.
+- **The other half of the batching is free and needs no window at all**:
+  board-watch holds the flock while it waits on a summoner, so everything typed
+  during a run is drained together by the next tick whatever these are set to.
+- Env: `BOARD_COALESCE_QUIET` / `BOARD_COALESCE_BURST`.
+- **For scale, what the hold is measured AGAINST**: over ~190 runs in
+  `~/.cache/board-watch.log` the summoner itself is a median ~50 s, p90 ~2 min,
+  tail 3-6 min, and nothing is dispatched until it finishes. That, and not this
+  window, is where the wait between his sentence and a minister card lives.
 - **It SLEEPS inside the run, holding the flock — it does not return.**
   `board-inbox.path` is `PathExistsGlob` and level-triggered, so returning with
   the queue still full is a respawn every few hundred milliseconds for the

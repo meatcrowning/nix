@@ -1045,56 +1045,58 @@ def mark_gate_hold():
 #: whole batch reaches ONE planner (`boardwork.route_groups` groups it by
 #: operator) and is grouped by file set there.
 #:
-#: **TWO windows, because a flat one is paid by the common case.** This started
-#: at a flat 75s and he felt it the same evening — *"why does it take seemingly
-#: minutes for prompts to get picked up and acted upon"*. Measured over ~190
-#: runs in `~/.cache/board-watch.log`: the summoner itself is a median ~50s
-#: (p90 ~2 min), so a flat 75s roughly DOUBLED the wait, and it bought nothing
-#: at all for the single sentence that is most of the traffic.
+#: **A LONE SENTENCE WAITS FOR NOTHING.** This started as a flat 75s and he
+#: felt it within the hour — *"why does it take seemingly minutes for prompts
+#: to get picked up and acted upon"* — then at 10s and he felt that too:
+#: *"it still took like a few seconds even though no summoners were busy"*.
+#: Both are correct readings. Measured: the path unit starts the tick ~100ms
+#: after the queue file appears, so ANY hold here is the whole of the delay he
+#: can see before a summoner starts thinking, and for one sentence it buys
+#: nothing — there is no second item to batch it with.
 #:
-#: So the opening window is short — long enough to catch a second sentence
-#: typed right behind the first, short enough not to be felt — and it only
-#: widens once there is real evidence of a burst (`COALESCE_BURST_S`, below).
-#: A run already in flight coalesces the rest for free anyway: board-watch
-#: holds the flock while it waits on a summoner, so everything typed meanwhile
-#: is drained together by the next tick.
-#:
-#: The box's footer promises only *"in the inbox - ctrl+z takes it back until a
-#: summoner acts"*, so nothing drawn becomes a lie — and Ctrl+Z gets a wider
-#: window, not a narrower one.
-COALESCE_QUIET_S = float(os.environ.get("BOARD_COALESCE_QUIET", "10"))
+#: So the default is ZERO: one thing queued is planned at once, exactly as it
+#: was before any of this existed. The batching this feature exists for happens
+#: on the path where it costs nothing (below).
+COALESCE_QUIET_S = float(os.environ.get("BOARD_COALESCE_QUIET", "0"))
 
 #: ...and the window once TWO OR MORE things are already queued, which is the
-#: only state that proves he is mid-burst. Longer, because that is where the
-#: batching is worth something, and by then he is visibly still typing.
+#: only state that PROVES a burst rather than guessing at one. Nothing waits on
+#: a guess: by the time this applies he has already sent more than one thing.
+#:
+#: The other half of the batching is free and needs no window at all: this
+#: script holds the flock while it waits on a summoner, so everything typed
+#: during a run is drained together by the next tick whatever these are set to.
 COALESCE_BURST_S = float(os.environ.get("BOARD_COALESCE_BURST", "40"))
-
-#: The hard ceiling on that wait, measured from the OLDEST queued item, so a
-#: steady typist is still planned promptly and a hold can never become a stall.
-COALESCE_MAX_HOLD_S = float(os.environ.get("BOARD_COALESCE_MAX", "300"))
 
 
 def coalescing(waiting, now=None):
     """Seconds to keep waiting for the rest of the burst, or 0 to plan it now.
 
-    Zero whenever the newest item has been sitting for `COALESCE_QUIET_S`, or
-    the oldest for `COALESCE_MAX_HOLD_S`, or anything in the queue carries no
-    timestamp at all — an unstamped item is one this cannot reason about, and
-    the safe answer for a message of his is to work it, not to hold it.
+    The window is `COALESCE_QUIET_S` for ONE queued item (zero by default) and
+    `COALESCE_BURST_S` for several. It is bounded from BOTH ends, which is what
+    keeps a hold from ever becoming a stall: it ends when the newest item has
+    sat quiet for the window, and unconditionally once the OLDEST has waited
+    one window — so a batch is planned at most `window` seconds after its first
+    sentence however fast he keeps typing, and a queue that has been sitting
+    (blocked behind a running summoner, say) is planned at once, being already
+    coalesced by definition.
+
+    Zero, too, if anything in the queue carries no timestamp: an unstamped item
+    is one this cannot reason about, and the safe answer for a message of his
+    is to work it, not to hold it.
     """
     now = time.time() if now is None else now
     stamps = [float(m.get("sent") or 0) for m in waiting]
     if not stamps or not all(stamps):
         return 0.0
-    if now - min(stamps) >= COALESCE_MAX_HOLD_S:
-        return 0.0
-    # ONE item is not yet a burst: it gets the short window and nothing more.
-    # Several ARE one, and are worth waiting on properly.
     window = COALESCE_BURST_S if len(stamps) > 1 else COALESCE_QUIET_S
-    quiet_for = now - max(stamps)
-    if quiet_for >= window:
+    if window <= 0:
         return 0.0
-    return max(0.0, window - quiet_for)
+    oldest_left = window - (now - min(stamps))
+    quiet_left = window - (now - max(stamps))
+    if oldest_left <= 0 or quiet_left <= 0:
+        return 0.0
+    return max(0.0, min(oldest_left, quiet_left))
 
 
 def drain_queue():
