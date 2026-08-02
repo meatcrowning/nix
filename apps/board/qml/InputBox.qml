@@ -147,6 +147,10 @@ Item {
             font.pixelSize: Theme.fontSize
             font.hintingPreference: Font.PreferFullHinting
             renderType: Text.NativeRendering
+            // the same "no antialiasing" pin PixelText/CodeView carry (§2.2):
+            // without it the typed text renders subpixel-AA'd/fringed while
+            // every other label here is crisp hard-edged pixels.
+            antialiasing: false
             color: box.fgText
             selectionColor: Theme.highlight
             selectedTextColor: Theme.accent
