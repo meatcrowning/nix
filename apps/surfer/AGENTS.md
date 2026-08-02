@@ -572,6 +572,49 @@ both markers still hand off, and a real pty still hands off — plus the whole o
 `tools/find-test.py` run through `surfer-qtenv`, and the built wrapper sourced
 in a sealed env (guard fires, no process, no log).
 
+## Memory — discard idle background tabs, cap the disk cache
+
+**Where surfer's memory actually goes is the render process tree, and the lever
+is QtWebEngine's page lifecycle, not cache knobs.** Measured offscreen
+(`tools/mem-test.py`, real shared-profile views over loopback): a tab that has
+ever loaded keeps a full renderer alive even hidden — **6 loaded tabs → 6
+renderers, ~1217 MB of tree RSS (VmRSS summed across the whole process tree,
+not just the main python process), and hiding the 5 background tabs changed
+nothing by itself (+1 MB).**
+
+- **`win.discardIdleTabs()` (Main.qml) is the fix.** QtWebEngine's
+  `WebEngineView.lifecycleState` (enum `WebEngineView.LifecycleState.`)
+  `Discarded` tears a hidden page's renderer down. The same 6-tab measurement
+  after discarding the 5 hidden tabs: **1 renderer, ~606 MB — a ~617 MB / ~51 %
+  drop.** Re-selecting a discarded tab sets it back to `Active`
+  (`onPaneChanged`), which is what reloads it.
+- **It never discards the on-screen pane** (`v.pane >= 0`), **never a cold
+  restored tab** (`v.cold` holds no renderer), and **only after a tab has been
+  off-screen for `win.discardAfter`** (10 minutes by default) — the reload cost
+  is the reason, so a just-used tab stays instant and only abandoned tabs give
+  their memory back. A 30 s `Timer` walks `viewRep` and discards any hidden tab
+  whose `lastSeen` is older than the threshold.
+- **Freezing is NOT a memory lever.** `Frozen` pauses JS/timers but keeps the
+  renderer's V8 heap and caches — measured at ~+1 MB. It is a CPU/power saver,
+  not an RSS one, so surfer only uses `Discarded`.
+- **The disk cache is capped, separately.** With no cap Chromium let
+  `~/.cache/surfer/surfer/QtWebEngine/surfer/Cache` reach **1.3 GB**.
+  `_wire_profile` now calls `prof.setHttpCacheMaximumSize(512 MB)` (the QML
+  profile object exposes the setter, verified) — it bounds that runaway disk
+  growth and the in-memory cache index with it, at a level that does not make
+  repeat visits re-fetch. This is cache sizing; the RSS win is the discard.
+- **The render-process model is left at the default** (process-per-site-instance
+  already shares one renderer across tabs of the same site, and the discard
+  above reclaims the rest). `--process-per-site` / `--single-process` trade
+  sandbox isolation for a little more memory and are not worth it.
+
+**`tools/mem-test.py` is the kept measurement harness** (+ its `mem-test.qml`
+fixture): N shared-profile views over loopback, `--none`/`--freeze`/`--discard`
+modes, and it prints tree RSS *and* `--type=renderer` process count before and
+after. It also drift-guards that Main.qml still carries the five discard tokens
+and that main.py still caps the cache. Run it with `surfer-qtenv python3
+apps/surfer/tools/mem-test.py --tabs 6 --discard`.
+
 ## Profile handoff between `top` and `book` (2026-07-26)
 
 `tools/sync.py` merges the two machines' browser state; `home/prog/surfer.nix`'s
