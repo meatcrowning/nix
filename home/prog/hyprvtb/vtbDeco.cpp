@@ -256,6 +256,24 @@ CVtbDeco::CVtbDeco(PHLWINDOW pWindow) : IHyprWindowDecoration(pWindow) {
     m_pMouseMoveCallback   = Event::bus()->m_events.input.mouse.move.listen([&](Vector2D c, Event::SCallbackInfo& info) { onMouseMove(c); });
     m_pMouseAxisCallback   = Event::bus()->m_events.input.mouse.axis.listen([&](IPointer::SAxisEvent e, Event::SCallbackInfo& info) { onMouseAxis(info, e); });
     m_pKeyboardKeyCallback = Event::bus()->m_events.input.keyboard.key.listen([&](IKeyboard::SKeyEvent e, Event::SCallbackInfo& info) { onKeyboardKey(info, e); });
+
+    // Take an initial registration snapshot NOW, synchronously, instead of
+    // waiting for the first 150ms heartbeat (mainThreadTick) to advance it. An
+    // app whose window maps with its REGISTER already in g_regs — surfer seeds
+    // its chrome+title_edit onto the socket ~1ms after launch, long before
+    // QtWebEngine builds the window — otherwise draws the plugin's DEFAULT bar
+    // (window title, no buttons, no address editor) for every frame between map
+    // and that first tick: up to a full heartbeat, which is the residual
+    // startup titlebar flash. Read the serial FIRST so a REGISTER landing
+    // between here and the get() still leaves serial != m_lastIpcSerial and the
+    // next tick re-snapshots. Thereafter the snapshot is advanced only by
+    // mainThreadTick (nothing on the render path may read VtbIpc::get).
+    m_lastIpcSerial = VtbIpc::serial.load(std::memory_order_relaxed);
+    SVtbAppReg fresh;
+    if (VtbIpc::get(appPid(), fresh)) {
+        m_regSnap = std::move(fresh);
+        m_bHasReg = true;
+    }
 }
 
 // Codepoint-boundary walk over a UTF-8 buffer: previous / next boundary byte
