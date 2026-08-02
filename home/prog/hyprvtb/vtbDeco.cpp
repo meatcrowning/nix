@@ -4039,9 +4039,11 @@ void CVtbShadowDeco::draw(PHLMONITOR, const float&) {
 //  * overBars=false, BEFORE the shade bars: the flat layer above — every
 //    unrolled window's shadow plus the in-flight roll composite's, on the
 //    desktop.
-//  * overBars=true, AFTER the shade bars: the parts of those same shadows that
-//    fall on a RESTING rolled-up bar, drawn back over the (opaque) bar so other
-//    windows' shadows appear ON TOP of a rolled-up window — his report. A
+//  * overBars=true, AFTER the shade bars: the parts of those same shadows —
+//    every unrolled window's, plus an in-flight roll composite's while it draws
+//    above the windows — that fall on a RESTING rolled-up bar, drawn back over
+//    the (opaque) bar so other windows' shadows appear ON TOP of a rolled-up
+//    window — his report. A
 //    rolled-up bar is chrome, not a window: it does NOT occlude a shadow the way
 //    an unrolled window does. Restricted to the bar union so the desktop share
 //    the first pass already laid down is never doubled (0.6 over 0.6 -> ~0.84).
@@ -4115,16 +4117,28 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
         shadow.add(CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round());
     }
 
-    // In-flight roll composite's own collapsing shadow — desktop only, and it
-    // sits UNDER its own bar, so it belongs to the pre-bars pass. Painting it in
-    // the over-bars pass would lay it on top of that bar. A window at REST rolled
+    // In-flight roll composite's own collapsing shadow. A window at REST rolled
     // up casts none (rollShadowBoxDev returns false unless a roll is running).
-    if (!overBars) {
-        for (auto& b : g_pGlobalState->bars) {
-            CBox rollShadow;
-            if (b && b->rollShadowBoxDev(pMonitor, rollShadow))
-                shadow.add(rollShadow);
-        }
+    //  * pre-bars: its desktop share, sitting under its own bar.
+    //  * over-bars: the part that falls on ANOTHER window's RESTING rolled-up
+    //    bar — so a window rolling out (or its mirror, rolling up) covers the
+    //    rolled-up windows it slides over from the FIRST frame, instead of its
+    //    shadow skipping them until the animation lands and the window joins the
+    //    flat loop above, then snapping into coverage. Only for a composite
+    //    drawing ABOVE the windows (roll-out / open reveal / roll-up slide): in
+    //    those phases its OWN bar is excluded from barRegion (rollBarBoxDev is
+    //    false), so the over-bars share (intersected with barRegion below) can
+    //    never be laid on its own bar — the hazard the original pre-bars-only
+    //    rule avoided. During a roll-up SET-DOWN the window sinks under the
+    //    others and its own bar IS in barRegion, so its shadow stays pre-bars.
+    for (auto& b : g_pGlobalState->bars) {
+        if (!b)
+            continue;
+        if (overBars && !(b->isRollingOut() || b->isOpening() || b->isRollingUpSlide()))
+            continue;
+        CBox rollShadow;
+        if (b->rollShadowBoxDev(pMonitor, rollShadow))
+            shadow.add(rollShadow);
     }
 
     if (shadow.empty())
