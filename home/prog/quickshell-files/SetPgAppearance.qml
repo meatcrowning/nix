@@ -79,6 +79,30 @@ Column {
                 onToggled: (v) => { page.d.pureBlackBg = v; SettingsStore.save(); }
             }
         }
+        SetRow {
+            // Opt-in departure from the one-hue palette (docs/DESIGN.md 3.1):
+            // on = frames take the wallpaper's SECOND colour and the status ramp
+            // takes real green/amber/red/blue, so the desktop reads as several
+            // wallpaper colours rather than shades of one. Off is the default.
+            label: "full palette"
+            desc: "on = build a whole multi-colour palette from the wallpaper, not one accent + shades"
+            SetToggle {
+                checked: page.d.paletteFull
+                onToggled: (v) => { page.d.paletteFull = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            // A global chroma/value transform over the full palette. Only bites
+            // when full palette is on; in the default one-hue mode the look is
+            // already the settled pastel and this is inert.
+            label: "variant"
+            desc: "full-palette style: vivid = punchy, muted = washed, pastel = soft (default)"
+            SetSelect {
+                options: ["vivid", "muted", "pastel"]
+                value: page.d.paletteVariant
+                onChanged: (v) => { page.d.paletteVariant = v; SettingsStore.save(); }
+            }
+        }
     }
 
     SetSection {

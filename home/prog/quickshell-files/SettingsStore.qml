@@ -122,6 +122,12 @@ Singleton {
             property int    fontSize: 15               // matches kitty's on-screen cell (11pt@96dpi ≈ 14.67px); see Theme.qml
             property int    paletteColorCount: 16      // wal quantize cluster count
             property bool   pureBlackBg: true
+            // Full-palette mode: off = the settled one-hue palette (§3.1);
+            // on = a whole palette read off the wallpaper (secondary-hue frames
+            // + real colour-coded status), styled by paletteVariant. Both are
+            // derived by wal-extract.py and fill the same Theme tokens.
+            property bool   paletteFull: false
+            property string paletteVariant: "pastel"   // vivid | muted | pastel (full mode only)
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
@@ -315,7 +321,8 @@ Singleton {
     readonly property var defaults: ({
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
-        fontSize: 15, paletteColorCount: 16, pureBlackBg: true, windowBorderWidth: 2,
+        fontSize: 15, paletteColorCount: 16, pureBlackBg: true,
+        paletteFull: false, paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, scrollbarStyle: "win31",
         reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",

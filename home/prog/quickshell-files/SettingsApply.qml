@@ -94,6 +94,8 @@ Item {
         function onAccentOverrideChanged()    { root.reapplyTheme(); }
         function onPaletteColorCountChanged() { root.reapplyTheme(); }
         function onPureBlackBgChanged()       { root.reapplyTheme(); }
+        function onPaletteFullChanged()       { root.reapplyTheme(); }
+        function onPaletteVariantChanged()    { root.reapplyTheme(); }
     }
 
     // Re-run the full wallpaper/theme apply. DEBOUNCED, because its last step
@@ -110,7 +112,8 @@ Item {
     // keys is recorded at completion (after loadNow(), which is what makes the
     // real values readable there) and the timer applies only a genuine change.
     readonly property var _paletteKeys: ["themeMode", "accentOverride",
-                                         "paletteColorCount", "pureBlackBg"]
+                                         "paletteColorCount", "pureBlackBg",
+                                         "paletteFull", "paletteVariant"]
     property string _paletteSig: ""
     function _sig() {
         const d = SettingsStore.d;
