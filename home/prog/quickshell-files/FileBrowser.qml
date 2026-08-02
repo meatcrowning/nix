@@ -138,7 +138,7 @@ FloatingWindow {
                 width: list.width
                 // terminal-style file list: one kitty cell per entry — row height
                 // IS the font line box (text-only), vs the old fixed 22px
-                height: Theme.fontSize
+                height: Theme.lineHeight
                 readonly property string abs: view.fromUrl(filePath)
                 color: view.selected === abs ? Theme.highlight : "transparent"
 

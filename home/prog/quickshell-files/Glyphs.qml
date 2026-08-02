@@ -21,7 +21,7 @@ Singleton {
     // containing a glyph it does not have makes Qt fall back to Noto Sans for
     // that ONE character — and the line's ascent becomes the fallback's, which
     // is taller. With `lineHeightMode: FixedHeight` pinning the line box to
-    // Theme.fontSize the extra ascent has nowhere to go, so the whole line is
+    // Theme.lineHeight the extra ascent has nowhere to go, so the whole line is
     // pushed down inside its row and clipped along the bottom. That is the
     // "one apostrophe ruins the row" report: the title sits several pixels
     // lower than the number, artist and duration beside it, which are ASCII.
