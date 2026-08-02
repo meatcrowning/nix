@@ -64,7 +64,12 @@ the gutter is reserved from its own `barW`, never a literal.
 
 **Every drag on the page is a DISPLAY order, and `board.md` is never rewritten by
 one** ([his answer, 2026-08-01]). The four top-level bands reorder into
-`sectionOrder`; the decisions inside NEEDS YOU reorder into `needsOrder`. Both are
+`sectionOrder`; the decisions inside NEEDS YOU reorder into `needsOrder`; and a
+CROSS-SECTION drag interleaves the NEEDS YOU sub-blocks — each decision and the
+whole to-do area — into `needsBlockOrder` ([his ask, 2026-08-01], "drag any
+subheading from any heading to any place": `win.needsBlocks` builds the flat block
+list, `reorderBlock` drops one anywhere among the others). The to-do area moves as
+one block; its tag groups keep their own order and folds. All three are
 saved in `~/.local/state/board/state.json` beside `collapsed` and `drafts`, and
 both are applied in `Main.qml` when the rows are drawn — the decisions through
 `applyDisplayOrder`, which keeps any key the saved order does not mention (a
