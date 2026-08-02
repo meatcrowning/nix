@@ -4142,11 +4142,12 @@ def test_window(app, tmp):
               for m, t in tips),
           [(t[0].property("text") if t else None) for m, t in tips])
     chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
-    # SEVEN now: the two meters, the four dropdowns (which carry their `hint`
+    # SIX now: the two meters, the three dropdowns (which carry their `hint`
     # here rather than in the footer for the same reason) and the hermes
-    # proximity row's reset tooltip.
+    # proximity row's reset tooltip. (It was seven until the operator dropdown
+    # came off, 2026-08-01.)
     check("...and no chip is on screen until he dwells on one (8)",
-          len(chips) == 7 and all(c.width() == 0 and not c.isVisible() for c in chips),
+          len(chips) == 6 and all(c.width() == 0 and not c.isVisible() for c in chips),
           [(c.width(), c.isVisible()) for c in chips])
 
     # ---- ...and it slides out to the LEFT, out of a fixed right edge ----
@@ -4230,35 +4231,34 @@ def test_window(app, tmp):
           and [m.property("busy") for m in meters] == [False, False],
           (lit, [m.property("busy") for m in meters]))
 
-    # ---- the model chooser sits to the RIGHT of the box he types in ----
+    # ---- the dropdown column to the RIGHT of the box he types in ----
     # His words placed it: "a drop down to the right of the top prompt box".
-    # Found by its label rather than an id, because that label is the one thing
-    # about it he can see, and a control that draws the wrong model is the whole
-    # failure mode worth catching.
+    # Since 2026-08-01 the operator/model pick is GONE — the operator is
+    # auto-routed (`boardwork.route_operator`) and the roster is read-only — so
+    # the column is THREE: the summoner count, the minister cap, the minister
+    # model. Found by their labels, the one thing about each he can see.
     from PySide6.QtCore import QPointF                                  # noqa: E402
     import boardwork as bwm                                             # noqa: E402
     agents_obj = keep[5]
-    # Two dropdowns in that column now — which model, and how many agents — so
-    # they are told apart by the label, which is the only thing about either of
-    # them he can see. A control drawing the wrong model, or the wrong cap, is
-    # the whole failure mode worth catching.
     drops = [it for it in descendants(win.contentItem())
              if (it.property("text") or "").endswith("  v")]
-    picks = [it for it in drops
-             if it.property("text").startswith(agents_obj.modelLabel)]
     caps = [it for it in drops
             if it.property("text").startswith(agents_obj.capLabel)]
-    # ...and the TOP of that column, which is the summoner count since his four
-    # dropdowns landed. Anything measuring the column's span reads this one and
-    # not the model chooser, which is now the second rung.
+    # The TOP of that column is the summoner count — anything measuring the
+    # column's span or its top-flush reads this one, not a chooser below it.
     sums = [it for it in drops
             if it.property("text").startswith(agents_obj.summonerLabel)]
-    check("there is exactly one model chooser, and it says which model",
-          len(picks) == 1, [p.property("text") for p in drops])
-    if picks:
+    check("the GUI can no longer PIN an operator - no model/operator chooser",
+          not hasattr(agents_obj, "models")
+          and not hasattr(agents_obj, "modelLabel")
+          and not hasattr(agents_obj, "chooseModel"),
+          [p.property("text") for p in drops])
+    check("there are exactly three dropdowns in the column",
+          len(drops) == 3, [p.property("text") for p in drops])
+    if sums:
         # The TOP box specifically — every agent card and decision carries an
         # InputBox too, and they are wider, so a max() over all of them compares
-        # the chooser against a box on the other side of the window. Sort by y
+        # the column against a box on the other side of the window. Sort by y
         # as a STABLE KEY (not by the whole tuple): two boxes can legitimately
         # reserve the same vertical slot when a section is reordered or a reply
         # box rests hidden at a sibling's y, and comparing the QQuickItems on a
@@ -4267,36 +4267,23 @@ def test_window(app, tmp):
                 for it in descendants(win.contentItem())
                 if it.property("hintText") is not None]
         boxes = sorted(_raw, key=lambda t: t[0])
-        pt = picks[0].mapToItem(win.contentItem(), QPointF(0, 0))
+        pt = sums[0].mapToItem(win.contentItem(), QPointF(0, 0))
         top = boxes[0][1] if boxes else None
         bx = top.mapToItem(win.contentItem(), QPointF(0, 0)).x() + top.width() \
             if top else 0
-        # BESIDE the box, not over or under it — and vertically it is inside the
-        # box's own span rather than level with its first line: the chooser is
-        # the SECOND rung of the column since his four dropdowns landed, and the
-        # top-flush assertion belongs to the summoner count (below).
-        check("...to the RIGHT of the box, not over it or under it",
+        # BESIDE the box, and near its TOP: the summoner count is the top rung
+        # of the column (`y: 0`), so its text sits within the box's first-line
+        # band rather than below the box the way the old second-rung chooser did.
+        check("...the summoner count sits to the RIGHT of the box, near its top",
               top is not None and pt.x() >= bx - 1
-              and boxes[0][0] - 1 <= pt.y() <= boxes[0][0] + top.height(),
-              (pt.x(), pt.y(), bx, boxes[0][0], top.height() if top else 0))
-    # It offers every OPERATOR and marks the live one — the roster comes from
-    # boardwork, so the control cannot disagree with who will actually spawn.
-    listed = agents_obj.models
-    check("...and offers every operator, with exactly one marked current",
-          len(listed) == len(bwm.OPERATORS)
-          and [m["name"] for m in listed] == bwm.OPERATOR_NAMES
-          and sum(1 for m in listed if m["current"]) == 1,
-          [(m["label"], m["current"]) for m in listed])
-    check("...whose closed label is an operator name, never the raw wire name",
-          "claude-" not in agents_obj.modelLabel
-          and agents_obj.modelLabel in bwm.OPERATOR_NAMES, agents_obj.modelLabel)
+              and boxes[0][0] - 2 <= pt.y() <= boxes[0][0] + top.height(),
+              (pt.x(), pt.y(), bx, boxes[0][0]))
 
-    # ---- ...and BETWEEN it and the meters, how many may run at once ----
+    # ---- ...and UNDER the summoner count, how many ministers may run ----
     # [his, 2026-07-29] *"between the model selector and the indicators, add
-    # another drop down for the max number of agents available."* Same idiom
-    # (one component, `PickBox.qml`), his order, and ONE store: the file
-    # `boardctl.py cap` writes. A second copy of the number is the failure.
-    check("there is a second dropdown, and it says how many agents",
+    # another drop down for the max number of agents available."* One store: the
+    # file `boardctl.py cap` writes. A second copy of the number is the failure.
+    check("there is a cap dropdown, and it says how many ministers",
           len(caps) == 1 and str(bwm.cap()) in caps[0].property("text"),
           [d.property("text") for d in drops])
     check("...offering a range, with exactly one marked current",
@@ -4304,17 +4291,17 @@ def test_window(app, tmp):
           == list(bwm.CAP_CHOICES)
           and sum(1 for c in agents_obj.caps if c["current"]) == 1,
           [(c["label"], c["current"]) for c in agents_obj.caps])
-    if caps and picks:
+    if caps and sums:
         cp = caps[0].parentItem().mapToItem(win.contentItem(), QPointF(0, 0))
-        mp = picks[0].parentItem().mapToItem(win.contentItem(), QPointF(0, 0))
-        check("...UNDER the model chooser (the meters come after it, below)",
+        mp = sums[0].parentItem().mapToItem(win.contentItem(), QPointF(0, 0))
+        check("...UNDER the summoner count (the meters come after it, below)",
               cp.y() > mp.y(), (mp.y(), cp.y()))
-        check("...and flush with the chooser, one edge for the whole column",
+        check("...and flush with the column, one edge for the whole of it",
               abs(cp.x() - mp.x()) < 1
               and abs(caps[0].parentItem().width()
-                      - picks[0].parentItem().width()) < 1,
+                      - sums[0].parentItem().width()) < 1,
               (cp.x(), mp.x(), caps[0].parentItem().width(),
-               picks[0].parentItem().width()))
+               sums[0].parentItem().width()))
     # Picking one writes THAT store — the file, checked as bytes. The env
     # override goes away for the duration, or `cap()` reports `2` back at us
     # whatever was written and the check would pass on a control that wrote
@@ -4343,18 +4330,20 @@ def test_window(app, tmp):
             os.environ["BOARD_MAX_WORKERS"] = env_cap
         agents_obj.capChanged.emit()
 
-    # ---- FOUR dropdowns, and the ORDER IS HIS ----
+    # ---- THREE dropdowns, and the ORDER IS HIS ----
     # [his, 2026-07-29] *"1. number of summoners 2. summoner model 3. number of
-    # ministers 4. minister model"*. Found by their labels, top to bottom, because
+    # ministers 4. minister model"*. #2, the summoner-model/operator pick, came
+    # off on 2026-08-01 (auto-routed, read-only roster), so the column is now
+    # count, cap, minister-model. Found by their labels, top to bottom, because
     # the label is the only thing about any of them he can see and a column in the
     # wrong order is the whole failure worth catching here.
     order = sorted((round(it.parentItem()
                           .mapToItem(win.contentItem(), QPointF(0, 0)).y(), 1),
                     it.property("text").split("  v")[0].strip())
                    for it in drops)
-    want = [agents_obj.summonerLabel, agents_obj.modelLabel,
+    want = [agents_obj.summonerLabel,
             agents_obj.capLabel, agents_obj.ministerLabel]
-    check("all four dropdowns are drawn, in his order, top to bottom",
+    check("all three dropdowns are drawn, in his order, top to bottom",
           [lab for _, lab in order] == want, (order, want))
     check("...and every one of them is padded to one arrow column",
           len({len(it.property("text")) for it in drops}) == 1,
@@ -4423,7 +4412,7 @@ def test_window(app, tmp):
             if it.property("hovering") is not None]
     check("there are exactly two usage meters, one per window",
           len(bars) == len(labels), len(bars))
-    if bars and picks:
+    if bars and sums:
         # Top to bottom now, not left to right: they are STACKED, so every
         # meter has the same x and only y orders them. 5h is the top line.
         texts = sorted((it.mapToItem(win.contentItem(), QPointF(0, 0)).y(),
@@ -4431,9 +4420,9 @@ def test_window(app, tmp):
                        for it in bars)
         check("...labelled by the window each one measures, in order",
               [t[1] for t in texts] == labels, [t[1] for t in texts])
-        pt = picks[0].mapToItem(win.contentItem(), QPointF(0, 0))
+        pt = sums[0].mapToItem(win.contentItem(), QPointF(0, 0))
         by = min(it.mapToItem(win.contentItem(), QPointF(0, 0)).y() for it in bars)
-        check("...UNDER the model chooser, not beside it", by > pt.y(),
+        check("...UNDER the dropdown column, not beside it", by > pt.y(),
               (pt.y(), by))
         # ...and under the CAP dropdown too, which is between the two of them:
         # his order for that column is model -> how many -> what they cost.
@@ -4446,9 +4435,9 @@ def test_window(app, tmp):
         # selection box above it", which is both edges, so both are checked.
         # A width bound to the chooser cannot drift when a longer model name
         # widens it; a hardcoded one silently could.
-        # Against the BOX, not against its label: the chooser's text is centred
-        # inside it, so comparing edges with `picks[0]` measures the inset.
-        box = picks[0].parentItem()
+        # Against the BOX, not against its label: the control's text is centred
+        # inside it, so comparing edges with `sums[0]` measures the inset.
+        box = sums[0].parentItem()
         bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
         xs = set(round(it.mapToItem(win.contentItem(), QPointF(0, 0)).x())
                  for it in bars)
@@ -4475,7 +4464,7 @@ def test_window(app, tmp):
         # the change is that the height is DERIVED: a hardcoded one would pass
         # today and drift the moment a longer model label or a bigger font size
         # moved the column.
-        box = (sums or picks)[0].parentItem()
+        box = sums[0].parentItem()
         bp = box.mapToItem(win.contentItem(), QPointF(0, 0))
         # Bottom of the WHOLE usage column, not just the % meters: the box is
         # derived to fill it end to end, and since 2026-07-31 the column also
@@ -4503,7 +4492,7 @@ def test_window(app, tmp):
               len(eds) == 1 and abs(top.height() - resting) < 1,
               (len(eds), top.height(), resting))
         if eds:
-            # Enough to overrun a column of FOUR dropdowns plus the meters:
+            # Enough to overrun a column of THREE dropdowns plus the meters:
             # 80 of these cleared the old two-rung floor and not this one.
             eds[0].setProperty("text", "wrap me " * 240)
             spin(120)
@@ -5011,35 +5000,56 @@ def test_window(app, tmp):
           (card.get("saysLine"), card.get("doingLine")))
     check("...and it is drawn as a PERSON: the card carries a first name",
           card.get("name") in ba.NAMES, card.get("name"))
-    # ---- SOLOMON, IN A SECTION OF HIS OWN, above the workers ----
-    # *"he should always be kept on the top of the agent list and should
-    # basically indicate like he's there and ready to go at all times when hes
-    # not doing something."* ...and then, twice: *"solmon should be in his own
-    # \"summoner\" section above the agents section"*. So he is no longer a row
-    # inside the workers' list at all: `boardwork.cards()` still orders him first
-    # and still substitutes the standing row when nothing is running, and `main.py`
-    # splits that one ordering into two lists. Nothing here registers an
-    # orchestrator, so this is the standing row — it is the whole point that it
-    # exists anyway.
+    # ---- THE STANDING ROSTER, in a section of its own above the workers ----
+    # [his, 2026-08-01] the summoner section is now a standing roster: ONE ROW
+    # PER OPERATOR, always drawn, in `boardwork.OPERATORS` order — not the single
+    # idle-Solomon row it used to be. A row is FOCUSED only while a real
+    # orchestrator for that operator is running; at rest every row is dim and
+    # unaddressable. `boardwork.cards()` still pins a live orchestrator and
+    # substitutes the standing row, and `main.py` reshapes that one ordering into
+    # the roster. Nothing here registers an orchestrator, so this is the roster
+    # at rest.
     summoner = prop(win, "summonerCards")
-    check("Solomon has a section of his own, and it holds only him",
-          len(summoner) == 1
-          and summoner[0].get("name") == ba.ORCHESTRATOR_NAME
-          and summoner[0].get("state") == "idle",
-          [(c.get("name"), c.get("state")) for c in summoner])
+    check("the summoner section is a standing roster, one row per operator",
+          [c.get("name") for c in summoner] == bwm.OPERATOR_NAMES,
+          [c.get("name") for c in summoner])
+    check("...every row dim (unfocused) and idle while nothing is running",
+          all(c.get("live") is False and c.get("running") is False
+              and c.get("state") == "idle" for c in summoner),
+          [(c.get("name"), c.get("live"), c.get("state")) for c in summoner])
+    check("...each leading with `<operator> awaits`, the way every card leads",
+          all(c.get("saysLine") == "%s awaits" % c.get("name")
+              for c in summoner),
+          [c.get("saysLine") for c in summoner])
+    check("...with no observation on any of them, and no box to send to",
+          all(c.get("doingLine") == "" and c.get("id") == ""
+              and c.get("waiting") == [] for c in summoner),
+          [(c.get("name"), c.get("doingLine"), c.get("id")) for c in summoner])
     check("...and the agents section below holds only the workers",
-          all(c.get("name") != ba.ORCHESTRATOR_NAME for c in cards)
+          all(c.get("name") not in bwm.OPERATOR_NAMES for c in cards)
           and all(c.get("kind") != "orchestrator" for c in cards),
           [(c.get("name"), c.get("kind")) for c in cards])
-    check("...leading with `Solomon awaits`, the way every card leads",
-          summoner[0].get("saysLine") == "%s awaits" % ba.ORCHESTRATOR_NAME,
-          summoner[0].get("saysLine"))
-    check("...with no observation on him: nothing claims to have SEEN him",
-          summoner[0].get("doingLine") == ""
-          and summoner[0].get("running") is False, summoner[0])
-    check("...and no box under it, there being nobody there to send to",
-          summoner[0].get("id") == "" and summoner[0].get("waiting") == [],
-          summoner[0])
+    # A LIVE orchestrator for one operator lights EXACTLY that row and leaves the
+    # rest dim — liveness is read from the SAME cards the triangle draws, off
+    # each card's `running`, so the roster cannot disagree with who is up.
+    agents_obj = keep[5]
+    _saved_cards = agents_obj._cards
+    try:
+        agents_obj._cards = list(_saved_cards) + [{
+            "id": "orch-live", "kind": "orchestrator", "name": "Trithemius",
+            "running": True, "state": "running",
+            "saysLine": "Trithemius is planning...", "doingLine": "",
+            "title": "", "waiting": [], "born": 1.0}]
+        lit = agents_obj.summoner
+        _live = [c.get("name") for c in lit if c.get("live")]
+        check("a running operator lights EXACTLY its own roster row, rest dim",
+              [c.get("name") for c in lit] == bwm.OPERATOR_NAMES
+              and _live == ["Trithemius"]
+              and next(c for c in lit if c["name"] == "Trithemius")["id"]
+                  == "orch-live",
+              [(c.get("name"), c.get("live")) for c in lit])
+    finally:
+        agents_obj._cards = _saved_cards
     check("an agent that has said nothing shows no claim at all",
           rows.get("Find where focus is decided", {}).get("says") == ""
           and rows.get("Find where focus is decided", {}).get("saysLine") == "",
@@ -5523,25 +5533,27 @@ def test_window(app, tmp):
           or all(c.property("nameW") >= (len(ba.ORCHESTRATOR_NAME) + 1) * cellW
                  for c in cols if c.property("nameW") > 0),
           [(c.property("nameW"), cellW) for c in cols])
-    # HIS TEXT NEVER GOES QUIET, and it never wears the unfocused grey — [his,
-    # 2026-07-29] *"his text should never become the unfocused colors and he
-    # doesnt need a line to the left of his card"*. The standing row used to lead
-    # at `fgDim` for not running; his card is not a record of finished work, so it
-    # leads at full strength either way, and its tones are the `Theme` ones rather
-    # than the window's faded pair.
-    check("...and the standing row still leads at full strength, never dimmed",
+    # THE STANDING ROW IS NOW DIM — [his, 2026-08-01] the summoner section is a
+    # standing roster, and a row is drawn FOCUSED only while its operator is
+    # running. Solomon at rest is one of five and carries no work in flight, so
+    # it wears the roster's UNFOCUSED tone: `Theme.inactive`, the exact grey
+    # §3.1.1 fades a window to, no new colour. His old §3.1.1 exemption is
+    # untouched by this — a standing row is unaddressable (no inbox), so no text
+    # HE typed is being dimmed; a LIVE row keeps the bright `Theme` tones, which
+    # the roster-liveness check above covers at the data level.
+    check("...and the standing (not-running) row is drawn dimmed",
           solItem is not None and solItem.property("running") is False
           and solItem.property("summoner") is True
           and {s: t.property("color") for _, s, t in solLines}
           .get(lead) == solItem.property("fgText"),
           [(s, t.property("color").name()) for _, s, t in solLines])
-    check("...with the unfocused fade never reaching him, whatever the window",
+    check("...at the unfocused grey the whole desktop uses, not a new colour",
           solItem is not None
-          and solItem.property("fgText") == keep[-1].property("text")
-          and solItem.property("fgDim") == keep[-1].property("textDim")
-          and solItem.property("fgAccent") == keep[-1].property("accent"),
+          and solItem.property("fgText") == keep[-1].property("inactive")
+          and solItem.property("fgDim") == keep[-1].property("inactive")
+          and solItem.property("fgAccent") == keep[-1].property("inactive"),
           [solItem.property("fgText").name() if solItem else None,
-           keep[-1].property("text").name()])
+           keep[-1].property("inactive").name()])
     check("...and no accent rule to the left of his card",
           solItem is not None
           and not any(it.property("width") == 2 and it.isVisible()
