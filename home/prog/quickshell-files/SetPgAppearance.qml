@@ -1,17 +1,76 @@
 import QtQuick
 import Quickshell.Io
 
-// Appearance = Theme + Palette generation + RGB lighting + Window frame +
-// Motion.
-// (Choosing the wallpaper — which DRIVES this palette via wal — is its own
-// page, SetPgWallpaper.qml, first in the program; this page is HOW the colours
-// are derived once one is picked.)
+// Appearance = Wallpaper + Theme + Palette generation + RGB lighting +
+// Window frame + Motion.
+// (The wallpaper DRIVES this palette via wal, so it leads: it is the top
+// section, not a separate page.)
 Column {
     id: page
     width: parent ? parent.width : 480
     spacing: 4
 
     property var d: SettingsStore.d
+
+    // Toggle the panel's wallpaper/theme switcher (meta+w). It lives in the
+    // PANEL process, so the button reaches it the same way the keybind does —
+    // `qs ipc call wallpaper toggle` — rather than instantiating a second copy
+    // here. A fresh run each click: set running false first so a second press
+    // re-fires even if the last spawn hasn't been reaped.
+    Process { id: pickerProc; command: ["qs", "ipc", "call", "wallpaper", "toggle"] }
+
+    SetSection {
+        title: "wallpaper"
+        SetRow {
+            // "no wallpaper" paints Theme.bg as the desktop instead of an image
+            // (WallpaperLayer.qml); the palette still comes from a wallpaper —
+            // each one has generated one — so the same picker chooses WHICH
+            // palette colours the desktop, and in that mode the switcher shows
+            // theme swatches instead of thumbnails (WallpaperPicker.qml).
+            label: page.d.wallpaperSolid ? "choose colour theme" : "change wallpaper"
+            desc: page.d.wallpaperSolid
+                ? "opens the switcher — pick a swatch to recolour the whole desktop"
+                : "opens the switcher — flip through your wallpapers; each one also recolours the whole desktop"
+            SetButton {
+                text: "open picker"
+                onClicked: { pickerProc.running = false; pickerProc.running = true; }
+            }
+        }
+        SetRow {
+            label: "no wallpaper"
+            desc: "on = paint the theme's background colour instead of an image; turn off 'pure black background' below to tint it from the chosen palette"
+            SetToggle {
+                checked: page.d.wallpaperSolid
+                onToggled: (v) => { page.d.wallpaperSolid = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "wallpaper folder"
+            desc: "browsed by the picker; ~/Pictures/wall stays the auto-versioned drop folder"
+            SetTextField {
+                fieldWidth: 220
+                value: page.d.wallpaperDir
+                onCommitted: (t) => { page.d.wallpaperDir = t; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "fit"
+            desc: "auto decides tile vs scale from image size"
+            SetSelect {
+                options: ["auto", "tile", "scale"]
+                value: page.d.wallpaperFit
+                onChanged: (v) => { page.d.wallpaperFit = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
+            label: "sort order"
+            SetSelect {
+                options: ["name", "mtime", "random"]
+                value: page.d.wallpaperSort
+                onChanged: (v) => { page.d.wallpaperSort = v; SettingsStore.save(); }
+            }
+        }
+    }
 
     // The RGB section is drawn ONLY on top — book is a MacBook with no OpenRGB
     // devices and no openrgb.service, so the toggle there would be the inert

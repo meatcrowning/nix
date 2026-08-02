@@ -38,7 +38,6 @@ Scope {
     // the pages, in order. `glyph` is the 1-2 char titlebar label; `src` is a
     // sibling QML file loaded on demand.
     readonly property var pages: [
-        { key: "wallpaper",  label: "wallpaper",  glyph: "wp", src: "SetPgWallpaper.qml" },
         { key: "appearance", label: "appearance", glyph: "ap", src: "SetPgAppearance.qml" },
         { key: "panel",      label: "panel",      glyph: "pn", src: "SetPgPanel.qml" },
         { key: "widgets",    label: "widgets",    glyph: "wg", src: "SetPgWidgets.qml" },
@@ -49,7 +48,7 @@ Scope {
         { key: "system",     label: "system",     glyph: "sy", src: "SetPgSystem.qml" },
         { key: "display",    label: "display",    glyph: "ds", src: "SetPgDisplay.qml" }
     ]
-    property string current: "wallpaper"
+    property string current: "appearance"
     function srcFor(k) {
         for (const p of pages) if (p.key === k) return p.src;
         return pages[0].src;
