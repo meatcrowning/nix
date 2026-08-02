@@ -4141,11 +4141,12 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
     if (shadow.empty())
         return;
 
-    // The shadow follows the theme (DESIGN §4): its tone is the palette's
-    // darkest — the bar background wal-set writes — at the user's shadow_alpha,
-    // not a hard-coded black.
-    CHyprColor COLOR = configColor(Cfg::bgColor());
-    COLOR.a          = ALPHA;
+    // Hard, near-solid black at the user's shadow_alpha (DESIGN §4). 3.03 briefly
+    // tied this to the bar background on the premise it is "the palette's
+    // darkest", but bg_color is whatever wal-set writes for the theme and is
+    // routinely LIGHT (e.g. 0xFFDDF6F6) — which painted every window's shadow
+    // near-white, i.e. no visible shadow at all. The shadow is black.
+    const CHyprColor COLOR = {0.0, 0.0, 0.0, ALPHA};
     for (const auto& r : shadow.getRects())
         Hl::rect(CBox{(double)r.x1, (double)r.y1, (double)(r.x2 - r.x1), (double)(r.y2 - r.y1)}, COLOR);
 }
