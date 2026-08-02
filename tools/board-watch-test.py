@@ -849,6 +849,24 @@ def test_summoner_fanout():
               bw.route_operator("add a dark mode; also rename the engine").name
               == "Solomon")
 
+        # A WORK ORDER WORN AS A QUESTION is WORKED, not answered-and-dropped.
+        # [chosen 2026-08-02] the Botis audit stalled here: an audit phrased as a
+        # question routed to answer-only Weyer, which never dispatches. A work
+        # verb (`_ROUTE_WORK`) now wins over the question routers, so a lone one
+        # goes SOLO and a coordinating one still reaches Solomon.
+        for worn in ("can you audit the Botis font's glyph coverage?",
+                     "could you check whether the panel still spaces right?",
+                     "how about you investigate the scrollbar lag"):
+            check("a work order phrased as a question is worked (solo): %r"
+                  % worn[:38],
+                  bw.route_operator(worn).flavour == "solo",
+                  bw.route_operator(worn).name)
+        check("...and a genuine factual question is still answered (Weyer)",
+              bw.route_operator("what is the current font size?").name == "Weyer")
+        check("...and a coordinating audit across areas still reaches Solomon",
+              bw.route_operator("audit the panel and the player across both apps")
+              .name == "Solomon")
+
         # A LONE solo order is not a summoner at all - it goes straight to one
         # minister (`bw.dispatch`), so no summoner fires and the worker stub does.
         r.clear()
