@@ -258,11 +258,15 @@ def set_cap(n):
 #: model"*. This is the first of them, and it is the only one of the four that
 #: had no store at all before.
 #:
-#: What it MEANS, because a count is only honest if it names something real: a
-#: tick with something in the queue splits what he typed across up to this many
-#: orchestrator runs, started together (`board-watch.work_the_queue`). It is a
-#: ceiling on the fan-out, not a quota — two summoners with one sentence queued
-#: is one summoner, because there is nothing for the second to read.
+#: What it MEANS, because a count is only honest if it names something real: it
+#: is the ceiling on how many summoner sessions run AT ONCE
+#: (`board-watch.work_the_queue`). Since 2026-08-01 the queue is grouped by the
+#: OPERATOR each item routes to (`route_groups`) — one session per operator, so N
+#: things that all want Solomon are one Solomon, not N — and those groups run in
+#: waves of at most this many threads. It is a concurrency ceiling, not a quota:
+#: one queued sentence is one summoner, and same-operator work is one session
+#: whatever the number says. [his, 2026-08-01: *"why the fuck are you running
+#: multiple solomons?????"*]
 def summoners_file():
     return os.path.join(_root(), "summoners")
 
@@ -300,6 +304,10 @@ def split_for_summoners(items, n=None):
     other about the same thing stay in one summoner's prompt where a human would
     read them together. With `n == 1` this is `[items]` — the whole point, since
     that is the behaviour that predates the control.
+
+    NOTE: `work_the_queue` no longer fans out with this — it groups by operator
+    (`route_groups`) so it never runs N copies of one operator. Kept for its
+    unit test and any caller that wants a blind contiguous split.
     """
     items = list(items)
     n = max(1, int(summoners() if n is None else n))
@@ -657,13 +665,48 @@ def route_operator(text):
 
 
 def tick_operator(text):
-    """The operator a board-watch tick summons: his explicit pick if he made
-    one, else the auto-route. One operator per tick (race-free across the
-    concurrent summoner threads, which share this process); the per-group
-    refinement is the roster doc's follow-up."""
+    """The operator a board-watch tick summons for a single body of text: his
+    explicit pick if he made one, else the auto-route. Kept for callers that
+    route ONE string; `route_groups` is what the queue uses now, so several
+    unrelated sentences do not all land on the same operator."""
     if orch_operator_chosen():
         return orch_operator()
     return route_operator(text)
+
+
+def route_groups(items, textof=lambda m: m["text"]):
+    """Partition a drained queue into `(Operator, [items])` groups, ONE per
+    distinct operator, in first-appearance order.
+
+    [his, 2026-08-01, of a tick that logged "3 thing(s) ... across 3 summoner(s)
+    as Solomon": *"why the fuck are you running multiple solomons????? multiple
+    fable 5s for what reason?"*] The waste was N copies of ONE expensive
+    operator running at once — the old `split_for_summoners` fan-out cut the
+    queue into contiguous chunks with no regard for which operator each needed,
+    so three sentences that all route to Solomon became three concurrent fable-5
+    sessions, each paying the full orchestrator startup context.
+
+    So the split axis is the OPERATOR: every item that routes to the same
+    operator shares one summoner handed the whole list, and only genuinely
+    different operators (a quick Weyer question beside a Solomon plan) get their
+    own session. His EXPLICIT pick collapses the whole tick onto that one
+    operator; otherwise each item is routed on its own text (`route_operator`),
+    which also means a one-liner reaches cheap Weyer instead of riding along on
+    whatever the concatenation happened to route to.
+    """
+    items = list(items)
+    if not items:
+        return []
+    if orch_operator_chosen():
+        return [(orch_operator(), items)]
+    order, by_name = [], {}
+    for it in items:
+        op = route_operator(textof(it))
+        if op.name not in by_name:
+            by_name[op.name] = (op, [])
+            order.append(op.name)
+        by_name[op.name][1].append(it)
+    return [by_name[n] for n in order]
 
 
 # --------------------------------------------- what the MINISTERS run on
@@ -1628,10 +1671,13 @@ class AgentBackend:
         spawns, and must never be interpolated after variable content."""
         return []
 
-    def args(self, *, prompt, session, role, label):
+    def args(self, *, prompt, session, role, label, model=None, effort=None):
         """The full argv for one headless run. THE only place a backend's CLI
         is named. `session` may be None (no observable transcript -> claim-only
-        card); `label` is the human name bound to the run."""
+        card); `label` is the human name bound to the run. `model`/`effort`, when
+        given, are the caller's already-resolved pick and win over the role's
+        env/default — how one operator's spawn stays independent of another's
+        running at the same time (`route_groups`)."""
         raise NotImplementedError
 
     def transcript(self, session):  # type: (str | None) -> str | None
@@ -1662,11 +1708,11 @@ class ClaudeBackend(AgentBackend):
     def system_blocks(self, role):
         return [RULES]
 
-    def args(self, *, prompt, session, role, label):
+    def args(self, *, prompt, session, role, label, model=None, effort=None):
         argv = ["claude", "-p", prompt]
         if session:
             argv += ["--session-id", session]
-        argv += role_flags(role)            # model + effort (his choice, capped)
+        argv += role_flags(role, model=model, effort=effort)  # his choice, capped
         argv += context_flags(role)         # cache prefix + trimmed tools (NO superpowers)
         for block in self.system_blocks(role):
             argv += ["--append-system-prompt", block]
@@ -1732,13 +1778,13 @@ class HermesBackend(AgentBackend):
     def system_blocks(self, role):
         return [RULES]
 
-    def args(self, *, prompt, session, role, label):
+    def args(self, *, prompt, session, role, label, model=None, effort=None):
         q = prompt
         for b in self.system_blocks(role):
             q += "\n\n" + b
         return ["hermes", "chat", "-q", q, "-Q",
                 "--source", "tool",
-                "-m", _role_model(role), "--provider", HERMES_PROVIDER,
+                "-m", _role_model(role, model), "--provider", HERMES_PROVIDER,
                 "-t", HERMES_TOOLSETS,
                 "--max-turns", str(HERMES_MAX_TURNS),
                 "--yolo"]
@@ -1784,9 +1830,13 @@ def get_backend(name=None):
                          % (want, ", ".join(sorted(_BACKENDS))))
 
 
-def _role_model(role):
+def _role_model(role, model=None):
     """The model string the NEXT `role` spawn runs on — the same source
-    `role_flags` reads, so a spawn and its flags never disagree."""
+    `role_flags` reads, so a spawn and its flags (and the backend that hosts
+    them) never disagree. An EXPLICIT `model` wins, the same precedence
+    `role_flags` gives it, so a per-operator spawn picks its own backend."""
+    if model:
+        return model.strip()
     if role in MINISTER_ROLES:
         return minister_model()[0]
     if role == "orchestrator":
@@ -1805,9 +1855,10 @@ def get_backend_for_model(model):
     return get_backend("hermes" if model in HERMES_MODELS else "claude")
 
 
-def get_backend_for_role(role):
-    """The backend the NEXT `role` spawn runs on, from its chosen model."""
-    return get_backend_for_model(_role_model(role))
+def get_backend_for_role(role, model=None):
+    """The backend the NEXT `role` spawn runs on, from its chosen model — the
+    explicit `model` when a caller resolved it, else the role's own source."""
+    return get_backend_for_model(_role_model(role, model))
 
 
 # --------------------------------------------------- the deepseek subminister
@@ -2041,8 +2092,14 @@ ROLES = {
 }
 
 
-def role_flags(role):
+def role_flags(role, model=None, effort=None):
     """argv fragment selecting the model and effort for `role`.
+
+    An EXPLICIT `model`/`effort` (passed by a caller that already resolved the
+    operator, e.g. one concurrent summoner thread per operator) wins over
+    everything below and needs no process-global state — which is what lets two
+    different operators spawn at once without racing the shared `BOARD_ORCH_*`
+    env (`route_groups`). Left as `None`, each falls back to the environment.
 
     Overridable per role by environment, following the `BOARD_*` convention the
     spawn stubs already use, so a harness can re-point or neutralise it:
@@ -2058,14 +2115,16 @@ def role_flags(role):
     `~/.claude/settings.json` says) by which a minister spawns above it. The
     variables can still LOWER a minister, which is all a harness ever wanted.
     """
-    model, effort = ROLES.get(role, ("", ""))
+    m, e = ROLES.get(role, ("", ""))
     if role == "orchestrator":
-        model, effort = orch_model()  # his choice of model AND effort, re-read
+        m, e = orch_model()  # his choice of model AND effort, re-read
     elif role in MINISTER_ROLES:
-        model, effort = minister_model()   # his choice, capped, re-read likewise
+        m, e = minister_model()   # his choice, capped, re-read likewise
     prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
-    model = os.environ.get(prefix + "_MODEL", model).strip()
-    effort = os.environ.get(prefix + "_EFFORT", effort).strip()
+    # explicit arg > BOARD_* env > the role default, resolved independently for
+    # model and effort so a caller can pin one and leave the other.
+    model = (os.environ.get(prefix + "_MODEL", m) if model is None else model).strip()
+    effort = (os.environ.get(prefix + "_EFFORT", e) if effort is None else effort).strip()
     if role in MINISTER_ROLES and (model, effort) not in minister_choices():
         model, effort = MINISTER_CEILING
     argv = []

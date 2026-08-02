@@ -736,35 +736,52 @@ def test_a_rebuild_kills_the_tick():
 
 
 def test_summoner_fanout():
-    """The top dropdown has to reach the number of summoners that really start.
+    """ONE summoner per operator, not per sentence.
 
-    [his, 2026-07-29] *"number of summoners"*, and the rule for every one of
-    these four controls is that it applies or it is not shipped. So: what he
-    typed is split across up to that many orchestrator runs, every sentence
-    reaches exactly one of them, and one queued sentence is one summoner however
-    high the number is — the count is a ceiling on the fan-out, not a quota.
+    [his, 2026-08-01, of a tick that ran three concurrent Solomons for three
+    things he typed: *"why the fuck are you running multiple solomons?????"*] So
+    the split axis is the OPERATOR each item routes to, not the sentence count:
+    items that want the same operator share one summoner handed the whole list,
+    and only genuinely different operators get their own session. The top
+    dropdown is now a ceiling on how many run AT ONCE, not on how many start.
     """
-    print("the summoner count - how many actually start")
+    print("the summoner grouping - one session per operator, not per sentence")
     d = tempfile.mkdtemp(prefix="board-watch-summon-")
     try:
         r = Rig(d, EMPTY_NEEDS)
-        for s in ("the first thing", "the second thing", "the third thing"):
-            r.note(s)
-        # One prompt file per run, named by the key, so the split itself is
+        # One prompt file per run, named by the key, so the grouping itself is
         # visible rather than inferred from a count.
         stub = ('cat > "%s/prompt-$BOARD_WATCH_KEY"; echo "$BOARD_WATCH_KEY" >> %s'
                 % (d, r.fired))
-        r.run(spawn=stub, BOARD_MAX_SUMMONERS=2)
-        keys = r.fires()
-        check("two summoners, two runs, two distinct cards",
-              len(keys) == 2 and len(set(keys)) == 2, str(keys))
-        prompts = {k: open(os.path.join(d, "prompt-" + k)).read() for k in keys}
+
+        # Three plain phrases all route to the SAME operator (Weyer), so however
+        # high the count, they become ONE summoner holding all three - the exact
+        # thing the incident was about.
         for s in ("the first thing", "the second thing", "the third thing"):
-            hits = [k for k, p in prompts.items() if s in p]
-            check("...and %r reached exactly one of them" % s, len(hits) == 1,
-                  str(hits))
+            r.note(s)
+        r.run(spawn=stub, BOARD_MAX_SUMMONERS=3)
+        keys = r.fires()
+        check("three same-operator things are ONE summoner, not three",
+              len(keys) == 1, str(keys))
+        body = open(os.path.join(d, "prompt-" + keys[0])).read()
+        for s in ("the first thing", "the second thing", "the third thing"):
+            check("...and %r is in that one run" % s, s in body, body[:80])
         check("...and the queue is empty, so nothing re-triggers",
               r.queued() == [], r.queued())
+
+        # Two items that route to DIFFERENT operators DO get their own sessions:
+        # a plan word summons Solomon, a bare factual question summons Weyer.
+        r.clear()
+        r.note("build a new settings page")     # -> Solomon (plan)
+        r.note("what time is it")               # -> Weyer (quick)
+        r.run(spawn=stub, BOARD_MAX_SUMMONERS=2)
+        keys = r.fires()
+        check("two different operators are two sessions", len(keys) == 2, str(keys))
+        bodies = [open(os.path.join(d, "prompt-" + k)).read() for k in keys]
+        for s in ("build a new settings page", "what time is it"):
+            hits = [b for b in bodies if s in b]
+            check("...and %r reached exactly one of them" % s, len(hits) == 1,
+                  str(len(hits)))
 
         r.clear()
         r.note("something on its own")
@@ -776,7 +793,7 @@ def test_summoner_fanout():
         r.note("one of two"), r.note("two of two")
         r.run(spawn=stub, BOARD_MAX_SUMMONERS=1)
         one = r.fires()
-        check("...and at one, everything he typed goes to that one run",
+        check("...and same-operator work at any cap is one run",
               len(one) == 1
               and "one of two" in open(os.path.join(d, "prompt-" + one[0])).read()
               and "two of two" in open(os.path.join(d, "prompt-" + one[0])).read(),
