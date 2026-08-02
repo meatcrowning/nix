@@ -482,12 +482,19 @@ populates the never-re-queue guard: the `/transfers/downloads` response nests
 as username → directories → files, and the guard was previously walking only
 the top level and matching nothing.
 
-**A re-sourced failure is then cleared from slskd itself.** slskd keeps
+**Every errored/failed download is then cleared from slskd itself.** slskd keeps
 completed/failed transfers until explicitly removed, so a re-sourced track left
-a dead errored row accumulating in the downloads view forever. Once a failed
-transfer's id is recorded in `soulseek-rescued.json`, the pipeline DELETE-cleans
-that transfer from `/transfers/downloads` — pure cleanup of a row that can never
-produce a file: the re-source (not the lingering row) is what recovers the track.
+a dead errored row accumulating in the downloads view forever. `clear_handled_failures()`
+DELETE-cleans **every** failed-terminal transfer from `/transfers/downloads` —
+pure cleanup of a row that can never produce a file: the re-source (not the
+lingering row) is what recovers the track. It runs after the rescue pass, so the
+same run has already seen the failures it needed to re-source before removing
+the rows. Two traps, both paid for: slskd's `DELETE downloads/{username}/{id}`
+only removes the row from the store (which the webapp reads) when
+`?remove=true` is passed — a bare DELETE merely "cancels" an already-failed
+transfer (a no-op) and the row stays visible; and clearing must not be gated on
+`soulseek-rescued.json`, or a failure whose track is nofind/error (never
+queued, so never rescued) accumulates in the downloads view forever.
 
 slskd drops completed downloads into `~/.local/share/slskd/downloads/`, and the
 player only ever sees a track once it is moved into `aud/` and rescanned. The
