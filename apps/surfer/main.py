@@ -170,13 +170,40 @@ class Titlebar(QObject):
     addrSubmitted = Signal(str)
     wake = Signal()
 
+    # Born-correct chrome, sent BEFORE engine.load so the plugin has this pid's
+    # registration in g_regs long before the window maps — otherwise the window
+    # surfaces at the plugin's default bar (window title, no buttons, no address
+    # editor) for the frames between map and the first QML setButtons, which is
+    # the startup titlebar flash. The socket connects within microseconds of the
+    # thread starting, so this REGISTER (address-bar flag riding in the same
+    # write) is on the wire before QtWebEngine has even spun up. qml/Main.qml's
+    # tbButtons is the source of truth; this is only the frame-0 seed and QML
+    # refines it (real tab buttons, live enabled/disabled states) on the same load.
+    _SEED_BUTTONS = [
+        ("back",    "<",  2, "back",     False, False),
+        ("fwd",     ">",  2, "forward",  False, False),
+        ("reload",  "r",  0, "reload",   False, False),
+        ("copyurl", "cu", 2, "copy url", False, False),
+        ("darkmode", "dm", 0, "dark mode", False, False),
+        ("vsplit",  "|",  0, "split right", False, False),
+        ("hsplit",  "_",  0, "split down",  False, False),
+        "-",
+        ("newtab",  "+t", 0, "new tab",  False, False),
+        ("settings", "st", 0, "userscripts folder / settings", False, True),
+    ]
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Seed the REGISTER (chrome + address-bar flag) into the client before its
+        # I/O thread starts, so it lands as one atomic write on the first connect,
+        # before the window maps — see _SEED_BUTTONS.
         self._client = VtbClient(
             on_click=self.clicked.emit,
             on_reorder=lambda s, d: self.reordered.emit(s, d),
             on_addr=self.addrSubmitted.emit,
             on_wake=self.wake.emit,
+            buttons=self._SEED_BUTTONS,
+            title_edit=True,
         )
 
     @Slot("QVariantList")
