@@ -115,7 +115,7 @@ swallow whole for one change.
     - The box, and the promise it can honestly make
     - FOUR dropdowns beside the box, and the order is his
     - 1. How many summoners plan at once
-    - 2. The dropdown beside the box: which model summons
+    - 2. The dropdown beside the box: which model, and how hard, summons
     - 3. ...and under THAT, how many agents may run at once
     - 4. ...and under that, what the MINISTERS run on — CAPPED
     - ...and under that, how much of his usage is gone

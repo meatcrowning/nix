@@ -735,7 +735,7 @@ Window {
                     // What it changes, and WHEN it takes effect. The second half
                     // is the whole of the promise: a running orchestrator is not
                     // restarted and not re-pointed.
-                    hint: "which model a summoner reads what you type on - the one running now keeps its own"
+                    hint: "which model a summoner reads what you type on, and how hard it thinks - the one running now keeps its own"
                     items: () => win.modelItems()
                     popup: menu
                     fgDim: win.fgDim
@@ -2280,7 +2280,7 @@ Component {
         return Agents.models.map((m) => ({
             label: (m.current ? "* " : "  ") + m.label,
             trigger: () => {
-                if (!Agents.chooseModel(m.flag))
+                if (!Agents.chooseModel(m.name))
                     win.status = "could not save that choice";
             }
         }));

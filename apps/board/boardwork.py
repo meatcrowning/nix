@@ -314,93 +314,125 @@ def split_for_summoners(items, n=None):
     return out
 
 
-# ------------------------------------------------- which model orchestrates
-#: The models the dropdown beside the box offers, in the order it draws them.
+# ------------------------------------------ which model, and how hard, summons
+#: The summoner (Solomon) chooser beside the box, in the order it draws them.
 #: [his, 2026-07-29] *"add a drop down to the right of the top prompt box that
-#: allows the user to select which model they wish the orchestrator to be."*
+#: allows the user to select which model they wish the orchestrator to be."* —
+#: and, its thinking budget too, added when he asked to choose *"the reasoning
+#: effort of the summoner agents"*. So this carries EFFORT now, exactly as the
+#: minister chooser below does, rather than the model alone: model and effort are
+#: one pick here, one control, one label.
 #:
-#: `(flag, label)`. The flag is what `--model` gets; the label is what he reads,
-#: lowercase like every other string this desktop authors (docs/DESIGN.md §7.2).
-#: **Full names, not the `opus`/`sonnet` aliases** — an alias means "the latest
-#: of that family" and would silently re-point his choice the day a new one
-#: ships, which is exactly the thing a chooser exists to stop.
+#: `(flag, effort, label)`. The flag is what `--model` gets, the effort what
+#: `--effort` gets, the label what he reads — lowercase like every other string
+#: this desktop authors (docs/DESIGN.md §7.2). **Full names, not the
+#: `opus`/`sonnet` aliases** — an alias means "the latest of that family" and
+#: would silently re-point his choice the day a new one ships, which is exactly
+#: the thing a chooser exists to stop.
+#:
+#: Unlike the minister list this is NOT a ceiling: the summoner's judgement is
+#: the whole of its job and he asked to be able to buy as much of it as he likes,
+#: so the higher efforts (`xhigh`, `max`) are offered on the reasoning models and
+#: there is no clamp at the spawn. It is a curated spread rather than the full
+#: model×effort cross product, for the reason `MINISTER_MODELS` is: a dropdown is
+#: a short list of sensible pairs, and `boardctl.py model` takes any of them.
 ORCH_MODELS = [
-    ("claude-fable-5", "fable 5"),
-    ("claude-opus-5", "opus 5"),
-    ("claude-opus-4-8", "opus 4.8"),
-    ("claude-sonnet-5", "sonnet 5"),
-    ("claude-haiku-4-5-20251001", "haiku 4.5"),
-    ("deepseek/deepseek-v4-flash-0731", "deepseek v4 flash"),
+    ("claude-fable-5", "high", "fable 5 high"),
+    ("claude-fable-5", "max", "fable 5 max"),
+    ("claude-opus-5", "high", "opus 5 high"),
+    ("claude-opus-5", "xhigh", "opus 5 xhigh"),
+    ("claude-opus-5", "max", "opus 5 max"),
+    ("claude-opus-4-8", "high", "opus 4.8 high"),
+    ("claude-sonnet-5", "high", "sonnet 5 high"),
+    ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
+    ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
 ]
 
-#: What orchestrates when he has never chosen. Unchanged from the value that was
-#: hardcoded in `ROLES` before the chooser existed, so adding the control moved
-#: no behaviour on its own.
-DEFAULT_ORCH_MODEL = "claude-fable-5"
+#: What summons when he has never chosen. `(flag, effort)`, stated once:
+#: `claude-fable-5` was the hardcoded model default and `high` the effort `ROLES`
+#: pinned before this chooser carried effort, so drawing it moved no behaviour on
+#: its own.
+DEFAULT_ORCH = ("claude-fable-5", "high")
 
 
 def orch_model_file():
     return os.path.join(_root(), "orch-model")
 
 
+def orch_choices():
+    return {(f, e) for f, e, _ in ORCH_MODELS}
+
+
+def orch_label(pair=None):
+    """The prose for a `(flag, effort)` pair — what the closed control reads and
+    what the footer reports. Never the wire values (docs/DESIGN.md §2)."""
+    flag, effort = pair or orch_model()
+    for f, e, lab in ORCH_MODELS:
+        if (f, e) == (flag, effort):
+            return lab
+    return "%s %s" % (flag, effort)
+
+
 def orch_model():
-    """The model the NEXT orchestrator spawns with.
+    """`(flag, effort)` the NEXT orchestrator spawns with.
 
     Read at spawn time, never cached, which is the whole of his rule for a
     change made mid-run: *"if this changes in the middle of the orchestrator
     working, simply change it to the defined model on the next prompt it
-    recieves."* A running session keeps the model it started with — nothing can
+    recieves."* A running session keeps what it started with — nothing can
     change that from outside — and the next prompt off the queue reads this file
     again. No signal to plumb, no restart, and nothing to reconcile.
 
     An unreadable or unrecognised file falls back to the default rather than
-    passing an unknown string to `--model`, where the failure would be a spawn
-    that dies with a CLI usage error and a FAILED bullet he has to decode.
+    passing an unknown string to `--model`/`--effort`, where the failure would be
+    a spawn that dies with a CLI usage error and a FAILED bullet he has to decode.
     """
     try:
         with open(orch_model_file()) as f:
-            got = f.read().strip()
+            parts = f.read().split()
     except OSError:
-        return DEFAULT_ORCH_MODEL
-    return got if got in {m for m, _ in ORCH_MODELS} else DEFAULT_ORCH_MODEL
+        return DEFAULT_ORCH
+    pair = (parts[0], parts[1]) if len(parts) >= 2 else None
+    return pair if pair in orch_choices() else DEFAULT_ORCH
 
 
 def resolve_model(name):
-    """A model from what somebody typed. Exact flag, exact label, or one
-    unambiguous case-insensitive substring of either — the same forgiveness
-    `boardctl`'s selectors give for the same reason (the caller is a person at a
-    terminal or a language model holding a half-remembered name), and the same
-    refusal: ambiguity is an error, never a guess.
+    """A `(flag, effort)` from what somebody typed. Exact label, exact
+    `<flag> <effort>`, or one unambiguous case-insensitive substring of either —
+    the same forgiveness `boardctl`'s selectors give for the same reason (the
+    caller is a person at a terminal or a language model holding a half-remembered
+    name), and the same refusal: ambiguity is an error, never a guess.
     """
-    want = (name or "").strip().lower()
+    want = " ".join((name or "").split()).lower()
     if not want:
         raise ValueError("no model named")
-    for flag, label in ORCH_MODELS:
-        if want in (flag.lower(), label.lower()):
-            return flag
-    hits = [f for f, lab in ORCH_MODELS
-            if want in f.lower() or want in lab.lower()]
+    rows = [("%s %s" % (f, e), lab, (f, e)) for f, e, lab in ORCH_MODELS]
+    for wire, lab, pair in rows:
+        if want in (wire.lower(), lab.lower()):
+            return pair
+    hits = [(lab, pair) for wire, lab, pair in rows
+            if want in wire.lower() or want in lab.lower()]
     if len(hits) == 1:
-        return hits[0]
+        return hits[0][1]
     if hits:
         raise ValueError("%r matches %s - be more specific"
-                         % (name, ", ".join(hits)))
-    raise ValueError("not a model this board offers: %r (have: %s)"
-                     % (name, ", ".join(f for f, _ in ORCH_MODELS)))
+                         % (name, ", ".join(lab for lab, _ in hits)))
+    raise ValueError("not a summoner this board offers: %r (have: %s)"
+                     % (name, ", ".join(lab for _, _, lab in ORCH_MODELS)))
 
 
-def set_orch_model(flag):
+def set_orch_model(name):
     """Choose it. Same atomic write as `set_cap`: this file is read by a spawner
     that may fire at any moment, so a half-written one must be impossible."""
-    flag = resolve_model(flag)
+    flag, effort = resolve_model(name)
     os.makedirs(_root(), exist_ok=True)
     tmp = orch_model_file() + ".tmp"
     with open(tmp, "w") as f:
-        f.write(flag + "\n")
+        f.write("%s %s\n" % (flag, effort))
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, orch_model_file())
-    return flag
+    return (flag, effort)
 
 
 # --------------------------------------------- what the MINISTERS run on
@@ -1386,7 +1418,7 @@ def _role_model(role):
     if role in MINISTER_ROLES:
         return minister_model()[0]
     if role == "orchestrator":
-        return orch_model()
+        return orch_model()[0]
     return ""
 
 
@@ -1603,12 +1635,15 @@ def context_flags(role):
 #: Flags verified against the installed CLI (`claude --help`, 2026-07-29):
 #: `--model <model>` takes an alias or a full name, `--effort <level>` takes
 #: low|medium|high|xhigh|max.
-#: The orchestrator's model is HIS, chosen in the dropdown beside the box and
-#: read out of `orch_model()` at spawn — the `""` here is not "inherit", it is
-#: "ask the file", and `role_flags` does. Its EFFORT stays pinned high: he chose
-#: a model, not a thinking budget, and the argument above for buying the
-#: orchestrator's judgement is about the run's shape, not about which family it
-#: belongs to.
+#: The orchestrator's model AND effort are HIS, chosen as one pick in the
+#: dropdown beside the box and read out of `orch_model()` at spawn — the pair
+#: written below is dead for this role (`role_flags` overwrites both from the
+#: file) and is kept only so the table has a row and a fallback shape. He asked
+#: to choose *"the reasoning effort of the summoner agents"* on top of the model,
+#: so the effort is no longer pinned; `DEFAULT_ORCH` (`high`) is what a summoner
+#: runs at until he picks otherwise, which is the value it was pinned to before.
+#: Unlike a minister the summoner has NO ceiling — its judgement is the whole of
+#: its job and he asked to be able to buy as much of it as he likes.
 #:
 #: A MINISTER's pair is his too — the fourth dropdown, read out of
 #: `minister_model()` at spawn — so the `claude-opus-5`/`medium` written below is
@@ -1647,7 +1682,7 @@ def role_flags(role):
     """
     model, effort = ROLES.get(role, ("", ""))
     if role == "orchestrator":
-        model = orch_model()          # his choice, re-read on every spawn
+        model, effort = orch_model()  # his choice of model AND effort, re-read
     elif role in MINISTER_ROLES:
         model, effort = minister_model()   # his choice, capped, re-read likewise
     prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())

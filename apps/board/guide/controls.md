@@ -112,40 +112,49 @@ right of the box he types in, with the usage meters under the last of them.
   the tick's flock is held. `boardctl.py summoners` still takes any `n >= 1`, and
   a value of his off the list is drawn and ticked rather than hidden.
 
-### 2. The dropdown beside the box: which model summons
+### 2. The dropdown beside the box: which model, and how hard, summons
 
 [his, 2026-07-29] *"add a drop down to the right of the top prompt box that
 allows the user to select which model they wish the orchestrator to be. if this
 changes in the middle of the orchestrator working, simply change it to the
-defined model on the next prompt it recieves."*
+defined model on the next prompt it recieves."* — and, later, the reasoning
+effort of the summoner too, so this control now picks a `(model, effort)` PAIR,
+exactly as the minister chooser (§4) does. One pick, one label (`opus 5 xhigh`).
 
 - **The list and the choice live in `boardwork`** — `ORCH_MODELS`,
-  `orch_model()`, `set_orch_model()` — because `boardctl.py model`, both
-  spawners and the control all read the same two functions. A copy of the list
-  in the QML would be a second answer to "what may he pick".
+  `orch_model()`, `set_orch_model()`, `orch_label()` — because `boardctl.py
+  model`, both spawners and the control all read the same functions. A copy of
+  the list in the QML would be a second answer to "what may he pick".
+- **`(flag, effort, label)`, a curated spread, NOT a ceiling.** Unlike
+  `MINISTER_MODELS` this list has no clamp behind it: the summoner's judgement is
+  the whole of its job and he asked to be able to buy as much of it as he likes,
+  so the higher efforts (`xhigh`, `max`) are offered on the reasoning models and
+  `role_flags("orchestrator")` never clamps the pair. It is curated rather than
+  the full model×effort cross product for the same reason the minister list is —
+  a dropdown is a short list of sensible pairs.
 - **Full model names, never the `opus`/`sonnet` aliases.** An alias means *the
   latest of that family* and would silently re-point his choice the day a new
   one ships, which is the exact thing a chooser exists to stop. What he TYPES at
   `boardctl.py model` is forgiving in the way this tool's selectors are
-  (`resolve_model`: exact, or one unambiguous substring — ambiguity is an error,
-  never a guess); what is STORED is always the full name.
+  (`resolve_model`: exact `<flag> <effort>`, exact label, or one unambiguous
+  substring — ambiguity is an error, never a guess); what is STORED is always
+  the full pair.
 - **His rule for a mid-run change is the mechanism, not a rule layered on one.**
   `role_flags("orchestrator")` reads the file on every spawn and caches nothing,
-  so a session already running keeps the model it started with — nothing can
+  so a session already running keeps what it started with — nothing can
   re-point it from outside — and the next prompt off the queue reads the file
   again. There is no signal to plumb and nothing to reconcile.
-- **A stale or hand-edited value falls back to the default** rather than
-  reaching `--model`, where the failure would be a spawn dying on a CLI usage
-  error and a `FAILED:` bullet he has to decode.
+- **A stale or hand-edited value falls back to `DEFAULT_ORCH`** (`fable 5` at
+  `high`, what a summoner ran before the effort was selectable) rather than
+  reaching `--model`/`--effort`, where the failure would be a spawn dying on a
+  CLI usage error and a `FAILED:` bullet he has to decode.
 - **It is a `CtxMenu`, not a combo box** (§7.2 — menus here are ours), with a
-  resting label and a `*` beside the live one. The label is prose (`opus 5`),
-  never the wire name; the tick is computed from `boardwork`, so the control
-  cannot disagree with what will actually spawn.
+  resting label and a `*` beside the live one. The label is prose (`opus 5
+  xhigh`), never the wire pair; the tick is computed from `boardwork`, so the
+  control cannot disagree with what will actually spawn.
 - **The choice is machine-local**, same as `cap` and for the same reason: it is
   a file under `~/.local/state/board/`, which does not sync. `top` and `book`
-  can orchestrate on different models, and neither surprises the other.
-- **Effort is NOT in the dropdown.** He chose a model, not a thinking budget;
-  the orchestrator stays pinned at `high` for the reason `ROLES` gives.
+  can summon on different models and efforts, and neither surprises the other.
 
 **Workers and decision agents are `claude-opus-5` at `medium`** — [his, same
 message] *"the other agents should all be opus 5 medium thinking"*. That
