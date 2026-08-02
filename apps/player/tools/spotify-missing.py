@@ -70,11 +70,18 @@ def load_local(db_path):
 
 
 def unique_spotify_tracks(data):
-    """Dedupe across saved tracks + every playlist + every saved album's
-    tracks, remembering where each one came from."""
+    """Dedupe across saved tracks + every saved album's tracks, remembering
+    where each one came from.
+
+    Playlist tracks are deliberately NOT a fetch target. The wanted library is
+    the liked tracks plus the albums those liked tracks come from (grown by
+    soulseek-missing.py's --albums pass) plus explicitly saved albums. A
+    playlist is a listening context, not a collection the user owns: folding
+    every playlist's tracks in here downloaded songs that are neither a like
+    nor on a wanted album (e.g. "Light and Sound" by Luke Million, pulled in
+    only because it sat in a playlist), which is exactly the class of track the
+    library was over-collecting."""
     rows = list(data.get("saved_tracks", []))
-    for pl in data.get("playlists", []):
-        rows.extend(pl.get("tracks", []))
     for alb in data.get("saved_albums", []):
         rows.extend(alb.get("tracks", []))
 
