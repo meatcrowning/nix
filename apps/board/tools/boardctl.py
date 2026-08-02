@@ -32,10 +32,12 @@ The orchestrator's verbs — how one sentence he typed becomes several agents
     boardctl.py phase coding --doing 'the vtbclient parser'
 
 **`subminister` runs one bounded chunk on a cheap deepseek subminister** — the
-way a Claude minister hands bulk, mechanical work (wide reading/greps, a
-transform) to the small model and gets a COMPACT result back, instead of burning
-its own expensive context. Only a minister genuinely on a Claude model may use
-it; a minister already on deepseek is refused (`boardwork.subminister`).
+way a Claude minister OR Solomon the orchestrator hands bulk, mechanical work
+(wide reading/greps, a transform) to the small model and gets a COMPACT result
+back, instead of burning its own expensive context. Any caller genuinely on a
+Claude model may use it; one already on deepseek is refused — the gate is on the
+runtime, not the role (`boardwork.subminister`). While it runs it draws its own
+inset card, named from the Lesser Key, under the parent that spawned it.
 
 **`phase` records what you SAY you are doing and does not set the phase your
 card is filed under.** That is derived from your own tool calls
@@ -467,8 +469,9 @@ UNGATED = {"list", "agents", "phase", "subminister"}
 
 def cmd_subminister(a):
     """Run a bounded chunk to completion on the deepseek subminister and print
-    its result, so the calling Claude minister's shell captures it. Refuses a
-    minister already on the deepseek/hermes runtime, which gains nothing."""
+    its result, so the calling caller's shell captures it. Open to a Claude
+    minister AND Solomon the orchestrator; refuses a caller already on the
+    deepseek/hermes runtime, which gains nothing."""
     try:
         out = bw.subminister(" ".join(a.text), max_turns=a.max_turns)
     except ValueError as e:
@@ -615,9 +618,10 @@ def main(argv=None):
     s.set_defaults(fn=cmd_inbox)
 
     s = sub.add_parser("subminister",
-                       help="a CLAUDE minister runs one bounded chunk on the "
-                            "deepseek subminister: spawns it, waits, prints "
-                            "its COMPACT result. Refuses a deepseek minister.")
+                       help="a CLAUDE minister or the orchestrator runs one "
+                            "bounded chunk on the deepseek subminister: spawns "
+                            "it, waits, prints its COMPACT result. Refuses a "
+                            "caller already on deepseek.")
     s.add_argument("text", nargs="+", help="the chunk of wide/mechanical work")
     s.add_argument("--max-turns", dest="max_turns", type=int, default=None)
     s.set_defaults(fn=cmd_subminister)

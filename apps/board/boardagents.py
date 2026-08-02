@@ -379,7 +379,7 @@ def self_id():
 # same pid and the same start time, and a second record would be a second
 # definition of "running".
 def register(agent_id, title, pid, kind="note", where="board-watch", session="",
-             name="", confirmed=True):
+             name="", confirmed=True, parent=""):
     """`session` is the `--session-id` the spawner chose, and it is what makes
     the card able to say what the agent is really doing: `boardphase.py` finds
     `~/.claude/projects/*/<session>.jsonl` by it. An agent registered without
@@ -400,6 +400,14 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     evidence the agent is really running. A caller that knows its process is up
     — board-watch registering itself, a stash, a test — leaves it True and
     nothing changes for it.
+
+    `parent` is set only for a **deepseek subminister** (`kind="subminister"`,
+    `boardwork.subminister`): it is the inbox id of the Claude minister or
+    orchestrator that delegated the chunk, so the UI can draw the subminister's
+    card INSET under the row that spawned it. `parentName` is resolved beside it
+    (best-effort, the parent's own record) so a reader need not re-derive it.
+    Both keys are ABSENT for every other kind, which is what marks a record as a
+    subminister as much as `kind` does.
     """
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
            "confirmed": bool(confirmed),
@@ -408,6 +416,9 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
            "pidStart": bm._proc_start(pid) if pid else None, "kind": kind,
            "where": where, "session": session or "",
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    if parent:
+        rec["parent"] = clean_id(parent)
+        rec["parentName"] = name_of(parent) or name_for(parent)
     _write_json(os.path.join(agents_dir(), rec["id"] + ".json"), rec)
     return rec
 
@@ -898,6 +909,12 @@ def agents(procs=None):
                     "name": rec.get("name") or name_for(rec.get("id") or ""),
                     "where": rec.get("where") or "", "pid": rec.get("pid") or 0,
                     "session": rec.get("session") or "",
+                    # For a deepseek subminister only (else ""): the id and name
+                    # of the minister/orchestrator that delegated the chunk, so
+                    # the UI can inset its card under that parent's row. Every
+                    # other kind carries "" here.
+                    "parent": rec.get("parent") or "",
+                    "parentName": rec.get("parentName") or "",
                     "state": "running" if alive else "exited",
                     # ...and, for one that has stopped, WHETHER IT FINISHED.
                     # `describe()` used to call every stopped worker abandoned;

@@ -822,9 +822,10 @@ orchestrator**, handing you a further item because you are already in those \
 files: that is part of your job now, and your final note says what you did with \
 it. Take them either way — an unread note is handed to somebody else later.
 
-13. **If you are a CLAUDE minister, you may hand a chunk of wide, mechanical
-work to a cheaper deepseek subminister.** Run a bounded chunk in your shell and
-get back a COMPACT result, instead of burning your own expensive context on it:
+13. **If you are a CLAUDE minister (or Solomon, the orchestrator), you may hand
+a chunk of wide, mechanical work to a cheaper deepseek subminister.** Run a
+bounded chunk in your shell and get back a COMPACT result, instead of burning
+your own expensive context on it:
 
        python3 apps/board/tools/boardctl.py subminister \\
            'read apps/pylib/**/*.py and list every public function with file:line'
@@ -839,8 +840,9 @@ get back a COMPACT result, instead of burning your own expensive context on it:
    your own tokens, but it is a NEW hop with its own output, so do NOT use it
    for creative, discretionary or judgement work you would have to re-read the
    whole output of to trust — if you would ingest ALL of it to verify or redo it,
-   doing the work yourself is still cheaper. And a minister ALREADY on deepseek
-   never uses it (the tool refuses): it is not cheaper for one of those.
+   doing the work yourself is still cheaper. And a caller ALREADY on deepseek —
+   a minister or the orchestrator on a hermes model — never uses it (the tool
+   refuses): it is not cheaper for one of those.
 
 There is nobody to ask. Finish, or write down why you did not.
 """
@@ -876,6 +878,9 @@ for|to <a few words>'
     python3 apps/board/tools/boardctl.py cap <n>      # a SETTING, applied now
 
     python3 apps/board/tools/boardctl.py agents       # who is running, and on what
+
+    python3 apps/board/tools/boardctl.py subminister '<a bounded chunk of \\
+wide, mechanical reading you would otherwise do YOURSELF>'
 
     python3 apps/board/tools/boardctl.py phase reading --doing '<one short \\
 line>'
@@ -918,6 +923,15 @@ and far longer to read them than you do.
   * **Do not open `AGENTS.md`, a nested guide or `docs/DESIGN.md` to plan.** \
 Every worker's own rules already send it to those, and reading them here buys \
 nothing but delay. Name the one it should read if it is not obvious.
+  * **When you genuinely must read WIDE, mechanical material to name a \
+`--where` or see how many jobs an ask holds — many files at once, a bulk \
+inventory — hand THAT to a deepseek `subminister` rather than reading it in \
+your own waited-on session**, and fold the compact result back in. Same tool \
+and same two rules a minister uses (rule 13): the chunk is wide/mechanical and \
+what comes back is smaller than the work. It refuses if you are yourself on a \
+deepseek/hermes model — then it is no cheaper and you read it yourself. Do not \
+reach for it for the quick grep you would finish in one call, or to plan the \
+split itself — that judgement is yours.
   * **Split on what he SAID, not on what the code turns out to be.** You are \
 splitting a sentence into jobs; you are not scoping them.
   * **Do not edit any file, do not commit, and do not run a test.** A worker \
@@ -1405,13 +1419,16 @@ SUBMINISTER_TIMEOUT_S = int(os.environ.get("BOARD_SUBMINISTER_TIMEOUT", "2700"))
 def calling_backend():
     """Which agent runtime the CALLING process is running under, if any.
 
-    The gate for `subminister`. Walks this process's ancestors and takes the
-    NEAREST one that is an agent runtime — `hermes` or claude — because the
-    nearest is the one we are actually running under: a deepseek subminister
-    spawned by a Claude minister has FIRST a `hermes` ancestor and then a
-    claude one beyond it, and it is hermes. Env is deliberately NOT consulted
-    (except as a fallback when no agent ancestor is found): `BOARD_WORKER_BACKEND`
-    would be inherited by a subminister from its claude parent and lie.
+    The gate for `subminister`, and it treats a Claude MINISTER and Solomon the
+    ORCHESTRATOR identically — both are `claude` processes, both may delegate,
+    and the refusal is on the RUNTIME (already on deepseek), never on the role.
+    Walks this process's ancestors and takes the NEAREST one that is an agent
+    runtime — `hermes` or claude — because the nearest is the one we are actually
+    running under: a deepseek subminister spawned by a Claude caller has FIRST a
+    `hermes` ancestor and then a claude one beyond it, and it is hermes. Env is
+    deliberately NOT consulted (except as a fallback when no agent ancestor is
+    found): `BOARD_WORKER_BACKEND` would be inherited by a subminister from its
+    claude parent and lie.
 
     Returns `'claude'` | `'hermes'` | `'shell'` (no agent runtime in the chain).
     """
@@ -1433,18 +1450,27 @@ def calling_backend():
 def subminister(prompt, max_turns=None):
     """Run `prompt` to completion on the deepseek flash subminister, synchronously.
 
-    Returns its stdout text. The calling Claude minister runs this in its shell
-    and the result is captured as a tool result and folded into its own context
-    — so the subminister is told, in the framing below, to return something
-    COMPACT relative to the work it did. That compactness is what makes the hop
-    a saving rather than a large bill.
+    Returns its stdout text. The calling Claude minister (or Solomon, the
+    orchestrator) runs this in its shell and the result is captured as a tool
+    result and folded into its own context — so the subminister is told, in the
+    framing below, to return something COMPACT relative to the work it did. That
+    compactness is what makes the hop a saving rather than a large bill.
 
-    Refuses unless the CALLING minister genuinely runs on a Claude model: a
-    minister already on the deepseek/hermes runtime spending another hermes run
-    to spawn one is pure waste. See `calling_backend`. Never writes to the board
-    and takes no unit and no card — it is a transient compute run whose whole
-    result is this function's return value, so a killed run is simply retried by
-    the calling minister.
+    Refuses unless the CALLER genuinely runs on a Claude model — a minister or
+    the orchestrator already on the deepseek/hermes runtime spending another
+    hermes run to spawn one is pure waste (see `calling_backend`; the gate is on
+    the runtime, not the role).
+
+    **It DOES get a card.** [his follow-up, 2026-08-01] a subminister is given
+    its own demon name from the Lesser Key and a registration record keyed on a
+    minted `sub…` id, so the board can draw an inset card under its parent while
+    it runs (`Murmur` renders it in `main.py`/`qml` off the fields this writes:
+    `kind="subminister"`, `name`, `parent`, `parentName`). It is NOT a board
+    worker: it takes no unit, writes no bullet, counts against no cap
+    (`live_workers` filters on `kind=="worker"`), is never reaped
+    (`reap` reads task files it never creates) and is not in the flat `cards()`
+    list. The record is dropped in the `finally`; a killed run leaks nothing that
+    `boardagents.sweep()` does not clean on the next tick (dead pid).
     """
     want = " ".join((prompt or "").split())
     if not want:
@@ -1453,7 +1479,8 @@ def subminister(prompt, max_turns=None):
         raise ValueError(
             "you are ALREADY on the deepseek/hermes runtime, so a deepseek "
             "subminister is just another cheap run - do this chunk yourself; "
-            "the tool refuses a deepseek minister spawning another")
+            "the tool refuses a caller (minister or orchestrator) already on "
+            "deepseek spawning another")
     q = SUBMINISTER_FRAME.format(prompt=want)
     cmd = ["hermes", "chat", "-q", q, "-Q",
            "--source", "tool",
@@ -1462,16 +1489,35 @@ def subminister(prompt, max_turns=None):
            "-t", HERMES_TOOLSETS,
            "--max-turns", str(int(max_turns or DEEPSEEK_SUBMINISTER_TURNS)),
            "--yolo"]
+    # The id/name/record exist only for the duration of the run, purely so the
+    # UI can draw the inset card. `parent` is the CALLER's inbox id — a minister's
+    # `BOARD_AGENT_ID`, or the orchestrator's — so `Murmur` can place the card
+    # directly under the row that spawned it (`boardagents.self_id`).
+    aid = "sub%s" % os.urandom(3).hex()
+    name = ba.pick_name(aid)
+    parent = ba.self_id() or ""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO,
-                           timeout=SUBMINISTER_TIMEOUT_S)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, cwd=REPO)
+    except (OSError, ValueError) as e:
+        raise ValueError("the deepseek subminister could not run: %s" % e)
+    ba.register(aid, want[:70], p.pid, kind="subminister", where="",
+                session="", name=name, parent=parent)
+    try:
+        out, err = p.communicate(timeout=SUBMINISTER_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        out, err = p.communicate()
+        raise ValueError("the deepseek subminister timed out after %ss"
+                         % SUBMINISTER_TIMEOUT_S)
     except (OSError, subprocess.SubprocessError) as e:
         raise ValueError("the deepseek subminister could not run: %s" % e)
+    finally:
+        ba.unregister(aid)
     if p.returncode != 0:
         raise ValueError("the deepseek subminister failed (exit %s): %s"
-                         % (p.returncode, (p.stderr or p.stdout or "")
-                            .strip()[:600]))
-    return p.stdout
+                         % (p.returncode, (err or out or "").strip()[:600]))
+    return out
 
 
 #: The framing a subminister starts with. It is the subminister's WHOLE
@@ -1481,8 +1527,9 @@ def subminister(prompt, max_turns=None):
 #: COMPACT result and get out of the way; the calling Claude minister quotes
 #: what comes back, so the leaner it is the more the hop saves.
 SUBMINISTER_FRAME = (
-    "You are a deepseek subminister working FOR a Claude minister on this "
-    "machine. You get one bounded chunk of wide, mechanical work (bulk reading, "
+    "You are a deepseek subminister working FOR a Claude minister (or the "
+    "orchestrator) on this machine. You get one bounded chunk of wide, "
+    "mechanical work (bulk reading, "
     "wide greps, a normalising/mechanical transform). DO it in your own cheap "
     "context, and return a COMPACT result the calling minister can fold straight "
     "into its own context: a summary, an inventory, a list, or the transformed "
@@ -2436,6 +2483,12 @@ def cards(agents=None, pend=None):
     # Board-dispatched workers (named rows) and Solomon are unaffected —
     # neither is ever a `session`.
     rows = [a for a in rows if a.get("kind") != "session"]
+    # A SUBMINISTER IS NOT A TOP-LEVEL CARD. It is a transient deepseek run a
+    # minister (or Solomon) delegated a chunk to; the board draws it INSET under
+    # its parent's row, not as one more card in the flat list. `main.py`/`qml`
+    # (Murmur) reads it off the `boardagents.agents()` walk by `kind`/`parent`
+    # and interleaves it — so it is dropped here, exactly like a `session`.
+    rows = [a for a in rows if a.get("kind") != "subminister"]
     pend = pending() if pend is None else pend
     out = sorted(rows, key=lambda a: (float(a.get("born") or 0.0), a["id"]))
     orch = [a for a in out if _is_orchestrator(a)]

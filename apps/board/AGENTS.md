@@ -92,7 +92,7 @@ swallow whole for one change.
     - What the orchestrator and its workers are told, beyond the board
     - What each spawn STARTS WITH, before it reads a line
     - The one thing that could hold the whole system up, and does not
-    - The deepseek subminister: a Claude minister delegates a chunk
+    - The deepseek subminister: a Claude minister OR the orchestrator delegates a chunk
     - A DISPATCH IS A START, NOT A RESULT
     - ...and the summon note GOES when the result arrives
 
