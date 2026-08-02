@@ -36,6 +36,23 @@ let
       $out/share/fonts/truetype/PerfectDOSVGA437.ttf \
       "Perfect DOS VGA 437"
   '';
+
+  # Botis 4x6 — a hand-authored 4-wide blocky pixel face. There is NO 4x4 pixel
+  # font on this system to merge or import from (the repo ships only the 8x16
+  # DOS VGA pair, and fontconfig has only loose 8px IBM CGA faces), and the
+  # user explicitly overrode the "do not invent a font" rule for this face — so
+  # every pixel of every glyph is authored by hand in build-4x6.py. It is a
+  # pure bitmap (BDF), so it renders blocky at its native 6px — the point.
+  # Grid 4x6, baseline row 4, advance 5, all glyphs same width. Not wired to
+  # the live desktop font (that stays the DOS VGA pair); it is shipped as a
+  # selectable face like the two DOS ones. Read the script docstring for the
+  # grid and metrics before touching it.
+  botis4x6 = pkgs.runCommand "botis-4x6" {
+    nativeBuildInputs = [ pkgs.python3 ];
+  } ''
+    mkdir -p $out/share/fonts
+    python3 ${./font-files/build-4x6.py} $out/share/fonts/Botis4x6.bdf
+  '';
 in
 
 {
@@ -59,6 +76,13 @@ in
   # whichever face is live; both resolve here.
   home.file.".local/share/fonts/PerfectDOSVGA437.ttf".source =
     "${perfectDOSVGA437}/share/fonts/truetype/PerfectDOSVGA437.ttf";
+
+  # The third, hand-authored pixel face — a 4-wide blocky bitmap (BDF). Not the
+  # live desktop font; shipped as a selectable face like the two DOS ones, with
+  # its own fontconfig rule below. It is NOT in nixpkgs and never will be — the
+  # whole point is that it is invented here.
+  home.file.".local/share/fonts/Botis4x6.bdf".source =
+    "${botis4x6}/share/fonts/Botis4x6.bdf";
 
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —
@@ -100,6 +124,26 @@ in
       </match>
       <match target="font">
         <test name="family"><string>Perfect DOS VGA 437</string></test>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+    </fontconfig>
+  '';
+
+  # Botis 4x6 is a single bitmap face too, so it gets the same guard: pin any
+  # request for it to upright regular and kill synthetic emboldening, so the
+  # 6px bitmap is never faux-bolded/obliqued into a smear.
+  xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="pattern">
+        <test name="family"><string>Botis 4x6</string></test>
+        <edit name="weight"   mode="assign"><const>regular</const></edit>
+        <edit name="slant"    mode="assign"><const>roman</const></edit>
+        <edit name="embolden" mode="assign"><bool>false</bool></edit>
+      </match>
+      <match target="font">
+        <test name="family"><string>Botis 4x6</string></test>
         <edit name="embolden" mode="assign"><bool>false</bool></edit>
       </match>
     </fontconfig>
