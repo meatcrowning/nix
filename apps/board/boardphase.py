@@ -606,13 +606,14 @@ def _subject(who):
 
 
 def arises_line(who=""):
-    """*"<name> arises..."* — the whole of a card that has nothing to say yet.
+    """*"<name> awakens..."* — the whole of a card that has nothing to say yet.
 
     [his, 2026-07-31] *"instead of hiding the card until it shows the name on the
     top line etc, can we just put a card in there that reads '[agent] arises...'
     with an animated elipsies ... the card should just show the rising text and
     nothing else until the agent card actually starts producing stuff like
-    before"*.
+    before"* — the word is AWAKENS, not arises: [his, 2026-08-01] *"have it just
+    say like '[agent] awakens...' with an animated elipsies"*.
 
     THIS REPLACED A GATE, and that is the point of it. A card used to be
     WITHHELD until its top line was a real sentence, which read fine for the two
@@ -634,9 +635,9 @@ def arises_line(who=""):
 
     It is NOT the end state. Past `START_GRACE_S` with an empty transcript the
     observation becomes `silent` and the card stops saying this and says so,
-    because "arises..." forever is the old invisibility in better clothes.
+    because "awakens..." forever is the old invisibility in better clothes.
     """
-    return "%s arises..." % _subject(who)
+    return "%s awakens..." % _subject(who)
 
 
 def says_line(rec, who=""):
@@ -1147,7 +1148,7 @@ def observe(agent_id, session=None):
             # LINKED, AND IT HAS NOT ACTED — but for how long. `none` is the
             # spawn that is two seconds old and about to work; `silent` is the
             # one that never did anything at all, and the two must not share a
-            # state: `none` is what puts a card in its bare *"<name> arises..."*
+            # state: `none` is what puts a card in its bare *"<name> awakens..."*
             # form (`boardagents.arising`), which is the right thing to say for
             # a few seconds and a lie after a minute. Measured on top
             # 2026-07-31: a worker wedged before its first API call held a card

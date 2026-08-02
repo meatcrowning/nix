@@ -167,9 +167,11 @@ Item {
     // ---- A CARD IS NEVER WITHHELD; ONE WITH NOTHING TO SAY YET RISES ----
     // [his, 2026-07-31] *"instead of hiding the card until it shows the name on
     // the top line etc, can we just put a card in there that reads '[agent]
-    // arises...' with an animated elipsies ... the card should just show the
+    // awakens...' with an animated elipsies ... the card should just show the
     // rising text and nothing else until the agent card actually starts
-    // producing stuff like before"*.
+    // producing stuff like before"* — the word is AWAKENS, not arises: [his,
+    // 2026-08-01] *"have it just say like '[agent] awakens...' with an animated
+    // elipsies"*.
     //
     // There is no `visible` binding here on purpose, and putting one back is a
     // regression. The gate this replaced (`speaks`) withheld a card until its
@@ -455,7 +457,7 @@ Item {
     PixelText {
         id: bornT
         // Not while it is rising, same rule as the tally: *"working for 2
-        // seconds"* beside *"arises..."* is two ways of saying it just started.
+        // seconds"* beside *"awakens..."* is two ways of saying it just started.
         visible: row.workedLine !== "" && !row.arising
                  && (row.saysLine !== "" || row.doingLine !== "")
         anchors.right: tallyT.visible ? tallyT.left : col.right
