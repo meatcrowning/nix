@@ -157,6 +157,11 @@ Singleton {
             property string wallpaperDir: "~/Pictures/wall"
             property string wallpaperFit: "auto"       // auto | tile | scale
             property string wallpaperSort: "name"      // name | random | mtime
+            // No wallpaper image: paint Theme.bg (the wallpaper-derived theme
+            // background colour) as the desktop instead. The palette still comes
+            // from a wallpaper — the meta+w picker chooses which — so this only
+            // changes whether the IMAGE is drawn. Honoured in WallpaperLayer.qml.
+            property bool   wallpaperSolid: false
 
             // ---- Panel & Widgets ----
             // The desktop's view mode, and the dock panel's width as a fraction
@@ -337,6 +342,7 @@ Singleton {
         windowRounding: 0, trayTint: true, scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
+        wallpaperSolid: false,
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,
         procSort: "cpu", mediaLocalLoop: 0, mediaQueueOpen: false,
