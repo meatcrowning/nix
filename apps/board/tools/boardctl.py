@@ -31,6 +31,12 @@ The orchestrator's verbs — how one sentence he typed becomes several agents
     boardctl.py minister 'sonnet 5 low'            # what a minister runs on
     boardctl.py phase coding --doing 'the vtbclient parser'
 
+**`subminister` runs one bounded chunk on a cheap deepseek subminister** — the
+way a Claude minister hands bulk, mechanical work (wide reading/greps, a
+transform) to the small model and gets a COMPACT result back, instead of burning
+its own expensive context. Only a minister genuinely on a Claude model may use
+it; a minister already on deepseek is refused (`boardwork.subminister`).
+
 **`phase` records what you SAY you are doing and does not set the phase your
 card is filed under.** That is derived from your own tool calls
 (`../boardphase.py`); he sees both, side by side, on purpose. Say it anyway —
@@ -455,7 +461,21 @@ def cmd_inbox(a):
 #: is deliberately the DEFAULT: a verb added later is refused after a ctrl+z
 #: without anybody having to remember this list. `phase` stays open on purpose —
 #: a cancelled Solomon saying what he is doing is not an act on the board.
-UNGATED = {"list", "agents", "phase"}
+#: (`subminister` changes nothing on the board either — it is a compute run.)
+UNGATED = {"list", "agents", "phase", "subminister"}
+
+
+def cmd_subminister(a):
+    """Run a bounded chunk to completion on the deepseek subminister and print
+    its result, so the calling Claude minister's shell captures it. Refuses a
+    minister already on the deepseek/hermes runtime, which gains nothing."""
+    try:
+        out = bw.subminister(" ".join(a.text), max_turns=a.max_turns)
+    except ValueError as e:
+        print("boardctl: " + str(e), file=sys.stderr)
+        return 2
+    print(out, end="" if out.endswith("\n") else "\n")
+    return 0
 
 
 def _gated(a):
@@ -593,6 +613,14 @@ def main(argv=None):
                    help="take: drain the queue too (board-watch only)")
     s.add_argument("--quiet", action="store_true", help="take: print nothing if empty")
     s.set_defaults(fn=cmd_inbox)
+
+    s = sub.add_parser("subminister",
+                       help="a CLAUDE minister runs one bounded chunk on the "
+                            "deepseek subminister: spawns it, waits, prints "
+                            "its COMPACT result. Refuses a deepseek minister.")
+    s.add_argument("text", nargs="+", help="the chunk of wide/mechanical work")
+    s.add_argument("--max-turns", dest="max_turns", type=int, default=None)
+    s.set_defaults(fn=cmd_subminister)
 
     s = sub.add_parser("budget", help="his dollar budget for the hermes minister "
                        "window (the settable fallback allowance)")

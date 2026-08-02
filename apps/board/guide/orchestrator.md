@@ -528,6 +528,53 @@ running. The zombie clause stays: it was a real bug for the old path (two stub
 workers that ran for one second still counted as running two and a half seconds
 later, holding slots against the cap and keeping cards on his board).
 
+### The deepseek subminister: a Claude minister delegates a chunk
+
+A **Claude** minister that knows it is about to burn context on wide, bulk,
+mechanical work — reading many files at once, a wide grep, a normalising
+transform — can hand that one chunk to a cheaper **deepseek subminister**
+instead of doing it in its own (expensive, long-context) session, then fold the
+compact result back in. This is a worker-to-worker delegation, distinct from a
+`dispatch`/handoff: the subminister is not a new board minister.
+
+```bash
+# from a CLAUDE minister's own shell:
+python3 apps/board/tools/boardctl.py subminister \
+    'read apps/pylib/**/*.py and list every public function with file:line'
+```
+
+- **The model is PINNED.** Whatever the minister's own dropdown (`minister_model()`)
+  says, a subminister ALWAYS runs on `deepseek/deepseek-v4-flash-0731`
+  (`boardwork.DEEPSEEK_SUBMINISTER_MODEL`) — that is the whole point of it — and
+  because that model is in `HERMES_MODELS` it rides the **hermes** runtime
+  (`hermes chat -q …`, nous provider), not Claude. `boardwork.subminister()`
+  builds the same argv a hermes minister gets, with the model fixed.
+- **It is gated on the caller genuinely being Claude.** `boardwork.calling_backend()`
+  walks the caller's process ancestors and takes the NEAREST agent runtime —
+  `hermes` or claude — so a minister already on deepseek, AND a deepseek
+  subminister (whose parents include a claude ancestor but whose nearest runtime
+  is hermes) are both refused with a "do this chunk yourself" message. Env is
+  not trusted for this: a subminister inherits its claude parent's env, so only
+  the process tree tells the truth. Neighbour-runtime detection reused the same
+  `/proc` walk `boardagents.session_pid` uses.
+- **It is synchronous and its whole result is stdout.** The calling minister's
+  shell tool captures what comes back and it is folded into the minister's own
+  context — so the subminister's framing (`boardwork.SUBMINISTER_FRAME`) tells it
+  to return something **COMPACT** relative to the work (a summary, an inventory,
+  a list), and NOT to write to any board, commit, or spawn anything further.
+  That compactness is what makes the hop a saving. No unit, no card, no
+  registration — it is a transient compute run; a killed one is simply retried
+  by the calling minister.
+- **When to use it is spelled out in the worker prompt (rule 13), not enforced.**
+  The two requirements: **(a)** the work is wide or mechanical — not a couple of
+  quick greps you would finish in one tool call; and **(b)** the result you need
+  back is genuinely smaller than the work. Keep the delegated chunk bounded so
+  the calling shell command survives it. Do NOT use it for creative,
+  discretionary or judgement work you would have to re-read the whole output of
+  to trust — if you would ingest all of it anyway, doing the work yourself is
+  still cheaper.
+- Harness: `test_subminister` in `tools/board-test.py`.
+
 ### A DISPATCH IS A START, NOT A RESULT
 
 The same bug cost him the work twice: it also produced a board that read as

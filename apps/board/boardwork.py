@@ -822,6 +822,26 @@ orchestrator**, handing you a further item because you are already in those \
 files: that is part of your job now, and your final note says what you did with \
 it. Take them either way — an unread note is handed to somebody else later.
 
+13. **If you are a CLAUDE minister, you may hand a chunk of wide, mechanical
+work to a cheaper deepseek subminister.** Run a bounded chunk in your shell and
+get back a COMPACT result, instead of burning your own expensive context on it:
+
+       python3 apps/board/tools/boardctl.py subminister \\
+           'read apps/pylib/**/*.py and list every public function with file:line'
+
+   Reach for it only when BOTH hold: **(a)** the work is wide or mechanical —
+   many files at once, a bulk extract, a normalising transform — NOT a couple of
+   quick greps you would finish in one tool call (do those yourself); and **(b)**
+   the result you need back is genuinely SMALLER than the work — a summary, an
+   inventory, the output of a transform you will fold in and move on. Keep the
+   delegated chunk BOUNDED (a few minutes, not hours) so your shell command
+   survives it. It is pinned to the deepseek flash model and costs a fraction of
+   your own tokens, but it is a NEW hop with its own output, so do NOT use it
+   for creative, discretionary or judgement work you would have to re-read the
+   whole output of to trust — if you would ingest ALL of it to verify or redo it,
+   doing the work yourself is still cheaper. And a minister ALREADY on deepseek
+   never uses it (the tool refuses): it is not cheaper for one of those.
+
 There is nobody to ask. Finish, or write down why you did not.
 """
 
@@ -1364,6 +1384,114 @@ def get_backend_for_model(model):
 def get_backend_for_role(role):
     """The backend the NEXT `role` spawn runs on, from its chosen model."""
     return get_backend_for_model(_role_model(role))
+
+
+# --------------------------------------------------- the deepseek subminister
+#: A Claude minister may hand a chunk of wide, mechanical work to a cheaper
+#: deepseek "subminister" instead of doing it in its own expensive context —
+#: the whole point of the feature. THE MODEL IS PINNED: whatever the minister's
+#: own dropdown says, a subminister ALWAYS runs on the deepseek flash model,
+#: and it rides the hermes backend because that model is in `HERMES_MODELS`.
+DEEPSEEK_SUBMINISTER_MODEL = "deepseek/deepseek-v4-flash-0731"
+DEEPSEEK_SUBMINISTER_TURNS = int(
+    os.environ.get("BOARD_SUBMINISTER_MAX_TURNS", str(HERMES_MAX_TURNS)))
+#: Backstop only. A bounded subminister chunk should finish in minutes; this
+#: stops a wedged hermes run from hanging the calling minister's shell forever
+#: (the calling tool's own timeout usually bites first, which is why the guide
+#: tells a minister to keep a delegated chunk bounded).
+SUBMINISTER_TIMEOUT_S = int(os.environ.get("BOARD_SUBMINISTER_TIMEOUT", "2700"))
+
+
+def calling_backend():
+    """Which agent runtime the CALLING process is running under, if any.
+
+    The gate for `subminister`. Walks this process's ancestors and takes the
+    NEAREST one that is an agent runtime — `hermes` or claude — because the
+    nearest is the one we are actually running under: a deepseek subminister
+    spawned by a Claude minister has FIRST a `hermes` ancestor and then a
+    claude one beyond it, and it is hermes. Env is deliberately NOT consulted
+    (except as a fallback when no agent ancestor is found): `BOARD_WORKER_BACKEND`
+    would be inherited by a subminister from its claude parent and lie.
+
+    Returns `'claude'` | `'hermes'` | `'shell'` (no agent runtime in the chain).
+    """
+    procs = ba._procs()
+    for pid in ba._ancestors(os.getpid(), procs):
+        ent = procs.get(pid)
+        if not ent:
+            continue
+        comm, cmd = ent[1], ent[2]
+        if comm == "hermes" or (cmd and os.path.basename(cmd[0]) == "hermes"):
+            return "hermes"
+        if comm in ba.CLAUDE_COMMS or (cmd and os.path.basename(cmd[0])
+                                       in ba.CLAUDE_COMMS):
+            return "claude"
+    env = os.environ.get("BOARD_WORKER_BACKEND", "").strip().lower()
+    return env if env in ("claude", "hermes") else "shell"
+
+
+def subminister(prompt, max_turns=None):
+    """Run `prompt` to completion on the deepseek flash subminister, synchronously.
+
+    Returns its stdout text. The calling Claude minister runs this in its shell
+    and the result is captured as a tool result and folded into its own context
+    — so the subminister is told, in the framing below, to return something
+    COMPACT relative to the work it did. That compactness is what makes the hop
+    a saving rather than a large bill.
+
+    Refuses unless the CALLING minister genuinely runs on a Claude model: a
+    minister already on the deepseek/hermes runtime spending another hermes run
+    to spawn one is pure waste. See `calling_backend`. Never writes to the board
+    and takes no unit and no card — it is a transient compute run whose whole
+    result is this function's return value, so a killed run is simply retried by
+    the calling minister.
+    """
+    want = " ".join((prompt or "").split())
+    if not want:
+        raise ValueError("no prompt for the subminister")
+    if calling_backend() == "hermes":
+        raise ValueError(
+            "you are ALREADY on the deepseek/hermes runtime, so a deepseek "
+            "subminister is just another cheap run - do this chunk yourself; "
+            "the tool refuses a deepseek minister spawning another")
+    q = SUBMINISTER_FRAME.format(prompt=want)
+    cmd = ["hermes", "chat", "-q", q, "-Q",
+           "--source", "tool",
+           "-m", DEEPSEEK_SUBMINISTER_MODEL,
+           "--provider", HERMES_PROVIDER,
+           "-t", HERMES_TOOLSETS,
+           "--max-turns", str(int(max_turns or DEEPSEEK_SUBMINISTER_TURNS)),
+           "--yolo"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO,
+                           timeout=SUBMINISTER_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ValueError("the deepseek subminister could not run: %s" % e)
+    if p.returncode != 0:
+        raise ValueError("the deepseek subminister failed (exit %s): %s"
+                         % (p.returncode, (p.stderr or p.stdout or "")
+                            .strip()[:600]))
+    return p.stdout
+
+
+#: The framing a subminister starts with. It is the subminister's WHOLE
+#: instruction set — deliberately a self-contained block, NOT the board-worker
+#: `RULES` (which speaks of committing, rebuilding and writing to the board, all
+#: things a bounded mechanical subagent must NOT do). Its job is to return a
+#: COMPACT result and get out of the way; the calling Claude minister quotes
+#: what comes back, so the leaner it is the more the hop saves.
+SUBMINISTER_FRAME = (
+    "You are a deepseek subminister working FOR a Claude minister on this "
+    "machine. You get one bounded chunk of wide, mechanical work (bulk reading, "
+    "wide greps, a normalising/mechanical transform). DO it in your own cheap "
+    "context, and return a COMPACT result the calling minister can fold straight "
+    "into its own context: a summary, an inventory, a list, or the transformed "
+    "output it asked for. Do NOT write to any board, do NOT commit, do NOT use "
+    "boardctl note/land/ask, and do NOT spawn any further agent. Do the work "
+    "entirely on files in the repo: never touch the user's display, focus, "
+    "audio, running apps or a rebuild, and never run a GUI. Keep your final "
+    "answer lean - the calling minister will quote it wholesale.\n\n"
+    "--- the chunk ---\n{prompt}\n--- end ---")
 
 
 def context_flags(role):
