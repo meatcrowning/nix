@@ -196,7 +196,9 @@ greys out when it does); this section is the mechanics.
   model would not need them changed.
 
 Queue mutation lives in `Player.queueTracks` / `playNext` / `removeFromQueue`
-(`queueAlbum` is now just `queueTracks` over an album's ids). Two traps they
+(`queueAlbum` is now just `queueTracks` over an album's ids, and the album
+cover's whole-album "play next" is `playAlbumNext`, which is `playNext` over
+`album_tracks` in album order). Two traps they
 exist to respect: `_orig_queue` — the pre-shuffle order — has to be mutated
 alongside `_queue`, or anything added while shuffled vanishes the moment shuffle
 is turned off; and a removal that does **not** touch the playing row must shift

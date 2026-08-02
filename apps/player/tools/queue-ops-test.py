@@ -71,6 +71,11 @@ class FakeLib:
         return [{"id": i, "path": f"/t/{i}.flac", "title": f"t{i}",
                  "duration": 100.0} for i in ids]
 
+    def album_tracks(self, album_id):
+        # two fixed albums, each 3 tracks in album order
+        ids = {1: [10, 11, 12], 2: [20, 21, 22]}[album_id]
+        return self.tracks_by_ids(ids)
+
 
 def mk(queue_ids, index, shuffle=False, orig=None):
     p = P.Player.__new__(P.Player)
@@ -143,6 +148,24 @@ check("shuffled: orig gets it after the same track",
 p = mk([], -1)
 p.playNext([4])
 check("nothing playing -> plain play", ids(p), [4])
+
+print("playAlbumNext")
+p = mk([1, 2, 3], 1)
+p.playAlbumNext(1)
+check("album tracks inserted after current, in album order", ids(p), [1, 2, 10, 11, 12, 3])
+check("current index untouched", p._index, 1)
+check("mpv tail rebuilt", p._mpv.pl,
+      ["/t/1.flac", "/t/2.flac", "/t/10.flac", "/t/11.flac", "/t/12.flac", "/t/3.flac"])
+
+p = mk([2, 1, 3], 0, shuffle=True, orig=[1, 2, 3])
+p.playAlbumNext(2)
+check("shuffled: album after the same track", ids(p), [2, 20, 21, 22, 1, 3])
+check("shuffled: orig got it after the same track",
+      [t["id"] for t in p._orig_queue], [1, 2, 20, 21, 22, 3])
+
+p = mk([], -1)
+p.playAlbumNext(1)
+check("nothing playing -> plain play of the album", ids(p), [10, 11, 12])
 
 print("removeFromQueue")
 p = mk([1, 2, 3, 4], 2)

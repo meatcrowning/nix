@@ -315,6 +315,8 @@ class FakePlayer(QObject):
     def playAlbum(self, _a, _i): pass
     @Slot(int)
     def queueAlbum(self, _a): pass
+    @Slot(int)
+    def playAlbumNext(self, _a): pass
     @Slot("QVariant")
     def queueTracks(self, _t): pass
     @Slot("QVariant")

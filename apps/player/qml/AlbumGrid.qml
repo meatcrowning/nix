@@ -304,6 +304,13 @@ Item {
                                     ctxMenu.open(p.x, p.y, [
                                         { label: "play",          trigger: function() { Player.playAlbum(aid, 0); } },
                                         { label: "play shuffled", trigger: function() { Player.setShuffle(true); Player.playAlbum(aid, 0); } },
+                                        // The track menu's "play next" is the
+                                        // whole-album twin of this — both insert
+                                        // after the playing row, and both grey
+                                        // with an empty queue, because with
+                                        // nothing playing it is a second "play".
+                                        { label: "play next", enabled: Player.queueLength > 0,
+                                          trigger: function() { Player.playAlbumNext(aid); } },
                                         { label: "add to queue",  trigger: function() { Player.queueAlbum(aid); } },
                                         { separator: true },
                                         { label: aid === root.expandedAlbumId ? "close album" : "open album",
@@ -371,6 +378,7 @@ Item {
 
     CtxMenu {
         id: ctxMenu
+        objectName: "albumCtxMenu"   // handle for headless harnesses
         anchors.fill: parent
     }
 }
