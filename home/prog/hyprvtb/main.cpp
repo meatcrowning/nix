@@ -1337,7 +1337,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     //    (rolled-up) window's bar: a shaded window is hidden, so Hyprland never
     //    renders it or calls its draw() — the shade bar sits OVER the desktop
     //    widgets (bottom-layer quickshell) yet UNDER windows, and over the
-    //    shadows, which is why it is enqueued second.
+    //    shadows, which is why it is enqueued second. Then a SECOND shadow pass
+    //    (overBars) re-lays the parts of other windows' shadows that fall on a
+    //    resting rolled-up bar, over the bar — so a rolled-up window is shadowed
+    //    by the windows above it instead of hiding their shadow behind its bar.
     //  * RENDER_POST_WINDOWS (after windows, before top/overlay layers): draw
     //    the hover tooltip so it lands OVER the window it labels (the bar's own
     //    UNDER-layer pass draws before the window; the tooltip overhangs left
@@ -1374,6 +1377,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                     b->renderShadeIfRolled(PMONITOR);
                 b->enqueueTooltip(PMONITOR);
             }
+        }
+        // Second shadow pass, AFTER the resting shade bars: the parts of other
+        // windows' shadows that fall on a rolled-up bar, drawn back over it so
+        // they read as lying ON the rolled-up window (his report). No-op when
+        // nothing is rolled up.
+        if (stage == RENDER_PRE_WINDOWS) {
+            auto overBars           = CVtbPassElement::SVtbData{};
+            overBars.shadowLayer    = true;
+            overBars.shadowOverBars = true;
+            Hl::addPass(makeUnique<CVtbPassElement>(overBars));
         }
     }));
 
@@ -1637,7 +1650,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.02"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.03"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

@@ -1249,20 +1249,19 @@ static CRegion vtbWindowFrames(PHLMONITOR pMonitor) {
 // rule already says a shadow never covers a window, so the only pixels it can
 // reach are desktop either way.
 //
-// Reports the composite's shadow both mid-roll AND at rest: a window that rests
-// fully rolled up casts the same hard bottom-left drop shadow a normal window
-// does (DESIGN §4 — "the window's, not its chrome"). The offset is the constant
-// resting one throughout, so the roll's set-down beat lands the composite on
-// exactly the rest shadow with no one-frame pop (the shadow used to collapse to
-// nothing as it set down, then a resting bar had no shadow at all).
+// Reports the composite's shadow ONLY while a roll is in flight — the visible
+// remnant (remaining client + bar) casts it, and it collapses to nothing as the
+// bar sets down. A window at REST rolled up casts NO drop shadow of its own: a
+// rolled-up window is chrome, not a window (his correction to 3.02, which had
+// added a resting self-shadow). Other windows' shadows still fall ON a resting
+// bar — that is the over-bars pass in vtbRenderShadowLayer, not this.
 //
-// False when there is nothing to draw: neither rolling nor rolled up, or the
-// lone bar is mid-fade (open fade-in / close fade-out), where the composite is
-// translucent and a full-strength shadow in a flat union can't follow it.
+// False when there is nothing to draw: no animation (incl. fully set down at
+// rest), or the lone bar is mid-fade (open fade-in / close fade-out), where the
+// composite is translucent and a full-strength shadow in a flat union can't
+// follow it.
 bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
-    if (!pMonitor || m_bBarFading || m_bBarFadingIn)
-        return false;
-    if (m_rollAnim == ROLL_NONE && !m_bRolledUp)
+    if (!pMonitor || m_rollAnim == ROLL_NONE || m_bBarFading || m_bBarFadingIn)
         return false;
 
     const auto PWINDOW = m_pWindow.lock();
@@ -1271,13 +1270,14 @@ bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
     if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
         return false;
 
-    // Rest state: content fully tucked behind the bar, bar set down. An in-flight
-    // animation overrides both.
-    float slideT = 1.f, downT = 1.f;
-    rollAnimSubProgress(slideT, downT);
+    float slideT = 0.f, downT = 0.f;
+    if (!rollAnimSubProgress(slideT, downT))
+        return false;
 
     const double SCALE     = pMonitor->m_scale;
-    const double shadowOff = VTB_SHADOW_SIZE * SCALE;
+    const double shadowOff = VTB_SHADOW_SIZE * (1.f - downT) * SCALE;
+    if (shadowOff <= 0.5)
+        return false;
 
     // Same bar box renderBar draws into (effectiveBoxGlobal already carries the
     // set-down drop), in this monitor's device pixels.
@@ -1294,6 +1294,36 @@ bool CVtbDeco::rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out) {
 
     out = CBox{visLeft - shadowOff, barBox.y + shadowOff, barRight - visLeft, barBox.h}.round();
     return out.w >= 1 && out.h >= 1; // never hand renderRect a degenerate box
+}
+
+// The resting/set-down bar box of a rolled-up window in this monitor's device
+// pixels — the same box renderBar draws into (effectiveBoxGlobal carries the
+// set-down drop). vtbRenderShadowLayer's over-bars pass unions these to find
+// where OTHER windows' shadows may fall on a rolled-up bar (his report: those
+// shadows must appear ON TOP of a rolled-up window, not vanish behind its bar).
+//
+// False for a bar drawing OVER the windows this frame — roll-out, open reveal
+// and the roll-up slide beat are all enqueued at RENDER_POST_WINDOWS and sit
+// above everything, so a shadow must not be laid on them — and for a window
+// that is not rolled up at all.
+bool CVtbDeco::rollBarBoxDev(PHLMONITOR pMonitor, CBox& out) {
+    if (!pMonitor || (!m_bRolledUp && m_rollAnim == ROLL_NONE))
+        return false;
+    if (isRollingOut() || isOpening() || isRollingUpSlide())
+        return false;
+
+    const auto PWINDOW = m_pWindow.lock();
+    if (!PWINDOW || PWINDOW->m_monitor.lock() != pMonitor)
+        return false;
+    if (!PWINDOW->m_pinned && (!PWINDOW->m_workspace || !PWINDOW->m_workspace->isVisible()))
+        return false;
+
+    const double SCALE   = pMonitor->m_scale;
+    const CBox   DECOBOX = effectiveBoxGlobal();
+    CBox         barBox  = {DECOBOX.x - pMonitor->m_position.x, DECOBOX.y - pMonitor->m_position.y, DECOBOX.w, DECOBOX.h};
+    barBox.translate(PWINDOW->m_floatingOffset).scale(SCALE).round();
+    out = barBox;
+    return out.w >= 1 && out.h >= 1;
 }
 
 // The window snapshot sliding right into the bar (or back out), clipped at the
@@ -3396,11 +3426,10 @@ bool CVtbDeco::pushRolledIntoBand(double reserve, bool edgeRight) {
 }
 
 // Eased sub-progress for the two beats. slideT: 0 = content fully out/visible,
-// 1 = tucked entirely behind the bar. downT: 0 = bar raised, 1 = bar set down
-// (a shadow-offset lower); the drop shadow itself is constant across both beats
-// and at rest (rollShadowBoxDev), so it never collapses under the setting-down
-// bar. Roll-out runs the beats in the reverse order (lift the bar first, then
-// slide the content back out). Returns false when no animation is in flight.
+// 1 = tucked entirely behind the bar. downT: 0 = raised with full shadow, 1 =
+// set down with no shadow. Roll-out runs the beats in the reverse order (lift
+// the bar / re-grow the shadow first, then slide the content back out). Returns
+// false when no animation is in flight.
 bool CVtbDeco::rollAnimSubProgress(float& slideT, float& downT) {
     if (m_rollAnim == ROLL_NONE)
         return false;
@@ -4000,22 +4029,46 @@ void CVtbShadowDeco::draw(PHLMONITOR, const float&) {
 //    there was a visibly darker patch. Here the boxes are unioned into a
 //    CRegion first, and pixman hands back DISJOINT rects — every shadowed pixel
 //    is painted exactly once, at exactly 0.6, however many windows cast there.
-//  * a shadow never lands on another window. Drawing before all windows already
-//    puts opaque windows over it, but a translucent one would still have been
-//    tinted by the shadow of the window beneath it, and a rolled-up bar (drawn
-//    in this same stage) would have been too. So every visible window's frame —
-//    client box plus its titlebar strip — is subtracted from the region as well:
-//    the shadow only ever falls on the desktop.
+//  * a shadow never lands on another (unrolled) window. Drawing before all
+//    windows already puts opaque windows over it, but a translucent one would
+//    still have been tinted by the shadow of the window beneath it. So every
+//    visible window's frame — client box plus its titlebar strip — is subtracted
+//    from the region as well: the shadow only ever falls on the desktop.
 //
-// Called from main.cpp's render-stage hook BEFORE the shade bars, which must
-// draw over it.
-void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
+// Called TWICE per monitor from main.cpp's RENDER_PRE_WINDOWS hook:
+//  * overBars=false, BEFORE the shade bars: the flat layer above — every
+//    unrolled window's shadow plus the in-flight roll composite's, on the
+//    desktop.
+//  * overBars=true, AFTER the shade bars: the parts of those same shadows that
+//    fall on a RESTING rolled-up bar, drawn back over the (opaque) bar so other
+//    windows' shadows appear ON TOP of a rolled-up window — his report. A
+//    rolled-up bar is chrome, not a window: it does NOT occlude a shadow the way
+//    an unrolled window does. Restricted to the bar union so the desktop share
+//    the first pass already laid down is never doubled (0.6 over 0.6 -> ~0.84).
+void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
     if (!pMonitor || !g_pGlobalState || !Cfg::enabled())
+        return;
+
+    const float ALPHA = Cfg::shadowAlpha(); // default 0.6; 0 = no shadow at all
+    if (ALPHA <= 0.f)
         return;
 
     const double SCALE = pMonitor->m_scale;
     const double N     = VTB_SHADOW_SIZE * SCALE;
     const double BARW  = totalBarW() * SCALE;
+
+    // over-bars pass: the resting rolled-up bars are the ONLY region it may
+    // paint. Nothing rolled up -> nothing to do.
+    CRegion barRegion;
+    if (overBars) {
+        for (auto& b : g_pGlobalState->bars) {
+            CBox bb;
+            if (b && b->rollBarBoxDev(pMonitor, bb))
+                barRegion.add(bb);
+        }
+        if (barRegion.empty())
+            return;
+    }
 
     // What occludes the shadows (see vtbWindowFrames — shared with the roll
     // animation's own shadow, which has to obey the same rule).
@@ -4040,9 +4093,9 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
 
         // No shadow on our custom-maximized windows, and none from THIS loop for
         // a rolled-up one (the sibling titlebar knows). isRolledUp() stays true
-        // across the whole roll-up/roll-out animation too — a window mid-roll or
-        // resting rolled up contributes the composite's shadow instead, from the
-        // rollShadowBoxDev pass below.
+        // across the whole roll-up/roll-out animation too — a window mid-roll
+        // contributes the composite's collapsing shadow instead (rollShadowBoxDev
+        // pass below); a window at rest rolled up casts none of its own.
         bool skip = false;
         for (auto& b : g_pGlobalState->bars) {
             if (b && b->getOwner() == w) {
@@ -4062,15 +4115,16 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
         shadow.add(CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round());
     }
 
-    // Rolled-up windows (mid-roll or at rest) are hidden, so the loop above
-    // skipped them entirely. Their shadow is the composite's, and it belongs in
-    // THIS union — painting it alongside the composite instead put a second 0.6
-    // black over any shadow it crossed (~0.84 where they met) and lit up the
-    // neighbouring window's edge until the animation ended. See rollShadowBoxDev.
-    for (auto& b : g_pGlobalState->bars) {
-        CBox rollShadow;
-        if (b && b->rollShadowBoxDev(pMonitor, rollShadow))
-            shadow.add(rollShadow);
+    // In-flight roll composite's own collapsing shadow — desktop only, and it
+    // sits UNDER its own bar, so it belongs to the pre-bars pass. Painting it in
+    // the over-bars pass would lay it on top of that bar. A window at REST rolled
+    // up casts none (rollShadowBoxDev returns false unless a roll is running).
+    if (!overBars) {
+        for (auto& b : g_pGlobalState->bars) {
+            CBox rollShadow;
+            if (b && b->rollShadowBoxDev(pMonitor, rollShadow))
+                shadow.add(rollShadow);
+        }
     }
 
     if (shadow.empty())
@@ -4078,10 +4132,20 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
 
     shadow.subtract(frames);
 
-    const float ALPHA = Cfg::shadowAlpha(); // default 0.6; 0 = no shadow at all
-    if (ALPHA <= 0.f)
+    // Over-bars: keep only what lands on a resting rolled-up bar. The desktop
+    // share was already painted by the pre-bars pass; the opaque bar hid its
+    // portion, redrawn here at full alpha so it reads as lying ON the bar.
+    if (overBars)
+        shadow.intersect(barRegion);
+
+    if (shadow.empty())
         return;
-    const CHyprColor COLOR = {0.0, 0.0, 0.0, ALPHA}; // hard, near-solid black
+
+    // The shadow follows the theme (DESIGN §4): its tone is the palette's
+    // darkest — the bar background wal-set writes — at the user's shadow_alpha,
+    // not a hard-coded black.
+    CHyprColor COLOR = configColor(Cfg::bgColor());
+    COLOR.a          = ALPHA;
     for (const auto& r : shadow.getRects())
         Hl::rect(CBox{(double)r.x1, (double)r.y1, (double)(r.x2 - r.x1), (double)(r.y2 - r.y1)}, COLOR);
 }
