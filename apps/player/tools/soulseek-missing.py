@@ -43,6 +43,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "pylib"))
@@ -87,6 +88,29 @@ DEFAULT_LIMIT = 5
 # offered by an already-capped peer is still enqueued there, because the bias
 # is a tiebreaker and never refuses the only source.
 MAX_ENQUEUES_PER_PEER = 2
+
+# State a download is in while it waits on the REMOTE peer for an upload slot.
+# A transfer in one of these states has produced no bytes and can't start until
+# that peer serves it -- if the peer never grants a slot (offline, leecher, or a
+# queue tens of thousands deep), it sits here forever with zero progress. These
+# are the "queued but frozen" transfers a sweep must notice and re-source.
+STALLED_CANDIDATE_STATES = ("Queued, Remotely", "Queued, Locally", "Requested")
+# A "Queued, Remotely" transfer at or above this placeInQueue position is not
+# going to be served in any sane horizon (measured 2026-08-01: a peer had us
+# 45,603rd in line). Re-source it rather than leaving it frozen. A position of
+# 0 (the peer never reported one) is not caught by this -- only the time bar.
+QUEUE_PLACE_STALL_LIMIT = 1000
+# A transfer stuck in a candidate state past this many hours with no progress
+# (bytesTransferred still 0 / never left the state) is treated as dead rather
+# than merely slow. Generous on purpose: Soulseek peers routinely take hours to
+# serve a queue, and rotation must not be rude. Catches the place-0 unknowns the
+# position bar above cannot.
+QUEUED_STALL_HOURS = 24
+# Persistent per-track avoid of peers we've re-sourced a track away from because
+# they were congested (huge queue / stalled). Kept across runs so a re-sourced
+# track is never immediately re-enqueued from the same peer -- the loop that
+# would otherwise make the sweep churn forever on the one peer that offers it.
+STALLED_AVOID_FILENAME = "soulseek-stall-avoid.json"
 
 STATE_COLS = ["spotify_id", "isrc", "status", "user", "filename", "when"]
 # status: have (already in library) / queued (search found + enqueued) /
@@ -229,6 +253,32 @@ def save_rescued(path, ids):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump({"handled": sorted(ids)}, f)
+    os.replace(tmp, path)
+
+
+def load_stall_avoid(path):
+    """Persistent {track_key: {peer, ...}} blocked peers, one per track.
+
+    When a track is re-sourced away from a congested peer (huge queue / never
+    progressing), that peer is recorded here so a later run never immediately
+    re-enqueues the same track from the same peer -- the cross-run churn that
+    would otherwise make a stalled transfer loop forever. Fresh/missing file is
+    an empty dict; a peer leaving the network or returning with a short queue
+    merely means the track stays wanted until a new, non-blocked peer offers it.
+    """
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return {k: set(v) for k, v in (data or {}).items()}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_stall_avoid(path, avoid):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({k: sorted(v) for k, v in sorted(avoid.items())}, f,
+                  indent=1)
     os.replace(tmp, path)
 
 
@@ -485,6 +535,138 @@ def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
     return blocked, resourced
 
 
+def stalled_transfer(f, now, place_limit, stall_hours):
+    """True when a transfer is stuck waiting on the remote peer, not just slow.
+
+    A download in one of STALLED_CANDIDATE_STATES (queued remotely / requested)
+    has produced no bytes and cannot start until the remote peer grants it an
+    upload slot. It is frozen when that peer never will: it is past `place_limit`
+    in the peer's queue, or it has sat in that state past `stall_hours` without a
+    byte moving. Either way the transfer is effectively dead and the sweep should
+    re-source it instead of leaving it to occupy the queue forever.
+
+    Non-candidates (in-progress, succeeded, failed) are excluded by the state
+    whitelist; a peer that has actually started us (or finished, or refused us)
+    is being handled elsewhere.
+    """
+    st = f.get("state") or ""
+    if st not in STALLED_CANDIDATE_STATES:
+        return False
+    place = f.get("placeInQueue") or 0
+    if place >= place_limit:
+        return True  # the peer has thousands ahead of us; never served
+    pushed = f.get("enqueuedAt") or f.get("requestedAt")
+    if not pushed:
+        return False  # no timestamp; give it the benefit of the doubt
+    try:
+        pushed_dt = datetime.fromisoformat(str(pushed).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if pushed_dt.tzinfo is None:
+        pushed_dt = pushed_dt.replace(tzinfo=timezone.utc)  # slskd timestamps are UTC
+    elapsed_h = (now - pushed_dt).total_seconds() / 3600.0
+    return elapsed_h >= stall_hours
+
+
+def rescue_stalled(rows, state, rescued_ids, stall_avoid, dl, now, base,
+                   api_key, dry_run, place_limit, stall_hours):
+    """Re-source every transfer stuck waiting on a congested remote peer.
+
+    This is the half of the pipeline rescue_rejected cannot reach: a transfer
+    that is NOT terminally failed (so rescue_rejected skips it) and NOT vanished
+    (so reconcile_orphaned_queued skips it) but is parked "Queued, Remotely"
+    behind a peer's upload queue at a position that will never serve us (or that
+    never progressed past a time bar). It is present, alive, and frozen -- the
+    exact "queued but never advancing" symptom that the failed-transfer and
+    vanished-transfer fixes each missed.
+
+    For each stalled transfer that maps to a work-list track still marked
+    "queued" we:
+      - cancel the stuck transfer in slskd (it can never produce a file in any
+        sane horizon), and
+      - drop the track's queued marker so the normal pass re-searches it, and
+      - record the congested peer in the persistent per-track `stall_avoid` set
+        so a later run never re-enqueues this track from that same peer (no
+        cross-run churn), and
+      - remember the transfer id in rescued_ids so it is acted on once.
+
+    The peer is blocked for THIS run's re-source too (the returned set feeds
+    pick_candidate), so a re-search lands on a healthier peer immediately when
+    one exists -- or, if the congested peer was the only offerer, the track just
+    stays wanted (its marker already dropped) until a new peer offers it.
+
+    Never mutates `state` or `stall_avoid` and never cancels anything under
+    --dry-run (a preview must not unqueue a real download, and a block it has
+    not acted on must not be recorded); `rescued_ids` may gain entries that a
+    preview does not persist, exactly like rescue_rejected. The returned count
+    still reports what a real run would re-source, and the blocklist always
+    applies. Cancels via the same ?remove=true DELETE clear_handled_failures
+    uses -- best-effort, a failure is reported not fatal.
+
+    Returns (blocked_user_set, n_would_resource, resourced_track_keys).
+    Mutates `state`, `rescued_ids` and `stall_avoid`; the caller persists the
+    latter two for a real run (and should put the returned track keys first in
+    the search pass so a re-sourced track finds its healthier peer promptly,
+    instead of waiting out the whole work-list budget).
+    """
+    blocked = set()
+    resourced = 0
+    resourced_keys = set()
+    for f in iter_transfers(dl):
+        if not stalled_transfer(f, now, place_limit, stall_hours):
+            continue
+        user = f.get("username")
+        filename = f.get("filename")
+        if not (user and filename):
+            continue
+        key = f.get("id") or f"{user}\x00{filename}"
+        if key in rescued_ids:
+            continue  # already acted on this exact stuck transfer
+        # Match like rescue_rejected: os.path.basename on a Soulseek path (which
+        # uses backslashes, not "/") returns the WHOLE path, and file_matches
+        # folds it -- a track whose artist lives in the album directory rather
+        # than the filename ("Rick Astley\\...\\01 Never Gonna Give You Up.mp3")
+        # still matches through the folded directory. Do NOT split backslashes
+        # here; normalizing would shrink the match to the bare leaf and miss it.
+        full = os.path.basename(filename)
+        matches = [r for r in rows
+                   if file_matches(full, r.get("artists", ""),
+                                   r.get("title", ""))]
+        if not matches:
+            continue
+        # Re-source each currently-queued track this stuck transfer maps to.
+        # Only count the transfer as HANDLED (and only block the congested
+        # peer) once at least one queued track was actually released -- mirroring
+        # rescue_rejected, so a transfer whose matching track is not currently
+        # "queued" does not burn the id and the peer permanently.
+        acted = 0
+        for row in matches:
+            sid = track_key(row)
+            rec = state.get(sid)
+            if rec and rec.get("status") == "queued":
+                acted += 1
+                resourced += 1
+                resourced_keys.add(sid)
+                if not dry_run:
+                    del state[sid]
+                    # persist the per-track avoid only on a real run; a preview
+                    # must not accumulate blocks it has not actually acted on.
+                    stall_avoid.setdefault(sid, set()).add(user)
+        if acted:
+            blocked.add(user)
+            rescued_ids.add(key)
+            if not dry_run:
+                try:
+                    http("DELETE",
+                         f"{base}/api/v0/transfers/downloads/"
+                         f"{urllib.parse.quote(str(user), safe='')}/"
+                         f"{urllib.parse.quote(str(key), safe='')}?remove=true",
+                         api_key)
+                except SlskdError as e:
+                    print(f"    ! could not cancel stalled transfer {key}: {e}")
+    return blocked, resourced, resourced_keys
+
+
 def scan_downloaded_names():
     """Set of folded basenames of files sitting in the slskd downloads dir.
 
@@ -619,6 +801,12 @@ def main():
                     help="search but do not enqueue downloads")
     ap.add_argument("--search-timeout", type=int, default=DEFAULT_SEARCH_TIMEOUT,
                     help="seconds to wait for each search (default %(default)s)")
+    ap.add_argument("--stall-place", type=int, default=QUEUE_PLACE_STALL_LIMIT,
+                    help="re-source a queued-remotely transfer at or above this "
+                         "placeInQueue (default %(default)s)")
+    ap.add_argument("--stall-hours", type=float, default=QUEUED_STALL_HOURS,
+                    help="re-source a queued transfer stuck this many hours "
+                         "with no progress (default %(default)s)")
     ap.add_argument("--library-skip/--no-library-skip",
                     dest="library_skip", action="store_true", default=True,
                     help="re-check the live library and skip what is present")
@@ -664,6 +852,8 @@ def main():
     state = {} if args.retry else load_state(state_path)
     rescued_ids = load_rescued(os.path.join(args.dump_dir,
                                             os.path.basename(RESCUED_FILE)))
+    stall_avoid = load_stall_avoid(os.path.join(args.dump_dir,
+                                                STALLED_AVOID_FILENAME))
 
     # --- 1.5 re-source downloads the peer rejected/cancelled/errored ---------
     # The /transfers/downloads response nests (username -> directories ->
@@ -691,6 +881,39 @@ def main():
     if blocked_users:
         print(f"  avoiding {len(blocked_users)} peer(s) that refused a download "
               f"this run")
+
+    # A transfer parked "Queued, Remotely" behind a congested peer's upload
+    # queue (or never progressing past a time bar) is present and alive -- so
+    # neither rescue_rejected (failed terminals) nor reconcile_orphaned_queued
+    # (vanished transfers) touches it, yet it can never produce a file. Re-source
+    # exactly those stalled transfers: cancel the frozen row, release the track's
+    # queued marker, and remember the congested peer per-track so a later run
+    # never re-enqueues it there (no cross-run churn). Its returned peer set is
+    # folded into blocked_users so the re-search of the same run avoids it.
+    stalled_blocked, n_stalled, resourced_stall_keys = set(), 0, set()
+    try:
+        (stalled_blocked, n_stalled,
+         resourced_stall_keys) = rescue_stalled(
+            rows, state, rescued_ids, stall_avoid, dl,
+            now=datetime.now(timezone.utc), base=base, api_key=api_key,
+            dry_run=args.dry_run, place_limit=args.stall_place,
+            stall_hours=args.stall_hours)
+    except SlskdError as e:
+        print(f"  ! stall re-source degraded: {e}")
+    if n_stalled:
+        print(f"  re-sourcing {n_stalled} track(s) stuck queued behind a "
+              f"congested peer")
+        if not args.dry_run:
+            save_state(state_path, state)
+    if stalled_blocked:
+        blocked_users |= stalled_blocked
+        print(f"  avoiding {len(stalled_blocked)} peer(s) with a frozen "
+              f"download queue this run")
+    if (n_stalled and not args.dry_run):
+        save_rescued(os.path.join(args.dump_dir,
+                                  os.path.basename(RESCUED_FILE)), rescued_ids)
+        save_stall_avoid(os.path.join(args.dump_dir, STALLED_AVOID_FILENAME),
+                         stall_avoid)
 
     # Now every errored/failed row can be cleared from slskd itself, so an
     # errored transfer does not linger in the downloads view forever (see
@@ -739,6 +962,13 @@ def main():
         net.append(r)
     if already_have:
         print(f"  {already_have} now in the library already; skipped\n")
+
+    # A track just re-sourced from a frozen/congested peer must find its
+    # healthier peer NOW, not after the whole (potentially thousands-long) work
+    # list has had its turn. Put re-sourced tracks first in the search budget so
+    # the re-source pays off in the next run rather than hundreds of runs away.
+    if resourced_stall_keys:
+        net.sort(key=lambda r: track_key(r) not in resourced_stall_keys)
 
     budget = len(net) if args.all else min(args.limit, len(net))
     if budget == 0:
@@ -811,7 +1041,8 @@ def main():
                     responses = responses or []
 
             cand = pick_candidate(responses, artists, title, want_ms,
-                                  blocked_users,
+                                  set(blocked_users)
+                                  | set(stall_avoid.get(sid, ())),
                                   {u for u, c in run_user_counts.items()
                                    if c >= MAX_ENQUEUES_PER_PEER})
         except SlskdError as e:
@@ -824,12 +1055,26 @@ def main():
             continue
 
         if not cand:
-            print("    no matching file found")
-            state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                          "isrc": row.get("isrc", ""), "status": "nofind",
-                          "user": "", "filename": "", "when": time.strftime("%Y-%m-%d %H:%M:%S")}
-            changed = True
-            save_state(state_path, state)
+            # Not picked. The track is genuinely unavailable only if NO peer at
+            # all offered it; when the only offers come from a peer we are
+            # avoiding (this run's refused/congested set, or a persistently-
+            # avoided peer this track was re-sourced away from), the track still
+            # exists on the network -- just not from a source we'll use. Leave it
+            # wanted (no state entry) so a later run probes again once a healthy
+            # peer offers it, rather than recording nofind, which would stop us
+            # ever trying.
+            any_offer = pick_candidate(responses, artists, title, want_ms,
+                                       set(), set()) is not None
+            if any_offer:
+                print("    only available from an avoided/congested peer; "
+                      "left for a later run")
+            else:
+                print("    no matching file found")
+                state[sid] = {"spotify_id": row.get("spotify_id", ""),
+                              "isrc": row.get("isrc", ""), "status": "nofind",
+                              "user": "", "filename": "", "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+                changed = True
+                save_state(state_path, state)
             continue
 
         user, filename, size = cand
