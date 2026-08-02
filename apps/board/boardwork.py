@@ -347,6 +347,7 @@ ORCH_MODELS = [
     ("claude-opus-5", "xhigh", "opus 5 xhigh"),
     ("claude-opus-5", "max", "opus 5 max"),
     ("claude-opus-4-8", "high", "opus 4.8 high"),
+    ("claude-opus-4-8", "medium", "opus 4.8 medium"),
     ("claude-sonnet-5", "high", "sonnet 5 high"),
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
