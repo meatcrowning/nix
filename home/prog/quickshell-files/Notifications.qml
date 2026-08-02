@@ -193,9 +193,12 @@ Singleton {
         persistenceSupported: false
 
         // Quickshell only parses the hints it has properties for, so anything
-        // else has to be asked for by name. These two are how a KDE Connect
-        // toast names the phone it came from — see "who a toast is FROM" above.
-        extraHints: ["x-kde-origin-name", "x-kdeconnect-source-device"]
+        // else has to be asked for by name. These are how a KDE Connect toast
+        // names the phone it came from — see "who a toast is FROM" above — and
+        // `x-download-image`, which surfer's completion toast carries the path
+        // of the downloaded image in, so the card can thumbnail it and open it.
+        extraHints: ["x-kde-origin-name", "x-kdeconnect-source-device",
+                     "x-download-image"]
 
         onNotification: function (n) {
             // Do Not Disturb: suppress toasts, but let critical (urgency 2)

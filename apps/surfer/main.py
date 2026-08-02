@@ -273,6 +273,17 @@ class Notifier(QObject):
             pass
 
 
+# The image extensions whose completion toast carries a thumbnail and
+# click-to-open (surfer/main.py). Mirrors filer/main.py IMAGE_EXTS so anything
+# filer would preview - and viewer would open - gets the same treatment.
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
+              ".avif", ".jxl", ".tif", ".tiff", ".ico", ".ppm", ".pgm"}
+
+
+def _is_image(name):
+    return os.path.splitext(name or "")[1].lower() in IMAGE_EXTS
+
+
 class Downloads(QObject):
     """Desktop toasts for downloads, driven from Main.qml's onDownloadRequested.
     A SLOW or LARGE download gets a live progress toast that updates IN PLACE
@@ -312,7 +323,7 @@ class Downloads(QObject):
         fill = int(round(pct / 100.0 * width))
         return "█" * fill + "░" * (width - fill)  # █ filled / ░ empty
 
-    def _send(self, key, title, body, value, persist=False):
+    def _send(self, key, title, body, value, persist=False, path=None):
         # -p prints the notification id so we can --replace-id (-r) it next time,
         # morphing one toast in place instead of stacking a new one per update.
         #
@@ -330,6 +341,10 @@ class Downloads(QObject):
             args += ["-r", str(rid)]
         if value is not None:
             args += ["-h", "int:value:%d" % int(value)]
+        if path:
+            # Which file this toast is about, for the panel: it renders a
+            # thumbnail and clicking the toast opens it in the viewer.
+            args += ["-h", "string:x-download-image:" + path]
         args += [title, body]
         try:
             out = subprocess.run(args, capture_output=True, text=True, timeout=2)
@@ -362,9 +377,13 @@ class Downloads(QObject):
                                      self._human(received), self._human(total))
         self._send(key, "downloading " + name, body, pct, persist=True)
 
-    @Slot(str, str)
-    def done(self, key, name):
-        self._send(key, "download complete", name, 100)  # reuses the progress toast
+    @Slot(str, str, str)
+    def done(self, key, name, path=""):
+        # Only an image completion carries the path hint: the panel shows its
+        # thumbnail and clicking the toast opens it in the viewer (filer/viewer
+        # open images; a PDF or zip has neither behaviour).
+        img = path if _is_image(path) else None
+        self._send(key, "download complete", name, 100, path=img)
         self._ids.pop(key, None)
         self._pct.pop(key, None)
 

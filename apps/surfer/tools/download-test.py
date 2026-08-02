@@ -139,14 +139,16 @@ class SpyDownloads(surfer.Downloads):
         self.sends = []      # (kind, title, body)
         self.last_id = 1
 
-    def _send(self, key, title, body, value, persist=False):
+    def _send(self, key, title, body, value, persist=False, path=None):
         # do NOT shell out to notify-send (no daemon offscreen, and never a real
-        # toast anyway) — record what WOULD be sent, including the -r replace id.
+        # toast anyway) — record what WOULD be sent, including the -r replace id
+        # and the download image path hint.
         rid = self._ids.get(key)
         assigned = self.last_id
         self.sends.append({
             "key": key, "title": title, "rid": rid,
             "persist": persist, "value": value, "assigned": assigned,
+            "path": path,
         })
         self._ids[key] = assigned
         self.last_id += 1
@@ -320,6 +322,20 @@ def main():
     dl.progress("k-unk", "u.bin", 100, -1, 5000.0)
     ok &= _expect("unknown total -> no toast", dl.sends, before + 1)
 
+    # an image completion toast carries the downloaded image's path (the panel
+    # thumbnails + opens it); a non-image completion carries no path
+    dl._ids.clear(); dl._pct.clear()
+    start = len(dl.sends)
+    dl.done("k-img", "pic.png", "/home/lam/Downloads/pic.png")
+    dl.done("k-pdf", "doc.pdf", "/home/lam/Downloads/doc.pdf")
+    ok &= _expect("done x2 -> two completion toasts", dl.sends, start + 2)
+    ok &= dl.sends[-2]["path"] == "/home/lam/Downloads/pic.png"
+    ok &= dl.sends[-1]["path"] is None
+    print(("  ok   " if dl.sends[-2]["path"] else "  FAIL ")
+          + "image done threads the path for the panel")
+    print(("  ok   " if dl.sends[-1]["path"] is None else "  FAIL ")
+          + "non-image done carries no image path")
+
     print("\n-- Main.qml wiring (must not drift from the bridge) --")
     main_qml = (HERE.parent / "qml" / "Main.qml").read_text(encoding="utf-8")
     wiring_ok = True
@@ -329,7 +345,7 @@ def main():
         ("sets downloadDirectory and accepts",
          r"download\.downloadDirectory = downloadDir;"),
         ("done/failed on finish",
-         "Downloads.done(key, name);" in main_qml and
+         "Downloads.done(key, name, path);" in main_qml and
          "Downloads.failed(key, name);" in main_qml),
     ]
     for label, pat in checks:

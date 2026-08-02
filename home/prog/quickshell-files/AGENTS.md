@@ -1698,6 +1698,20 @@ and, measured 2026-07-29, **outlives the bus teardown** and has to be killed by
 hand. The CLI's output shape is verifiable once against the live daemon; the
 stub is what keeps the harness off the network.
 
+### An image-download toast thumbnails + opens the file
+
+surfer's download **completion** toast for an image carries the downloaded
+file's absolute path in the `x-download-image` hint (surfer's `Downloads.done`
+threads the path through from `Main.qml`'s `onDownloadRequested` — `downloadDir
++ "/" + downloadFileName` — and only attaches it for a download whose extension
+is in its `IMAGE_EXTS`, mirroring filer's). `NotificationCard.qml` renders a
+48px thumbnail from that path and, because the whole card is the affordance,
+clicking it `xdg-open`s the image (the default handler → viewer) before
+dismissing. A non-image toast, or a progress toast (whose file is still
+partial), carries no hint and clicks plain-dismiss. `x-download-image` is in
+`extraHints` for the same reason the KDE Connect hints are — Quickshell drops a
+hint it was not asked for.
+
 ---
 
 ## The bar dims itself for the sudo modal (`Askpass.qml`)

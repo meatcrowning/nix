@@ -1,9 +1,15 @@
 import QtQuick
+import Quickshell
 
 // A single notification toast. Text-only, coloured by urgency, click anywhere to
 // dismiss, hover to pause its auto-expiry. Styled to match OsdWindow's card:
 // bgAlt fill, hard edges (radius 0), a 2px tinted border and a left urgency
 // strip echoing the bar's accent stripe.
+//
+// A surfer image-download completion toast additionally carries the downloaded
+// file's path in the `x-download-image` hint (Notifications.qml extraHints);
+// such a toast shows a thumbnail on the left and clicking it OPENS the image
+// in the viewer (xdg-open -> the default image handler) before dismissing.
 Rectangle {
     id: card
 
@@ -12,6 +18,21 @@ Rectangle {
 
     readonly property int urgency: notif ? notif.urgency : 1
     readonly property bool critical: urgency === 2
+
+    // Absolute path of a downloaded image, from surfer's completion toast, or
+    // "" when this toast has no openable image (a progress toast, a non-image
+    // download, anything else).
+    readonly property string imagePath: notif && notif.hints
+        ? String(notif.hints["x-download-image"] || "").trim() : ""
+    readonly property bool hasImage: imagePath !== ""
+    readonly property int thumbSize: 48
+
+    // A local absolute path -> a file:// URL QML Image can load, with each
+    // segment percent-encoded (a space, `#` or `?` in a filename must not be
+    // read as a URL separator/fragment).
+    function fileUrl(p) {
+        return "file://" + p.split("/").map(encodeURIComponent).join("/");
+    }
 
     // Per-notification expiry, straight off the spec's expire_timeout: 0 means
     // NEVER expire, >0 is an explicit ms lifetime, -1 (the default) means "use
@@ -29,7 +50,9 @@ Rectangle {
                                 : Theme.accent
 
     width: SettingsStore.d.notifWidth
-    implicitHeight: Math.max(Theme.cell, content.implicitHeight + 20)
+    implicitHeight: Math.max(Theme.cell,
+                             (hasImage ? thumbSize : 0) + 20,
+                             content.implicitHeight + 20)
     radius: 0
     color: Theme.bgAlt
     border.width: 2
@@ -51,51 +74,76 @@ Rectangle {
         color: card.tint
     }
 
-    Column {
-        id: content
+    Row {
+        id: bodyRow
         anchors {
             left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
             leftMargin: 14; rightMargin: 12
         }
-        spacing: 4
+        spacing: 10
 
-        // who it is from — the tinted header line. Usually the app's own name;
-        // for a notification relayed off his phone it is the PHONE's name, since
-        // KDE Connect's appName is the same useless "KDE Connect" on every one.
-        // Notifications.sender() owns that choice and the font map with it.
-        PixelText {
-            width: parent.width
-            text: Notifications.sender(card.notif)
-            color: card.tint
-            font.pixelSize: Theme.fontSize
-            elide: Text.ElideRight
+        // thumbnail of the downloaded image — only on a surfer image-download
+        // completion toast. Fixed slot (reserved only when the hint is present,
+        // so its arrival can't reflow the text). Downscaled, async, like the
+        // desktop's other thumbs (filer's PreviewTile); a file that vanished
+        // since the toast rendered just draws nothing in the box.
+        Image {
+            id: thumb
+            visible: card.hasImage
+            width: card.thumbSize
+            height: card.thumbSize
+            source: card.hasImage ? card.fileUrl(card.imagePath) : ""
+            sourceSize.width: card.thumbSize * 2
+            sourceSize.height: card.thumbSize * 2
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: true
+            smooth: false
         }
 
-        // summary — the headline
-        PixelText {
-            width: parent.width
-            // Summary skips Notifications.plain() on purpose — a headline is not
-            // supposed to carry markup — but it is prose from a stranger just
-            // like the body, so it still needs the font map.
-            text: card.notif ? Glyphs.px(card.notif.summary) : ""
-            color: Theme.text
-            font.pixelSize: Theme.fontSize
-            wrapMode: Text.WordWrap
-            maximumLineCount: 2
-            elide: Text.ElideRight
-            visible: text.length > 0
-        }
+        Column {
+            id: content
+            width: parent.width - (thumb.visible ? thumb.width + bodyRow.spacing : 0)
+            spacing: 4
 
-        // body — dimmed detail, capped so a wall of text can't fill the screen
-        PixelText {
-            width: parent.width
-            text: Notifications.plain(card.notif ? card.notif.body : "")
-            color: Theme.textDim
-            font.pixelSize: Theme.fontSize
-            wrapMode: Text.WordWrap
-            maximumLineCount: 4
-            elide: Text.ElideRight
-            visible: text.length > 0
+            // who it is from — the tinted header line. Usually the app's own name;
+            // for a notification relayed off his phone it is the PHONE's name, since
+            // KDE Connect's appName is the same useless "KDE Connect" on every one.
+            // Notifications.sender() owns that choice and the font map with it.
+            PixelText {
+                width: parent.width
+                text: Notifications.sender(card.notif)
+                color: card.tint
+                font.pixelSize: Theme.fontSize
+                elide: Text.ElideRight
+            }
+
+            // summary — the headline
+            PixelText {
+                width: parent.width
+                // Summary skips Notifications.plain() on purpose — a headline is not
+                // supposed to carry markup — but it is prose from a stranger just
+                // like the body, so it still needs the font map.
+                text: card.notif ? Glyphs.px(card.notif.summary) : ""
+                color: Theme.text
+                font.pixelSize: Theme.fontSize
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                visible: text.length > 0
+            }
+
+            // body — dimmed detail, capped so a wall of text can't fill the screen
+            PixelText {
+                width: parent.width
+                text: Notifications.plain(card.notif ? card.notif.body : "")
+                color: Theme.textDim
+                font.pixelSize: Theme.fontSize
+                wrapMode: Text.WordWrap
+                maximumLineCount: 4
+                elide: Text.ElideRight
+                visible: text.length > 0
+            }
         }
     }
 
@@ -122,6 +170,15 @@ Rectangle {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onClicked: if (card.notif) card.notif.dismiss()
+        // An image-download toast also OPENS the downloaded image in the viewer
+        // (xdg-open -> the default image handler) — the whole card is the
+        // affordance. Anything else keeps the plain dismiss.
+        onClicked: {
+            if (!card.notif)
+                return;
+            if (card.hasImage)
+                Quickshell.execDetached(["xdg-open", card.imagePath]);
+            card.notif.dismiss();
+        }
     }
 }

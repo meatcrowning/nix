@@ -772,6 +772,7 @@ Window {
             download.accept();
             var key = "dl" + (win.dlSeq++);
             var name = download.downloadFileName;
+            var path = downloadDir + "/" + download.downloadFileName;
             var started = Date.now();
             download.receivedBytesChanged.connect(function() {
                 if (download.isFinished)
@@ -786,7 +787,7 @@ Window {
                 if (!download.isFinished)
                     return;
                 if (download.state === WebEngineDownloadRequest.DownloadCompleted)
-                    Downloads.done(key, name);
+                    Downloads.done(key, name, path);
                 else
                     Downloads.failed(key, name);
             });
