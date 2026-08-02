@@ -41,20 +41,24 @@ let
   # font on this system to merge or import from (the repo ships only the 8x16
   # DOS VGA pair, and fontconfig has only loose 8px IBM CGA faces), and the
   # user explicitly overrode the "do not invent a font" rule for this face — so
-  # every pixel of every glyph is authored by hand in build-4x6.py. It is a
-  # pure bitmap (BDF), so it renders blocky at its native size — the point.
-  # Authored grid 4x6, baseline row 4, advance 5; build-4x6.py SCALE=2 emits the
-  # face as 8x12 (ascent 10, descent 2, advance 10) so its native cell renders
-  # as tall as More Perfect at the desktop 15px default (a fixed bitmap is
-  # non-scalable, so the authored size IS the only thing that sets its height).
-  # Not wired to the live desktop font (that stays the DOS VGA pair); it is
-  # shipped as a selectable face like the two DOS ones. Read the script
-  # docstring for the grid and metrics before touching it.
+  # every pixel of every glyph is authored by hand in build-4x6.py. Authored
+  # grid 4x6, baseline row 4, advance 5.
+  #
+  # It is emitted as a SCALABLE outline TTF (every authored pixel is a filled
+  # square), NOT a bitmap. As a non-scalable BDF it was silently substituted by
+  # every text stack that asks fontconfig for a scalable face —
+  # `fc-match "Botis 4x6:scalable=true"` returned Noto Sans, and Pango (the
+  # hyprvtb titlebar) and the Quickshell GL scenegraph both dropped it for a
+  # generic sans, so the pick appeared to do nothing on those surfaces. The UPM
+  # is chosen so that at the panel's 15px pixelSize each authored pixel is an
+  # exact 2x2 device-pixel block — pixel-identical to the old 8x12 BDF — while
+  # the font-size slider now scales it like any scalable face. Read the script
+  # docstring for the grid, metrics and the UPM math before touching it.
   botis4x6 = pkgs.runCommand "botis-4x6" {
-    nativeBuildInputs = [ pkgs.python3 ];
+    nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.fonttools ])) ];
   } ''
-    mkdir -p $out/share/fonts
-    python3 ${./font-files/build-4x6.py} $out/share/fonts/Botis4x6.bdf
+    mkdir -p $out/share/fonts/truetype
+    python3 ${./font-files/build-4x6.py} $out/share/fonts/truetype/Botis4x6.ttf
   '';
 
   # The desktop's SELECTABLE faces — the single source of truth for the
@@ -109,12 +113,14 @@ in
   home.file.".local/share/fonts/PerfectDOSVGA437.ttf".source =
     "${perfectDOSVGA437}/share/fonts/truetype/PerfectDOSVGA437.ttf";
 
-  # The third, hand-authored pixel face — a 4-wide blocky bitmap (BDF, emitted
-  # at 2x as 8x12). Not the live desktop font; shipped as a selectable face like
-  # the two DOS ones, with its own fontconfig rule below. It is NOT in nixpkgs
-  # and never will be — the whole point is that it is invented here.
-  home.file.".local/share/fonts/Botis4x6.bdf".source =
-    "${botis4x6}/share/fonts/Botis4x6.bdf";
+  # The third, hand-authored pixel face — a 4-wide blocky pixel face shipped as
+  # a SCALABLE outline TTF (see the derivation comment: a bitmap here was
+  # silently substituted by Pango and the GL scenegraph). Not the live desktop
+  # font; shipped as a selectable face like the two DOS ones, with its own
+  # fontconfig rule below. It is NOT in nixpkgs and never will be — the whole
+  # point is that it is invented here.
+  home.file.".local/share/fonts/Botis4x6.ttf".source =
+    "${botis4x6}/share/fonts/truetype/Botis4x6.ttf";
 
   # Generated singleton the Settings "pixel font" dropdown reads its options
   # from (SetPgAppearance.qml -> FontFaces). Built from `selectableFaces` above,
@@ -167,9 +173,9 @@ in
     </fontconfig>
   '';
 
-  # Botis 4x6 is a single bitmap face too, so it gets the same guard: pin any
-  # request for it to upright regular and kill synthetic emboldening, so the
-  # 12px bitmap is never faux-bolded/obliqued into a smear.
+  # Botis 4x6 ships Regular-only too (a single outline face), so it gets the
+  # same guard: pin any request for it to upright regular and kill synthetic
+  # emboldening, so the pixel squares are never faux-bolded/obliqued into a smear.
   xdg.configFile."fontconfig/conf.d/50-botis-4x6-regular.conf".text = ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "fonts.dtd">

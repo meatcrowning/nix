@@ -5,7 +5,7 @@
 system to copy from, and the user explicitly overrode the "do not invent a
 font" rule for this one face so it exists at all.
 
-    build-4x6.py <out.bdf>
+    build-4x6.py <out.ttf>
 
 The design intent (see docs/DESIGN.md for how the desktop consumes pixel
 faces): a square-ish, heavy, blocky 4-wide terminal face matching the style of
@@ -27,14 +27,21 @@ Hand-audited character set: all 95 printable ASCII (U+0020..U+007E), plus the
 non-ASCII glyphs the desktop actually draws in this face as hardcoded labels
 (see the block after the ASCII table).
 
-SCALE (default 2) upscales every authored pixel to an SCALE-by-SCALE block at
-BDF build time, so the emitted face is 8x12 (ascent 10, descent 2, advance 10).
-The face is a pure fixed bitmap, so it is non-scalable — fontconfig pins it to
-its native cell and a requested pixelSize has no effect on it. Its "default
-size" therefore lives in this bitmap, not in the shared fontSize setting, and
-SCALE is what sets it. 2x makes the glyph ink land tall enough to read as the
-same apparent height as the desktop default (More Perfect DOS VGA at 15px,
-~10px cap ink) — see docs/DESIGN.md §2.1.
+OUTPUT IS A SCALABLE OUTLINE TTF, not a bitmap. Every authored pixel becomes a
+filled square contour, so the face is a normal scalable font that any renderer
+can rasterise. This is deliberate and load-bearing: as a non-scalable BDF the
+face was SILENTLY SUBSTITUTED by every text stack that asks fontconfig for a
+scalable face — proven, `fc-match "Botis 4x6:scalable=true"` returned Noto Sans,
+and Pango (the hyprvtb titlebar) and the Quickshell GL scenegraph both dropped
+Botis for a generic sans. An outline face is matched and drawn by all of them.
+
+The em is sized so the pixel grid stays crisp at the desktop default. UPM (below)
+is chosen so that at the panel's 15px pixelSize each authored pixel maps to an
+exact integer device-pixel block (2x2 at 15px) — pixel-identical to the old
+8x12 BDF — while the font size slider now scales it like any scalable face
+(it used to have no effect). One authored pixel = PX_UNITS font units; the cell
+is ASCENT rows above the baseline and DESCENT below, matching the old metrics.
+See docs/DESIGN.md §2.1.
 """
 
 import sys
@@ -168,89 +175,95 @@ W, H = 4, 6          # 4 wide, 6 tall  (the authored grid; author here)
 ADVANCE = 5           # 1 px right side bearing
 ASCENT = 5            # rows 0..4 above/at baseline (baseline = row 4)
 DESCENT = 1           # row 5 below baseline
-SCALE = 2             # pixels per authored pixel -> emitted 8x12 face; see docstring
 FAMILY = "Botis 4x6"
 FOUNDRY = "botis"
 
-# Emitted (scaled) cell — this is the face's native size and therefore its
-# "default size". A fixed bitmap is non-scalable, so this is the only thing
-# that sets how tall it renders.
-eW, eH = W * SCALE, H * SCALE
-eADVANCE = ADVANCE * SCALE
-eASCENT = ASCENT * SCALE
-eDESCENT = DESCENT * SCALE
+# Outline (scalable) metrics. One authored pixel is a PX_UNITS-square contour.
+# UPM = H * PX_UNITS makes the whole 6-row cell exactly one em, so at the
+# panel's 15px pixelSize one authored pixel is 15/6 = 2.5px... which is not an
+# integer. To keep the old BDF's crisp 2x2-block look at 15px, the cell must be
+# 12px tall at 15px pixelSize (cell/em = 12/15 = 0.8), i.e. UPM = H*PX_UNITS/0.8.
+# With PX_UNITS = 100: cell = 600 units, UPM = 750, and 15px * (100/750) = 2.0px
+# per authored pixel — an exact 2x2 block, pixel-identical to the old 8x12 BDF.
+PX_UNITS = 100
+UPM = round(H * PX_UNITS / 0.8)     # 750
+ASCENT_U = ASCENT * PX_UNITS         # 500 units above the baseline
+DESCENT_U = DESCENT * PX_UNITS       # 100 units below the baseline
+ADVANCE_U = ADVANCE * PX_UNITS       # 500 units
 
 
-def scale_glyph(rows, s):
-    """Upscale a authored WxH glyph to an (W*s)x(H*s) block, crisp: each '#'
-    pixel becomes an s-by-s block. This is what makes the face render taller."""
-    scaled = []
-    for row in rows:
-        wide = "".join(ch * s for ch in row)
-        for _ in range(s):
-            scaled.append(wide)
-    return scaled
+def pixel_square(pen, r, c):
+    """Emit one authored pixel (row r from the top, col c) as a filled square
+    contour. y is baseline-relative and up-positive: the cell spans ASCENT_U
+    above the baseline down to -DESCENT_U below it. Row 0 is the top row, so its
+    top edge is at ASCENT_U and each row is PX_UNITS tall."""
+    x0 = c * PX_UNITS
+    x1 = x0 + PX_UNITS
+    y1 = ASCENT_U - r * PX_UNITS         # top edge of this row
+    y0 = y1 - PX_UNITS                   # bottom edge
+    pen.moveTo((x0, y0))
+    pen.lineTo((x1, y0))
+    pen.lineTo((x1, y1))
+    pen.lineTo((x0, y1))
+    pen.closePath()
 
 
-def row_to_hex(row):
-    """Pixel row -> hex string (MSB = leftmost). Width is len(row)."""
-    v = 0
-    n = len(row)
-    for i, ch in enumerate(row):
-        if ch == "#":
-            v |= 1 << (n - 1 - i)
-    return f"{v:0{(n + 3) // 4}X}"
+def glyph_name(cp):
+    return "space" if cp == 0x20 else f"uni{cp:04X}"
 
 
-def build_bdf():
-    lines = []
-    a = lines.append
-    a("STARTFONT 2.1")
-    # XLFD; spacing m (mono — every glyph advances the same eADVANCE px),
-    # avgwidth in tenths of px = advance *10
-    a(f"FONT -{FOUNDRY}-{FAMILY.lower().replace(' ','')}-medium-r-normal--{eH}-"
-      f"{6*SCALE*10}-72-72-m-{eADVANCE*10}-iso10646-1")
-    a(f"SIZE {eASCENT+eDESCENT} 72 72")
-    a(f"FONTBOUNDINGBOX {eW} {eH} 0 {-eDESCENT}")
-    a("STARTPROPERTIES 12")
-    a(f"FONT_ASCENT {eASCENT}")
-    a(f"FONT_DESCENT {eDESCENT}")
-    a("DEFAULT_CHAR 32")
-    a("FONT_VERSION 1.0")
-    a(f"FAMILY_NAME \"{FAMILY}\"")
-    a("FOUNDRY \"botis\"")
-    a("WEIGHT_NAME \"Regular\"")
-    a("SLANT \"R\"")
-    a("SETWIDTH_NAME \"Normal\"")
-    a("ADD_STYLE_NAME \"\"")
-    a("CHARSET_REGISTRY \"ISO10646\"")
-    a("CHARSET_ENCODING \"1\"")
-    a("ENDPROPERTIES")
-    a(f"CHARS {len(G)}")
-    for cp in sorted(G):
-        a(f"STARTCHAR U+{cp:04X}")
-        a(f"ENCODING {cp}")
-        a(f"SWIDTH {eADVANCE*1000} 0")
-        a(f"DWIDTH {eADVANCE} 0")
-        # BDF BBX yoffset is the LOWER-LEFT corner of the bitmap relative to the
-        # baseline, i.e. the bottom row, not the top. The cell's bottom sits at
-        # -DESCENT (descenders below the baseline); the top then lands at
-        # eH-eDESCENT == eASCENT above it, as intended. The earlier value
-        # (eASCENT-1) put the bottom row a whole ascent ABOVE the baseline, so
-        # every glyph rendered ~11px too high and text floated to the top of any
-        # box it sat in (goetia's input field, all six apps, the panel).
-        a(f"BBX {eW} {eH} 0 {-eDESCENT}")
-        a("BITMAP")
-        for row in scale_glyph(G[cp], SCALE):
-            a(row_to_hex(row))
-        a("ENDCHAR")
-    a("ENDFONT")
-    return "\n".join(lines) + "\n"
+def build_ttf(out):
+    """Build the scalable outline TTF: every '#' pixel becomes a PX_UNITS square.
+    Abutting squares share edges of the same winding, so the rasteriser fills the
+    union — no seams — while non-adjacent ink stays separate."""
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    cps = sorted(G)
+    glyph_order = [".notdef"] + [glyph_name(cp) for cp in cps]
+
+    fb = FontBuilder(UPM, isTTF=True)
+    fb.setupGlyphOrder(glyph_order)
+    fb.setupCharacterMap({cp: glyph_name(cp) for cp in cps})
+
+    glyphs = {}
+    metrics = {}
+    # .notdef: empty, standard advance.
+    npen = TTGlyphPen(None)
+    glyphs[".notdef"] = npen.glyph()
+    metrics[".notdef"] = (ADVANCE_U, 0)
+    for cp in cps:
+        pen = TTGlyphPen(None)
+        for r, row in enumerate(G[cp]):
+            for c, ch in enumerate(row):
+                if ch == "#":
+                    pixel_square(pen, r, c)
+        glyphs[glyph_name(cp)] = pen.glyph()
+        # Mono: every glyph advances ADVANCE_U; LSB left at 0 (the grid origin).
+        metrics[glyph_name(cp)] = (ADVANCE_U, 0)
+
+    fb.setupGlyf(glyphs)
+    fb.setupHorizontalMetrics(metrics)
+    fb.setupHorizontalHeader(ascent=ASCENT_U, descent=-DESCENT_U)
+    fb.setupNameTable({
+        "familyName": FAMILY,
+        "styleName": "Regular",
+        "fullName": FAMILY,
+        "psName": FAMILY.replace(" ", "") + "-Regular",
+        "version": "1.0",
+        "uniqueFontIdentifier": f"{FOUNDRY};{FAMILY};1.0",
+    })
+    fb.setupOS2(
+        sTypoAscender=ASCENT_U, sTypoDescender=-DESCENT_U, sTypoLineGap=0,
+        usWinAscent=ASCENT_U, usWinDescent=DESCENT_U,
+    )
+    fb.setupPost(isFixedPitch=1)
+    fb.font["head"].lowestRecPPEM = 6
+    fb.save(str(out))
 
 
 def main():
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("Botis4x6.bdf")
-    out.write_text(build_bdf())
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("Botis4x6.ttf")
     # sanity: all 95 printable ASCII present, all rows W wide (authored)
     ascii_cps = [cp for cp in G if 0x20 <= cp <= 0x7E]
     assert len(ascii_cps) == 95, f"expected 95 printable ASCII, got {len(ascii_cps)}"
@@ -258,8 +271,9 @@ def main():
         assert len(rows) == H, f"U+{cp:04X}: want {H} rows"
         for r in rows:
             assert len(r) == W and set(r) <= {'.', '#'}, f"U+{cp:04X}: bad row {r!r}"
-    print(f"wrote {out}: {len(G)} glyphs, {eW}x{eH} (authored {W}x{H}, scale {SCALE}), "
-          f"advance {eADVANCE}, ascent {eASCENT} descent {eDESCENT}")
+    build_ttf(out)
+    print(f"wrote {out}: {len(G)} glyphs, scalable outline, UPM {UPM}, "
+          f"1px={PX_UNITS}u, advance {ADVANCE_U}, ascent {ASCENT_U} descent {DESCENT_U}")
 
 
 if __name__ == "__main__":
