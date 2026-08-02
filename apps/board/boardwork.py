@@ -639,6 +639,24 @@ _ROUTE_PLAN = re.compile(
     r"\b(build|implement|add|fix|refactor|wire|port|migrat|dispatch|split|"
     r"across (several|multiple|\d+)|plan|design|create|write (a|the|some)|"
     r"change|update|rename|move|delete|remove)\w*", re.I)
+#: A WORK ORDER can wear a question's clothes — "can you audit the Botis
+#: coverage?", "could you check whether X still holds?" — and its verb is not
+#: always a plan verb. These are verbs that unmistakably ask for WORK DONE (a
+#: deliverable, a change, a minister running its tools), not an answer typed
+#: back. They are matched in the WORK branch, BEFORE the question routers, or an
+#: interrogative frame sends the order to answer-only Weyer/Agrippa, which never
+#: dispatch and the work is silently dropped. [chosen 2026-08-02] the Botis
+#: audit stalled exactly here: an audit phrased as a question routed to Weyer
+#: and was answered-and-dropped, never worked. The bar is the same
+#: "unmistakable" one every non-default flavour is held to, and it errs toward
+#: WORK on purpose — a SOLO minister can always just answer if that was all it
+#: took, where a mis-routed Weyer cannot dispatch what needed doing.
+_ROUTE_WORK = re.compile(
+    r"\b(audit|investigat\w*|diagnos\w*|troubleshoot\w*|debug|reproduc\w*|"
+    r"profil\w*|benchmark|instrument|"
+    r"verif\w*|validate|(?:double[- ]?)?check\b|make sure|ensure|"
+    r"set up|configur\w*|provision|install|"
+    r"clean up|optimi[sz]e|harden|look into)\b", re.I)
 #: Agrippa's shape: a question that needs READING and judgement but no plan —
 #: comparisons, evaluations, "read X and tell me Y". Checked before the quick
 #: router so it beats Weyer's one-liner tier.
@@ -720,10 +738,11 @@ def route_operator(text):
     auto-route for when he has left it on default.
 
     Order matters: meta and synth are narrow, unmistakable jobs, so they win
-    first; then anything that is WORK is split between Solomon (when it needs
-    several ministers coordinated) and `SOLO` (one minister, dispatched
-    straight); a question with none of those goes to the cheapest operator that
-    can answer it.
+    first; then anything that is WORK — a plan verb OR an unmistakable work verb
+    (`_ROUTE_WORK`, so an order worn as a question is still worked, not dropped)
+    — is split between Solomon (when it needs several ministers coordinated) and
+    `SOLO` (one minister, dispatched straight); a question with none of those
+    goes to the cheapest operator that can answer it.
 
     [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
     there is a need to coordinate multiple ministers together?"* So Solomon is
@@ -749,9 +768,13 @@ def route_operator(text):
         return operator_by_name("Waite")
     if _ROUTE_META.search(t):
         return operator_by_name("Trithemius")
-    if _ROUTE_PLAN.search(t):
+    if _ROUTE_PLAN.search(t) or _ROUTE_WORK.search(t):
         # A work order: Solomon only when it needs several ministers coordinated,
         # else one minister carries it straight (no planning session in front).
+        # `_ROUTE_WORK` catches an order WORN AS A QUESTION ("can you audit ...?")
+        # whose verb is not a plan verb, so it is worked here rather than falling
+        # through to answer-only Weyer/Agrippa, which never dispatch — the bug
+        # the stalled Botis audit stood on.
         return operator_by_name("Solomon") if needs_coordination(t) else SOLO
     # No plan words. A read-and-judge question is Agrippa's; a short factual one
     # is Weyer's; a longer un-signalled one that still is not a plan leans on the
