@@ -20,6 +20,11 @@ Item {
     property string source: ""
     property string tileKey: ""
     property bool active: true
+    // The content's height in this tile's closed (no queue rows) configuration,
+    // set by the grid. Forwarded to the content so a widget whose drawer shrinks
+    // its own row span (the player's queue) can keep its top section fixed.
+    // -1 means "not a grid tile / no closed form" and the content carries on.
+    property real gridClosedH: -1
 
     // Publish allotted-vs-wanted for `qs ipc call live tiles`. "No blank space"
     // is a number, not an opinion, and this is where it can be read.
@@ -112,5 +117,14 @@ Item {
         property: "active"
         value: root.active
         when: loader.item !== null
+    }
+    Binding {
+        target: loader.item
+        property: "gridClosedH"
+        value: root.gridClosedH
+        // Only forward to a content that actually declares the property — the
+        // other dock widgets do not, and setting an unknown property on them is
+        // a warning per tile into the cumulative `qs log`.
+        when: loader.item !== null && loader.item.gridClosedH !== undefined
     }
 }

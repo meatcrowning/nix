@@ -191,6 +191,10 @@ Item {
             y: root.cellY(modelData.row + (modelData.qRow || 0) * root.q)
             width: root.cellW(modelData.cs)
             height: root.cellH(modelData.rs + (modelData.qSpan || 0) * root.q)
+            // The tile's height with no queue rows — the closed configuration.
+            // MediaContent sizes its queue drawer from this so the drawer can
+            // never push the artwork around, in any state (see `gridClosedH`).
+            gridClosedH: root.cellH(modelData.rs) - root.tileInset
 
             tileKey: modelData.key
             source: modelData.src
