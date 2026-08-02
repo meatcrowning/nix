@@ -1,28 +1,35 @@
 #!/usr/bin/env bash
-# cursor-recolor.sh — regenerate an accent-tinted copy of the GoogleDot-Black
-# cursor theme and apply it live, so the dot's white outline follows the
-# wallpaper's accent colour (the black core stays black).
+# cursor-recolor.sh — regenerate a themed copy of the GoogleDot-Black cursor
+# theme and apply it live, so the dot's white outline follows the wallpaper's
+# accent colour and its core follows the theme BACKGROUND colour — the whole
+# cursor matches the theme, core and outline alike, in both polarities.
 #
-#   cursor-recolor.sh <accent-hex> [size]
+#   cursor-recolor.sh <accent-hex> <bg-hex> [size]
 #
-# <accent-hex> is "rrggbb" (no leading #), the ACCENT var wal-set.sh derives
-# from the wallpaper palette. Called from wal-set.sh on every theme apply.
+# <accent-hex> and <bg-hex> are "rrggbb" (no leading #), the ACCENT and BG vars
+# wal-set.sh derives from the wallpaper palette. Called from wal-set.sh on every
+# theme apply. In dark mode BG is (near-)black, so the core stays black exactly
+# as before; in light mode BG is light, so the core turns light too — following
+# the bg token unconditionally, the same as every other surface on the desktop
+# (DESIGN.md §3.1: nothing downstream branches on light/dark, all read bg/accent).
 #
 # XCursor files are packed binaries, so we can't just recolour them in place.
 # Instead: decompile GoogleDot-Black ONCE (cached under ~/.cache/wal/
-# cursor-master — the source never changes), then per accent change batch-
-# recolour every extracted PNG with ImageMagick's `+level-colors black,#accent`
-# (maps the black core -> black, the white outline -> accent, the anti-aliased
+# cursor-master — the source never changes), then per theme change batch-
+# recolour every extracted PNG with ImageMagick's `+level-colors #bg,#accent`
+# (maps the black core -> bg, the white outline -> accent, the anti-aliased
 # greys interpolate between). `-channel RGB ... +channel` is essential — without
 # it +level-colors also levels the ALPHA channel, forcing every pixel opaque so
 # the cursor renders inside a black box. Then recompile with xcursorgen and
 # hot-reload with `hyprctl setcursor`.
 #
-# The theme is named per-accent ("GoogleDot-<accent>") ON PURPOSE: hyprcursor
-# caches a loaded theme by name for the life of the Hyprland process and a
-# same-name `setcursor` does NOT re-read it from disk, so re-tinting a fixed
-# name would keep drawing the stale (previous-accent) cursor until relogin. A
-# fresh name per accent always loads fresh. We also point Hyprland's cursor env
+# The theme is named per-colour-pair ("GoogleDot-<accent><bg>") ON PURPOSE:
+# hyprcursor caches a loaded theme by name for the life of the Hyprland process
+# and a same-name `setcursor` does NOT re-read it from disk, so re-tinting a
+# fixed name would keep drawing the stale cursor until relogin. A fresh name per
+# (accent, bg) always loads fresh — and bg is in the name, not just accent, so a
+# polarity flip that leaves accent unchanged (or a pure-black-bg toggle) still
+# gets a fresh cursor. We also point Hyprland's cursor env
 # (in ~/.config/hypr/hyprland.lua) at the current name so a re-login loads the
 # right theme natively at startup instead of relying on setcursor timing (which
 # doesn't stick that early), and prune the other accent themes to save disk
@@ -49,15 +56,22 @@ if command -v flock >/dev/null 2>&1 && [ "${_WAL_CURSOR_LOCKED:-}" != 1 ]; then
 fi
 
 ACCENT="${1:-}"
-SIZE="${2:-${XCURSOR_SIZE:-22}}"
+BG="${2:-}"
+SIZE="${3:-${XCURSOR_SIZE:-22}}"
+hex6="[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]"
 case "$ACCENT" in
-    [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) ;;
+    $hex6) ;;
     *) echo "cursor-recolor: bad accent '$ACCENT' (want rrggbb)" >&2; exit 1 ;;
 esac
+case "$BG" in
+    $hex6) ;;
+    *) echo "cursor-recolor: bad bg '$BG' (want rrggbb)" >&2; exit 1 ;;
+esac
 ACCENT="$(printf '%s' "$ACCENT" | tr 'A-F' 'a-f')"
+BG="$(printf '%s' "$BG" | tr 'A-F' 'a-f')"
 
 SRC="$HOME/.icons/GoogleDot-Black"
-NAME="GoogleDot-$ACCENT"
+NAME="GoogleDot-$ACCENT$BG"
 DST="$HOME/.icons/$NAME"
 LUA="$HOME/.config/hypr/hyprland.lua"
 CACHE="$HOME/.cache/wal"
@@ -97,18 +111,19 @@ pin_env() {
 # recolour is fast now and the next hover picks it up.
 apply() { hyprctl setcursor "$NAME" "$SIZE" >/dev/null 2>&1 || true; }
 
-# Drop stale per-accent themes (keep the current one and the GoogleDot-Black
-# base). Match only the 6-hex accent suffix so "GoogleDot-Black" is never hit.
+# Drop stale per-theme cursors (keep the current one and the GoogleDot-Black
+# base). Match a lowercase-hex suffix so "GoogleDot-Black" (capital B) is never
+# hit; the `*` also catches leftover 6-hex accent-only names from the old scheme.
 prune() {
-    for d in "$HOME"/.icons/GoogleDot-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]; do
+    for d in "$HOME"/.icons/GoogleDot-[0-9a-f]*; do
         [ -d "$d" ] || continue
         [ "$d" = "$DST" ] && continue
         rm -rf "$d"
     done
 }
 
-# already generated for this accent? just re-pin + re-apply and stop.
-if [ "$(cat "$STAMP" 2>/dev/null)" = "$ACCENT" ] && [ -f "$DST/cursors/left_ptr" ]; then
+# already generated for this (accent, bg)? just re-pin + re-apply and stop.
+if [ "$(cat "$STAMP" 2>/dev/null)" = "$ACCENT$BG" ] && [ -f "$DST/cursors/left_ptr" ]; then
     pin_env; apply; prune
     exit 0
 fi
@@ -130,8 +145,8 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/cursor-recolor.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/build" "$WORK/theme/cursors"
 
-# Recolour every extracted frame with `+level-colors black,#accent` (black core
-# -> black, white outline -> accent). `-channel RGB ... +channel` keeps the alpha
+# Recolour every extracted frame with `+level-colors #bg,#accent` (black core
+# -> bg, white outline -> accent). `-channel RGB ... +channel` keeps the alpha
 # intact (see the header note on the black box); -path writes the copies into
 # WORK so the cached grey master is left untouched.
 #
@@ -143,9 +158,9 @@ mkdir -p "$WORK/build" "$WORK/theme/cursors"
 JOBS="$(nproc 2>/dev/null || echo 1)"
 if command -v xargs >/dev/null 2>&1 && [ "$JOBS" -gt 1 ]; then
     printf '%s\n' "$MASTER"/*.png \
-        | xargs -P "$JOBS" -n 64 magick mogrify -path "$WORK/build" -channel RGB +level-colors "black,#$ACCENT" +channel
+        | xargs -P "$JOBS" -n 64 magick mogrify -path "$WORK/build" -channel RGB +level-colors "#$BG,#$ACCENT" +channel
 else
-    magick mogrify -path "$WORK/build" -channel RGB +level-colors "black,#$ACCENT" +channel "$MASTER"/*.png
+    magick mogrify -path "$WORK/build" -channel RGB +level-colors "#$BG,#$ACCENT" +channel "$MASTER"/*.png
 fi
 cp "$MASTER"/*.conf "$WORK/build/"
 # Recompile each cursor. xcursorgen reads the PNG basenames from each .conf, so
@@ -176,6 +191,6 @@ cp "$WORK/theme/index.theme" "$WORK/theme/cursor.theme"
 rm -rf "$DST"
 mv "$WORK/theme" "$DST"
 
-printf '%s' "$ACCENT" > "$STAMP"
+printf '%s' "$ACCENT$BG" > "$STAMP"
 pin_env; apply; prune
-echo "cursor-recolor: $NAME tinted #$ACCENT, applied at ${SIZE}px"
+echo "cursor-recolor: $NAME core #$BG / outline #$ACCENT, applied at ${SIZE}px"
