@@ -17,6 +17,15 @@ truth and refines the seed (real tab buttons, live states) on the same load;
 `_SEED_BUTTONS` is only the frame-0 copy. Regression: the `case_seed` in
 `apps/pylib/tools/vtb-register-test.py`.
 
+The seed is only the *client* half. Getting the REGISTER into the plugin's
+`g_regs` before the window maps did not fully close the flash on its own,
+because a freshly-mapped `CVtbDeco` only picked its registration up on the
+plugin's 150ms heartbeat — so the default bar still showed for up to one
+heartbeat after map even with the seed present. `hyprvtb 2.99` takes the
+initial snapshot in the deco constructor, so a window mapping with its
+registration already present draws its real chrome on the first frame. Both
+halves are `docs/hyprvtb-titlebar-flash.md`.
+
 **QtWebEngine spellcheck is imperative-only**: the declarative QML
 `WebEngineProfile` `spellCheck*` properties are silently dropped — set
 `setSpellCheckEnabled`/`setSpellCheckLanguages` imperatively in `_wire_profile`.
