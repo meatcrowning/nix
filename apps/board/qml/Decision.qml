@@ -36,9 +36,10 @@ Item {
     //: drag-to-reorder, [his ask, 2026-08-01]. The grip over the TITLE band
     //  initiates a vertical drag; on release it carries the draggable card's
     //  index and the displacement (in pixels, positive = dragged down) and the
-    //  page works out which sibling it crossed and rewrites the store
-    //  (`Board.reorderNeeds`). The title band is the one non-interactive part
-    //  of the card, so the gesture never fights the options or the answer box.
+    //  page works out which sibling it crossed and saves the new DISPLAY order to
+    //  state.json ([his answer, 2026-08-01]: the store is left intact, never
+    //  rewritten). The title band is the one non-interactive part of the card,
+    //  so the gesture never fights the options or the answer box.
     signal reorderRequested(int fromIndex, real dy)
 
     //: the same caret hand-off `InputBox` carries, and for the same reason: a

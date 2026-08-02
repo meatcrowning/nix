@@ -46,7 +46,14 @@ Window {
     Motion { id: motion }
 
     readonly property var doc: Board.doc
-    readonly property var needs: doc && doc.needs ? doc.needs : []
+    // NEEDS YOU is drawn in a DISPLAY order held here, not in `board.md`'s own
+    // order ([his answer, 2026-08-01]: a drag rearranges the on-screen order and
+    // the store's sections stay intact — the same model the four top-level bands
+    // already use). `needsOrder` is a saved list of decision keys; unknown keys
+    // (a decision just added, or one handed back) keep their file position after
+    // the known ones. The store is never rewritten by a reorder.
+    readonly property var needs: win.applyDisplayOrder(
+        doc && doc.needs ? doc.needs : [], win.needsOrder, "key")
     readonly property var todo: doc && doc.todo ? doc.todo : []
     // The same bullets as `todo`, in sub-sections by what they SAY THEY ARE.
     // Grouped once per load in `boardparse.todo_groups()`, never here: a view
@@ -352,6 +359,39 @@ Window {
             }
     }
 
+    // ---- drag-to-reorder: the DECISIONS within NEEDS YOU, same display model ----
+    // [his answer, 2026-08-01] a drag rearranges only the on-screen order; the
+    // store keeps its sections intact and the arrangement lives in state.json,
+    // exactly as the top bands already do. `needsOrder` is a saved list of
+    // decision keys. `applyDisplayOrder` draws the rows in that order, with any
+    // key it does not mention (a decision just added, or one handed back) kept in
+    // its file position after the ordered ones — so a new question is never lost
+    // and never jumps to the top. board.md is never rewritten by a reorder.
+    property var needsOrder: []
+    function applyDisplayOrder(rows, order, field) {
+        if (!order || order.length === 0)
+            return rows;
+        var byKey = {};
+        for (var i = 0; i < rows.length; i++)
+            byKey[String(rows[i][field])] = rows[i];
+        var out = [], used = {};
+        for (var j = 0; j < order.length; j++) {
+            var k = String(order[j]);
+            if (byKey[k] !== undefined && !used[k]) { out.push(byKey[k]); used[k] = true; }
+        }
+        for (var m = 0; m < rows.length; m++) {
+            var rk = String(rows[m][field]);
+            if (!used[rk]) { out.push(rows[m]); used[rk] = true; }
+        }
+        return out;
+    }
+    function setNeedsOrder(keys) {
+        var o = [];
+        for (var i = 0; i < keys.length; i++) o.push(String(keys[i]));
+        win.needsOrder = o;
+        Settings.set("needsOrder", o);
+    }
+
     // ---- ...and where his caret is, for the reload that CANNOT keep a row ----
     // A row appearing or leaving changes the key list, so that one list is built
     // again and the box he was typing in goes with it. One key and one offset,
@@ -394,6 +434,11 @@ Window {
         // The saved display order of the four sections, validated so a stale or
         // hand-edited value can never drop a section from the page.
         win.sectionOrder = win.normalizeOrder(Settings.get("sectionOrder", null));
+        // The saved display order of the NEEDS YOU decisions. A stale or
+        // hand-edited value cannot drop a decision: `applyDisplayOrder` keeps
+        // any key the saved list does not mention.
+        var no = Settings.get("needsOrder", null);
+        win.needsOrder = Array.isArray(no) ? no.map(String) : [];
         Titlebar.setButtons(tbButtons);
         Titlebar.setFooter(footerStr);
     }
@@ -1015,7 +1060,8 @@ Component {
         //  can reach the section's OWN `needsRepeater` — the page can no longer
         //  name it, now that the section is a delegate. Same target math as the
         //  section bands: resting centre + displacement, count how many siblings
-        //  centre above it.
+        //  centre above it. The new order is a DISPLAY order saved in state.json
+        //  ([his answer, 2026-08-01]), never a rewrite of board.md.
         function reorderDecision(from, dy) {
             var n = win.needs.length;
             if (n < 2 || from < 0 || from >= n)
@@ -1035,7 +1081,7 @@ Component {
                 keys.push(String(win.needs[j].key));
             var k = keys.splice(from, 1)[0];
             keys.splice(target, 0, k);
-            Board.reorderNeeds(keys);
+            win.setNeedsOrder(keys);
         }
 
                 // ================================================ what needs you
@@ -1151,7 +1197,8 @@ Component {
                                     win.decisionMenu(decCard.modelData, mx, my)
                                 // drag-to-reorder among its NEEDS YOU siblings — the
                                 // grip on the title band reports the displacement and
-                                // the page computes the target and rewrites the store.
+                                // the page computes the target and saves the display
+                                // order to state.json (board.md is left intact).
                                 onReorderRequested: (from, dy) =>
                                     needsSectionRoot.reorderDecision(from, dy)
                             }
