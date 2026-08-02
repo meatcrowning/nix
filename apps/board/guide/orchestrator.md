@@ -192,75 +192,11 @@ whole pipeline, and what each piece is allowed to claim:
 | | what happens | where it lives |
 | --- | --- | --- |
 | he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
-| board-watch's next run | **waits out the rest of the burst**, drains the queue, routes each item; a LONE work order is dispatched STRAIGHT to one minister, a burst or a coordination order goes to a summoner (one per operator), and it WAITS for the summoners | `board-watch.py:coalescing` + `work_the_queue` |
-| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, hands one to a worker already in those files, or `ask`s him. It does not build anything | `boardwork.orchestrator_prompt()` |
+| board-watch's next run | **waits out the rest of the burst**, drains the queue, splits it across at most `summoners()` runs (one by default) and WAITS for them | `board-watch.py:coalescing` + `work_the_queue` |
+| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, hands one to a worker already in those files, or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
 | each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **and may rebuild or reload** under `~/nix/AGENTS.md` -> "When it is okay to rebuild or hot-reload" | `boardwork._spawn_worker` |
 | a card per worker | two sentences — what it claims, then what it is observed doing — in one flat list, oldest first | `boardwork.cards()` + `qml/AgentRow.qml` |
 | a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
-
-**The operator is not always Solomon** [his, 2026-08-01]. There is a roster of
-five NAMED OPERATORS (`boardwork.OPERATORS`), each a fixed
-`(name, model, effort, flavour)`: **Weyer** (deepseek-flash) and **Agrippa**
-(deepseek-pro) ANSWER off Claude and never run the summoning flow; **Solomon**
-(fable 5, the default) plans and dispatches; **Trithemius** (opus 5 xhigh)
-handles the operator machinery itself; **Waite** (sonnet 5) reconciles several
-summoners into one answer. The model follows the JOB: `board-watch` AUTO-ROUTES
-each tick to one operator from what was typed (`boardwork.route_operator`),
-unless he has picked one in the dropdown, which wins. A deepseek operator rides
-the hermes backend and never spends the weekly Claude window. The routed
-operator's model/effort reach the spawn through `BOARD_ORCH_MODEL`/`_EFFORT`,
-and its flavour picks the prompt (`boardwork.orchestrator_prompt`). Full roster,
-tiers and what is deferred: `docs/goetia-orchestrator-roster.md`. Everything
-below describes the `plan` flavour (Solomon), which is the common case.
-
-**SOLOMON IS SUMMONED ONLY FOR SEVERAL MINISTERS; a lone order goes STRAIGHT to
-one** [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
-there is a need to coordinate multiple ministers together?"* Solomon is a
-fable-5 planning session whose whole job is to SPLIT one input across several
-ministers, so summoning it to dispatch a single minister is pure overhead on the
-common case (a lone sentence is most of the traffic) and spends the weekly
-Claude window on the plan step. So `route_operator` returns a sixth target,
-`boardwork.SOLO` — a sentinel, NOT one of the five operators and NOT a roster
-row — for a work order one minister carries, and `work_the_queue` **dispatches
-one minister directly** (`bw.dispatch`, the same capped worker path a summoner
-reaches), no orchestrator in front. Solomon is reached only when the order
-**needs splitting** (`boardwork.needs_coordination`: it names coordinating
-several agents/areas, or holds several plan clauses). The determination is the
-existing triage step extended, not a second classifier — `route_operator` still
-returns per item, and everything a summoner still handles (questions to
-Weyer/Agrippa, meta to Trithemius, synth to Waite, a real multi-minister plan to
-Solomon) is unchanged.
-
-[his, 2026-08-02] *"solomon should only be used when another summoner, whichever
-one deals with this kinda thing, determines the current goal requires multiple
-ministers."* `needs_coordination` IS that determination, and it is already the
-sole trigger for Solomon in `route_operator` — every auto-route path that
-reaches Solomon gates on it. What had made it summon Solomon for a one-minister
-job was its INPUT, not its rule: a reply to a board bullet arrives with the
-quoted bullet appended as a `(about the `...` bullet "...")` trailer, so routing
-read his sentence and the quote as one text — a semicolon or a plan verb in the
-quote then tripped the determination (the 10:07 reply to the light-mode ENACTED
-bullet did exactly this). `route_operator` now strips that trailer
-(`boardwork.strip_reply_quote`) before the determination runs, so it judges his
-words alone; the untouched text still travels to the worker as its order.
-
-- **A coalesced BURST of lone orders folds back into Solomon.** Two or more
-  work orders arriving in one batch are several ministers who may touch one
-  file, which is exactly the collision coalescing exists to have ONE planner
-  coordinate. So the split is by COUNT: one solo order dispatches straight; two
-  or more fold into Solomon (merging with any real Solomon group), keeping the
-  coalescing behaviour intact. `work_the_queue` owns this fold.
-- **A direct solo minister is a normal worker in every other way** — capped by
-  `bw.cap()` (not the summoner ceiling), tiered by the minister dial
-  (`minister_tier("")`, since there is no planner to pick a per-task tier),
-  drawn as a spirit-named card in the triangle, relayed and reaped like any
-  other. Its spawn failure is reported by `reap()` next tick, the same as a
-  Solomon-dispatched worker's.
-- **Ctrl+Z on a lone solo order is caught in the coalescing hold** (the item is
-  still in the queue; `boardundo` cancels it there), not in a summoner run —
-  there is no summoner run to cancel, because the minister IS the act. Once
-  dispatched it runs, exactly as a Solomon-dispatched worker does once Solomon
-  acts.
 
 Rules that fall out of it, all load-bearing:
 

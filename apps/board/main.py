@@ -1180,65 +1180,10 @@ class Agents(QObject):
     # row when nothing is running — and two views of one ordered list cannot
     # disagree about who is where. Two overlapping orchestrators are both his,
     # and both land in his section.
-    # THE STANDING ROSTER — [his, 2026-08-01] one row per operator, always
-    # drawn, in `boardwork.OPERATORS` order (Weyer, Agrippa, Solomon,
-    # Trithemius, Waite). A row is LIVE when a real orchestrator for that
-    # operator is running right now — the summoner section then draws it
-    # focused (the bright Theme tones his card already gets) and the rest at
-    # `Theme.inactive`, the same focused/unfocused fade §3.1.1 gives the whole
-    # window (docs/DESIGN.md). Liveness is read from the SAME `self._cards` the
-    # triangle draws, off each card's `running`, so the roster cannot disagree
-    # with who is actually up. There is no on-screen operator pick any more: the
-    # next operator is AUTO-ROUTED (`boardwork.route_operator`), so this is a
-    # read-only muster, not a chooser.
     @Property("QVariantList", notify=changed)
     def summoner(self):
-        # Real orchestrator cards, keyed by operator name — a running one wins
-        # over a stopped one of the same name, and the idle placeholder (id "")
-        # is not one of these.
-        by_name = {}
-        for c in self._cards:
-            if c.get("kind") != boardagents.ORCHESTRATOR_KIND or not c.get("id"):
-                continue
-            prev = by_name.get(c.get("name"))
-            if prev is None or (c.get("running") and not prev.get("running")):
-                by_name[c.get("name")] = c
-        roster, used = [], set()
-        for op in boardwork.OPERATORS:
-            card = by_name.get(op.name)
-            if card:
-                row = dict(card)
-                row["live"] = bool(card.get("running"))
-                used.add(card.get("id"))
-            else:
-                row = self._operator_standing(op)
-            roster.append(row)
-        # An orchestrator whose name is not a known operator should not happen —
-        # the registered name IS the operator — but never HIDE a live agent, so
-        # any leftover real card lands after the roster.
-        for c in self._cards:
-            if (c.get("kind") == boardagents.ORCHESTRATOR_KIND and c.get("id")
-                    and c.get("id") not in used):
-                row = dict(c)
-                row["live"] = bool(c.get("running"))
-                roster.append(row)
-        return roster
-
-    @staticmethod
-    def _operator_standing(op):
-        """A resting roster row for an operator with nothing running — its name,
-        its blurb as the standing line, and `live` false so the section draws it
-        dimmed. It is unaddressable (`id` empty): there is no process to put a
-        message in front of, exactly like the old idle Solomon row."""
-        return {
-            "id": "", "name": op.name, "kind": boardagents.ORCHESTRATOR_KIND,
-            "title": op.blurb, "where": "", "state": "idle",
-            "running": False, "live": False,
-            "phase": "ready", "says": "ready",
-            "saysLine": "%s awaits" % op.name,
-            "actually": "", "doingLine": "", "observed": "unlinked",
-            "contextLine": "", "workedLine": "", "unread": 0, "waiting": [],
-            "born": 0.0, "detail": ""}
+        return [c for c in self._cards
+                if c.get("kind") == boardagents.ORCHESTRATOR_KIND]
 
     @Property("QVariantList", notify=changed)
     def workers(self):
@@ -1505,14 +1450,40 @@ class Agents(QObject):
         self.summonersChanged.emit()
         return True
 
-    # ---- which OPERATOR orchestrates: NO on-screen pick any more -------------
-    # [his, 2026-08-01] the GUI stopped being able to PIN an operator: the
-    # operator is AUTO-ROUTED (`boardwork.route_operator`) from what he types,
-    # and the STANDING ROSTER above (`summoner`) shows the five as a read-only
-    # muster, not a chooser. The pin MECHANISM stays — `boardctl.py operator`
-    # (and the advanced `boardctl.py model` override) is the same-tier escape
-    # hatch it always was — only the dropdown is gone, so `models`/`modelLabel`/
-    # `chooseModel` went with it.
+    # ---- which model orchestrates -------------------------------------------
+    # The dropdown beside the box. Both halves are thin on purpose: the list and
+    # the choice live in `boardwork`, because `boardctl.py model` and the
+    # spawners read the same two functions and a second copy of the list here
+    # would be a second answer to "what may he pick".
+    modelChanged = Signal()
+
+    @Property("QVariantList", notify=modelChanged)
+    def models(self):
+        """`[{name, label, current}]`, in the order the menu draws them. `name`
+        is the `<flag> <effort>` pair `resolve_model` takes: the summoner chooser
+        carries a thinking budget as well as a model now."""
+        cur = boardwork.orch_model()
+        return [{"name": "%s %s" % (f, e), "label": lab, "current": (f, e) == cur}
+                for f, e, lab in boardwork.ORCH_MODELS]
+
+    @Property(str, notify=modelChanged)
+    def modelLabel(self):
+        """What the closed control reads. Never the raw pair: `claude-opus-5` is
+        a wire value and this is a line of his desktop's prose (§2)."""
+        return boardwork.orch_label()
+
+    @Slot(str, result=bool)
+    def chooseModel(self, name):
+        """Write his choice — model AND effort, one pick. It reaches the NEXT
+        orchestrator and no other: a session already running keeps what it
+        started with, which is his rule for a change made mid-run stated as the
+        mechanism rather than enforced on top of one."""
+        try:
+            boardwork.set_orch_model(name)
+        except (ValueError, OSError):
+            return False
+        self.modelChanged.emit()
+        return True
 
     # ---- ...and what the MINISTERS run on ------------------------------------
     # The fourth dropdown, under the cap. [his, 2026-07-29] *"do not allow

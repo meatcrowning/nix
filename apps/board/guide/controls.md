@@ -92,20 +92,17 @@ right of the box he types in, with the usage meters under the last of them.
 - **`boardwork.summoners()` / `set_summoners()`**, the file
   `~/.local/state/board/summoners`, also written by `boardctl.py summoners <n>`
   and overridable by `BOARD_MAX_SUMMONERS` for a harness.
-- **What it MEANS is a ceiling on CONCURRENCY, not a quota.** [his, 2026-08-01,
-  of a tick that ran three Solomons at once: *"why the fuck are you running
-  multiple solomons?????"*] A tick groups what he typed by the OPERATOR each item
-  routes to (`boardwork.route_groups`) — ONE summoner per operator, handed that
-  operator's whole list — so N things that all want Solomon are one Solomon, not
-  N. Those operator groups then run in waves of at most this many threads
-  (`board-watch.work_the_queue` → `_summon`), so nothing is stranded but no more
-  than his chosen number is ever alive together. One queued sentence is ONE
-  summoner however high the number is.
-- **The split axis is the operator, not the sentence.** Same-operator work is
-  always one session; only genuinely different operators (a quick Weyer question
-  beside a Solomon plan) get their own. `split_for_summoners` — the old blind
-  contiguous split — is no longer on this path.
-- **The tick is held for the slowest run in a wave, not the sum** — the runs are waited on
+- **What it MEANS is a ceiling on the fan-out, not a quota.** A tick with
+  something in the queue splits what he typed across up to that many
+  orchestrator runs (`boardwork.split_for_summoners` — contiguous, longest
+  first, none empty) and starts them together in threads
+  (`board-watch.work_the_queue` → `_summon`). One queued sentence is ONE
+  summoner however high the number is, because there is nothing for a second to
+  read.
+- **Contiguous, not round-robin**: two sentences he typed one after the other
+  about the same thing stay in one prompt, where a human would read them
+  together.
+- **The tick is held for the slowest run, not the sum** — the runs are waited on
   (that is what puts a failure back on his board in his own words), so the
   flock's worst case does not grow with the count. Each failed run leaves its
   own `QUEUE_FAIL` bullet, written serially after the join because `board.md` is

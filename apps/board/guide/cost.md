@@ -12,8 +12,8 @@ Part of goetia's guide — the map and the shared rules are in
 2026-08-01 (`docs/claude-usage-2026-08-01.md`): the ministers were $4,426 of the
 spend against the summoners' $911, **84% of every dollar was context re-read
 rather than output**, and per-turn cost climbed with session length (42k
-cache-read/turn at 22 turns, 151k at 163). The operator roster had tiered the
-planners and nothing had touched the other three quarters. The spec these three
+cache-read/turn at 22 turns, 151k at 163). The summoner dropdown had tiered the
+planner and nothing had touched the other three quarters. The spec these three
 were built from is `docs/goetia-request-management.md`.
 
 ---
@@ -23,16 +23,11 @@ were built from is `docs/goetia-request-management.md`.
 [his, 2026-08-01] *"being able to send a multitude of requests in either a
 single or multitude of prompts"*. How he split his thinking into box-fulls is
 not how the work divides, so `drain_queue()` can wait out the rest of a burst
-and hand the whole of it to ONE summoner (`boardwork.route_groups` groups it by
-operator), which can then group it by file set.
+and hand the whole of it to ONE summoner, which can then group it by file set.
 
-**A LONE work order skips the summoner entirely** [his, 2026-08-01] — it is
-dispatched straight to one minister (`boardwork.SOLO`, see
-[`orchestrator.md`](orchestrator.md)), so no fable-5 plan step is paid for the
-common case. The coalescing hold below is upstream of that split (it lives in
-`drain_queue`, before `work_the_queue` routes), so a lone order is still held
-out for the window; the summoner is reached only when the batch turns out to be
-a burst of two or more, which folds back into ONE Solomon for the file-set
+The coalescing hold lives in `drain_queue`, upstream of `work_the_queue`, so it
+is the same hold whatever the summoner dial says: what it buys is that a burst
+of two or more reaches ONE Solomon for the file-set
 coordination this section is about.
 
 - **A LONE SENTENCE WAITS FOR NOTHING** — `COALESCE_QUIET_S` is **0**. This
@@ -69,8 +64,8 @@ coordination this section is about.
   summoner (up to 15 min) for a fraction of the time.
 - **A sentence typed DURING the hold joins the same batch** and pushes the
   window out — the queue is re-read after every sleep. That is the whole point:
-  the batch then reaches ONE summoner (`route_groups` groups it by operator),
-  which can group it by file set instead of two summoners dispatching two
+  the batch then reaches ONE summoner, which can group it by file set instead
+  of two summoners dispatching two
   ministers into the same files.
 - **Nothing is dropped and nothing is promised.** The queue is left exactly as
   it was until it is drained, and the box's footer already says only *"in the
@@ -85,7 +80,7 @@ coordination this section is about.
 ### WHICH TIER a minister runs on, per piece of work
 
 **`dispatch --model` names the tier, and it is stored on the task record.** The
-operator roster tiered the PLANNERS (~9% of the spend); every minister — the
+summoner dropdown tiers the PLANNER (~9% of the spend); every minister — the
 43% — read one global dial, so a doc edit and a compositor C++ change spawned on
 the same model. `boardwork.minister_tier()` resolves what the planner asked for
 (`resolve_minister`'s forgiveness), `dispatch()` stores `(model, effort)` on the

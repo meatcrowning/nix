@@ -228,11 +228,6 @@ class Rig:
         self.state = os.path.join(d, "state")
         self.log = os.path.join(d, "watch.log")
         self.fired = os.path.join(d, "fired")
-        # ...and the SOLO ministers a tick dispatches directly (`bw.dispatch`,
-        # the `BOARD_WORK_SPAWN` path), kept apart from summoner fires above so a
-        # test can assert on each. A default stub is also what keeps a stray solo
-        # route from ever reaching real `claude` on his machine (below).
-        self.wfired = os.path.join(d, "wfired")
         with open(self.board, "w") as f:
             f.write(fixture)
 
@@ -270,13 +265,6 @@ class Rig:
                  XDG_CACHE_HOME=os.path.join(self.d, "xdgcache"),
                  BOARD_WATCH_SPAWN=spawn if spawn is not None
                  else 'echo "$BOARD_WATCH_KEY" >> ' + self.fired)
-        # A SOLO minister is dispatched through `bw.dispatch` -> `_spawn_worker`,
-        # which reads `BOARD_WORK_SPAWN`, not `BOARD_WATCH_SPAWN`. Default it to a
-        # harmless stub that records the worker id: no test that does not opt in
-        # can reach real `claude`, and one that wants to see solo dispatches reads
-        # `wfires()`. A caller passing its own (test_dispatch_outlives_tick) keeps
-        # it — extra is applied before this setdefault.
-        e.setdefault("BOARD_WORK_SPAWN", 'echo "$BOARD_AGENT_ID" >> ' + self.wfired)
         return e
 
     def run(self, gate="open", spawn=None, **extra):
@@ -327,18 +315,9 @@ class Rig:
         except OSError:
             return []
 
-    def wfires(self):
-        """The SOLO ministers a tick dispatched directly (worker ids)."""
-        try:
-            with open(self.wfired) as f:
-                return [l.strip() for l in f if l.strip()]
-        except OSError:
-            return []
-
     def clear(self):
-        for p in (self.fired, self.wfired):
-            if os.path.exists(p):
-                os.unlink(p)
+        if os.path.exists(self.fired):
+            os.unlink(self.fired)
 
     def text(self):
         with open(self.board) as f:
@@ -486,10 +465,7 @@ def test_worker_outlives_the_tick():
     survivor = os.path.join(d, "survivor")
     try:
         r = Rig(d, EMPTY_NEEDS)
-        # A coordination order so a real SUMMONER runs and dispatches the worker
-        # (this test is the orchestrator variant of "outlives the tick"; the solo
-        # variant is test_solo_dispatch).
-        r.note("dispatch two ministers to the long thing")
+        r.note("please do the long thing")
 
         env = r.env(gate="open")
         # The orchestrator's whole job here is to dispatch ONE worker; the
@@ -766,179 +742,51 @@ def test_a_rebuild_kills_the_tick():
 
 
 def test_summoner_fanout():
-    """ONE summoner per operator, not per sentence.
+    """The top dropdown has to reach the number of summoners that really start.
 
-    [his, 2026-08-01, of a tick that ran three concurrent Solomons for three
-    things he typed: *"why the fuck are you running multiple solomons?????"*] So
-    the split axis is the OPERATOR each item routes to, not the sentence count:
-    items that want the same operator share one summoner handed the whole list,
-    and only genuinely different operators get their own session. The top
-    dropdown is now a ceiling on how many run AT ONCE, not on how many start.
+    [his, 2026-07-29] *"number of summoners"*, and the rule for every one of
+    these four controls is that it applies or it is not shipped. So: what he
+    typed is split across up to that many orchestrator runs, every sentence
+    reaches exactly one of them, and one queued sentence is one summoner however
+    high the number is — the count is a ceiling on the fan-out, not a quota.
     """
-    print("the summoner grouping - one session per operator, not per sentence")
+    print("the summoner count - how many actually start")
     d = tempfile.mkdtemp(prefix="board-watch-summon-")
     try:
         r = Rig(d, EMPTY_NEEDS)
-        # One prompt file per run, named by the key, so the grouping itself is
+        for s in ("the first thing", "the second thing", "the third thing"):
+            r.note(s)
+        # One prompt file per run, named by the key, so the split itself is
         # visible rather than inferred from a count.
         stub = ('cat > "%s/prompt-$BOARD_WATCH_KEY"; echo "$BOARD_WATCH_KEY" >> %s'
                 % (d, r.fired))
-
-        # Three plain work orders each route to SOLO on their own, but a burst of
-        # two or more folds back into ONE Solomon (`work_the_queue`) so a
-        # coalesced burst is coordinated by one planner - the same "one summoner,
-        # not three" the incident was about, now reached via the solo-burst fold.
-        for s in ("the first thing", "the second thing", "the third thing"):
-            r.note(s)
-        r.run(spawn=stub, BOARD_MAX_SUMMONERS=3)
+        r.run(spawn=stub, BOARD_MAX_SUMMONERS=2)
         keys = r.fires()
-        check("three solo orders together are ONE summoner, not three",
-              len(keys) == 1, str(keys))
-        check("...and none was dispatched straight (a burst is coordinated)",
-              r.wfires() == [], r.wfires())
-        body = open(os.path.join(d, "prompt-" + keys[0])).read()
+        check("two summoners, two runs, two distinct cards",
+              len(keys) == 2 and len(set(keys)) == 2, str(keys))
+        prompts = {k: open(os.path.join(d, "prompt-" + k)).read() for k in keys}
         for s in ("the first thing", "the second thing", "the third thing"):
-            check("...and %r is in that one run" % s, s in body, body[:80])
+            hits = [k for k, p in prompts.items() if s in p]
+            check("...and %r reached exactly one of them" % s, len(hits) == 1,
+                  str(hits))
         check("...and the queue is empty, so nothing re-triggers",
               r.queued() == [], r.queued())
 
-        # Two items that route to DIFFERENT summoner operators DO get their own
-        # sessions: a coordination order summons Solomon, a bare factual question
-        # summons Weyer.
-        r.clear()
-        r.note("dispatch the settings and reader work across two ministers")  # Solomon
-        r.note("what time is it")               # -> Weyer (quick)
-        r.run(spawn=stub, BOARD_MAX_SUMMONERS=2)
-        keys = r.fires()
-        check("two different operators are two sessions", len(keys) == 2, str(keys))
-        bodies = [open(os.path.join(d, "prompt-" + k)).read() for k in keys]
-        for s in ("across two ministers", "what time is it"):
-            hits = [b for b in bodies if s in b]
-            check("...and %r reached exactly one of them" % s, len(hits) == 1,
-                  str(len(hits)))
-
-        # SHORTNESS IS NOT A QUESTION, and a lone work order is WORKED, not
-        # answered — but by ONE MINISTER now, not a Solomon. [his, 2026-08-01]
-        # *"shouldnt solomon only be called when it is determined there is a need
-        # to coordinate multiple ministers together?"* So a short lone order
-        # routes to SOLO (a minister), never to Weyer (which only answers).
-        import boardwork as bw
-        for short_order in ("have another look at the panel spacing",
-                            "the scrollbar arrows feel sluggish",
-                            "goetia's titlebar text flickers"):
-            check("a short lone WORK ORDER routes to one minister (solo): %r"
-                  % short_order[:34],
-                  bw.route_operator(short_order).flavour == "solo",
-                  bw.route_operator(short_order).name)
-        check("...while a short QUESTION still reaches the cheap operator",
-              bw.route_operator("what time is it").name == "Weyer")
-        check("...and an order that names coordinating several IS Solomon",
-              bw.route_operator("dispatch this across three ministers").name
-              == "Solomon")
-        # A REPLY carries the quoted bullet as a trailer; routing reads his words
-        # ALONE, or the quote's semicolon/plan verbs summon Solomon for a lone
-        # job. [his, 2026-08-02] the 10:07 reply to the light-mode bullet did.
-        quoted = ('yeah go for it  (about the `to do` bullet '
-                  '"add a light mode; no other changes")')
-        check("a reply is routed on his words, not the quoted bullet: %r"
-              % bw.strip_reply_quote(quoted),
-              bw.route_operator(quoted).flavour == "solo"
-              and bw.strip_reply_quote(quoted) == "yeah go for it",
-              bw.route_operator(quoted).name)
-        check("...and a GENUINE typed multi-ask still reaches Solomon",
-              bw.route_operator("add a dark mode; also rename the engine").name
-              == "Solomon")
-
-        # A WORK ORDER WORN AS A QUESTION is WORKED, not answered-and-dropped.
-        # [chosen 2026-08-02] the Botis audit stalled here: an audit phrased as a
-        # question routed to answer-only Weyer, which never dispatches. A work
-        # verb (`_ROUTE_WORK`) now wins over the question routers, so a lone one
-        # goes SOLO and a coordinating one still reaches Solomon.
-        for worn in ("can you audit the Botis font's glyph coverage?",
-                     "could you check whether the panel still spaces right?",
-                     "how about you investigate the scrollbar lag"):
-            check("a work order phrased as a question is worked (solo): %r"
-                  % worn[:38],
-                  bw.route_operator(worn).flavour == "solo",
-                  bw.route_operator(worn).name)
-        check("...and a genuine factual question is still answered (Weyer)",
-              bw.route_operator("what is the current font size?").name == "Weyer")
-        check("...and a coordinating audit across areas still reaches Solomon",
-              bw.route_operator("audit the panel and the player across both apps")
-              .name == "Solomon")
-
-        # A LONE solo order is not a summoner at all - it goes straight to one
-        # minister (`bw.dispatch`), so no summoner fires and the worker stub does.
         r.clear()
         r.note("something on its own")
         r.run(spawn=stub, BOARD_MAX_SUMMONERS=4)
-        check("one lone order fires NO summoner", r.fires() == [], str(r.fires()))
-        check("...it is dispatched straight as one minister",
-              len(r.wfires()) == 1, str(r.wfires()))
+        check("one sentence is one summoner, whatever the number says",
+              len(r.fires()) == 1, str(r.fires()))
 
         r.clear()
         r.note("one of two"), r.note("two of two")
         r.run(spawn=stub, BOARD_MAX_SUMMONERS=1)
         one = r.fires()
-        check("...and a two-order burst is one summoner, not two solos",
+        check("...and at one, everything he typed goes to that one run",
               len(one) == 1
               and "one of two" in open(os.path.join(d, "prompt-" + one[0])).read()
               and "two of two" in open(os.path.join(d, "prompt-" + one[0])).read(),
               str(one))
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
-
-
-def test_solo_dispatch():
-    """SOLOMON ONLY FOR SEVERAL MINISTERS; a lone order goes STRAIGHT to one.
-
-    [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
-    there is a need to coordinate multiple ministers together?"* So a lone work
-    order is dispatched directly to ONE minister (`bw.dispatch`) with no planning
-    session in front, and Solomon is summoned only when the batch holds several
-    ministers' worth of work — which for a coalesced burst is two or more orders.
-    """
-    print("solo dispatch - one minister for a lone order, Solomon only for several")
-    d = tempfile.mkdtemp(prefix="board-watch-solo-")
-    try:
-        r = Rig(d, EMPTY_NEEDS)
-        # A summoner stub that would fire if one ran, and a worker stub that
-        # records the TASK it was handed - so a solo dispatch is visible by
-        # content, not just by count.
-        summon = 'echo "$BOARD_WATCH_KEY" >> ' + r.fired
-        work = 'echo "$BOARD_WORK_TASK" >> ' + r.wfired
-
-        # ONE lone order: one minister, straight. No summoner at all.
-        r.note("add a dark mode toggle to the settings page")
-        r.run(spawn=summon, BOARD_WORK_SPAWN=work)
-        check("a lone order summons NOBODY", r.fires() == [], str(r.fires()))
-        check("...it is dispatched straight to one minister",
-              r.wfires() == ["add a dark mode toggle to the settings page"],
-              str(r.wfires()))
-        check("...and the queue is empty, so nothing re-triggers",
-              r.queued() == [], r.queued())
-
-        # TWO lone orders in one batch: a burst folds back into ONE Solomon so a
-        # coalesced burst is coordinated (file-set collisions), not raced.
-        r.clear()
-        r.note("fix the panel spacing")
-        r.note("tidy the reader margins")
-        r.run(spawn=summon, BOARD_WORK_SPAWN=work)
-        check("two lone orders together are ONE summoner (Solomon coordinates)",
-              len(r.fires()) == 1, str(r.fires()))
-        check("...and neither was dispatched straight", r.wfires() == [],
-              str(r.wfires()))
-
-        # A lone order BESIDE a question: the order goes solo, the question to
-        # its cheap answering operator - two different paths, one tick.
-        r.clear()
-        r.note("rename the widget to Panel")     # -> solo (one minister)
-        r.note("what is the cap set to")          # -> Weyer (a question)
-        r.run(spawn=summon, BOARD_WORK_SPAWN=work)
-        check("the lone order is dispatched straight",
-              r.wfires() == ["rename the widget to Panel"], str(r.wfires()))
-        check("...while the question summons exactly one (Weyer) operator",
-              len(r.fires()) == 1, str(r.fires()))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -968,16 +816,12 @@ def test_coalescing():
         # ONE THING QUEUED WAITS FOR NOTHING, at the shipped default - there
         # is no second item to batch it with, and the path unit starts this
         # tick ~100ms after he presses enter, so any hold IS the delay he sees.
-        # A lone order routes SOLO now (one minister, straight), so the coalescing
-        # hold is observed on the WORKER dispatch (`wfires`), not a summoner. The
-        # hold itself lives in `drain_queue`, before the solo/summoner split, so
-        # it applies identically either way.
         r.note("a lone sentence")
         t0 = time.time()
         r.run(spawn=stub)          # no COALESCE_* - the module's own defaults
         took = time.time() - t0
         check("one queued thing is planned AT ONCE on the shipped default",
-              len(r.wfires()) == 1 and took < 8, (r.wfires(), "%.1fs" % took))
+              len(r.fires()) == 1 and took < 8, (r.fires(), "%.1fs" % took))
         check("...and nothing is left behind it", r.queued() == [], r.queued())
 
         r.clear()
@@ -992,8 +836,8 @@ def test_coalescing():
         check("...and the run SAYS it is holding rather than going quiet",
               "holding" in open(r.log).read(), open(r.log).read()[-200:])
         check("...and it is planned when the window closes, never dropped",
-              len(r.wfires()) == 1 and r.queued() == [],
-              (r.wfires(), r.queued()))
+              len(r.fires()) == 1 and r.queued() == [],
+              (r.fires(), r.queued()))
 
         # A SENTENCE TYPED DURING THE HOLD JOINS THE SAME BATCH - the whole
         # point: how he split his thinking into box-fulls is not how the work
@@ -1099,10 +943,7 @@ def test_the_loop():
     d = tempfile.mkdtemp(prefix="board-watch-first-")
     try:
         r = Rig(d, EMPTY_NEEDS)
-        # A coordination order so a summoner runs (this asserts the FIRST-RUN
-        # DRAIN via the orchestrator prompt file); the drain is upstream of the
-        # solo/summoner split, so a lone order is drained on the first run too.
-        m = r.note("clear the to-do list and dispatch a minister; i cannot remove anything")
+        m = r.note("clear the to-do list, i cannot remove anything")
         check("(setup) the box queued it", m["state"] == "queued", m)
         r.run(spawn="cat > " + os.path.join(d, "orch.txt")
               + '; echo "$BOARD_WATCH_KEY" >> ' + r.fired)
@@ -1462,11 +1303,7 @@ def test_cancelled_summoner():
     d = tempfile.mkdtemp(prefix="board-watch-cancel-")
     try:
         r = Rig(d, EMPTY_NEEDS)
-        # A COORDINATION order, so it summons Solomon and there is a summoner run
-        # to cancel: ctrl+z of a lone solo order is caught in the coalescing hold
-        # (boardundo, before dispatch), which board-test.py covers; this covers
-        # the half only a real summoner run can show.
-        r.note("dispatch two ministers to the thing I have changed my mind about")
+        r.note("build the thing I have changed my mind about")
         # The stub IS him pressing ctrl+z: it cancels the order this run was
         # given, the way the window does, and then dies nonzero.
         cancel = (
@@ -1813,24 +1650,20 @@ def main():
         r.run()
         r.clear()
 
-        # A coordination order (`dispatch ... to each`), so it summons an
-        # ORCHESTRATOR rather than a lone minister - this block is asserting the
-        # orchestrator prompt. A single-minister order takes the solo path now
-        # (test_solo_dispatch) and never reaches this prompt.
-        order = "rework the panel and the reader; dispatch a minister to each"
-        m = r.note(order)
+        m = r.note("have another look at the panel spacing")
         check("with nothing running, the box queues it", m["state"] == "queued", m)
         r.run(gate="closed")
         check("a locked screen does not work it", r.fires() == [], str(r.fires()))
         check("...and it is still queued, not lost",
-              r.queued() == [order], r.queued())
+              r.queued() == ["have another look at the panel spacing"], r.queued())
 
         r.run(spawn="cat > " + os.path.join(d, "note.txt")
               + '; echo "$BOARD_WATCH_KEY" >> ' + r.fired)
         note_prompt = open(os.path.join(d, "note.txt")).read()
         check("an open gate spawns ONE agent for it",
               len(r.fires()) == 1 and r.fires()[0].startswith("orch-"), str(r.fires()))
-        check("...carrying what he wrote, verbatim", order in note_prompt)
+        check("...carrying what he wrote, verbatim",
+              "have another look at the panel spacing" in note_prompt)
         check("...under the same rules a decision run gets",
               "RULES bind you and every worker you dispatch" in note_prompt
               and "they are in your system prompt" in note_prompt)
@@ -1874,10 +1707,7 @@ def main():
 
         print("...and a note whose agent fails still reaches him")
         before = r.text()
-        # A coordination order so a SUMMONER runs (and here fails): a lone solo
-        # order takes the worker path, whose own spawn failure is reported by
-        # reap() next tick, not by this QUEUE_FAIL path.
-        r.note("audit the clock; dispatch a minister to whether it is off by a pixel")
+        r.note("check whether the clock is off by a pixel")
         r.run(spawn="exit 3")
         after = r.text()
         bullet = [l for l in after.splitlines()
@@ -1928,7 +1758,6 @@ def main():
     test_worker_outlives_the_tick()
     test_a_rebuild_kills_the_tick()
     test_summoner_fanout()
-    test_solo_dispatch()
     test_cancelled_summoner()
     test_coalescing()
     test_the_loop()
