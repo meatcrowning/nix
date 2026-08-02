@@ -4,16 +4,23 @@ from it. Prints KEY=rrggbb lines for shell eval.
 
     wal-extract.py IMAGE [--colors N] [--accent RRGGBB|--auto] [--bg pure|tone]
                          [--full|--mono] [--variant vivid|muted|pastel]
+                         [--light|--dark]
 
-Six of the Settings program's Appearance keys land here, and this is the ONLY
+Seven of the Settings program's Appearance keys land here, and this is the ONLY
 place they can: the whole desktop's palette is derived in this file, so a
 control that claims to change the palette has to change what this prints.
 Unless overridden on the command line the values come straight from
 ~/.config/quickshell/settings.json (`themeMode`, `accentOverride`,
-`paletteColorCount`, `pureBlackBg`, `paletteFull`, `paletteVariant`), so
-Settings and a hand-run of this script agree. wal-prepare.sh re-runs us
-whenever that file is newer than the cached palette, which is what makes the
-settings apply.
+`paletteColorCount`, `pureBlackBg`, `paletteFull`, `paletteVariant`,
+`lightMode`), so Settings and a hand-run of this script agree. wal-prepare.sh
+re-runs us whenever that file is newer than the cached palette, which is what
+makes the settings apply.
+
+LIGHT vs DARK is an orthogonal axis over both modes below (`lightMode` /
+`--light`): dark (default) is the settled black-background look; light inverts
+the value ladder so the background is white and the ink is the dark end of the
+SAME wallpaper hue. Both fill the same twelve tokens, so nothing downstream
+(kitty, kdeglobals, hyprvtb, the panel) knows which polarity it is drawing.
 
 TWO derivation modes, both filling the SAME twelve tokens (so Theme.qml is
 untouched either way):
@@ -43,7 +50,8 @@ warnings.filterwarnings("ignore")
 SETTINGS = os.path.expanduser("~/.config/quickshell/settings.json")
 DEFAULTS = {"themeMode": "auto", "accentOverride": "#5c9fcc",
             "paletteColorCount": 16, "pureBlackBg": True,
-            "paletteFull": False, "paletteVariant": "pastel"}
+            "paletteFull": False, "paletteVariant": "pastel",
+            "lightMode": False}
 
 # Full-mode variant knobs. Each is a global transform over the generated
 # palette, NOT a different derivation: the same hues come out, dressed brighter
@@ -117,7 +125,7 @@ def pick_secondary(clusters, ph, ps):
     return best if best is not None else (ph, ps)
 
 
-def status_color(anchor, band, clusters, ss, base_v, s_floor, v_floor):
+def status_color(anchor, band, clusters, ss, base_v, s_floor, v_floor, light=False):
     """A status colour genuinely SAMPLED from the wallpaper, not a canonical hue
     dressed up. Find the saturated wallpaper cluster nearest the status slot's
     canonical anchor (green/amber/red/blue) and take its hue, saturation AND
@@ -128,7 +136,11 @@ def status_color(anchor, band, clusters, ss, base_v, s_floor, v_floor):
     black. A wallpaper with no colour near the anchor keeps the canonical
     baseline, so full mode degrades gracefully on a wallpaper that lacks a hue.
     Unlike the old fixed-hue-wheel nudge, every wallpaper now yields a visibly
-    different ramp because the sampled hue/sat/value all track the image."""
+    different ramp because the sampled hue/sat/value all track the image.
+
+    In LIGHT mode `base_v`/`v_floor` are dark targets and `v_floor` reads as a
+    value CEILING (so a status slot stays dark enough to read on white) rather
+    than the dark-mode floor (dark enough it never sinks into the black panel)."""
     near, near_d = None, 1.0
     for (h, s, v, c) in clusters:
         if s < 0.22 or v < 0.12:
@@ -146,8 +158,43 @@ def status_color(anchor, band, clusters, ss, base_v, s_floor, v_floor):
     # Saturation/value: the variant baseline shifted toward the sampled cluster,
     # floored so the state still reads against the black panel.
     sat = max(ss + (ns - ss) * 0.6, s_floor)
-    val = max(base_v + (nv - base_v) * 0.5, v_floor)
+    blended = base_v + (nv - base_v) * 0.5
+    val = min(blended, v_floor) if light else max(blended, v_floor)
     return hsv_hex(hue, sat, val)
+
+
+def mono_palette_light(h, s, v, pure_bg):
+    """Light-mode counterpart of mono_palette(): the SAME single hue, but the
+    value ladder is INVERTED — the background is white and the ink is the dark
+    end of the hue, so every 'light surface' of the dark palette (accent / text /
+    status) becomes a legible dark tone on white and every 'dark structural tone'
+    (dim / border / bgAlt) becomes a light grey tint. Saturation is still capped
+    inversely to value, and the greyscale guard still holds: a near-grey
+    wallpaper already has s <= 0.12 upstream, so the caps are no-ops and silver
+    stays silver on white. See docs/DESIGN.md §3.1."""
+    # Dark ink on white: cap saturation so a vivid wallpaper doesn't give a
+    # garish accent, and pin the value into a dark band so it reads on white
+    # while still carrying the hue.
+    INK = min(s, 0.55)
+    accent = hsv_hex(h, INK, min(max(v, 0.28), 0.42))
+    return {
+        "ACCENT":    accent,
+        "TEXT":      accent,          # body text IS the accent (§3.1.1), dark on white
+        "TEXTDIM":   hsv_hex(h, min(s, 0.45), 0.46),
+        "DIM":       hsv_hex(h, min(s, 0.30), 0.60),
+        "BORDER":    hsv_hex(h, min(s, 0.28), 0.72),
+        "BGALT":     hsv_hex(h, min(s, 0.12), 0.94),
+        "HIGHLIGHT": hsv_hex(h, min(s, 0.28), 0.85),   # selection bg
+        # Pure white by default — the light-mode analogue of pure black, and the
+        # same settled decision inverted. `pureBlackBg = false` tones it to the
+        # hue's lightest tint instead of a colour from outside the palette.
+        "BG":        "ffffff" if pure_bg else hsv_hex(h, min(s, 0.10), 0.965),
+        # Status ramp on the one hue, varied in darkness so levels read on white.
+        "OK":        hsv_hex(h, INK, 0.55),
+        "WARN":      hsv_hex(h, min(s, 0.50), 0.62),
+        "CRIT":      hsv_hex(h, min(s, 0.62), 0.48),
+        "INFO":      hsv_hex(h, min(s, 0.40), 0.58),
+    }
 
 
 def mono_palette(h, s, v, pure_bg):
@@ -192,15 +239,46 @@ def mono_palette(h, s, v, pure_bg):
     }
 
 
-def full_palette(h, s, v, clusters, pure_bg, variant):
+def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
     """The opt-in FULL palette: the accent stays the primary hue, but the
     structural tones take the wallpaper's secondary hue and the status ramp
     takes real colour-coded hues nudged toward the wallpaper. Still the same
     twelve tokens. `variant` (vivid|muted|pastel) is a global transform — see
-    VARIANTS. docs/DESIGN.md §3.1.2."""
+    VARIANTS. `light` inverts the value ladder onto a white background exactly
+    as mono_palette_light() does, while keeping the secondary-hue frames and the
+    sampled status ramp. docs/DESIGN.md §3.1.2."""
     vp = VARIANTS.get(variant, VARIANTS["pastel"])
     lcap, av, smul, ss = (vp["light_cap"], vp["accent_v"],
                           vp["struct_mul"], vp["status_s"])
+
+    if light:
+        h2, s2 = pick_secondary(clusters, h, s)
+        # Dark ink accent on white; the variant's chroma character still applies
+        # (a vivid full theme carries more chroma in its ink), but the value is
+        # pinned dark rather than lifted by `accent_v`.
+        INK = min(s, max(lcap, 0.40))
+        accent = hsv_hex(h, INK, min(max(v, 0.28), 0.42))
+
+        def lstruct(cap, val):
+            # Light grey tinted with the SECONDARY hue; values are high (near the
+            # white bg), the variant free to push chroma since a pale tint at high
+            # value does not glow.
+            return hsv_hex(h2, min(s2 * smul, cap), val)
+
+        return {
+            "ACCENT":    accent,
+            "TEXT":      accent,
+            "TEXTDIM":   hsv_hex(h, min(s, lcap * 1.15), 0.46),
+            "DIM":       lstruct(0.30, 0.60),
+            "BORDER":    lstruct(0.28, 0.72),
+            "BGALT":     lstruct(0.12, 0.94),
+            "HIGHLIGHT": lstruct(0.28, 0.85),
+            "BG":        "ffffff" if pure_bg else lstruct(0.10, 0.965),
+            "OK":        status_color(0.34, 0.10, clusters, ss,            0.55, 0.30, 0.66, True),
+            "WARN":      status_color(0.12, 0.05, clusters, ss,            0.60, 0.30, 0.68, True),
+            "CRIT":      status_color(0.00, 0.05, clusters, max(ss, 0.65), 0.48, 0.55, 0.56, True),
+            "INFO":      status_color(0.57, 0.07, clusters, min(ss, 0.55), 0.56, 0.28, 0.64, True),
+        }
 
     # Light surfaces: accent hue, chroma capped by the variant, value lifted.
     # `min(s, lcap)` so a washed wallpaper is never forced brighter than it is
@@ -249,6 +327,7 @@ def main():
     pure_bg = bool(cfg["pureBlackBg"])
     full = bool(cfg["paletteFull"])
     variant = str(cfg["paletteVariant"] or "pastel")
+    light = bool(cfg["lightMode"])
     i = 0
     while i < len(args):
         a = args[i]
@@ -266,6 +345,10 @@ def main():
             full = False
         elif a == "--variant":
             i += 1; variant = args[i]
+        elif a == "--light":
+            light = True
+        elif a == "--dark":
+            light = False
         else:
             path = a
         i += 1
@@ -298,7 +381,8 @@ def main():
         if path is None:
             sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
                              "[--accent RRGGBB] [--bg pure|tone] "
-                             "[--full|--mono] [--variant vivid|muted|pastel]\n")
+                             "[--full|--mono] [--variant vivid|muted|pastel] "
+                             "[--light|--dark]\n")
             return 2
         try:
             img = Image.open(path).convert("RGB")
@@ -355,8 +439,11 @@ def main():
         s = max(s, 0.55)   # keep a defined hue to derive the palette from
 
     if full:
-        out = full_palette(h, s, v, clusters, pure_bg, variant)
+        out = full_palette(h, s, v, clusters, pure_bg, variant, light)
         mode_label = "manual+full" if manual_hsv is not None else "full"
+    elif light:
+        out = mono_palette_light(h, s, v, pure_bg)
+        mode_label = "manual" if manual_hsv is not None else "auto"
     else:
         out = mono_palette(h, s, v, pure_bg)
         mode_label = "manual" if manual_hsv is not None else "auto"
@@ -365,8 +452,9 @@ def main():
     # this is a comment rather than a KEY=value — it exists so `cat
     # ~/.cache/wal/themes/*.env` says which settings produced the colours when
     # someone is working out why a toggle "did nothing".
-    print("# opts: mode=%s variant=%s colors=%d bg=%s%s"
-          % (mode_label, variant if full else "-", colors,
+    print("# opts: mode=%s polarity=%s variant=%s colors=%d bg=%s%s"
+          % (mode_label, "light" if light else "dark",
+             variant if full else "-", colors,
              "pure" if pure_bg else "tone",
              (" accent=%s" % accent_hex) if manual_hsv is not None else ""))
     for k, val in out.items():

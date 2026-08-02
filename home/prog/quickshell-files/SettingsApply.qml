@@ -113,7 +113,7 @@ Item {
     // real values readable there) and the timer applies only a genuine change.
     readonly property var _paletteKeys: ["themeMode", "accentOverride",
                                          "paletteColorCount", "pureBlackBg",
-                                         "paletteFull", "paletteVariant"]
+                                         "paletteFull", "paletteVariant", "lightMode"]
     property string _paletteSig: ""
     function _sig() {
         const d = SettingsStore.d;
