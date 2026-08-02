@@ -284,6 +284,61 @@ def test_rescued_persistence_roundtrip(tmp_path):
           S.load_rescued(str(tmp_path / "nope.json")) == set())
 
 
+def clear_state():
+    saved = {}
+    def fake_http(method, url, api_key, body=None):
+        saved["calls"] = saved.get("calls", []) + [(method, url)]
+        return None
+    return fake_http, saved
+
+
+def test_clear_handled_failures_dry_run_counts_only_handled():
+    print("clear_handled_failures: --dry-run counts handled, mutates nothing")
+    dl = dl_response(
+        failed_transfer("rejector", REJECTED_FILENAME, reason="Completed, Rejected",
+                        tid="clear-1"),
+        failed_transfer("erro", REJECTED_FILENAME, reason="Completed, Errored",
+                        tid="clear-2"),
+        {"username": "ongoing", "filename": "o\\\\one.mp3", "state": "InProgress"},
+        {"username": "done", "filename": "d\\\\two.mp3",
+         "state": "Completed, Succeeded"},
+    )
+    fake_http, saved = clear_state()
+    orig_http = S.http
+    S.http = fake_http
+    try:
+        n = S.clear_handled_failures("http://x", "k", dl, {"clear-1"}, dry_run=True)
+    finally:
+        S.http = orig_http
+    check("counts only the handled failed transfer", n == 1)
+    check("dry-run made no DELETE calls", saved.get("calls", []) == [])
+
+
+def test_clear_handled_failures_deletes_and_counts():
+    print("clear_handled_failures: a handled failure is DELETE-cleanable")
+    dl = dl_response(
+        failed_transfer("rejector", REJECTED_FILENAME, reason="Completed, Rejected",
+                        tid="clear-1"),
+        failed_transfer("erro", "e\\\\two.mp3", reason="Completed, Errored",
+                        tid="clear-2"),
+        failed_transfer("unhandled", "u\\\\three.mp3",
+                        reason="Completed, TimedOut", tid="clear-3"),
+    )
+    fake_http, saved = clear_state()
+    orig_http = S.http
+    S.http = fake_http
+    try:
+        n = S.clear_handled_failures("http://x", "k", dl, {"clear-1", "clear-2"},
+                                    dry_run=False)
+    finally:
+        S.http = orig_http
+    check("clears exactly the two handled failures", n == 2)
+    urls = [u for m, u in saved["calls"] if m == "DELETE"]
+    check("DELETE for each handled failure", len(urls) == 2)
+    check("unhandled failure is not deleted",
+          all("clear-3" not in u for u in urls))
+
+
 def main():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
