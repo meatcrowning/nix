@@ -395,6 +395,57 @@ def test_clear_handled_failures_deletes_and_counts():
           all(u.endswith("?remove=true") for u in urls))
 
 
+def test_reconcile_orphaned_queued():
+    print("reconcile_orphaned_queued: orphaned 'queued' markers")
+    art, title = TRACK["artists"], TRACK["title"]
+    sid = TRACK["spotify_id"]
+
+    def rec(sid_, user, fn, status="queued"):
+        return {"spotify_id": sid_, "isrc": "", "status": status,
+                "user": user, "filename": fn, "when": "2026-08-01 00:00:00"}
+
+    state = {
+        sid: rec(sid, "ghost", "ghost\\\\01 %s.mp3" % title),      # orphan
+        "SPOTID-LIVE": rec("SPOTID-LIVE", "livepeer", "live\\\\tune.flac"),
+        "SPOTID-DL": rec("SPOTID-DL", "dlpeer", "dl\\\\07 DL only.mp3"),
+        "SPOTID-LANDED": rec("SPOTID-LANDED", "landpeer",
+                             "land\\\\Some Other Song.mp3"),
+        "SPOTID-GONE": rec("SPOTID-GONE", "gone", "gone\\\\old.mp3"),
+    }
+    # work list rows: the orphan, the DL one, and the landed one
+    rows = [
+        dict(TRACK),                                        # sid (orphan)
+        dict(TRACK, spotify_id="SPOTID-DL", title=title),
+        dict(TRACK, spotify_id="SPOTID-LANDED", title="Some Other Song"),
+    ]
+    # a transfer is still working on SPOTID-LIVE only
+    alive = {("livepeer", "live\\\\tune.flac")}
+    # library holds "Some Other Song" but not the orphan track
+    present = set(S.trackmatch.keys(art, "Some Other Song"))
+    # a completed file for SPOTID-DL awaits import in the downloads dir
+    downloaded = {S.trackmatch.fold("07 DL only.mp3")}
+
+    # dry-run: counts the orphan, mutates nothing
+    state_before = {k: dict(v) for k, v in state.items()}
+    n = S.reconcile_orphaned_queued(state_before, alive, present, rows,
+                                    downloaded, dry_run=True)
+    check("dry-run counts the orphan and leaves state alone",
+          n == 1 and sid in state_before)
+
+    n = S.reconcile_orphaned_queued(state, alive, present, rows,
+                                    downloaded, dry_run=False)
+    check("real run re-queues exactly the orphan", n == 1)
+    check("orphaned marker dropped", sid not in state)
+    check("a live transfer keeps its queued marker",
+          state["SPOTID-LIVE"]["status"] == "queued")
+    check("a completed file awaiting import is not re-downloaded",
+          state["SPOTID-DL"]["status"] == "queued")
+    check("a track that landed is re-marked 'have'",
+          state["SPOTID-LANDED"]["status"] == "have")
+    check("an entry with no work-list row is left alone",
+          "SPOTID-GONE" in state and state["SPOTID-GONE"]["status"] == "queued")
+
+
 def main():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
