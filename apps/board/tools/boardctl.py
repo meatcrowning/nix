@@ -374,18 +374,22 @@ def cmd_minister(a):
 
 
 def cmd_model(a):
-    """Which model orchestrates. The dropdown beside his box writes the same
-    file; this is the scriptable half, and what a harness drives."""
+    """Which model summons, and how hard it thinks. The dropdown beside his box
+    writes the same file; this is the scriptable half, and what a harness
+    drives. The summoner carries an effort now, so this sets a `(model, effort)`
+    pair the way `minister` does, from `boardwork.ORCH_MODELS`."""
     if a.name is None:
         cur = bw.orch_model()
-        for flag, label in bw.ORCH_MODELS:
-            print("%s %-28s %s" % ("*" if flag == cur else " ", flag, label))
+        for flag, effort, label in bw.ORCH_MODELS:
+            print("%s %-28s %-7s %s"
+                  % ("*" if (flag, effort) == cur else " ", flag, effort, label))
         return 0
     try:
-        print("the next summoner, Solomon, runs on %s" % bw.set_orch_model(a.name))
+        flag, effort = bw.set_orch_model(a.name)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
+    print("the next summoner, Solomon, runs on %s at %s effort" % (flag, effort))
     return 0
 
 
@@ -595,7 +599,8 @@ def main(argv=None):
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_summoners)
 
-    s = sub.add_parser("model", help="which model the next orchestrator runs on")
+    s = sub.add_parser("model", help="which model, and how hard, the next "
+                                     "summoner runs on (e.g. 'opus 5 xhigh')")
     s.add_argument("name", nargs="?", default=None)
     s.set_defaults(fn=cmd_model)
 
