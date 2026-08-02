@@ -7,7 +7,7 @@ CVtbPassElement::CVtbPassElement(const CVtbPassElement::SVtbData& data_) : data(
 
 std::vector<UP<IPassElement>> CVtbPassElement::draw() {
     if (data.shadowLayer)
-        vtbRenderShadowLayer(Hl::renderMonitor());
+        vtbRenderShadowLayer(Hl::renderMonitor(), data.shadowOverBars);
     else if (data.tooltipOnly)
         data.deco->drawTooltipPass(Hl::renderMonitor(), data.a);
     else

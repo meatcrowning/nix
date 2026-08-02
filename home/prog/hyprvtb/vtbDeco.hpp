@@ -71,6 +71,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     // definition for what drawing it separately used to cost.
     bool                               rollShadowBoxDev(PHLMONITOR pMonitor, CBox& out);
 
+    // The resting/set-down bar box of a rolled-up window, in pMonitor's device
+    // pixels. False for a bar drawing over the windows this frame (roll-out /
+    // open / roll-up slide) or a window not rolled up. vtbRenderShadowLayer's
+    // over-bars pass unions these — other windows' shadows land on top of them.
+    bool                               rollBarBoxDev(PHLMONITOR pMonitor, CBox& out);
+
     // Put this window back into a plain, visible state — no animation, no
     // deferred work. PLUGIN_EXIT calls it for every bar: the states this plugin
     // puts a window INTO (rolled up = setHidden, minimized = parked off-screen)
@@ -446,9 +452,11 @@ class CVtbDeco : public IHyprWindowDecoration {
 
 // Paint every window's hard drop shadow on this monitor, as one flat layer of
 // disjoint rects under all windows — see the definition in vtbDeco.cpp for why
-// the shadows are not drawn per-window any more. Called from main.cpp's
-// RENDER_PRE_WINDOWS hook, before the shade bars.
-void vtbRenderShadowLayer(PHLMONITOR pMonitor);
+// the shadows are not drawn per-window any more. Called TWICE from main.cpp's
+// RENDER_PRE_WINDOWS hook: overBars=false before the shade bars (the desktop
+// layer), overBars=true after them (the parts that fall on a resting rolled-up
+// bar, drawn over it so other windows' shadows appear on top of it).
+void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars = false);
 
 // Reset the process-global PangoCairo font map so the next titlebar draw
 // re-reads fontconfig — the only in-process way the bars pick up a font
