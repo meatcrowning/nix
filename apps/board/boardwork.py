@@ -499,6 +499,25 @@ DEFAULT_OPERATOR = "Solomon"
 #: excludes these so a minister is never accidentally named after a summoner.
 OPERATOR_NAMES = [o.name for o in OPERATORS]
 
+#: NOT an operator — the routing target for a work order ONE MINISTER CAN CARRY.
+#: [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
+#: there is a need to coordinate multiple ministers together?"* Solomon is a
+#: fable-5 planning session whose whole job is to SPLIT one input across several
+#: ministers and coordinate them. A lone work order needs no splitting, so
+#: summoning Solomon to dispatch a single minister is the sledgehammer he named:
+#: the plan step is pure overhead and it spends the weekly Claude window on it.
+#:
+#: So `route_operator` returns this sentinel for a single-minister order, and
+#: `board-watch.work_the_queue` dispatches ONE minister directly (`dispatch()`,
+#: the same worker path Solomon would have reached), no orchestrator in front.
+#: It is deliberately NOT in `OPERATORS`: it summons nobody, draws no roster row
+#: and registers no summoner card — a solo run IS a minister (a spirit-named
+#: worker on the minister dial), drawn in the triangle like any other. Its
+#: `flavour` (`solo`) is the whole signal `work_the_queue` branches on; its empty
+#: model means "the minister dial", resolved at dispatch by `minister_tier("")`.
+SOLO = Operator("Solo", "", "", "solo",
+                "one minister, dispatched straight to the work - no summoner")
+
 
 def operator_by_name(name):
     for o in OPERATORS:
@@ -633,17 +652,66 @@ _ROUTE_QUICK = re.compile(
     r"^\s*(what|which|who|when|where|why|how many|is |are |does |do |can |"
     r"could |should |list |name |tell me|remind me)", re.I)
 
+#: WHEN A WORK ORDER NEEDS SOLOMON rather than a single minister. [his,
+#: 2026-08-01] *"shouldnt solomon only be called when it is determined there is
+#: a need to coordinate multiple ministers together?"* Solomon exists to SPLIT
+#: one input across several ministers, so it earns its place only when there IS
+#: something to split — an order that holds several independent asks, or that
+#: spans several disjoint areas/file-sets. Everything else a lone minister
+#: carries, and `route_operator` sends it to `SOLO`.
+#:
+#: The bar is "unmistakable", the same bar every non-default flavour is held to,
+#: and it errs toward SOLO on purpose: a single minister that turns out to want
+#: help can still fan out (its `Task` tool) or relay, whereas a Solomon summoned
+#: for one minister's work is pure overhead every time. So this matches only
+#: EXPLICIT coordination language, never mere length or a single plan verb.
+_ROUTE_COORD = re.compile(
+    r"\b(split|dispatch|coordinat\w*|orchestrat\w*|in parallel|fan(?:ned)? out|"
+    r"(?:several|multiple|both|all|two|three|four|five|\d+)\s+"
+    r"(?:of\s+)?(?:the\s+)?(?:agents?|ministers?|workers?|areas?|apps?|files?|"
+    r"places?|codebases?|repos?|repositories|projects?|components?|modules?|"
+    r"pages?|screens?|parts?|sections?)|"
+    r"across\s+(?:several|multiple|both|all|two|three|four|five|\d+))\b", re.I)
+
+#: ...and the OTHER shape of "several ministers": one box holding several
+#: independent asks. Split on the joins he strings asks together with and count
+#: the clauses that each carry a plan verb — two or more is a burst he happened
+#: to type as one sentence, which is exactly what Solomon divides. (A burst he
+#: types as several sentences is coalesced and grouped elsewhere; this catches
+#: the ones that arrive fused.)
+_ASK_JOIN = re.compile(r";|\band also\b|\band then\b|\bas well as\b|\n|\bplus\b",
+                       re.I)
+
+
+def _multi_ask(text):
+    parts = [p for p in _ASK_JOIN.split(text or "") if p and p.strip()]
+    return sum(1 for p in parts if _ROUTE_PLAN.search(p)) >= 2
+
+
+def needs_coordination(text):
+    """Does this order want SEVERAL ministers coordinated, or one? True only when
+    the text unmistakably names multiple agents/areas or holds multiple asks."""
+    t = text or ""
+    return bool(_ROUTE_COORD.search(t)) or _multi_ask(t)
+
 
 def route_operator(text):
-    """Pick an `Operator` for what he typed. His EXPLICIT pick (a chosen
-    operator) is honoured by the caller before this runs; this is the auto-route
-    for when he has left it on default.
+    """Pick an `Operator` (or `SOLO`) for what he typed. His EXPLICIT pick (a
+    chosen operator) is honoured by the caller before this runs; this is the
+    auto-route for when he has left it on default.
 
     Order matters: meta and synth are narrow, unmistakable jobs, so they win
-    first; then genuine planning words send it to Solomon; then a short factual
-    question with none of those goes to the cheapest operator that can answer
-    it. Anything else falls through to the default, because a wrong route costs
-    more than defaulting to the planner, who can always ask or dispatch.
+    first; then anything that is WORK is split between Solomon (when it needs
+    several ministers coordinated) and `SOLO` (one minister, dispatched
+    straight); a question with none of those goes to the cheapest operator that
+    can answer it.
+
+    [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
+    there is a need to coordinate multiple ministers together?"* So Solomon is
+    no longer the catch-all default: a lone work order is `SOLO`, and Solomon is
+    reached only when `needs_coordination` says there is something to split. A
+    wrong SOLO route is cheap — one minister can fan out or relay — where a
+    Solomon summoned per lone order was overhead on every one.
     """
     t = text or ""
     # Synth first: "reconcile" is the narrowest, least ambiguous signal, and its
@@ -653,7 +721,9 @@ def route_operator(text):
     if _ROUTE_META.search(t):
         return operator_by_name("Trithemius")
     if _ROUTE_PLAN.search(t):
-        return operator_by_name("Solomon")
+        # A work order: Solomon only when it needs several ministers coordinated,
+        # else one minister carries it straight (no planning session in front).
+        return operator_by_name("Solomon") if needs_coordination(t) else SOLO
     # No plan words. A read-and-judge question is Agrippa's; a short factual one
     # is Weyer's; a longer un-signalled one that still is not a plan leans on the
     # crude length stand-in for "how much context" until the classifier lands.
@@ -665,12 +735,14 @@ def route_operator(text):
     # spacing"* is 43 characters, and Weyer's flavour answers and never
     # dispatches, so a short ask was silently answered instead of worked. That
     # is exactly the failure this function's own bar was written against: a
-    # mis-routed Weyer answers what needed a plan, and defaulting to Solomon
-    # costs only the difference in tier. Length still decides WHICH cheap
-    # operator once something is already a question.
+    # mis-routed Weyer answers what needed working. Length still decides WHICH
+    # cheap operator once something is already a question.
     if _ROUTE_QUICK.search(t):
         return operator_by_name("Weyer" if len(t) <= 240 else "Agrippa")
-    return default_operator()
+    # Not a question and no plan word: an un-signalled order. One minister carries
+    # it, unless it explicitly names coordinating several — the same split the
+    # plan branch makes, so the default is no longer "always Solomon".
+    return operator_by_name("Solomon") if needs_coordination(t) else SOLO
 
 
 def tick_operator(text):
@@ -2604,7 +2676,7 @@ def order_of(agent_id):
     return " ".join(str(rec.get("title") or "").split())
 
 
-def dispatch(task, phase="", where="", context="", cap_=None, model=""):
+def dispatch(task, phase="", where="", context="", cap_=None, model="", order=None):
     """One piece of work -> one worker, or -> the pending queue if we are full.
 
     Returns the task record with `state` in `running` / `queued`. It never
@@ -2621,6 +2693,12 @@ def dispatch(task, phase="", where="", context="", cap_=None, model=""):
     is resolved HERE and stored on the record, not read at spawn time, so a
     task that queues behind the cap runs on the tier it was planned with rather
     than on whatever the dial says whenever a slot happens to free.
+
+    `order` is HIS sentence behind this dispatch, for the bullet's "which of his
+    asks it came out of". `None` reads it the usual way (`_order_now`, off the
+    caller's own card) — right when a summoner dispatches. A DIRECT solo dispatch
+    (board-watch, no summoner card to read) passes his typed text explicitly, so
+    the minister's bullet can still quote what he asked.
     """
     task = " ".join((task or "").split())
     if not task:
@@ -2630,7 +2708,8 @@ def dispatch(task, phase="", where="", context="", cap_=None, model=""):
            "where": (where or "").strip(), "context": (context or "").strip(),
            "model": flag, "effort": effort, "turns": RELAY_TURNS, "relay": 0,
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
-           "host": os.uname().nodename, "order": _order_now()}
+           "host": os.uname().nodename,
+           "order": _order_now() if order is None else " ".join((order or "").split())}
     over = [{"id": a["id"], "name": a.get("name") or "",
              "where": a.get("where") or ""} for a in overlaps(rec["where"])]
     limit = cap() if cap_ is None else cap_

@@ -26,6 +26,15 @@ not how the work divides, so `drain_queue()` can wait out the rest of a burst
 and hand the whole of it to ONE summoner (`boardwork.route_groups` groups it by
 operator), which can then group it by file set.
 
+**A LONE work order skips the summoner entirely** [his, 2026-08-01] — it is
+dispatched straight to one minister (`boardwork.SOLO`, see
+[`orchestrator.md`](orchestrator.md)), so no fable-5 plan step is paid for the
+common case. The coalescing hold below is upstream of that split (it lives in
+`drain_queue`, before `work_the_queue` routes), so a lone order is still held
+out for the window; the summoner is reached only when the batch turns out to be
+a burst of two or more, which folds back into ONE Solomon for the file-set
+coordination this section is about.
+
 - **A LONE SENTENCE WAITS FOR NOTHING** — `COALESCE_QUIET_S` is **0**. This
   shipped as a flat 75 s and he felt it within the hour (*"why does it take
   seemingly minutes for prompts to get picked up and acted upon"*), then at
