@@ -360,23 +360,109 @@ Window {
     }
 
 
-    // ---- page theming: wal-coloured scrollbars ----
-    // Chromium's default scrollbars clash with the wal palette, so inject a
-    // stylesheet into every page (::-webkit-scrollbar + the standard
-    // scrollbar-color) matching the DE. Injected via runJavaScript on load
+    // ---- page theming: the desktop's ONE scrollbar, on the page too ----
+    // docs/DESIGN.md §9.2 / apps/qmlcommon/VScroll.qml is the one scrollbar
+    // idiom for the whole desktop (win31/beveled/flat, picked in Settings >
+    // Appearance) and a page's own Chromium scrollbar is the one control that
+    // idiom did not reach — it is styled here, via ::-webkit-scrollbar*,
+    // to the same widths, the same bg/bgAlt/border/dim/accent ladder, the
+    // same hard 1px bevels (no radius, no gradient) and, for win31, the same
+    // stepper arrows (drawn as a solid pixel-triangle SVG rather than a glyph,
+    // for the same reason VScroll draws them as geometry: the desktop font has
+    // no arrow glyphs at all — §2.3). Injected via runJavaScript on load
     // (WebEngineScript isn't a creatable QML element in this Qt build).
+    //
+    // What CSS cannot reach that VScroll does: a scrollbar-button's arrow ink
+    // cannot tell "nothing left to scroll" (§10's dead-arrow rule) since that
+    // needs the flickable's own position, which is not exposed to CSS at all —
+    // so a win31 stepper here never dims. Everything else (idle/hover/active
+    // ink and bevel direction, per §9.2) is reachable and done.
     function cssColor(c) {
-        return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
-             + Math.round(c.b * 255) + "," + c.a.toFixed(3) + ")";
+        return "rgb(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
+             + Math.round(c.b * 255) + ")";
+    }
+    // A 9x5 (or 5x9) solid pixel-triangle, matching VScroll's Arrow component's
+    // outline. shape-rendering:crispEdges keeps it hard-edged rather than
+    // antialiased at this tiny size.
+    function triangleUri(inkCss, dir) {
+        var svg;
+        if (dir === "up")
+            svg = '<svg xmlns="http://www.w3.org/2000/svg" width="9" height="5" viewBox="0 0 9 5" shape-rendering="crispEdges"><polygon points="4,0 8,4 0,4" fill="' + inkCss + '"/></svg>';
+        else if (dir === "down")
+            svg = '<svg xmlns="http://www.w3.org/2000/svg" width="9" height="5" viewBox="0 0 9 5" shape-rendering="crispEdges"><polygon points="0,0 8,0 4,4" fill="' + inkCss + '"/></svg>';
+        else if (dir === "left")
+            svg = '<svg xmlns="http://www.w3.org/2000/svg" width="5" height="9" viewBox="0 0 5 9" shape-rendering="crispEdges"><polygon points="0,4 4,0 4,8" fill="' + inkCss + '"/></svg>';
+        else
+            svg = '<svg xmlns="http://www.w3.org/2000/svg" width="5" height="9" viewBox="0 0 5 9" shape-rendering="crispEdges"><polygon points="4,4 0,0 0,8" fill="' + inkCss + '"/></svg>';
+        return "data:image/svg+xml;charset=utf8," + encodeURIComponent(svg);
     }
     function scrollbarJs() {
-        var bg = cssColor(Theme.bg), thumb = cssColor(Theme.border), hover = cssColor(Theme.accent);
-        var css = "::-webkit-scrollbar{width:12px;height:12px;background:" + bg + ";}"
-                + "::-webkit-scrollbar-track{background:" + bg + ";}"
-                + "::-webkit-scrollbar-thumb{background:" + thumb + ";border:3px solid " + bg + ";}"
-                + "::-webkit-scrollbar-thumb:hover{background:" + hover + ";}"
-                + "::-webkit-scrollbar-corner{background:" + bg + ";}"
-                + "html{scrollbar-color:" + thumb + " " + bg + ";}";
+        var style = (typeof DeskStyle !== "undefined" && DeskStyle
+                     && ["win31", "beveled", "flat"].indexOf(DeskStyle.scrollbarStyle) !== -1)
+                   ? DeskStyle.scrollbarStyle : "win31";
+        var isWin31 = style === "win31", isFlat = style === "flat";
+        var barW = isWin31 ? 16 : (style === "beveled" ? 14 : 11);
+
+        // the same three-tone ladder VScroll reads off the wallpaper palette
+        var dark = cssColor(Theme.bg), trackC = cssColor(Theme.bgAlt),
+            face = cssColor(Theme.border), light = cssColor(Theme.dim),
+            accent = cssColor(Theme.accent),
+            inkDim = cssColor(Theme.textDim), inkHover = cssColor(Theme.text);
+
+        var css = "::-webkit-scrollbar{width:" + barW + "px;height:" + barW + "px;}"
+                + "::-webkit-scrollbar-corner{background:" + trackC + ";}";
+
+        if (isFlat) {
+            // square, hard-edged, no bevel, no arrows, solid textDim on bgAlt
+            css += "::-webkit-scrollbar-track{background:" + trackC + ";border:none;}"
+                 + "::-webkit-scrollbar-thumb{background:" + inkDim + ";border:none;}"
+                 + "::-webkit-scrollbar-thumb:hover{background:" + inkHover + ";}"
+                 + "::-webkit-scrollbar-thumb:active{background:" + accent + ";}"
+                 + "::-webkit-scrollbar-button{display:none;}";
+        } else {
+            // win31 / beveled: recessed track, raised thumb — the same 1px
+            // hard bevel Bevel{} draws (light top/left, dark bottom/right for
+            // a raised face; swapped for the sunken track)
+            css += "::-webkit-scrollbar-track{background:" + trackC + ";"
+                 + "border-top:1px solid " + dark + ";border-left:1px solid " + dark + ";"
+                 + "border-bottom:1px solid " + light + ";border-right:1px solid " + light + ";}"
+                 + "::-webkit-scrollbar-thumb{background:" + face + ";"
+                 + "border-top:1px solid " + light + ";border-left:1px solid " + light + ";"
+                 + "border-bottom:1px solid " + dark + ";border-right:1px solid " + dark + ";}"
+                 + "::-webkit-scrollbar-thumb:active{background:" + accent + ";}";
+
+            if (isWin31) {
+                var up = triangleUri(inkDim, "up"), upH = triangleUri(inkHover, "up"), upA = triangleUri(accent, "up");
+                var dn = triangleUri(inkDim, "down"), dnH = triangleUri(inkHover, "down"), dnA = triangleUri(accent, "down");
+                var lf = triangleUri(inkDim, "left"), lfH = triangleUri(inkHover, "left"), lfA = triangleUri(accent, "left");
+                var rt = triangleUri(inkDim, "right"), rtH = triangleUri(inkHover, "right"), rtA = triangleUri(accent, "right");
+                var raised = "border-top:1px solid " + light + ";border-left:1px solid " + light + ";"
+                           + "border-bottom:1px solid " + dark + ";border-right:1px solid " + dark + ";";
+                var sunken = "border-top:1px solid " + dark + ";border-left:1px solid " + dark + ";"
+                           + "border-bottom:1px solid " + light + ";border-right:1px solid " + light + ";";
+                var btnBase = "display:block;width:" + barW + "px;height:" + barW + "px;"
+                            + "background-color:" + face + ";background-repeat:no-repeat;background-position:center;" + raised;
+                css += "::-webkit-scrollbar-button:vertical:start:decrement{" + btnBase + "background-image:url(" + up + ");}"
+                     + "::-webkit-scrollbar-button:vertical:end:increment{" + btnBase + "background-image:url(" + dn + ");}"
+                     + "::-webkit-scrollbar-button:horizontal:start:decrement{" + btnBase + "background-image:url(" + lf + ");}"
+                     + "::-webkit-scrollbar-button:horizontal:end:increment{" + btnBase + "background-image:url(" + rt + ");}"
+                     + "::-webkit-scrollbar-button:vertical:start:increment,::-webkit-scrollbar-button:vertical:end:decrement,"
+                     + "::-webkit-scrollbar-button:horizontal:start:increment,::-webkit-scrollbar-button:horizontal:end:decrement{display:none;}"
+                     + "::-webkit-scrollbar-button:hover{background-color:" + face + ";}"
+                     + "::-webkit-scrollbar-button:vertical:start:decrement:hover{background-image:url(" + upH + ");}"
+                     + "::-webkit-scrollbar-button:vertical:end:increment:hover{background-image:url(" + dnH + ");}"
+                     + "::-webkit-scrollbar-button:horizontal:start:decrement:hover{background-image:url(" + lfH + ");}"
+                     + "::-webkit-scrollbar-button:horizontal:end:increment:hover{background-image:url(" + rtH + ");}"
+                     // pressed: the bevel inverts and the arrow inks accent, like Stepper{}
+                     + "::-webkit-scrollbar-button:vertical:start:decrement:active{" + sunken + "background-image:url(" + upA + ");}"
+                     + "::-webkit-scrollbar-button:vertical:end:increment:active{" + sunken + "background-image:url(" + dnA + ");}"
+                     + "::-webkit-scrollbar-button:horizontal:start:decrement:active{" + sunken + "background-image:url(" + lfA + ");}"
+                     + "::-webkit-scrollbar-button:horizontal:end:increment:active{" + sunken + "background-image:url(" + rtA + ");}";
+            } else {
+                css += "::-webkit-scrollbar-button{display:none;}";
+            }
+        }
+
         return "(function(){var id='__surfer_scrollbar__';var css=" + JSON.stringify(css) + ";"
              + "var s=document.getElementById(id);"
              + "if(!s){s=document.createElement('style');s.id=id;(document.head||document.documentElement).appendChild(s);}"
@@ -389,10 +475,15 @@ Window {
         }
     }
     // scrollbarJs() is re-run on each page load (see onLoadingChanged) so new
-    // loads pick up the current palette; reinjectScrollbar() live-updates
-    // already-open pages when the wallpaper palette changes.
+    // loads pick up the current palette/style; reinjectScrollbar() live-updates
+    // already-open pages when the wallpaper palette OR the scrollbarStyle
+    // setting changes.
     Connections {
         target: WalPalette
+        function onChanged() { win.reinjectScrollbar(); }
+    }
+    Connections {
+        target: (typeof DeskStyle !== "undefined") ? DeskStyle : null
         function onChanged() { win.reinjectScrollbar(); }
     }
 
