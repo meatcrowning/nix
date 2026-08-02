@@ -845,15 +845,25 @@ def test_coalescing():
         # that leaves the queue full - `board-inbox.path` is level-triggered, so
         # returning would respawn this every few hundred milliseconds for the
         # length of the window.
+        # ONE THING QUEUED WAITS FOR NOTHING, at the shipped default - there
+        # is no second item to batch it with, and the path unit starts this
+        # tick ~100ms after he presses enter, so any hold IS the delay he sees.
+        r.note("a lone sentence")
+        t0 = time.time()
+        r.run(spawn=stub)          # no COALESCE_* - the module's own defaults
+        took = time.time() - t0
+        check("one queued thing is planned AT ONCE on the shipped default",
+              len(r.fires()) == 1 and took < 8, (r.fires(), "%.1fs" % took))
+        check("...and nothing is left behind it", r.queued() == [], r.queued())
+
+        r.clear()
         r.note("the first half of the thought")
         t0 = time.time()
-        r.run(spawn=stub, BOARD_COALESCE_QUIET=3, BOARD_COALESCE_BURST=90,
-              BOARD_COALESCE_MAX=600)
+        r.run(spawn=stub, BOARD_COALESCE_QUIET=3, BOARD_COALESCE_BURST=90)
         took = time.time() - t0
-        check("a just-typed sentence is waited out, not planned at once",
+        check("a lone sentence IS waited out when the window is set",
               took >= 3, "%.1fs" % took)
-        check("...on the SHORT window - one item is not yet a burst, and a "
-              "flat wait is paid by the common case",
+        check("...on the SHORT window - one item is not yet a burst",
               took < 90, "%.1fs" % took)
         check("...and the run SAYS it is holding rather than going quiet",
               "holding" in open(r.log).read(), open(r.log).read()[-200:])
@@ -869,8 +879,7 @@ def test_coalescing():
         proc = subprocess.Popen([sys.executable, WATCHER],
                                 env=r.env("open", stub,
                                           BOARD_COALESCE_QUIET=4,
-                                          BOARD_COALESCE_BURST=4,
-                                          BOARD_COALESCE_MAX=600),
+                                          BOARD_COALESCE_BURST=8),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         time.sleep(1.5)
         r.note("and the second half")
@@ -895,11 +904,11 @@ def test_coalescing():
                 json.dump(rec, f)
         r.note("typed just now")
         t0 = time.time()
-        r.run(spawn=stub, BOARD_COALESCE_QUIET=600, BOARD_COALESCE_BURST=600,
-              BOARD_COALESCE_MAX=60)
+        r.run(spawn=stub, BOARD_COALESCE_QUIET=6, BOARD_COALESCE_BURST=6)
         took = time.time() - t0
-        check("the hard ceiling plans the batch even mid-burst",
-              len(r.fires()) == 1 and took < 30, (r.fires(), "%.1fs" % took))
+        check("a queue that has already been SITTING is planned at once - "
+              "it is coalesced by definition",
+              len(r.fires()) == 1 and took < 6, (r.fires(), "%.1fs" % took))
         check("...and it took the WHOLE queue with it", r.queued() == [],
               r.queued())
     finally:
