@@ -373,9 +373,26 @@ is up.
 families; MP4 freeform names must be matched case-insensitively — some files say
 `com.apple.itunes`) into `tracks.rg_*` columns, and **mpv applies the gain
 itself** (`replaygain`/`-preamp`/`-fallback`/`-clip`), independent of the volume
-slider — verified empirically at −6.3 dB measured vs −6.32 dB tagged. ~96% of
+slider — verified empirically at −6.3 dB measured vs −6.32 dB tagged. ~93.5% of
 the library is already tagged; untagged files use the library's **median** gain
 rather than a made-up constant.
+
+The untagged remainder is filled in by `tools/replaygain.py`: it runs the
+packaged `rsgain` (an EBU-R128 / ReplayGain 2.0 scanner, on PATH) in scan-only
+mode to *compute* each track's gain+peak, then **writes the tags itself through
+`atomicsave`** — copy-then-replace, never in place, the same path every other
+write into aud/ takes, so a run that dies halfway cannot leave a truncated file
+on exFAT. Dry run is the default; `--write` applies. It writes both track and
+album gain (album-grouped by directory, so album-mode playback keeps an album's
+intended contrast). Formats `rsgain` cannot tag — DSF/DMF/MPC/TTA, listed once
+as `RG_UNSUPPORTED_EXTS` in main.py — are skipped and stay on the median
+fallback. `AutoScanner` runs it as a child after every rescan
+(`scan --write --auto`; idempotent, failures remembered in
+`~/.local/state/player/replaygain-auto.json`), so **any track that lands in the
+library — a Soulseek download via player-add.py or a file dropped straight into
+aud/ — is normalized automatically**, no manual step. Harness:
+`tools/replaygain-test.py` (28 checks, offscreen, on scratch copies; the live
+library and running player are never touched).
 
 NB when integrity-checking tag writes: `ffmpeg -i f -f md5 -` is
 **nondeterministic** on files with embedded cover art — hash audio only

@@ -82,6 +82,12 @@ LIBRARY_ROOT = Path(os.environ.get("PLAYER_LIBRARY_ROOT", "/run/media/lam/SSD/au
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".dsf", ".ogg", ".opus", ".wv",
               ".ape", ".aiff", ".aif", ".wav", ".mpc", ".tta", ".dff"}
 
+# Formats the ReplayGain scanner (tools/replaygain.py via `rsgain`) cannot tag
+# — DSD, Musepack, TTA. They keep the player's median-gain fallback at play
+# time. Single source of truth; the scan tool imports this too, so the auto
+# hook and the scanner agree on what is worth scanning.
+RG_UNSUPPORTED_EXTS = frozenset({".dsf", ".dff", ".mpc", ".tta"})
+
 DATA = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "player"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "player"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "player"
@@ -2930,6 +2936,16 @@ class AutoScanner(QObject):
         self._rewatch_timer.timeout.connect(self._watch_dirs)
         self._rewatch_timer.start(self.REWATCH_S * 1000)
         self._watch_dirs()
+        # New-track hook: whenever a rescan finishes, compute+write ReplayGain
+        # tags for any supported track that landed without them, as a child
+        # (mirrors player-add.py). Debounced so a burst of scan completions
+        # collapses into one child; only spawns when untagged supported tracks
+        # actually exist, so a fully-tagged library never pays for it.
+        self._rg_proc = None
+        self._rg_timer = QTimer(self)
+        self._rg_timer.setSingleShot(True)
+        self._rg_timer.timeout.connect(self._maybe_rg_scan)
+        self._library.scanRunning.connect(self._on_scan_running)
         # Catch up anything already sitting in downloads/ from a previous session.
         if SLSKD_DOWNLOADS.is_dir() and _has_audio(SLSKD_DOWNLOADS):
             self._import_timer.start(500)
@@ -2960,6 +2976,52 @@ class AutoScanner(QObject):
         # playlist ("recently added" included). The scan is incremental and
         # emits `changed`, which re-opens the current smart playlist.
         self._library.rescan()
+
+    def _on_scan_running(self, running):
+        # scanRunning(True) at scan start, (False) at done. Debounce so a burst
+        # of consecutive scan completions collapses into one ReplayGain child.
+        if not running:
+            self._rg_timer.start(250)
+
+    def _maybe_rg_scan(self):
+        if self._proc is not None or self._rg_proc is not None:
+            return  # an import is mid-move, or a gain scan is already running
+        if not self._untagged_pending():
+            return
+        self._rg_proc = QProcess(self)
+        self._rg_proc.finished.connect(self._on_rg_done)
+        self._rg_proc.start(sys.executable,
+                            [str(HERE / "tools" / "replaygain.py"),
+                             "scan", "--write", "--auto"])
+
+    def _on_rg_done(self, _code, _status):
+        self._rg_proc = None
+
+    def _untagged_pending(self):
+        """True if any supported-format track lacks a ReplayGain tag and has
+        not already been recorded as failed by the scanner's auto mode."""
+        try:
+            skip = set()
+            try:
+                with open(STATE / "replaygain-auto.json") as f:
+                    skip = set(json.load(f))
+            except Exception:
+                pass
+            con = open_db()
+            try:
+                rows = con.execute(
+                    "SELECT path FROM tracks WHERE rg_track_gain IS NULL").fetchall()
+            finally:
+                con.close()
+        except Exception:
+            return False
+        for r in rows:
+            p = r["path"]
+            if p in skip:
+                continue
+            if os.path.splitext(p)[1].lower() not in RG_UNSUPPORTED_EXTS:
+                return True
+        return False
 
 
 def _has_audio(d):
