@@ -1,22 +1,37 @@
 #!/usr/bin/env python3
-"""Extract a vibrant accent colour from an image and derive a full monochrome
-palette from its hue. Prints KEY=rrggbb lines for shell eval.
+"""Extract a vibrant accent colour from an image and derive the desktop palette
+from it. Prints KEY=rrggbb lines for shell eval.
 
     wal-extract.py IMAGE [--colors N] [--accent RRGGBB|--auto] [--bg pure|tone]
+                         [--full|--mono] [--variant vivid|muted|pastel]
 
-Four of the Settings program's Appearance keys land here, and this is the ONLY
+Six of the Settings program's Appearance keys land here, and this is the ONLY
 place they can: the whole desktop's palette is derived in this file, so a
 control that claims to change the palette has to change what this prints.
 Unless overridden on the command line the values come straight from
 ~/.config/quickshell/settings.json (`themeMode`, `accentOverride`,
-`paletteColorCount`, `pureBlackBg`), so Settings and a hand-run of this script
-agree. wal-prepare.sh re-runs us whenever that file is newer than the cached
-palette, which is what makes the settings apply.
+`paletteColorCount`, `pureBlackBg`, `paletteFull`, `paletteVariant`), so
+Settings and a hand-run of this script agree. wal-prepare.sh re-runs us
+whenever that file is newer than the cached palette, which is what makes the
+settings apply.
 
-Every colour still comes off ONE hue through the same value ladder — the
-manual accent replaces where the hue comes FROM, never how the ramp is built,
-and `--bg tone` puts BG on a rung below BGALT rather than inventing a colour.
-See ~/nix/docs/DESIGN.md §3.1."""
+TWO derivation modes, both filling the SAME twelve tokens (so Theme.qml is
+untouched either way):
+
+  * MONO (default) — every colour comes off ONE hue through the value ladder in
+    mono_palette(). The manual accent replaces where the hue comes FROM, never
+    how the ramp is built, and `--bg tone` puts BG on a rung below BGALT rather
+    than inventing a colour. This is the settled §3.1 look.
+
+  * FULL (`paletteFull` / `--full`) — an opt-in mode that reads a WHOLE palette
+    off the wallpaper (full_palette()): the accent stays the primary vibrant
+    hue, but the structural tones (bgAlt/border/dim/highlight) take the
+    wallpaper's SECONDARY hue and the status ramp (ok/warn/crit/info) takes real
+    green/amber/red/blue hues gently nudged toward matching wallpaper clusters —
+    so the desktop reads as several wallpaper colours, not shades of one. The
+    `paletteVariant` picker (vivid | muted | pastel) is a global chroma/value
+    transform over that generated palette; it only bites in full mode. See
+    ~/nix/docs/DESIGN.md §3.1 and §3.1.2."""
 import sys, os, json, colorsys, warnings
 from collections import Counter
 from PIL import Image
@@ -25,7 +40,23 @@ warnings.filterwarnings("ignore")
 
 SETTINGS = os.path.expanduser("~/.config/quickshell/settings.json")
 DEFAULTS = {"themeMode": "auto", "accentOverride": "#5c9fcc",
-            "paletteColorCount": 16, "pureBlackBg": True}
+            "paletteColorCount": 16, "pureBlackBg": True,
+            "paletteFull": False, "paletteVariant": "pastel"}
+
+# Full-mode variant knobs. Each is a global transform over the generated
+# palette, NOT a different derivation: the same hues come out, dressed brighter
+# or more washed. `light_cap` caps saturation on the light surfaces
+# (accent/text/status) — this is the §3.1 "pastel, not fluorescent" cap, which
+# `vivid` deliberately opens up because opting into full+vivid is opting out of
+# that rule. `accent_v` is the accent's value floor; `struct_mul` scales the
+# chroma of the dark structural tones (which glow less, so may carry more);
+# `status_s` is the status ramp's saturation.
+VARIANTS = {
+    # name       light_cap  accent_v  struct_mul  status_s
+    "pastel":  {"light_cap": 0.34, "accent_v": 0.92, "struct_mul": 1.00, "status_s": 0.42},
+    "muted":   {"light_cap": 0.20, "accent_v": 0.78, "struct_mul": 0.55, "status_s": 0.30},
+    "vivid":   {"light_cap": 0.85, "accent_v": 1.00, "struct_mul": 1.45, "status_s": 0.90},
+}
 
 
 def settings():
@@ -62,88 +93,51 @@ def hsv_hex(h, s, v):
     return "%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
-def main():
-    cfg = settings()
-    args = sys.argv[1:]
-    path = None
-    colors = None
-    accent_hex = None
-    manual = cfg["themeMode"] == "manual"
-    pure_bg = bool(cfg["pureBlackBg"])
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--colors":
-            i += 1; colors = int(args[i])
-        elif a == "--accent":
-            i += 1; accent_hex = args[i]; manual = True
-        elif a == "--auto":
-            manual = False
-        elif a == "--bg":
-            i += 1; pure_bg = (args[i] == "pure")
-        else:
-            path = a
-        i += 1
+def hue_dist(a, b):
+    """Shortest distance between two hues on the [0,1) colour wheel: 0..0.5."""
+    d = abs(a - b) % 1.0
+    return min(d, 1.0 - d)
 
-    if colors is None:
-        try:
-            colors = int(cfg["paletteColorCount"])
-        except (TypeError, ValueError):
-            colors = 16
-    # PIL's quantizers take 2..256; the Settings slider is 8..32.
-    colors = max(2, min(256, colors))
-    if accent_hex is None:
-        accent_hex = cfg["accentOverride"]
 
-    manual_hsv = parse_hex(accent_hex) if manual else None
-    if manual and manual_hsv is None:
-        # A manual accent that doesn't parse must not silently become a
-        # wallpaper palette — that reads as "the setting did nothing".
-        sys.stderr.write("wal-extract: bad accentOverride %r, falling back to "
-                         "the wallpaper\n" % (accent_hex,))
-    if manual_hsv is not None:
-        # Manual mode: the hue comes from the picked colour instead of the
-        # image, and nothing below changes. avg_sat is the picked colour's own
-        # saturation, so the greyscale guard still applies to a grey pick.
-        h, s, v = manual_hsv
-        avg_sat = s
-    else:
-        if path is None:
-            sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
-                             "[--accent RRGGBB] [--bg pure|tone]\n")
-            return 2
-        img = Image.open(path).convert("RGB")
-        img.thumbnail((200, 200))
-        # Quantise, then score each cluster by vibrancy * frequency so we pick
-        # the colour that "reads" as the wallpaper's accent, not the black
-        # background. More clusters = a finer split, so a small vivid area can
-        # win a cluster of its own instead of being averaged into a big dull
-        # one; that is what `paletteColorCount` buys.
-        q = img.quantize(colors=colors, method=Image.FASTOCTREE).convert("RGB")
-        counts = Counter(q.getdata())
-        best, best_score = None, -1.0
-        total = 0.0
-        sat_sum = 0.0
-        for (r, g, b), cnt in counts.items():
-            h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
-            sat_sum += s * cnt
-            total += cnt
-            score = (s ** 1.5) * (v ** 0.5) * cnt
-            if score > best_score:
-                best_score, best = score, (h, s, v)
-        h, s, v = best
-        avg_sat = sat_sum / total if total else 0.0
-    # A near-greyscale wallpaper (silver/steel gradient, etc.) has no real
-    # accent hue — the "winning" pixel is just faintly tinted grey. Forcing
-    # saturation up would fabricate a vivid colour (e.g. prussian blue) that
-    # doesn't match the wallpaper. So: only enforce a vivid accent when the
-    # image is actually colourful; otherwise keep the palette desaturated/grey
-    # on whatever faint hue it has, so silver stays silver.
-    if avg_sat < 0.15:
-        s = min(s, 0.12)   # stay grey/silver
-    else:
-        s = max(s, 0.55)   # keep a defined hue to derive the palette from
+def pick_secondary(clusters, ph, ps):
+    """The wallpaper's SECONDARY colour for the structural tones: the saturated,
+    non-trivial cluster whose hue sits farthest from the accent, so the frames
+    read as a different wallpaper colour rather than a darker accent. Falls back
+    to the accent hue itself on a monochrome image (then full mode degrades
+    gracefully toward the mono look for the structural tones)."""
+    best, best_score = None, -1.0
+    for (h, s, v, c) in clusters:
+        if s < 0.18 or v < 0.06:
+            continue
+        score = hue_dist(h, ph) * (0.5 + s) * (c ** 0.25)
+        if score > best_score:
+            best_score, best = score, (h, s)
+    return best if best is not None else (ph, ps)
 
+
+def nudge_hue(hue, clusters, tol=0.11, amt=0.30):
+    """Pull a canonical status hue GENTLY toward the nearest saturated wallpaper
+    cluster, but only one already close to it (within `tol`). A wallpaper that
+    has a green tints OK's green a little; one that has none keeps canonical
+    green, so a status colour never stops reading as its state — §3.5/§3.2 keep
+    status legible. Blends on the wheel, shortest-arc."""
+    near, near_d = None, tol
+    for (h, s, v, c) in clusters:
+        if s < 0.25:
+            continue
+        d = hue_dist(h, hue)
+        if d < near_d:
+            near_d, near = d, h
+    if near is None:
+        return hue
+    # shortest-arc interpolation toward `near`
+    diff = (near - hue + 0.5) % 1.0 - 0.5
+    return (hue + diff * amt) % 1.0
+
+
+def mono_palette(h, s, v, pure_bg):
+    """The settled §3.1 single-hue value ladder. Unchanged: this is the default
+    look, and every existing theme must re-derive to the same colours."""
     # Pastel, not fluorescent: a bright surface with high saturation reads as
     # neon on the black panel. Pastels keep the brightness but wash the chroma
     # out, so cap saturation low on the light surfaces (accent/text/status) and
@@ -152,9 +146,8 @@ def main():
     # stay distinguishable. PASTEL folds in the grey/silver case (s already <=
     # 0.12 there, so the cap is a no-op and silver stays silver).
     PASTEL = min(s, 0.34)
-
     accent = hsv_hex(h, PASTEL, max(v, 0.90))
-    out = {
+    return {
         "ACCENT":    accent,
         # Body text IS the accent colour (not a brighter tint of it), so the
         # panel / runner / OSD text reads as the same red as kitty's foreground
@@ -182,12 +175,184 @@ def main():
         "CRIT":      hsv_hex(h, min(s, 0.55), 0.98),
         "INFO":      hsv_hex(h, min(s, 0.34), 0.72),
     }
+
+
+def full_palette(h, s, v, clusters, pure_bg, variant):
+    """The opt-in FULL palette: the accent stays the primary hue, but the
+    structural tones take the wallpaper's secondary hue and the status ramp
+    takes real colour-coded hues nudged toward the wallpaper. Still the same
+    twelve tokens. `variant` (vivid|muted|pastel) is a global transform — see
+    VARIANTS. docs/DESIGN.md §3.1.2."""
+    vp = VARIANTS.get(variant, VARIANTS["pastel"])
+    lcap, av, smul, ss = (vp["light_cap"], vp["accent_v"],
+                          vp["struct_mul"], vp["status_s"])
+
+    # Light surfaces: accent hue, chroma capped by the variant, value lifted.
+    # `min(s, lcap)` so a washed wallpaper is never forced brighter than it is
+    # and the greyscale guard (s already clamped upstream) still holds — a
+    # silver wallpaper stays silver in every variant.
+    LIGHT = min(s, lcap)
+    accent = hsv_hex(h, LIGHT, max(v, av))
+
+    # Structural tones: the wallpaper's SECONDARY hue, so frames/insets read as
+    # a different wallpaper colour. Low value means chroma doesn't glow, so the
+    # variant is free to push it (smul) — clamped in hsv_hex.
+    h2, s2 = pick_secondary(clusters, h, s)
+
+    def struct(cap, val):
+        return hsv_hex(h2, min(s2 * smul, cap * (1.0 if smul <= 1 else smul)), val)
+
+    # Status ramp: real colour-coded hues (green/amber/red/blue), each gently
+    # pulled toward a matching wallpaper cluster when one is close. CRIT keeps a
+    # chroma floor so an alarm reads even in the muted variant.
+    ok_h   = nudge_hue(0.34, clusters)
+    warn_h = nudge_hue(0.12, clusters)
+    crit_h = nudge_hue(0.00, clusters)
+    info_h = nudge_hue(0.57, clusters)
+    return {
+        "ACCENT":    accent,
+        "TEXT":      accent,   # body text is still the accent (§3.1.1 focus rule)
+        "TEXTDIM":   hsv_hex(h, min(s, lcap * 1.15), 0.60),
+        "DIM":       struct(0.50, 0.33),
+        "BORDER":    struct(0.60, 0.22),
+        "BGALT":     struct(0.55, 0.07),
+        "HIGHLIGHT": struct(0.60, 0.13),
+        "BG":        "000000" if pure_bg else struct(0.55, 0.035),
+        "OK":        hsv_hex(ok_h,   ss,              0.90),
+        "WARN":      hsv_hex(warn_h, ss,              0.82),
+        "CRIT":      hsv_hex(crit_h, max(ss, 0.65),  0.98),
+        "INFO":      hsv_hex(info_h, min(ss, 0.55),  0.74),
+    }
+
+
+def main():
+    cfg = settings()
+    args = sys.argv[1:]
+    path = None
+    colors = None
+    accent_hex = None
+    manual = cfg["themeMode"] == "manual"
+    pure_bg = bool(cfg["pureBlackBg"])
+    full = bool(cfg["paletteFull"])
+    variant = str(cfg["paletteVariant"] or "pastel")
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--colors":
+            i += 1; colors = int(args[i])
+        elif a == "--accent":
+            i += 1; accent_hex = args[i]; manual = True
+        elif a == "--auto":
+            manual = False
+        elif a == "--bg":
+            i += 1; pure_bg = (args[i] == "pure")
+        elif a == "--full":
+            full = True
+        elif a == "--mono":
+            full = False
+        elif a == "--variant":
+            i += 1; variant = args[i]
+        else:
+            path = a
+        i += 1
+
+    if variant not in VARIANTS:
+        variant = "pastel"
+    if colors is None:
+        try:
+            colors = int(cfg["paletteColorCount"])
+        except (TypeError, ValueError):
+            colors = 16
+    # PIL's quantizers take 2..256; the Settings slider is 8..32.
+    colors = max(2, min(256, colors))
+    if accent_hex is None:
+        accent_hex = cfg["accentOverride"]
+
+    manual_hsv = parse_hex(accent_hex) if manual else None
+    if manual and manual_hsv is None:
+        # A manual accent that doesn't parse must not silently become a
+        # wallpaper palette — that reads as "the setting did nothing".
+        sys.stderr.write("wal-extract: bad accentOverride %r, falling back to "
+                         "the wallpaper\n" % (accent_hex,))
+
+    # Read the image's clusters whenever the palette derives FROM the wallpaper:
+    # always in auto mode (for the accent), and always in FULL mode (for the
+    # secondary + status hues, even when the accent hue was picked by hand).
+    clusters = []
+    img_hsv = None    # (h, s, v, avg_sat) from the image's winning cluster
+    if (manual_hsv is None) or full:
+        if path is None:
+            sys.stderr.write("usage: wal-extract.py IMAGE [--colors N] "
+                             "[--accent RRGGBB] [--bg pure|tone] "
+                             "[--full|--mono] [--variant vivid|muted|pastel]\n")
+            return 2
+        try:
+            img = Image.open(path).convert("RGB")
+            img.thumbnail((200, 200))
+            # Quantise, then score each cluster by vibrancy * frequency so we
+            # pick the colour that "reads" as the wallpaper's accent, not the
+            # black background. More clusters = a finer split, so a small vivid
+            # area can win a cluster of its own instead of being averaged into a
+            # big dull one; that is what `paletteColorCount` buys — and, in full
+            # mode, more candidate hues for the secondary and status tones.
+            q = img.quantize(colors=colors, method=Image.FASTOCTREE).convert("RGB")
+            counts = Counter(q.getdata())
+            best, best_score = None, -1.0
+            total = 0.0
+            sat_sum = 0.0
+            for (r, g, b), cnt in counts.items():
+                h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+                clusters.append((h, s, v, cnt))
+                sat_sum += s * cnt
+                total += cnt
+                score = (s ** 1.5) * (v ** 0.5) * cnt
+                if score > best_score:
+                    best_score, best = score, (h, s, v)
+            bh, bs, bv = best
+            img_hsv = (bh, bs, bv, sat_sum / total if total else 0.0)
+        except Exception as e:
+            # In full+manual we can still proceed with just the picked hue (the
+            # structural/status tones then degrade to canonical, no wallpaper
+            # nudge). In auto mode there is no fallback — a black desktop is
+            # worse than an error.
+            if manual_hsv is None:
+                sys.stderr.write("wal-extract: cannot read %r: %s\n" % (path, e))
+                return 1
+
+    if manual_hsv is not None:
+        # Manual mode: the accent hue comes from the picked colour, not the
+        # image. avg_sat is the picked colour's own saturation, so the greyscale
+        # guard still applies to a grey pick.
+        h, s, v = manual_hsv
+        avg_sat = s
+    else:
+        h, s, v, avg_sat = img_hsv
+
+    # A near-greyscale wallpaper (silver/steel gradient, etc.) has no real
+    # accent hue — the "winning" pixel is just faintly tinted grey. Forcing
+    # saturation up would fabricate a vivid colour (e.g. prussian blue) that
+    # doesn't match the wallpaper. So: only enforce a vivid accent when the
+    # image is actually colourful; otherwise keep the palette desaturated/grey
+    # on whatever faint hue it has, so silver stays silver. (The variant caps
+    # in full mode never RAISE saturation, so silver stays silver there too.)
+    if avg_sat < 0.15:
+        s = min(s, 0.12)   # stay grey/silver
+    else:
+        s = max(s, 0.55)   # keep a defined hue to derive the palette from
+
+    if full:
+        out = full_palette(h, s, v, clusters, pure_bg, variant)
+        mode_label = "manual+full" if manual_hsv is not None else "full"
+    else:
+        out = mono_palette(h, s, v, pure_bg)
+        mode_label = "manual" if manual_hsv is not None else "auto"
+
     # The options this palette was derived under. wal-set.sh evals the file, so
     # this is a comment rather than a KEY=value — it exists so `cat
     # ~/.cache/wal/themes/*.env` says which settings produced the colours when
     # someone is working out why a toggle "did nothing".
-    print("# opts: mode=%s colors=%d bg=%s%s"
-          % ("manual" if manual_hsv is not None else "auto", colors,
+    print("# opts: mode=%s variant=%s colors=%d bg=%s%s"
+          % (mode_label, variant if full else "-", colors,
              "pure" if pure_bg else "tone",
              (" accent=%s" % accent_hex) if manual_hsv is not None else ""))
     for k, val in out.items():
