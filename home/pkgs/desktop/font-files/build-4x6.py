@@ -48,7 +48,7 @@ import sys
 from pathlib import Path
 
 # --- the glyphs --------------------------------------------------------------
-# key: codepoint; value: 6 rows, each 4 chars of '#'/' ' (row 0 = top).
+# key: codepoint; value: 6 rows, each 4 chars of '#'/'.' (row 0 = top).
 G = {
 0x20: ["...."]*6,                                  # space
 0x21: [".#..",".#..",".#..",".#..","....",".#.."],  # !
@@ -173,6 +173,8 @@ G = {
 0x2193: [".#..",".#..",".#..","###.",".#..","...."],  # ↓ sort descending (filer)
 0x2212: ["....","....","####","....","....","...."],  # − zoom out (reader, viewer); bar aligns +,=
 0x25a0: ["....","####","####","####","####","...."],  # ■ non-image preview placeholder (filer)
+0x2588: ["####","####","####","####","####","####"],  # █ full block — progress-bar fill (surfer, filer video convert)
+0x2591: ["#...","..#.","#...","..#.","#...","..#."],  # ░ light shade — progress-bar empty track (dithered)
 0x25b6: ["#...","###.","####","###.","#...","...."],  # ▶ play (viewer)
 0x2665: ["....","#..#","####","####",".##.","...."],  # ♥ favourite (player)
 0x266b: ["..##","..#.","#.#.","#.#.","###.","###."],  # ♫ now-playing marker (player)
