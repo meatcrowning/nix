@@ -6892,6 +6892,62 @@ def test_card_output(tmp):
     del os.environ["BOARD_TRANSCRIPTS"]
 
 
+def test_shells(tmp):
+    """The triangle's live shells: a per-minister tail of the running agent's
+    own output, off the same `cards` list the triangle draws, and only for
+    running ministers — the FILE under `~/.cache/board-work/<id>.log` is
+    buffered and empty until exit, so the transcript is the live source."""
+    import main as brd
+    import boardagents as ba
+    print("\n=== the triangle shows each bound minister's live shell ===")
+    os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
+    agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling
+    ba.register("w-a", "T", 1, kind="worker", session="ses-a", where="apps/x/**")
+    ba.register("w-b", "T", 1, kind="worker", session="ses-b", where="apps/x/**")
+    ba.register("w-quiet", "T", 1, kind="worker", session="ses-quiet",
+                where="apps/x/**")
+    d = os.path.join(tmp, "transcripts", "-proj")
+    os.makedirs(d, exist_ok=True)
+
+    def say(sess, *parts):
+        with open(os.path.join(d, sess + ".jsonl"), "a") as f:
+            f.write(json.dumps({"type": "assistant",
+                                "message": {"role": "assistant",
+                                            "content": list(parts)}}) + "\n")
+
+    say("ses-a", {"type": "text", "text": "alpha one"},
+        {"type": "text", "text": "alpha two"},
+        {"type": "text", "text": "alpha three"})
+    say("ses-b", {"type": "text", "text": "beta one"})
+    # an empty transcript, the shape of a running minister that has not spoken
+    open(os.path.join(d, "ses-quiet.jsonl"), "w").close()
+
+    cards = [
+        {"id": "w-a", "name": "Marbas", "kind": "worker", "state": "running"},
+        {"id": "w-b", "name": "Bune", "kind": "worker", "state": "running"},
+        {"id": "w-quiet", "name": "Camio", "kind": "worker", "state": "running"},
+        {"id": "w-stop", "name": "X", "kind": "worker", "state": "exited"},
+        {"id": "w-sum", "name": "Solomon", "kind": ba.ORCHESTRATOR_KIND,
+         "state": "running"},
+    ]
+    shells = agents._shells_build(cards)
+    by = {s["id"]: s for s in shells}
+    check("a running minister's shell tails its own last couple of lines",
+          by["w-a"]["lines"] == ["alpha two", "alpha three"], by)
+    check("...and a short one shows what it has (one line, not a filler)",
+          by["w-b"]["lines"] == ["beta one"], by)
+    check("...a minister still bound but silent draws no shell row at all",
+          "w-quiet" not in by, list(by))
+    check("...an exited worker is never shelled",
+          "w-stop" not in by, list(by))
+    check("...and the orchestrator never is either (his card is the summoner)",
+          "w-sum" not in by, list(by))
+    ba.unregister("w-a")
+    ba.unregister("w-b")
+    ba.unregister("w-quiet")
+    del os.environ["BOARD_TRANSCRIPTS"]
+
+
 def _hermes_db(path):
     """A synthetic `~/.hermes/state.db` with the columns this reads.
 
@@ -7198,6 +7254,7 @@ def main():
         test_usage_fetch(os.path.join(tmp, "usf"))
         os.makedirs(os.path.join(tmp, "out"))
         test_card_output(os.path.join(tmp, "out"))
+        test_shells(os.path.join(tmp, "out"))
         os.makedirs(os.path.join(tmp, "herm"))
         test_hermes(os.path.join(tmp, "herm"))
 

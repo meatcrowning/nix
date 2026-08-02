@@ -69,6 +69,10 @@ Window {
     readonly property var summonerCards: Agents.summoner
     readonly property var agentCards: Agents.workers
     readonly property var queuedNotes: Agents.queued
+    // The triangle's LIVE SHELLS — a little tail per bound minister ([his ask,
+    // 2026-08-01]). `main.py` builds them off the same `workers` list, so this
+    // can never disagree with the cards above it about who is bound.
+    readonly property var agentShells: Agents.shells
     // Is anything actually HAPPENING? This is the WORKERS' list now, so the
     // question is just whether it is empty — Solomon's standing row, which is
     // drawn whether or not anything is running, is in his own section above.
@@ -1769,13 +1773,67 @@ Window {
                         }
                     }
 
+                    // ---- their LIVE SHELLS ----
+                    // [his ask, 2026-08-01] a small live tail per bound minister,
+                    // under the cards: the last couple of lines each one is
+                    // actually producing, so a running spirit reads as a live
+                    // process rather than two sentences and a name. It is the
+                    // SAME source the card drawer tails (the transcript — a
+                    // running worker's `.log` is buffered till exit), built in
+                    // `main.py` off the same `workers` list, so the section can
+                    // never disagree with the cards about who is bound.
+                    //
+                    // It shows only when there is something to show (§5.2 — an
+                    // empty shell slot is a hole he has to fill): no bound
+                    // ministers, or none with anything logged yet, draws no
+                    // band and no rows. It collapses like every heading here.
+                    SectionHead {
+                        id: shellsHead
+                        width: agentsCol.width
+                        visible: win.agentShells.length > 0
+                        height: visible ? implicitHeight : 0
+                        label: "shells"
+                        collapsed: win.isCollapsed("shells")
+                        fgDim: win.fgDim
+                        onToggled: win.toggleCollapsed("shells")
+                    }
+
+                    Item {
+                        width: agentsCol.width
+                        visible: win.agentShells.length > 0
+                                 && !win.isCollapsed("shells")
+                        implicitHeight: visible ? shellsCol.implicitHeight : 0
+                        height: implicitHeight
+
+                        Column {
+                            id: shellsCol
+                            width: parent.width
+                            spacing: 2
+
+                            Repeater {
+                                model: win.keysOf(win.agentShells, "id")
+                                delegate: Shell {
+                                    id: shellRow
+                                    required property int index
+                                    readonly property var modelData:
+                                        win.agentShells[shellRow.index] || ({})
+                                    width: shellsCol.width
+                                    name: shellRow.modelData.name
+                                    lines: shellRow.modelData.lines
+                                    cellW: win.cellW
+                                    fgDim: win.fgDim
+                                }
+                            }
+                        }
+                    }
+
                     // The watcher's own systemd sentence used to sit here, under
                     // the cards. It does not any more: [his, 2026-07-30] with
-                    // ministers bound the section draws the cards and NOTHING
-                    // else. It is still read (`Agents.watcher`/`armed`) and it
-                    // is still SAID in the one case where silence would make
-                    // the empty line a lie — a watcher that will never fire,
-                    // up beside "binds ministers." (§10).
+                    // ministers bound the section draws the cards and the shells
+                    // and NOTHING else. It is still read (`Agents.watcher`/
+                    // `armed`) and it is still SAID in the one case where
+                    // silence would make the empty line a lie — a watcher that
+                    // will never fire, up beside "binds ministers." (§10).
                 }
             }
 
