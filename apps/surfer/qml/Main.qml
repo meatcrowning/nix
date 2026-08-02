@@ -401,7 +401,15 @@ Window {
                      && ["win31", "beveled", "flat"].indexOf(DeskStyle.scrollbarStyle) !== -1)
                    ? DeskStyle.scrollbarStyle : "win31";
         var isWin31 = style === "win31", isFlat = style === "flat";
-        var barW = isWin31 ? 16 : (style === "beveled" ? 14 : 11);
+        // barW is the desktop VScroll width in DEVICE-independent px (§9.2).
+        // A ::-webkit-scrollbar width is in CSS px, which Chromium multiplies
+        // by the page zoom — so at a zoom of 0.83 a 16px bar renders ~13px on
+        // screen and reads SKINNIER than the Qt-chrome VScroll, which does not
+        // zoom. Divide by the zoom so the on-screen width stays barW regardless
+        // (physical = barW/z * z = barW). screenDPR cancels and is not involved.
+        var z = (typeof Zoom !== "undefined" && Zoom && Zoom.level > 0) ? Zoom.level : 1;
+        var barW0 = isWin31 ? 16 : (style === "beveled" ? 14 : 11);
+        var barW = Math.round(barW0 / z * 100) / 100;
 
         // the same three-tone ladder VScroll reads off the wallpaper palette
         var dark = cssColor(Theme.bg), trackC = cssColor(Theme.bgAlt),
@@ -485,6 +493,12 @@ Window {
     Connections {
         target: (typeof DeskStyle !== "undefined") ? DeskStyle : null
         function onChanged() { win.reinjectScrollbar(); }
+    }
+    // The bar width is zoom-compensated (scrollbarJs), so a zoom change has to
+    // re-inject or the page bar keeps the previous zoom's width until reload.
+    Connections {
+        target: (typeof Zoom !== "undefined") ? Zoom : null
+        function onLevelChanged() { win.reinjectScrollbar(); }
     }
 
     // ---- dark mode (DarkMode bridge) ----
