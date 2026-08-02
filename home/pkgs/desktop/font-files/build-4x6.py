@@ -152,9 +152,17 @@ G = {
 # this face somewhere, NOT external text (which Glyphs.px()/pylib.glyphs map to
 # ASCII on the way in). Botis lacking one made its whole line fall back to
 # another font and lose ~5px of ascent, clipping the row — so a missing glyph
-# here is not cosmetic. Kept to what is drawn; typographic punctuation the UI
-# never authors (…, em/en dash, curly quotes, • , →) is deliberately absent
-# because the desktop maps it to ASCII before it ever reaches this font.
+# here is not cosmetic.
+#
+# Most typographic punctuation the UI never authors (…, •, →) stays absent on
+# purpose: the desktop maps it to ASCII at ingest (Glyphs.px()/pylib.glyphs)
+# before it reaches this font. But that ingest mapping is only wired into the
+# panel and reader — the six other apps parse foreign metadata (an ID3 title
+# like "Don't Stop") and draw it raw, so a curly apostrophe/quote or an en/em
+# dash from a real tag DOES reach this face and clipped the player's rows. Those
+# few characters are therefore carried here (mapped to their ASCII twins' shapes,
+# which is what px() would have produced anyway) so any app is safe without its
+# own ingest pass. More Perfect DOS VGA already covers them; this is parity.
 0x00b0: [".##.","#..#","#..#",".##.","....","...."],  # ° temperature unit (panel settings)
 0x00b7: ["....","....",".#..","....","....","...."],  # · separator (player), star fallback
 0x00d7: ["....","#..#",".##.",".##.","#..#","...."],  # × close buttons (player, viewer)
@@ -168,6 +176,18 @@ G = {
 0x25b6: ["#...","###.","####","###.","#...","...."],  # ▶ play (viewer)
 0x2665: ["....","#..#","####","####",".##.","...."],  # ♥ favourite (player)
 0x266b: ["..##","..#.","#.#.","#.#.","###.","###."],  # ♫ now-playing marker (player)
+
+# Typographic punctuation that arrives in FOREIGN text (ID3 tags, filenames)
+# and reaches this face because the six non-panel/reader apps do not px()-map at
+# ingest. Each reuses its ASCII twin's shape — px() would map it to that ASCII
+# char anyway — so a curly apostrophe no longer forces a taller fallback and
+# clips the row. Parity with More Perfect DOS VGA, which already carries these.
+0x2018: [".#..","....","....","....","....","...."],  # ' left single quote  (= ')
+0x2019: [".#..","....","....","....","....","...."],  # ' right single quote / apostrophe (= ')
+0x201c: [".#.#",".#.#","....","....","....","...."],  # " left double quote  (= ")
+0x201d: [".#.#",".#.#","....","....","....","...."],  # " right double quote (= ")
+0x2013: ["....","....","....","####","....","...."],  # – en dash  (= -)
+0x2014: ["....","....","....","####","....","...."],  # — em dash  (= -)
 }
 
 # --- metrics -----------------------------------------------------------------
