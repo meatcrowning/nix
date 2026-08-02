@@ -144,6 +144,7 @@ struct SGlobalState {
         SP<Config::Values::CColorValue>  buttonBorderColor;
         SP<Config::Values::CColorValue>  accentColor;
         SP<Config::Values::CColorValue>  critColor;
+        SP<Config::Values::CColorValue>  warnColor;
         SP<Config::Values::CColorValue>  inactiveColor;
 
         // ---- THE DESKTOP'S MOTION (see vtbPublishMotion below) ----
@@ -236,6 +237,9 @@ namespace Vtb::Cfg {
     }
     inline auto critColor() {
         return g_pGlobalState->config.critColor->value();
+    }
+    inline auto warnColor() {
+        return g_pGlobalState->config.warnColor->value();
     }
     inline auto inactiveColor() {
         return g_pGlobalState->config.inactiveColor->value();
