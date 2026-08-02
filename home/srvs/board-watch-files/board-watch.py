@@ -956,10 +956,29 @@ def work_the_queue():
     (a question in NEEDS YOU, answered at his leisure). `boardwork.py` owns both
     verbs and the prompt.
 
+    SOLOMON IS SUMMONED ONLY WHEN THERE ARE SEVERAL MINISTERS TO COORDINATE.
+    [his, 2026-08-01] *"shouldnt solomon only be called when it is determined
+    there is a need to coordinate multiple ministers together?"* So `route_operator`
+    routes a lone work order to `boardwork.SOLO` — a sentinel, not an operator —
+    and a LONE solo order is DISPATCHED DIRECTLY (`bw.dispatch`, the same capped
+    worker path a summoner reaches), with no planning session in front. Solomon
+    is summoned only for an order that needs SPLITTING (`needs_coordination`:
+    several independent asks, or several disjoint areas).
+
+    A BURST OF SOLO ORDERS IS STILL A SOLOMON. Two work orders arriving in one
+    coalesced batch are several ministers who may touch one file, which is
+    exactly what coalescing exists to coordinate: the batch reaches ONE Solomon
+    that groups by file set rather than two ministers editing the same file. So
+    the split is by COUNT — one solo order goes straight to a minister (his
+    common case, the whole point of this change); two or more fold back into
+    Solomon, keeping the coalescing behaviour intact.
+
     THESE RUNS ARE WAITED ON, and the workers they start are not. That is the
     whole concurrency design: the tick blocks only for the short planning runs, so
     its flock is released long before the workers finish — a decision he answers
-    five minutes from now still fires on time.
+    five minutes from now still fires on time. A direct solo dispatch is not
+    waited on either — `bw.dispatch` starts the minister in its own unit and
+    returns.
 
     ONE SUMMONER PER OPERATOR, not per sentence. [his, 2026-08-01, of a tick that
     logged "3 thing(s) ... across 3 summoner(s) as Solomon": *"why the fuck are
@@ -975,7 +994,8 @@ def work_the_queue():
     change takes effect on the next tick with nothing restarted. It is now a
     ceiling on CONCURRENCY: the operator groups run in waves of at most that many
     threads, so nothing is left unworked, but no more than his chosen number of
-    summoner sessions is ever alive together.
+    summoner sessions is ever alive together. It bounds SUMMONERS; a lone solo
+    minister rides the worker cap (`bw.cap()`), which `bw.dispatch` honours.
 
     Returns True if a run happened.
     """
@@ -988,24 +1008,56 @@ def work_the_queue():
     # model/effort into `_summon` -> `spawn` explicitly, so two groups on
     # different operators do not race the process-global `BOARD_ORCH_*` env.
     groups = bw.route_groups(msgs)
-    log("orchestrating %d thing(s) he typed as %d summoner(s): %s"
-        % (len(msgs), len(groups),
-           ", ".join("%s x%d (%s %s)" % (op.name, len(g), op.model, op.effort)
-                     for op, g in groups)))
-    total = len(groups)
+    # SOLO items do not summon. A LONE one is dispatched straight to a minister; a
+    # BURST of two or more folds back into Solomon (merging with any real Solomon
+    # group), because a coalesced burst is exactly the file-set-collision case
+    # coalescing exists to have ONE planner coordinate.
+    solo_items = [it for op, g in groups if op.flavour == "solo" for it in g]
+    summon = [(op, g) for op, g in groups if op.flavour != "solo"]
+    happened = False
+    if len(solo_items) == 1:
+        # THE WHOLE POINT: one work order, one minister, no planning session in
+        # front. `order` carries his own sentence for the bullet's "which of his
+        # asks it came out of" — there is no summoner card to read it off, so it
+        # is passed explicitly. `bw.dispatch` is capped and never waits.
+        it = solo_items[0]
+        rec = bw.dispatch(it["text"], order=it["text"])
+        happened = True
+        log("dispatched one minister (%s) straight for: %s"
+            % ((rec or {}).get("state", "?"), it["text"][:70]))
+    elif solo_items:
+        # A burst: hand the lot to Solomon so it groups them by file set. Merge
+        # into an existing Solomon group if the batch already had one.
+        sol = bw.operator_by_name("Solomon")
+        for i, (op, g) in enumerate(summon):
+            if op.name == sol.name:
+                summon[i] = (op, g + solo_items)
+                break
+        else:
+            summon.append((sol, solo_items))
+
+    log("working %d thing(s) he typed: %d summoner(s)%s"
+        % (len(msgs), len(summon),
+           (": " + ", ".join("%s x%d (%s %s)" % (op.name, len(g), op.model,
+                                                 op.effort)
+                             for op, g in summon)) if summon else " (solo)"))
+
+    total = len(summon)
     out = {}
 
     def one(i, op, group):
         out[i] = _summon(group, i, total, op)
 
     if total == 1:
-        one(0, groups[0][0], groups[0][1])
-    else:
+        one(0, summon[0][0], summon[0][1])
+        happened = True
+    elif total:
         # In waves of at most `summoners()`: his concurrency ceiling, honoured
         # without stranding any group — the next wave starts when this one is home.
+        happened = True
         width = max(1, bw.summoners())
         for start in range(0, total, width):
-            wave = list(enumerate(groups))[start:start + width]
+            wave = list(enumerate(summon))[start:start + width]
             pool = [threading.Thread(target=one, args=(i, op, g), daemon=True)
                     for i, (op, g) in wave]
             for t in pool:
@@ -1019,7 +1071,7 @@ def work_the_queue():
     for text in fails:
         if text:
             note_on_board(text)
-    return True
+    return happened
 
 
 #: Set by drain_queue() when there IS something queued and the gate said no. A
