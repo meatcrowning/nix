@@ -462,6 +462,17 @@ what is already handled, and `--dry-run` shows picks without enqueueing. It
 requires slskd to be **running and logged in** — which the generated
 `slskd.yml` alone does not provide (see `home/prog/slskd.nix`).
 
+**Each run fans the batch out across distinct peers.** slskd serializes
+downloads from one peer over a single connection (the Soulseek protocol grants
+one upload slot per user), so a run that piled every match onto the same peer —
+common when an album/single-artist set lives on one user's share — lined them
+all up behind that one slot and read as "only one transfer at a time" however
+high `global.download.slots` was. `pick_candidate` therefore de-prioritizes a
+peer a run has already enqueued `MAX_ENQUEUES_PER_PEER` (2) files to, and
+prefers a peer advertising a free upload slot on the tiebreak. Both biases
+break ties only — a file offered solely by an already-loaded/busy peer is still
+enqueued there rather than refused.
+
 Each run also **re-sources downloads that ended failed** — slskd's
 `Completed, Rejected` (and `Cancelled`/`TimedOut`/`Errored`/`Aborted`) states,
 where a peer accepted the request then refused the transfer, so the track

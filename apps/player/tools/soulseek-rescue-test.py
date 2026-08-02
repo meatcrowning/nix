@@ -274,6 +274,55 @@ def test_pick_candidate_skips_blocked_peer():
           and best_blocked[0] == "goodpeer")
 
 
+def test_pick_candidate_spreads_across_peers():
+    print("pick_candidate: de-prioritizes a peer already loaded this run")
+    # Two peers offer an equally good file; `avoided` is already carrying
+    # MAX_ENQUEUES_PER_PEER files this run. The fresh peer must win so the
+    # batch fans out instead of serializing behind one peer's upload slot.
+    art, title = TRACK["artists"], TRACK["title"]
+    resp_avoided = {"username": "overloaded",
+                    "files": [{"filename": f"m\\\\{art}\\\\01 {title}.mp3",
+                               "length": 213, "bitRate": 320}]}
+    resp_fresh = {"username": "freshpeer",
+                  "files": [{"filename": f"f\\\\{art}\\\\01 {title}.mp3",
+                             "length": 213, "bitRate": 320}]}
+    best = S.pick_candidate([resp_avoided, resp_fresh], art, title, 213000,
+                            avoid_users={"overloaded"})
+    check("fresh peer wins over a loaded one at equal quality",
+          best is not None and best[0] == "freshpeer")
+    check("with nothing avoided, the first-equal peer still wins",
+          S.pick_candidate([resp_avoided, resp_fresh], art, title, 213000,
+                           avoid_users=set())[0] == "overloaded")
+
+
+def test_pick_candidate_avoid_is_bias_not_refusal():
+    print("pick_candidate: an avoided peer is still used when it is the only "
+          "source")
+    art, title = TRACK["artists"], TRACK["title"]
+    only = {"username": "solo",
+            "files": [{"filename": f"m\\\\{art}\\\\01 {title}.wv",
+                       "length": 213, "bitRate": 300}]}
+    best = S.pick_candidate([only], art, title, 213000,
+                            avoid_users={"solo"})
+    check("the only source is picked even when it is avoided", best is not None
+          and best[0] == "solo")
+
+
+def test_pick_candidate_prefers_free_upload_slot():
+    print("pick_candidate: a peer with a free upload slot wins at equal "
+          "quality")
+    art, title = TRACK["artists"], TRACK["title"]
+    busy = {"username": "busy",
+            "files": [{"filename": f"m\\\\{art}\\\\01 {title}.mp3",
+                       "length": 213, "bitRate": 320}]}
+    free = {"username": "freeslot", "hasFreeUploadSlot": True,
+            "files": [{"filename": f"f\\\\{art}\\\\02 {title}.mp3",
+                       "length": 213, "bitRate": 320}]}
+    best = S.pick_candidate([busy, free], art, title, 213000)
+    check("free-slot peer wins on the tiebreak", best is not None
+          and best[0] == "freeslot")
+
+
 def test_rescued_persistence_roundtrip(tmp_path):
     print("load_rescued / save_rescued roundtrip")
     p = tmp_path / "soulseek-rescued.json"

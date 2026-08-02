@@ -77,6 +77,17 @@ DEFAULT_SEARCH_TIMEOUT = 90
 # with all 2,000+ missing tracks at once. Raise with --limit / --all.
 DEFAULT_LIMIT = 5
 
+# Bias against enqueueing many files from the SAME peer in one run. slskd
+# serializes downloads from one peer over a single connection (the Soulseek
+# protocol grants one upload slot per user), so a batch that piles several
+# tracks on the same peer -- common when an album or single-artist set lives on
+# one user's share -- lines them up behind that one slot instead of fanning out
+# across distinct peers toward global.download.slots (pinned to 50). This caps
+# how many files a single peer may carry from one run; a track that is only
+# offered by an already-capped peer is still enqueued there, because the bias
+# is a tiebreaker and never refuses the only source.
+MAX_ENQUEUES_PER_PEER = 2
+
 STATE_COLS = ["spotify_id", "isrc", "status", "user", "filename", "when"]
 # status: have (already in library) / queued (search found + enqueued) /
 #         picked (dry-run: would have queued) / nofind (search returned no match)
@@ -312,14 +323,19 @@ def duration_ok(file_len, want_ms):
         return True
     return abs(got - want) <= DURATION_TOLERANCE
 
-
-def pick_candidate(responses, artists, title, want_ms, skip_users=()):
+def pick_candidate(responses, artists, title, want_ms, skip_users=(),
+                   avoid_users=()):
     """From slskd search responses, choose the best (user, filename, size).
     Keeps files whose name matches artist+title and whose length agrees with
     the target, then prefers the closest length and the highest bitrate.
     Files from a peer in `skip_users` (one that has just rejected/errored a
     download this run) are never chosen, so a re-sourced track lands on a
-    different source rather than the one that refused it."""
+    different source rather than the one that refused it. Files from a peer in
+    `avoid_users` (one already carrying MAX_ENQUEUES_PER_PEER files this run)
+    are de-prioritized so a batch fans out across distinct peers -- but the
+    bias only breaks ties, so a file offered solely by an already-capped peer
+    is still picked rather than refused.
+    """
     best = None
     best_score = None
     for resp in responses or []:
@@ -337,8 +353,15 @@ def pick_candidate(responses, artists, title, want_ms, skip_users=()):
             length = f.get("length") or 0
             delta = abs(length - (float(want_ms or 0) / 1000.0)) if want_ms else 0
             bitrate = f.get("bitRate") or 0
-            # lower (delta, -bitrate, not-free) is better
-            score = (delta, -bitrate, 0 if free else 1)
+            # lower (delta, -bitrate, avoid, not-free) is better
+            #   avoid:   this peer is already carrying MAX_ENQUEUES_PER_PEER
+            #            files this run -> prefer a fresh peer, so a batch does
+            #            not serialize behind one peer's single upload slot
+            #   not-free: a peer advertising a free upload slot starts now
+            #            instead of sitting "Queued, Remotely"
+            score = (delta, -bitrate,
+                     0 if user not in avoid_users else 1,
+                     0 if free else 1)
             if best_score is None or score < best_score:
                 best_score = score
                 best = (user, fn, f.get("size"))
@@ -645,6 +668,10 @@ def main():
     # --- 2. search and enqueue ----------------------------------------------
     changed = False
     processed = 0
+    # How many files each peer has been enqueued this run, so pick_candidate can
+    # de-prioritize a peer that is already carrying MAX_ENQUEUES_PER_PEER and
+    # keep a batch fanned out across distinct peers instead of piled on one.
+    run_user_counts = {}
     for row in net[:budget]:
         processed += 1
         sid = track_key(row)
@@ -702,7 +729,9 @@ def main():
                     responses = responses or []
 
             cand = pick_candidate(responses, artists, title, want_ms,
-                                  blocked_users)
+                                  blocked_users,
+                                  {u for u, c in run_user_counts.items()
+                                   if c >= MAX_ENQUEUES_PER_PEER})
         except SlskdError as e:
             print(f"    ! search failed: {e}")
             state[sid] = {"spotify_id": row.get("spotify_id", ""),
@@ -739,12 +768,14 @@ def main():
                           "isrc": row.get("isrc", ""), "status": "picked",
                           "user": user, "filename": filename,
                           "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            run_user_counts[user] = run_user_counts.get(user, 0) + 1
         else:
             try:
                 http("POST", f"{base}/api/v0/transfers/downloads/{urllib.parse.quote(user, safe='')}",
                      api_key, [{"filename": filename, "size": size}])
                 print(f"    queued from {user}: {filename}")
                 queued_files.add((user, filename))
+                run_user_counts[user] = run_user_counts.get(user, 0) + 1
                 state[sid] = {"spotify_id": row.get("spotify_id", ""),
                               "isrc": row.get("isrc", ""), "status": "queued",
                               "user": user, "filename": filename,
