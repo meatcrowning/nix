@@ -139,6 +139,13 @@ Singleton {
             // property and apps/qmlcommon/VScroll.qml binds to it, exactly like
             // fontFamily/fontSize/reduceMotion/animSpeed.
             property string scrollbarStyle: "win31"
+            // RGB hardware (DRAM sticks + motherboard headers) follows the
+            // accent on every theme change. Read by rgb-set.py itself, which
+            // wal-set.sh step 6c fires detached — so turning this off leaves
+            // the lights on whatever colour they last took, and turning it
+            // back on takes effect at the next wallpaper/theme change. Only
+            // `top` has the hardware, so the Settings row is drawn there only.
+            property bool   rgbFollowTheme: true
             // Motion
             property bool   reduceMotion: false
             property real   animSpeed: 1.0             // 1.0 = the baked 220ms; <1 faster
@@ -324,7 +331,7 @@ Singleton {
         fontSize: 15, paletteColorCount: 16, pureBlackBg: true,
         paletteFull: false, paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, scrollbarStyle: "win31",
-        reduceMotion: false, animSpeed: 1.0,
+        rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         viewMode: "classic", dockWidthFrac: 0.15,
         barWidth: 48, barEdge: "right", barGap: 8, barCell: 40, taskbarClickMinimizes: true,

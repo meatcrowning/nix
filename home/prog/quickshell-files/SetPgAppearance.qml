@@ -1,6 +1,8 @@
 import QtQuick
+import Quickshell.Io
 
-// Appearance = Theme + Palette generation + Window frame + Motion + Wallpaper.
+// Appearance = Theme + Palette generation + RGB lighting + Window frame +
+// Motion + Wallpaper.
 // (Wallpaper drives the palette via wal, so it lives with colours, not apps.)
 Column {
     id: page
@@ -8,6 +10,18 @@ Column {
     spacing: 4
 
     property var d: SettingsStore.d
+
+    // The RGB section is drawn ONLY on top — book is a MacBook with no OpenRGB
+    // devices and no openrgb.service, so the toggle there would be the inert
+    // control docs/DESIGN.md §10 forbids. Read via `hostname`, same as
+    // SetPgSession.qml's lid gate: absent until the answer arrives, never
+    // wrongly present.
+    property bool hasRgb: false
+    Process {
+        running: true
+        command: ["hostname"]
+        stdout: StdioCollector { onStreamFinished: page.hasRgb = (this.text || "").trim() === "top" }
+    }
 
     SetSection {
         title: "theme"
@@ -101,6 +115,19 @@ Column {
                 options: ["vivid", "muted", "pastel"]
                 value: page.d.paletteVariant
                 onChanged: (v) => { page.d.paletteVariant = v; SettingsStore.save(); }
+            }
+        }
+    }
+
+    SetSection {
+        title: "rgb lighting"
+        visible: page.hasRgb
+        SetRow {
+            label: "follow the theme"
+            desc: "off = the DRAM and case lights keep their current colour instead of taking each new accent"
+            SetToggle {
+                checked: page.d.rgbFollowTheme
+                onToggled: (v) => { page.d.rgbFollowTheme = v; SettingsStore.save(); }
             }
         }
     }

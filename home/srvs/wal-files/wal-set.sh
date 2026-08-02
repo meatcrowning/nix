@@ -292,7 +292,9 @@ setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "${XCURSOR_SIZE:-22}" \
 
 # ---- 6c. RGB hardware: DRAM sticks + motherboard headers on the accent -------
 # rgb-set.py pushes ACCENT to every controller via the system openrgb.service
-# SDK server (a no-op if that's down). Detached for the same reasons as the
+# SDK server (a no-op if that's down, and a no-op if `rgbFollowTheme` is off —
+# it reads that key itself, since this script has no json reader on its pinned
+# PATH). Detached for the same reasons as the
 # cursor: the ENE DRAM SMBus writes aren't instant, nothing later depends on
 # them, and setsid keeps it alive through the step-7 Quickshell reload.
 setsid "$SCRIPTS/rgb-set.py" "$ACCENT" \
