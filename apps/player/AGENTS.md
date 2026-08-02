@@ -460,9 +460,18 @@ loopback HTTP API (key from `~/.secrets/slskd-api-key`, pinned in
 `trackmatch` artist/title folding + a duration check, and queues the download.
 Stdlib-only, so it needs no runtime dependency and runs on both hosts; it keeps
 a per-dump-dir `soulseek-state.tsv` so re-runs never re-search or re-download
-what is already handled, and `--dry-run` shows picks without enqueueing. It
-requires slskd to be **running and logged in** — which the generated
-`slskd.yml` alone does not provide (see `home/prog/slskd.nix`).
+what is already handled (an `error` row, a transient failure, is **retried** on
+a later run — only `nofind` is terminal), and `--dry-run` shows picks without
+enqueueing. It requires slskd to be **running and logged in** — which the
+generated `slskd.yml` alone does not provide (see `home/prog/slskd.nix`).
+
+The sweep itself has no concurrency to tune: slskd rejects concurrent searches
+outright (HTTP 429 "Only one concurrent operation is permitted"), so it must
+search one track at a time and the batch size (`--limit`, default 40; `--all`
+for everything) is the real lever on download throughput. The parallel transfer
+is slskd's (`global.download.slots`, pinned to 50); feeding it a real batch
+across distinct peers is what turns "one download at a time" into several in
+parallel.
 
 **Each run fans the batch out across distinct peers.** slskd serializes
 downloads from one peer over a single connection (the Soulseek protocol grants
