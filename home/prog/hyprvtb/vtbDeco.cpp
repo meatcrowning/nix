@@ -4066,7 +4066,10 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor) {
 
     shadow.subtract(frames);
 
-    const CHyprColor COLOR = {0.0, 0.0, 0.0, 0.6}; // hard, near-solid black
+    const float ALPHA = Cfg::shadowAlpha(); // default 0.6; 0 = no shadow at all
+    if (ALPHA <= 0.f)
+        return;
+    const CHyprColor COLOR = {0.0, 0.0, 0.0, ALPHA}; // hard, near-solid black
     for (const auto& r : shadow.getRects())
         Hl::rect(CBox{(double)r.x1, (double)r.y1, (double)(r.x2 - r.x1), (double)(r.y2 - r.y1)}, COLOR);
 }

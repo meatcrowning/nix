@@ -1411,6 +1411,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.rollSlideFrac     = makeShared<Config::Values::CFloatValue>(
         "plugin:hyprvtb:roll_slide_frac", "Fraction of the roll spent on the drawer slide; the rest is the set-down", 0.55f,
         Config::Values::SFloatValueOptions{.min = 0.05f, .max = 0.95f});
+    // The hard drop shadow's opacity. Default 0.6 is exactly the constant it
+    // replaced, so the shipped look is unchanged; 0 draws no shadow. hyprlang
+    // rejects out-of-range and Cfg:: clamps again.
+    g_pGlobalState->config.shadowAlpha       = makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprvtb:shadow_alpha", "Opacity of the window drop shadow (0 = none)", 0.6f,
+        Config::Values::SFloatValueOptions{.min = 0.f, .max = 1.f});
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.barWidth);
@@ -1487,6 +1493,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.inactiveColor);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.slideDurationMs);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.rollSlideFrac);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.shadowAlpha);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kinetic);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticFriction);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMinStartVelocity);
@@ -1628,7 +1635,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "2.99"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / maximize / minimize / pin / roll-up / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.00"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

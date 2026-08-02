@@ -135,6 +135,12 @@ Singleton {
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
+            // Opacity of the window drop shadow hyprvtb draws to the bottom-left
+            // of every titlebarred window. 0.6 is the shipped look; 0 = no
+            // shadow. Live-applied over `hl.config` (plugin:hyprvtb:shadow_alpha)
+            // by SettingsApply.qml — the native decoration.shadow stays disabled,
+            // so this is the ONE shadow there is and the control cannot no-op.
+            property real   shadowAlpha: 0.6
             // Which scrollbar the seven Qt apps draw (docs/DESIGN.md 9.2).
             // win31 | beveled | flat. The panel itself draws no scrollbar at
             // all — its one page never scrolls — so this key exists here purely
@@ -339,7 +345,7 @@ Singleton {
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, paletteColorCount: 16, pureBlackBg: true, lightMode: false,
         paletteFull: false, paletteVariant: "pastel", windowBorderWidth: 2,
-        windowRounding: 0, trayTint: true, scrollbarStyle: "win31",
+        windowRounding: 0, trayTint: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false,

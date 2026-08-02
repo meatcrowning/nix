@@ -155,6 +155,13 @@ struct SGlobalState {
         SP<Config::Values::CIntValue>    slideDurationMs;
         SP<Config::Values::CFloatValue>  rollSlideFrac;
 
+        // ---- the drop shadow's opacity (see vtbRenderShadowLayer) ----
+        // The hard bottom-left drop shadow's alpha. Default 0.6 reproduces the
+        // hardcoded look. 0 = no shadow (an honest "off", not a silent no-op —
+        // the native decoration.shadow in hyprland.lua stays disabled because it
+        // doubled this one, so THIS is the only shadow anyone can adjust).
+        SP<Config::Values::CFloatValue>  shadowAlpha;
+
         // ---- kinetic scrolling (see vtbKinetic.hpp) ----
         // Flat underscore names, matching bar_width / font_size. The dotted
         // `col.*` group exists only because wal-set.sh writes those keys.
@@ -254,6 +261,10 @@ namespace Vtb::Cfg {
     // easing curves, and an endpoint would divide by a zero-width interval.
     inline float rollSlideFrac() {
         return std::clamp(g_pGlobalState->config.rollSlideFrac->value(), 0.05f, 0.95f);
+    }
+    // The drop shadow's opacity. 0..1; 0 draws nothing at all (honest "off").
+    inline float shadowAlpha() {
+        return std::clamp(g_pGlobalState->config.shadowAlpha->value(), 0.f, 1.f);
     }
 
     // ---- kinetic scrolling ----

@@ -234,6 +234,15 @@ Column {
             }
         }
         SetRow {
+            label: "drop shadow"
+            desc: "opacity of the shadow cast to a window's bottom-left; 0 = none"
+            SetSlider {
+                from: 0; to: 1; step: 0.05
+                value: page.d.shadowAlpha
+                onMoved: (v) => { page.d.shadowAlpha = v; SettingsStore.save(); }
+            }
+        }
+        SetRow {
             // Desktop-wide: it reaches all seven apps through settings.json ->
             // pylib/deskstyle.py -> apps/qmlcommon/VScroll.qml. It sits under
             // Appearance beside the font and the motion controls because those
