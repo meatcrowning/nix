@@ -35,9 +35,18 @@ PanelWindow {
     // palette — and therefore Theme.bg — still comes from a wallpaper picked in
     // the meta+w switcher; only the IMAGE is suppressed.
     readonly property bool solid: SettingsStore.d.wallpaperSolid
-    // Re-load the image when the user turns the image back on (_apply no-ops
-    // while solid, so nothing assigned a source in the meantime).
-    onSolidChanged: if (!solid) _apply(Wall.url, Wall.mode)
+    // Re-load the image when the user turns the image back on. While solid, _apply
+    // no-ops on every Wall change, so the front frame is either EMPTY (a reload
+    // happened while solid — picking a colour theme rewrites Theme.qml) or still
+    // holds a now-stale source. Neither can be restored by _apply's "unchanged"
+    // early-return path, and leaning on visibleArea.visible alone left the desktop
+    // on flat Theme.bg when the front was empty. So force a synchronous (re)load
+    // of the front frame here — it paints the picture in the same frame the layer
+    // becomes visible again, whatever state solid mode left it in.
+    onSolidChanged: {
+        if (!solid && Wall.url.length)
+            _front.loadNow(Wall.url, Wall.mode);
+    }
 
     // ---- the blurred backdrop --------------------------------------------
     // Fills the whole monitor, behind everything, and NEVER moves or resizes.
