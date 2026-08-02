@@ -231,6 +231,19 @@ returns per item, and everything a summoner still handles (questions to
 Weyer/Agrippa, meta to Trithemius, synth to Waite, a real multi-minister plan to
 Solomon) is unchanged.
 
+[his, 2026-08-02] *"solomon should only be used when another summoner, whichever
+one deals with this kinda thing, determines the current goal requires multiple
+ministers."* `needs_coordination` IS that determination, and it is already the
+sole trigger for Solomon in `route_operator` — every auto-route path that
+reaches Solomon gates on it. What had made it summon Solomon for a one-minister
+job was its INPUT, not its rule: a reply to a board bullet arrives with the
+quoted bullet appended as a `(about the `...` bullet "...")` trailer, so routing
+read his sentence and the quote as one text — a semicolon or a plan verb in the
+quote then tripped the determination (the 10:07 reply to the light-mode ENACTED
+bullet did exactly this). `route_operator` now strips that trailer
+(`boardwork.strip_reply_quote`) before the determination runs, so it judges his
+words alone; the untouched text still travels to the worker as its order.
+
 - **A coalesced BURST of lone orders folds back into Solomon.** Two or more
   work orders arriving in one batch are several ministers who may touch one
   file, which is exactly the collision coalescing exists to have ONE planner

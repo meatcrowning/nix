@@ -690,9 +690,28 @@ def _multi_ask(text):
 
 def needs_coordination(text):
     """Does this order want SEVERAL ministers coordinated, or one? True only when
-    the text unmistakably names multiple agents/areas or holds multiple asks."""
+    the text unmistakably names multiple agents/areas or holds multiple asks.
+    This is THE determination his rule turns on — see `route_operator`."""
     t = text or ""
     return bool(_ROUTE_COORD.search(t)) or _multi_ask(t)
+
+
+#: A reply to a board bullet arrives with the quoted bullet appended by the reply
+#: box as a `(about the `<section>` bullet "<text>")` trailer (`qml/Main.qml`,
+#: `replyToTodo`) — his sentence FIRST, the quote AFTER it, always as a suffix.
+#: The quote is CONTEXT for the worker, not a second ask, so routing must read
+#: his words ALONE: left in, a quote that happens to carry a semicolon or a plan
+#: verb ("add a light mode", "no other changes") trips `needs_coordination` and
+#: summons Solomon for a one-minister job. [his, 2026-08-02] the 10:07 reply to
+#: the light-mode ENACTED bullet logged "1 summoner(s): Solomon x1" exactly this
+#: way. Only the ROUTING decision strips it; the untouched text (trailer and all)
+#: still travels to the worker as its order.
+_REPLY_QUOTE = re.compile(r"\s*\(about the `[^`]+` bullet \".*\"\)\s*\Z", re.S)
+
+
+def strip_reply_quote(text):
+    """His words with the reply-box quote trailer removed, for ROUTING only."""
+    return _REPLY_QUOTE.sub("", text or "")
 
 
 def route_operator(text):
@@ -712,8 +731,18 @@ def route_operator(text):
     reached only when `needs_coordination` says there is something to split. A
     wrong SOLO route is cheap — one minister can fan out or relay — where a
     Solomon summoned per lone order was overhead on every one.
+
+    [his, 2026-08-02] *"solomon should only be used when another summoner,
+    whichever one deals with this kinda thing, determines the current goal
+    requires multiple ministers."* `needs_coordination` IS that determination,
+    and it is already the sole trigger for Solomon here — both work branches gate
+    on it, and Solomon is reached by no other auto-route path. What had made it
+    fire wrongly was its INPUT: a reply carried the quoted bullet as a trailer,
+    so it read his sentence and the quote as one text. `strip_reply_quote` now
+    removes the trailer before the determination runs, so it judges his words
+    alone.
     """
-    t = text or ""
+    t = strip_reply_quote(text)
     # Synth first: "reconcile" is the narrowest, least ambiguous signal, and its
     # requests mention summoners, which would otherwise trip the meta router.
     if _ROUTE_SYNTH.search(t):

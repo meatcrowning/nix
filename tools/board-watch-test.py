@@ -835,6 +835,19 @@ def test_summoner_fanout():
         check("...and an order that names coordinating several IS Solomon",
               bw.route_operator("dispatch this across three ministers").name
               == "Solomon")
+        # A REPLY carries the quoted bullet as a trailer; routing reads his words
+        # ALONE, or the quote's semicolon/plan verbs summon Solomon for a lone
+        # job. [his, 2026-08-02] the 10:07 reply to the light-mode bullet did.
+        quoted = ('yeah go for it  (about the `to do` bullet '
+                  '"add a light mode; no other changes")')
+        check("a reply is routed on his words, not the quoted bullet: %r"
+              % bw.strip_reply_quote(quoted),
+              bw.route_operator(quoted).flavour == "solo"
+              and bw.strip_reply_quote(quoted) == "yeah go for it",
+              bw.route_operator(quoted).name)
+        check("...and a GENUINE typed multi-ask still reaches Solomon",
+              bw.route_operator("add a dark mode; also rename the engine").name
+              == "Solomon")
 
         # A LONE solo order is not a summoner at all - it goes straight to one
         # minister (`bw.dispatch`), so no summoner fires and the worker stub does.
