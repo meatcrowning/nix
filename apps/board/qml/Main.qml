@@ -1423,7 +1423,16 @@ Component {
                                             width: parent.width
 
                                         Repeater {
-                                            model: win.keysOf(todoGroup.modelData.items, "line")
+                                            // Keyed by the bullet's TEXT, not its file
+                                            // `line`: a new message posted anywhere above
+                                            // shifts every later line index, and a
+                                            // line-keyed row is then destroyed and rebuilt
+                                            // under a new key — which closed his open reply
+                                            // box and orphaned the draft stored under the
+                                            // old line. Text is stable across inserts (the
+                                            // same id folding already keys by), so an
+                                            // unrelated message leaves his reply untouched.
+                                            model: win.keysOf(todoGroup.modelData.items, "text")
                                             delegate: Item {
                                                 id: todoRow
                                                 required property int index
@@ -1433,7 +1442,7 @@ Component {
                                                 // and stays open until he sends or clears it, like
                                                 // every other editor here — a draft is never thrown
                                                 // away by a click somewhere else.
-                                                property bool replying: win.draftOf("todo:" + todoRow.modelData.line) !== ""
+                                                property bool replying: win.draftOf("todo:" + todoRow.modelData.text) !== ""
                                                 // Folded to its one summary line, by his
                                                 // click on the mark. `win.todoFolded` says
                                                 // what the key is and why it is the text.
@@ -1751,18 +1760,18 @@ Component {
                                                     width: parent.width
                                                     visible: todoRow.replying
                                                     height: visible ? implicitHeight : 0
-                                                    draft: win.draftOf("todo:" + todoRow.modelData.line)
-                                                    openCaret: win.caretOf("todo:" + todoRow.modelData.line)
+                                                    draft: win.draftOf("todo:" + todoRow.modelData.text)
+                                                    openCaret: win.caretOf("todo:" + todoRow.modelData.text)
                                                     onCaretHeld: (p) => win.caretHeld(
-                                                        "todo:" + todoRow.modelData.line, p)
+                                                        "todo:" + todoRow.modelData.text, p)
                                                     onCaretLeft: () => win.caretLeft(
-                                                        "todo:" + todoRow.modelData.line)
+                                                        "todo:" + todoRow.modelData.text)
                                                     fgAccent: win.fgAccent
                                                     fgText: win.fgText
                                                     fgDim: win.fgDim
                                                     placeholder: "reply to this one - it goes to the inbox"
                                                     onDraftEdited: (b) => win.setDraft(
-                                                        "todo:" + todoRow.modelData.line, b)
+                                                        "todo:" + todoRow.modelData.text, b)
                                                     onSubmitted: (b) => {
                                                         if (win.replyToTodo(todoRow.modelData, b))
                                                             todoRow.replying = false;
