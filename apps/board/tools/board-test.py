@@ -3376,37 +3376,40 @@ def test_work(tmp):
           bw.set_cap(6) == 6 and open(bw.cap_file()).read().strip() == "6")
     os.environ["BOARD_MAX_WORKERS"] = "2"
 
-    # ---- which model orchestrates: his choice, read at every spawn ----
-    check("with nothing chosen, the default orchestrates",
+    # ---- which model summons, and how hard: his choice, read at every spawn ----
+    check("with nothing chosen, the default summons",
           not os.path.exists(bw.orch_model_file())
-          and bw.orch_model() == bw.DEFAULT_ORCH_MODEL, bw.orch_model())
-    check("a name he half-remembers resolves, ambiguity does not",
-          bw.resolve_model("opus 5") == "claude-opus-5"
-          and bw.resolve_model("haiku") == "claude-haiku-4-5-20251001")
-    for bad in ("5", "gpt", ""):
+          and bw.orch_model() == bw.DEFAULT_ORCH, bw.orch_model())
+    check("a name he half-remembers resolves to a pair, ambiguity does not",
+          bw.resolve_model("opus 5 xhigh") == ("claude-opus-5", "xhigh")
+          and bw.resolve_model("haiku") == ("claude-haiku-4-5-20251001", "medium"))
+    for bad in ("5", "gpt", "opus 5", ""):
         try:
             bw.resolve_model(bad)
             check("...%r is refused rather than guessed" % bad, False)
         except ValueError:
             check("...%r is refused rather than guessed" % bad, True)
-    check("choosing one writes it, and it is what the next spawn reads",
-          bw.set_orch_model("sonnet") == "claude-sonnet-5"
-          and bw.orch_model() == "claude-sonnet-5"
-          and bw.role_flags("orchestrator")[:2] == ["--model", "claude-sonnet-5"],
+    check("choosing one writes model AND effort, and it is what the next spawn reads",
+          bw.set_orch_model("sonnet 5 high") == ("claude-sonnet-5", "high")
+          and bw.orch_model() == ("claude-sonnet-5", "high")
+          and bw.role_flags("orchestrator") == ["--model", "claude-sonnet-5",
+                                                 "--effort", "high"],
           bw.role_flags("orchestrator"))
     # The whole of "changing it mid-run applies to the NEXT prompt" is that this
     # is a file read per spawn, with nothing cached and nothing signalled.
-    bw.set_orch_model("opus 5")
-    check("...and changing it again changes the next spawn, with no restart",
-          bw.role_flags("orchestrator")[:2] == ["--model", "claude-opus-5"],
+    bw.set_orch_model("opus 5 max")
+    check("...and changing it again changes the next spawn, model and effort, no restart",
+          bw.role_flags("orchestrator") == ["--model", "claude-opus-5",
+                                            "--effort", "max"],
           bw.role_flags("orchestrator"))
-    check("...while its EFFORT stays pinned - he chose a model, not a budget",
-          bw.role_flags("orchestrator")[2:] == ["--effort", "high"],
+    check("...and the summoner's effort is HIS to raise - no ceiling clamps it",
+          bool(bw.set_orch_model("opus 5 xhigh"))
+          and bw.role_flags("orchestrator")[2:] == ["--effort", "xhigh"],
           bw.role_flags("orchestrator"))
     with open(bw.orch_model_file(), "w") as fh:
-        fh.write("something-that-was-retired\n")
+        fh.write("something-that-was-retired medium\n")
     check("a stale or hand-edited choice falls back, never reaching --model",
-          bw.orch_model() == bw.DEFAULT_ORCH_MODEL, bw.orch_model())
+          bw.orch_model() == bw.DEFAULT_ORCH, bw.orch_model())
     os.unlink(bw.orch_model_file())
     # [his, 2026-07-29] "the other agents should all be opus 5 medium thinking"
     for role in ("worker", "decision"):
