@@ -178,6 +178,7 @@ pkill -USR1 -x kitty >/dev/null 2>&1
 hyprctl eval 'hl.config({
     general = { col = { active_border = "rgba('"${ACCENT}"'ee)" } },
     plugin = { hyprvtb = {
+        ["bg_color"]          = "rgba('"${BG}"'ff)",
         ["col.text"]          = "rgba('"${TEXTDIM}"'ff)",
         ["col.button_border"] = "rgba('"${BORDER}"'ff)",
         ["col.accent"]        = "rgba('"${ACCENT}"'ff)",
@@ -188,6 +189,7 @@ hyprctl eval 'hl.config({
 LUA="$CONFIG/hypr/hyprland.lua"
 if [ -f "$LUA" ]; then
     sed -i -E 's/(\<active_border[[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${ACCENT}"'ee)\2/' "$LUA"
+    sed -i -E 's/(\["bg_color"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BG}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.text"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${TEXTDIM}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.button_border"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BORDER}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.accent"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${ACCENT}"'ff)\2/' "$LUA"
