@@ -71,7 +71,7 @@ class VtbClient:
     _RETRY_MAX = 3.0
 
     def __init__(self, on_click=None, pid=None, on_reorder=None, on_addr=None,
-                 on_wake=None, on_seek=None):
+                 on_wake=None, on_seek=None, buttons=None, title_edit=False):
         self._on_click = on_click
         self._on_reorder = on_reorder
         self._on_addr = on_addr
@@ -80,10 +80,16 @@ class VtbClient:
         self._pid = pid or os.getpid()
         self._lock = threading.Lock()
         self._sock = None          # guarded by _lock
-        self._buttons = []         # last set, guarded by _lock (resent on reconnect)
+        # `buttons` + `title_edit` are the born-correct seed: an app whose chrome
+        # is NOT the plugin's default (surfer's address bar) stages it here, BEFORE
+        # the I/O thread starts, so the very first connect's REGISTER already
+        # carries it in one write and the window can never map at the default bar
+        # (the startup titlebar flash). Staging before `_thread.start()` also means
+        # no standalone flag write can race ahead of that REGISTER.
+        self._buttons = list(buttons) if buttons else []   # last set, resent on reconnect
         self._footer = ""
         self._footer_bottom = False
-        self._title_edit = False
+        self._title_edit = bool(title_edit)
         self._title_text = True    # the bar draws the window title unless told not to
         self._loading = False
         self._playbar = None       # (shown, pos) or None if never set
@@ -135,6 +141,8 @@ class VtbClient:
     def set_title_edit(self, on):
         """Mark the title region an editable address bar (surfer)."""
         with self._lock:
+            if bool(on) == self._title_edit:
+                return
             self._title_edit = bool(on)
             self._send_title_edit_locked()
 

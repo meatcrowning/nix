@@ -189,6 +189,30 @@ def case_every_flag(rundir):
         srv.stop()
 
 
+def case_seed(rundir):
+    """The constructor seed (surfer): buttons + title_edit staged BEFORE the I/O
+    thread starts, so the window never maps at the plugin's default bar. The very
+    FIRST wakeup the plugin sees must be the REGISTER, already carrying TITLEEDIT
+    1 — no standalone flag write may race ahead of it."""
+    srv = MockPlugin(rundir).start()
+    c = VtbClient(buttons=BUTTONS, title_edit=True)
+    try:
+        srv.wait_for("REGISTER")
+        time.sleep(0.2)
+        first = srv.wakeups[0] if srv.wakeups else []
+        check("seed: first wakeup is the REGISTER", verbs(first)[:1] == ["REGISTER"], repr(verbs(first)))
+        check("seed: TITLEEDIT 1 rides in that first REGISTER", "TITLEEDIT 1" in first, repr(first))
+        # A later QML setButtons/setTitleEdit(true) must not re-emit a standalone
+        # TITLEEDIT (dedup guard) — it is already asserted in the seed.
+        c.set_title_edit(True)
+        time.sleep(0.15)
+        standalone = [b for b in srv.wakeups if verbs(b) == ["TITLEEDIT"]]
+        check("seed: redundant setTitleEdit(true) sends nothing", standalone == [], repr(standalone))
+    finally:
+        c.close()
+        srv.stop()
+
+
 def case_reconnect(rundir):
     """A plugin hot-swap: the socket goes, a new instance brings it back. The
     app's window is mapped and visible throughout, so this gap is the one the
@@ -239,6 +263,7 @@ def main():
         case_defaults(rundir)
         case_goetia(rundir)
         case_every_flag(rundir)
+        case_seed(rundir)
         print("reconnect")
         case_reconnect(rundir)
         case_backoff_ceiling()

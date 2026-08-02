@@ -4,6 +4,19 @@ Vendored source of the standalone browser, same live-source pattern as the rest
 of [`apps/`](../AGENTS.md); built/installed by `home/prog/surfer.nix`. Titlebar
 chrome via hyprvtb like the others.
 
+**The titlebar REGISTER is seeded before the window maps.** surfer's chrome is
+the plugin's *default* flipped twice — it turns the title region into an address
+bar (`TITLEEDIT`) and fills the button column — so a window that maps before its
+first REGISTER surfaces at the bare default bar for a few frames (the startup
+flash). `Titlebar.__init__` (`main.py`) hands `VtbClient` a static
+`_SEED_BUTTONS` set + `title_edit=True` at construction, staged BEFORE the I/O
+thread starts, so the first connect's REGISTER carries surfer's real chrome in
+one write — flushed within a millisecond of process start, long before
+QtWebEngine builds the window. `qml/Main.qml`'s `tbButtons` stays the source of
+truth and refines the seed (real tab buttons, live states) on the same load;
+`_SEED_BUTTONS` is only the frame-0 copy. Regression: the `case_seed` in
+`apps/pylib/tools/vtb-register-test.py`.
+
 **QtWebEngine spellcheck is imperative-only**: the declarative QML
 `WebEngineProfile` `spellCheck*` properties are silently dropped — set
 `setSpellCheckEnabled`/`setSpellCheckLanguages` imperatively in `_wire_profile`.
