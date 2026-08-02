@@ -1993,12 +1993,17 @@ class DarkMode(QObject):
 
     changed = Signal()
 
-    # The desktop's pixel font — matches qml/theme/Theme.qml's `font`.
+    # The desktop's pixel font — matches qml/theme/Theme.qml's `font` (that
+    # file reads DeskStyle.fontFamily, i.e. settings.json). Read the LIVE pick
+    # the same way instead of pinning the default, so the system-font override
+    # follows the Settings > pixel font choice. Fallback only for harnesses
+    # that construct DarkMode without a DeskStyle (find/pagestyle tests).
     _SYSTEM_FONT = "More Perfect DOS VGA"
 
-    def __init__(self, prefs, parent=None):
+    def __init__(self, prefs, parent=None, style=None):
         super().__init__(parent)
         self._prefs = prefs
+        self._style = style
         d = prefs.loadDark()
         self._enabled = bool(d.get("enabled", False))
         self._brightness = self._clamp(d.get("brightness", 100))
@@ -2193,8 +2198,10 @@ class DarkMode(QObject):
 
     def _font_css(self):
         # Force the desktop pixel font on all page text (family only — sizes stay
-        # the site's, so layout/heading hierarchy survives).
-        f = json.dumps(self._SYSTEM_FONT)
+        # the site's, so layout/heading hierarchy survives). Reads the LIVE pick
+        # from DeskStyle so a Settings > pixel font change shows here too, falling
+        # back to the default family only when no DeskStyle was supplied.
+        f = json.dumps(self._style.fontFamily if self._style is not None else DarkMode._SYSTEM_FONT)
         return "*,*::before,*::after{font-family:" + f + ",monospace!important}"
 
     @Slot(str, result=str)
@@ -3675,7 +3682,7 @@ def main():
     prefs = Prefs()
     files = Files(prefs, app)
     zoom = Zoom(prefs, app)
-    darkmode = DarkMode(prefs, app)
+    darkmode = DarkMode(prefs, app, style=style)
     adblocker = AdBlocker(app)
     cosmetic = Cosmetic(adblocker, app)
     download_dir = str(Path.home() / "Downloads")
