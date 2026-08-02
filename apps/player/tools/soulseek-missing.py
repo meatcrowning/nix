@@ -106,6 +106,21 @@ QUEUE_PLACE_STALL_LIMIT = 1000
 # serve a queue, and rotation must not be rude. Catches the place-0 unknowns the
 # position bar above cannot.
 QUEUED_STALL_HOURS = 24
+# How long a "Queued, Remotely" transfer whose peer reported NO placeInQueue
+# (None) may sit before it is treated as stalled. This is the silent-freeze
+# case: with no position reported, neither QUEUE_PLACE_STALL_LIMIT nor the
+# position-aware judgement can apply, so absent this bar a peer that never
+# serves and never reports where we are parks us indefinitely (measured
+# 2026-08-02: five "Queued, Remotely" transfers sat frozen behind exactly such
+# peers). Shorter than QUEUED_STALL_HOURS on purpose - a position-less queue is
+# the signature of the recurring freeze, not a healthy-but-slow queue.
+NOPLACE_STALL_HOURS = 8
+# A peer at or above this search-response queueLength counts as roundly
+# congested for the quick-alternate fallback: picking its "best" version means
+# waiting weeks in line (one track measured 45,603rd). A peer with a free upload
+# slot, or a shorter queue than this, wins over the most exact version on a
+# peer this deep, so a lesser-but-faster copy downloads instead of parking.
+QUICK_QUEUE_LIMIT = 200
 # Persistent per-track avoid of peers we've re-sourced a track away from because
 # they were congested (huge queue / stalled). Kept across runs so a re-sourced
 # track is never immediately re-enqueued from the same peer -- the loop that
@@ -373,6 +388,28 @@ def duration_ok(file_len, want_ms):
         return True
     return abs(got - want) <= DURATION_TOLERANCE
 
+def expected_wait(resp):
+    """Rank a peer by how soon it would start a download, lower is faster.
+
+    A peer advertising a free upload slot starts an accepted transfer
+    immediately (0). A peer with a short or unreported queue waits a plausible
+    while (1) -- Soulseek peers report queueLength when they can, and its
+    absence (as in most search responses) should not guess "congested". A peer
+    whose own upload queue is already QUICK_QUEUE_LIMIT deep and offers no free
+    slot is the roundly-congested case (2): accepting its "best" file means
+    sitting weeks in line, which is precisely the freeze this fallback exists to
+    dodge. This is the "expected wait" trigger for the quick-alternate rule --
+    a peer with a free slot or a short queue wins over the most exact version
+    on a peer this deep, so a lesser-but-faster copy downloads instead.
+    """
+    if resp.get("hasFreeUploadSlot"):
+        return 0
+    ql = resp.get("queueLength")
+    if isinstance(ql, (int, float)) and ql >= QUICK_QUEUE_LIMIT:
+        return 2
+    return 1
+
+
 def pick_candidate(responses, artists, title, want_ms, skip_users=(),
                    avoid_users=()):
     """From slskd search responses, choose the best (user, filename, size).
@@ -385,6 +422,16 @@ def pick_candidate(responses, artists, title, want_ms, skip_users=(),
     are de-prioritized so a batch fans out across distinct peers -- but the
     bias only breaks ties, so a file offered solely by an already-capped peer
     is still picked rather than refused.
+
+    The quick-alternate fallback lives here: whatever the exactness of its
+    file, a peer that will START the download now or soon (expected_wait 0/1 --
+    free upload slot, or a queue shorter than QUICK_QUEUE_LIMIT) beats the
+    most exact version parked behind a roundly-congested peer (expected_wait
+    2). So a track whose best match lives on a peer with, say, 45,000 queued
+    ahead of it downloads a lesser version from a peer that will serve it now
+    instead of waiting weeks for the perfect copy. The wait class is the
+    primary key; only among peers in the same class does file exactness
+    (length, then bitrate) decide.
     """
     best = None
     best_score = None
@@ -392,7 +439,7 @@ def pick_candidate(responses, artists, title, want_ms, skip_users=(),
         user = resp.get("username", "")
         if user in skip_users:
             continue
-        free = bool(resp.get("hasFreeUploadSlot", False))
+        wait = expected_wait(resp)
         for f in resp.get("files", []):
             fn = f.get("filename", "")
             base = os.path.basename(fn)
@@ -403,15 +450,15 @@ def pick_candidate(responses, artists, title, want_ms, skip_users=(),
             length = f.get("length") or 0
             delta = abs(length - (float(want_ms or 0) / 1000.0)) if want_ms else 0
             bitrate = f.get("bitRate") or 0
-            # lower (delta, -bitrate, avoid, not-free) is better
-            #   avoid:   this peer is already carrying MAX_ENQUEUES_PER_PEER
-            #            files this run -> prefer a fresh peer, so a batch does
-            #            not serialize behind one peer's single upload slot
-            #   not-free: a peer advertising a free upload slot starts now
-            #            instead of sitting "Queued, Remotely"
-            score = (delta, -bitrate,
-                     0 if user not in avoid_users else 1,
-                     0 if free else 1)
+            # lower (wait, delta, -bitrate, avoid) is better
+            #   wait:    a peer that will start now/soon beats one that parks us
+            #            behind a huge queue (the quick-alternate fallback)
+            #   delta:   closest length to the target wins within a wait class
+            #   bitrate: then the richest copy
+            #   avoid:   a peer already carrying MAX_ENQUEUES_PER_PEER files
+            #            this run loses ties, so a batch spreads across peers
+            score = (wait, delta, -bitrate,
+                     0 if user not in avoid_users else 1)
             if best_score is None or score < best_score:
                 best_score = score
                 best = (user, fn, f.get("size"))
@@ -535,7 +582,7 @@ def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
     return blocked, resourced
 
 
-def stalled_transfer(f, now, place_limit, stall_hours):
+def stalled_transfer(f, now, place_limit, stall_hours, no_place_hours=None):
     """True when a transfer is stuck waiting on the remote peer, not just slow.
 
     A download in one of STALLED_CANDIDATE_STATES (queued remotely / requested)
@@ -545,6 +592,15 @@ def stalled_transfer(f, now, place_limit, stall_hours):
     byte moving. Either way the transfer is effectively dead and the sweep should
     re-source it instead of leaving it to occupy the queue forever.
 
+    The silent-freeze case is a peer that reports NO placeInQueue at all (None,
+    so `or 0` here would read it as "at the front"). With no position reported,
+    neither the position bar nor a position-aware time judgement applies; the
+    peer keeps us "Queued, Remotely" with no progress and no information until
+    the (daily) `stall_hours` bar finally trips. `no_place_hours` is a shorter,
+    dedicated bar for exactly that state -- measured 2026-08-02, five transfers
+    sat frozen this way for hours -- so a position-less queue is judged by time
+    alone, and sooner.
+
     Non-candidates (in-progress, succeeded, failed) are excluded by the state
     whitelist; a peer that has actually started us (or finished, or refused us)
     is being handled elsewhere.
@@ -552,8 +608,8 @@ def stalled_transfer(f, now, place_limit, stall_hours):
     st = f.get("state") or ""
     if st not in STALLED_CANDIDATE_STATES:
         return False
-    place = f.get("placeInQueue") or 0
-    if place >= place_limit:
+    place = f.get("placeInQueue")
+    if place is not None and place >= place_limit:
         return True  # the peer has thousands ahead of us; never served
     pushed = f.get("enqueuedAt") or f.get("requestedAt")
     if not pushed:
@@ -565,11 +621,17 @@ def stalled_transfer(f, now, place_limit, stall_hours):
     if pushed_dt.tzinfo is None:
         pushed_dt = pushed_dt.replace(tzinfo=timezone.utc)  # slskd timestamps are UTC
     elapsed_h = (now - pushed_dt).total_seconds() / 3600.0
+    if place is None:
+        # No queue position reported: a short dedicated bar catches the freeze
+        # a position-aware peer would have been flagged for by place_limit.
+        bar = no_place_hours if no_place_hours is not None else stall_hours
+        return elapsed_h >= bar
     return elapsed_h >= stall_hours
 
 
 def rescue_stalled(rows, state, rescued_ids, stall_avoid, dl, now, base,
-                   api_key, dry_run, place_limit, stall_hours):
+                   api_key, dry_run, place_limit, stall_hours,
+                   no_place_hours=None):
     """Re-source every transfer stuck waiting on a congested remote peer.
 
     This is the half of the pipeline rescue_rejected cannot reach: a transfer
@@ -613,7 +675,7 @@ def rescue_stalled(rows, state, rescued_ids, stall_avoid, dl, now, base,
     resourced = 0
     resourced_keys = set()
     for f in iter_transfers(dl):
-        if not stalled_transfer(f, now, place_limit, stall_hours):
+        if not stalled_transfer(f, now, place_limit, stall_hours, no_place_hours):
             continue
         user = f.get("username")
         filename = f.get("filename")
@@ -807,6 +869,11 @@ def main():
     ap.add_argument("--stall-hours", type=float, default=QUEUED_STALL_HOURS,
                     help="re-source a queued transfer stuck this many hours "
                          "with no progress (default %(default)s)")
+    ap.add_argument("--stall-no-place-hours", type=float,
+                    default=NOPLACE_STALL_HOURS,
+                    help="re-source a queued-remotely transfer whose peer "
+                         "reported NO queue position and has not progressed "
+                         "this many hours (default %(default)s)")
     ap.add_argument("--library-skip/--no-library-skip",
                     dest="library_skip", action="store_true", default=True,
                     help="re-check the live library and skip what is present")
@@ -897,7 +964,8 @@ def main():
             rows, state, rescued_ids, stall_avoid, dl,
             now=datetime.now(timezone.utc), base=base, api_key=api_key,
             dry_run=args.dry_run, place_limit=args.stall_place,
-            stall_hours=args.stall_hours)
+            stall_hours=args.stall_hours,
+            no_place_hours=args.stall_no_place_hours)
     except SlskdError as e:
         print(f"  ! stall re-source degraded: {e}")
     if n_stalled:

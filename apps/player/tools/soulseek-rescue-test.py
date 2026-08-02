@@ -603,6 +603,120 @@ def test_pick_candidate_respects_stall_avoid():
     check("an avoided peer that is the only source -> no candidate", solo is None)
 
 
+def test_expected_wait():
+    print("expected_wait: the quick-alternate trigger reads free slot + queue length")
+    check("a free upload slot is instant (0)",
+          S.expected_wait({"hasFreeUploadSlot": True, "queueLength": 0}) == 0)
+    check("a free slot stays instant even behind a long queue",
+          S.expected_wait({"hasFreeUploadSlot": True, "queueLength": 45603}) == 0)
+    check("a short queue is a plausible wait (1)",
+          S.expected_wait({"queueLength": 5}) == 1)
+    check("an unreported queue is not guessed congested (1)",
+          S.expected_wait({}) == 1)
+    check("a huge queue with no free slot is congested (2)",
+          S.expected_wait({"queueLength": 20000}) == 2)
+    check("exactly QUICK_QUEUE_LIMIT counts as congested",
+          S.expected_wait({"queueLength": S.QUICK_QUEUE_LIMIT}) == 2)
+    check("one below the limit is a plausible wait",
+          S.expected_wait({"queueLength": S.QUICK_QUEUE_LIMIT - 1}) == 1)
+
+
+def test_pick_candidate_quick_alternate():
+    print("pick_candidate: a lesser version that will start now beats the most "
+          "exact version parked behind a huge queue")
+    art, title = TRACK["artists"], TRACK["title"]
+    # The "best" version (exact length, richest bitrate) lives on a peer with a
+    # 45,000-deep upload queue and no free slot. A weaker copy (closer length
+    # mismatch, lower bitrate) sits on a peer with a free slot. The free-slot
+    # peer must win: waiting weeks for the perfect copy is the freeze.
+    exact = {"username": "congested",
+             "queueLength": 45000,
+             "files": [{"filename": f"m\\\\{art}\\\\01 {title}.flac",
+                        "length": 213, "bitRate": 1411}]}
+    quick = {"username": "freeslot", "hasFreeUploadSlot": True,
+             "files": [{"filename": f"f\\\\{art}\\\\02 {title}.mp3",
+                        "length": 215, "bitRate": 320}]}
+    best = S.pick_candidate([exact, quick], art, title, 213000)
+    check("the quick lesser copy beats the exact copy behind a huge queue",
+          best is not None and best[0] == "freeslot")
+
+
+def test_pick_candidate_quick_alternate_only_when_congested():
+    print("pick_candidate: file exactness still decides within a wait class")
+    art, title = TRACK["artists"], TRACK["title"]
+    # Neither peer is congested: both report modest queues. The exact version
+    # must still win -- the fallback only overrides exactness for a roundly
+    # congested (wait-class-2) peer, never for an ordinary one.
+    busy = {"username": "busy", "queueLength": 5,
+            "files": [{"filename": f"m\\\\{art}\\\\01 {title}.mp3",
+                       "length": 213, "bitRate": 320}]}
+    other = {"username": "other", "queueLength": 3,
+             "files": [{"filename": f"o\\\\{art}\\\\02 {title}.mp3",
+                        "length": 215, "bitRate": 192}]}
+    best = S.pick_candidate([busy, other], art, title, 213000)
+    check("exact version still wins between two un-congested peers",
+          best is not None and best[0] == "busy")
+
+
+def test_stalled_transfer_no_place():
+    print("stalled_transfer: a peer that reports no queue position freezes sooner")
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    # No placeInQueue at all -- the silent-freeze signature. With no_place_hours
+    # (the shorter bar) the transfer is flagged once it outstays it.
+    silent = {"state": "Queued, Remotely",
+              "enqueuedAt": "2026-07-31T14:00:00.000+00:00"}  # 10h before now
+    check("a no-place transfer past the short bar is stalled",
+          S.stalled_transfer(silent, now, 1000, 24, no_place_hours=8))
+    fresh = {"state": "Queued, Remotely",
+             "enqueuedAt": "2026-07-31T23:59:00.000+00:00"}  # 1 min before now
+    check("a no-place transfer inside the short bar is not stalled",
+          not S.stalled_transfer(fresh, now, 1000, 24, no_place_hours=8))
+    # When no_place_hours is None it falls back to the regular stall bar.
+    check("no_place_hours defaults to the regular bar",
+          not S.stalled_transfer(silent, now, 1000, 24))
+    check("actually out past the regular bar stalls too",
+          S.stalled_transfer(
+              {"state": "Queued, Remotely",
+               "enqueuedAt": "2026-07-29T00:00:00.000+00:00"},
+              now, 1000, 24))
+    # A reported position is not affected by the no-place bar.
+    pos = {"state": "Queued, Remotely", "placeInQueue": 5,
+           "enqueuedAt": "2026-07-31T14:00:00.000+00:00"}
+    check("a reported short position is judged by the regular bar",
+          not S.stalled_transfer(pos, now, 1000, 24, no_place_hours=8))
+
+
+def test_rescue_stalled_no_place():
+    print("rescue_stalled: re-sources a no-position silent freeze")
+    rows = [dict(TRACK)]
+    state = {"SPOTID00001": queued("SPOTID00001", "silent", REJECTED_FILENAME)}
+    rescued = set()
+    avoid = {}
+    now = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    # No placeInQueue key at all, parked 10h (past the 8h no-place bar).
+    dl = dl_response({"username": "silent", "filename": REJECTED_FILENAME,
+                      "state": "Queued, Remotely",
+                      "enqueuedAt": "2026-07-31T14:00:00.000+00:00",
+                      "id": "stall-np"})
+    fake_http, saved = clear_state()
+    orig = S.http
+    S.http = fake_http
+    try:
+        blocked, n, rs_keys = S.rescue_stalled(
+            rows, state, rescued, avoid, dl, now, "http://x", "k", dry_run=False,
+            place_limit=1000, stall_hours=24, no_place_hours=8)
+    finally:
+        S.http = orig
+    check("blocks the no-position peer", blocked == {"silent"})
+    check("re-sources the track", n == 1)
+    check("queued marker dropped", "SPOTID00001" not in state)
+    check("congested peer remembered", avoid.get("SPOTID00001") == {"silent"})
+    check("transfer id remembered", "stall-np" in rescued)
+    deletes = [u for m, u in saved["calls"] if m == "DELETE"]
+    check("cancels the frozen transfer with ?remove=true",
+          len(deletes) == 1 and deletes[0].endswith("?remove=true"))
+
+
 def main():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
