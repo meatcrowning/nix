@@ -253,18 +253,20 @@ if command -v kwriteconfig6 >/dev/null 2>&1; then
     kw --group Icons --key Theme        "breeze-dark"
 
     # Same pixel font AND size as kitty (font_size 11 in kitty.conf), everywhere.
-    # Static (not wallpaper-derived), but re-pinned here so it lands on first
-    # login and overrides any stale Plasma-set font.
-    FSPEC="More Perfect DOS VGA,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
-    for k in font menuFont toolBarFont smallestReadableFont fixed; do
-        kw --group General --key "$k" "$FSPEC"
-    done
-    kw --group WM --key activeFont "$FSPEC"
+    # The font roles (and kitty + the hyprvtb titlebar) now follow the Settings
+    # "pixel font" pick — apply-pixel-font.sh reads fontFamily/fontSize from
+    # settings.json and writes them here, so whoever runs on login (wal-set.sh)
+    # and whenever the pick changes (the panel) share one writer. kwriteconfig6
+    # below only handles the colour groups; the font delegate lives out of the
+    # wallpaper derive because it is a Settings value, not a wallpaper value.
+    "$CONFIG/scripts/apply-pixel-font.sh" >/dev/null 2>&1 || true
 
     # Reload palette (0), fonts (1), style (2) and icons (4) in running KDE/Qt
     # apps without a relogin. Harmless if there's no session bus or no listeners.
+    # (apply-pixel-font.sh already sent the fonts(1) notify; this catches the
+    # colour/style/icon rates too.)
     if command -v dbus-send >/dev/null 2>&1; then
-        for change in 0 1 2 4; do
+        for change in 0 2 4; do
             dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32 "$change" int32 0 >/dev/null 2>&1 || true
         done
     fi

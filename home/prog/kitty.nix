@@ -46,4 +46,16 @@
   home.activation.seedKittyTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     [ -e "$HOME/.config/kitty/theme.conf" ] || install -D -m644 ${./kitty-files/theme.conf} "$HOME/.config/kitty/theme.conf"
   '';
+
+  # font.conf is the pixel-font include that kitty.conf pulls in and that
+  # apply-pixel-font.sh regenerates from settings.json. Seeded once so the
+  # include never resolves to nothing on a machine that has not run
+  # apply-pixel-font.sh yet (a missing include is an error, not a no-op, in
+  # kitty). The pick value wins from the first apply-pixel-font.sh run.
+  home.activation.seedKittyFont = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ ! -e "$HOME/.config/kitty/font.conf" ]; then
+      printf 'font_family More Perfect DOS VGA\nfont_size 11\n' > "$HOME/.config/kitty/font.conf"
+      chmod 644 "$HOME/.config/kitty/font.conf"
+    fi
+  '';
 }
