@@ -53,7 +53,15 @@ Window {
     // that regrouped per delegate would do it on every scroll (§2.3's ingest
     // rule, the same reason the glyph map lives at the parse). `todo` stays the
     // flat list everything else — removal, undo, reply — still works from.
-    readonly property var todoGroups: doc && doc.todoGroups ? doc.todoGroups : []
+    readonly property var todoGroups: {
+        var g = doc && doc.todoGroups ? doc.todoGroups : [];
+        // The SUMMONED/COMMANDED announcements are hidden unless the inner
+        // titlebar cell is lit (`showSummoned`, below). `boardparse.section_of`
+        // draws COMMANDED under the SUMMONED group, so dropping the one group
+        // whose tag is "SUMMONED" hides both.
+        return win.showSummoned
+             ? g : g.filter(function(x) { return String(x.tag) !== "SUMMONED"; });
+    }
     readonly property var landed: doc && doc.landed ? doc.landed : []
     readonly property var intro: doc && doc.intro ? doc.intro : ({})
 
@@ -239,6 +247,18 @@ Window {
         Settings.set("allLogs", allLogs);
     }
 
+    // [his, 2026-08-01] *"i actually don't need to see the summoned / commanded
+    // messages. those can be hidden behind a button in the inner left
+    // titlebar."* A view-only filter on `todoGroups` above; default HIDDEN,
+    // remembered across relaunch like `allLogs`. The two summon tags share one
+    // drawn group (`section_of` folds COMMANDED into SUMMONED), so one flag
+    // governs both, and the titlebar cell is lit exactly when they are shown.
+    property bool showSummoned: false
+    function toggleSummoned() {
+        showSummoned = !showSummoned;
+        Settings.set("showSummoned", showSummoned);
+    }
+
     // Cut a string to `cells` characters, marking the cut with ASCII "...".
     // NEVER the unicode ellipsis and never `Text.ElideRight`, which draws one:
     // the font has no U+2026 and a missing glyph clips the row it is on
@@ -368,6 +388,7 @@ Window {
         var d = Settings.get("drafts", {});
         drafts = (d && typeof d === "object") ? d : ({});
         allLogs = Settings.get("allLogs", false) === true;
+        showSummoned = Settings.get("showSummoned", false) === true;
         var tf = Settings.get("todoFolded", {});
         todoFolded = (tf && typeof tf === "object") ? tf : ({});
         // The saved display order of the four sections, validated so a stale or
@@ -489,6 +510,9 @@ Window {
         "-",
         { id: "logs", label: "lg", state: allLogs ? 1 : 0,
           tip: allLogs ? "hide every card's log" : "show every card's log" },
+        { id: "summoned", label: "sm", state: showSummoned ? 1 : 0,
+          tip: showSummoned ? "hide the summoned + commanded notes"
+                            : "show the summoned + commanded notes" },
     ]
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -537,6 +561,7 @@ Window {
             // or not he has since moved the sections around.
             case "agents": win.jumpSection("summoner"); break;
             case "landed": win.jumpSection("landed"); break;
+            case "summoned": win.toggleSummoned(); break;
             case "reader":
                 if (!Board.openInReader())
                     win.status = "could not run reader";
