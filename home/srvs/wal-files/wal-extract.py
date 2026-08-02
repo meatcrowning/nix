@@ -26,9 +26,11 @@ untouched either way):
   * FULL (`paletteFull` / `--full`) — an opt-in mode that reads a WHOLE palette
     off the wallpaper (full_palette()): the accent stays the primary vibrant
     hue, but the structural tones (bgAlt/border/dim/highlight) take the
-    wallpaper's SECONDARY hue and the status ramp (ok/warn/crit/info) takes real
-    green/amber/red/blue hues gently nudged toward matching wallpaper clusters —
-    so the desktop reads as several wallpaper colours, not shades of one. The
+    wallpaper's SECONDARY hue and the status ramp (ok/warn/crit/info) is SAMPLED
+    from the wallpaper clusters nearest green/amber/red/blue — hue, saturation
+    and value all taken from the image, the hue clamped to a legible band so each
+    slot still reads as its state — so the desktop reads as several wallpaper
+    colours, not shades of one. The
     `paletteVariant` picker (vivid | muted | pastel) is a global chroma/value
     transform over that generated palette; it only bites in full mode. See
     ~/nix/docs/DESIGN.md §3.1 and §3.1.2."""
@@ -115,24 +117,37 @@ def pick_secondary(clusters, ph, ps):
     return best if best is not None else (ph, ps)
 
 
-def nudge_hue(hue, clusters, tol=0.11, amt=0.30):
-    """Pull a canonical status hue GENTLY toward the nearest saturated wallpaper
-    cluster, but only one already close to it (within `tol`). A wallpaper that
-    has a green tints OK's green a little; one that has none keeps canonical
-    green, so a status colour never stops reading as its state — §3.5/§3.2 keep
-    status legible. Blends on the wheel, shortest-arc."""
-    near, near_d = None, tol
+def status_color(anchor, band, clusters, ss, base_v, s_floor, v_floor):
+    """A status colour genuinely SAMPLED from the wallpaper, not a canonical hue
+    dressed up. Find the saturated wallpaper cluster nearest the status slot's
+    canonical anchor (green/amber/red/blue) and take its hue, saturation AND
+    value from that cluster — the hue pulled toward it but CLAMPED to a legible
+    band around the anchor (so OK still reads green, CRIT still reads red —
+    §3.2/§3.5), and the saturation/value BLENDED with the variant baseline so
+    the variant still reads as a global transform and the slot stays legible on
+    black. A wallpaper with no colour near the anchor keeps the canonical
+    baseline, so full mode degrades gracefully on a wallpaper that lacks a hue.
+    Unlike the old fixed-hue-wheel nudge, every wallpaper now yields a visibly
+    different ramp because the sampled hue/sat/value all track the image."""
+    near, near_d = None, 1.0
     for (h, s, v, c) in clusters:
-        if s < 0.25:
+        if s < 0.22 or v < 0.12:
             continue
-        d = hue_dist(h, hue)
+        d = hue_dist(h, anchor)
         if d < near_d:
-            near_d, near = d, h
+            near_d, near = d, (h, s, v)
     if near is None:
-        return hue
-    # shortest-arc interpolation toward `near`
-    diff = (near - hue + 0.5) % 1.0 - 0.5
-    return (hue + diff * amt) % 1.0
+        return hsv_hex(anchor, max(ss, s_floor), base_v)
+    nh, ns, nv = near
+    # Hue: pull toward the sampled cluster, clamped shortest-arc to the band so
+    # the slot never leaves its legible colour-coded region of the wheel.
+    diff = (nh - anchor + 0.5) % 1.0 - 0.5
+    hue = (anchor + max(-band, min(band, diff))) % 1.0
+    # Saturation/value: the variant baseline shifted toward the sampled cluster,
+    # floored so the state still reads against the black panel.
+    sat = max(ss + (ns - ss) * 0.6, s_floor)
+    val = max(base_v + (nv - base_v) * 0.5, v_floor)
+    return hsv_hex(hue, sat, val)
 
 
 def mono_palette(h, s, v, pure_bg):
@@ -202,13 +217,12 @@ def full_palette(h, s, v, clusters, pure_bg, variant):
     def struct(cap, val):
         return hsv_hex(h2, min(s2 * smul, cap * (1.0 if smul <= 1 else smul)), val)
 
-    # Status ramp: real colour-coded hues (green/amber/red/blue), each gently
-    # pulled toward a matching wallpaper cluster when one is close. CRIT keeps a
-    # chroma floor so an alarm reads even in the muted variant.
-    ok_h   = nudge_hue(0.34, clusters)
-    warn_h = nudge_hue(0.12, clusters)
-    crit_h = nudge_hue(0.00, clusters)
-    info_h = nudge_hue(0.57, clusters)
+    # Status ramp: each slot is SAMPLED from the wallpaper cluster nearest its
+    # colour-coded anchor (green/amber/red/blue) — hue, saturation and value all
+    # taken from the image, the hue clamped to a per-slot legible band (amber and
+    # red are narrow; green and blue tolerate a wider pull) so a status colour
+    # never stops reading as its state. CRIT keeps a chroma floor so an alarm
+    # reads even in the muted variant. See status_color().
     return {
         "ACCENT":    accent,
         "TEXT":      accent,   # body text is still the accent (§3.1.1 focus rule)
@@ -218,10 +232,10 @@ def full_palette(h, s, v, clusters, pure_bg, variant):
         "BGALT":     struct(0.55, 0.07),
         "HIGHLIGHT": struct(0.60, 0.13),
         "BG":        "000000" if pure_bg else struct(0.55, 0.035),
-        "OK":        hsv_hex(ok_h,   ss,              0.90),
-        "WARN":      hsv_hex(warn_h, ss,              0.82),
-        "CRIT":      hsv_hex(crit_h, max(ss, 0.65),  0.98),
-        "INFO":      hsv_hex(info_h, min(ss, 0.55),  0.74),
+        "OK":        status_color(0.34, 0.10, clusters, ss,             0.90, 0.22, 0.70),
+        "WARN":      status_color(0.12, 0.05, clusters, ss,             0.82, 0.22, 0.66),
+        "CRIT":      status_color(0.00, 0.05, clusters, max(ss, 0.65),  0.98, 0.55, 0.85),
+        "INFO":      status_color(0.57, 0.07, clusters, min(ss, 0.55),  0.74, 0.20, 0.60),
     }
 
 
