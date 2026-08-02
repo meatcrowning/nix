@@ -1016,7 +1016,13 @@ def agents(procs=None):
         # rather than after a hyphen on the first one (his call — see
         # `boardphase.says_detail`).
         a["saysDetail"] = bph.says_detail(obs)
-        a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running")
+        # The observed line LEADS the card — is its own top line — when there
+        # is no claim above it. [his, 2026-08-01] the name must stay on the top
+        # line by name, so when it leads it opens with the name; under a claim
+        # it is the bare description. `saysLine` is already resolved above, so
+        # its emptiness is exactly "will this line be first".
+        a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running",
+                                        lead=a["saysLine"] == "")
         # SOLOMON ONLY: a live orchestrator with nothing observed yet gets his
         # own two-line startup pair instead of the bare `nothing yet` — [his,
         # 2026-07-29] *"Solomon wields the ring..."* while his transcript is

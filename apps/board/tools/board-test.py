@@ -5057,12 +5057,25 @@ def test_window(app, tmp):
     check("a STOPPED agent is never described in the present tense",
           all(r.get("doingLine", "") == ""
               or r.get("doingLine", "").startswith("last seen ")
+              or " was last seen " in r.get("doingLine", "")
               for r in cards if not r.get("running")),
           [r.get("doingLine") for r in cards if not r.get("running")])
-    check("...and no card repeats its own name on the observed line",
-          all(not r.get("name") or not r.get("doingLine", "")
-              .startswith(r.get("name")) for r in cards),
-          [(r.get("name"), r.get("doingLine")) for r in cards])
+    # [his, 2026-08-01] THE NAME STAYS ON THE TOP LINE BY NAME. The observed line
+    # used to name nobody, so the moment activity was reported and that line took
+    # the lead the card's name vanished off its top line. It now opens with the
+    # name whenever it LEADS (no claim above it); under a claim it stays the bare
+    # description, his 2026-07-29 call, so the name is not drawn twice.
+    lead = [r for r in cards if r.get("name") and r.get("saysLine", "") == ""
+            and r.get("running") and r.get("observed") == "ok"]
+    check("...and the observed line, when it LEADS, opens with the agent's name",
+          bool(lead) and all(r.get("doingLine", "").startswith(r.get("name") + " ")
+                             for r in lead),
+          [(r.get("name"), r.get("doingLine")) for r in lead])
+    check("...but under a claim it does NOT repeat the name",
+          all(not r.get("doingLine", "").startswith(r.get("name") + " ")
+              for r in cards if r.get("name") and r.get("saysLine", "")),
+          [(r.get("name"), r.get("doingLine"))
+           for r in cards if r.get("saysLine", "")])
     check("...and the birth the order comes from never reaches the window",
           all("born" not in r for r in cards), list(rows.values())[:1])
     check("no card carries a time, an age or a count",

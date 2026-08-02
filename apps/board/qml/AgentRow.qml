@@ -14,9 +14,17 @@ import "../../qmlcommon"
 //
 // **The second line is the description ALONE** — his call, 2026-07-29:
 // *"actually just take out the [agent] is actually and just display the text
-// after it"*. So it reads `editing Main.qml`, not *"Marbas is actually editing
-// Main.qml"*. The name is already the subject of the line above it, and a card
-// that said it twice was the repeated metadata docs/DESIGN.md §9.1 rules out.
+// after it"*. So UNDER A CLAIM it reads `editing Main.qml`, not *"Marbas is
+// actually editing Main.qml"*. The name is already the subject of the line
+// above it, and a card that said it twice was the repeated metadata
+// docs/DESIGN.md §9.1 rules out.
+//
+// **But when the observed line LEADS the card — no claim above it — it keeps
+// the name on the top line** [his, 2026-08-01]: the card used to drop its name
+// the moment activity was reported and that subjectless line took the lead. So
+// a claimless active card reads *"Marbas is editing Main.qml..."*, name and
+// all (`boardphase.doing_line`'s `lead`). It is drawn once, never twice — the
+// 7-cell name column below only appears when NO sentence names the agent.
 //
 // **The two lines come FIRST, and the title row is the THIRD** — his call
 // again, in as many words: *"the very first line of an agent in the agent
@@ -70,8 +78,9 @@ import "../../qmlcommon"
 // `Theme.dim` now that it is third.
 //
 // It reads the other way round when it has to: a card with no claim leads with
-// `doing`, and a card with neither sentence leads with the title row, which is
-// the case the name column exists for. Position, not trust, picks the tone —
+// `doing` — which then opens with the agent's name (above) — and a card with
+// neither sentence leads with the title row, which is the case the name column
+// exists for. Position, not trust, picks the tone —
 // the old order had `says` a rung quieter than `doing` for being somebody's
 // account of themselves, and that reading would now make the first line of
 // every card the dimmest thing on it. §10.6's rule is that neither side is
@@ -240,15 +249,17 @@ Item {
     // off that one condition.
     readonly property bool titleFirst: saysLine === "" && doingLine === ""
     // The name gets a cell of its own ONLY when no line ABOVE it is going to
-    // say it — otherwise it would be drawn three times in four lines.
+    // say it — otherwise it would be drawn twice on the same card.
     // (`boardagents.NAMES`' width rule is this column's.)
     //
-    // That is now the CLAIM alone: since the observed line dropped its
-    // *"<name> is actually"* opener it names nobody, so a card whose agent has
-    // said nothing would be anonymous without this — which is the one thing
-    // this list may never be. It is drawn on the title row either way; the
-    // title row just is not always that card's top line any more.
-    readonly property bool nameNeeded: name !== "" && saysLine === ""
+    // [his, 2026-08-01] the observed line now opens with the name whenever it
+    // LEADS the card (`boardphase.doing_line`'s `lead`), so a card that has a
+    // claim OR an observation to show already carries its name on its top line.
+    // The column is therefore needed only when NEITHER line is drawn — the
+    // title row is then the card's own top line — which is exactly `titleFirst`
+    // (a stopped agent nothing was seen doing, or a queued task). That is the
+    // one thing this list may never be: anonymous.
+    readonly property bool nameNeeded: name !== "" && titleFirst
     // The lead tone, for whichever line is drawn first. A stopped agent leads
     // at `fgDim` rather than `fgText` — that was already how the title row
     // said "this one is over", and it is one rung, not a colour (§3.5's job is
@@ -554,8 +565,11 @@ Item {
         }
 
         // ---- SECOND LINE: what it is observed doing, and nothing else ----
-        // No subject and no *"is actually"* opener: the description alone, his
-        // call. Observed, never the claim. When it cannot be observed it says
+        // No subject and no *"is actually"* opener when it sits UNDER a claim:
+        // the description alone, his call. When it LEADS instead (no claim
+        // above it) `boardphase.doing_line` opens it with the agent's name, so
+        // the name stays on the card's top line [his, 2026-08-01].
+        // Observed, never the claim. When it cannot be observed it says
         // that ("board cannot see what it is doing", "nothing
         // recently") rather than quietly falling back to the line above —
         // §10's rule, and the reason there are two lines at all. Past tense
