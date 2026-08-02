@@ -1711,7 +1711,8 @@ def test_todo_tags(tmp):
                 num=1, how="on a `timeout`",
                 title=B.oneline(hostile, 120, code=True)),
             "the undispatched-order note": watch_mod.QUEUE_FAIL.format(
-                how="on a `timeout`", text=B.oneline(hostile, 300, code=True)),
+                how="on a `timeout`", who="Solomon",
+                text=B.oneline(hostile, 300, code=True)),
         }
         for label, bullet in rendered.items():
             try:
@@ -4257,10 +4258,15 @@ def test_window(app, tmp):
     if picks:
         # The TOP box specifically — every agent card and decision carries an
         # InputBox too, and they are wider, so a max() over all of them compares
-        # the chooser against a box on the other side of the window.
-        boxes = sorted((it.mapToItem(win.contentItem(), QPointF(0, 0)).y(), it)
-                       for it in descendants(win.contentItem())
-                       if it.property("hintText") is not None)
+        # the chooser against a box on the other side of the window. Sort by y
+        # as a STABLE KEY (not by the whole tuple): two boxes can legitimately
+        # reserve the same vertical slot when a section is reordered or a reply
+        # box rests hidden at a sibling's y, and comparing the QQuickItems on a
+        # tie raises. The order among equals is irrelevant here — only the first.
+        _raw = [(it.mapToItem(win.contentItem(), QPointF(0, 0)).y(), it)
+                for it in descendants(win.contentItem())
+                if it.property("hintText") is not None]
+        boxes = sorted(_raw, key=lambda t: t[0])
         pt = picks[0].mapToItem(win.contentItem(), QPointF(0, 0))
         top = boxes[0][1] if boxes else None
         bx = top.mapToItem(win.contentItem(), QPointF(0, 0)).x() + top.width() \
@@ -4273,15 +4279,17 @@ def test_window(app, tmp):
               top is not None and pt.x() >= bx - 1
               and boxes[0][0] - 1 <= pt.y() <= boxes[0][0] + top.height(),
               (pt.x(), pt.y(), bx, boxes[0][0], top.height() if top else 0))
-    # It offers every model and marks the live one — the tick comes from
-    # boardwork, so the control cannot disagree with what will actually spawn.
+    # It offers every OPERATOR and marks the live one — the roster comes from
+    # boardwork, so the control cannot disagree with who will actually spawn.
     listed = agents_obj.models
-    check("...and offers every model, with exactly one marked current",
-          len(listed) == len(bwm.ORCH_MODELS)
+    check("...and offers every operator, with exactly one marked current",
+          len(listed) == len(bwm.OPERATORS)
+          and [m["name"] for m in listed] == bwm.OPERATOR_NAMES
           and sum(1 for m in listed if m["current"]) == 1,
           [(m["label"], m["current"]) for m in listed])
-    check("...whose label is prose, never the raw wire name",
-          "claude-" not in agents_obj.modelLabel, agents_obj.modelLabel)
+    check("...whose closed label is an operator name, never the raw wire name",
+          "claude-" not in agents_obj.modelLabel
+          and agents_obj.modelLabel in bwm.OPERATOR_NAMES, agents_obj.modelLabel)
 
     # ---- ...and BETWEEN it and the meters, how many may run at once ----
     # [his, 2026-07-29] *"between the model selector and the indicators, add
@@ -5249,6 +5257,76 @@ def test_window(app, tmp):
                      cardItem.mapToScene(QPointF(cardItem.width() / 2, 6))
                      .toPoint())
     spin(600)                                    # past the slide (§6.2's 260ms)
+    # TEMP DEBUG drawer
+    _pt = cardItem.mapToScene(QPointF(cardItem.width() / 2, 6)).toPoint()
+    _hit = win.contentItem().childAt(_pt.x(), _pt.y())
+    print("DBGDRAW scn=%s winSize=%s cardVis=%s addr=%s out=%s hit=%s"
+          % (_pt, (win.width(), win.height()), cardItem.isVisible(),
+             cardItem.property("addressable"), prop(win, "outputOpen"),
+             (_hit.objectName() if _hit else None),
+             ))
+    print("DBGDRAW hitclass=%s" % (_hit.metaObject().className() if _hit else None))
+    _chain = []
+    _p = _hit
+    while _p is not None and len(_chain) < 8:
+        _chain.append("%s(%s)" % (_p.objectName() or "-",
+                                  _p.metaObject().className()))
+        _p = _p.parent()
+    print("DBGDRAW chain=%s" % " <- ".join(_chain))
+    print("DBGDRAW hitGeo=%.0f,%.0f %sx%s" % (
+        _hit.x(), _hit.y(), _hit.width(), _hit.height()) if _hit else "")
+    _sc = [it for it in descendants(win.contentItem())
+           if it.property("contentY") is not None][:1]
+    if _sc:
+        print("DBGDRAW contentY=%s contentH=%s scY=%s"
+              % (_sc[0].property("contentY"), _sc[0].property("contentHeight"),
+                 _sc[0].property("y")))
+    print("DBGDRAW cardAtContent=%.0f,%.0f cardMapScene=%.0f,%.0f"
+          % (cardItem.mapToItem(win.contentItem(), QPointF(0, 0)).x(),
+             cardItem.mapToItem(win.contentItem(), QPointF(0, 0)).y(),
+             cardItem.mapToScene(QPointF(0, 0)).x(),
+             cardItem.mapToScene(QPointF(0, 0)).y()))
+    # PROBE: how many AgentRows exist for this card, and their visual parents
+    _rows = [it for it in descendants(win.contentItem())
+             if it.property("doingLine") is not None
+             and it.property("nameNeeded") is not None
+             and getattr(it, "property", None)]
+    _matching = [it for it in _rows
+                 if (isinstance(prop(it, "agent"), dict)
+                     and prop(it, "agent").get("title") == "Wire FOCUS through vtbclient")]
+    print("DBGDRAW allAgentRows=%d matching=%d" % (len(_rows), len(_matching)))
+    for _r in _matching:
+        _pi = _r.parentItem()
+        print("DBGDRAW   row y=%.0f h=%.0f scene(0,0)=(%.0f,%.0f) vis=%s parentItem=%s"
+              % (_r.y(), _r.height(), _r.mapToScene(QPointF(0, 0)).x(),
+                 _r.mapToScene(QPointF(0, 0)).y(), _r.isVisible(),
+                 _pi.metaObject().className() if _pi else None))
+        _r2 = _r
+        while _r2 is not None and _r2 is not win.contentItem():
+            print("DBGDRAW     ^ %.0f,%.0f %sx%s cls=%s vis=%s clip=%s"
+                  % (_r2.x(), _r2.y(), _r2.width(), _r2.height(),
+                     _r2.metaObject().className(), _r2.isVisible(),
+                     _r2.clip() if hasattr(_r2, "clip") else "?"))
+            _r2 = _r2.parentItem()
+    print("DBGDRAW SECTIONREPEATERS=%d"
+          % len([it for it in descendants(win.contentItem())
+                 if it.objectName() == "sectionsRepeater"]))
+    # PROBE2: hit-test the SAME scene point via the flickable's own content,
+    # and report z of card ancestors + whether the card is inside the clip.
+    _hit2 = win.contentItem().childAt(_pt.x(), _pt.y())
+    print("DBGDRAW hit2=%s class=%s" % (_hit2 is not None,
+          _hit2.metaObject().className() if _hit2 else None))
+    _rz = cardItem
+    _zchain = []
+    for _ in range(6):
+        if _rz is None:
+            break
+        _zchain.append("%s(z=%s)" % (_rz.metaObject().className(),
+                                     _rz.property("z")))
+        _rz = _rz.parentItem()
+    print("DBGDRAW zChain(up)= " + " ^ ".join(_zchain))
+    print("DBGDRAW cardSceneVisibleRange y=%s..%s winH=%s"
+          % (_pt.y() - 6, _pt.y() - 6 + cardItem.height(), win.height()))
     check("clicking the card opens it, keyed by the AGENT and not the row",
           prop(win, "outputOpen").get("w-code") is True
           and drawer is not None and drawer.height() > 0,

@@ -839,7 +839,7 @@ class Agents(QObject):
             # is doing, which used to follow a hyphen on the line above.
             "saysDetail": a.get("saysDetail", ""),
             "doingLine": a.get("doingLine", ""),
-            # ...and whether this card is the bare *"<name> arises..."* one: an
+            # ...and whether this card is the bare *"<name> awakens..."* one: an
             # agent that is running and has neither claimed nor been seen doing
             # anything yet. True makes the rising line the WHOLE card
             # (`AgentRow` drops the title row and the trailing metadata off it);
@@ -1450,36 +1450,44 @@ class Agents(QObject):
         self.summonersChanged.emit()
         return True
 
-    # ---- which model orchestrates -------------------------------------------
-    # The dropdown beside the box. Both halves are thin on purpose: the list and
-    # the choice live in `boardwork`, because `boardctl.py model` and the
-    # spawners read the same two functions and a second copy of the list here
-    # would be a second answer to "what may he pick".
+    # ---- which OPERATOR orchestrates ----------------------------------------
+    # The dropdown beside the box. Since 2026-08-01 it picks a NAMED OPERATOR
+    # (Weyer/Agrippa/Solomon/Trithemius/Waite), not a bare model: the operator
+    # carries its own model, effort and prompt flavour, and board-watch also
+    # AUTO-ROUTES to one when this is left on the default. Both halves stay thin
+    # on purpose — the roster and the choice live in `boardwork`, so `boardctl`,
+    # the spawners and this control read one answer. The raw per-model override
+    # survives as the advanced `boardctl.py model` escape hatch.
     modelChanged = Signal()
 
     @Property("QVariantList", notify=modelChanged)
     def models(self):
-        """`[{name, label, current}]`, in the order the menu draws them. `name`
-        is the `<flag> <effort>` pair `resolve_model` takes: the summoner chooser
-        carries a thinking budget as well as a model now."""
-        cur = boardwork.orch_model()
-        return [{"name": "%s %s" % (f, e), "label": lab, "current": (f, e) == cur}
-                for f, e, lab in boardwork.ORCH_MODELS]
+        """`[{name, label, current}]`, in roster order. `name` is the operator
+        name `resolve_operator`/`chooseModel` take; `label` names the operator
+        and the tier it runs at, so he sees at a glance which pick spends the
+        weekly Claude window and which does not."""
+        cur = boardwork.orch_operator().name
+        return [{"name": o.name,
+                 "label": "%s · %s" % (o.name,
+                                            boardwork.orch_label((o.model, o.effort))),
+                 "current": o.name == cur}
+                for o in boardwork.OPERATORS]
 
     @Property(str, notify=modelChanged)
     def modelLabel(self):
-        """What the closed control reads. Never the raw pair: `claude-opus-5` is
-        a wire value and this is a line of his desktop's prose (§2)."""
-        return boardwork.orch_label()
+        """What the closed control reads — the chosen operator's name. A name,
+        not a wire value (§2)."""
+        return boardwork.orch_operator().name
 
     @Slot(str, result=bool)
     def chooseModel(self, name):
-        """Write his choice — model AND effort, one pick. It reaches the NEXT
-        orchestrator and no other: a session already running keeps what it
-        started with, which is his rule for a change made mid-run stated as the
-        mechanism rather than enforced on top of one."""
+        """Write his choice of OPERATOR. It reaches the NEXT orchestrator and no
+        other: a session already running keeps what it started with, which is
+        his rule for a change made mid-run stated as the mechanism rather than
+        enforced on top of one. His explicit pick also wins over auto-routing
+        until he changes it."""
         try:
-            boardwork.set_orch_model(name)
+            boardwork.set_orch_operator(name)
         except (ValueError, OSError):
             return False
         self.modelChanged.emit()
