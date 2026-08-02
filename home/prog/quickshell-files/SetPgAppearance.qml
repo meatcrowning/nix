@@ -2,8 +2,10 @@ import QtQuick
 import Quickshell.Io
 
 // Appearance = Theme + Palette generation + RGB lighting + Window frame +
-// Motion + Wallpaper.
-// (Wallpaper drives the palette via wal, so it lives with colours, not apps.)
+// Motion.
+// (Choosing the wallpaper — which DRIVES this palette via wal — is its own
+// page, SetPgWallpaper.qml, first in the program; this page is HOW the colours
+// are derived once one is picked.)
 Column {
     id: page
     width: parent ? parent.width : 480
@@ -219,33 +221,4 @@ Column {
         }
     }
 
-    SetSection {
-        title: "wallpaper"
-        SetRow {
-            label: "wallpaper folder"
-            desc: "browsed by the picker; ~/Pictures/wall stays the auto-versioned drop folder"
-            SetTextField {
-                fieldWidth: 220
-                value: page.d.wallpaperDir
-                onCommitted: (t) => { page.d.wallpaperDir = t; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "fit"
-            desc: "auto decides tile vs scale from image size"
-            SetSelect {
-                options: ["auto", "tile", "scale"]
-                value: page.d.wallpaperFit
-                onChanged: (v) => { page.d.wallpaperFit = v; SettingsStore.save(); }
-            }
-        }
-        SetRow {
-            label: "sort order"
-            SetSelect {
-                options: ["name", "mtime", "random"]
-                value: page.d.wallpaperSort
-                onChanged: (v) => { page.d.wallpaperSort = v; SettingsStore.save(); }
-            }
-        }
-    }
 }
