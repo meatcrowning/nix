@@ -36,13 +36,15 @@ Column {
         SetRow {
             // The desktop's pixel font. One key (fontFamily) drives Theme.font in
             // the panel AND DeskStyle.fontFamily in the apps, so flipping it here
-            // switches the whole desktop live via settings.json. The two faces are
-            // the shipped members of the DOS VGA family (home/pkgs/desktop/font.nix).
+            // switches the whole desktop live via settings.json. The faces offered
+            // are enumerated from home/pkgs/desktop/font.nix (the selectableFaces
+            // list) through the generated FontFaces singleton, so a face added to
+            // font.nix appears here automatically — including Botis 4x6.
             label: "pixel font"
-            desc: "the DOS VGA face the desktop draws with"
+            desc: "the face the desktop draws with; more perfect is the default"
             SetSelect {
-                options: ["More Perfect DOS VGA", "Perfect DOS VGA 437"]
-                labels: ({ "More Perfect DOS VGA": "more perfect", "Perfect DOS VGA 437": "perfect dos vga 437" })
+                options: FontFaces.families
+                labels: FontFaces.labels
                 value: page.d.fontFamily
                 onChanged: (v) => { page.d.fontFamily = v; SettingsStore.save(); }
             }

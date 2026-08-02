@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
 let
   # More Perfect DOS VGA, plus the 526 codepoints it lacks, imported from PxPlus
@@ -53,6 +53,35 @@ let
     mkdir -p $out/share/fonts
     python3 ${./font-files/build-4x6.py} $out/share/fonts/Botis4x6.bdf
   '';
+
+  # The desktop's SELECTABLE faces — the single source of truth for the
+  # Settings "pixel font" dropdown (see FontFaces.qml generation below and
+  # SetPgAppearance.qml). Each of these ships via the home.file installs and
+  # fontconfig rules in this file. family is the fontconfig family name, which
+  # is what settings.json's fontFamily stores and Theme.font /
+  # DeskStyle.fontFamily resolve; label is the short lowercase name the
+  # dropdown shows. Keep this list in step with the home.file/fontconfig
+  # entries below: the Settings window enumerates from HERE, never its own
+  # hardcoded copy.
+  selectableFaces = [
+    { family = "More Perfect DOS VGA"; label = "more perfect"; }
+    { family = "Perfect DOS VGA 437"; label = "perfect dos vga 437"; }
+    { family = "Botis 4x6"; label = "botis 4x6"; }
+  ];
+
+  # The Settings dropdown reads its options from a generated singleton rather
+  # than a hardcoded QML array, so the two can never drift. Mirrors the
+  # Host.qml pattern (home/prog/quickshell.nix): a store-path .qml that
+  # Quickshell loads like any other singleton in the config dir.
+  fontFacesQml = ''
+    pragma Singleton
+    import QtQuick
+
+    QtObject {
+        readonly property var families: [${lib.concatMapStringsSep "," (f: " \"${f.family}\"") selectableFaces} ]
+        readonly property var labels: ({${lib.concatMapStringsSep "," (f: " \"${f.family}\": \"${f.label}\"") selectableFaces} })
+    }
+  '';
 in
 
 {
@@ -83,6 +112,12 @@ in
   # whole point is that it is invented here.
   home.file.".local/share/fonts/Botis4x6.bdf".source =
     "${botis4x6}/share/fonts/Botis4x6.bdf";
+
+  # Generated singleton the Settings "pixel font" dropdown reads its options
+  # from (SetPgAppearance.qml -> FontFaces). Built from `selectableFaces` above,
+  # so the faces it offers and the home.file/fontconfig installs below can never
+  # drift. Quickshell loads it from the config dir like any other singleton.
+  xdg.configFile."quickshell/FontFaces.qml".text = fontFacesQml;
 
   # "More Perfect DOS VGA" ships ONLY a Regular face. Without this, KDE/Qt apps
   # faux-bold (and oblique-shear) it wherever the UI asks for bold/italic text —
