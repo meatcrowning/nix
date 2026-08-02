@@ -28,7 +28,7 @@ The split of work is the interesting part, and it is deliberate:
 
 State (`~/.local/state/editor/state.json`) is the app's own, per §14: which
 files were open and where the caret was in each, the indent settings, the line
-numbers / wrap / whitespace toggles. Nothing here writes another app's file.
+numbers / whitespace toggles. Nothing here writes another app's file.
 
 Deliberately NOT here, and not to be started without him asking: LSP or
 completion, split views, an embedded terminal, a project sidebar, sessions, a
@@ -768,7 +768,7 @@ class Settings(QObject):
 
     docs/DESIGN.md §14: anything the user changes by USING the app goes here —
     the open files and the caret in each, the indent settings, and the line
-    numbers / wrap / whitespace toggles. What is being typed into the find bar
+    numbers / whitespace toggles. What is being typed into the find bar
     right now deliberately stays in QML."""
 
     def __init__(self, parent=None):

@@ -43,7 +43,6 @@ Item {
     property int indentWidth: 4
 
     property bool showNumbers: true
-    property bool wrap: false
     property bool winActive: true
     property real cellW: 8
 
@@ -308,7 +307,11 @@ Item {
             id: ed
             x: 0
             y: 0
-            width: Math.max(flick.width, contentWidth)
+            // Wrap is always on, so the text lays out to the viewport width and
+            // never overflows it. Binding to `contentWidth` here (as the old
+            // no-wrap path did) loops, because wrapping makes contentWidth depend
+            // on width in turn.
+            width: flick.width
             // The BODY is not PixelText (that is a Text subclass), so the four
             // things PixelText pins for the chrome are pinned again here — and
             // for the same reasons (§2.2): native rasterisation at an integer
@@ -328,8 +331,10 @@ Item {
             // and RENDER it, so opening a web page in the editor would show the
             // page instead of the source.
             textFormat: TextEdit.PlainText
-            wrapMode: root.wrap ? TextEdit.WrapAtWordBoundaryOrAnywhere
-                                : TextEdit.NoWrap
+            // Wrap is UNCONDITIONAL — the editor always wraps long lines, with no
+            // toggle to turn it off (his call). So the code area never pans
+            // horizontally: `flick.contentX` stays 0 and no HScroll is needed.
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
             selectByMouse: true
             selectByKeyboard: true
             persistentSelection: true
@@ -474,18 +479,6 @@ Item {
         refreshLines();
         refreshCursor();
         refreshSpell();
-    }
-
-    onWrapChanged: {
-        // Wrapping changes what every line's rectangle IS, so the gutter and the
-        // current-line band are both stale until the layout settles.
-        wrapSettle.restart();
-        if (!wrap) flick.contentX = 0;
-    }
-    Timer {
-        id: wrapSettle
-        interval: 16
-        onTriggered: { root.refreshLines(); root.refreshCursor(); }
     }
 
     onShowNumbersChanged: gutter.reload()

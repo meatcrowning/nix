@@ -465,6 +465,14 @@ def test_window(app, tmp):
     check("a monospace advance was MEASURED, not assumed",
           2 < win.property("cellW") < 40, win.property("cellW"))
 
+    # ---- wrap is UNCONDITIONAL: no toggle, no key, no way to turn it off ----
+    btn_ids = [b.get("id") for b in (prop(win, "tbButtons") or [])
+               if isinstance(b, dict)]
+    check("the line-numbers toggle is still in the titlebar",
+          "nums" in btn_ids, btn_ids)
+    check("there is NO wrap toggle to turn wrapping off", "wrap" not in btn_ids,
+          btn_ids)
+
     # ---- the gutter is the DOCUMENT's layout, not n * lineH ----
     tid = 2
     rows = buffers.gutter(tid, 0.0, 200.0)

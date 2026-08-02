@@ -121,11 +121,11 @@ Two more, with reasons rather than a pending question:
   Qt's selection is one contiguous range and a rectangular one means drawing and
   editing N ranges by hand. It was scoped as "if it is cheap", and it is not.
 - **A horizontal scrollbar.** `qmlcommon/VScroll.qml` is the desktop's one
-  scrollbar and it is vertical-only, so with wrap off the code area pans
-  horizontally by caret-follow and by the flickable, with no bar. §9.2 wants a
-  scrollbar wherever one is appropriate, so this is a real gap rather than a
-  decision — it is in `docs/DESIGN.md` → Open questions as "should `qmlcommon`
-  grow an `HScroll`", since the answer binds more than this app.
+  scrollbar and it is vertical-only. This does not bite here: wrap is
+  **unconditional** (his call — long lines always wrap, no toggle), so the code
+  area never pans horizontally and there is nothing for a horizontal bar to
+  scroll. The general question "should `qmlcommon` grow an `HScroll`" is still
+  open in `docs/DESIGN.md`, but editor no longer drives it.
 - **No undo/redo cells in the titlebar.** §12.1 has no glyph for either and a
   glyph is never invented locally. They are Ctrl+Z / Ctrl+Shift+Z and rows in the
   context menu.
