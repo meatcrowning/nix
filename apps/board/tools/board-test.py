@@ -6897,17 +6897,20 @@ def test_card_output(tmp):
 
 
 def test_shells(tmp):
-    """The triangle's live shells: a per-minister tail of the running agent's
-    own output, off the same `cards` list the triangle draws, and only for
-    running ministers — the FILE under `~/.cache/board-work/<id>.log` is
-    buffered and empty until exit, so the transcript is the live source."""
+    """The triangle's live shells: a per-minister tail of the TOOL CALLS the
+    running agent runs — only those, [his, 2026-08-01] not its prose, its
+    reasoning or its `.log`. Off the same `cards` list the triangle draws, and
+    only for running ministers — the FILE under `~/.cache/board-work/<id>.log`
+    is buffered and empty until exit anyway, so the transcript is the source."""
     import main as brd
     import boardagents as ba
-    print("\n=== the triangle shows each bound minister's live shell ===")
+    print("\n=== the triangle shows each bound minister's tool-call shell ===")
     os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
     agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling
     ba.register("w-a", "T", 1, kind="worker", session="ses-a", where="apps/x/**")
     ba.register("w-b", "T", 1, kind="worker", session="ses-b", where="apps/x/**")
+    ba.register("w-prose", "T", 1, kind="worker", session="ses-prose",
+                where="apps/x/**")
     ba.register("w-quiet", "T", 1, kind="worker", session="ses-quiet",
                 where="apps/x/**")
     d = os.path.join(tmp, "transcripts", "-proj")
@@ -6919,16 +6922,31 @@ def test_shells(tmp):
                                 "message": {"role": "assistant",
                                             "content": list(parts)}}) + "\n")
 
-    say("ses-a", {"type": "text", "text": "alpha one"},
-        {"type": "text", "text": "alpha two"},
-        {"type": "text", "text": "alpha three"})
-    say("ses-b", {"type": "text", "text": "beta one"})
+    def result(sess, text):     # a tool RESULT rides on a `user` entry
+        with open(os.path.join(d, sess + ".jsonl"), "a") as f:
+            f.write(json.dumps({"type": "user",
+                                "message": {"role": "user", "content": [
+                                    {"type": "tool_result", "content": text}]}})
+                    + "\n")
+
+    # Prose and reasoning INTERLEAVED with the calls: only the calls survive.
+    say("ses-a", {"type": "thinking", "thinking": "let me think"},
+        {"type": "text", "text": "I will grep for it"},
+        {"type": "tool_use", "name": "Bash", "input": {"command": "grep foo x"}})
+    result("ses-a", "3 matches")     # a result is not an invocation - dropped
+    say("ses-a", {"type": "text", "text": "now push"},
+        {"type": "tool_use", "name": "Bash", "input": {"command": "git push"}})
+    say("ses-b", {"type": "tool_use", "name": "Read",
+                  "input": {"file_path": "/a/b.py"}})
+    # prose ONLY, no call at all: nothing to show, so no shell row
+    say("ses-prose", {"type": "text", "text": "just talking, no tools"})
     # an empty transcript, the shape of a running minister that has not spoken
     open(os.path.join(d, "ses-quiet.jsonl"), "w").close()
 
     cards = [
         {"id": "w-a", "name": "Marbas", "kind": "worker", "state": "running"},
         {"id": "w-b", "name": "Bune", "kind": "worker", "state": "running"},
+        {"id": "w-prose", "name": "Vine", "kind": "worker", "state": "running"},
         {"id": "w-quiet", "name": "Camio", "kind": "worker", "state": "running"},
         {"id": "w-stop", "name": "X", "kind": "worker", "state": "exited"},
         {"id": "w-sum", "name": "Solomon", "kind": ba.ORCHESTRATOR_KIND,
@@ -6936,10 +6954,14 @@ def test_shells(tmp):
     ]
     shells = agents._shells_build(cards)
     by = {s["id"]: s for s in shells}
-    check("a running minister's shell tails its own last couple of lines",
-          by["w-a"]["lines"] == ["alpha two", "alpha three"], by)
-    check("...and a short one shows what it has (one line, not a filler)",
-          by["w-b"]["lines"] == ["beta one"], by)
+    check("a running minister's shell tails only the tool calls it ran",
+          by["w-a"]["lines"] == ["$ grep foo x", "$ git push"], by)
+    check("...its prose, reasoning and tool results are NOT in the shell",
+          all(x.startswith("$ ") for x in by["w-a"]["lines"]), by)
+    check("...and a single call shows as itself",
+          by["w-b"]["lines"] == ["Read /a/b.py"], by)
+    check("...a minister that has only talked (no tools) draws no shell row",
+          "w-prose" not in by, list(by))
     check("...a minister still bound but silent draws no shell row at all",
           "w-quiet" not in by, list(by))
     check("...an exited worker is never shelled",
@@ -6948,6 +6970,7 @@ def test_shells(tmp):
           "w-sum" not in by, list(by))
     ba.unregister("w-a")
     ba.unregister("w-b")
+    ba.unregister("w-prose")
     ba.unregister("w-quiet")
     del os.environ["BOARD_TRANSCRIPTS"]
 
