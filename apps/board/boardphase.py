@@ -188,6 +188,41 @@ def phase_of_window(recent):
     return "unreported"
 
 
+# CVC-doubling is unknowable from spelling (stress lives nowhere in the
+# letters), so curate the common CLI verbs rather than guess — a wrong
+# "visitting" reads worse than a plain "grepING".
+_GERUND_DOUBLE = {
+    "run", "get", "set", "put", "cut", "stop", "drop", "commit", "submit",
+    "tag", "log", "grep", "ship", "map", "zip", "plan", "scan", "pin", "trim",
+    "wrap", "swap", "strip", "split",
+}
+
+
+def _gerund(word):
+    """The -ing form of a single verb.
+
+    For the OBSERVED line's Bash branch: a Bash `description` is imperative
+    ("Test the parser"), so led by a name it reads "<name> is test the
+    parser". Gerundizing its first word fixes both the bare fragment
+    ("testing the parser") and the led form ("<name> is testing…"). Curated,
+    not clever — skip anything already -ing or non-alpha, and double the final
+    consonant only for a known CVC set."""
+    if not word or not word.isalpha():
+        return word
+    low = word.lower()
+    if low.endswith("ing"):
+        return word
+    if low.endswith("ie"):
+        stem = low[:-2] + "y"
+    elif low.endswith("e") and not low.endswith(("ee", "oe", "ye")):
+        stem = low[:-1]
+    elif low in _GERUND_DOUBLE:
+        stem = low + low[-1]
+    else:
+        stem = low
+    return stem + "ing"
+
+
 # -------------------------------------------------------- what the card says
 #: The activity line: a verb and the one thing the call was about. Not a log
 #: line — he is reading a sentence about an agent, not a trace.
@@ -214,7 +249,10 @@ def describe_call(name, inp):
             return "commanding a minister already in those files"
         d = " ".join(str(inp.get("description") or "").split())
         if d:
-            return d[0].lower() + d[1:] if d[:1].isupper() else d
+            if d[:1].isupper():
+                d = d[0].lower() + d[1:]
+            first, sep, rest = d.partition(" ")
+            return _gerund(first) + sep + rest
         cmd = " ".join(str(inp.get("command") or "").split())
         return ("running " + cmd[:48]) if cmd else "running a command"
     if name in ("Read", "NotebookEdit"):

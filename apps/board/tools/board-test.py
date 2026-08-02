@@ -2809,6 +2809,35 @@ def test_phase(tmp):
           bph.says_line(r) == "it is testing..."
           and bph.doing_line(r) == "editing Main.qml",
           (bph.says_line(r), bph.doing_line(r)))
+    # ---- an imperative Bash description reads as a gerund, both bare and led ----
+    # [his, 2026-08-01] when the observed line LEADS a card it opens *"<name> is
+    # <describe_call>"*; a Bash `description` is imperative ("Test the parser"),
+    # so ungerundized it read *"<name> is test the parser"*. describe_call now
+    # gerundizes the first word so both the bare fragment and the led form read
+    # as English — every other describe_call output was already a gerund.
+    check("an imperative Bash description gerundizes its first word",
+          bph.describe_call("Bash", {"command": "pytest",
+                                     "description": "Test the parser"})
+          == "testing the parser",
+          bph.describe_call("Bash", {"command": "pytest",
+                                     "description": "Test the parser"}))
+    check("...a CVC verb doubles its consonant, curated not guessed",
+          bph.describe_call("Bash", {"description": "run the suite"})
+          == "running the suite",
+          bph.describe_call("Bash", {"description": "run the suite"}))
+    check("...an already-gerund description is left as it is",
+          bph.describe_call("Bash", {"description": "Building the kernel"})
+          == "building the kernel",
+          bph.describe_call("Bash", {"description": "Building the kernel"}))
+    check("...so the observed line, leading, reads as English",
+          bph.doing_line({"observed": "ok", "doing": bph.describe_call(
+              "Bash", {"description": "Test the parser"})}, "Eligos", lead=True)
+          == "Eligos is testing the parser...",
+          bph.doing_line({"observed": "ok", "doing": bph.describe_call(
+              "Bash", {"description": "Test the parser"})}, "Eligos", lead=True))
+    check("...and a non-alpha first token is left alone, never gerundized",
+          bph._gerund("-v") == "-v" and bph._gerund("2to3") == "2to3",
+          (bph._gerund("-v"), bph._gerund("2to3")))
     # ---- SIMPLE PRESENT, and an ellipsis that MOVES ----
     # [his, 2026-07-29] *"instead of the agent verb-part being 'is researching'
     # or 'is coding' etc it should just say 'researches...' or 'codes...' with
