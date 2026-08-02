@@ -724,6 +724,13 @@ class Agents(QObject):
     #: unread note — and anything hung off that would be a 2.5s poll of
     #: whatever it drives. See `Usage.follow()`, its one consumer.
     lives = Signal()
+    #: THE LIVE SHELLS of the ministers bound in the triangle. A per-minister
+    #: little tail of the agent's own literal output, rebuilt on the ordinary
+    #: poll — `shells` is the list, this is when it changed. Deliberately a
+    #: SEPARATE signal from `changed`: a running agent's output moves every poll,
+    #: and hanging the whole window off that would make `changed` fire near-
+    #: continuously. The section binds to this and nothing else does.
+    shellsChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -734,6 +741,7 @@ class Agents(QObject):
         self._watcher = ""
         self._armed = None
         self._lives = None
+        self._shells = []
         # The registry, the stashes and the inboxes are all files, so watch
         # them — but /proc is not, so poll as well. 2.5s is well under "prompt"
         # for a finished agent leaving the list and costs one /proc walk.
@@ -917,6 +925,12 @@ class Agents(QObject):
     #: elides to the card's width itself; this only stops a 40kB tool result
     #: from arriving as one line and being carried around as one.
     OUTPUT_WIDTH = 400
+
+    #: How many of its own lines one row of the triangle's SHELLS tail shows.
+    #: [his ask, 2026-08-01] *\"the last couple of lines\"* — two, read for the
+    #: same reason the drawer is cut at three: several ministers side by side
+    #: must not become the transcript §5.2 rules out.
+    SHELL_LINES = 2
 
     @staticmethod
     def _tool_use_lines(name, inp):
@@ -1111,6 +1125,17 @@ class Agents(QObject):
             was, self._lives = self._lives, lives
             if was is not None:      # the first read is not a transition
                 self.lives.emit()
+        # ---- the live shells of the bound ministers ----
+        # Rebuilt off `cards` — the SAME drawn list the triangle shows — and
+        # only for running, non-orchestrator rows, so the shells section can
+        # never disagree with the triangle about who is bound. Each is the
+        # agent's own literal tail (`output`, the transcript, never the
+        # exit-flush `.log`), cut to two lines. Emitted on its own signal so a
+        # moving tail does not re-broadcast `changed` to the whole window.
+        shells = self._shells_build(cards)
+        if shells != self._shells:
+            self._shells = shells
+            self.shellsChanged.emit()
 
     @Property("QVariantList", notify=changed)
     def list(self):
@@ -1154,6 +1179,37 @@ class Agents(QObject):
         return sum(1 for c in self._cards
                    if c.get("kind") != boardagents.ORCHESTRATOR_KIND
                    and c.get("state") == "running")
+
+    # ---- the SHELLS: a live tail per bound minister -------------------------
+    # [his ask, 2026-08-01] under the triangle, a small live tail per running
+    # minister — theirs, not this app's account of them. It is the SAME source
+    # the card drawer tails (`output`, i.e. the transcript — a running worker's
+    # `~/.cache/board-work/<id>.log` is buffered and empty until it exits), and
+    # it reads the running set the way the app already knows it: off `cards`,
+    # the very list the triangle draws, so a shell can never belong to an agent
+    # the triangle is not showing. A row with nothing logged yet is ABSENT — an
+    # empty shell slot is the §5.2 shape this board refuses; the card above it
+    # still says `nothing logged yet` if he opens its drawer.
+    def _shells_build(self, cards):
+        out = []
+        for c in cards:
+            if c.get("kind") == boardagents.ORCHESTRATOR_KIND:
+                continue
+            if c.get("state") != "running":
+                continue
+            lines = self.output(c.get("id", ""))
+            if not lines:
+                continue
+            out.append({"id": c["id"], "name": c.get("name", ""),
+                        "lines": lines[-Agents.SHELL_LINES:]})
+        return out
+
+    @Property("QVariantList", notify=shellsChanged)
+    def shells(self):
+        """`[{id, name, lines}]` for each bound minister with something logged —
+        top-to-bottom the same order the triangle draws its cards in, so a shell
+        never appears above or below the wrong card."""
+        return self._shells
 
     @Property(int, notify=changed)
     def cap(self):
