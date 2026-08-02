@@ -94,6 +94,50 @@ def test_transfer_failed():
     check("missing state is not failed", not S.transfer_failed({}))
 
 
+def test_transfer_failed_zero_byte_succeeded():
+    print("transfer_failed: completed-but-zero-bytes")
+    check("flags succeeded-with-0-bytes-of-a-real-file as failed",
+          S.transfer_failed({"state": "Completed, Succeeded",
+                             "size": 5_000_000, "bytesTransferred": 0}))
+    check("a real succeeded transfer (bytes == size) is not failed",
+          not S.transfer_failed({"state": "Completed, Succeeded",
+                                 "size": 5_000_000,
+                                 "bytesTransferred": 5_000_000}))
+    check("a partial succeeded transfer is not failed",
+          not S.transfer_failed({"state": "Completed, Succeeded",
+                                 "size": 5_000_000,
+                                 "bytesTransferred": 4_000_000}))
+    check("a genuinely zero-size succeeded transfer is not flagged here",
+          not S.transfer_failed({"state": "Completed, Succeeded",
+                                 "size": 0, "bytesTransferred": 0}))
+
+
+def test_transfer_in_pipe_and_count():
+    print("transfer_in_pipe / count_in_pipe")
+    live = ("Queued, Remotely", "Queued, Locally", "Requested",
+            "Initializing", "InProgress")
+    for st in live:
+        check(f"{st!r} counts as live", S.transfer_in_pipe({"state": st}))
+    for st in ("Completed, Succeeded", "Completed, Rejected",
+               "Completed, Errored"):
+        check(f"{st!r} does not count as live",
+              not S.transfer_in_pipe({"state": st}))
+    check("zero-byte succeeded is not live",
+          not S.transfer_in_pipe({"state": "Completed, Succeeded",
+                                  "size": 100, "bytesTransferred": 0}))
+    dl = dl_response(
+        {"username": "a", "filename": "a\\1.mp3", "state": "InProgress"},
+        {"username": "a", "filename": "a\\2.mp3", "state": "Queued, Remotely"},
+        {"username": "b", "filename": "b\\1.mp3", "state": "Completed, Succeeded",
+         "size": 10, "bytesTransferred": 10},
+        failed_transfer("c", "c\\1.mp3"),
+    )
+    check("count_in_pipe counts only the two live transfers",
+          S.count_in_pipe(dl) == 2)
+    check("count_in_pipe of an empty list is 0", S.count_in_pipe([]) == 0)
+    check("count_in_pipe of None is 0", S.count_in_pipe(None) == 0)
+
+
 def test_alive_transfers_excludes_failed():
     print("alive_transfers: failed terminals do not guard re-queueing")
     dl = dl_response(
@@ -715,6 +759,58 @@ def test_rescue_stalled_no_place():
     deletes = [u for m, u in saved["calls"] if m == "DELETE"]
     check("cancels the frozen transfer with ?remove=true",
           len(deletes) == 1 and deletes[0].endswith("?remove=true"))
+
+
+def test_requested_keys_dedup():
+    print("requested_keys: same recording under a second entry is a duplicate")
+    # Two missing.tsv rows, same recording, different spotify ids. One is
+    # already queued; the other must be recognised as a duplicate of it.
+    row_a = dict(TRACK, spotify_id="SID_A")
+    row_b = dict(TRACK, spotify_id="SID_B", title="never gonna give you up")
+    rows = [row_a, row_b]
+    state = {"SID_A": queued("SID_A", "peer", REJECTED_FILENAME)}
+    req = S.requested_keys(rows, state)
+    check("queued row's keys are in the requested set",
+          any(k in req for k in S.trackmatch.keys(row_a["artists"],
+                                                  row_a["title"])))
+    check("the SIBLING (other id, same song) folds into the same keys",
+          any(k in req for k in S.trackmatch.keys(row_b["artists"],
+                                                  row_b["title"])))
+    # A different song is not swept in.
+    other = {"artists": "Daft Punk", "title": "One More Time"}
+    check("an unrelated song is not in the requested set",
+          not any(k in req for k in S.trackmatch.keys(other["artists"],
+                                                      other["title"])))
+    # Only 'queued' status contributes; a nofind/error does not block re-search.
+    state2 = {"SID_A": dict(queued("SID_A", "peer", REJECTED_FILENAME),
+                            status="nofind")}
+    check("a non-queued status contributes nothing",
+          S.requested_keys(rows, state2) == set())
+
+
+def test_acquire_lock_single_instance(tmp_path):
+    print("acquire_lock: only one sweep may hold it")
+    import fcntl
+    saved = S._LOCK_FH
+    try:
+        first = S.acquire_lock(str(tmp_path))
+        check("first caller takes the lock", first is True)
+        # A second attempt (fresh fd, as a concurrent process would) is refused.
+        path = os.path.join(str(tmp_path), "soulseek-missing.lock")
+        fh2 = open(path, "w")
+        busy = False
+        try:
+            fcntl.flock(fh2, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            busy = True
+        finally:
+            fh2.close()
+        check("a second concurrent caller is refused", busy)
+    finally:
+        if S._LOCK_FH is not None:
+            fcntl.flock(S._LOCK_FH, fcntl.LOCK_UN)
+            S._LOCK_FH.close()
+        S._LOCK_FH = saved
 
 
 def main():

@@ -7,6 +7,21 @@ spotify-missing.py -- and, for each track still not in the live player library,
 submits one slskd search, picks the best matching file a peer offers, and
 queues it for download.
 
+Two modes:
+  * default -- one pass over a fixed batch (--limit / --all), then exit.
+  * --watch -- keep the download pipe fed: poll slskd for how many transfers
+    are still live and, whenever that falls below --low-water, search+enqueue
+    up to --target, until the missing list is drained or the process is stopped
+    (SIGINT/SIGTERM). Searching stays serialized (slskd 429s a second
+    concurrent search); slskd's own 50 slots pull the transfers in parallel.
+
+Duplicate downloads are guarded three ways: a single-instance flock so two
+sweeps (timer + a manual run) never race and double-enqueue; a normalized
+(caseless/unaccented, via trackmatch) dedup so the same recording is not grabbed
+twice under a different spotify id, filename or peer; and a grab-time re-check of
+the live library DB and slskd's downloads dir so a file that landed WHILE the
+sweep ran is not re-fetched.
+
 Why not nicotine: slskd is already installed and *configured* here
 (home/prog/slskd.nix pins the web API to loopback and reads the key from
 ~/.secrets/slskd-api-key), and its HTTP/JSON surface is a clean fit for a
@@ -36,6 +51,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -88,6 +104,46 @@ DEFAULT_SEARCH_TIMEOUT = 90
 # (this default, or --limit / --all) fills the parallel downloader with tracks
 # spread across distinct peers, so several transfer at once.
 DEFAULT_LIMIT = 40
+
+# --- continuous ("keep the pipe fed") mode -------------------------------
+# A single run searches a fixed batch and exits; unattended, the pool then
+# drains to nothing while thousands of tracks stay missing (2026-08-02: 5
+# frozen "Queued, Remotely" transfers, 0 in flight, ~3.5k still missing). The
+# --watch loop instead holds the download pipe topped up: it polls slskd for
+# how many transfers are still live (queued or downloading, per transfer_in_pipe)
+# and, whenever that falls below WATCH_LOW_WATER, searches and enqueues fresh
+# tracks until the live count reaches WATCH_TARGET again -- never running more
+# than one search at a time (slskd 429s a second concurrent search), so
+# searching stays serialized while slskd's own 50 slots pull transfers in
+# parallel. It ends when the missing list is drained (nothing left to search
+# and nothing left in flight) or on SIGINT/SIGTERM.
+#
+# WATCH_TARGET is set below slskd's global.download.slots (50) so the pool has
+# distinct-peer headroom rather than being packed with same-peer queue-waiters.
+WATCH_TARGET = 45
+# Top the pool back up only once it has drained past this, so the loop enqueues
+# in worthwhile bursts (each search costs 10-40s, serialized) instead of one
+# track at a time.
+WATCH_LOW_WATER = 20
+# How often (seconds) the watch loop re-checks the live transfer count when the
+# pool is full enough to need no topping up. The downloads GET is ~5ms, so this
+# is only about not busy-looping; a real top-up pass takes minutes on its own.
+WATCH_POLL_SECONDS = 30
+# Re-snapshot the live library (the WAL-safe DB copy) at most this often in a
+# long watch run, so a track that finished and was imported mid-run stops being
+# re-queued without paying for a 17 MB snapshot on every top-up.
+WATCH_LIB_REFRESH_SECONDS = 300
+
+# Set by SIGINT/SIGTERM so an unattended watch run (e.g. under a systemd timer)
+# stops cleanly: the current search finishes, state is saved, and the loop exits
+# rather than being killed mid-enqueue.
+STOP = False
+
+
+def _request_stop(signum, _frame):
+    global STOP
+    STOP = True
+
 
 # Bias against enqueueing many files from the SAME peer in one run. slskd
 # serializes downloads from one peer over a single connection (the Soulseek
@@ -499,11 +555,24 @@ def iter_transfers(dl):
 
 def transfer_failed(f):
     """True when a download ended in a state where the file never arrived
-    (slskd's Failed set: rejected / cancelled / timed out / errored / aborted).
-    These are the transfers that would otherwise leave a track silently
-    missing while the poller kept counting it as queued."""
+    (slskd's Failed set: rejected / cancelled / timed out / errored / aborted),
+    OR completed "successfully" with zero bytes -- the peer reported success but
+    no data landed, so the track is still missing on disk. These are the
+    transfers that would otherwise leave a track silently missing while the
+    poller kept counting it as queued."""
     st = f.get("state") or ""
-    return any(tok in st for tok in FAILED_TRANSFER_TOKENS)
+    if any(tok in st for tok in FAILED_TRANSFER_TOKENS):
+        return True
+    # completed-but-zero-bytes: a "Completed, Succeeded" transfer whose peer
+    # advertised a non-empty file but sent nothing. bytesTransferred==0 against
+    # a positive size means an empty/aborted stream that never produced the
+    # file -- re-source it exactly like a rejection. (A file genuinely of size 0
+    # is not a track worth having either, but we only flag size>0 so a healthy
+    # succeeded transfer, whose bytes equal its size, is never touched.)
+    if "Succeeded" in st and (f.get("size") or 0) and not (
+            f.get("bytesTransferred") or 0):
+        return True
+    return False
 
 
 def alive_transfers(dl):
@@ -521,6 +590,88 @@ def alive_transfers(dl):
         user, filename = tr.get("username"), tr.get("filename")
         if user and filename and not transfer_failed(tr):
             out.add((user, filename))
+    return out
+
+
+def transfer_in_pipe(f):
+    """True when a transfer still occupies the download pipe: it is queued or
+    downloading and has neither failed nor finished. This is what the --watch
+    loop counts to decide whether the pool needs topping up -- a failed/zero-byte
+    terminal (transfer_failed) is not feeding anything, and a genuinely
+    succeeded one has already produced its file, so neither counts as live."""
+    if transfer_failed(f):
+        return False
+    st = f.get("state") or ""
+    # "Completed"/"Succeeded" is finished; everything else in slskd's download
+    # list (Queued, Remotely/Locally, Requested, Initializing, InProgress) is
+    # still on its way and worth counting as an occupied slot.
+    if "Completed" in st or "Succeeded" in st:
+        return False
+    return True
+
+
+def count_in_pipe(dl):
+    """How many download transfers are still live (queued or downloading)."""
+    return sum(1 for tr in iter_transfers(dl) if transfer_in_pipe(tr))
+
+
+# Held for the whole process so the single-instance lock (acquire_lock) is not
+# released until this run exits.
+_LOCK_FH = None
+
+
+def acquire_lock(dump_dir):
+    """Take an exclusive, non-blocking lock so two sweeps never run at once.
+
+    A single missing-track sweep can run for hours in --watch; a systemd timer
+    firing a second one, or a hand-run overlapping it, would each load the same
+    state, both see a track as not-yet-queued, and both enqueue it -- a duplicate
+    download slskd cannot dedupe (distinct search -> distinct transfer). The
+    guard lives in the SCRIPT rather than the timer unit on purpose: a unit-level
+    guard only serializes the timer, not a manual `python3 soulseek-missing.py`
+    racing it. Returns True if we hold the lock (caller proceeds), False if
+    another sweep owns it (caller should exit cleanly). The fd is kept in a
+    module global so it stays open -- and the lock held -- for the process."""
+    global _LOCK_FH
+    import fcntl
+    path = os.path.join(dump_dir, "soulseek-missing.lock")
+    fh = open(path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    fh.truncate(0)
+    fh.write(str(os.getpid()))
+    fh.flush()
+    _LOCK_FH = fh
+    return True
+
+
+def requested_keys(rows, state):
+    """Folded (artist, title) keys for every track state currently marks
+    'queued' -- i.e. already requested from a peer this run or a previous one.
+
+    state.tsv IS the persistent record of what has been requested; this reads it
+    into the same folded key space trackmatch/library_keys use (caseless,
+    unaccented, punctuation-free -- so a name differing only in case or a
+    reserved exFAT char folds together). Its purpose is the duplicate state.tsv's
+    per-spotify_id status does NOT catch: two missing.tsv rows that are the SAME
+    recording under different spotify ids, or the same recording arriving from a
+    second peer / under a slightly different filename in a later sweep. A row
+    whose key set intersects this one is a duplicate of something already
+    requested and must not be enqueued again. A track a rescue pass releases
+    (its 'queued' state dropped) leaves this set automatically, so a genuine
+    re-source is never blocked."""
+    rows_by_id = {r.get("spotify_id"): r for r in rows if r.get("spotify_id")}
+    out = set()
+    for sid, rec in state.items():
+        if rec.get("status") != "queued":
+            continue
+        row = rows_by_id.get(sid)
+        if row is None:
+            continue
+        out |= trackmatch.keys(row.get("artists", ""), row.get("title", ""))
     return out
 
 
@@ -892,13 +1043,46 @@ def main():
                     default=True,
                     help="skip the move-into-library + rescan import step "
                          "(default: run it)")
+    ap.add_argument("--watch", action="store_true",
+                    help="continuous 'keep the pipe fed' mode: instead of one "
+                         "fixed batch, keep the download pool topped up (search "
+                         "and enqueue whenever live transfers fall below "
+                         "--low-water) until the missing list is drained or the "
+                         "process is stopped (SIGINT/SIGTERM)")
+    ap.add_argument("--target", type=int, default=WATCH_TARGET,
+                    help="--watch: top the pool back up to this many live "
+                         "transfers (default %(default)s)")
+    ap.add_argument("--low-water", type=int, default=WATCH_LOW_WATER,
+                    help="--watch: only top up once live transfers fall below "
+                         "this (default %(default)s)")
+    ap.add_argument("--poll-interval", type=float, default=WATCH_POLL_SECONDS,
+                    help="--watch: seconds between transfer-count checks when "
+                         "the pool needs no topping up (default %(default)s)")
     args = ap.parse_args()
 
     api_key = read_api_key(args.key_file)
     base = args.host.rstrip("/")
     state_path = os.path.join(args.dump_dir, "soulseek-state.tsv")
 
-    # --- 0. is slskd up, and is it logged in? -------------------------------
+    if not acquire_lock(args.dump_dir):
+        print("another soulseek-missing sweep is already running "
+              f"({os.path.join(args.dump_dir, 'soulseek-missing.lock')}); "
+              "exiting so the two do not enqueue duplicates.")
+        return
+
+    check_slskd(base, api_key)
+
+    if args.watch:
+        watch_loop(args, api_key, base, state_path)
+    else:
+        session = {"deferred": set(), "present": None, "present_at": 0.0}
+        sweep_once(args, api_key, base, state_path, session)
+
+
+def check_slskd(base, api_key):
+    """Fail fast unless slskd is up and logged in to the Soulseek network.
+    Both are SystemExit conditions -- there is nothing to search against
+    otherwise -- so the watch loop calls this once, before it starts."""
     try:
         app = http("GET", f"{base}/api/v0/application", api_key)
     except SlskdError as e:
@@ -916,15 +1100,110 @@ def main():
             "slskd activation regenerates slskd.yml from them) and\n"
             "`systemctl --user restart slskd`, or the searches below would 409.")
 
+
+def fetch_downloads(base, api_key):
+    """Best-effort GET of the download list; None on any API error, so a blip
+    never crashes an unattended watch run."""
+    try:
+        return http("GET", f"{base}/api/v0/transfers/downloads", api_key)
+    except SlskdError:
+        return None
+
+
+def interruptible_sleep(seconds):
+    """Sleep in short steps so a SIGINT/SIGTERM (which sets STOP) is noticed
+    within ~1s rather than blocking out the whole poll interval."""
+    end = time.time() + seconds
+    while not STOP and time.time() < end:
+        time.sleep(min(1.0, end - time.time()))
+
+
+def watch_loop(args, api_key, base, state_path):
+    """Keep the download pipe fed until the missing list is drained or stopped.
+
+    One search at a time (slskd 429s a second concurrent search), transfers in
+    parallel (slskd's own 50 slots). Whenever the count of live transfers
+    (transfer_in_pipe) falls below --low-water, run one sweep that searches and
+    enqueues up to --target - live tracks -- each sweep also runs the full rescue
+    pass (rejected / zero-byte / stalled-forever / vanished), so tracks that
+    would otherwise strand are re-sourced as it goes. Ends when a sweep finds
+    nothing left to search AND nothing is in flight, or on SIGINT/SIGTERM."""
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
+    # session state persists ACROSS sweeps so the loop terminates and stays
+    # cheap: `deferred` holds tracks offered only by an avoided/congested peer
+    # this session (so they are not re-searched every sweep forever), and the
+    # cached library keys are re-snapshotted at most every WATCH_LIB_REFRESH_S.
+    session = {"deferred": set(), "present": None, "present_at": 0.0}
+    print(f"watch: target {args.target} live transfers, top up below "
+          f"{args.low_water}, poll every {args.poll_interval:g}s. "
+          f"Ctrl-C / SIGTERM to stop.\n")
+    while not STOP:
+        dl = fetch_downloads(base, api_key)
+        in_pipe = count_in_pipe(dl)
+        if in_pipe >= args.low_water:
+            print(f"watch: {in_pipe} live transfer(s) (>= {args.low_water}); "
+                  f"waiting {args.poll_interval:g}s")
+            interruptible_sleep(args.poll_interval)
+            continue
+        print(f"\nwatch: {in_pipe} live transfer(s) (< {args.low_water}); "
+              f"topping up toward {args.target}")
+        budget = max(1, args.target - in_pipe)
+        summary = sweep_once(args, api_key, base, state_path, session,
+                             budget_override=budget)
+        if STOP:
+            break
+        if summary["wanted"] == 0:
+            post = count_in_pipe(fetch_downloads(base, api_key))
+            if post == 0:
+                print("\nwatch: missing list drained and nothing in flight. "
+                      "done.")
+                break
+            # Nothing left to enqueue, but transfers are still finishing. Wait
+            # for them (a rescue pass may free a stalled one) rather than
+            # busy-looping the sweep.
+            print(f"watch: nothing left to search; {post} still finishing. "
+                  f"waiting {args.poll_interval:g}s")
+            interruptible_sleep(args.poll_interval)
+    if STOP:
+        print("\nwatch: stopped.")
+
+
+def library_present(args, session):
+    """Live-library lookup keys, cached on `session` and re-snapshotted only
+    once per WATCH_LIB_REFRESH_SECONDS, so a long watch run does not pay for a
+    17 MB DB copy on every top-up. A single run always computes it fresh (the
+    cache starts empty). --no-library-skip returns an empty set, as before."""
+    if not args.library_skip:
+        return set()
+    now = time.time()
+    if (session.get("present") is not None
+            and now - session.get("present_at", 0.0) < WATCH_LIB_REFRESH_SECONDS):
+        return session["present"]
+    present = library_keys(args.db)
+    session["present"] = present
+    session["present_at"] = now
+    print(f"  live library has {len(present)} lookup keys (skipping those)")
+    return present
+
+
+def sweep_once(args, api_key, base, state_path, session, budget_override=None):
+    """One pass: rescue the strandable transfers, then search+enqueue tracks.
+
+    `budget_override` caps how many tracks this pass searches (watch mode sets it
+    to the pool deficit); when None the single-run --limit / --all rule applies.
+    Returns a summary dict: `enqueued` (new downloads queued this pass),
+    `processed` (tracks searched), `wanted` (tracks still needing a search after
+    this pass excludes handled + deferred ones -- 0 means the list is drained),
+    `in_pipe` (live transfers seen at the start of the pass)."""
+    deferred = session["deferred"]
+
     # --- 1. load the work list and skip what the live library now has --------
     rows = load_missing(args.tsv)
     print(f"{len(rows)} tracks in {args.tsv}")
 
-    present = set()
-    if args.library_skip:
-        present = library_keys(args.db)
-        print(f"  live library has {len(present)} lookup keys (skipping those)")
-    else:
+    present = library_present(args, session)
+    if not args.library_skip:
         print("  (--no-library-skip: not checking the live library)")
 
     state = {} if args.retry else load_state(state_path)
@@ -945,6 +1224,7 @@ def main():
         dl = http("GET", f"{base}/api/v0/transfers/downloads", api_key)
     except SlskdError:
         pass
+    in_pipe = count_in_pipe(dl)
     queued_files = alive_transfers(dl)
     blocked_users, resourced = rescue_rejected(rows, state, rescued_ids, dl,
                                                args.dry_run)
@@ -1020,6 +1300,11 @@ def main():
             save_state(state_path, state)
 
     def wanted(row):
+        # A track deferred this session (offered only by an avoided/congested
+        # peer -- see the search loop) is not re-searched every sweep; a fresh
+        # invocation clears `deferred` and probes it again.
+        if track_key(row) in deferred:
+            return False
         if args.retry:
             return True
         rec = state.get(row.get("spotify_id"))
@@ -1040,20 +1325,34 @@ def main():
     todo = [r for r in rows if wanted(r)]
     print(f"  {len(todo)} not yet handled by a previous run")
 
+    # Everything already requested (state marks 'queued') in the folded key
+    # space, so a DIFFERENT missing.tsv row that is the same recording -- or the
+    # same recording offered by a second peer / filename in a later sweep -- is
+    # recognised as a duplicate and not enqueued again. Grows as this sweep
+    # enqueues, so two same-recording rows within one budget are also caught.
+    requested = requested_keys(rows, state)
     already_have = 0
+    dup_skipped = 0
     net = []
     for r in todo:
-        if present and any(k in present for k in
-                           trackmatch.keys(r.get("artists", ""), r.get("title", ""))):
+        ks = trackmatch.keys(r.get("artists", ""), r.get("title", ""))
+        if present and any(k in present for k in ks):
             already_have += 1
             state.setdefault(track_key(r), {
                 "spotify_id": r.get("spotify_id", ""), "isrc": r.get("isrc", ""),
                 "status": "have", "user": "", "filename": "-already-in-library-",
                 "when": time.strftime("%Y-%m-%d %H:%M:%S")})
             continue
+        if requested and any(k in requested for k in ks):
+            dup_skipped += 1  # a sibling row / earlier run already requested it
+            continue
         net.append(r)
     if already_have:
-        print(f"  {already_have} now in the library already; skipped\n")
+        print(f"  {already_have} now in the library already; skipped")
+    if dup_skipped:
+        print(f"  {dup_skipped} already requested under another entry; skipped")
+    if already_have or dup_skipped:
+        print()
 
     # A track just re-sourced from a frozen/congested peer must find its
     # healthier peer NOW, not after the whole (potentially thousands-long) work
@@ -1062,10 +1361,16 @@ def main():
     if resourced_stall_keys:
         net.sort(key=lambda r: track_key(r) not in resourced_stall_keys)
 
-    budget = len(net) if args.all else min(args.limit, len(net))
+    if budget_override is not None:
+        budget = min(budget_override, len(net))
+    elif args.all:
+        budget = len(net)
+    else:
+        budget = min(args.limit, len(net))
     if budget == 0:
         print("nothing to do.")
-        return
+        return {"enqueued": 0, "processed": 0, "wanted": len(net),
+                "in_pipe": in_pipe}
     print(f"searching {budget} track(s); --dry-run is "
           f"{'ON' if args.dry_run else 'OFF'}\n")
 
@@ -1084,17 +1389,31 @@ def main():
     # distinct peers (--limit / --all) and slskd downloads them in parallel.
     changed = False
     processed = 0
+    enqueued = 0
     # How many files each peer has been enqueued this run, so pick_candidate can
     # de-prioritize a peer that is already carrying MAX_ENQUEUES_PER_PEER and
     # keep a batch fanned out across distinct peers instead of piled on one.
     run_user_counts = {}
     for row in net[:budget]:
+        # A stop signal (SIGINT/SIGTERM in --watch) ends the pass cleanly after
+        # the current track's state is saved, rather than mid-enqueue.
+        if STOP:
+            print("  (stop requested; ending this pass)")
+            break
         processed += 1
         sid = track_key(row)
         artists, title = row.get("artists", ""), row.get("title", "")
         want_ms = row.get("duration_ms")
         desc = f"({processed}/{budget}) {artists} - {title}"
         print(f"  {desc}")
+
+        # Duplicate guard: a sibling row enqueued earlier THIS budget (or a peer
+        # that started serving between the net build and here) already covers
+        # this recording. Skip before spending the one serialized search on it.
+        ks = trackmatch.keys(artists, title)
+        if requested and any(k in requested for k in ks):
+            print("    already requested this recording this run; skipped")
+            continue
 
         # Skip if this exact peer file is already queued / completed in slskd.
         def already_handled(user, filename):
@@ -1172,6 +1491,10 @@ def main():
             if any_offer:
                 print("    only available from an avoided/congested peer; "
                       "left for a later run")
+                # In --watch this would otherwise be re-searched every sweep
+                # forever (it records no state); defer it for the rest of this
+                # session so the loop can drain. A fresh invocation clears it.
+                deferred.add(sid)
             else:
                 print("    no matching file found")
                 state[sid] = {"spotify_id": row.get("spotify_id", ""),
@@ -1188,6 +1511,25 @@ def main():
                           "isrc": row.get("isrc", ""), "status": "queued",
                           "user": user, "filename": filename,
                           "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            requested |= ks
+            changed = True
+            save_state(state_path, state)
+            continue
+
+        # Grab-time existence check: this exact file may already sit COMPLETED in
+        # slskd's downloads dir, waiting for the import step to move it into aud/
+        # and rescan (so it is not in the library DB yet). Re-grabbing it would
+        # be a straight duplicate. Soulseek paths use backslashes; normalize
+        # before basename, then fold to the same caseless key the dir scan uses.
+        cand_base = trackmatch.fold(
+            os.path.basename(str(filename).replace("\\", "/")))
+        if cand_base and cand_base in downloaded:
+            print(f"    already downloaded (awaiting import); skipped: {filename}")
+            state[sid] = {"spotify_id": row.get("spotify_id", ""),
+                          "isrc": row.get("isrc", ""), "status": "queued",
+                          "user": user, "filename": filename,
+                          "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            requested |= ks
             changed = True
             save_state(state_path, state)
             continue
@@ -1199,6 +1541,7 @@ def main():
                           "isrc": row.get("isrc", ""), "status": "picked",
                           "user": user, "filename": filename,
                           "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            requested |= ks
             run_user_counts[user] = run_user_counts.get(user, 0) + 1
         else:
             try:
@@ -1206,6 +1549,8 @@ def main():
                      api_key, [{"filename": filename, "size": size}])
                 print(f"    queued from {user}: {filename}")
                 queued_files.add((user, filename))
+                requested |= ks
+                enqueued += 1
                 run_user_counts[user] = run_user_counts.get(user, 0) + 1
                 state[sid] = {"spotify_id": row.get("spotify_id", ""),
                               "isrc": row.get("isrc", ""), "status": "queued",
@@ -1226,7 +1571,7 @@ def main():
     if changed:
         save_state(state_path, state)
 
-    print(f"\ndone. {budget} track(s) processed this run.")
+    print(f"\ndone. {processed} track(s) processed this pass.")
     print(f"  state -> {state_path}")
 
     # The player only sees a track once it is moved into aud/ and rescanned —
@@ -1234,6 +1579,25 @@ def main():
     # does it. Skipped in --dry-run, which must not touch the filesystem.
     if not args.dry_run:
         import_downloads(args.import_step)
+
+    # Tracks still needing a search after this pass (untouched budget tail,
+    # transient errors to retry, orphans just re-queued) -- excludes handled,
+    # in-library, already-requested (dedup) and deferred tracks. 0 means the
+    # missing list is drained as far as this run can take it, which is how the
+    # watch loop knows to stop rather than spinning on rows it will always skip.
+    def still_searchable(r):
+        if not wanted(r):
+            return False
+        ks_r = trackmatch.keys(r.get("artists", ""), r.get("title", ""))
+        if present and any(k in present for k in ks_r):
+            return False
+        if requested and any(k in requested for k in ks_r):
+            return False
+        return True
+
+    remaining = sum(1 for r in rows if still_searchable(r))
+    return {"enqueued": enqueued, "processed": processed, "wanted": remaining,
+            "in_pipe": in_pipe}
 
 
 if __name__ == "__main__":
