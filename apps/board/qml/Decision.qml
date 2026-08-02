@@ -320,6 +320,10 @@ Item {
                     font.pixelSize: Theme.fontSize
                     font.hintingPreference: Font.PreferFullHinting
                     renderType: Text.NativeRendering
+                    // the "no antialiasing" pin PixelText/CodeView carry (§2.2),
+                    // same as the shared InputBox editor: crisp hard-edged
+                    // pixels, not fringed subpixel AA.
+                    antialiasing: false
                     color: card.fgText
                     selectionColor: Theme.highlight
                     selectedTextColor: Theme.accent
