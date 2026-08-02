@@ -240,7 +240,21 @@ NAMES = ["Bael", "Agares", "Vassago", "Samigina", "Marbas", "Valefor", "Amon",
 #: two things) and it costs nothing: `boardctl inbox send --to Solomon` resolves
 #: to a live one, `boardwork.cards()` pins them together at the top, and every
 #: id underneath is still distinct.
+#:
+#: Solomon is the DEFAULT operator. Since 2026-08-01 there is a small roster of
+#: named operators (`boardwork.OPERATORS`: Weyer, Agrippa, Solomon, Trithemius,
+#: Waite) and `board-watch` routes a run to one of them; the run's card carries
+#: whichever operator it summoned (`register(name=…)`), and this constant is the
+#: fallback when none is passed. Every operator name is EXCLUDED from `NAMES`
+#: below so a minister is never named after a summoner.
 ORCHESTRATOR_NAME = "Solomon"
+
+#: The human operators — kept out of the 72-spirit pool. Mirrors
+#: `boardwork.OPERATOR_NAMES` (not imported: `boardwork` imports this module, so
+#: a top-level reference would be a cycle); a mismatch is caught by the assert.
+_OPERATOR_NAMES = {"Solomon", "Weyer", "Agrippa", "Trithemius", "Waite"}
+NAMES = [n for n in NAMES if n not in _OPERATOR_NAMES]
+assert len(NAMES) == 72, "operator name collided with the 72 spirits: %d" % len(NAMES)
 
 #: The `kind` the orchestrator is registered under (`board-watch.py`).
 ORCHESTRATOR_KIND = "orchestrator"
@@ -411,7 +425,13 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     """
     rec = {"id": clean_id(agent_id), "title": title, "pid": pid,
            "confirmed": bool(confirmed),
-           "name": (ORCHESTRATOR_NAME if kind == ORCHESTRATOR_KIND
+           # An orchestrator's name is its OPERATOR (`boardwork.OPERATORS`): the
+           # spawner passes the routed operator's name and it wins — but ONLY a
+           # real operator name does. A caller that passes nothing, or a spirit's
+           # name, still gets `Solomon`, the default operator: the roster opened
+           # the name up to the four other operators, not to anything at all.
+           "name": ((name if name in _OPERATOR_NAMES else ORCHESTRATOR_NAME)
+                    if kind == ORCHESTRATOR_KIND
                     else name or pick_name(agent_id)),
            "pidStart": bm._proc_start(pid) if pid else None, "kind": kind,
            "where": where, "session": session or "",

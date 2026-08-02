@@ -864,7 +864,7 @@ def spawn(prompt, agent_id, label, session=None, timeout=None, role="decision",
 QUEUE_FAIL = (
     "- FAILED: **what you typed could not be worked** - nothing was "
     "dispatched.\n"
-    "    Solomon exited {how}; nothing was committed either. What you wrote, "
+    "    {who} exited {how}; nothing was committed either. What you wrote, "
     "so it is not lost: {text} Log: `~/.cache/board-watch.log`\n")
 
 
@@ -877,8 +877,12 @@ QUEUE_FAIL = (
 ORCH_TIMEOUT_S = int(os.environ.get("BOARD_ORCH_TIMEOUT", "900"))
 
 
-def _summon(notes, index, total):
+def _summon(notes, index, total, op=None):
     """One summoner run: register a card, spawn, wait, unregister.
+
+    `op` is the `boardwork.Operator` this tick routed to (Solomon by default) —
+    it names the card and picks the prompt flavour. Its model/effort reach the
+    spawn through `BOARD_ORCH_MODEL`/`_EFFORT`, set once by the caller.
 
     Returns the QUEUE_FAIL text for it or None. It does NOT write to the board
     itself — several of these run in threads and `note_on_board` is a
@@ -897,8 +901,9 @@ def _summon(notes, index, total):
     # pins the row to the top of the list whether or not this run exists. Two
     # of them are two Solomons, both pinned, in birth order — which `cards()`
     # already said it did.
+    op = op or bw.default_operator()
     ba.register(aid, notes[0]["text"][:70], os.getpid(), kind="orchestrator",
-                where="board-watch", session=session)
+                where="board-watch", session=session, name=op.name)
     # HE CAN TAKE IT BACK UNTIL THIS RUN ACTS. Written before the spawn, like
     # the drain above it: `boardundo.py` is what ctrl+z reaches, and a run that
     # exists without a record of the orders it was given is a run he cannot
@@ -907,9 +912,8 @@ def _summon(notes, index, total):
     text = "\n\n".join(m["text"] for m in notes)
     try:
         rc, how, secs = spawn(
-            bw.ORCHESTRATOR_PROMPT.format(repo=REPO, host=bw.host_line(),
-                                          notes=text,
-                                          cap=bw.cap()),
+            bw.orchestrator_prompt(op, repo=REPO, host=bw.host_line(),
+                                   notes=text, cap=bw.cap()),
             aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
             role="orchestrator")
     finally:
@@ -930,7 +934,8 @@ def _summon(notes, index, total):
     log("a summoner FAILED %s after %dm%02ds" % (how, secs // 60, secs % 60))
     # The last stop. He must never have to wonder where a sentence he typed
     # went, so the failure carries the text itself onto the board.
-    return QUEUE_FAIL.format(how=how, text=bp.oneline(text, 300, code=True))
+    return QUEUE_FAIL.format(how=how, who=op.name,
+                             text=bp.oneline(text, 300, code=True))
 
 
 def work_the_queue():
@@ -969,15 +974,26 @@ def work_the_queue():
     if not msgs:
         return False
     groups = bw.split_for_summoners(msgs)
-    log("orchestrating %d thing(s) he typed across %d summoner(s)"
-        % (len(msgs), len(groups)))
+    # WHICH OPERATOR summons this tick — his explicit pick if he made one, else
+    # the auto-route from what he typed (`bw.tick_operator`). One operator for
+    # the whole tick, chosen HERE at the single-threaded top, then pinned into
+    # the environment the concurrent summoner threads all read: `role_flags`
+    # and `_role_model` honour `BOARD_ORCH_MODEL`/`_EFFORT`, so the run's
+    # `--model`, its effort and its backend (hermes vs claude) all follow the
+    # routed operator with no per-thread state to race. Per-GROUP routing is the
+    # roster doc's follow-up. [his, 2026-08-01: "build auto-routing for the start"]
+    op = bw.tick_operator("\n\n".join(m["text"] for m in msgs))
+    os.environ["BOARD_ORCH_MODEL"] = op.model
+    os.environ["BOARD_ORCH_EFFORT"] = op.effort
+    log("orchestrating %d thing(s) he typed across %d summoner(s) as %s (%s %s)"
+        % (len(msgs), len(groups), op.name, op.model, op.effort))
     if len(groups) == 1:
-        fails = [_summon(groups[0], 0, 1)]
+        fails = [_summon(groups[0], 0, 1, op)]
     else:
         out = {}
 
         def one(i, group):
-            out[i] = _summon(group, i, len(groups))
+            out[i] = _summon(group, i, len(groups), op)
 
         pool = [threading.Thread(target=one, args=(i, g), daemon=True)
                 for i, g in enumerate(groups)]

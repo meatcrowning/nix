@@ -373,15 +373,40 @@ def cmd_minister(a):
     return 0
 
 
+def cmd_operator(a):
+    """Which OPERATOR summons — the dropdown beside his box picks the same thing.
+    An operator carries its own model, effort and prompt flavour
+    (`boardwork.OPERATORS`); picking one is his explicit choice and wins over
+    board-watch's auto-routing until he changes it. No argument lists the
+    roster and marks the current pick and how each tick would route."""
+    if a.name is None:
+        cur = bw.orch_operator().name
+        auto = "" if bw.orch_operator_chosen() else "  (auto-route: on)"
+        for o in bw.OPERATORS:
+            print("%s %-11s %-32s %-6s %s"
+                  % ("*" if o.name == cur else " ", o.name, o.model, o.effort,
+                     o.blurb))
+        print(auto.strip() or "  (his explicit pick: %s)" % cur)
+        return 0
+    try:
+        op = bw.set_orch_operator(a.name)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    print("the next summoner is %s (%s at %s effort)"
+          % (op.name, op.model, op.effort))
+    return 0
+
+
 def cmd_model(a):
-    """Which model summons, and how hard it thinks. The dropdown beside his box
-    writes the same file; this is the scriptable half, and what a harness
-    drives. The summoner carries an effort now, so this sets a `(model, effort)`
-    pair the way `minister` does, from `boardwork.ORCH_MODELS`."""
+    """ADVANCED per-model override for the summoner. The operator (`operator`
+    command / the dropdown) is the ordinary control; this swaps only the MODEL,
+    keeping the operator's name and flavour, for a one-off. Picking an operator
+    clears any override set here. From `boardwork.ORCH_MODELS`."""
     if a.name is None:
         cur = bw.orch_model()
         for flag, effort, label in bw.ORCH_MODELS:
-            print("%s %-28s %-7s %s"
+            print("%s %-32s %-7s %s"
                   % ("*" if (flag, effort) == cur else " ", flag, effort, label))
         return 0
     try:
@@ -389,7 +414,8 @@ def cmd_model(a):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    print("the next summoner, Solomon, runs on %s at %s effort" % (flag, effort))
+    print("the next summoner (%s) runs on %s at %s effort"
+          % (bw.orch_operator().name, flag, effort))
     return 0
 
 
@@ -599,8 +625,15 @@ def main(argv=None):
     s.add_argument("n", nargs="?", type=int, default=None)
     s.set_defaults(fn=cmd_summoners)
 
-    s = sub.add_parser("model", help="which model, and how hard, the next "
-                                     "summoner runs on (e.g. 'opus 5 xhigh')")
+    s = sub.add_parser("operator", aliases=["op"],
+                       help="which operator summons (Weyer/Agrippa/Solomon/"
+                            "Trithemius/Waite); no arg lists the roster")
+    s.add_argument("name", nargs="?", default=None)
+    s.set_defaults(fn=cmd_operator)
+
+    s = sub.add_parser("model", help="ADVANCED: per-model override for the "
+                                     "summoner (e.g. 'opus 5 xhigh'); operator "
+                                     "is the ordinary control")
     s.add_argument("name", nargs="?", default=None)
     s.set_defaults(fn=cmd_model)
 

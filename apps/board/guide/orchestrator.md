@@ -192,11 +192,26 @@ whole pipeline, and what each piece is allowed to claim:
 | | what happens | where it lives |
 | --- | --- | --- |
 | he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
-| board-watch's next run | drains the queue and spawns ONE **orchestrator**, and WAITS for it | `board-watch.py:work_the_queue` |
-| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, hands one to a worker already in those files, or `ask`s him. It does not build anything | `boardwork.ORCHESTRATOR_PROMPT` |
+| board-watch's next run | drains the queue, ROUTES the tick to an **operator**, spawns it, and WAITS for it | `board-watch.py:work_the_queue` |
+| the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, hands one to a worker already in those files, or `ask`s him. It does not build anything | `boardwork.orchestrator_prompt()` |
 | each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **and may rebuild or reload** under `~/nix/AGENTS.md` -> "When it is okay to rebuild or hot-reload" | `boardwork._spawn_worker` |
 | a card per worker | two sentences — what it claims, then what it is observed doing — in one flat list, oldest first | `boardwork.cards()` + `qml/AgentRow.qml` |
 | a question | an ordinary decision in NEEDS YOU, answered at his leisure | `boardmove.ask()` |
+
+**The operator is not always Solomon** [his, 2026-08-01]. There is a roster of
+five NAMED OPERATORS (`boardwork.OPERATORS`), each a fixed
+`(name, model, effort, flavour)`: **Weyer** (deepseek-flash) and **Agrippa**
+(deepseek-pro) ANSWER off Claude and never run the summoning flow; **Solomon**
+(fable 5, the default) plans and dispatches; **Trithemius** (opus 5 xhigh)
+handles the operator machinery itself; **Waite** (sonnet 5) reconciles several
+summoners into one answer. The model follows the JOB: `board-watch` AUTO-ROUTES
+each tick to one operator from what was typed (`boardwork.route_operator`),
+unless he has picked one in the dropdown, which wins. A deepseek operator rides
+the hermes backend and never spends the weekly Claude window. The routed
+operator's model/effort reach the spawn through `BOARD_ORCH_MODEL`/`_EFFORT`,
+and its flavour picks the prompt (`boardwork.orchestrator_prompt`). Full roster,
+tiers and what is deferred: `docs/goetia-orchestrator-roster.md`. Everything
+below describes the `plan` flavour (Solomon), which is the common case.
 
 Rules that fall out of it, all load-bearing:
 

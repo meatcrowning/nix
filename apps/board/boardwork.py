@@ -131,6 +131,7 @@ against him. It is scoped to exactly that: nothing else here may count —
 `placed`, LANDED's `when`, the queue and the quiet threshold stay absolute or
 stay words, and nothing may cite this exception as precedent for a second one.
 """
+import collections
 import json
 import os
 import re
@@ -346,6 +347,7 @@ ORCH_MODELS = [
     ("claude-sonnet-5", "high", "sonnet 5 high"),
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
+    ("deepseek/deepseek-v4-pro", "medium", "deepseek v4 pro"),
 ]
 
 #: What summons when he has never chosen. `(flag, effort)`, stated once:
@@ -383,17 +385,22 @@ def orch_model():
     change that from outside — and the next prompt off the queue reads this file
     again. No signal to plumb, no restart, and nothing to reconcile.
 
-    An unreadable or unrecognised file falls back to the default rather than
-    passing an unknown string to `--model`/`--effort`, where the failure would be
+    The model now follows the chosen OPERATOR (`orch_operator()`): its
+    `(model, effort)` is what summons. The `orch-model` file is the advanced
+    escape hatch — a per-model override that swaps only the model, keeping the
+    operator's name and flavour. An override that is unreadable or not one of
+    `ORCH_MODELS` is ignored in favour of the operator's own model, rather than
+    passing an unknown string to `--model`/`--effort` where the failure would be
     a spawn that dies with a CLI usage error and a FAILED bullet he has to decode.
     """
+    op = orch_operator()
     try:
         with open(orch_model_file()) as f:
             parts = f.read().split()
     except OSError:
-        return DEFAULT_ORCH
+        return (op.model, op.effort)
     pair = (parts[0], parts[1]) if len(parts) >= 2 else None
-    return pair if pair in orch_choices() else DEFAULT_ORCH
+    return pair if pair in orch_choices() else (op.model, op.effort)
 
 
 def resolve_model(name):
@@ -433,6 +440,217 @@ def set_orch_model(name):
         os.fsync(f.fileno())
     os.replace(tmp, orch_model_file())
     return (flag, effort)
+
+
+# ============================================ the named operators (summoners)
+#: [his, 2026-08-01, answering the roster decision:] *"adopt the four and add
+#: waite now to reconcile several summoners into one answer and build
+#: auto-routing for the start"*. So the one summoner identity (`Solomon`, always
+#: on `claude-fable-5`) becomes a small roster of NAMED OPERATORS, each a fixed
+#: `(name, model, effort, flavour)` preset. The model follows the JOB now, not a
+#: per-run pick: a quick factual question runs Weyer off Claude entirely, a full
+#: plan runs Solomon on Claude, and `board-watch` ROUTES to one of them from
+#: what he typed (`route_operator`). Full rationale + tiers:
+#: `docs/goetia-orchestrator-roster.md`.
+#:
+#: `flavour` is what the operator DOES, and it picks the prompt
+#: (`orchestrator_prompt`):
+#:   * `answer` — Weyer, Agrippa: answer directly, do NOT run the summoning
+#:     flow; hand anything that needs a real multi-agent plan to Solomon.
+#:   * `plan`   — Solomon: the default split-and-dispatch orchestrator, unchanged.
+#:   * `meta`   — Trithemius: plan flavour PLUS licence to act on the operator
+#:     machinery itself (models, caps, roster, prompts).
+#:   * `synth`  — Waite: reconcile several summoners' output into one answer.
+#:
+#: The model of an operator decides its RUNTIME by the same `HERMES_MODELS` rule
+#: everything else uses (`get_backend_for_model`): a deepseek model rides hermes
+#: and never touches the weekly Claude window. The two hermes operators are
+#: scoped answer-first on purpose — the full summoning flow is only trusted on
+#: the Claude path — so a job that needs a real multi-minister plan routes to
+#: Solomon regardless of what was typed.
+Operator = collections.namedtuple("Operator", "name model effort flavour blurb")
+
+OPERATORS = [
+    Operator("Weyer", "deepseek/deepseek-v4-flash-0731", "medium", "answer",
+             "quick factual questions - answers directly, off Claude"),
+    Operator("Agrippa", "deepseek/deepseek-v4-pro", "medium", "answer",
+             "medium read-and-answer, no multi-agent plan - off Claude"),
+    Operator("Solomon", "claude-fable-5", "high", "plan",
+             "the default: split a request, summon ministers, wait"),
+    Operator("Trithemius", "claude-opus-5", "xhigh", "meta",
+             "meta: the operators themselves - models, caps, roster, prompts"),
+    Operator("Waite", "claude-sonnet-5", "high", "synth",
+             "reconcile several summoners' output into one answer"),
+]
+
+#: Summons when he has never chosen and nothing routes — the same default the
+#: one Solomon always was, so drawing the roster moved no behaviour on its own.
+DEFAULT_OPERATOR = "Solomon"
+
+#: Operator NAMES are HUMAN operators, not the 72 spirits — `boardagents.NAMES`
+#: excludes these so a minister is never accidentally named after a summoner.
+OPERATOR_NAMES = [o.name for o in OPERATORS]
+
+
+def operator_by_name(name):
+    for o in OPERATORS:
+        if o.name.lower() == (name or "").strip().lower():
+            return o
+    return None
+
+
+def default_operator():
+    return operator_by_name(DEFAULT_OPERATOR) or OPERATORS[0]
+
+
+def orch_operator_file():
+    return os.path.join(_root(), "orch-operator")
+
+
+def orch_operator():
+    """The `Operator` the NEXT summoner IS — its name, flavour and default
+    model. Read at spawn time, never cached, the same rule `orch_model()`
+    states. An unreadable or unrecognised file falls back to the default rather
+    than naming an operator that does not exist."""
+    try:
+        with open(orch_operator_file()) as f:
+            name = f.read().strip()
+    except OSError:
+        return default_operator()
+    return operator_by_name(name) or default_operator()
+
+
+def orch_operator_chosen():
+    """Did he EXPLICITLY pick an operator? A present, valid file means yes and
+    his pick wins over auto-routing; an absent file means auto-route."""
+    try:
+        with open(orch_operator_file()) as f:
+            return operator_by_name(f.read().strip()) is not None
+    except OSError:
+        return False
+
+
+def resolve_operator(name):
+    """An `Operator` from what somebody typed — exact name or one unambiguous
+    case-insensitive substring, the same forgiveness `resolve_model` gives and
+    the same refusal: ambiguity is an error, never a guess."""
+    want = " ".join((name or "").split()).lower()
+    if not want:
+        raise ValueError("no operator named")
+    exact = operator_by_name(want)
+    if exact:
+        return exact
+    hits = [o for o in OPERATORS if want in o.name.lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        raise ValueError("%r matches %s - be more specific"
+                         % (name, ", ".join(o.name for o in hits)))
+    raise ValueError("not an operator this board offers: %r (have: %s)"
+                     % (name, ", ".join(o.name for o in OPERATORS)))
+
+
+def set_orch_operator(name):
+    """Choose the operator. Atomic write, same as `set_orch_model`. Picking an
+    operator CLEARS any advanced per-model override (`orch-model`), so the
+    operator's own model is what summons — the override is a deliberate,
+    separate act (`boardctl.py model`)."""
+    op = resolve_operator(name)
+    os.makedirs(_root(), exist_ok=True)
+    tmp = orch_operator_file() + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(op.name + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, orch_operator_file())
+    try:
+        os.unlink(orch_model_file())
+    except OSError:
+        pass
+    return op
+
+
+#: Keyword routers, tried in order — the FIRST whose pattern hits what he typed
+#: wins, so the list is ordered by how strong a signal each flavour's words are.
+#: This is the "auto-routing from the start" he asked for: deterministic,
+#: testable, and cheap (no model call). It is deliberately a HEURISTIC first
+#: pass — the roster doc's step 2 (a deepseek-flash classifier) is the upgrade,
+#: and this is the seam it slots into (`route_operator`).
+#:
+#: The bar for each non-default flavour is "unmistakable", because a wrong route
+#: is a worse outcome than defaulting to Solomon: Solomon can always ask or
+#: dispatch, where a mis-routed Weyer might answer a question that needed a plan.
+#: So plan words (the common case) and anything unmatched fall through to Solomon.
+#: META is about acting ON the machinery — the roster, its models/efforts, the
+#: caps, the prompts, board-watch, the routing itself. It deliberately does NOT
+#: match a bare mention of a summoner or an operator name: "reconcile the
+#: summoners" is a synth job, not a meta one, so the operator NAMES are not
+#: signal words here.
+_ROUTE_META = re.compile(
+    r"\b(the )?(operator|orchestrator)s?\b|"
+    r"\b(roster|preset|which model|which operator|auto-rout\w*)\b|"
+    r"\bthe (models?|caps?|prompts?|summoners?|ministers?)\b|"
+    r"\bboard-watch\b", re.I)
+_ROUTE_SYNTH = re.compile(
+    r"\b(reconcile|synthesi[sz]e|merge (the|these|their|several|both)|"
+    r"combine (the|these|their|several|both)|one answer|single answer|"
+    r"into one answer|conflicting answers?|reconciliation)\b", re.I)
+_ROUTE_PLAN = re.compile(
+    r"\b(build|implement|add|fix|refactor|wire|port|migrat|dispatch|split|"
+    r"across (several|multiple|\d+)|plan|design|create|write (a|the|some)|"
+    r"change|update|rename|move|delete|remove)\w*", re.I)
+#: Agrippa's shape: a question that needs READING and judgement but no plan —
+#: comparisons, evaluations, "read X and tell me Y". Checked before the quick
+#: router so it beats Weyer's one-liner tier.
+_ROUTE_MEDIUM = re.compile(
+    r"\b(compare|contrast|evaluate|assess|weigh|"
+    r"difference between|pros and cons|trade-?offs?|"
+    r"which is (faster|better|slower|cheaper|safer|cleaner)|"
+    r"read .+ and (tell|list|summar|explain)|"
+    r"go through|look through|survey|review (the|this|all))\b", re.I)
+_ROUTE_QUICK = re.compile(
+    r"^\s*(what|which|who|when|where|why|how many|is |are |does |do |can |"
+    r"could |should |list |name |tell me|remind me)", re.I)
+
+
+def route_operator(text):
+    """Pick an `Operator` for what he typed. His EXPLICIT pick (a chosen
+    operator) is honoured by the caller before this runs; this is the auto-route
+    for when he has left it on default.
+
+    Order matters: meta and synth are narrow, unmistakable jobs, so they win
+    first; then genuine planning words send it to Solomon; then a short factual
+    question with none of those goes to the cheapest operator that can answer
+    it. Anything else falls through to the default, because a wrong route costs
+    more than defaulting to the planner, who can always ask or dispatch.
+    """
+    t = text or ""
+    # Synth first: "reconcile" is the narrowest, least ambiguous signal, and its
+    # requests mention summoners, which would otherwise trip the meta router.
+    if _ROUTE_SYNTH.search(t):
+        return operator_by_name("Waite")
+    if _ROUTE_META.search(t):
+        return operator_by_name("Trithemius")
+    if _ROUTE_PLAN.search(t):
+        return operator_by_name("Solomon")
+    # No plan words. A read-and-judge question is Agrippa's; a short factual one
+    # is Weyer's; a longer un-signalled one that still is not a plan leans on the
+    # crude length stand-in for "how much context" until the classifier lands.
+    if _ROUTE_MEDIUM.search(t):
+        return operator_by_name("Agrippa")
+    if _ROUTE_QUICK.search(t) or len(t) <= 120:
+        return operator_by_name("Weyer" if len(t) <= 240 else "Agrippa")
+    return default_operator()
+
+
+def tick_operator(text):
+    """The operator a board-watch tick summons: his explicit pick if he made
+    one, else the auto-route. One operator per tick (race-free across the
+    concurrent summoner threads, which share this process); the per-group
+    refinement is the roster doc's follow-up."""
+    if orch_operator_chosen():
+        return orch_operator()
+    return route_operator(text)
 
 
 # --------------------------------------------- what the MINISTERS run on
@@ -879,16 +1097,17 @@ your own expensive context on it:
 There is nobody to ask. Finish, or write down why you did not.
 """
 
-ORCHESTRATOR_PROMPT = """You are running headless, with no human watching, on \
+_PLAN_PROMPT = """You are running headless, with no human watching, on \
 the machine {host}. Work in `{repo}`.
 
-**You are Solomon, the orchestrator, and you do not do the work.** That is \
+**You are {operator}, an orchestrator, and you do not do the work.** That is \
 the name on the card pinned to the top of his board and the name he will use \
 if he types something at you; the workers you hand things to are named after \
-the demons of the Lesser Key, and you are the king who binds them. He typed \
+the demons of the Lesser Key, and you are the operator who binds them. He typed \
 the following into the one box on his board. Your job is to work out what it \
 implies, split it into pieces, and hand each piece to a worker agent — or, if \
 what it implies is genuinely his to decide, to ask him instead.
+{meta}
 
 --- what he wrote ---
 {notes}
@@ -1156,6 +1375,141 @@ dispatched and in hand — when every worker had already been killed and nothing
 was built.
 """
 
+#: Back-compat alias. `_PLAN_PROMPT` carries `{operator}` and `{meta}` slots the
+#: bare `.format(host=…, repo=…, notes=…, cap=…)` does not fill — always build
+#: an orchestrator prompt through `orchestrator_prompt(op, …)`, which fills all
+#: of them per the operator's flavour.
+ORCHESTRATOR_PROMPT = _PLAN_PROMPT
+
+#: The paragraph the `meta` flavour (Trithemius) gets that Solomon does not — its
+#: licence to act on the operator machinery itself. Inserted into `{meta}`.
+_META_LICENCE = """
+**You are the meta-operator: the operators THEMSELVES are in your remit.** \
+Where Solomon splits ordinary work, you also handle anything about the roster, \
+its models and efforts, the caps, the summoning machinery and these prompts — \
+the code under `apps/board/` and `home/srvs/board-watch-files/`. Treat such a \
+request like any other: read enough to name a `--where`, then dispatch a worker \
+to make the change (you still do not edit files yourself), or `ask` him if it is \
+genuinely his call (a new operator, a tier change, anything on the Ask-first \
+list). The roster and its rationale live in \
+`docs/goetia-orchestrator-roster.md` — name it in the task text.
+"""
+
+#: Weyer and Agrippa: ANSWER, do not summon a plan. Compact on purpose — the
+#: whole split-into-workers essay is the opposite of their job.
+_ANSWER_PROMPT = """You are running headless, with no human watching, on \
+the machine {host}. Work in `{repo}`.
+
+**You are {operator}, an operator who ANSWERS. You do not run the summoning \
+flow.** {blurb}. He typed the following into the one box on his board; work out \
+what it asks and answer it directly, on this board, in his own words to him \
+("you", never "he").
+
+--- what he wrote ---
+{notes}
+--- end ---
+
+HOW YOU ANSWER — and it is a short list:
+
+    python3 apps/board/tools/boardctl.py note '<TAG>: **<title>** - \
+<your answer, at most about a dozen words on this line>'
+
+    python3 apps/board/tools/boardctl.py ask '<the question>' \\
+        --option '<one way>' --option '<another way>' \\
+        --if-unanswered '<what happens if he never answers>'
+
+    python3 apps/board/tools/boardctl.py phase reading --doing '<one short line>'
+
+    python3 apps/board/tools/boardctl.py subminister '<a bounded chunk of wide, \
+mechanical reading>'   # ONLY if you are on a Claude model; refused on deepseek
+
+**A note STARTS WITH A TAG** — `INFORMATION:` for a plain answer, `ENACTED:` if \
+you turned a knob he named, `PARTIAL:`/`FAILED:` if you could not. Then a short \
+summary; elaboration goes on indented continuation lines. A QUESTION is never a \
+note — use `ask`, the only writer of a question on this board.
+
+WHAT YOU MAY DO, and the hard boundary:
+
+  * **Answer.** Read only what you need — a few greps, one bounded \
+`subminister` chunk for wide mechanical reading — and write the answer. You may \
+run a single bounded shell check to be sure of a fact.
+  * **You do NOT dispatch a multi-agent plan.** If what he typed genuinely \
+needs real work built across the repo — files edited, commits, several workers — \
+that is Solomon's job, not yours. Hand the WHOLE thing over unchanged:
+
+        python3 apps/board/tools/boardctl.py inbox send '<his request, in \
+full>' --to Solomon
+
+    then say so in one `note` (`INFORMATION: **handed to Solomon** - <why>`), \
+and stop. Do not half-build it and do not edit files yourself.
+  * **A knob he named** (the worker cap: `boardctl.py cap <n>`) you may turn \
+yourself, and say so.
+
+Keep it to ONE note unless he asked two distinct things. Never write that \
+something is done, fixed or working unless you verified it this run and can say \
+how. RULES bind you; they are in your system prompt.
+
+There is nobody to ask. Finish, or write down why you did not.
+"""
+
+#: Waite: reconcile several summoners' output into one answer.
+_SYNTH_PROMPT = """You are running headless, with no human watching, on \
+the machine {host}. Work in `{repo}`.
+
+**You are {operator}, the operator who RECONCILES.** When several summoners \
+have each answered part of a thing, or the same thing differently, your job is \
+to read their output and produce ONE coherent answer or plan from it — not to \
+start the work over. He typed the following into the one box on his board.
+
+--- what he wrote ---
+{notes}
+--- end ---
+
+WHAT YOU DO:
+
+  * **Find the pieces to reconcile.** The summoners' work is on this board and \
+in `~/.cache/board-work/<id>.log` (a pointer to each agent's transcript). \
+`python3 apps/board/tools/boardctl.py agents` lists who ran and on what; the \
+board's own sections hold their notes. Read what they said.
+  * **Produce one answer.** Where they agree, state it once; where they \
+conflict, resolve it and say which way you went and why, in one place. Write it \
+to him, to "you", with:
+
+        python3 apps/board/tools/boardctl.py note '<TAG>: **<title>** - \
+<the reconciled answer, short first line>'
+
+  * **If reconciling reveals genuine WORK to be built**, that is Solomon's \
+job: `inbox send '<the reconciled plan>' --to Solomon`, and say so. You \
+synthesise; you do not dispatch a fan-out yourself.
+  * **If the pieces are not there yet** — nothing to reconcile — say so plainly \
+in a `note` rather than inventing an answer.
+
+A note STARTS WITH A TAG (`INFORMATION:` for the reconciled answer). A question \
+is never a note — use `ask`. Keep it tight. RULES bind you.
+
+There is nobody to ask. Finish, or write down why you did not.
+"""
+
+
+def orchestrator_prompt(op, repo, host, notes, cap):
+    """The prompt for operator `op`, chosen by its flavour.
+
+    `plan`/`meta` build the full split-and-dispatch prompt (meta gets the extra
+    licence paragraph); `answer` and `synth` get their own compact prompts.
+    board-watch calls this instead of formatting the bare constant, so the
+    identity, the flavour and the model always come from one `Operator`.
+    """
+    if op.flavour in ("plan", "meta"):
+        return _PLAN_PROMPT.format(
+            repo=repo, host=host, notes=notes, cap=cap, operator=op.name,
+            meta=(_META_LICENCE if op.flavour == "meta" else ""))
+    if op.flavour == "synth":
+        return _SYNTH_PROMPT.format(
+            repo=repo, host=host, notes=notes, operator=op.name)
+    return _ANSWER_PROMPT.format(
+        repo=repo, host=host, notes=notes, operator=op.name, blurb=op.blurb)
+
+
 # Allow the tools a working agent needs; deny the ones nothing here may ever
 # do. board-watch imports these rather than keeping a second copy — one list, so
 # a hole cannot be opened in one spawner and not the other. The prompt is the
@@ -1330,7 +1684,12 @@ class ClaudeBackend(AgentBackend):
 #: spawn to `HermesBackend`; everything else stays on Claude. [his, 2026-07-31]
 #: the summoner and minister dropdowns should offer `deepseek-v4-flash-0731`
 #: via hermes.
-HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731"}
+#:
+#: `deepseek-v4-pro` was added [his, 2026-08-01] for the **Agrippa** operator —
+#: a stronger, still-far-cheaper-than-Claude step up for a medium
+#: read-and-answer that should stay off the weekly Claude window. See
+#: `OPERATORS` and `docs/goetia-orchestrator-roster.md`.
+HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-pro"}
 HERMES_PROVIDER = os.environ.get("BOARD_HERMES_PROVIDER", "nous")
 #: The Hermes toolsets a minister may reach. Mirrors the Claude `TOOLS` idea:
 #: a minister gets the shell, the file tools and the web pair — nothing bigger.
@@ -1418,7 +1777,13 @@ def _role_model(role):
     if role in MINISTER_ROLES:
         return minister_model()[0]
     if role == "orchestrator":
-        return orch_model()[0]
+        # Honour the same `BOARD_ORCH_MODEL` override `role_flags` reads, so the
+        # BACKEND a run rides (hermes vs claude) never disagrees with the
+        # `--model` flag it is launched with. board-watch sets this per tick to
+        # the ROUTED operator's model, which may differ from the globally chosen
+        # one (`orch_model()`), and a deepseek route must reach the hermes
+        # backend, not claude with a deepseek flag.
+        return os.environ.get("BOARD_ORCH_MODEL", orch_model()[0]).strip()
     return ""
 
 
@@ -2407,8 +2772,14 @@ def _idle_orchestrator_row():
     is written by this function. `doingLine` stays empty, which is the half of
     §10.6 that does bind: nothing pretends to have seen him do anything.
     """
+    # The idle row wears the CHOSEN operator's name (`orch_operator()` — Solomon
+    # by default, or whatever he picked in the dropdown), so the standing card
+    # reads as the operator that will answer if he types now. In auto-route mode
+    # (no explicit pick) that is Solomon, the default, which is honest: the next
+    # sentence has not been routed yet.
+    _op = orch_operator()
     return {
-        "id": "", "name": ba.ORCHESTRATOR_NAME, "kind": ba.ORCHESTRATOR_KIND,
+        "id": "", "name": _op.name, "kind": ba.ORCHESTRATOR_KIND,
         # [his, 2026-07-29] `hands` is gone from his card: an item goes to a NEW
         # agent as `summoned` and to one already running as `commanded`, the same
         # pair his notes carry. This line used to say "hands out what you type".
@@ -2427,7 +2798,7 @@ def _idle_orchestrator_row():
         # same verb his `waiting` line uses, so the standing row and the live
         # card say the same thing about the same state. No `...`: nothing is
         # happening on this row and §10 does not let an animation claim there is.
-        "saysLine": "%s awaits" % ba.ORCHESTRATOR_NAME,
+        "saysLine": "%s awaits" % _op.name,
         "actually": "", "doingLine": "", "observed": "unlinked",
         "contextLine": "", "workedLine": "", "unread": 0, "waiting": [],
         "born": 0.0,
