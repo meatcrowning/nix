@@ -462,18 +462,30 @@ def rescue_rejected(rows, state, rescued_ids, dl, dry_run):
     return blocked, resourced
 
 
-def clear_handled_failures(base, api_key, dl, rescued_ids, dry_run):
-    """DELETE failed-terminal transfers the rescue has already handled, so a
-    re-sourced error stops lingering in slskd's download list.
+def clear_handled_failures(base, api_key, dl, dry_run):
+    """DELETE every failed-terminal download from slskd, so errored rows stop
+    lingering in the download list the webapp reads.
 
-    rescue_rejected() drops a failed track's queued marker so the normal pass
-    re-searches it from another peer - but it never removes the errored
-    transfer from slskd, and slskd keeps completed/failed transfers until
-    explicitly cleared. Over many runs those errored rows accumulate in the
-    downloads view forever, which is the pile-up the user keeps seeing despite
-    the re-source. A transfer in a failed terminal state can never produce a
-    file, so once its id is in `rescued_ids` (i.e. its track has been
-    re-sourced) removing the row from slskd is pure cleanup.
+    rescue_rejected() re-sources failed tracks (drops the queued marker so the
+    normal pass enqueues a fresh download from a different peer) - but the
+    errored *row* itself never leaves slskd, because slskd keeps
+    completed/failed transfers until explicitly removed. A transfer in a failed
+    terminal state can never produce a file, so removing its row is pure
+    cleanup: the re-source (not the lingering row) is what recovers the track.
+
+    Every failed-terminal transfer is cleared, not just the ones the rescue
+    handled this run. A failure whose track is currently nofind/error, or whose
+    recorded source has since diverged, is exactly the row that would otherwise
+    accumulate in the downloads view forever -- and clearing it loses nothing,
+    because the track's recovery is driven by the work list and the state file,
+    not by this row. This runs AFTER rescue_rejected(), so the same run has
+    already seen every failed transfer it needed to re-source before their rows
+    are cleared.
+
+    slskd's DELETE downloads/{username}/{id} only removes the row from the
+    tracked store (what the webapp reads) when ?remove=true is passed; without
+    it the call merely "cancels" an already-failed transfer (a no-op) and the
+    row stays visible -- which is why this used to clear nothing.
 
     Best-effort: a failed DELETE is reported, not fatal. No-op under --dry-run
     (a preview must not mutate the live daemon). Returns the number cleared."""
@@ -485,9 +497,6 @@ def clear_handled_failures(base, api_key, dl, rescued_ids, dry_run):
         tid = f.get("id")
         if not (user and tid):
             continue
-        key = f.get("id") or f"{user}\x00{f.get('filename')}"
-        if key not in rescued_ids:
-            continue
         if dry_run:
             cleared += 1
             continue
@@ -495,7 +504,7 @@ def clear_handled_failures(base, api_key, dl, rescued_ids, dry_run):
             http("DELETE",
                  f"{base}/api/v0/transfers/downloads/"
                  f"{urllib.parse.quote(str(user), safe='')}/"
-                 f"{urllib.parse.quote(str(tid), safe='')}",
+                 f"{urllib.parse.quote(str(tid), safe='')}?remove=true",
                  api_key)
             cleared += 1
         except SlskdError as e:
@@ -594,19 +603,14 @@ def main():
         print(f"  avoiding {len(blocked_users)} peer(s) that refused a download "
               f"this run")
 
-    # Now the re-sourced errors can be cleared from slskd itself, so an errored
-    # row does not linger in the downloads view forever (see
-    # clear_handled_failures). Runs after rescue_rejected so `rescued_ids` holds
-    # every transfer this run just handled; a lingering failure from a previous
-    # run that maps to an already-re-sourced id is also cleared.
-    cleared = clear_handled_failures(base, api_key, dl, rescued_ids, args.dry_run)
+    # Now every errored/failed row can be cleared from slskd itself, so an
+    # errored transfer does not linger in the downloads view forever (see
+    # clear_handled_failures). Runs after rescue_rejected so the same run has
+    # already seen the failures it needed to re-source before they are removed.
+    cleared = clear_handled_failures(base, api_key, dl, args.dry_run)
     if cleared:
-        print(f"  cleared {cleared} handled errored transfer(s) from slskd"
+        print(f"  cleared {cleared} errored transfer(s) from slskd"
               + (" [dry-run]" if args.dry_run else ""))
-        if not args.dry_run:
-            save_rescued(os.path.join(args.dump_dir,
-                                      os.path.basename(RESCUED_FILE)),
-                         rescued_ids)
 
     def wanted(row):
         if row.get("spotify_id") not in state or args.retry:

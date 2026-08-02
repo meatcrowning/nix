@@ -292,8 +292,9 @@ def clear_state():
     return fake_http, saved
 
 
-def test_clear_handled_failures_dry_run_counts_only_handled():
-    print("clear_handled_failures: --dry-run counts handled, mutates nothing")
+def test_clear_handled_failures_dry_run_counts_no_mutation():
+    print("clear_handled_failures: --dry-run counts every failed transfer, "
+          "mutates nothing")
     dl = dl_response(
         failed_transfer("rejector", REJECTED_FILENAME, reason="Completed, Rejected",
                         tid="clear-1"),
@@ -307,15 +308,15 @@ def test_clear_handled_failures_dry_run_counts_only_handled():
     orig_http = S.http
     S.http = fake_http
     try:
-        n = S.clear_handled_failures("http://x", "k", dl, {"clear-1"}, dry_run=True)
+        n = S.clear_handled_failures("http://x", "k", dl, dry_run=True)
     finally:
         S.http = orig_http
-    check("counts only the handled failed transfer", n == 1)
+    check("counts every failed-terminal transfer (2 here)", n == 2)
     check("dry-run made no DELETE calls", saved.get("calls", []) == [])
 
 
 def test_clear_handled_failures_deletes_and_counts():
-    print("clear_handled_failures: a handled failure is DELETE-cleanable")
+    print("clear_handled_failures: every failed transfer is DELETE-cleanable")
     dl = dl_response(
         failed_transfer("rejector", REJECTED_FILENAME, reason="Completed, Rejected",
                         tid="clear-1"),
@@ -323,20 +324,26 @@ def test_clear_handled_failures_deletes_and_counts():
                         tid="clear-2"),
         failed_transfer("unhandled", "u\\\\three.mp3",
                         reason="Completed, TimedOut", tid="clear-3"),
+        {"username": "done", "filename": "d\\\\four.mp3",
+         "state": "Completed, Succeeded"},
     )
     fake_http, saved = clear_state()
     orig_http = S.http
     S.http = fake_http
     try:
-        n = S.clear_handled_failures("http://x", "k", dl, {"clear-1", "clear-2"},
-                                    dry_run=False)
+        n = S.clear_handled_failures("http://x", "k", dl, dry_run=False)
     finally:
         S.http = orig_http
-    check("clears exactly the two handled failures", n == 2)
+    check("clears all three failed transfers, not only a 'rescued' subset",
+          n == 3)
     urls = [u for m, u in saved["calls"] if m == "DELETE"]
-    check("DELETE for each handled failure", len(urls) == 2)
-    check("unhandled failure is not deleted",
-          all("clear-3" not in u for u in urls))
+    check("DELETE for each failed transfer", len(urls) == 3)
+    check("the failed terminal is deleted too (it can never produce a file)",
+          any("clear-3" in u for u in urls))
+    check("a succeeded transfer is NOT deleted",
+          all("d\\\\four.mp3" not in u for u in urls))
+    check("DELETE carries ?remove=true (else slskd only cancels, the row stays)",
+          all(u.endswith("?remove=true") for u in urls))
 
 
 def main():
