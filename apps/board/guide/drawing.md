@@ -62,6 +62,18 @@ forbids nested scroll regions, so every section sizes to its whole content and a
 wheel notch means the same thing wherever the cursor is. `VScroll` is the bar and
 the gutter is reserved from its own `barW`, never a literal.
 
+**Every drag on the page is a DISPLAY order, and `board.md` is never rewritten by
+one** ([his answer, 2026-08-01]). The four top-level bands reorder into
+`sectionOrder`; the decisions inside NEEDS YOU reorder into `needsOrder`. Both are
+saved in `~/.local/state/board/state.json` beside `collapsed` and `drafts`, and
+both are applied in `Main.qml` when the rows are drawn — the decisions through
+`applyDisplayOrder`, which keeps any key the saved order does not mention (a
+decision just added, or one handed back) in its file position after the ordered
+ones. A decision keeps its `### n.` number and stays a decision because it stays
+under NEEDS YOU in the file; the on-screen order is the only thing a drag changes.
+The Python `Board.reorderNeeds`/`reorder_sections` slots that once rewrote the
+store are left unused — nothing on the page calls them.
+
 - **Sections are told apart by a RULE and by spacing, never by size or weight**
   (§2.2 — the font ships Regular only, and every size here is one desktop-wide
   setting). `needs you` takes an accent rule; `in flight`, `agents` and `landed`
