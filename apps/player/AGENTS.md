@@ -482,6 +482,13 @@ populates the never-re-queue guard: the `/transfers/downloads` response nests
 as username → directories → files, and the guard was previously walking only
 the top level and matching nothing.
 
+**A re-sourced failure is then cleared from slskd itself.** slskd keeps
+completed/failed transfers until explicitly removed, so a re-sourced track left
+a dead errored row accumulating in the downloads view forever. Once a failed
+transfer's id is recorded in `soulseek-rescued.json`, the pipeline DELETE-cleans
+that transfer from `/transfers/downloads` — pure cleanup of a row that can never
+produce a file: the re-source (not the lingering row) is what recovers the track.
+
 slskd drops completed downloads into `~/.local/share/slskd/downloads/`, and the
 player only ever sees a track once it is moved into `aud/` and rescanned. The
 pipeline's last step (`tools/player-add.py`, run automatically by
