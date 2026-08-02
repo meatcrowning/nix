@@ -42,6 +42,22 @@ Item {
         Quickshell.execDetached(["hyprctl", "eval", lua]);
     }
 
+    // Push the "pixel font" pick (Settings > Appearance) out beyond the panel
+    // and the Qt apps: kitty, the hyprvtb titlebar and kdeglobals read the same
+    // settings.json via apply-pixel-font.sh, so flipping the pick here takes
+    // the whole desktop with it. Debounced — the file write is itself debounced
+    // in SettingsStore, and this only acts on a real value change (see
+    // onFontFamilyChanged below), but the two timers need not race.
+    function applyPixelFont() { fontApply.restart(); }
+    Timer {
+        id: fontApply
+        interval: 400
+        onTriggered: {
+            Quickshell.execDetached(["sh", "-c",
+                'exec "$HOME/.config/scripts/apply-pixel-font.sh"']);
+        }
+    }
+
     // loadNow() first: this handler branches on persisted values (the palette
     // signature below), and a one-shot handler cannot be gated — at completion
     // the adapter still holds the shipped defaults unless the read is forced.
@@ -59,6 +75,12 @@ Item {
         function onPointerSpeedChanged() { root.applyInput(); }
         function onNaturalScrollChanged() { root.applyInput(); }
         function onTapToClickChanged() { root.applyInput(); }
+
+        // ---- pixel-font propagation (kitty / titlebar / kdeglobals) ----
+        // The panel + Qt apps read the pick live themselves; this pushes it to
+        // the static surfaces. Both keys fire on a real change.
+        function onFontFamilyChanged() { root.applyPixelFont(); }
+        function onFontSizeChanged()   { root.applyPixelFont(); }
 
         // ---- palette generation ----
         // The four Appearance keys that are INPUTS to wal-extract.py. Nothing
