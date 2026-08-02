@@ -2,7 +2,12 @@
 # rgb-set.py — set every RGB device on the box to one colour (the wallpaper
 # accent), so the DRAM sticks and motherboard headers follow the desktop theme.
 #
-#   rgb-set.py RRGGBB
+#   rgb-set.py [--force] RRGGBB
+#
+# The automatic follow is a setting: `rgbFollowTheme` in settings.json
+# (Settings -> Appearance -> rgb lighting, drawn on top only). Off means every
+# automatic fire is a no-op and the lights keep their last colour; --force
+# ignores it, for setting them by hand.
 #
 # Called detached from wal-set.sh (step 6c). Talks to the system
 # openrgb.service SDK server on 127.0.0.1:6742 (hardware.openrgb.enable in
@@ -18,6 +23,7 @@
 #   JRAINBOW2 — bottom case RGB strip
 #   JRGB1/2   — nothing visible connected
 import fcntl
+import json
 import os
 import sys
 
@@ -56,11 +62,38 @@ ZONE_RESIZE = {
 # brightness=None on every device) — full output was uncomfortably bright.
 BRIGHTNESS = 0.30
 
+# The desktop's one cross-app settings channel; see SettingsStore.qml.
+SETTINGS = os.path.expanduser("~/.config/quickshell/settings.json")
+
+
+def follows_theme():
+    """Is the automatic accent push switched on? (`rgbFollowTheme`)
+
+    The Settings window's Appearance page writes this key; wal-set.sh fires
+    us on every theme change regardless, and the gate lives HERE rather than
+    in that script because our own interpreter is baked by home/srvs/wal.nix
+    while wal-set.sh has no json reader on its pinned PATH. Missing file or
+    missing key means on — the same fail-open default the panel declares, so
+    a machine that has never opened Settings behaves as it always did.
+    """
+    try:
+        with open(SETTINGS) as f:
+            return bool(json.load(f).get("rgbFollowTheme", True))
+    except Exception:
+        return True
+
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("usage: rgb-set.py RRGGBB")
-    color = led_color(sys.argv[1])
+    argv = [a for a in sys.argv[1:] if a != "--force"]
+    forced = "--force" in sys.argv
+    if len(argv) != 1:
+        sys.exit("usage: rgb-set.py [--force] RRGGBB")
+    # --force is for setting the lights by hand (or from a test) with the
+    # automatic follow switched off; without it, off means off.
+    if not forced and not follows_theme():
+        print("rgb-set: rgbFollowTheme is off, leaving the lights alone")
+        return
+    color = led_color(argv[0])
 
     # Serialise overlapping fires (rapid theme flips): same trick as
     # cursor-recolor.sh — queued runs each apply their own colour in order,
@@ -89,7 +122,7 @@ def main():
                 if want is not None and len(zone.leds) != want:
                     zone.resize(want)
             dev.set_color(color)
-            print(f"rgb-set: {dev.name} -> #{sys.argv[1]} (led {color})")
+            print(f"rgb-set: {dev.name} -> #{argv[0]} (led {color})")
         except Exception as e:
             print(f"rgb-set: {dev.name}: {e}")
 
