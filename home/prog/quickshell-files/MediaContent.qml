@@ -30,21 +30,34 @@ Item {
         return (v > 0 ? "+" : "") + v.toFixed(1) + " dB";
     }
 
-    // ---- CJK/fullwidth queue text: a fallback that FITS the pixel cell ----
-    // The pixel font has no CJK glyphs, so Qt falls back to Noto Sans CJK for
-    // a Japanese/Chinese/fullwidth title. Noto's line metrics (ascent 17,
-    // height 21 at 15px) overflow the panel's FixedHeight 15px line box, so the
-    // whole row is pushed down inside its 16px cell and clipped along the
-    // bottom — the "CJK sits low against the Latin rows next to it" report.
-    // Unifont is the one installed CJK family whose metrics FIT the pixel
-    // cell (ascent 13 / descent 2 / height 15, all measured), and it is itself
-    // a bitmap font, so a CJK row keeps the desktop's pixel look instead of
-    // clashing with a smooth sans. Draw these rows in Unifont and they sit on
-    // (nearly) the same baseline as the ASCII rows, uncropped. A string that
-    // mixes Latin with CJK takes Unifont for the whole line — one font, one
-    // baseline — rather than re-introducing the cross-font ascent mismatch.
-    readonly property var _cjkRe: /[\u3000-\u303f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/
-    function isCjk(s) { return s !== null && s !== undefined && _cjkRe.test(s); }
+    // ---- Non-pixel-font queue text: a fallback that FITS the pixel cell ----
+    // The pixel font (More Perfect DOS VGA) has no CJK glyphs, so Qt falls back
+    // to Noto Sans CJK for a Japanese/Chinese/fullwidth title. Noto's line
+    // metrics (ascent 17, height 21 at 15px) overflow the panel's FixedHeight
+    // 15px line box, so the whole row is pushed down inside its 16px cell and
+    // clipped along the bottom — the "CJK sits low against the Latin rows next
+    // to it" report. Unifont is the one installed family whose metrics FIT the
+    // pixel cell (ascent 13 / descent 2 / height 15, all measured) AND covers
+    // the whole BMP, and it is itself a bitmap font, so such a row keeps the
+    // desktop's pixel look instead of clashing with a smooth sans. Draw these
+    // rows in Unifont and they sit on (nearly) the same baseline as the ASCII
+    // rows, uncropped. A string that mixes Latin with a foreign script takes
+    // Unifont for the whole line — one font, one baseline — rather than
+    // re-introducing the cross-font ascent mismatch.
+    //
+    // The same clip hits EVERY script the pixel font lacks that has no ASCII
+    // form for Glyphs.px() to map to — not just CJK. The regex ranges are the
+    // BMP script blocks More Perfect covers ZERO of (verified against its cmap):
+    // ԰-֏ Armenian, then ؀-᣿ — Arabic/Syriac/Thaana/N'Ko,
+    // Devanagari and every other Indic, Thai/Lao/Tibetan, Myanmar/Georgian,
+    // Hangul Jamo, Ethiopic/Cherokee/Khmer/Mongolian — plus the original CJK
+    // ranges. Hebrew (֐-׿) is deliberately EXCLUDED: More Perfect
+    // draws its alphabet itself, so it stays in the pixel font. Partially
+    // covered Cyrillic/Greek are excluded for the same reason — routing them
+    // would uglify text the pixel font renders fine. An allowlist of the major
+    // scripts, not exhaustive over the whole BMP; widen it deliberately.
+    readonly property var _noPixelRe: /[\u0530-\u058f\u0600-\u18ff\u3000-\u303f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/
+    function needsUnifont(s) { return s !== null && s !== undefined && _noPixelRe.test(s); }
 
     onActiveChanged: {
         Media.watch(root, active);
@@ -1207,10 +1220,10 @@ Item {
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     text: qrow.modelData.artist || ""
-                    // CJK/fullwidth rows render in Unifont (fits the pixel line
-                    // box) instead of the overflowing Noto fallback — see the
-                    // `_cjkRe`/`isCjk` note at the top.
-                    font.family: root.isCjk(qrow.modelData.artist) ? "Unifont" : Theme.font
+                    // Rows in a script the pixel font lacks render in Unifont
+                    // (fits the pixel line box) instead of the overflowing Noto
+                    // fallback — see the `_noPixelRe`/`needsUnifont` note above.
+                    font.family: root.needsUnifont(qrow.modelData.artist) ? "Unifont" : Theme.font
                     color: Theme.textDim
                 }
                 PixelText {
@@ -1220,7 +1233,7 @@ Item {
                     }
                     elide: Text.ElideRight
                     text: qrow.modelData.title || ""
-                    font.family: root.isCjk(qrow.modelData.title) ? "Unifont" : Theme.font
+                    font.family: root.needsUnifont(qrow.modelData.title) ? "Unifont" : Theme.font
                     color: qrow.isCurrent ? Theme.accent : Theme.text
                 }
                 MouseArea {
