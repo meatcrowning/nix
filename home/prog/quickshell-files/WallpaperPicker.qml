@@ -17,6 +17,41 @@ PanelWindow {
 
     property bool open: false
 
+    // "No wallpaper" mode (Settings › Appearance › wallpaper › no wallpaper):
+    // the desktop is a solid Theme.bg with no image, so there is nothing to flip
+    // THROUGH. The switcher becomes a COLOUR-THEME chooser instead — a grid of
+    // hue swatches, one per candidate theme. Picking one sets the manual accent
+    // (themeMode=manual + accentOverride), which SettingsApply.qml re-themes the
+    // whole desktop from exactly as a wallpaper's palette would. The thumbnail
+    // picker is unchanged whenever a real wallpaper is active.
+    readonly property bool solid: SettingsStore.d.wallpaperSolid
+
+    // Hue wheel for the swatch grid — built once, distinct enough to read as a
+    // palette. Only the HUE is used downstream (wal-extract pastel-caps it like
+    // any wallpaper accent), so the swatch's own s/v are display-only.
+    property var swatches: []
+    Component.onCompleted: {
+        const arr = [];
+        const n = 24;
+        for (let i = 0; i < n; i++) arr.push(Qt.hsva(i / n, 0.65, 0.92, 1));
+        swatches = arr;
+    }
+
+    function hexOf(c) {
+        function h(x) { return ("0" + Math.round(x * 255).toString(16)).slice(-2); }
+        return "#" + h(c.r) + h(c.g) + h(c.b);
+    }
+
+    // Apply a swatch as the theme: switch to the manual accent path and hand it
+    // the hue. SettingsApply.qml's onThemeModeChanged/onAccentOverrideChanged
+    // then re-runs wal-set.sh — the same re-theme a wallpaper pick triggers.
+    function pickSwatch(c) {
+        SettingsStore.d.themeMode = "manual";
+        SettingsStore.d.accentOverride = root.hexOf(c);
+        SettingsStore.save();
+        root.open = false;
+    }
+
     // Stay mapped through the slide-out, then hide once off-screen — same
     // lifecycle as Launcher/Cheatsheet.
     visible: open || card.x < card.hidden - 1
@@ -250,9 +285,15 @@ PanelWindow {
     onOpenChanged: {
         if (open) {
             dirty = false;
-            refresh();
-            list.forceActiveFocus();
-        } else {
+            if (root.solid) {
+                swatchList.forceActiveFocus();
+            } else {
+                refresh();
+                list.forceActiveFocus();
+            }
+        } else if (!root.solid) {
+            // Swatch picks apply immediately (pickSwatch); only the thumbnail
+            // picker defers its full apply to close.
             commitFinal();
         }
     }
@@ -276,13 +317,66 @@ PanelWindow {
         PixelText {
             id: title
             anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 10 }
-            text: "wallpaper"
+            text: root.solid ? "color theme" : "wallpaper"
             color: Theme.accent
+        }
+
+        // Swatch grid — shown only in "no wallpaper" mode. Picking a swatch
+        // re-themes the desktop from that hue (see root.pickSwatch).
+        GridView {
+            id: swatchList
+            visible: root.solid
+            focus: root.solid
+            anchors {
+                top: title.bottom; topMargin: 8
+                left: parent.left; right: parent.right; bottom: parent.bottom
+                margins: 10
+            }
+            clip: true
+            readonly property int columns: 3
+            cellWidth: Math.floor(width / columns)
+            cellHeight: 90
+            model: root.swatches
+            boundsBehavior: Flickable.StopAtBounds
+
+            Keys.onLeftPressed:  currentIndex = Math.max(0, currentIndex - 1)
+            Keys.onRightPressed: currentIndex = Math.min(count - 1, currentIndex + 1)
+            Keys.onUpPressed:    currentIndex = Math.max(0, currentIndex - columns)
+            Keys.onDownPressed:  currentIndex = Math.min(count - 1, currentIndex + columns)
+            Keys.onEscapePressed: root.open = false
+            Keys.onReturnPressed: if (currentIndex >= 0) root.pickSwatch(root.swatches[currentIndex])
+            Keys.onEnterPressed:  if (currentIndex >= 0) root.pickSwatch(root.swatches[currentIndex])
+
+            delegate: Item {
+                id: swCell
+                required property var modelData
+                required property int index
+                width: swatchList.cellWidth
+                height: swatchList.cellHeight
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    color: swCell.modelData
+                    radius: 0
+                    border.width: swCell.index === swatchList.currentIndex ? 2 : 1
+                    border.color: swCell.index === swatchList.currentIndex ? Theme.accent : Theme.border
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: swatchList.currentIndex = swCell.index
+                        onClicked: root.pickSwatch(swCell.modelData)
+                    }
+                }
+            }
         }
 
         KineticGridView {
             id: list
-            focus: true
+            visible: !root.solid
+            focus: !root.solid
             anchors {
                 top: title.bottom; topMargin: 8
                 left: parent.left; right: parent.right; bottom: parent.bottom
