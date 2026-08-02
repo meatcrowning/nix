@@ -56,6 +56,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1139,31 +1140,48 @@ def watch_loop(args, api_key, base, state_path):
           f"{args.low_water}, poll every {args.poll_interval:g}s. "
           f"Ctrl-C / SIGTERM to stop.\n")
     while not STOP:
-        dl = fetch_downloads(base, api_key)
-        in_pipe = count_in_pipe(dl)
-        if in_pipe >= args.low_water:
-            print(f"watch: {in_pipe} live transfer(s) (>= {args.low_water}); "
-                  f"waiting {args.poll_interval:g}s")
-            interruptible_sleep(args.poll_interval)
-            continue
-        print(f"\nwatch: {in_pipe} live transfer(s) (< {args.low_water}); "
-              f"topping up toward {args.target}")
-        budget = max(1, args.target - in_pipe)
-        summary = sweep_once(args, api_key, base, state_path, session,
-                             budget_override=budget)
-        if STOP:
-            break
-        if summary["wanted"] == 0:
-            post = count_in_pipe(fetch_downloads(base, api_key))
-            if post == 0:
-                print("\nwatch: missing list drained and nothing in flight. "
-                      "done.")
+        # One iteration must never take the whole daemon down: this runs
+        # unattended for days, and a transient blip (slskd restarting mid-poll,
+        # a search that raises SlskdError, a DB snapshot hiccup) is ordinary,
+        # not fatal. Catch it, log it, sleep, and retry -- so the pool keeps
+        # refilling the moment slskd is back, without waiting for a systemd
+        # restart to rebuild the session state. SIGINT/SIGTERM sets STOP via the
+        # handler (no KeyboardInterrupt), so nothing here swallows a stop; a real
+        # SystemExit (check_slskd, argparse) is re-raised so the unit still fails
+        # loudly on a genuinely-unusable slskd.
+        try:
+            dl = fetch_downloads(base, api_key)
+            in_pipe = count_in_pipe(dl)
+            if in_pipe >= args.low_water:
+                print(f"watch: {in_pipe} live transfer(s) (>= {args.low_water}); "
+                      f"waiting {args.poll_interval:g}s")
+                interruptible_sleep(args.poll_interval)
+                continue
+            print(f"\nwatch: {in_pipe} live transfer(s) (< {args.low_water}); "
+                  f"topping up toward {args.target}")
+            budget = max(1, args.target - in_pipe)
+            summary = sweep_once(args, api_key, base, state_path, session,
+                                 budget_override=budget)
+            if STOP:
                 break
-            # Nothing left to enqueue, but transfers are still finishing. Wait
-            # for them (a rescue pass may free a stalled one) rather than
-            # busy-looping the sweep.
-            print(f"watch: nothing left to search; {post} still finishing. "
-                  f"waiting {args.poll_interval:g}s")
+            if summary["wanted"] == 0:
+                post = count_in_pipe(fetch_downloads(base, api_key))
+                if post == 0:
+                    print("\nwatch: missing list drained and nothing in flight. "
+                          "done.")
+                    break
+                # Nothing left to enqueue, but transfers are still finishing.
+                # Wait for them (a rescue pass may free a stalled one) rather
+                # than busy-looping the sweep.
+                print(f"watch: nothing left to search; {post} still finishing. "
+                      f"waiting {args.poll_interval:g}s")
+                interruptible_sleep(args.poll_interval)
+        except SystemExit:
+            raise
+        except Exception as e:  # noqa: BLE001 -- deliberate: keep the loop alive
+            print(f"watch: poll iteration failed ({e!r}); "
+                  f"retrying in {args.poll_interval:g}s")
+            traceback.print_exc()
             interruptible_sleep(args.poll_interval)
     if STOP:
         print("\nwatch: stopped.")

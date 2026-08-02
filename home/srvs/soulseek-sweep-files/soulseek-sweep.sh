@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
-# Drain the Soulseek missing-track backlog unattended.
+# Keep the Soulseek download pool fed, unattended.
 #
-# apps/player/tools/soulseek-missing.py submits a batch of searches to the
-# local slskd daemon and queues the best match of each for download; slskd's
-# 50-slot downloader then pulls them in the background. Nothing ran that sweep
-# on a schedule, so the download queue drained to a handful of items and sat
-# idle until someone kicked it by hand. This wrapper is the scheduled kick,
-# driven by soulseek-sweep.timer.
+# apps/player/tools/soulseek-missing.py --watch is a long-running feeder: it
+# polls the local slskd daemon for how many transfers are still live and,
+# whenever that falls below its low-water mark, searches and enqueues fresh
+# tracks until the pool is topped up again; slskd's 50-slot downloader pulls
+# them in the background. This wrapper is what soulseek-sweep.service execs to
+# run it. (It used to run a one-shot batch on a 30-min timer, but a periodic
+# one-shot cannot hold a pool at a low-water mark — the queue drained to a
+# handful between ticks and sat idle, the symptom this replaces.)
 #
 # It exists as a shell wrapper rather than an ExecStart straight at the python
-# because the sweep MUST be a clean no-op when slskd is down, unreachable, or
+# because the feeder MUST be a clean no-op when slskd is down, unreachable, or
 # not logged in to Soulseek: the python raises SystemExit (a non-zero exit)
 # with an explanatory message in every one of those cases, which would mark the
-# service `failed` and, under a timer, do it on every tick. slskd being down is
-# an ordinary state here (the daemon restarts, the network drops, the login
-# secret was never added), not a fault of this unit — so we pre-check it and
-# skip quietly instead.
+# service `failed`. slskd being down is an ordinary state here (the daemon
+# restarts, the network drops, the login secret was never added), not a fault
+# of this unit — so we pre-check it and skip quietly (exit 0), leaving the timer
+# to try again. Once slskd is up we `exec` the python so a crash still trips the
+# unit's Restart=on-failure.
 #
 # KILL SWITCH: `touch ~/.local/state/soulseek-sweep/off` to stop it running;
-# delete that file to re-arm. Same style as board-watch / board-notify.
-# LOG: ~/.cache/soulseek-sweep.log (this wrapper's own line-per-run trail; the
-# python's verbose per-track output is appended under it).
+# delete that file to re-arm, then `systemctl --user start soulseek-sweep`.
+# Same style as board-watch / board-notify.
+# LOG: ~/.cache/soulseek-sweep.log (this wrapper's own per-start precheck trail);
+# the feeder's own per-poll / per-track output goes to journald
+# (`journalctl --user -u soulseek-sweep`), which rotates it — a days-long run
+# would otherwise grow the file without bound.
 
 set -u
 
@@ -68,14 +74,20 @@ case "$app" in
     ;;
 esac
 
-log "running soulseek-missing sweep"
-# Batch invocation (default --limit, currently 40 tracks/run). A keep-fed /
-# continuous mode was being added to soulseek-missing.py concurrently but had
-# not landed when this was written, so this wires the existing one-shot batch;
-# swap in that flag when it lands.
-python3 "$SWEEP" >> "$LOG" 2>&1
-rc=$?
-log "sweep finished (exit $rc)"
-# Don't propagate the python's exit code: a mid-sweep hiccup (a peer 429, a
-# search timeout) is normal and must not mark the unit failed on a timer.
-exit 0
+log "starting soulseek-missing --watch"
+# --watch is a LONG-RUNNING feeder, not a one-shot batch: it polls slskd for how
+# many transfers are still live and, whenever that falls below its low-water
+# mark, searches and enqueues fresh tracks until the pool is topped up again
+# (soulseek-missing.py). A periodic one-shot could not hold the pool at a
+# low-water mark -- it drained to a handful between ticks and sat idle -- which
+# is exactly what this replaces.
+#
+# `exec` so systemd tracks the python directly: SIGTERM (stop/restart) reaches
+# the loop, which stops cleanly after the current search; the python's exit code
+# propagates, so a crash trips the unit's Restart=on-failure while a clean drain
+# (exit 0) stays stopped until the timer re-checks for newly-missing tracks. The
+# non-blocking flock on fd 9 is preserved across exec and held for the python's
+# whole lifetime, so a second run still cannot overlap. Output goes to journald
+# (long-running: journald rotates it; the file LOG keeps only this wrapper's
+# per-start precheck trail).
+exec python3 "$SWEEP" --watch
