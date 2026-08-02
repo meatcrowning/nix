@@ -1729,6 +1729,14 @@ class Player(QObject):
         rows = self._library.album_tracks(album_id)
         self.queueTracks([r["id"] for r in rows])
 
+    @Slot(int)
+    def playAlbumNext(self, album_id):
+        """Insert every track of the album, in album order, directly after the
+        playing one — the album cover's right-click "play next" (the track menu
+        already had the single-track playNext; this is its whole-album twin)."""
+        rows = self._library.album_tracks(album_id)
+        self.playNext([r["id"] for r in rows])
+
     def _fresh_rows(self, ids):
         """Library rows for `ids`, in the order given, minus anything whose file
         is gone (the library drive can be unplugged under a listing)."""
