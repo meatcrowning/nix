@@ -31,7 +31,6 @@ Window {
     property bool useTabs: false
     property int indentWidth: 4
     property bool showNumbers: true
-    property bool wrap: false
     property bool guessIndent: true
 
     readonly property Item view: (current >= 0 && current < viewRep.count
@@ -319,8 +318,6 @@ Window {
             "-",
             { id: "nums",  label: "ln", state: win.showNumbers ? 1 : 0,
               tip: "line numbers" },
-            { id: "wrap",  label: "wr", state: win.wrap ? 1 : 0,
-              tip: "wrap long lines" },
             "-",
         ];
         for (var i = 0; i < tabs.count; i++) {
@@ -371,8 +368,6 @@ Window {
                 return;
             case "nums":    win.showNumbers = !win.showNumbers;
                             Settings.set("showNumbers", win.showNumbers); return;
-            case "wrap":    win.wrap = !win.wrap;
-                            Settings.set("wrap", win.wrap); return;
             }
             if (id.indexOf("tab:") === 0) {
                 var at = win.indexOfTid(parseInt(id.substring(4)));
@@ -442,7 +437,8 @@ Window {
         useTabs = Settings.get("useTabs", false) === true;
         indentWidth = Number(Settings.get("indentWidth", 4)) || 4;
         showNumbers = Settings.get("showNumbers", true) !== false;
-        wrap = Settings.get("wrap", false) === true;
+        // Wrap is unconditional now — no `wrap` key is read or written, so a
+        // stale `wrap:false` in an old state.json is simply ignored.
         guessIndent = Settings.get("guessIndent", true) !== false;
 
         var paths = startArgs.paths || [];
@@ -498,7 +494,6 @@ Window {
                     useTabs: win.useTabs
                     indentWidth: win.indentWidth
                     showNumbers: win.showNumbers
-                    wrap: win.wrap
                     winActive: win.active
                     cellW: win.cellW
                     onStatusReported: (m) => win.status = m
