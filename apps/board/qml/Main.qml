@@ -1217,7 +1217,16 @@ Component {
                         // an agent editing one card must not pull the answer editor
                         // out from under him on another (see `keysOf`). The Loader
                         // sizes to its loaded block so the Column lays them out by
-                        // their real heights, exactly as the top-level sectionsCol.
+                        // their real heights, exactly as the top-level sectionsCol —
+                        // and it reads the block's IMPLICIT height for the same
+                        // reason that one does (see the comment there): a Loader
+                        // with an explicit `height` force-resizes its item, which
+                        // DESTROYS the item's own `height: implicitHeight` binding.
+                        // Reading `item.height` then froze the to-do block at
+                        // whatever it measured before its last bullet's wrapped
+                        // elaboration laid out — 60px short — so the summoner
+                        // section drew over the tail of a long INFORMATION bullet.
+                        // `implicitHeight` is content-driven and keeps updating.
                         Repeater {
                             id: blockRepeater
                             model: win.keysOf(win.needsBlocks, "bkey")
@@ -1226,7 +1235,7 @@ Component {
                                 required property int index
                                 readonly property var blockData: win.needsBlocks[index]
                                 width: needsCol.width
-                                height: item ? item.height : 0
+                                height: item ? item.implicitHeight : 0
                                 sourceComponent: blockData
                                     ? (blockData.kind === "decision"
                                        ? decisionBlockComp : todoAreaComp)
