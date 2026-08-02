@@ -22,6 +22,19 @@ import Quickshell.Io
 // with no panel reload and therefore no flash. In the writer instance the
 // self-write reloads the same values straight back: nothing calls save() on a
 // programmatic adapter change, so there is no write loop.
+//
+// BOTH instances write, though — not just the Settings window. The panel
+// persists its own live state through here (gammaLevel/brightnessHw from
+// SysInfo, viewMode/dockWidthFrac from a bar drag, procSort, mediaQueueOpen,
+// clockFace…). writeAdapter() serialises the WHOLE adapter, so a panel write of
+// gamma made while the panel's in-memory copy of an unrelated key was stale
+// used to clobber that key back to the stale value — e.g. the Settings window
+// turning "no wallpaper" OFF, then the panel writing gamma a moment later and
+// reverting wallpaperSolid to true, so the desktop stayed solid and the meta+w
+// picker kept showing the colour-theme grid. save() therefore does a
+// read-modify-write: it reloads the freshest file, re-applies only the keys
+// THIS process actually changed (diffed against the last-seen disk snapshot),
+// then writes. See saveTimer/onLoaded below.
 Singleton {
     id: root
 
@@ -53,10 +66,39 @@ Singleton {
         file.writeAdapter();
     }
 
+    // The last state we KNOW is on disk, as key -> JSON.stringify(value) (so
+    // array keys like worldClocks/defaultWidgets compare by value, not by the
+    // reference the adapter hands back). Refreshed on every load in
+    // file.onLoaded; the diff against it is exactly the set of keys this process
+    // has changed since it last saw disk — i.e. what a save must preserve while
+    // adopting everyone else's changes.
+    property var _savedSnap: ({})
+    // Keys pending re-application after the pre-write reload lands (see onLoaded).
+    property var _pendingKeys: null
+    property bool _writeArmed: false
+    function _snapshot() {
+        const s = {};
+        for (const k in root.defaults) s[k] = JSON.stringify(file.adapter[k]);
+        return s;
+    }
+
+    // A debounced read-modify-write. On fire: capture the keys we changed vs the
+    // last-seen disk, then reload — file.onLoaded finishes the job once the
+    // freshest values are in the adapter, re-applying only our own changes on
+    // top and writing that merge. This is why the panel writing gamma no longer
+    // reverts a wallpaperSolid the Settings window just cleared.
     Timer {
         id: saveTimer
         interval: 300
-        onTriggered: file.writeAdapter()
+        onTriggered: {
+            const changed = {};
+            for (const k in root.defaults)
+                if (JSON.stringify(file.adapter[k]) !== root._savedSnap[k])
+                    changed[k] = file.adapter[k];
+            root._pendingKeys = changed;
+            root._writeArmed = true;
+            file.reload();   // async; onLoaded does the merge + writeAdapter
+        }
     }
 
     // Read the file once more the instant this singleton is complete, so the
@@ -87,12 +129,13 @@ Singleton {
     // Gated on saveTimer so the WRITER (the Settings window) never reverts a
     // control mid-drag: while you are editing, a save is pending and we skip the
     // reload; the panel never has a pending save, so it always reloads. Both
-    // instances run this, but only the reader ever acts on it.
+    // instances run this, but only the reader ever acts on it. Also skipped
+    // while a save's own reload is armed, so the poll can't consume that landing.
     Timer {
         interval: 350
         running: true
         repeat: true
-        onTriggered: if (!saveTimer.running) file.reload()
+        onTriggered: if (!saveTimer.running && !root._writeArmed) file.reload()
     }
 
     FileView {
@@ -111,6 +154,27 @@ Singleton {
         printErrors: false
         // First run: no file yet — seed it with the declared defaults.
         onLoadFailed: (err) => { if (err === FileViewError.FileNotFound) file.writeAdapter(); }
+
+        // Every completed load — the initial one, each poll reload, and the
+        // reload a save() arms — passes through here. When a write is armed the
+        // adapter now holds the freshest disk values, so we re-apply ONLY the
+        // keys this process changed (adopting every other key another process
+        // may have just written) and persist that merge. Otherwise we simply
+        // record the new disk snapshot the next save() will diff against. The
+        // re-apply happens in this same synchronous handler as the load, so a
+        // binding never observes the momentary pure-disk state (no flicker on,
+        // e.g., wallpaperSolid when the panel saves gamma).
+        onLoaded: {
+            if (root._writeArmed) {
+                root._writeArmed = false;
+                for (const k in root._pendingKeys) file.adapter[k] = root._pendingKeys[k];
+                root._pendingKeys = null;
+                root._savedSnap = root._snapshot();
+                file.writeAdapter();
+            } else {
+                root._savedSnap = root._snapshot();
+            }
+        }
 
         adapter: JsonAdapter {
             property int schemaVersion: 1
