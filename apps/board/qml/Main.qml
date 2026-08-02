@@ -473,8 +473,14 @@ Window {
         // The saved display order of the NEEDS YOU decisions. A stale or
         // hand-edited value cannot drop a decision: `applyDisplayOrder` keeps
         // any key the saved list does not mention.
+        // Iterated by `.length`, not `Array.isArray`: `Settings.get` hands QML a
+        // QVariant list for which `Array.isArray` is FALSE, so the old form loaded
+        // an empty order every launch and a reordered decision list never survived
+        // a relaunch (it held only in-session, on the live property).
         var no = Settings.get("needsOrder", null);
-        win.needsOrder = Array.isArray(no) ? no.map(String) : [];
+        var nord = [];
+        if (no) for (var ni = 0; ni < no.length; ni++) nord.push(String(no[ni]));
+        win.needsOrder = nord;
         // The saved cross-section order of the NEEDS YOU sub-blocks (decisions +
         // the to-do area). `applyDisplayOrder` keeps any block the saved list
         // omits, so a stale value cannot hide one. Iterated by `.length` rather
