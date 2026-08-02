@@ -23,7 +23,9 @@ Each glyph is authored as 6 rows of 4 pixels, '#' = ink. Capital and lowercase
 are deliberately drawn as distinct shapes (lowercase is x-height, caps full
 height) so the face carries real case.
 
-Hand-audited character set: all 95 printable ASCII (U+0020..U+007E).
+Hand-audited character set: all 95 printable ASCII (U+0020..U+007E), plus the
+non-ASCII glyphs the desktop actually draws in this face as hardcoded labels
+(see the block after the ASCII table).
 
 SCALE (default 2) upscales every authored pixel to an SCALE-by-SCALE block at
 BDF build time, so the emitted face is 8x12 (ascent 10, descent 2, advance 10).
@@ -136,6 +138,29 @@ G = {
 0x7c: [".#..",".#..",".#..",".#..",".#..",".#.."],  # |
 0x7d: [".#..","..#.","..#.","...#","..#.",".#.."],  # }
 0x7e: ["....","....","#..#",".#.#","..#.","...."],  # ~
+
+# --- non-ASCII glyphs the desktop actually RENDERS in the pixel font ----------
+# Built empirically (swept the panel QML, the nine apps' QML labels + Python
+# user strings, and the plugin): every one below is a HARDCODED label drawn in
+# this face somewhere, NOT external text (which Glyphs.px()/pylib.glyphs map to
+# ASCII on the way in). Botis lacking one made its whole line fall back to
+# another font and lose ~5px of ascent, clipping the row — so a missing glyph
+# here is not cosmetic. Kept to what is drawn; typographic punctuation the UI
+# never authors (…, em/en dash, curly quotes, • , →) is deliberately absent
+# because the desktop maps it to ASCII before it ever reaches this font.
+0x00b0: [".##.","#..#","#..#",".##.","....","...."],  # ° temperature unit (panel settings)
+0x00b7: ["....","....",".#..","....","....","...."],  # · separator (player), star fallback
+0x00d7: ["....","#..#",".##.",".##.","#..#","...."],  # × close buttons (player, viewer)
+0x2016: ["#..#","#..#","#..#","#..#","#..#","...."],  # ‖ pause (viewer)
+0x2039: ["..#.",".#..","#...",".#..","..#.","...."],  # ‹ previous (viewer)
+0x203a: [".#..","..#.","...#","..#.",".#..","...."],  # › next (viewer)
+0x2191: [".#..","###.",".#..",".#..",".#..","...."],  # ↑ sort ascending (filer)
+0x2193: [".#..",".#..",".#..","###.",".#..","...."],  # ↓ sort descending (filer)
+0x2212: ["....","....","####","....","....","...."],  # − zoom out (reader, viewer); bar aligns +,=
+0x25a0: ["....","####","####","####","####","...."],  # ■ non-image preview placeholder (filer)
+0x25b6: ["#...","###.","####","###.","#...","...."],  # ▶ play (viewer)
+0x2665: ["....","#..#","####","####",".##.","...."],  # ♥ favourite (player)
+0x266b: ["..##","..#.","#.#.","#.#.","###.","###."],  # ♫ now-playing marker (player)
 }
 
 # --- metrics -----------------------------------------------------------------
@@ -226,9 +251,9 @@ def build_bdf():
 def main():
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("Botis4x6.bdf")
     out.write_text(build_bdf())
-    # sanity: every codepoint is present exactly once, all rows W wide (authored)
-    assert 0x20 <= min(G) and max(G) <= 0x7E, "range"
-    assert len(G) == 95, f"expected 95 printable ASCII, got {len(G)}"
+    # sanity: all 95 printable ASCII present, all rows W wide (authored)
+    ascii_cps = [cp for cp in G if 0x20 <= cp <= 0x7E]
+    assert len(ascii_cps) == 95, f"expected 95 printable ASCII, got {len(ascii_cps)}"
     for cp, rows in G.items():
         assert len(rows) == H, f"U+{cp:04X}: want {H} rows"
         for r in rows:
