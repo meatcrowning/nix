@@ -2673,7 +2673,7 @@ def test_phase(tmp):
     # ...and `none` is a GRACE too, for the same reason `starting` is. A worker
     # that wedges before its first API call is linked, has a transcript, and
     # writes nothing into it ever; `none` is what holds a card in its bare
-    # *"<name> arises..."* form (`boardagents.arising`), so an unbounded `none`
+    # *"<name> awakens..."* form (`boardagents.arising`), so an unbounded `none`
     # would leave a stuck minister claiming forever that it is on its way —
     # and under the older `speaks` gate it was UNDRAWABLE outright, measured on
     # top 2026-07-31 at 45 minutes invisible on 100% of one core. Past the
@@ -4811,7 +4811,7 @@ def test_window(app, tmp):
         # padded to three cells — assert the stem, never the current frame.
         check("...drawing the rising line and NOTHING else - his 'nothing else'",
               len(shown) == 1
-              and shown[0].strip().startswith("%s arises" % rising[0]["name"]),
+              and shown[0].strip().startswith("%s awakens" % rising[0]["name"]),
               shown)
         check("...so the title, the tally and the worked-for stamp are all gone",
               not any(rising[0]["title"] in s or "/" in s or "working for" in s
@@ -6810,9 +6810,10 @@ def test_card_output(tmp):
           agents.output("w-done") == ["finished", "last word"],
           agents.output("w-done"))
     # ---- a card with nothing to say yet RISES; it is never withheld ----
-    # [his, 2026-07-31] *"instead of hiding the card ... '[agent] arises...'
+    # [his, 2026-07-31] *"instead of hiding the card ... '[agent] awakens...'
     # with an animated elipsies ... nothing else until the agent card actually
-    # starts producing stuff"*. This replaced `speaks`, whose withheld state was
+    # starts producing stuff"* — the word is AWAKENS, not arises: [his,
+    # 2026-08-01] settled it. This replaced `speaks`, whose withheld state was
     # exactly the one a wedged minister sat in, invisibly, for 45 minutes.
     ba.register("w-hush", "T", os.getpid(), kind="worker", where="apps/x/**",
                 session="ses-never")          # linked, transcript never appears
@@ -6821,7 +6822,7 @@ def test_card_output(tmp):
           by_id["w-hush"]["arising"] is True, by_id.get("w-hush", {}).get("arising"))
     check("...and the rising line names it and ends in three ASCII dots",
           by_id["w-hush"]["saysLine"]
-          == "%s arises..." % (by_id["w-hush"]["name"] or "it"),
+          == "%s awakens..." % (by_id["w-hush"]["name"] or "it"),
           by_id.get("w-hush", {}).get("saysLine"))
     check("...and it is the WHOLE card - no observed line, no metadata",
           by_id["w-hush"]["doingLine"] == ""
