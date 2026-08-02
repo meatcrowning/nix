@@ -186,7 +186,7 @@ def build_bdf():
     a(f"FONT -{FOUNDRY}-{FAMILY.lower().replace(' ','')}-medium-r-normal--{eH}-"
       f"{6*SCALE*10}-72-72-m-{eADVANCE*10}-iso10646-1")
     a(f"SIZE {eASCENT+eDESCENT} 72 72")
-    a(f"FONTBOUNDINGBOX {eW} {eH} 0 -1")
+    a(f"FONTBOUNDINGBOX {eW} {eH} 0 {-eDESCENT}")
     a("STARTPROPERTIES 12")
     a(f"FONT_ASCENT {eASCENT}")
     a(f"FONT_DESCENT {eDESCENT}")
@@ -207,7 +207,14 @@ def build_bdf():
         a(f"ENCODING {cp}")
         a(f"SWIDTH {eADVANCE*1000} 0")
         a(f"DWIDTH {eADVANCE} 0")
-        a(f"BBX {eW} {eH} 0 {eASCENT-1}")   # top row at y=eASCENT-1 above baseline
+        # BDF BBX yoffset is the LOWER-LEFT corner of the bitmap relative to the
+        # baseline, i.e. the bottom row, not the top. The cell's bottom sits at
+        # -DESCENT (descenders below the baseline); the top then lands at
+        # eH-eDESCENT == eASCENT above it, as intended. The earlier value
+        # (eASCENT-1) put the bottom row a whole ascent ABOVE the baseline, so
+        # every glyph rendered ~11px too high and text floated to the top of any
+        # box it sat in (goetia's input field, all six apps, the panel).
+        a(f"BBX {eW} {eH} 0 {-eDESCENT}")
         a("BITMAP")
         for row in scale_glyph(G[cp], SCALE):
             a(row_to_hex(row))
