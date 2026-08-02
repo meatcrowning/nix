@@ -15,14 +15,13 @@ Singleton {
     readonly property string font: SettingsStore.d.fontFamily
 
     // Canvas-safe face. QML Canvas / Context2D cannot rasterise a NON-SCALABLE
-    // bitmap font: it logs "the font families specified are invalid" and
-    // silently falls back to a generic sans, so canvas-drawn text (the weather
-    // widget's axis labels) ignored the pixel-font pick entirely. Botis 4x6
-    // (BDF) is the only such selectable face — see home/pkgs/desktop/font.nix.
-    // Canvas text binds this, not `font`, so a bitmap pick still draws in a
-    // pixel face (the always-present default) rather than dropping to sans. A
-    // scalable pick passes through unchanged, so the canvas shows the exact face.
-    readonly property string fontCanvas: font === "Botis 4x6" ? "More Perfect DOS VGA" : font
+    // bitmap font ("the font families specified are invalid" -> generic sans).
+    // All three selectable faces are now scalable outlines (Botis 4x6 was a BDF
+    // until it was rebuilt as a pixel-outline TTF — see home/pkgs/desktop/font.nix),
+    // so every pick draws in the exact face and this is a plain pass-through.
+    // Kept as its own property so a future non-scalable face has one place to
+    // guard again; canvas text binds this rather than `font` for that reason.
+    readonly property string fontCanvas: font
 
     // Text size in PIXELS (not points). Matched to kitty's on-screen size:
     // kitty is font_size 11pt, which at 96 DPI (1080p, scale 1.0) rasterises to

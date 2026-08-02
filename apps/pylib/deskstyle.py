@@ -177,8 +177,8 @@ class DeskStyle(QObject):
         (the default "More Perfect DOS VGA") as crisp mono glyphs. An *editable*
         item does NOT: `QQuickTextEdit`/`QQuickTextInput` ignore the QML
         `antialiasing` and `renderType` levers for glyph rasterisation and draw
-        grey-fringed AA glyphs regardless (a bitmap face like "Botis 4x6" is the
-        only thing that escapes it, having no antialiased form). The one lever
+        grey-fringed AA glyphs regardless of the face (all three pixel faces are
+        scalable outlines now, so none escapes it on its own). The one lever
         that reaches the font engine is `QFont::NoAntialias`, which the QML
         `font` group cannot express — so it is set here and bound as a whole
         `font:` (docs/DESIGN.md §2.2). Verified: 17 grey levels in a glyph -> 2.
