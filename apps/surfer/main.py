@@ -3797,6 +3797,18 @@ def main():
                     )
                 except Exception as e:
                     sys.stderr.write(f"surfer spellcheck: setup failed ({e})\n")
+                # Bound the Chromium disk cache. With no cap (0) Chromium lets it
+                # grow without an upper limit — on this machine the cache had
+                # reached 1.3 GB (~/.cache/surfer/surfer/QtWebEngine/surfer/Cache).
+                # Capping it stops that runaway disk growth (and shrinks the
+                # in-memory cache index with it); the level below is large enough
+                # that repeat visits still hit cache, so this is not a browsing
+                # cost. The real RSS win is the background-tab discard in Main.qml
+                # (win.discardIdleTabs) — this one is cache sizing.
+                try:
+                    prof.setHttpCacheMaximumSize(512 * 1024 * 1024)   # 512 MB
+                except Exception as e:
+                    sys.stderr.write(f"surfer cache cap: failed ({e})\n")
                 return
 
     from PySide6.QtCore import QTimer

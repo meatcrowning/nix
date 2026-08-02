@@ -292,6 +292,39 @@ Window {
         tabRev += 1;
     }
 
+    // ---- memory saver: discard background tabs after idle ----
+    // QtWebEngine keeps a full renderer process (V8 heap + GPU/canvas buffers
+    // included) alive for every tab that has ever loaded, visible or not — an
+    // offscreen measurement found a background tab pins ~120 MB each (6 loaded
+    // tabs -> ~1.2 GB of tree RSS, and hiding them changed nothing by itself).
+    // The lever that actually reclaims that memory is QtWebEngine's page
+    // lifecycle: `Discarded` tears the hidden page's renderer down and frees it.
+    // The cost is that the tab RELOADS when you come back to it, so we only
+    // discard a tab once it has been off-screen for `discardAfter` (never the
+    // on-screen pane, never a just-used tab) — recently used tabs stay instant,
+    // abandoned ones give their memory back. Re-selecting a discarded tab sets
+    // it back to Active (see onPaneChanged below), which is what reloads it.
+    property int discardAfter: 10 * 60 * 1000   // ms a hidden tab keeps its renderer before discard
+    Timer {
+        id: discardTimer
+        interval: 30 * 1000
+        repeat: true
+        running: true
+        onTriggered: win.discardIdleTabs()
+    }
+    function discardIdleTabs() {
+        if (viewRep.count === 0) return
+        for (var i = 0; i < viewRep.count; i++) {
+            var v = viewRep.itemAt(i)
+            if (!v) continue
+            if (v.pane >= 0) continue                                  // on-screen: keep warm
+            if (v.cold) continue                                       // cold: holds no renderer
+            if (Date.now() - v.lastSeen < win.discardAfter) continue   // recently used: keep instant
+            if (v.lifecycleState === WebEngineView.LifecycleState.Discarded) continue
+            v.lifecycleState = WebEngineView.LifecycleState.Discarded
+        }
+    }
+
     // spinner: tell the titlebar plugin whether the current tab is loading, so
     // it animates a | \ - / spinner above the address bar (see hyprvtb).
     readonly property bool currentLoading: current ? current.loading : false
@@ -802,6 +835,19 @@ Window {
                 readonly property bool activeTab: pane >= 0
                 onActiveTabChanged: if (activeTab && cold) win.warmTab(index)
                 onColdChanged: if (!cold && ("" + url) === "") url = seed
+                // memory saver (win.discardIdleTabs): every tab remembers when
+                // it was last on screen, and a hidden one that has been off for
+                // `discardAfter` gets its renderer discarded. Coming back puts
+                // the pane on screen again, which fires this and sets the
+                // lifecycle state back to Active — that is what reloads a
+                // discarded tab — and re-arms the clock.
+                property int lastSeen: Date.now()
+                onPaneChanged: {
+                    if (pane >= 0) {
+                        lifecycleState = WebEngineView.LifecycleState.Active
+                        lastSeen = Date.now()
+                    }
+                }
                 // closing this tab kills any dialog/picker it was holding — the
                 // requests die with the view, so the queues must let go of them
                 // here, while the view is still a valid key.
