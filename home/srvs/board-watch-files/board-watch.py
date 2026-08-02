@@ -1045,11 +1045,29 @@ def mark_gate_hold():
 #: whole batch reaches ONE planner (`boardwork.route_groups` groups it by
 #: operator) and is grouped by file set there.
 #:
-#: The cost is that a sentence waits up to this long before anything starts.
+#: **TWO windows, because a flat one is paid by the common case.** This started
+#: at a flat 75s and he felt it the same evening — *"why does it take seemingly
+#: minutes for prompts to get picked up and acted upon"*. Measured over ~190
+#: runs in `~/.cache/board-watch.log`: the summoner itself is a median ~50s
+#: (p90 ~2 min), so a flat 75s roughly DOUBLED the wait, and it bought nothing
+#: at all for the single sentence that is most of the traffic.
+#:
+#: So the opening window is short — long enough to catch a second sentence
+#: typed right behind the first, short enough not to be felt — and it only
+#: widens once there is real evidence of a burst (`COALESCE_BURST_S`, below).
+#: A run already in flight coalesces the rest for free anyway: board-watch
+#: holds the flock while it waits on a summoner, so everything typed meanwhile
+#: is drained together by the next tick.
+#:
 #: The box's footer promises only *"in the inbox - ctrl+z takes it back until a
-#: summoner acts"*, so nothing drawn becomes a lie — and Ctrl+Z gets a WIDER
+#: summoner acts"*, so nothing drawn becomes a lie — and Ctrl+Z gets a wider
 #: window, not a narrower one.
-COALESCE_QUIET_S = float(os.environ.get("BOARD_COALESCE_QUIET", "75"))
+COALESCE_QUIET_S = float(os.environ.get("BOARD_COALESCE_QUIET", "10"))
+
+#: ...and the window once TWO OR MORE things are already queued, which is the
+#: only state that proves he is mid-burst. Longer, because that is where the
+#: batching is worth something, and by then he is visibly still typing.
+COALESCE_BURST_S = float(os.environ.get("BOARD_COALESCE_BURST", "40"))
 
 #: The hard ceiling on that wait, measured from the OLDEST queued item, so a
 #: steady typist is still planned promptly and a hold can never become a stall.
@@ -1070,10 +1088,13 @@ def coalescing(waiting, now=None):
         return 0.0
     if now - min(stamps) >= COALESCE_MAX_HOLD_S:
         return 0.0
+    # ONE item is not yet a burst: it gets the short window and nothing more.
+    # Several ARE one, and are worth waiting on properly.
+    window = COALESCE_BURST_S if len(stamps) > 1 else COALESCE_QUIET_S
     quiet_for = now - max(stamps)
-    if quiet_for >= COALESCE_QUIET_S:
+    if quiet_for >= window:
         return 0.0
-    return max(0.0, COALESCE_QUIET_S - quiet_for)
+    return max(0.0, window - quiet_for)
 
 
 def drain_queue():

@@ -246,6 +246,7 @@ class Rig:
         # work it, and the real 75-second hold would add 75 seconds to each of
         # them. `test_coalescing` passes its own values and keeps them.
         e.setdefault("BOARD_COALESCE_QUIET", "0")
+        e.setdefault("BOARD_COALESCE_BURST", "0")
         e.update(BOARD_WATCH_BOARD=self.board, BOARD_WATCH_STATE=self.state,
                  BOARD_WATCH_LOG=self.log, BOARD_WATCH_GATE=gate,
                  BOARD_WATCH_REPO=REPO,
@@ -846,10 +847,14 @@ def test_coalescing():
         # length of the window.
         r.note("the first half of the thought")
         t0 = time.time()
-        r.run(spawn=stub, BOARD_COALESCE_QUIET=3, BOARD_COALESCE_MAX=600)
+        r.run(spawn=stub, BOARD_COALESCE_QUIET=3, BOARD_COALESCE_BURST=90,
+              BOARD_COALESCE_MAX=600)
         took = time.time() - t0
         check("a just-typed sentence is waited out, not planned at once",
               took >= 3, "%.1fs" % took)
+        check("...on the SHORT window - one item is not yet a burst, and a "
+              "flat wait is paid by the common case",
+              took < 90, "%.1fs" % took)
         check("...and the run SAYS it is holding rather than going quiet",
               "holding" in open(r.log).read(), open(r.log).read()[-200:])
         check("...and it is planned when the window closes, never dropped",
@@ -864,6 +869,7 @@ def test_coalescing():
         proc = subprocess.Popen([sys.executable, WATCHER],
                                 env=r.env("open", stub,
                                           BOARD_COALESCE_QUIET=4,
+                                          BOARD_COALESCE_BURST=4,
                                           BOARD_COALESCE_MAX=600),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         time.sleep(1.5)
@@ -889,7 +895,8 @@ def test_coalescing():
                 json.dump(rec, f)
         r.note("typed just now")
         t0 = time.time()
-        r.run(spawn=stub, BOARD_COALESCE_QUIET=600, BOARD_COALESCE_MAX=60)
+        r.run(spawn=stub, BOARD_COALESCE_QUIET=600, BOARD_COALESCE_BURST=600,
+              BOARD_COALESCE_MAX=60)
         took = time.time() - t0
         check("the hard ceiling plans the batch even mid-burst",
               len(r.fires()) == 1 and took < 30, (r.fires(), "%.1fs" % took))

@@ -28,6 +28,20 @@ for `COALESCE_QUIET_S` (75 s) before planning any of it**, bounded by
 steady typist is still planned promptly and a hold can never become a stall.
 Both are `BOARD_COALESCE_QUIET` / `BOARD_COALESCE_MAX`.
 
+- **TWO windows, because a flat one is paid by the common case.**
+  `COALESCE_QUIET_S` (**10 s**) while ONE thing is queued;
+  `COALESCE_BURST_S` (**40 s**) once two or more are, which is the only state
+  that proves he is mid-burst. It started at a flat 75 s and he felt it the
+  same evening — *"why does it take seemingly minutes for prompts to get picked
+  up and acted upon"*. Measured over ~190 runs in `~/.cache/board-watch.log`,
+  the SUMMONER is a median ~50 s (p90 ~2 min), so a flat 75 s roughly doubled
+  the wait and bought nothing for the single sentence that is most of the
+  traffic. Env: `BOARD_COALESCE_QUIET` / `BOARD_COALESCE_BURST` /
+  `BOARD_COALESCE_MAX`.
+- **A run already in flight coalesces the rest for free**, which is why the
+  opening window can be this short: board-watch holds the flock while it waits
+  on a summoner, so everything typed meanwhile is drained together by the next
+  tick anyway.
 - **It SLEEPS inside the run, holding the flock — it does not return.**
   `board-inbox.path` is `PathExistsGlob` and level-triggered, so returning with
   the queue still full is a respawn every few hundred milliseconds for the
