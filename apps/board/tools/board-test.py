@@ -7243,6 +7243,100 @@ def test_hermes_proximity(tmp):
     del os.environ["BOARD_HERMES_DB"]
 
 
+def test_subminister(tmp):
+    """A CLAUDE MINISTER CAN DELEGATE A BOUNDED CHUNK TO A DEEPSEEK SUBMINISTER.
+
+    The gate: only a minister genuinely running on a Claude model may spawn the
+    deepseek subminister — a minister already on the deepseek/hermes runtime
+    gains nothing and is refused. The subminister's model is PINNED to
+    `deepseek/deepseek-v4-flash-0731` whatever the minister's own dropdown
+    says, and its chunk is carried in the query. It takes no unit and no card:
+    its whole result is the returned stdout the calling minister quotes.
+    """
+    import boardwork as bw
+    import types
+    print("\n=== a Claude minister delegates bulk work to a deepseek subminister ===")
+
+    # The gate reads the NEAREST agent-runtime ancestor out of /proc.
+    P = os.getpid()
+    real_procs, real_anc = bw.ba._procs, bw.ba._ancestors
+    def _with(procs, chain):
+        bw.ba._procs = lambda: procs
+        bw.ba._ancestors = lambda pid, pr: chain
+        return bw.calling_backend()
+    try:
+        check("a plain shell with no agent runtime is 'shell' (allowed)",
+              _with({P: (1, "sh", ["sh"])}, []) == "shell")
+        check("a Claude worker's nearest runtime is 'claude' (allowed)",
+              _with({10: (1, "sh", ["sh"]),
+                     20: (1, ".claude-wrapped", [".claude-wrapped"])},
+                    [10, 20]) == "claude")
+        check("a deepseek/hermes worker's nearest runtime is 'hermes' (refused)",
+              _with({10: (1, "sh", ["sh"]),
+                     20: (1, "hermes", ["hermes"])}, [10, 20]) == "hermes")
+        # The recursion case the gate exists for: a deepseek SUBminister spawned
+        # by a Claude minister inherits its parent's claude env, so the walk must
+        # take the NEAREST runtime (hermes), not the env it was handed.
+        check("a deepseek subminister of a Claude minister is still 'hermes'",
+              _with({10: (1, "sh", ["sh"]), 20: (1, "hermes", ["hermes"]),
+                     30: (1, ".claude-wrapped", [".claude-wrapped"])},
+                    [10, 20, 30]) == "hermes")
+
+        # Refusal: a hermes caller is told to do the chunk itself.
+        bw.ba._procs = lambda: {10: (1, "sh", ["sh"]), 20: (1, "hermes", ["hermes"])}
+        bw.ba._ancestors = lambda pid, pr: [10, 20]
+        refused = False
+        try:
+            bw.subminister("any chunk")
+        except ValueError as e:
+            refused = "ALREADY on the deepseek/hermes runtime" in str(e)
+        check("a deepseek minister is refused, not delegated", refused)
+
+        # A Claude caller: the argv is pinned to deepseek flash and carries the
+        # chunk + the compact-result framing + the RULES block.
+        bw.ba._procs = lambda: {10: (1, "sh", ["sh"]),
+                                20: (1, ".claude-wrapped", [".claude-wrapped"])}
+        bw.ba._ancestors = lambda pid, pr: [10, 20]
+        captured = {}
+        def fake_run(cmd, **kw):
+            captured["cmd"] = cmd
+            captured["kw"] = kw
+            return types.SimpleNamespace(returncode=0, stdout="LEAN RESULT\n",
+                                         stderr="")
+        real_run = bw.subprocess.run
+        bw.subprocess.run = fake_run
+        try:
+            out = bw.subminister("read all python and list public funcs")
+            cmd = captured["cmd"]
+            q = cmd[cmd.index("-q") + 1]
+            check("the subminister's model is PINNED to deepseek flash",
+                  cmd[cmd.index("-m") + 1] == "deepseek/deepseek-v4-flash-0731", cmd)
+            check("it rides the hermes backend and the nous provider",
+                  cmd[0] == "hermes"
+                  and cmd[cmd.index("--provider") + 1] ==
+                  bw.HERMES_PROVIDER, cmd)
+            check("the chunk is carried in the query", "read all python and "
+                  "list public funcs" in q, q)
+            check("the framing tells it to return something COMPACT",
+                  "return a COMPACT result" in q)
+            check("...and not to act as a board minister",
+                  "write to any board" in q and "boardctl note/land/ask" in q)
+            check("its frame is self-contained — it does NOT inherit the board "
+                  "worker RULES (which would have it commit and rebuild)",
+                  "You MAY rebuild and reload" not in q
+                  and "RULES are in force" not in q, q)
+            check("...but still carries the user-safe guardrail",
+                  "never touch the user's display" in q)
+            check("its stdout is the calling minister's result",
+                  out == "LEAN RESULT\n", repr(out))
+            check("it runs in the repo, where the bulk files live",
+                  captured["kw"].get("cwd") == bw.REPO, captured["kw"])
+        finally:
+            bw.subprocess.run = real_run
+    finally:
+        bw.ba._procs, bw.ba._ancestors = real_procs, real_anc
+
+
 
 
 def main():
@@ -7320,6 +7414,7 @@ def main():
         test_hermes(os.path.join(tmp, "herm"))
 
         test_hermes_proximity(os.path.join(tmp, "herm"))
+        test_subminister(os.path.join(tmp, "herm"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
         test_real_store()
