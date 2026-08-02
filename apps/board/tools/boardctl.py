@@ -281,10 +281,23 @@ def _warn_overlaps(rec):
 
 
 def cmd_dispatch(a):
-    rec = bw.dispatch(" ".join(a.task), where=a.where, context=a.context)
+    rec = bw.dispatch(" ".join(a.task), where=a.where, context=a.context,
+                      model=a.model)
     if rec is None:
         print("boardctl: nothing to dispatch", file=sys.stderr)
         return 1
+    # WHAT IT WILL ACTUALLY RUN ON, said out loud whenever the caller asked for
+    # something — a tier this board cannot name falls back to his dial rather
+    # than raising (`boardwork.minister_tier`), and a silent fallback that the
+    # planner reads as honoured is exactly the confident lie this tree refuses.
+    if a.model:
+        got = bw.minister_label((rec.get("model"), rec.get("effort")))
+        try:
+            bw.resolve_minister(a.model)
+            print("tier: " + got)
+        except ValueError as e:
+            print("tier: %s - using %s (the setting, which is also the "
+                  "ceiling)" % (e, got))
     if rec["state"] == "queued":
         print("queued above the cap (%d already bound, the cap is %d) - a later "
               "summoning starts it: %s"
@@ -305,6 +318,48 @@ def cmd_dispatch(a):
           % (rec.get("name") or rec["id"], rec["id"], bw.UNIT_PREFIX, rec["id"],
              rec["task"][:70]))
     _warn_overlaps(rec)
+    return 0
+
+
+def cmd_turns(a):
+    """How much of its turn budget this minister has spent, and whether to hop.
+
+    Read from its own transcript, so it costs nothing to ask and there is
+    nothing to keep in step. An unreadable count (a hermes minister, a
+    transcript not written yet) says so and does NOT advise a relay: handing on
+    work that has barely started spends a whole startup context to save
+    nothing."""
+    used, budget, depth, may = bw.relay_state()
+    if used is None:
+        print("turns: not knowable for this run - no budget is being enforced. "
+              "Finish the task.")
+        return 0
+    left = budget - used
+    if may:
+        print("turns: %d used of about %d - HAND THE REST ON. Push what is in "
+              "your hands, `note` it, then `boardctl.py relay '<what landed, "
+              "what is left, what you learned>'` and stop." % (used, budget))
+        return 0
+    if depth + 1 > bw.RELAY_MAX:
+        print("turns: %d used of about %d - this is the last hop (%d of %d), so "
+              "there is no relay left: finish what you can and report the rest "
+              "as PARTIAL:." % (used, budget, depth, bw.RELAY_MAX))
+        return 0
+    print("turns: %d used of about %d - %d left, keep going." %
+          (used, budget, left))
+    return 0
+
+
+def cmd_relay(a):
+    """Hand the rest of this task to a fresh minister. See `boardwork.relay`."""
+    try:
+        rec = bw.relay(" ".join(a.brief))
+    except ValueError as e:
+        print("boardctl: %s" % e, file=sys.stderr)
+        return 1
+    print("relayed - hop %d is queued and the next summoning starts it. Your "
+          "work is recorded; this call IS your report, so write no other note "
+          "for it. Stop here." % rec["relay"])
     return 0
 
 
@@ -595,7 +650,21 @@ def main(argv=None):
     s.add_argument("--where", default="", help="the files it will touch")
     s.add_argument("--context", default="",
                    help="what you know that the minister does not")
+    s.add_argument("--model", default="",
+                   help="the tier this piece runs on (a label like 'sonnet 5 "
+                        "medium'); left off, it runs on the setting, which is "
+                        "also the ceiling")
     s.set_defaults(fn=cmd_dispatch)
+
+    s = sub.add_parser("turns", help="how much of your turn budget is spent, "
+                                     "and whether to hand the rest on")
+    s.set_defaults(fn=cmd_turns)
+
+    s = sub.add_parser("relay", help="hand the rest of your task to a fresh "
+                                     "minister (it is your report too)")
+    s.add_argument("brief", nargs="+",
+                   help="what landed, what is left, what you learned")
+    s.set_defaults(fn=cmd_relay)
 
     s = sub.add_parser("phase", help="say what YOU are doing (the card also "
                                      "shows what you are observed doing)")

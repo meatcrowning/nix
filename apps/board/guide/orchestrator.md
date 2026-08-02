@@ -192,7 +192,7 @@ whole pipeline, and what each piece is allowed to claim:
 | | what happens | where it lives |
 | --- | --- | --- |
 | he types and presses enter | a FILE in `inbox/queue/`, by the write path that already existed | `boardagents.send()` |
-| board-watch's next run | drains the queue, ROUTES the tick to an **operator**, spawns it, and WAITS for it | `board-watch.py:work_the_queue` |
+| board-watch's next run | **waits out the rest of the burst**, drains the queue, groups it by **operator**, spawns one summoner per group, and WAITS for them | `board-watch.py:coalescing` + `work_the_queue` |
 | the orchestrator | counts the distinct asks in the input; `dispatch`es a worker per independent one, hands one to a worker already in those files, or `ask`s him. It does not build anything | `boardwork.orchestrator_prompt()` |
 | each worker | **its own systemd unit**, capped, works/tests/commits/pushes, **and may rebuild or reload** under `~/nix/AGENTS.md` -> "When it is okay to rebuild or hot-reload" | `boardwork._spawn_worker` |
 | a card per worker | two sentences — what it claims, then what it is observed doing — in one flat list, oldest first | `boardwork.cards()` + `qml/AgentRow.qml` |
@@ -281,6 +281,13 @@ Rules that fall out of it, all load-bearing:
   five-minute window between the question and the next tick would be recorded
   and never worked. This is the one thing outside board-watch that writes its
   state file.
+
+### The three cost levers are their own part
+
+Waiting out a burst before planning it, the per-dispatch TIER, and the turn
+RELAY are in [`cost.md`](cost.md) — they share this pipeline and are read
+together, and this file was past the 700-line mark where a guide becomes a
+token bomb for whoever opens it.
 
 ### The concurrency cap, and what is above it
 

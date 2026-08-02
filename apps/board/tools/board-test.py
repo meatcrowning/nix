@@ -3033,7 +3033,7 @@ def test_phase(tmp):
     check("...and the worker prompt actually carries it",
           menu in bw.WORKER_PROMPT.format(
               repo="R", host="H", task="T", rules="X", name="N", aid="a",
-              context="", phase_words=menu))
+              context="", phase_words=menu, relay=bw.relay_block(60, 0)))
     # ...and a word NOT on it is still accepted, because it is a menu.
     bph.claim("ph-a", "yakshaving", "the third yak")
     check("a word that is not on the menu is still a legal claim",
@@ -3754,6 +3754,177 @@ def test_overlap(tmp):
     time.sleep(0.4)
     ba.sweep()          # drop the dead registrations, as the real tick would
     del os.environ["BOARD_WORK_SPAWN"]
+
+
+def test_tier(tmp):
+    """A dispatch names the TIER its minister runs on, and the ceiling still
+    holds above it. The planner picks per piece of work (`--model`); his dial
+    is what a dispatch naming nothing gets, and is also the ceiling."""
+    import subprocess
+    import boardagents as ba
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "4"
+    bw.set_minister_model("opus 5 medium")
+
+    rec = bw.dispatch("a doc sweep", where="docs/**", model="sonnet 5 medium")
+    check("the tier the planner asked for is stored ON THE RECORD...",
+          (rec.get("model"), rec.get("effort")) == ("claude-sonnet-5", "medium"),
+          (rec.get("model"), rec.get("effort")))
+    check("...and a dispatch naming no tier gets his dial",
+          [bw.dispatch("unspecified", where="sys/**")[k]
+           for k in ("model", "effort")] == ["claude-opus-5", "medium"])
+
+    check("a label this board cannot name is his dial, never a cheap guess",
+          bw.minister_tier("gpt-9 ultra") == ("claude-opus-5", "medium"))
+    check("...and neither is a tier ABOVE the ceiling",
+          bw.minister_tier("opus 5 high") == ("claude-opus-5", "medium"))
+    check("a deepseek tier resolves, and rides the hermes backend",
+          bw.minister_tier("deepseek v4 flash")[0] in bw.HERMES_MODELS
+          and bw.get_backend_for_model(bw.minister_tier("deepseek v4 flash")[0])
+          .name == "hermes")
+
+    # THE FLAGS THE SPAWN REALLY CARRIES, not what the record says it wanted:
+    # `role_flags` clamps last and independently, so a record forged above the
+    # ceiling must still spawn at it.
+    check("the record's tier reaches the argv",
+          bw.role_flags("worker", "claude-sonnet-5", "medium")
+          == ["--model", "claude-sonnet-5", "--effort", "medium"])
+    check("...and a forged over-ceiling pair is clamped there anyway",
+          bw.role_flags("worker", "claude-opus-5", "xhigh")
+          == ["--model", "claude-opus-5", "--effort", "medium"])
+
+    # A QUEUED task keeps the tier it was PLANNED with, rather than reading the
+    # dial whenever a slot happens to free.
+    q = bw.dispatch("queued work", where="apps/x/**", model="haiku 4.5 low",
+                    cap_=0)
+    check("(setup) it queued above the cap", q["state"] == "queued", q["state"])
+    bw.set_minister_model("opus 5 medium")
+    on_disk = ba._read_json(q["file"])
+    check("a queued task carries its own tier on disk, so `promote()` starts "
+          "it on the tier it was PLANNED with",
+          (on_disk.get("model"), on_disk.get("effort"))
+          == ("claude-haiku-4-5-20251001", "low"), on_disk.get("model"))
+
+    cli = os.path.join(BOARD, "tools", "boardctl.py")
+    p = subprocess.run([sys.executable, cli, "dispatch", "tiered work",
+                        "--where", "docs/**", "--model", "sonnet 5 medium"],
+                       capture_output=True, text=True)
+    check("boardctl says which tier it used", "tier: sonnet 5 medium" in p.stdout,
+          p.stdout[-200:])
+    p = subprocess.run([sys.executable, cli, "dispatch", "bad tier",
+                        "--where", "docs/**", "--model", "gpt-9 ultra"],
+                       capture_output=True, text=True)
+    check("...and SAYS SO when it could not honour one, rather than silently "
+          "falling back", "tier:" in p.stdout and "using opus 5 medium" in p.stdout,
+          p.stdout[-200:])
+
+    check("the orchestrator is told to pick a tier, and to tier UP when unsure",
+          "WHICH TIER EACH PIECE RUNS ON" in bw.ORCHESTRATOR_PROMPT
+          and "WHEN IN DOUBT, TIER UP" in bw.ORCHESTRATOR_PROMPT
+          and "--model" in bw.ORCHESTRATOR_PROMPT)
+
+    os.environ["BOARD_MAX_WORKERS"] = "4"
+    for a in bw.live_workers():
+        try:
+            os.kill(a["pid"], 9)
+        except OSError:
+            pass
+    time.sleep(0.4)
+    ba.sweep()
+    del os.environ["BOARD_WORK_SPAWN"]
+
+
+def test_relay(tmp):
+    """A minister at its turn budget hands the REST on instead of pushing
+    through: one successor in `pending/`, the hop stamped as reported so
+    `reap()` files it done, the tier and `--where` inherited, and a hard depth
+    cap that turns into a `PARTIAL:` instead of a fifth hop."""
+    import boardagents as ba
+    import boardwork as bw
+
+    task = "rewrite the thing"
+    env = {"BOARD_AGENT_ID": "wrelay1", "BOARD_WORK_TASK": task,
+           "BOARD_WORK_WHERE": "apps/player/**", "BOARD_WORK_RELAY": "0",
+           "BOARD_WORK_TURNS": "60", "BOARD_WORK_MODEL": "claude-sonnet-5",
+           "BOARD_WORK_EFFORT": "medium", "BOARD_ORDER": "his sentence"}
+    os.environ.update(env)
+    try:
+        before = len(bw.pending())
+        rec = bw.relay("landed the parser; the QML half is left; the binding "
+                       "is in PlaybarRow.qml")
+        after = bw.pending()
+        check("a relay queues EXACTLY ONE successor",
+              len(after) == before + 1, len(after))
+        check("...carrying the brief AND the original task",
+              "PICKING UP WHERE" in rec["task"] and task in rec["task"]
+              and "PlaybarRow.qml" in rec["task"], rec["task"][:120])
+        check("...at depth 1, from the minister that wrote it",
+              (rec["relay"], rec["relayFrom"]) == (1, "wrelay1"), rec)
+        check("...inheriting the tier and the files, not re-reading the dial",
+              (rec["model"], rec["effort"], rec["where"])
+              == ("claude-sonnet-5", "medium", "apps/player/**"), rec)
+        check("...and it is QUEUED, so `promote()` starts it like anything else",
+              rec["state"] == "queued" and os.path.isdir(bw.work_dir("pending")))
+
+        # THE HOP IS THE REPORT. Without this `reap()` finds a worker that
+        # recorded nothing, files it FAILED and puts a `FAILED:` bullet on his
+        # board for work that is in hand and queued.
+        check("the hop stamps the minister as having reported",
+              os.path.exists(bw.reported_file("wrelay1")))
+
+        os.environ["BOARD_WORK_RELAY"] = str(bw.RELAY_MAX)
+        try:
+            bw.relay("more left")
+            check("the last hop REFUSES to relay again", False, "it relayed")
+        except ValueError as e:
+            check("the last hop refuses to relay again, naming PARTIAL:",
+                  "PARTIAL" in str(e), str(e))
+        os.environ["BOARD_WORK_RELAY"] = "0"
+        try:
+            bw.relay("   ")
+            check("a relay with no brief is refused", False, "it relayed")
+        except ValueError as e:
+            check("a relay with no brief is refused - the brief IS the saving",
+                  "brief" in str(e), str(e))
+
+        # WHEN to hop, read from the agent's own transcript. No transcript is
+        # the honest unknown, and an unknown NEVER advises a hop.
+        os.environ["BOARD_WORK_SESSION"] = "not-a-session"
+        used, budget, depth, may = bw.relay_state()
+        check("an unreadable turn count is None and advises no relay",
+              used is None and may is False, (used, may))
+
+        proj = os.path.join(tmp, "projects", "-home-lam-nix")
+        os.makedirs(proj, exist_ok=True)
+        os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "projects")
+        sid = "11111111-2222-3333-4444-555555555555"
+        with open(os.path.join(proj, sid + ".jsonl"), "w") as f:
+            for i in range(70):
+                f.write('{"type":"user","x":%d}\n{"type":"assistant","y":%d}\n'
+                        % (i, i))
+        os.environ["BOARD_WORK_SESSION"] = sid
+        used, budget, depth, may = bw.relay_state()
+        check("turns are counted from the agent's own transcript",
+              used == 70 and budget == 60, (used, budget))
+        check("...and past the budget it says to hand on", may is True)
+        os.environ["BOARD_WORK_TURNS"] = "600"
+        check("...but not before", bw.relay_state()[3] is False)
+
+        check("rule 14 reaches a minister that can hop...",
+              "boardctl.py relay" in bw.relay_block(60, 0)
+              and "hop 1 of at most %d" % bw.RELAY_MAX in bw.relay_block(60, 0))
+        check("...and NOTHING reaches one that cannot",
+              bw.relay_block(60, bw.RELAY_MAX) == ""
+              and bw.relay_block(0, 0) == "")
+    finally:
+        for k in list(env) + ["BOARD_WORK_SESSION", "BOARD_TRANSCRIPTS"]:
+            os.environ.pop(k, None)
+        try:
+            os.unlink(bw.reported_file("wrelay1"))
+        except OSError:
+            pass
 
 
 def test_dead_worker_notes(tmp):
@@ -7608,6 +7779,10 @@ def main():
         os.makedirs(os.path.join(tmp, "work"))
         test_work(os.path.join(tmp, "work"))
         test_overlap(os.path.join(tmp, "work"))
+        os.makedirs(os.path.join(tmp, "tier"))
+        test_tier(os.path.join(tmp, "tier"))
+        os.makedirs(os.path.join(tmp, "relay"))
+        test_relay(os.path.join(tmp, "relay"))
         test_dead_worker_notes(os.path.join(tmp, "work"))
         test_finished_leaves(os.path.join(tmp, "work"))
         os.makedirs(os.path.join(tmp, "conf"))

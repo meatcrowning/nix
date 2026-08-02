@@ -810,6 +810,36 @@ def resolve_minister(name):
                         ", ".join(lab for _, _, lab in MINISTER_MODELS)))
 
 
+def minister_tier(name=None):
+    """The `(flag, effort)` ONE dispatch really runs on — his dial when it names
+    nothing, and never anything the dial itself could not be set to.
+
+    This is the per-task half of the operator roster: the roster tiers the
+    PLANNERS (`OPERATORS`, ~9% of the spend) and until now every minister — the
+    43% — read one global dial, so a doc edit and a compositor C++ change
+    spawned on the same model. `dispatch(model=…)` names a tier per piece of
+    work, because the planner has just written the task sentence and the
+    `--where` glob and is the only thing that knows what the piece IS.
+
+    **His dial becomes the CEILING rather than the setting**, which is the word
+    the guide already used for it: a dispatch naming no tier still gets exactly
+    what it got before, so nothing changes for an unclassified one.
+
+    **An unreadable tier is his dial, never a cheap guess.** `resolve_minister`
+    refuses what it cannot name unambiguously and this swallows that refusal
+    upward — the safe direction, because a mis-tiered minister does not fail
+    loudly: it half-lands the work and reports `ENACTED`. The clamp in
+    `role_flags` still runs last and independently, so no route here can spawn
+    a minister above the ceiling either.
+    """
+    if not (name or "").strip():
+        return minister_model()
+    try:
+        return resolve_minister(name)
+    except ValueError:
+        return minister_model()
+
+
 def set_minister_model(name):
     """Choose it. Same atomic write as `set_cap`, because a dispatch may fire at
     any moment and a half-written file must be impossible."""
@@ -822,6 +852,132 @@ def set_minister_model(name):
         os.fsync(f.fileno())
     os.replace(tmp, minister_file())
     return (flag, effort)
+
+
+# -------------------------------------------------------------- the RELAY
+#: How many turns one minister takes before it hands the rest to a fresh one.
+#:
+#: **A session's cost is quadratic in its turns** — everything already said is
+#: re-read on every turn after it — and measured on `top` (2026-08-01, over the
+#: week) a minister averaged 118 turns while cache-read per turn climbed from
+#: 42k at 22 turns to 151k at 163. `WORKER_TIMEOUT_S` bounds the wall-clock and
+#: nothing bounded the turns; "dispatch smaller" was doctrine in `RULES` and
+#: unenforced. Three 100-turn hops cost about a third of one 300-turn session.
+RELAY_TURNS = int(os.environ.get("BOARD_WORK_TURNS", "60"))
+
+#: ...and how many hops one piece of work may take before it must report what
+#: is left instead. A relay is a legitimate reason for a task to run twice —
+#: `retried` is the other, and the two marks stay distinct because the CAUSES
+#: are (a budget reached vs a platform death) and `reap()` reads them
+#: differently. This is the backstop against a task that relays forever.
+RELAY_MAX = int(os.environ.get("BOARD_WORK_RELAY_MAX", "4"))
+
+
+def turns_used(session=None):
+    """How many turns this minister has taken, or None if it cannot be known.
+
+    Counted from the agent's OWN transcript — the file `boardphase` already
+    tails to draw the observed line on its card — so nothing new is written and
+    no runtime is asked to account for itself. None is the honest answer for a
+    hermes minister (its run lives in hermes's store, not a `.jsonl` here) and
+    for a transcript that has not appeared yet; `boardctl turns` says so rather
+    than inventing a number, and a budget that cannot be read is not enforced.
+    """
+    session = session or os.environ.get("BOARD_WORK_SESSION") or ""
+    path = bph.transcript(session)
+    if not path:
+        return None
+    n = 0
+    try:
+        with open(path, "rb") as f:
+            for line in f:
+                if b'"type":"assistant"' in line:
+                    n += 1
+    except OSError:
+        return None
+    return n
+
+
+def relay_state(session=None):
+    """`(used, budget, depth, may_relay)` for the running minister.
+
+    `used` is None when the transcript cannot be read (see `turns_used`), and
+    then `may_relay` is False: an unknown count never triggers a hop, because
+    relaying work that has barely started costs a whole startup context to
+    save nothing.
+    """
+    used = turns_used(session)
+    budget = int(os.environ.get("BOARD_WORK_TURNS") or RELAY_TURNS)
+    depth = int(os.environ.get("BOARD_WORK_RELAY") or 0)
+    may = used is not None and used >= budget and depth + 1 <= RELAY_MAX
+    return used, budget, depth, may
+
+
+def relay(brief, agent_id=None, where=None, model=None):
+    """Hand what is LEFT of this task to a fresh minister. Returns the new
+    record, or None with a reason on `ValueError`.
+
+    **A relay is not a kill, and that is the whole design.** `--max-turns`
+    would cut the session mid-edit and leave the tree half-written, and to
+    `reap()` it would look exactly like a crash — filed `failed`, with a
+    `FAILED:` bullet on his board for work that was going fine. Here the
+    ENDING IS VOLUNTARY AND ACCOUNTED FOR: the successor is written to
+    `pending/` before the minister exits, the hop is stamped `mark_reported`
+    so `reap()` files the finished one under `done/`, and `promote()` starts
+    the successor on the next tick exactly as it starts anything else that was
+    over the cap.
+
+    The successor inherits the tier, the `--where` and the depth+1. It does NOT
+    inherit the original task text alone: `brief` is what the minister knows
+    now and the next one would otherwise rediscover, and it is the reason one
+    hop costs a brief rather than a re-run.
+    """
+    brief = " ".join((brief or "").split())
+    if not brief:
+        raise ValueError("a relay needs the brief - what is done, what is "
+                         "left, and what you learned")
+    aid = ba.clean_id(agent_id or os.environ.get("BOARD_AGENT_ID") or "")
+    depth = int(os.environ.get("BOARD_WORK_RELAY") or 0)
+    if depth + 1 > RELAY_MAX:
+        raise ValueError("this task has already relayed %d times (the limit) - "
+                         "report what is left as PARTIAL: instead" % depth)
+    task = os.environ.get("BOARD_WORK_TASK") or ""
+    rec = {"task": " ".join(("%s\n\nPICKING UP WHERE THE LAST MINISTER LEFT "
+                             "OFF: %s" % (task, brief)).split()),
+           "phase": "", "where": (where if where is not None
+                                  else os.environ.get("BOARD_WORK_WHERE") or ""),
+           "context": "", "relay": depth + 1, "relayFrom": aid,
+           "turns": int(os.environ.get("BOARD_WORK_TURNS") or RELAY_TURNS),
+           "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
+           "host": os.uname().nodename,
+           "order": os.environ.get("BOARD_ORDER") or ""}
+    flag, effort = minister_tier(model or " ".join(
+        x for x in (os.environ.get("BOARD_WORK_MODEL") or "",
+                    os.environ.get("BOARD_WORK_EFFORT") or "") if x))
+    rec["model"], rec["effort"] = flag, effort
+    path = os.path.join(work_dir("pending"), _task_name())
+    ba._write_json(path, rec)
+    rec["file"] = path
+    rec["state"] = "queued"
+    # The hop IS this minister's report. Without it `reap()` finds a worker
+    # that recorded nothing, files it `failed` and writes a `FAILED:` bullet
+    # for work that is in hand and queued — the exact confident lie the rest of
+    # this module is built to refuse.
+    mark_reported(aid, "relayed to a fresh minister: %s" % brief[:120])
+    return rec
+
+
+def relay_block(budget, depth):
+    """Rule 14 as the worker sees it, or nothing at all.
+
+    A budget of zero (or a task already at `RELAY_MAX`) prints NOTHING rather
+    than a rule saying "you may not relay": a minister that cannot hop does not
+    need to know the mechanism exists, and every line in that prompt is re-read
+    on every turn of the session it is telling to be short.
+    """
+    if budget <= 0 or depth + 1 > RELAY_MAX:
+        return ""
+    return RELAY_RULE.format(budget=budget, hop=depth + 1, most=RELAY_MAX)
 
 
 # ------------------------------------------------------------------ dispatch
@@ -1149,8 +1305,45 @@ your own expensive context on it:
    doing the work yourself is still cheaper. And a caller ALREADY on deepseek —
    a minister or the orchestrator on a hermes model — never uses it (the tool
    refuses): it is not cheaper for one of those.
-
+{relay}
 There is nobody to ask. Finish, or write down why you did not.
+"""
+
+#: Rule 14, and it is only shown to a minister that can actually act on it
+#: (`relay_block`). Written as a HANDOVER rather than a stop: the reason a long
+#: session is expensive is not the work it does, it is that every turn re-reads
+#: everything said before it, so what has to end is the SESSION and not the
+#: task.
+RELAY_RULE = """
+14. **You have a turn budget of about {budget}, and when you reach it you hand \
+the REST of this task to a fresh minister instead of pushing on.** Check it \
+between steps, in the same breath as your inbox:
+
+       python3 apps/board/tools/boardctl.py turns
+
+   It answers with what you have used, the budget, and whether to hand on. When \
+it says to:
+
+   1. **Finish and push what is in your hands** — never relay mid-edit. Commit, \
+push, and `land`/`note` what actually landed, exactly as rule 10 says.
+   2. Then hand the rest on, in one call, and STOP:
+
+       python3 apps/board/tools/boardctl.py relay '<what landed, what is still \\
+left, and what you learned that the next minister would otherwise have to \\
+rediscover>'
+
+   The successor is queued the instant you call it and the next tick starts it, \
+on the same tier and the same files, with your brief in its task. It is not a \
+failure and it is not a re-run: your work is recorded, and `relay` is itself \
+your report, so you do not need a second one.
+
+   **Why, in a number.** A session's cost grows with the SQUARE of its turns — \
+everything already said is re-read on every turn after it — so three 100-turn \
+ministers cost about a THIRD of one 300-turn minister for the same work. The \
+brief you write is the whole price of the hop; write it well and it is cheap.
+
+   This is hop {hop} of at most {most}. On the last one there is no relay left: \
+finish what you can and report the remainder as `PARTIAL:`.
 """
 
 _PLAN_PROMPT = """You are running headless, with no human watching, on \
@@ -1172,7 +1365,8 @@ what it implies is genuinely his to decide, to ask him instead.
 WHAT YOU MAY DO, and it is a short list:
 
     python3 apps/board/tools/boardctl.py dispatch '<the task, in full - the \\
-worker sees only this>' --where '<the files it will touch>'
+worker sees only this>' --where '<the files it will touch>' \\
+        --model '<the tier - see WHICH TIER below>'
 
     python3 apps/board/tools/boardctl.py ask '<the question>' \\
         --context '<what makes it a question>' \\
@@ -1267,6 +1461,13 @@ message, not each item.
   * **Two items that touch the same files are ONE dispatch**, even when he \
 wrote them as two sentences. That is the same rule as the one above, read from \
 the other end.
+  * **What you were handed may be SEVERAL SEPARATE MESSAGES he typed minutes \
+apart, and they are ONE planning problem.** They are given to you together on \
+purpose: how he broke his thinking into box-fulls is not how the work divides. \
+So group across the whole input by FILE SET before you dispatch anything — two \
+messages that both land in `apps/player/` are one minister, not two racing to \
+edit the same file — and treat a later message that corrects or extends an \
+earlier one as the same item, not a second one.
 
 ...AND ONE ASK IS OFTEN SEVERAL JOBS TOO. Do not stop splitting when you run \
 out of sentences. Read each item for the AREAS it lands in — the panel QML, the \
@@ -1303,6 +1504,28 @@ one ever would.
 that is a complete answer and always was. This rule is for the ask that really \
 does span the tree, not a licence to shard a small job into five agents that \
 each pay a startup bill to do nothing.
+
+WHICH TIER EACH PIECE RUNS ON, and this is yours to say because you have just \
+written the task and the `--where` and nothing downstream knows the piece \
+better. `--model` on a `dispatch` picks it; leave it off and it runs on the \
+setting he chose, which is also the ceiling. The ministers are most of what \
+this system spends, and until now every one of them — a doc edit and a \
+compositor C++ change alike — ran on that one setting.
+
+  * `deepseek v4 flash` — an inventory, a survey, a wide read, prose and doc \
+edits, a mechanical rename. It runs on a different provider and does not touch \
+his weekly Claude window at all.
+  * `haiku 4.5 medium` / `sonnet 5 medium` — a change whose SHAPE is already \
+decided: one file, a stated edit, a `.nix` packaging change, a harness run, a \
+test to repair.
+  * The ceiling (leave `--model` off) — the plugin's C++, QML and anything \
+visual, anything that reads `docs/DESIGN.md`, multi-file design work, and \
+anything you are not sure about.
+
+  * **WHEN IN DOUBT, TIER UP.** A minister on too small a model does not fail \
+where he can see it — it half-lands the work and reports that it is done, \
+which is the one thing nothing here may do. The cheap tiers are for work whose \
+shape is already settled, and no saving is worth a confident lie.
 
 SOMEBODY MAY ALREADY BE IN THOSE FILES. Run `agents` before you dispatch \
 anything. It lists what is running right now, each with the task it was given \
@@ -2372,7 +2595,7 @@ def order_of(agent_id):
     return " ".join(str(rec.get("title") or "").split())
 
 
-def dispatch(task, phase="", where="", context="", cap_=None):
+def dispatch(task, phase="", where="", context="", cap_=None, model=""):
     """One piece of work -> one worker, or -> the pending queue if we are full.
 
     Returns the task record with `state` in `running` / `queued`. It never
@@ -2383,12 +2606,20 @@ def dispatch(task, phase="", where="", context="", cap_=None):
     one (`overlaps()` above) — computed before the spawn, so the new worker
     is never its own hit. WARN ONLY: it changes nothing about what was
     dispatched; `boardctl dispatch` prints it and the caller decides.
+
+    `model` names the TIER this piece runs on (`minister_tier`) — a label, a
+    wire pair, or anything `resolve_minister` can name; empty is his dial. It
+    is resolved HERE and stored on the record, not read at spawn time, so a
+    task that queues behind the cap runs on the tier it was planned with rather
+    than on whatever the dial says whenever a slot happens to free.
     """
     task = " ".join((task or "").split())
     if not task:
         return None
+    flag, effort = minister_tier(model)
     rec = {"task": task, "phase": (phase or "").strip().lower(),
            "where": (where or "").strip(), "context": (context or "").strip(),
+           "model": flag, "effort": effort, "turns": RELAY_TURNS, "relay": 0,
            "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "sent": time.time(),
            "host": os.uname().nodename, "order": _order_now()}
     over = [{"id": a["id"], "name": a.get("name") or "",
@@ -2545,9 +2776,18 @@ def _spawn_worker(rec):
     # on it: the unit, the log and the sidecar below all stay on `aid`.
     name = ba.pick_name(aid)
     session = str(uuid.uuid4())
+    # THE TIER THIS ONE RUNS ON, resolved once here so the backend, the flags
+    # and the record can never disagree: `dispatch` stored what the planner
+    # asked for and `minister_tier` clamps it to something the dial itself
+    # could hold. An older record (dispatched before tiering existed, or
+    # requeued from `pending/`) names nothing and gets his dial, unchanged.
+    flag, effort = minister_tier(" ".join(
+        x for x in (rec.get("model") or "", rec.get("effort") or "") if x))
+    budget = int(rec.get("turns") or RELAY_TURNS)
     prompt = WORKER_PROMPT.format(
         repo=REPO, host=host_line(), task=rec["task"],
         name=name, aid=aid, phase_words=phase_word_menu(),
+        relay=relay_block(budget, int(rec.get("relay") or 0)),
         context=("--- what the orchestrator knows that you do not ---\n%s\n--- end ---\n\n"
                  % rec["context"]) if rec.get("context") else "")
     stub = os.environ.get("BOARD_WORK_SPAWN")
@@ -2557,12 +2797,13 @@ def _spawn_worker(rec):
         # All the Claude-isms — the model/effort, the cache flags, the trimmed
         # tools, the allowed/denied sets, and the appended RULES system-prompt
         # block — live in the backend. Which backend this task runs on follows
-        # the model its drop down chose (`get_backend_for_role`); hermes models
-        # spawn via `hermes`, everything else via `claude`.
-        backend = get_backend_for_role("worker")
+        # THIS TASK'S tier rather than the dial (`get_backend_for_model` on the
+        # pair resolved above); a deepseek-tiered minister must reach the hermes
+        # backend, not claude carrying a deepseek flag.
+        backend = get_backend_for_model(flag)
         cmd = backend.args(
             prompt=prompt, session=session, role="worker",
-            label="board: " + rec["task"][:50])
+            label="board: " + rec["task"][:50], model=flag, effort=effort)
         # BEFORE the spawn, and before the header that names it: a backend whose
         # session id we cannot choose is bound by the query instead, and the
         # binding has to be on disk before the run it identifies can appear in
@@ -2575,7 +2816,15 @@ def _spawn_worker(rec):
     # (`boardparse.for_now`). Absent when nobody typed an order.
     env = dict(os.environ, BOARD_AGENT_ID=aid, BOARD_WATCH_KEY=aid,
                BOARD_WORK_TASK=rec["task"], BOARD_WORK_SESSION=session,
-               BOARD_ORDER=rec.get("order") or "")
+               BOARD_ORDER=rec.get("order") or "",
+               # The relay's own state, on the environment for the reason
+               # everything else here is: `boardctl turns` and `boardctl relay`
+               # are run by the minister itself, in a shell that inherits this,
+               # so neither has to be told which task it is a hop of.
+               BOARD_WORK_TURNS=str(budget),
+               BOARD_WORK_RELAY=str(int(rec.get("relay") or 0)),
+               BOARD_WORK_WHERE=rec.get("where") or "",
+               BOARD_WORK_MODEL=flag, BOARD_WORK_EFFORT=effort)
     logpath = _log_path(aid)
     # BEFORE the spawn, so a worker killed at second one still leaves a log that
     # names it and points at its transcript. See "a log that survives a kill".
