@@ -1008,8 +1008,21 @@ Item {
     onHeightChanged: noteRestSlack()
     onDrawerOutChanged: noteRestSlack()
 
+    // The dock tile's height with NO queue rows (its closed configuration), so
+    // the drawer can be sized to exactly the rows the grid handed over. That
+    // makes the artwork row above it its closed size on every frame and in
+    // EVERY state — including a panel that loads with the drawer already out,
+    // which the sampled `restSlack` above can never know: it had only ever seen
+    // the open height, so it sat at 0 and the cover rendered at its natural,
+    // smaller size until the queue was toggled once. The grid is the one thing
+    // that always knows the closed height, so it supplies it. The popup has no
+    // grid, so `gridClosedH` stays -1 there and it keeps the `restSlack` path
+    // (a flat 90, its artwork being size-invariant already).
+    property real gridClosedH: -1
     readonly property real queueH: drawerOut
-        ? Math.max(0, root.height - naturalRest - restSlack) : 0
+        ? (root.gridClosedH >= 0
+            ? Math.max(0, root.height - root.gridClosedH)
+            : Math.max(0, root.height - naturalRest - restSlack)) : 0
 
     // The hold must OUTLAST the tile's glide, which is the drawer's only actual
     // animation — so it is derived from `ViewMode.slideMs` plus a frame's margin,
