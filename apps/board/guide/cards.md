@@ -362,15 +362,24 @@ The short version, and every line of it is a rule:
   again. What does NOT carry over is the context tally: hermes writes no
   per-message token count, so a hermes card has no `62k/200k` line at all.
   Covered by `test_hermes`.
-- **The second line is the OBSERVED one, never the claim, and it is the
-  description ALONE** — [his, 2026-07-29] *"actually just take out the [agent]
-  is actually and just display the text after it"*. An agent saying
+- **The second line is the OBSERVED one, never the claim, and UNDER A CLAIM it
+  is the description ALONE** — [his, 2026-07-29] *"actually just take out the
+  [agent] is actually and just display the text after it"*. An agent saying
   `testing` while every recent call is an `Edit` reads *"Marbas is testing - the
   parser"* on one line and *"editing vtbclient.py"* on the
   next — and **that divergence is a feature, not an error**. Nothing
   hides it, reconciles it, warns about it or colours it: the warn/crit ramp on
   this desktop means a machine fault (§8.1, §9.3), not an agent being optimistic
   about itself.
+- **...but when the observed line LEADS the card, it keeps the name ON the top
+  line** — [his, 2026-08-01] the card used to lose its name off the top line the
+  moment activity was reported: a claimless card leads with the observation, and
+  that line named nobody. So a claimless active card now reads *"Marbas is
+  editing vtbclient.py..."* — name, and the top line's tick — instead of the
+  bare description. `boardphase.doing_line`'s `lead` flag (true iff `says_line`
+  is empty) is the whole mechanism; `boardagents.agents()` passes it off exactly
+  that emptiness. The name is drawn ONCE — the 7-cell column below is now gated
+  on `titleFirst`, so it appears only when neither sentence names the agent.
 - **Each side may be missing, and says so on its own terms.** No claim is
   silence — a claim is never manufactured out of the observation, which would
   make the two agree by construction and throw away the only thing having two of
@@ -403,9 +412,11 @@ The short version, and every line of it is a rule:
   agent nothing was ever seen doing, or a queued task — so nothing on the list
   is anonymous and the name is never drawn twice. It lives on the title row, so
   on such a card that row is also the top line and takes the lead tone. The
-  condition is one property (`AgentRow.titleFirst`) and both the column and the
-  ladder read it; `tools/board-test.py` asserts the drawn order, the tones and
-  both branches of the fallback offscreen.
+  condition is `AgentRow.titleFirst` (both sentences empty), which `nameNeeded`
+  now reads directly: once the leading observed line carries the name (above),
+  the claim line, the observed line and the title row cannot all be blank while
+  a name still needs a home. `tools/board-test.py` asserts the drawn order, the
+  tones and both branches of the fallback offscreen.
 - **Transcripts reach megabytes** (a long session's is ~1.8 MB), so nothing ever
   reads one whole: each agent's record keeps a byte offset and a poll reads only
   the delta, advancing past complete lines only — a transcript is appended to

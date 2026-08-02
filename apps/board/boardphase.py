@@ -812,13 +812,22 @@ def says_detail(rec):
     return words
 
 
-def doing_line(rec, who="", running=True):
-    """The observation as the card's second line: the description ALONE, with no
-    subject and no *"is actually"* opener. Never the claim, and never present
-    tense about a process that has stopped.
+def doing_line(rec, who="", running=True, lead=False):
+    """The observation as a card line. Never the claim, and never present tense
+    about a process that has stopped.
 
-    `who` is still taken because the one state that cannot be said without a
-    subject — nothing observable at all — names the agent instead.
+    `lead` is whether this is the card's OWN TOP LINE — true when there is no
+    claim above it to carry the agent's name. [his, 2026-08-01] the name must
+    stay on the top line by name even once activity is being reported: a card
+    used to drop its name off the top line the moment the observed line took the
+    lead, because that line carried no subject. So when it LEADS it opens with
+    the name — *"<name> is editing Main.qml"* — and ticks like every other top
+    line; as the SECOND line under a claim it stays the description ALONE, with
+    no subject and no *"is actually"* opener, his call of 2026-07-29.
+
+    `who` is taken in both cases: the leading forms need the name, and the one
+    state that cannot be said without a subject — nothing observable at all —
+    names the agent whether it leads or not.
 
     "" only when there is nothing honest to say about a stopped agent — it was
     never seen doing anything, and inventing a past for it is worse than the
@@ -829,25 +838,38 @@ def doing_line(rec, who="", running=True):
     state = rec.get("observed")
     last = rec.get("doing") or ""
     if not running:
-        # PAST TENSE, and only about something actually seen. `last seen` is
-        # what carries the tense now that the subject is gone from the line.
-        return ("last seen %s" % last) if last and \
-            state in ("ok", "quiet") else ""
+        # PAST TENSE, and only about something actually seen. Leading, the name
+        # is back on the line and carries the tense (*"<name> was last seen"*);
+        # under a claim there is no subject, so `last seen` carries it instead.
+        if not (last and state in ("ok", "quiet")):
+            return ""
+        return ("%s was last seen %s" % (subj, last)) if lead \
+            else ("last seen %s" % last)
     if state == "ok":
-        return last or "working"
+        # Live activity. Leading, it opens with the name and ends in the three
+        # ticking cells `AgentRow.qml` animates — the top line is the only one
+        # that may. Under a claim it is the bare description and never ticks.
+        body = last or "working"
+        return ("%s is %s..." % (subj, body)) if lead else body
     if state == "quiet":
         # Words, never a duration — the threshold is machine business.
+        if lead:
+            return ("%s is quiet - last seen %s" % (subj, last)) if last \
+                else "%s is quiet" % subj
         return ("nothing recently - last seen %s" % last) if last else \
             "nothing recently"
     # Same line for both, for the reason `actually()` gives: a spawn whose
     # transcript is seconds away has not done anything yet, which is exactly
     # what `none` says. It is the branch below — the true unknown — that his
     # complaint was about, and it must not be reached by a run that is two
-    # seconds old.
+    # seconds old. A running unclaimed agent in these states is `arising` and
+    # draws the awakens line instead, so the leading form here is off the happy
+    # path; it still names the agent rather than leave a subjectless placeholder.
     if state in ("none", "starting"):
-        return "nothing yet"
+        return ("%s is starting up" % subj) if lead else "nothing yet"
     if state == "silent":
-        return "not started - nothing in its transcript at all"
+        return ("%s has not started - nothing in its transcript at all" % subj) \
+            if lead else "not started - nothing in its transcript at all"
     return "board cannot see what %s is doing - only that the process is there" \
         % subj
 
