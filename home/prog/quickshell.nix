@@ -1,7 +1,19 @@
-{ config, pkgs, lib, host, ... }:
+{ config, pkgs, lib, host, inputs, ... }:
 
 let
   qmlDir = ./quickshell-files;
+
+  # The panel binary. On `top` it is the pinned Quickshell (same source wm.nix
+  # installs — see the `nixpkgs-quickshell` input in flake.nix); on `book` the
+  # compositor stack is Fedora's, so `qs` is resolved from PATH there and the
+  # nix build is never forced. An absolute path on `top` means the service does
+  # not depend on the systemd user manager's PATH being right when it starts.
+  qsBin =
+    if host == "air"
+    then "qs"
+    else "${(import inputs.nixpkgs-quickshell {
+      inherit (pkgs.stdenv.hostPlatform) system;
+    }).quickshell}/bin/qs";
 
   # `settings` — launcher for the standalone Settings program (Settings.qml).
   # It is its OWN Quickshell instance, run from the same config directory as the
@@ -155,4 +167,40 @@ in
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     [ -e "$HOME/.config/quickshell/Theme.qml" ] || install -D -m644 ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml"
   '';
+
+  # The panel (bar + launcher + tray + clock, and it draws the wallpaper) runs
+  # as its OWN systemd user service instead of a one-shot Hyprland exec-once, so
+  # a crash, an OOM kill, or a stray `qs kill` can no longer leave the desktop
+  # with no panel and no wallpaper until a manual relaunch. hyprland.lua starts
+  # it at session start (reset-failed + start) rather than WantedBy a target:
+  # nothing activates graphical-session.target in this Hyprland session.
+  #
+  # Restart=always, not on-failure: a `qs kill` (and a plain SIGTERM) exits the
+  # panel *cleanly* — measured, exit 0 — and on-failure would not catch either,
+  # yet those are exactly the deaths the reboot of this to a service is meant to
+  # survive. StartLimit bounds it: five deaths in a minute (a genuinely broken
+  # panel, or logout tearing the compositor out from under it) and systemd stops
+  # retrying; the next session's reset-failed re-arms it. RestartSec=1 → ~1s
+  # recovery from a one-off death. An intentional stop still goes through
+  # `systemctl --user stop`, which never triggers a restart.
+  #
+  # ExecStart runs through hypr-session-env.sh (same wrapper as wal-set.service)
+  # because the manager's HYPRLAND_INSTANCE_SIGNATURE / WAYLAND_DISPLAY are not
+  # trustworthy — a nested test compositor overwrites that store; the wrapper
+  # resolves the live session from its lockfile instead. Not `qs -d`: daemonizing
+  # detaches the shell from systemd, which would then never see it die.
+  systemd.user.services.quickshell-panel = {
+    Unit = {
+      Description = "Quickshell desktop panel + wallpaper";
+      After = [ "graphical-session.target" ];
+      StartLimitIntervalSec = 60;
+      StartLimitBurst = 5;
+    };
+    Service = {
+      Environment = [ "QS_NO_RELOAD_POPUP=1" ];
+      ExecStart = "%h/.config/scripts/hypr-session-env.sh ${qsBin}";
+      Restart = "always";
+      RestartSec = 1;
+    };
+  };
 }
