@@ -668,8 +668,10 @@ Window {
             // the indicators. the indicators should be anchored to the model
             // selector box not the prompt box as they are now."* So:
             //
-            //   * `modelPick` sits at y 0 and the meters hang off ITS bottom —
-            //     the two are one column, and nothing in it looks at the box.
+            //   * `summonerPick` sits at y 0 and the rest of the column — the
+            //     cap, the minister model, then the meters — hangs off it, and
+            //     nothing in that column looks at the box. (It was `modelPick`
+            //     at the top until the operator dropdown came off, 2026-08-01.)
             //   * `askBox.minHeight` is that column's span, so the box is as
             //     tall as chooser + gap + meters and both edges line up. It is
             //     read off their real geometry, never a number: a longer model
@@ -702,7 +704,7 @@ Window {
                 // would otherwise give it five. Bound to the labels, never a
                 // number, so a longer model name still widens all of it (§2.7).
                 readonly property real colW:
-                    Math.max(summonerPick.implicitWidth, modelPick.implicitWidth,
+                    Math.max(summonerPick.implicitWidth,
                              capPick.implicitWidth, ministerPick.implicitWidth)
 
                 // ...and ONE arrow column, for the same reason. Every label is
@@ -710,7 +712,7 @@ Window {
                 // on the same cell; a character count, because the font is
                 // monospace and the controls are centred (§2.7).
                 readonly property int pickCells:
-                    Math.max(Agents.summonerLabel.length, Agents.modelLabel.length,
+                    Math.max(Agents.summonerLabel.length,
                              Agents.capLabel.length, Agents.ministerLabel.length)
 
                 InputBox {
@@ -732,13 +734,13 @@ Window {
                     onCaretLeft: () => win.caretLeft("msg:queue")
                 }
 
-                // FOUR of these, and the ORDER IS HIS. [his, 2026-07-29] *"1.
+                // THREE of these. His order was FOUR [his, 2026-07-29] *"1.
                 // number of summoners 2. summoner model 3. number of ministers
-                // 4. minister model"* — so the column reads count, model, count,
-                // model, and each count names the role of the model under it.
-                // That pairing is what lets the labels stay as short as they are:
-                // `fable 5` on its own is ambiguous between the two models, and
-                // `1 summoner` directly above it is not.
+                // 4. minister model"* — but #2, the summoner-model/operator pick,
+                // came off on 2026-08-01: the operator is auto-routed now
+                // (`boardwork.route_operator`) and the STANDING ROSTER above is a
+                // read-only muster, not a chooser. So the column is count, count,
+                // model: how many summoners, how many ministers, what they run on.
                 //
                 // Every one of them is a MENU, not a combo box: §7.2 says menus
                 // on this desktop are ours and are `CtxMenu`, and a chooser with a
@@ -769,29 +771,12 @@ Window {
                     fgAccent: win.fgAccent
                 }
 
-                PickBox {
-                    id: modelPick
-                    padTo: parent.pickCells
-                    anchors.top: summonerPick.bottom
-                    anchors.topMargin: 4
-                    anchors.right: summonerPick.right
-                    width: parent.colW
-                    label: Agents.modelLabel
-                    // What it changes, and WHEN it takes effect. The second half
-                    // is the whole of the promise: a running orchestrator is not
-                    // restarted and not re-pointed.
-                    hint: "which model a summoner reads what you type on, and how hard it thinks - the one running now keeps its own"
-                    items: () => win.modelItems()
-                    popup: menu
-                    fgDim: win.fgDim
-                    fgAccent: win.fgAccent
-                }
-
-                // ...and under it, how many of them may run at once. [his,
+                // ...and under it, how many ministers may run at once. [his,
                 // 2026-07-29] *"between the model selector and the indicators,
                 // add another drop down for the max number of agents
-                // available."* It is BETWEEN them, in his order, so the column
-                // reads model -> how many -> what they have cost.
+                // available."* It sat between the operator pick and the meters;
+                // with the operator pick gone it hangs off the summoner count
+                // directly, and the column now reads count -> how many -> cost.
                 //
                 // It writes the ONE cap store — the file `boardctl.py cap`
                 // writes and `promote()` re-reads at the top of every tick — so
@@ -802,9 +787,9 @@ Window {
                 PickBox {
                     id: capPick
                     padTo: parent.pickCells
-                    anchors.top: modelPick.bottom
+                    anchors.top: summonerPick.bottom
                     anchors.topMargin: 4
-                    anchors.right: modelPick.right
+                    anchors.right: summonerPick.right
                     width: parent.colW
                     label: Agents.capLabel
                     hint: "the most ministers allowed to work at once - the next tick honours it"
@@ -852,9 +837,10 @@ Window {
                 // readout per line, because it is about the same thing: what
                 // spending that model costs him. [his, 2026-07-29] *"each usage
                 // indicator should be exactly as wide as the model selection box
-                // above it … stacked vertically"*. The width is bound to
-                // `modelPick`, not to a number, so the box and the bars stay
-                // flush when a longer model name widens it.
+                // above it … stacked vertically"*. The width is bound to the
+                // dropdown column (`ministerPick`, its foot), not to a number,
+                // so the box and the bars stay flush when a longer label widens
+                // it. (It read `modelPick` until the operator dropdown came off.)
                 //
                 // ANCHORED TO THE CHOOSER, not to the box he types in [his,
                 // 2026-07-29] — so the two of them are one column, the box
@@ -1757,19 +1743,29 @@ Component {
                                 width: summonerCol.width
                                 agent: sumRow.modelData
                                 cellW: win.cellW
-                                // HIS TEXT NEVER FADES — [his, 2026-07-29] *"his
-                                // text should never become the unfocused colors"*.
-                                // The fade is handed down (docs/DESIGN.md §3.1.1),
-                                // so the exemption is one place: the `Theme` tones
-                                // instead of the window's `fgX` ternaries. That
-                                // covers every label on the card, the inbox box
-                                // included, without a leaf reading `Window.active`
-                                // itself — which §3.1.1 forbids for its own reasons.
-                                // A recorded exception to that section, not a drift
-                                // from it (DESIGN.md §20).
-                                fgAccent: Theme.accent
-                                fgText: Theme.text
-                                fgDim: Theme.textDim
+                                // THE ROSTER'S FOCUSED/UNFOCUSED SPLIT. [his,
+                                // 2026-08-01] this section is now the standing
+                                // roster (one row per operator, always drawn):
+                                // the operator that is actually running is FOCUSED
+                                // and the rest are UNFOCUSED, drawn with the exact
+                                // vocabulary §3.1.1 gives an unfocused window —
+                                // the whole foreground to `Theme.inactive`, no new
+                                // colour (docs/DESIGN.md).
+                                //
+                                // A LIVE row keeps his old exemption: the bright
+                                // `Theme` tones rather than the window's faded
+                                // `fgX`, so a running summoner's card (his text in
+                                // its inbox included) never greys — *"his text
+                                // should never become the unfocused colors"*. A
+                                // dim row carries no text of his (it is
+                                // unaddressable, no inbox), so `Theme.inactive`
+                                // fades nothing that rule protects. Handed down,
+                                // one place, no leaf reading `Window.active`.
+                                readonly property bool sumLive:
+                                    sumRow.modelData.live === true
+                                fgAccent: sumRow.sumLive ? Theme.accent : Theme.inactive
+                                fgText: sumRow.sumLive ? Theme.text : Theme.inactive
+                                fgDim: sumRow.sumLive ? Theme.textDim : Theme.inactive
                                 outputOpen: win.isOutputOpen(sumRow.modelData.id)
                                 onOutputToggled: () =>
                                     win.toggleOutputOpen(sumRow.modelData.id)
@@ -2294,10 +2290,11 @@ Component {
         anchors.fill: parent
     }
 
-    // The model chooser's rows. A tick marks the live one rather than the row
+    // The cap dropdown's entries. A tick marks the live one rather than the row
     // being disabled — picking what is already picked is a no-op he can see the
-    // result of, and a greyed row would read as "unavailable" (§10).
-    // The cap dropdown's entries. Same shape as `modelItems`.
+    // result of, and a greyed row would read as "unavailable" (§10). (There was
+    // an operator/model chooser of the same shape here until 2026-08-01; the
+    // operator is auto-routed now and the roster is read-only.)
     //
     // A SUCCESSFUL PICK SAYS NOTHING. [his, 2026-07-30] *"when i change the
     // number of ministers in goetia itll flash text indicating that on the
@@ -2318,16 +2315,6 @@ Component {
             label: (c.current ? "* " : "  ") + c.label,
             trigger: () => {
                 if (!Agents.chooseCap(c.n))
-                    win.status = "could not save that choice";
-            }
-        }));
-    }
-
-    function modelItems() {
-        return Agents.models.map((m) => ({
-            label: (m.current ? "* " : "  ") + m.label,
-            trigger: () => {
-                if (!Agents.chooseModel(m.name))
                     win.status = "could not save that choice";
             }
         }));
