@@ -20,13 +20,15 @@ Item {
     property color fgAccent: Theme.accent
     property color fgDim: Theme.textDim
     property bool interactive: true
-    //: [his ask, 2026-08-01] the four TOP-LEVEL bands are drag handles as well
-    //  as collapse toggles: a vertical drag on the band reorders the section it
-    //  heads, and the page turns the displacement into a target and repersists
-    //  the display order. OPT-IN — only the top-level section bands set it; every
-    //  sub-band (`to do`, a tag group, a LANDED day, `shells`) stays a plain
-    //  toggle, because a reorder that grabs a sub-section is not a thing this
-    //  page offers. The one gesture does both jobs: a drag is a drag (the
+    //: [his ask, 2026-08-01; re-ask 2026-08-02] the TOP-LEVEL bands are drag
+    //  handles as well as collapse toggles: a vertical drag on the band reorders
+    //  the section it heads, and the page turns the displacement into a target
+    //  and repersists the display order. Every heading is now a top-level
+    //  section — `to do` and `workings` (the live tool-call band) were promoted
+    //  out of `needs` and the triangle so he can place them anywhere. OPT-IN —
+    //  only the section bands set it; a sub-band (a tag group, a LANDED day)
+    //  stays a plain toggle, because a reorder that grabs a sub-section is not a
+    //  thing this page offers. The one gesture does both jobs: a drag is a drag (the
     //  `clicked` is suppressed once the pointer crosses the threshold, so the
     //  band never reorders on the tap that toggles it), and a tap is the usual
     //  collapse toggle.

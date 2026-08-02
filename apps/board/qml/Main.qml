@@ -320,14 +320,29 @@ Window {
     // triangle are the machine, not the store — there is nowhere for them in
     // board.md. So the order lives in `~/.local/state/board/state.json`, the
     // same `Settings` the folds and drafts use, never in the store file.
-    property var sectionOrder: ["needs", "summoner", "agents", "landed"]
+    // [his re-ask, 2026-08-02] EVERY heading is a full section he can place
+    // anywhere: `to do` and `shells` used to be trapped inside `needs` and the
+    // triangle, so he could not lift `to do` above the decisions or drop it
+    // below `summoner`. They are top-level entries now, so all six bands drag.
+    property var sectionOrder: ["needs", "todo", "summoner", "agents", "shells", "landed"]
     function normalizeOrder(o) {
-        var def = ["needs", "summoner", "agents", "landed"];
+        var def = ["needs", "todo", "summoner", "agents", "shells", "landed"];
         var out = [];
         if (o) for (var i = 0; i < o.length; i++)
             if (def.indexOf(o[i]) >= 0 && out.indexOf(o[i]) < 0) out.push(o[i]);
-        for (var j = 0; j < def.length; j++)
-            if (out.indexOf(def[j]) < 0) out.push(def[j]);
+        // A key the saved order never knew about (an older state.json from
+        // before `to do`/`shells` were promoted) is inserted at its DEFAULT
+        // neighbour, not appended at the end — so a first launch after the
+        // upgrade puts them where they have always sat, not below `landed`.
+        for (var j = 0; j < def.length; j++) {
+            if (out.indexOf(def[j]) >= 0) continue;
+            var at = 0;
+            for (var p = j - 1; p >= 0; p--) {
+                var idx = out.indexOf(def[p]);
+                if (idx >= 0) { at = idx + 1; break; }
+            }
+            out.splice(at, 0, def[j]);
+        }
         return out;
     }
     function reorderSection(key, dy) {
@@ -405,10 +420,12 @@ Window {
     // a block — `applyDisplayOrder` keeps any bkey the saved list does not mention
     // in its default position, so a decision just added is drawn, never lost.
     //
-    // The to-do AREA moves as one block (its master `to do` band is the grip);
-    // the tag groups inside it keep their own order and their own folds. Whether
-    // each tag group should also be independently placeable among the decisions is
-    // a further step left for his call — see the completion note.
+    // The decisions reorder among themselves here. `to do` is no longer one of
+    // these blocks: [his re-ask, 2026-08-02] it is a top-level section now, so
+    // it lifts above the decisions or drops below `summoner` through
+    // `sectionOrder`, not through this within-needs order. The tag groups inside
+    // `to do` keep their own order and folds; whether each should also be
+    // independently placeable among the decisions is a further step for his call.
     property var needsBlockOrder: []
     readonly property var needsBlocks: {
         var out = [];
@@ -417,8 +434,6 @@ Window {
             out.push({ kind: "decision",
                        bkey: "dec:" + String(nd[i].key),
                        dec: nd[i] });
-        if (win.todo.length > 0)
-            out.push({ kind: "todoarea", bkey: "todoarea" });
         return win.applyDisplayOrder(out, win.needsBlockOrder, "bkey");
     }
     function setNeedsBlockOrder(keys) {
@@ -1069,8 +1084,10 @@ Window {
                         sourceComponent: {
                             switch (String(modelData)) {
                             case "needs": return needsSection
+                            case "todo": return todoSection
                             case "summoner": return summonerSection
                             case "agents": return agentsSection
+                            case "shells": return shellsSection
                             case "landed": return landedSection
                             }
                             return null
@@ -1188,9 +1205,11 @@ Component {
                             "decisions brought to you from Solomon."
 
                         //: EMPTY is the state he sees most often, and there this ONE
-                        //: sentence is the whole of the section.
+                        //: sentence is the whole of the section. `to do` is its own
+                        //: top-level section now, so it no longer bears on whether
+                        //: NEEDS YOU reads as empty — only the decisions do.
                         readonly property bool empty:
-                            win.needs.length === 0 && win.todo.length === 0
+                            win.needs.length === 0
 
                         // Populated, the same sentence frames the cards: the
                         // paragraph treatment the store's intro used to have, in the
@@ -1224,11 +1243,13 @@ Component {
                             }
                         }
 
-                        // The NEEDS YOU content is ONE flat list of sub-blocks now
-                        // ([his ask, 2026-08-01]: cross-section free-drag). Each
-                        // decision is a block, and the whole to-do area is a block,
-                        // so a drag can interleave them (`win.needsBlocks`). Keyed on
-                        // each block's stable `bkey` (`dec:<key>` / `todoarea`), for
+                        // The NEEDS YOU decisions as a reorderable list
+                        // (`win.needsBlocks`). Each decision is a block a drag can
+                        // move among the others. `to do` used to be a block here too
+                        // ([his ask, 2026-08-01]); [his re-ask, 2026-08-02] it is a
+                        // top-level section now, so it drags among ALL the bands, not
+                        // only within needs. Keyed on each block's stable `bkey`
+                        // (`dec:<key>`), for
                         // the same reason the old decisions Repeater keyed on `key` —
                         // an agent editing one card must not pull the answer editor
                         // out from under him on another (see `keysOf`). The Loader
@@ -1252,10 +1273,8 @@ Component {
                                 readonly property var blockData: win.needsBlocks[index]
                                 width: needsCol.width
                                 height: item ? item.implicitHeight : 0
-                                sourceComponent: blockData
-                                    ? (blockData.kind === "decision"
-                                       ? decisionBlockComp : todoAreaComp)
-                                    : null
+                                sourceComponent: blockData && blockData.kind === "decision"
+                                    ? decisionBlockComp : null
                             }
                         }
 
@@ -1298,22 +1317,23 @@ Component {
                             }
                         }
 
-                        // The whole to-do area as one draggable block: its master
-                        // `to do` band is the grip (a vertical drag reorders it among
-                        // the decisions; a tap still folds). The tag groups inside
-                        // keep their own order and folds unchanged.
-                        Component {
-                            id: todoAreaComp
+                }
+                }
+
+                Item { width: 1; height: 18 }
+    }
+}
+
+Component {
+                            id: todoSection
                             Column {
                                 id: todoAreaRoot
-                                width: needsCol.width
+                                width: page.width
                                 // Set height explicitly (like `needsSectionRoot`),
                                 // or the block Loader's `height: item.height` clamps
                                 // this Column to its initial 0 and the to-do area
                                 // renders with no height, overlapping the decisions.
                                 height: implicitHeight
-                                readonly property var blockData:
-                                    parent ? parent.blockData : null
 
                         Item { width: 1; height: win.todo.length > 0 ? 10 : 0 }
 
@@ -1327,18 +1347,19 @@ Component {
                         // wears rather than being the one dim label that could not
                         // be folded. Folding it takes every tag group with it.
                         SectionHead {
-                            width: needsCol.width
+                            width: page.width
                             visible: win.todo.length > 0
                             height: visible ? implicitHeight : 0
                             label: "to do"
                             collapsed: win.isCollapsed("todo")
                             fgDim: win.fgDim
-                            // The grip for the whole to-do area block: a drag
-                            // reorders it among the decisions, a tap still folds.
+                            // [his re-ask, 2026-08-02] the `to do` band is a
+                            // top-level section grip now: a vertical drag places
+                            // it anywhere among the other sections, a tap folds.
                             reorderable: true
                             onToggled: win.toggleCollapsed("todo")
                             onReorderRequested: (dy) =>
-                                needsSectionRoot.reorderBlock("todoarea", dy)
+                                win.reorderSection("todo", dy)
                         }
                         // ...and they are grouped by that first word — his:
                         // *"the information, completion, partial etc of a message
@@ -1362,7 +1383,7 @@ Component {
                         // by their line — so a note arriving under one tag leaves
                         // every other bullet's reply box exactly as he left it.
                         Item {
-                            width: needsCol.width
+                            width: page.width
                             visible: !win.isCollapsed("todo")
                             implicitHeight: visible ? todoCol.implicitHeight : 0
                             height: implicitHeight
@@ -1379,7 +1400,7 @@ Component {
                                     readonly property var modelData:
                                         win.todoGroups[todoGroup.index]
                                         || ({ label: "", items: [] })
-                                    width: needsCol.width
+                                    width: page.width
 
                                     // Its own collapse key, so folding `information`
                                     // says nothing about `failed` — and namespaced by
@@ -1461,7 +1482,7 @@ Component {
                                                     todoRow.modelData.when ? todoRow.modelData.when : ""
                                                 readonly property string metaCombined:
                                                     (metaBy ? metaBy + "  " : "") + metaWhen
-                                                width: needsCol.width
+                                                width: page.width
                                                 implicitHeight: bar.implicitHeight
                                                                 + (replying ? replyBox.height + 4 : 0)
                                                 height: implicitHeight
@@ -1792,12 +1813,6 @@ Component {
                         }
                     }
                 }
-                }
-                }
-
-                Item { width: 1; height: 18 }
-    }
-}
 
 Component {
     id: summonerSection
@@ -2146,6 +2161,29 @@ Component {
                             }
                         }
 
+
+                        // The watcher's own systemd sentence used to sit here, under
+                        // the cards. It does not any more: [his, 2026-07-30] with
+                        // ministers bound the section draws the cards and the shells
+                        // and NOTHING else. It is still read (`Agents.watcher`/
+                        // `armed`) and it is still SAID in the one case where
+                        // silence would make the empty line a lie — a watcher that
+                        // will never fire, up beside "binds ministers." (§10).
+                    }
+                }
+
+                Item { width: 1; height: 18 }
+    }
+}
+
+Component {
+    id: shellsSection
+    //: a top-level section [his re-ask, 2026-08-02]: the live workings
+    //  of the bound ministers, placeable anywhere among the other bands.
+    Column {
+        width: page.width
+        height: implicitHeight
+
                         // ---- their LIVE SHELLS ----
                         // [his ask, 2026-08-01] a small live tail per bound minister,
                         // under the cards: the last couple of lines each one is
@@ -2164,19 +2202,29 @@ Component {
                         // long-runners it left running ride under it, read from
                         // the worker's own unit cgroup. It collapses like every
                         // heading here.
-                        SectionHead {
-                            id: shellsHead
-                            width: agentsCol.width
-                            visible: win.agentShells.length > 0
-                            height: visible ? implicitHeight : 0
-                            label: "shells"
-                            collapsed: win.isCollapsed("shells")
-                            fgDim: win.fgDim
-                            onToggled: win.toggleCollapsed("shells")
-                        }
+
+                SectionHead {
+                    id: shellsHead
+                    width: page.width
+                    visible: win.agentShells.length > 0
+                    height: visible ? implicitHeight : 0
+                    // [ask 1, 2026-08-02] renamed from "shells": the band is the
+                    // live tail of each bound minister's tool calls, not a
+                    // terminal — *"the other section labeled 'shells'"* read as
+                    // the shell it runs in. `workings` names what it shows in the
+                    // summoning register: what each spirit is actively doing. The
+                    // collapse key stays "shells" (internal, one fold state).
+                    label: "workings"
+                    collapsed: win.isCollapsed("shells")
+                    fgAccent: win.fgAccent
+                    fgDim: win.fgDim
+                    reorderable: true
+                    onToggled: win.toggleCollapsed("shells")
+                    onReorderRequested: (dy) => win.reorderSection("shells", dy)
+                }
 
                         Item {
-                            width: agentsCol.width
+                            width: page.width
                             visible: win.agentShells.length > 0
                                      && !win.isCollapsed("shells")
                             implicitHeight: visible ? shellsCol.implicitHeight : 0
@@ -2204,18 +2252,6 @@ Component {
                                 }
                             }
                         }
-
-                        // The watcher's own systemd sentence used to sit here, under
-                        // the cards. It does not any more: [his, 2026-07-30] with
-                        // ministers bound the section draws the cards and the shells
-                        // and NOTHING else. It is still read (`Agents.watcher`/
-                        // `armed`) and it is still SAID in the one case where
-                        // silence would make the empty line a lie — a watcher that
-                        // will never fire, up beside "binds ministers." (§10).
-                    }
-                }
-
-                Item { width: 1; height: 18 }
     }
 }
 
