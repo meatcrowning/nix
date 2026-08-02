@@ -19,7 +19,7 @@ Item {
             var names = Library.smartNames();
             if (names.length > 0) select(names[0]);
         } else if (visible && current !== "") {
-            Library.openSmart(current);   // refresh — counts may have moved
+            Library.refreshSmart();   // refresh in place — keeps the scroll spot
         }
     }
 

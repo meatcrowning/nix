@@ -2237,10 +2237,16 @@ class DictListModel(QAbstractListModel):
 
     countChanged = Signal()
 
-    def __init__(self, roles, parent=None):
+    def __init__(self, roles, parent=None, key=None):
         super().__init__(parent)
         self._role_names = {Qt.UserRole + i: r for i, r in enumerate(roles)}
         self._rows = []
+        # The role that identifies a row across a refresh (albumId / trackId).
+        # merge() keys on it to turn "replace every row" into the minimal
+        # insert/remove/change so a view keeps its scroll position. Defaults to
+        # the first role, which is the id column for both ALBUM_ROLES and
+        # TRACK_ROLES.
+        self._key = key or (roles[0] if roles else None)
 
     def roleNames(self):
         return {k: v.encode() for k, v in self._role_names.items()}
@@ -2257,6 +2263,77 @@ class DictListModel(QAbstractListModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+        self.countChanged.emit()
+
+    def merge(self, rows):
+        """Reconcile the current rows toward `rows` in place, keyed on `self._key`,
+        emitting the minimal insert/remove/dataChanged instead of a full reset.
+
+        A reset (set_rows) snaps every view bound to this model back to the top
+        and drops its selection; a library scan/import/watcher refresh must not
+        do that (docs/DESIGN.md — a refresh under the user keeps their place).
+        This turns "the same view gained/lost a few rows" into row operations a
+        ListView absorbs while holding its contentY. Falls back to set_rows when
+        there is no usable key, or when keys collide, so correctness never rides
+        on the diff. Keys are unique for albumId and for trackId within one
+        listing; a queue can hold a track twice, so it stays on set_rows."""
+        key = self._key
+        if key is None:
+            self.set_rows(rows)
+            return
+        new_keys = [r.get(key) for r in rows]
+        if len(set(new_keys)) != len(new_keys) or None in new_keys:
+            self.set_rows(rows)  # can't diff safely — replace wholesale
+            return
+
+        # Phase 1 — drop rows absent from the new set, bottom-up in runs.
+        keep = set(new_keys)
+        i = len(self._rows) - 1
+        while i >= 0:
+            if self._rows[i].get(key) not in keep:
+                j = i
+                while j >= 0 and self._rows[j].get(key) not in keep:
+                    j -= 1
+                self.beginRemoveRows(QModelIndex(), j + 1, i)
+                del self._rows[j + 1:i + 1]
+                self.endRemoveRows()
+                i = j
+            else:
+                i -= 1
+
+        # Phase 2 — walk the target order, inserting new rows, moving reordered
+        # ones (as remove+insert), patching data in place where only fields moved.
+        i = 0
+        while i < len(rows):
+            nk = new_keys[i]
+            if i < len(self._rows) and self._rows[i].get(key) == nk:
+                if self._rows[i] != rows[i]:
+                    self._rows[i] = rows[i]
+                    self.dataChanged.emit(self.index(i), self.index(i))
+                i += 1
+                continue
+            pos = next((j for j in range(i + 1, len(self._rows))
+                        if self._rows[j].get(key) == nk), None)
+            if pos is None:
+                self.beginInsertRows(QModelIndex(), i, i)
+                self._rows.insert(i, rows[i])
+                self.endInsertRows()
+            else:
+                self.beginRemoveRows(QModelIndex(), pos, pos)
+                del self._rows[pos]
+                self.endRemoveRows()
+                self.beginInsertRows(QModelIndex(), i, i)
+                self._rows.insert(i, rows[i])
+                self.endInsertRows()
+            i += 1
+
+        # Any trailing leftovers (shouldn't happen — every key is in the new
+        # set) get trimmed so the model matches the target exactly.
+        if len(self._rows) > len(rows):
+            self.beginRemoveRows(QModelIndex(), len(rows), len(self._rows) - 1)
+            del self._rows[len(rows):]
+            self.endRemoveRows()
+
         self.countChanged.emit()
 
     def update_row(self, i, row):
@@ -2321,7 +2398,10 @@ class Bridge(QObject):
         self._current_album = 0
         self._current_smart = ""
 
-        library.changed.connect(self.refreshAlbums)
+        # A library scan/import/watcher refresh must keep the user's place: the
+        # grid, the open album section and the open playlist all reconcile in
+        # place rather than resetting to the top (see DictListModel.merge).
+        library.changed.connect(lambda: self.refreshAlbums(merge=True))
         library.changed.connect(self._refresh_current)
         library.trackChanged.connect(self._on_track_changed)
         player.queueChanged.connect(self._refresh_queue)
@@ -2343,11 +2423,11 @@ class Bridge(QObject):
     # ---- albums grid ----
 
     @Slot()
-    def refreshAlbums(self):
+    def refreshAlbums(self, merge=False):
         self._album_rows = self._library.albums(self._sort)
-        self._apply_album_filter()
+        self._apply_album_filter(merge=merge)
 
-    def _apply_album_filter(self):
+    def _apply_album_filter(self, merge=False):
         rows = self._album_rows
         f = self._filter.casefold().strip()
         if f:
@@ -2355,7 +2435,11 @@ class Bridge(QObject):
             rows = [r for r in rows
                     if all(w in f'{(r["album"] or "").casefold()}\n'
                                 f'{(r["album_artist"] or "").casefold()}' for w in words)]
-        self.albumsModel.set_rows([album_row(r) for r in rows])
+        out = [album_row(r) for r in rows]
+        if merge:
+            self.albumsModel.merge(out)
+        else:
+            self.albumsModel.set_rows(out)
 
     @Slot(str)
     def setSort(self, sort):
@@ -2371,10 +2455,14 @@ class Bridge(QObject):
     # ---- album detail ----
 
     @Slot(int)
-    def openAlbum(self, album_id):
+    def openAlbum(self, album_id, merge=False):
         self._current_album = album_id
         rows = self._library.album_tracks(album_id)
-        self.albumTracksModel.set_rows([track_row(r, check_exists=True) for r in rows])
+        out = [track_row(r, check_exists=True) for r in rows]
+        if merge:
+            self.albumTracksModel.merge(out)
+        else:
+            self.albumTracksModel.set_rows(out)
 
     @Slot(int, result="QVariant")
     def albumInfo(self, album_id):
@@ -2392,10 +2480,23 @@ class Bridge(QObject):
         return self._library.smart_names()
 
     @Slot(str)
-    def openSmart(self, name):
+    def openSmart(self, name, merge=False):
         self._current_smart = name
         rows = self._library.smart_tracks(name)
-        self.playlistModel.set_rows([track_row(r, check_exists=True) for r in rows])
+        out = [track_row(r, check_exists=True) for r in rows]
+        if merge:
+            self.playlistModel.merge(out)
+        else:
+            self.playlistModel.set_rows(out)
+
+    @Slot()
+    def refreshSmart(self):
+        """Re-open the current smart playlist WITHOUT scrolling to the top —
+        used when returning to the playlists view (counts may have moved).
+        Selecting a different list (openSmart) still resets, as new content
+        should."""
+        if self._current_smart:
+            self.openSmart(self._current_smart, merge=True)
 
     @Slot(str)
     def search(self, text):
@@ -2460,10 +2561,12 @@ class Bridge(QObject):
     # ---- refresh plumbing ----
 
     def _refresh_current(self):
+        # Driven by library.changed — the open album section and playlist keep
+        # their scroll (merge), unlike a user navigating to a new one.
         if self._current_album:
-            self.openAlbum(self._current_album)
+            self.openAlbum(self._current_album, merge=True)
         if self._current_smart:
-            self.openSmart(self._current_smart)
+            self.openSmart(self._current_smart, merge=True)
 
     def _refresh_queue(self):
         self.queueModel.set_rows([track_row(t) for t in self._player.queue_dicts()])
