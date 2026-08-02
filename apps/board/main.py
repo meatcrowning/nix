@@ -932,6 +932,11 @@ class Agents(QObject):
     #: must not become the transcript §5.2 rules out.
     SHELL_LINES = 2
 
+    #: How long a BACKGROUNDED process line may be before it is cut — a worker
+    #: argv can be pathological, and its job here is to say WHAT is running, not
+    #: to become a second transcript (§5.2 keeps a banner from growing one).
+    SHELL_BG_WIDTH = 200
+
     @staticmethod
     def _tool_use_lines(name, inp):
         """A tool CALL as its literal arguments, not as a description of it.
@@ -1190,6 +1195,20 @@ class Agents(QObject):
     # the triangle is not showing. A row with nothing logged yet is ABSENT — an
     # empty shell slot is the §5.2 shape this board refuses; the card above it
     # still says `nothing logged yet` if he opens its drawer.
+    #
+    # THE CLARIFIED ASK, 2026-08-01: *"leave triangle how it is, do the
+    # background processes in the other section labeled 'shells'"*. The
+    # transcript tail shows the FOREGROUND activity — what each minister is
+    # doing right now, which is what the triangle already says. The backgrounded
+    # long-runners it started and left running are a separate fact, visible for
+    # free from each worker's own systemd unit cgroup, so they get their own
+    # lines under the foreground tail — same band, same row, nothing in the
+    # triangle changes. A minister with foreground lines and no runners shows
+    # just the tail; one that is silent but left a runner going shows the runner
+    # (the row exists on the strength of the running process, not the words).
+    # Only a worker — a card with a `board-worker-<id>` unit — can have
+    # background processes; sessions and Solomon have no unit, so they read none
+    # rather than guessing.
     def _shells_build(self, cards):
         out = []
         for c in cards:
@@ -1198,17 +1217,82 @@ class Agents(QObject):
             if c.get("state") != "running":
                 continue
             lines = self.output(c.get("id", ""))
-            if not lines:
+            bg = self._bg_processes(c.get("id", ""))
+            if not lines and not bg:
                 continue
             out.append({"id": c["id"], "name": c.get("name", ""),
-                        "lines": lines[-Agents.SHELL_LINES:]})
+                        "lines": lines[-Agents.SHELL_LINES:], "bg": bg})
         return out
+
+    #: The cgroup path of `pid`'s unit, only when that unit is a worker's own
+    #: (`board-worker-*.service`). Sessions, Solomon and this app itself live in
+    #: other units, and a bogus read must never invent background processes for
+    #: them — so the guard is the unit NAME inside the cgroup path, not just
+    #: "a process that has children".
+    def _worker_cgroup(self, pid):
+        if not pid:
+            return None
+        try:
+            with open("/proc/%d/cgroup" % pid) as f:
+                text = f.read()
+        except OSError:
+            return None
+        for line in text.splitlines():
+            ctrl, _, path = line.partition(":")
+            if ctrl == "0" and path.startswith("/") and "board-worker-" in path:
+                return "/sys/fs/cgroup" + path
+        return None
+
+    def _bg_processes(self, agent_id):
+        """The long-runners a bound worker started and left running, read from
+        its own systemd unit cgroup: every process still in the unit besides
+        the minister itself. Empty for anything with no worker unit. Pure /proc
+        reads — never a fork, so it is safe on the poll clock like the rest of
+        the section."""
+        rec = boardagents.record(agent_id) or {}
+        main = rec.get("pid") or 0
+        cg = self._worker_cgroup(main)
+        if not cg:
+            return []
+        try:
+            with open(cg + "/cgroup.procs") as f:
+                pids = [int(p) for p in f.read().split() if p.strip().isdigit()]
+        except OSError:
+            return []
+        out = []
+        for pid in pids:
+            if pid == main:
+                continue
+            label = self._proc_label(pid)
+            if label:
+                out.append(label)
+        return out
+
+    def _proc_label(self, pid):
+        """One short line for a backgrounded process: its command name plus the
+        arguments that say what it is (`quickshell -p /tmp/qs-x/qml`...), glyph
+        mapped (§2.3), trimmed here so a pathological argv cannot pad the band."""
+        try:
+            with open("/proc/%d/comm" % pid) as f:
+                comm = f.read().strip()
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                raw = f.read().split(b"\x00")
+        except OSError:
+            return ""
+        args = [a.decode("utf-8", "replace") for a in raw if a]
+        parts = args or [comm]
+        # fold store paths to their basename: the /nix/store hash is noise
+        line = " ".join(p.rsplit("/", 1)[-1] if "/" in p else p for p in parts)
+        line = (comm + ": " + line) if comm and comm != parts[0] else line
+        return px(line)[:Agents.SHELL_BG_WIDTH]
 
     @Property("QVariantList", notify=shellsChanged)
     def shells(self):
-        """`[{id, name, lines}]` for each bound minister with something logged —
-        top-to-bottom the same order the triangle draws its cards in, so a shell
-        never appears above or below the wrong card."""
+        """`[{id, name, lines, bg}]` for each bound minister with something to
+        show — `lines` the foreground tail, `bg` the backgrounded long-runners
+        it left running (empty when it has none). Top-to-bottom the same order
+        the triangle draws its cards in, so a shell never appears above or
+        below the wrong card."""
         return self._shells
 
     @Property(int, notify=changed)

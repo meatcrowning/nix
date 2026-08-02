@@ -6949,6 +6949,65 @@ def test_shells(tmp):
     del os.environ["BOARD_TRANSCRIPTS"]
 
 
+def test_shell_bg(tmp):
+    """The backgrounded long-runners a bound minister left running, read from
+    its own worker-unit cgroup (`board-worker-<id>.service`), ride under the
+    foreground tail in the shells band — the triangle itself is untouched
+    ([his, 2026-08-01] *\"leave triangle how it is, do the background\n
+    processes in the other section labeled 'shells'\"*). Proves the row is kept
+    on the strength of a running process even when the minister has said
+    nothing, that only a worker unit reads background processes at all, and
+    that the minister's own main pid is the one process never shown."""
+    import main as brd
+    import boardagents as ba
+    print("\n=== the shells band reads a bound minister's backgrounded runners ===")
+    os.environ["BOARD_TRANSCRIPTS"] = os.path.join(tmp, "transcripts")
+    agents = brd.Agents.__new__(brd.Agents)      # no Qt, no polling
+    ba.register("w-run", "T", 4242, kind="worker", session="ses-run",
+                where="apps/x/**")
+    ba.register("w-nounit", "T", 31337, kind="session", session="ses-sess",
+                where="apps/x/**")
+
+    cg = os.path.join(tmp, "cgroup")
+    os.makedirs(cg)
+    # a worker unit cgroup holding the minister itself and two long-runners
+    with open(os.path.join(cg, "cgroup.procs"), "w") as f:
+        f.write("4242\n5150\n5250\n")
+
+    # stub the cgroup resolve and the /proc label read: this module's real
+    # `_worker_cgroup`/`_proc_label` read his live /sys and /proc, which a
+    # harness must not touch — the wiring under test is the shells builder.
+    agents._worker_cgroup = lambda pid: cg if pid == 4242 else None
+    agents._proc_label = lambda pid: {
+        5150: "qml -p /tmp/qs-test/shell.qml",
+        5250: "node media/scan.mjs",
+    }.get(pid, "")
+
+    by = {s["id"]: s
+          for s in agents._shells_build([
+              {"id": "w-run", "name": "Gaap", "kind": "worker",
+               "state": "running"},
+              {"id": "w-nounit", "name": "Vassago", "kind": "session",
+               "state": "running"},
+          ])}
+    # a silent worker that left a runner going is still drawn, on the strength
+    # of the process — a §5.2 hole is a hole, but a live runner is not one.
+    check("a running worker's row carries its backgrounded long-runners",
+          set(by.get("w-run", {}).get("bg", []))
+          == {"qml -p /tmp/qs-test/shell.qml", "node media/scan.mjs"}, by)
+    check("...its own main pid is never one of them",
+          "4242" not in " ".join(by.get("w-run", {}).get("bg", [])), by)
+    check("...a minister with a worker unit draws background even if silent",
+          "w-run" in by and by["w-run"]["bg"], by)
+    check("...a session (no worker unit) reads no background processes at all",
+          set(by.get("w-nounit", {}).get("bg", [])) == set(), by)
+    check("...and the foreground tail stays the drawable's own source",
+          isinstance(by.get("w-run", {}).get("lines"), list), by)
+    ba.unregister("w-run")
+    ba.unregister("w-nounit")
+    del os.environ["BOARD_TRANSCRIPTS"]
+
+
 def _hermes_db(path):
     """A synthetic `~/.hermes/state.db` with the columns this reads.
 
@@ -7256,6 +7315,7 @@ def main():
         os.makedirs(os.path.join(tmp, "out"))
         test_card_output(os.path.join(tmp, "out"))
         test_shells(os.path.join(tmp, "out"))
+        test_shell_bg(os.path.join(tmp, "out"))
         os.makedirs(os.path.join(tmp, "herm"))
         test_hermes(os.path.join(tmp, "herm"))
 

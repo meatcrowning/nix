@@ -16,11 +16,18 @@ import QtQuick
 // The name is the shell's subject, the same word the card above it reads; it is
 // drawn once, above its lines, so the tail is never anonymous and the name is
 // never repeated on every row of a wrapped line.
+//
+// `bg` carries the BACKGROUNDED LONG-RUNNERS the minister started and left
+// running, read from its own worker unit cgroup in `main.py` — a separate fact
+// from the foreground tail, one this component only has to draw. Each is a
+// clipped line marked with a leading `&` so it can never be mistaken for one of
+// the agent's own words.
 Item {
     id: sh
 
     property string name: ""
     property var lines: []
+    property var bg: []
     property real cellW: 8
     property color fgDim: Theme.textDim
 
@@ -61,6 +68,25 @@ Item {
                 clip: true
                 color: sh.fgDim
                 text: sh.clipTo(String(modelData), Math.floor(width / sh.cellW))
+            }
+        }
+
+        // THE BACKGROUNDED LONG-RUNNERS, [his ask, 2026-08-01]: processes the
+        // minister started and left running (`&`/nohup), read from its worker
+        // unit cgroup in main.py. Drawn as their own line(s) under the
+        // foreground tail — a process is a fact, not a transcript line, so
+        // each is marked with a leading `&` to keep it from reading as one of
+        // the agent's own words, and it clips like every other line here.
+        Repeater {
+            model: sh.bg
+            delegate: PixelText {
+                required property var modelData
+                width: col.width
+                wrapMode: Text.NoWrap
+                clip: true
+                color: sh.fgDim
+                text: sh.clipTo("& " + String(modelData),
+                               Math.floor(width / sh.cellW))
             }
         }
     }
