@@ -17,31 +17,14 @@ PanelWindow {
 
     property bool open: false
 
-    // "No wallpaper" mode (Settings › Appearance › wallpaper › no wallpaper):
-    // the desktop is a solid Theme.bg with no image, so there is nothing to flip
-    // THROUGH. The switcher becomes a COLOUR-THEME chooser instead — the SAME
-    // wallpaper list, but each entry drawn as a strip of its own extracted
-    // palette (bgAlt…accent…status, from list-wallpapers.sh's palette field)
-    // rather than a thumbnail. Picking one runs the full wal-set.sh on that
-    // wallpaper exactly as the thumbnail picker does, so the desktop takes that
-    // wallpaper's real palette — while `wallpaperSolid` stays on, so no image is
-    // painted, only Theme.bg. The thumbnail picker is unchanged whenever a real
-    // wallpaper is active.
-    readonly property bool solid: SettingsStore.d.wallpaperSolid
-
-    // Apply a wallpaper's palette as the colour theme WITHOUT leaving solid
-    // mode: run the full wal-set.sh on it (same commit the thumbnail picker
-    // defers to close), which re-extracts and re-themes the whole desktop from
-    // that image. wallpaperSolid is untouched, so WallpaperLayer keeps painting
-    // Theme.bg — the palette changes, the image does not appear.
-    function pickTheme(path) {
-        if (!path || commitProc.running) return;
-        commitProc.command = ["sh", "-c",
-            "touch \"" + root.suppressMarker + "\"; exec \"" + root.wallSetPath + "\" \"$1\" >>\"$HOME/.cache/wal/wallpaper-picker.log\" 2>&1",
-            "_", path];
-        commitProc.running = true;
-        root.open = false;
-    }
+    // The picker ALWAYS shows wallpaper thumbnails, whether or not the desktop
+    // is currently painting the image ("display wallpaper" off → solid Theme.bg,
+    // SettingsStore.wallpaperSolid). Picking one always runs the full wal-set.sh,
+    // which re-extracts and re-themes the whole desktop from that wallpaper;
+    // `wallpaperSolid` is left untouched, so in solid mode the palette changes
+    // and the image simply stays hidden behind Theme.bg (WallpaperLayer.qml).
+    // Each thumbnail also carries a strip of the palette it produces along its
+    // bottom edge, so the colour theme is visible without applying it.
 
     // Stay mapped through the slide-out, then hide once off-screen — same
     // lifecycle as Launcher/Cheatsheet.
@@ -132,18 +115,14 @@ PanelWindow {
         if (!_openSync) return;
         const idx = currentPath ? images.indexOf(currentPath) : -1;
         const at = idx >= 0 ? idx : 0;
-        // Both grids share the `images` model; sync whichever one is showing.
-        // In solid mode the "current" wallpaper is the palette source, so
-        // landing on it shows the theme you're already on.
         list.currentIndex = at;
-        swatchList.currentIndex = at;
         updateSelected();
         // Land the view ON the current entry, centred — opening the picker
         // should show where you already are, not the top of the list. Do it now
         // AND once more after layout settles (positionViewAtIndex is a no-op if
         // the grid hasn't laid its delegates out yet, which it often hasn't on
         // the very first frame after the model is (re)assigned).
-        (root.solid ? swatchList : list).positionViewAtIndex(at, GridView.Center);
+        list.positionViewAtIndex(at, GridView.Center);
         centerTimer.restart();
     }
 
@@ -154,9 +133,8 @@ PanelWindow {
         id: centerTimer
         interval: 0
         onTriggered: {
-            const g = root.solid ? swatchList : list;
-            if (g.count > 0)
-                g.positionViewAtIndex(g.currentIndex, GridView.Center);
+            if (list.count > 0)
+                list.positionViewAtIndex(list.currentIndex, GridView.Center);
         }
     }
 
@@ -299,22 +277,14 @@ PanelWindow {
 
     onOpenChanged: {
         if (open) {
-            // Read the no-wallpaper setting straight off disk before deciding
-            // which grid to show. `solid` is a binding on the polled
-            // SettingsStore, so it is normally current — but forcing the read
-            // here means a just-toggled "no wallpaper" cannot leave the picker
-            // one poll behind, showing the colour-theme grid when the mode is
-            // off (or the thumbnails when it is on).
-            SettingsStore.loadNow();
             dirty = false;
             refresh(true);   // open sync: land + centre on the current wallpaper
-            if (root.solid)
-                swatchList.forceActiveFocus();
-            else
-                list.forceActiveFocus();
-        } else if (!root.solid) {
-            // Colour-theme picks apply immediately (pickTheme); only the
-            // thumbnail picker defers its full apply to close.
+            list.forceActiveFocus();
+        } else {
+            // The full theme apply runs once, on close, on whatever was last
+            // highlighted — in solid mode too, where it re-themes but leaves the
+            // image hidden (wallpaperSolid untouched). A close with no flip is a
+            // no-op (see `dirty`).
             commitFinal();
         }
     }
@@ -342,120 +312,9 @@ PanelWindow {
             color: Theme.accent
         }
 
-        // Colour-theme grid — shown only in "no wallpaper" mode. Same wallpaper
-        // list as the thumbnail picker, but each cell is a strip of that
-        // wallpaper's extracted palette. Picking one re-themes the desktop from
-        // that wallpaper while staying solid (see root.pickTheme).
-        KineticGridView {
-            id: swatchList
-            visible: root.solid
-            focus: root.solid
-            anchors {
-                top: title.bottom; topMargin: 8
-                left: parent.left; right: parent.right; bottom: parent.bottom
-                margins: 10
-            }
-            clip: true
-            readonly property int columns: 2
-            cellWidth: Math.floor(width / columns)
-            cellHeight: 90
-            model: root.images
-            cacheBuffer: 800   // keep a couple of off-screen rows warm for smooth scroll
-
-            function pick() {
-                if (currentIndex >= 0 && currentIndex < root.images.length)
-                    root.pickTheme(root.images[currentIndex]);
-            }
-            // A real user move: keep the highlight on screen AND mark the picker
-            // dirty, so a late refresh can never pull the selection back to the
-            // current wallpaper (matches the thumbnail grid's userNav).
-            function nav(i) {
-                currentIndex = Math.max(0, Math.min(i, count - 1));
-                root.dirty = true;
-            }
-            Keys.onLeftPressed:  nav(currentIndex - 1)
-            Keys.onRightPressed: nav(currentIndex + 1)
-            Keys.onUpPressed:    nav(currentIndex - columns)
-            Keys.onDownPressed:  nav(currentIndex + columns)
-            Keys.onEscapePressed: root.open = false
-            Keys.onReturnPressed: pick()
-            Keys.onEnterPressed:  pick()
-            // Keyboard nav keeps the highlighted cell on screen. Do NOT drive this
-            // from hover (below): a hover-select that also repositioned the view
-            // made the grid scroll away under the pointer while browsing — the
-            // "poor handling" this grid had. Same rule as the thumbnail grid,
-            // which never selects on hover for the same reason.
-            onCurrentIndexChanged: positionViewAtIndex(currentIndex, GridView.Contain)
-
-            delegate: Item {
-                id: swCell
-                required property string modelData   // image path
-                required property int index
-                readonly property var palette: (root.palettes && root.palettes[index]) || []
-                width: swatchList.cellWidth
-                height: swatchList.cellHeight
-
-                Rectangle {
-                    id: swBox
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    color: Theme.bgAlt
-                    radius: 0
-                    border.width: swCell.index === swatchList.currentIndex ? 2 : 1
-                    border.color: swCell.index === swatchList.currentIndex ? Theme.accent : Theme.border
-
-                    // The palette strip: equal-width columns of the theme's
-                    // tokens. Empty (image not prepared yet) leaves the bare box.
-                    Row {
-                        anchors.fill: parent
-                        anchors.margins: swBox.border.width
-                        Repeater {
-                            model: swCell.palette
-                            delegate: Rectangle {
-                                required property string modelData
-                                required property int index
-                                width: Math.ceil(swBox.width / Math.max(1, swCell.palette.length))
-                                height: swBox.height
-                                color: modelData
-                            }
-                        }
-                    }
-
-                    // Filename label, same treatment as the thumbnail cell.
-                    Rectangle {
-                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                        anchors.margins: swBox.border.width
-                        height: 18
-                        color: Qt.rgba(0, 0, 0, 0.55)
-                        PixelText {
-                            anchors.centerIn: parent
-                            width: parent.width - 8
-                            elide: Text.ElideMiddle
-                            horizontalAlignment: Text.AlignHCenter
-                            text: Glyphs.px(root.fileName(swCell.modelData))
-                            color: Theme.text
-                        }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        // Click = pick this palette. Hover deliberately does NOT
-                        // move the selection: it used to (with a view reposition on
-                        // every currentIndex change), which scrolled the grid out
-                        // from under the pointer while browsing. Matches the
-                        // thumbnail grid, which avoids hover-select for the same
-                        // reason.
-                        onClicked: root.pickTheme(swCell.modelData)
-                    }
-                }
-            }
-        }
-
         KineticGridView {
             id: list
-            visible: !root.solid
-            focus: !root.solid
+            focus: true
             anchors {
                 top: title.bottom; topMargin: 8
                 left: parent.left; right: parent.right; bottom: parent.bottom
