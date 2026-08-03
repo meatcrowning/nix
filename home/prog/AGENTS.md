@@ -368,9 +368,11 @@ row the supervisor gives up and hands over to `start-hyprland` — at that point
 it is not the plugin's fault.
 
 book has no `hypr-supervise` (it is a Fedora session), so a compositor crash
-there is still a relog; its quarantine block only picks the known-good build at
-the next start. book **does** hot-swap properly since 2026-07-26 — its live
-`hyprland.lua` now carries the resolved-path + quarantine block; it used to load
+there is still a relog — a build that dies on reload costs a relog, and the
+quarantine block only picks the known-good build at the next start. **That risk
+is accepted since 2026-08-03: book hot-swaps live, at agent judgement, like
+top.** The swap itself has been sound since 2026-07-26 — book's live
+`hyprland.lua` carries the resolved-path + quarantine block; it used to load
 the symlink, so reload had never swapped there
 (`docs/book-hyprvtb-version-bridge.md` records the correction).
 
