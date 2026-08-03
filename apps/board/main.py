@@ -1938,9 +1938,23 @@ class Spend(QObject):
     reads the same numbers is silent. The same lifecycle kick `Usage` takes moves
     it the moment an agent starts, finishes or dies (`follow`), with the 60s
     clock as the floor under it.
+
+    OFF THE GUI THREAD, exactly like `Usage`, and for the same reason it was
+    always true there: the read is over every session transcript on the machine
+    and it is on a clock. It was synchronous here until 2026-08-02, and measured
+    at **1,134 ms** — so goetia froze solid for over a second on every 60s poll,
+    on every agent lifecycle change, AND once in the constructor before the
+    window could be created at all, which is most of what made it slow to start.
+    `boardspend._summary` cut the steady-state read to ~5 ms; this makes the
+    FIRST one — and any pathological one — cost him nothing either.
     """
 
     changed = Signal()
+
+    #: Private, emitted from the worker thread when a snapshot is ready; the
+    #: result is applied by `_settled` back on the GUI thread. Nothing in the
+    #: worker touches Qt state except this emit.
+    _done = Signal()
 
     #: The idle re-read cadence. The figures move slowly; 60s is well inside
     #: "prompt" and each read is a snapshot over transcripts + one sqlite query.
@@ -1953,6 +1967,9 @@ class Spend(QObject):
         self._daily = []
         self._known = False
         self._estimated = False
+        self._busy = False
+        self._snap = None
+        self._done.connect(self._settled)
         self._poll = QTimer(self)
         self._poll.setInterval(self.POLL_MS)
         self._poll.timeout.connect(self.refresh)
@@ -1967,10 +1984,32 @@ class Spend(QObject):
 
     @Slot()
     def refresh(self):
+        """Kick a read, unless one is already in flight.
+
+        A read in flight IS this refresh: the poll and the lifecycle kick can
+        both land inside one snapshot, and starting a second worker would only
+        read the same files twice. Returns immediately either way — the window
+        never waits on this.
+        """
+        if self._busy:
+            return
+        self._busy = True
+        threading.Thread(target=self._work, daemon=True,
+                         name="board-spend").start()
+
+    def _work(self):
         try:
-            snap = boardspend.snapshot()
+            self._snap = boardspend.snapshot()
         except Exception as e:  # a read of other programs' files; never fatal
             print("spend: snapshot failed (%s)" % e, file=sys.stderr)
+            self._snap = None
+        self._done.emit()
+
+    @Slot()
+    def _settled(self):
+        self._busy = False
+        snap, self._snap = self._snap, None
+        if snap is None:
             return
         models = snap.get("models", [])
         totals = snap.get("totals", {})
@@ -2013,8 +2052,18 @@ class Spend(QObject):
 
     @Slot(float, result=str)
     def fmtTokens(self, n):
-        """`boardspend.fmt_tokens` for the QML side — 1.2M / 48k, one place."""
-        return boardspend.fmt_tokens(n)
+        """`boardspend.fmt_tokens` for the QML side — 1.2M / 48k, one place.
+
+        A QML `undefined` reaches a `float` slot as NaN, and that is an ORDINARY
+        state here, not a bug to raise on: `totals` is an empty map until the
+        first snapshot lands, and `{}["in"]` is undefined. Since that read moved
+        off the GUI thread the window draws before the numbers exist, so every
+        one of these six bindings evaluated once against nothing and `int(nan)`
+        raised — six tracebacks per launch, all of them harmless and none of them
+        legible. What the section SAYS in that gap is not this figure anyway:
+        its `!Spend.known` row is already on screen saying so in words.
+        """
+        return boardspend.fmt_tokens(n if -1e18 < n < 1e18 else 0)
 
 
 class Settings(QObject):
