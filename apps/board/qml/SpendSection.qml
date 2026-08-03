@@ -72,6 +72,13 @@ Column {
 
     readonly property bool hasModels: Spend.models && Spend.models.length > 0
 
+    //: the whole period's total spend, as a fixed-2 string — added to the grid
+    //  caption on hover so the day's per-item figure reads against the running
+    //  total (the same $ the system-wide totals line carries below).
+    readonly property string totalCost:
+        (Spend.totals && Spend.totals.cost !== undefined)
+        ? Spend.totals.cost.toFixed(2) : "0"
+
     //: the hovered day's {family: tokens} map, or null when none is hovered.
     readonly property var dayModels:
         (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
@@ -321,14 +328,37 @@ Column {
                             color: spendRoot.hoveredDay === index
                                    ? Theme.accent
                                    : chart.cellColor(modelData.total)
-                            MouseArea {
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onEntered: spendRoot.hoveredDay = index
-                                onExited: if (spendRoot.hoveredDay === index)
-                                              spendRoot.hoveredDay = -1
-                            }
                         }
+                    }
+
+                    // ONE hit area over the whole grid, not a MouseArea per cell.
+                    // The 2px gaps between squares are not their own hit target:
+                    // a per-cell area fired onExited crossing a gap, so the
+                    // hover snapped back to the whole-period view for a frame
+                    // between every two days (§5.1 — a gap is not a place the
+                    // pointer can fall out of the thing). Here a gap maps to the
+                    // square up-left of it (floor over cell+gap), and a position
+                    // that resolves to no day at all — the caption row, an empty
+                    // calendar slot — KEEPS the last hovered day rather than
+                    // clearing it, so the readout only reverts when the pointer
+                    // actually leaves the chart (onExited).
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        function dayAt(mx, my) {
+                            var step = chart.cell + chart.gap;
+                            var col = Math.floor(mx / step);
+                            var row = Math.floor(my / step);
+                            if (col < 0 || col >= chart.nCols || row < 0 || row > 6)
+                                return -1;
+                            var idx = col * 7 + row - chart.firstDow;
+                            return (idx >= 0 && idx < chart.nDays) ? idx : -1;
+                        }
+                        onPositionChanged: (m) => {
+                            var idx = dayAt(m.x, m.y);
+                            if (idx >= 0) spendRoot.hoveredDay = idx;
+                        }
+                        onExited: spendRoot.hoveredDay = -1
                     }
                     // the legend (§9.3): normally what the grid IS; under the
                     // pointer, the hovered day's date and token total.
@@ -342,6 +372,7 @@ Column {
                                 && spendRoot.hoveredDay < chart.days.length)
                             ? chart.days[spendRoot.hoveredDay].date + "  "
                               + Spend.fmtTokens(spendRoot.dayTotal)
+                              + "  ·  $" + spendRoot.totalCost + " total"
                             : "tokens / day · 30d"
                     }
                 }
