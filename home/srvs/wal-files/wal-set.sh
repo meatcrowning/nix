@@ -212,6 +212,11 @@ if [ -f "$LUA" ]; then
     sed -i -E 's/(\["col\.bg_alt"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${BGALT}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.crit"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${CRIT}"'ff)\2/' "$LUA"
     sed -i -E 's/(\["col\.warn"\][[:space:]]*=[[:space:]]*")rgba\([0-9a-fA-F]+\)(")/\1rgba('"${WARN}"'ff)\2/' "$LUA"
+    # Persist shadow_alpha too — the live hl.config above reverts on the next
+    # `hyprctl reload` (which re-reads this file), so the colours survived and
+    # the shadow did not. Rewriting the seed line here makes it survive a
+    # reload and a restart, exactly as the colour lines do.
+    sed -i -E 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\1'"${SHADOW_ALPHA}"'/' "$LUA"
 fi
 
 # ---- 6. KDE / Qt apps (kdeglobals colours + pixel font; live-reloaded) --------
