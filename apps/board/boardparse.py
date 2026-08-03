@@ -69,6 +69,7 @@ import fcntl
 import hashlib
 import os
 import re
+import sys
 import tempfile
 import time
 
@@ -1920,6 +1921,54 @@ def drop_summon(lines, doc, agent_id="", name=""):
         return lines               # it moved under us: leave it, never guess
 
 
+# --------------------------------------- state for a board that is NOT this host's
+# Every writer here keeps its bookkeeping under one root — `$XDG_STATE_HOME/board`,
+# `boardmove.state_dir()` — and every one of them resolves that root without ever
+# asking WHICH BOARD it is about. That is right for the store this host actually
+# shows and wrong for anything else, and "anything else" is not hypothetical: an
+# agent writing a one-off probe against a `/tmp` board inherits his real state dir
+# and writes into it. Measured on `top` 2026-08-02: 830 stale `edit-*.lock` files
+# from 830 throwaway board paths, and one fixture stash left in `inflight/` that
+# drew a phantom minister card on his board — a decision agent with no process
+# behind it, which nothing would ever reap because a stash with a null pid cannot
+# be observed to die.
+#
+# So state ABOUT a board that is not this host's own goes somewhere it can never
+# be mistaken for his: a per-board directory under the runtime dir, gone at the
+# next boot.
+#
+# `XDG_STATE_HOME` being set means the caller has ALREADY isolated itself — which
+# is what both harnesses do — so it is honoured verbatim and none of this fires.
+
+def is_live_board(path):
+    """Whether `path` IS the store this host shows (`board_path()`). Pure."""
+    return os.path.abspath(str(path)) == os.path.abspath(board_path())
+
+
+#: One warning per board path per process — it must not be silent (§10), and it
+#: must not be a line per lock either.
+_SCRATCH_WARNED = set()
+
+
+def scratch_state_dir(path):
+    """Where state about `path` belongs when it does NOT belong in his own state
+    dir — or None when the live root is the correct answer, which is the case
+    for this host's board and for any caller that set `XDG_STATE_HOME` itself."""
+    if os.environ.get("XDG_STATE_HOME") or is_live_board(path):
+        return None
+    key = hashlib.sha256(os.path.abspath(str(path)).encode("utf-8")).hexdigest()[:16]
+    base = os.environ.get("XDG_RUNTIME_DIR") or os.path.join(
+        tempfile.gettempdir(), "board-scratch-%d" % os.getuid())
+    d = os.path.join(base, "board-scratch", key)
+    os.makedirs(d, exist_ok=True)
+    if key not in _SCRATCH_WARNED:
+        _SCRATCH_WARNED.add(key)
+        print("board: %s is not this host's board - its state goes to %s, not "
+              "~/.local/state/board (set XDG_STATE_HOME to place it yourself)"
+              % (path, d), file=sys.stderr)
+    return d
+
+
 # ------------------------------------------------------- one edit, done safely
 # board(1), the five-minute docs sync, board-watch and any agent with a terminal
 # all write this file. Two defences, and they are separate on purpose: the
@@ -1929,9 +1978,14 @@ def drop_summon(lines, doc, agent_id="", name=""):
 
 def lock_path(path):
     """Beside the state dir, never beside the store: `docs/` is a git checkout a
-    timer commits and pushes, and a stray lock file would sync to book."""
-    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-    d = os.path.join(base, "board")
+    timer commits and pushes, and a stray lock file would sync to book.
+
+    A board that is not this host's own locks under its own scratch root instead
+    — see `scratch_state_dir`, and the 830 files that paid for it."""
+    d = scratch_state_dir(path)
+    if d is None:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        d = os.path.join(base, "board")
     os.makedirs(d, exist_ok=True)
     key = hashlib.sha256(os.path.abspath(path).encode("utf-8")).hexdigest()[:16]
     return os.path.join(d, "edit-%s.lock" % key)
