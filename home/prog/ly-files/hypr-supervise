@@ -1,0 +1,56 @@
+#!/bin/sh
+# hypr-supervise — the crash net for book's Hyprland session.
+#
+# Replaces /usr/bin/start-hyprland at the top of the ly session. start-hyprland
+# is a watchdog whose answer to an unclean compositor exit is a restart in
+# --safe-mode — no config at all, no titlebars, no panel, and a relog to get
+# out. On book the thing most likely to take the compositor down is a freshly
+# built hyprvtb being hot-swapped in by `hyprctl reload`, so a bad build would
+# cost the whole session. This wrapper restarts with the REAL config instead,
+# and names the plugin build that was live when it died: hyprland.lua wrote it
+# to state/loaded on the way up, this copies it to state/crashed-with, and the
+# next config load reads that breadcrumb and loads the last known-good build —
+# the session returns intact, one plugin version behind, with
+# ~/.local/state/hyprvtb/quarantined saying why. After 3 crashes it stops
+# guessing and hands over to start-hyprland (safe mode) — at that point the
+# problem is not the plugin.
+#
+# Same protocol as top's supervisor (sys/dsk/hyprland.nix); book's is a plain
+# POSIX script because the session runs Fedora's rpm compositor, not a nix
+# build. Runbook and undo steps: docs/agents/book-supervised-session.md.
+#
+# HYPR_SUPERVISE_BIN / HYPR_SUPERVISE_WATCHDOG are test seams (stubs, see
+# tools/hypr-supervise-test.sh); production always runs the defaults.
+set -u
+: "${HYPR_SUPERVISE_BIN:=/usr/bin/Hyprland}"
+: "${HYPR_SUPERVISE_WATCHDOG:=/usr/bin/start-hyprland}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/hyprvtb"
+LOG="$STATE/supervise.log"
+mkdir -p "$STATE"
+say() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG"; }
+
+tries=0
+while :; do
+  say "starting Hyprland (restarts so far: $tries)"
+  "$HYPR_SUPERVISE_BIN" "$@"
+  rc=$?
+
+  if [ "$rc" = 0 ]; then
+    say "clean exit — session over"
+    exit 0
+  fi
+
+  if [ -s "$STATE/loaded" ]; then
+    cp "$STATE/loaded" "$STATE/crashed-with"
+    say "UNCLEAN exit (rc=$rc) — blaming plugin $(cat "$STATE/loaded")"
+  else
+    say "UNCLEAN exit (rc=$rc) — no plugin was recorded as loaded"
+  fi
+
+  tries=$((tries + 1))
+  if [ "$tries" -ge 3 ]; then
+    say "3 crashes in one session — handing over to start-hyprland (safe mode)"
+    exec "$HYPR_SUPERVISE_WATCHDOG" "$@"
+  fi
+  sleep 1
+done

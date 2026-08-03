@@ -139,13 +139,15 @@ What that judgement is made of — the parts that are **not** free:
   no session disturbance.
 - **The compiled `hyprvtb` hot-swap is the one that is not.** Build it always;
   `hyprctl reload` swaps it live and is survivable *by design* since v2.65,
-  with `hypr-supervise` quarantining a build that dies on `top`. **On `book`
-  the swap is live too, since 2026-08-03** — book's live `hyprland.lua` has
-  carried the resolved-path + quarantine load block since 2026-07-26 and swaps
-  fine on `hyprctl reload`; the old deferral was only about the missing crash
-  net, and that risk is now accepted. So swap it live on either machine if the
-  work needs it. **Never `hyprctl plugin load` / `unload`** on either — that
-  one is unconditional and unrecoverable.
+  with `hypr-supervise` quarantining a build that dies — on `top` through the
+  NixOS session wrapper (`sys/dsk/hyprland.nix`), on `book` through ly's
+  session entry since 2026-08-03 (`docs/agents/book-supervised-session.md`).
+  book's live `hyprland.lua` has carried the resolved-path + quarantine load
+  block since 2026-07-26 and swaps fine on `hyprctl reload`; the crash net now
+  covers both machines, so a bad build costs the previous plugin version and a
+  `quarantined` breadcrumb, not a relog. So swap it live on either machine if
+  the work needs it. **Never `hyprctl plugin load` / `unload`** on either —
+  that one is unconditional and unrecoverable.
 - **A rebuild that bumps Hyprland or hyprutils makes any live swap impossible**
   (the new plugin links a newer toolchain than the running compositor). Then it
   is next-login, and saying so is part of the job.

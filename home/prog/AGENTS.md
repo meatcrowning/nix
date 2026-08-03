@@ -367,14 +367,15 @@ plugin costs one version and a breadcrumb, not the desktop. After 3 crashes in a
 row the supervisor gives up and hands over to `start-hyprland` — at that point
 it is not the plugin's fault.
 
-book has no `hypr-supervise` (it is a Fedora session), so a compositor crash
-there is still a relog — a build that dies on reload costs a relog, and the
-quarantine block only picks the known-good build at the next start. **That risk
-is accepted since 2026-08-03: book hot-swaps live, at agent judgement, like
-top.** The swap itself has been sound since 2026-07-26 — book's live
-`hyprland.lua` carries the resolved-path + quarantine block; it used to load
-the symlink, so reload had never swapped there
-(`docs/book-hyprvtb-version-bridge.md` records the correction).
+book has the same net since 2026-08-03 — ly (book's display manager) starts
+the session under `hypr-supervise` too, via a per-user session dir + a
+systemd drop-in, sharing the exact `loaded`/`crashed-with`/`known-good`/
+`quarantined` protocol (`home/prog/ly.nix`,
+`docs/agents/book-supervised-session.md`; the swap itself has been sound on
+book since 2026-07-26 — its live `hyprland.lua` carries the resolved-path +
+quarantine block, it used to load the symlink, so reload had never swapped
+there (`docs/book-hyprvtb-version-bridge.md` records the correction)). A bad
+build costs one version and a breadcrumb on either machine now, not a relog.
 
 ### Never go back to manual `hyprctl plugin load` / `unload`
 
