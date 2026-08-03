@@ -31,6 +31,18 @@ board's, and are left out — the section is about what the automation costs.
   and true input/output token columns. Board ministers run `--source tool`
   (`boardusage.HERMES_SOURCE`), so that filter is exactly this board's hermes
   spend. Here the cost is the provider's own estimate, not ours.
+- **The hermes rows are BOTH hosts', not just this one's.** `~/.hermes/state.db`
+  does NOT sync (unlike the transcripts, which ride the `claude-state` sync),
+  so each host writes a small export of its board sessions to
+  `~/nix/docs/spend.<host>.json` (quarter-hourly unit in
+  `home/srvs/board-spend-export.nix`, writer at
+  `apps/board/tools/hermes-spend-export.py`), and the docs sync carries it to
+  the other machine. This module reads the LOCAL ledger plus every OTHER host's
+  synced export (`_hermes_export_files`) and folds both through the same
+  aggregation — the own export is never read, being a stale copy of the local
+  ledger, and reading both would double count. The export is only as fresh as
+  its write + the 5-minute docs sync, which the readout inherits without
+  claiming otherwise: the figures are real, and the section never shows an age.
 
 **A missing source is UNKNOWN, never a zero.** No transcripts, no hermes ledger:
 that provider simply contributes no rows and `known` says so, rather than
@@ -268,56 +280,117 @@ def _epoch(iso):
         return None
 
 
-def _hermes_rows(now, window):
-    """`{label: {...}}` for board (source=tool) hermes ministers, grouped by the
-    session's model, or an empty dict when the ledger is unreachable. Cost is the
-    provider's own `estimated_cost_usd`; tokens are the real columns. `in` folds
-    the cache and reasoning read/write into the input side to mirror the Claude
-    figure; `out` is the generated tokens."""
+#: Where the per-host hermes exports live. The docs checkout — the file the
+#: writer mints there (`spend.<host>.json`) syncs to the other machine via the
+#: docs sync, and this module reads it back beside the local ledger. Env
+#: override for a harness, the same courtesy `BOARD_HERMES_DB` gives the db.
+def _hermes_export_dir():
+    return os.environ.get("BOARD_SPEND_EXPORT_DIR") or os.path.join(
+        os.path.expanduser("~"), "nix", "docs")
+
+
+def _hermes_export_files():
+    """The OTHER hosts' synced spend exports, `spend.<host>.json` under
+    `_hermes_export_dir()`, never this host's own — the local ledger is the
+    live source for this host and its own export is a stale copy of it, so
+    reading both would double count. A missing dir or an empty glob is simply
+    no rows from the other host: a machine that has not deployed the writer
+    yet, or one that has no hermes ministers at all, contributes nothing."""
+    d = _hermes_export_dir()
+    try:
+        names = sorted(glob.glob(os.path.join(d, "spend.*.json")))
+    except OSError:
+        return []
+    own = "spend.%s.json" % os.uname().nodename
+    return [f for f in names if os.path.basename(f) != own]
+
+
+def _hermes_export_sessions(path):
+    """`[(model, started_at, input, cache_read, cache_write, output, reasoning,
+    cost), ...]` from one synced export file — the same tuple shape
+    `_hermes_db_sessions` yields, so both sources fold through one reducer. An
+    unreadable or malformed file is `[]`, not a crash: the other host's export
+    breaking must not take the whole readout with it.
+
+    The format is the writer's contract (`tools/hermes-spend-export.py`): one
+    object with `host`, `written` and `sessions`, each session carrying the
+    exact columns the local query selects."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(doc, dict):
+        return []
+    out = []
+    for s in doc.get("sessions") or []:
+        if not isinstance(s, dict):
+            continue
+        out.append((s.get("model"), s.get("started_at"),
+                    s.get("input_tokens"), s.get("cache_read_tokens"),
+                    s.get("cache_write_tokens"), s.get("output_tokens"),
+                    s.get("reasoning_tokens"), s.get("estimated_cost_usd")))
+    return out
+
+
+def _hermes_db_sessions():
+    """`[(model, started_at, input, cache_read, cache_write, output, reasoning,
+    cost), ...]` for board (source='tool') sessions in the LOCAL ledger, or
+    `[]` when the ledger is unreachable. Unwindowed — the cutoff is applied by
+    the fold, exactly so the same reducer can consume the synced exports."""
     path = boardusage._hermes_db_path()
-    cutoff = None if window is None else now - window
     try:
         db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
     except (OSError, sqlite3.Error):
-        return {}
+        return []
     try:
-        if cutoff is None:
-            q = ("SELECT model, COUNT(*),"
-                 " COALESCE(SUM(input_tokens),0),"
-                 " COALESCE(SUM(cache_read_tokens),0),"
-                 " COALESCE(SUM(cache_write_tokens),0),"
-                 " COALESCE(SUM(output_tokens),0),"
-                 " COALESCE(SUM(reasoning_tokens),0),"
-                 " COALESCE(SUM(estimated_cost_usd),0)"
-                 " FROM sessions WHERE source=? GROUP BY model")
-            args = (boardusage.HERMES_SOURCE,)
-        else:
-            q = ("SELECT model, COUNT(*),"
-                 " COALESCE(SUM(input_tokens),0),"
-                 " COALESCE(SUM(cache_read_tokens),0),"
-                 " COALESCE(SUM(cache_write_tokens),0),"
-                 " COALESCE(SUM(output_tokens),0),"
-                 " COALESCE(SUM(reasoning_tokens),0),"
-                 " COALESCE(SUM(estimated_cost_usd),0)"
-                 " FROM sessions WHERE source=? AND started_at>=? GROUP BY model")
-            args = (boardusage.HERMES_SOURCE, cutoff)
-        rows = db.execute(q, args).fetchall()
+        rows = db.execute(
+            "SELECT model, started_at, input_tokens, cache_read_tokens,"
+            " cache_write_tokens, output_tokens, reasoning_tokens,"
+            " estimated_cost_usd FROM sessions WHERE source=?", (boardusage.HERMES_SOURCE,)).fetchall()
     except sqlite3.Error:
-        return {}
+        return []
     finally:
         try:
             db.close()
         except sqlite3.Error:
             pass
-    out = {}
-    for model, n, inp, crd, cwr, outp, reason, cost in rows:
+    return [tuple(r) for r in rows]
+
+
+def _hermes_fold(out, sessions, cutoff):
+    """Fold raw hermes session tuples into the aggregate dict, applying `cutoff`
+    (`None` = all-time) to `started_at` the same way the old SQL did: a session
+    without a timestamp counts only when there is no cutoff, and a session
+    before the cutoff never does. `in` folds cache and reasoning read/write
+    into the input side to mirror the Claude figure; `out` is generated tokens.
+    The single reducer for BOTH sources — the local ledger and every synced
+    export — so a hermes row on the other host is aggregated identically to one
+    here."""
+    for model, started_at, inp, crd, cwr, outp, reason, cost in sessions:
+        if cutoff is not None and (started_at is None or started_at < cutoff):
+            continue
         label = _hermes_label(model)
         r = out.setdefault(
             label, {"dispatched": 0, "cost": 0.0, "in": 0, "out": 0})
-        r["dispatched"] += int(n or 0)
+        r["dispatched"] += 1
         r["cost"] += float(cost or 0.0)
         r["in"] += int(inp or 0) + int(crd or 0) + int(cwr or 0)
         r["out"] += int(outp or 0) + int(reason or 0)
+
+
+def _hermes_rows(now, window):
+    """`{label: {...}}` for board (source=tool) hermes ministers on BOTH hosts,
+    grouped by the session's model, or an empty dict when neither source is
+    readable. Cost is the provider's own `estimated_cost_usd`; tokens are the
+    real columns, folded exactly as `_hermes_fold` documents. The local ledger
+    is the live source for this host; the other host's figures ride its synced
+    export, which lags its own write + the 5-minute docs sync."""
+    cutoff = None if window is None else now - window
+    out = {}
+    _hermes_fold(out, _hermes_db_sessions(), cutoff)
+    for path in _hermes_export_files():
+        _hermes_fold(out, _hermes_export_sessions(path), cutoff)
     return out
 
 
@@ -335,35 +408,22 @@ def _hermes_label(model):
 
 
 def _hermes_daily(now):
-    """`{day: {label: tokens}}` for board (source=tool) hermes ministers over the
-    trailing `DAILY_DAYS`, bucketed by `started_at`'s local day, or an empty dict
-    when the ledger is unreachable. `tokens` folds every column the aggregate's
-    `in`/`out` do, so a day's chart bar equals the sum of its per-model figures."""
-    path = boardusage._hermes_db_path()
+    """`{day: {label: tokens}}` for board (source=tool) hermes ministers on BOTH
+    hosts over the trailing `DAILY_DAYS`, bucketed by `started_at`'s local day,
+    or an empty dict when neither source is readable. `tokens` folds every
+    column the aggregate's `in`/`out` do, so a day's chart bar equals the sum of
+    its per-model figures. The other host's sessions ride its synced export
+    exactly as the ranked list's do."""
     daily_cutoff = now - DAILY_DAYS * 86400
     daily = collections.defaultdict(lambda: collections.defaultdict(int))
-    try:
-        db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
-    except (OSError, sqlite3.Error):
-        return daily
-    try:
-        q = ("SELECT model, started_at,"
-             " COALESCE(input_tokens,0)+COALESCE(cache_read_tokens,0)"
-             " +COALESCE(cache_write_tokens,0)+COALESCE(output_tokens,0)"
-             " +COALESCE(reasoning_tokens,0)"
-             " FROM sessions WHERE source=? AND started_at>=?")
-        rows = db.execute(q, (boardusage.HERMES_SOURCE, daily_cutoff)).fetchall()
-    except sqlite3.Error:
-        return daily
-    finally:
-        try:
-            db.close()
-        except sqlite3.Error:
-            pass
-    for model, started_at, toks in rows:
-        if started_at is None:
-            continue
-        daily[_day_str(float(started_at))][_hermes_label(model)] += int(toks or 0)
+    for sessions in [_hermes_db_sessions()] + \
+            [_hermes_export_sessions(p) for p in _hermes_export_files()]:
+        for model, started_at, inp, crd, cwr, outp, reason, _cost in sessions:
+            if started_at is None or started_at < daily_cutoff:
+                continue
+            toks = (int(inp or 0) + int(crd or 0) + int(cwr or 0)
+                    + int(outp or 0) + int(reason or 0))
+            daily[_day_str(float(started_at))][_hermes_label(model)] += toks
     return daily
 
 
