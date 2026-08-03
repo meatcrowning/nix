@@ -928,6 +928,14 @@ Window {
                 onActiveFocusChanged: if (activeFocus && pane >= 0 && !win.retargeting)
                                           win.focusPane = pane
                 profile: sharedProfile
+                // Chromium's touch-emulation gesture recognizer: with it on, a
+                // plain left-click drag over the page pans it like a touchscreen
+                // (docs/DESIGN.md — "scrollbar and wheel only, never click-and-
+                // drag to scroll"). Force it off rather than trust the platform
+                // default, which is Enabled whenever Chromium THINKS the input
+                // device might be a touchscreen. Wheel and the scrollbar are
+                // untouched — neither goes through the touch API.
+                settings.touchEventsApiEnabled: false
                 // Shared, persisted zoom (Ctrl+wheel or Ctrl +/-/0). zoomFactor
                 // is NOT a binding and is NEVER persisted from here: the level is
                 // owned by the Zoom bridge (changed only via ZoomFilter), and each
