@@ -43,7 +43,14 @@ lib.mkIf (host == "top") {
       Type = "simple";
       # Pinned so the unit doesn't lean on the ambient systemd-user PATH.
       # curl = the slskd reachability pre-check; python3 runs the feeder;
-      # coreutils/util-linux supply date and flock.
+      # coreutils/util-linux supply date and flock. The profile dirs are
+      # appended (board-notify.nix / board-reminder.nix do the same) so
+      # `shutil.which("player")` in soulseek-missing.py's player_python()
+      # can actually find the `player` wrapper: without them it silently
+      # fell back to this bare python3, which has no mutagen, so every
+      # completed download's import-into-library step
+      # (player-add.py) failed with ModuleNotFoundError and downloads piled
+      # up in ~/.local/share/slskd/downloads/ instead of reaching aud/.
       # PYTHONUNBUFFERED so the days-long run's per-poll output reaches journald
       # promptly (stdout to a pipe is block-buffered otherwise).
       Environment = [
@@ -52,7 +59,7 @@ lib.mkIf (host == "top") {
           pkgs.util-linux
           pkgs.curl
           pkgs.python3
-        ]}"
+        ]}:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
         "PYTHONUNBUFFERED=1"
       ];
       ExecStart = "${pkgs.bash}/bin/bash %h/.config/scripts/soulseek-sweep.sh";
