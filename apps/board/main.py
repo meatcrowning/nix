@@ -1755,6 +1755,7 @@ class Usage(QObject):
         self._rows = []
         self._hrows = []
         self._hprox = {}
+        self._htopup = {}
         self._stamp = None
         self._busy = False
         self._fetched_at = 0.0
@@ -1883,15 +1884,21 @@ class Usage(QObject):
         # (`boardusage.hermes_proximity`, itself a read of the nous.json cache
         # that `_work`'s `fetch_nous()` keeps fresh).
         hprox = boardusage.hermes_proximity()
+        # ...and the TOP-UP balance beside it — the purchased pay-as-you-go pool
+        # (`boardusage.hermes_topup`), read from the same nous.json cache.
+        htopup = boardusage.hermes_topup()
         if (rows == self._rows and stamps == self._stamp
-                and hrows == self._hrows and hprox == self._hprox):
+                and hrows == self._hrows and hprox == self._hprox
+                and htopup == self._htopup):
             return
         rows_changed = rows != self._rows or stamps != self._stamp
         hrows_changed = hrows != self._hrows
         hprox_changed = hprox != self._hprox
+        htopup_changed = htopup != self._htopup
         self._rows, self._stamp = rows, stamps
         self._hrows = hrows
         self._hprox = hprox
+        self._htopup = htopup
         # Emit only the row kind that actually moved, so a nous-only change
         # never forces the Anthropic bars to redraw (and vice versa).
         if rows_changed:
@@ -1900,6 +1907,8 @@ class Usage(QObject):
             self.hchanged.emit()
         if hprox_changed:
             self.hproxChanged.emit()
+        if htopup_changed:
+            self.htopupChanged.emit()
 
     @Property("QVariantList", notify=changed)
     def rows(self):
@@ -1922,6 +1931,16 @@ class Usage(QObject):
     @Property("QVariantMap", notify=hproxChanged)
     def hprox(self):
         return self._hprox
+
+    #: The hermes TOP-UP signal — one dict (`boardusage.hermes_topup`): the
+    #: purchased pay-as-you-go credit left (`purchased_credits_remaining`), the
+    #: pool separate from the monthly subscription `hprox` counts down, and the
+    #: honest unknown when the account has not been read on this host yet.
+    htopupChanged = Signal()
+
+    @Property("QVariantMap", notify=htopupChanged)
+    def htopup(self):
+        return self._htopup
 
 
 class Spend(QObject):
