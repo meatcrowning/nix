@@ -891,6 +891,14 @@ def _summon(notes, index, total):
     # `unregister` racing itself.
     aid = "orch-%d" % os.getpid() if total == 1 else "orch-%d-%d" % (os.getpid(), index)
     session = str(uuid.uuid4())
+    # THE TIER THIS RUN SPAWNS ON, resolved ONCE here — same shape as
+    # `boardwork._spawn_worker`'s `minister_tier` resolution — so the record and
+    # the actual `--model`/`--effort` this run is launched with can never
+    # disagree: his choice (`boardwork.orch_model()`), overridable by the same
+    # `BOARD_ORCH_MODEL`/`BOARD_ORCH_EFFORT` env `role_flags` already honours.
+    flag, effort = bw.orch_model()
+    flag = os.environ.get("BOARD_ORCH_MODEL", flag).strip()
+    effort = os.environ.get("BOARD_ORCH_EFFORT", effort).strip()
     # Registered so it shows up on his board as a running agent with his own
     # words as its title — the same card, the same box, so he can add to it
     # while it is still deciding. `kind="orchestrator"` is also what names it:
@@ -898,8 +906,13 @@ def _summon(notes, index, total):
     # pins the row to the top of the list whether or not this run exists. Two
     # of them are two Solomons, both pinned, in birth order — which `cards()`
     # already said it did.
+    #
+    # `model=`/`effort=` stamped here too — [his, 2026-08-02] the same tier a
+    # minister's card names beside it now names Solomon's, dynamically: change
+    # his choice of orchestrator model and the very next summon's card reads
+    # the new one, with nothing to touch in `boardagents.py`.
     ba.register(aid, notes[0]["text"][:70], os.getpid(), kind="orchestrator",
-                where="board-watch", session=session)
+                where="board-watch", session=session, model=flag, effort=effort)
     # HE CAN TAKE IT BACK UNTIL THIS RUN ACTS. Written before the spawn, like
     # the drain above it: `boardundo.py` is what ctrl+z reaches, and a run that
     # exists without a record of the orders it was given is a run he cannot
@@ -912,7 +925,7 @@ def _summon(notes, index, total):
                                           notes=text,
                                           cap=bw.cap()),
             aid, "board: orchestrating", session=session, timeout=ORCH_TIMEOUT_S,
-            role="orchestrator")
+            role="orchestrator", model=flag, effort=effort)
     finally:
         ba.unregister(aid)
         took_back = bu.end_run(aid)

@@ -152,6 +152,19 @@ separable rules, and `board-test.py` asserts each of them separately.
   `Main.qml`'s `nothingRunning` (any card that is not the standing row) rather
   than on the list's length.
 - `boardctl.py inbox send --to` takes either the name or the id.
+- **His card names his MODEL too, same as a minister's** — [his, 2026-08-02]
+  *"Solomon (deepseek v4 flash)"*, the same `"[name] ([model])"` a worker's
+  row carries (`boardagents.agents()`, `tier_label`). It is not hardcoded:
+  `board-watch._summon` resolves the pair he chose for the NEXT orchestrator
+  run (`boardwork.orch_model()`, overridable by `BOARD_ORCH_MODEL`/
+  `BOARD_ORCH_EFFORT` like every other role) once, at the spawn, and stamps it
+  on the registration exactly like `_spawn_worker` does for a minister — so a
+  future run on a different model shows that model with no code change. A
+  record with no stamped model (a hand call, an old record) falls back to
+  `boardwork.orch_label()`, the currently-chosen pair, rather than showing
+  nothing — there is no `taken/`-style dispatch record for an orchestrator to
+  join against the way a pre-tiering worker's card does. The idle standing row
+  carries none: it is not a run, so there is nothing yet to name.
 
 ### A card says what the agent CLAIMS and what it is OBSERVED doing — both
 

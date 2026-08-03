@@ -1021,18 +1021,26 @@ def agents(procs=None):
         orch = a["kind"] == ORCHESTRATOR_KIND
         # THE MODEL TIER RIDES THE NAME — [his, 2026-08-02] the card's leading
         # line reads *"[agent] ([model])"*: *"Balam (deepseek v4 flash)"*,
-        # *"Bael (sonnet 5 medium)"*. The label is the same one the chooser
+        # *"Bael (sonnet 5 medium)"*, and — same treatment, [his, 2026-08-02] —
+        # *"Solomon (deepseek v4 flash)"*. The label is the same one the chooser
         # draws (`boardwork.tier_label`), off the `(flag, effort)` the spawner
-        # stamped on the record (`register(model=)`) — or, for an agent already
+        # stamped on the record (`register(model=)`) — or, for a worker already
         # running when that landed, the authoritative dispatch record in `taken/`
         # joined above. `a["model"]` is overwritten from the raw pair to this
         # readable label so the card (`AgentRow` name cell) binds it.
         #
-        # NOT Solomon: he is the one orchestrator and speaks in his own voice
-        # (*"Solomon wields the ring..."*), and his examples were the MINISTERS.
-        # His card carries no tier, so his line stays exactly his wording.
-        tier = "" if orch else \
-            bw.tier_label(a.get("model") or "", a.get("effort") or "")
+        # SOLOMON reads the same way, off the same field: `_summon` resolves his
+        # `(flag, effort)` once (env override, else `boardwork.orch_model()`) and
+        # stamps it with `register(model=,effort=)` exactly like a worker's
+        # spawner does, so a future run on a different model shows that model
+        # with no code change here. A record with no model (a hand call, a test)
+        # falls back to the currently-configured orchestrator pair rather than
+        # showing nothing, since there is no `taken/`-style dispatch record for
+        # an orchestrator to join against. He still speaks in his own VOICE
+        # (*"Solomon wields the ring..."*) — only the tier joins the name.
+        tier = bw.tier_label(a.get("model") or "", a.get("effort") or "")
+        if not tier and orch:
+            tier = bw.orch_label()
         if not tier and not orch:
             m, e = taken_tier.get(clean_id(a["id"]), ("", ""))
             tier = bw.tier_label(m, e)
