@@ -322,10 +322,19 @@ class Board(QObject):
         if os.path.isdir(d):
             self._watcher.addPath(d)      # an atomic save replaces the inode
         # A write lands as several inotify events; coalesce them, and let our
-        # OWN write settle before re-reading it.
+        # OWN write settle before re-reading it. `boardparse.write` is already
+        # atomic (temp file, fsync, `os.replace`), so nothing here waits for
+        # the CONTENT to be safe to read — only for the burst of events one
+        # atomic replace fires (a create and a rename, back to back) to finish
+        # arriving. Measured offscreen (`/tmp/latency_probe.py`-style harness,
+        # `boardmove.note()` to a scratch board): those land within a couple of
+        # ms of each other, so 120 ms was almost entirely dead wait on his
+        # screen — a worker's `ENACTED:`/LANDED bullet sat unread for it every
+        # time. 30 ms is still generous coalescing headroom and cut the
+        # measured write-to-redraw time from ~125-135 ms to ~30-40 ms.
         self._settle = QTimer(self)
         self._settle.setSingleShot(True)
-        self._settle.setInterval(120)
+        self._settle.setInterval(30)
         self._settle.timeout.connect(self._reload)
         # LANDED IS READ OUT OF GIT, HERE, every time the section is built —
         # `boardmove.landed_view()`, a pure read. Nothing sweeps, nothing
@@ -744,6 +753,10 @@ class Agents(QObject):
         self._armed = None
         self._lives = None
         self._shells = []
+        #: id -> session uuid, refilled on every poll. The output drawer needs
+        #: it to find the agent's live transcript, and the session is not on the
+        #: card: it is machine business, so it stops here rather than in QML.
+        self._sessions = {}
         # The registry, the stashes and the inboxes are all files, so watch
         # them — but /proc is not, so poll as well. 2.5s is well under "prompt"
         # for a finished agent leaving the list and costs one /proc walk.
@@ -1123,13 +1136,21 @@ class Agents(QObject):
     def refresh(self):
         self._rewatch()
         try:
-            rows = [self._row(a) for a in boardagents.agents()]
+            live = boardagents.agents()
+            rows = [self._row(a) for a in live]
             # ONE FLAT LIST, oldest first — `boardwork.cards()` is the one place
             # that decides the order, and it is birth and nothing else, so a
             # card does not move under his cursor when the agent changes phase
             # or stops. Queued tasks come after the live ones; they have no
             # birth yet.
-            cards = [self._row(a) for a in boardwork.cards()]
+            drawn = boardwork.cards()
+            cards = [self._row(a) for a in drawn]
+            # The one place both lists are in hand, so the one place the
+            # id -> session map is built. `cards` is the superset (it pins
+            # Solomon and the queued rows), and a queued row has no session,
+            # which is exactly what the drawer should find for it.
+            self._sessions = {a["id"]: a.get("session") or ""
+                              for a in list(live) + list(drawn) if a.get("id")}
             # id AND text: the row he right-clicks has to name the message it
             # is acting on, and its text is not a name (two identical sentences
             # are two messages) while its position is not one either — the next
