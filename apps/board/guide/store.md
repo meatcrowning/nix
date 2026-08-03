@@ -485,7 +485,7 @@ So, as binding as the parse:
   `placed` time above is not an exception to this and must not be turned into
   one: an absolute time is a fact about the past, an elapsed one is a clock
   running against him. **The ONE exception is the working duration on a live
-  agent card** (`working for 4 minutes`, `boardphase.worked_line`) — his own
+  agent card** (`4 minutes`, `boardphase.worked_line`) — his own
   explicit ask, 2026-07-29, replacing the absolute spawn stamp he had asked
   for that morning. It is granted by the person this rule protects, and the
   reading that keeps it coherent: a running agent's clock counts against the

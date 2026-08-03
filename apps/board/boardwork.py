@@ -124,7 +124,7 @@ founding requirement.
 **The ONE exception is the working duration on an agent card, and it is his.**
 A card first drew when its agent was spawned (an absolute `10:26 am`), then he
 asked for the opposite the same day, 2026-07-29: show *"how long the agent has
-been working"* — `boardphase.worked_line`, `working for 4 minutes`, live. An
+been working"* — `boardphase.worked_line`, `4 minutes`, live. An
 elapsed time, granted deliberately by the person the no-pressure rule
 protects, because a running agent's clock counts against the AGENT and not
 against him. It is scoped to exactly that: nothing else here may count —

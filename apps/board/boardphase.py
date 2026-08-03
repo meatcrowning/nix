@@ -1017,17 +1017,20 @@ def _k(n):
 
 
 def worked_line(ts, running=True):
-    """HOW LONG the agent has been working — `working for 4 minutes` — or "".
+    """HOW LONG the agent has been working — `4 minutes` — or "".
 
     This REPLACED the absolute spawn stamp `born_line` drew (`10:26 am`,
     itself his 2026-07-29 ask), by his own later words the same day: the card
     should show *"how long the agent has been working: 'has been working for X
-    minutes'"* — a duration, not an instant. That makes it the ONE elapsed
-    time this app draws, a deliberate exception to the no-pressure
-    requirement, granted by the person the requirement protects: a running
-    agent's clock counts against the AGENT, not against him. Nothing else may
-    cite this as precedent — `placed`, LANDED's `when` and the quiet-agent
-    threshold stay absolute or unsaid.
+    minutes'"* — a duration, not an instant. [his, 2026-08-03] the wording
+    dropped the *"working for"* opener entirely, so the card shows just the
+    duration (`4 minutes`, `under a minute`, `1 hour 5 minutes`) — the
+    duration is what he asked for, and the opener was scaffolding. That makes
+    it the ONE elapsed time this app draws, a deliberate exception to the
+    no-pressure requirement, granted by the person the requirement protects: a
+    running agent's clock counts against the AGENT, not against him. Nothing
+    else may cite this as precedent — `placed`, LANDED's `when` and the
+    quiet-agent threshold stay absolute or unsaid.
 
     It reads naturally at every age: under a minute in words (never seconds —
     a ticking seconds counter is exactly the pressure the rule forbids
@@ -1047,17 +1050,17 @@ def worked_line(ts, running=True):
         return ""
     m = max(0, int(time.time() - ts)) // 60
     if m < 1:
-        return "working for under a minute"
+        return "under a minute"
     if m < 60:
-        return "working for %d minute%s" % (m, "" if m == 1 else "s")
+        return "%d minute%s" % (m, "" if m == 1 else "s")
     h, m = m // 60, m % 60
     if h < 24:
         who = "%d hour%s" % (h, "" if h == 1 else "s")
         if m:
             who += " %d minute%s" % (m, "" if m == 1 else "s")
-        return "working for " + who
+        return who
     d = h // 24
-    return "working for %d day%s" % (d, "" if d == 1 else "s")
+    return "%d day%s" % (d, "" if d == 1 else "s")
 
 
 def context_line(rec):
