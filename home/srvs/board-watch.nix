@@ -213,6 +213,15 @@ in
       #                                   the user manager that is actually
       #                                   running, which on Fedora is Fedora's.
       #                                   Hence `pkgs.systemd` is top-only.
+      #   ~/.local/bin                    the hermes launcher, curl-installed
+      #                                   (home/prog/hermes-agent.nix) — a
+      #                                   deepseek-tuned summoner or minister
+      #                                   spawns `hermes`, not `claude`, and
+      #                                   the shell PATH fixes there never
+      #                                   reach a systemd unit. Absent, every
+      #                                   hermes dispatch dies at the check in
+      #                                   board-watch.py with "not on this
+      #                                   unit's PATH".
       # NOT `%h`: systemd expands specifiers in ExecStart but NOT in
       # Environment= (measured on top with a scratch transient unit — the value
       # arrived as the literal `%h/x`), so this interpolates the real path.
@@ -224,7 +233,7 @@ in
           pkgs.git
           pkgs.gh
           pkgs.nix
-        ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:/run/wrappers/bin:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:/usr/bin:/bin"
+        ] ++ lib.optionals (host == "top") [ pkgs.systemd pkgs.openssh ])}:/run/wrappers/bin:${config.home.homeDirectory}/.nix-profile/bin:/run/current-system/sw/bin:/etc/profiles/per-user/lam/bin:${config.home.homeDirectory}/.local/bin:/usr/bin:/bin"
       ];
       ExecStart = "${pkgs.python3}/bin/python3 %h/.config/scripts/board-watch.py";
       # Outer guard only. The script caps the agent itself at 45 minutes so the
