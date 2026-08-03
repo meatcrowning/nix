@@ -1,14 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
   <!-- goetia app icon — the seal of Bael, first spirit of the Ars Goetia.
        Redrawn as clean geometry from the 1904 Mathers/Crowley plate:
        outer circle, three-headed bird (top + two side heads), body bands,
-       stem and forked tail. DARK-THEME variant: near-black tile with the
-       sigil in the desktop's default accent (#cc4400, the wal fallback
-       accent in apps/board/main.py PALETTE_DEFAULTS; body text = accent,
-       docs/DESIGN.md §3.1). Uniform 44-unit stroke = the desktop's 2px edge
-       weight scaled to icon size (docs/DESIGN.md §4). -->
-  <rect width="512" height="512" fill="#000000"/>
-  <g fill="none" stroke="#cc4400" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+       stem and forked tail.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (a light-theme tile
+       used to render as an opaque black square, DESIGN.md §3.1). The strokes
+       are `currentColor` so the sigil IS the live theme's foreground (body
+       text = the accent, §3.1) rather than a baked hue — the window icon is
+       tinted at runtime by substituting currentColor for the wal `text`
+       colour and rendering through QSvgRenderer (apps/board/main.py
+       _window_icon), and re-tinted on every theme change. The root `color`
+       above is only the fallback for external consumers that render the file
+       directly (the desktop entry / panel task cell), which resolve
+       currentColor to it: the desktop's default accent. Uniform 44-unit
+       stroke = the 2px edge weight scaled to icon size (DESIGN.md §4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="256" cy="256" r="218"/>
     <circle cx="256" cy="112" r="36"/>
     <path d="M256 148 L256 225"/>
@@ -20,7 +28,7 @@
     <path d="M256 352 L212 404"/>
     <path d="M256 352 L300 404"/>
   </g>
-  <g fill="#cc4400">
+  <g fill="currentColor">
     <circle cx="256" cy="112" r="13"/>
     <circle cx="168" cy="225" r="21"/>
     <circle cx="344" cy="225" r="21"/>

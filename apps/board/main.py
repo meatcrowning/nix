@@ -83,9 +83,10 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl,
-                            QFileSystemWatcher, QProcess, QTimer)
-from PySide6.QtGui import QGuiApplication, QColor, QIcon
+from PySide6.QtCore import (QObject, Slot, Signal, Property, QUrl, Qt,
+                            QByteArray, QFileSystemWatcher, QProcess, QTimer)
+from PySide6.QtGui import QGuiApplication, QColor, QIcon, QPixmap, QPainter
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
 HERE = Path(__file__).resolve().parent
@@ -2080,22 +2081,32 @@ def sync_now(path):
 # goetia's icon is the seal of Bael, first spirit of the Ars Goetia, redrawn as
 # clean vector SVG in home/prog/board-files/ and installed into the hicolor
 # theme by home/prog/board.nix (the desktop entry's `Icon=goetia` resolves the
-# same files). Two polarity variants, per docs/DESIGN.md §3.1's light-mode
-# inversion of the value ladder: goetia.svg is the dark-theme one (black tile,
-# accent sigil), goetia-light.svg the light-theme one (light tile, dark sigil).
-# Which is right is a fact about the LIVE palette, so it is picked here by the
-# background's lightness and re-picked on every theme change; a missing file or
-# a Qt without SVG support degrades to the platform default icon.
-ICON_DIR = (Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
-            / "icons" / "hicolor" / "scalable" / "apps")
+# same file). ONE transparent variant, drawn in `currentColor` — the sigil IS
+# the theme's foreground (body text = the accent, docs/DESIGN.md §3.1), not a
+# baked light/dark hue, so it tracks the live palette instead of flipping
+# between two files. QSvgRenderer has no API for the CSS current colour, so the
+# token is substituted textually with the live `text` colour before the SVG is
+# rendered onto a transparent pixmap; re-run on every theme change. A missing
+# file or a Qt without SVG support degrades to the platform default icon.
+ICON_FILE = (Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
+             / "icons" / "hicolor" / "scalable" / "apps" / "goetia.svg")
 
 
-def _window_icon(bg):
-    name = "goetia-light.svg" if bg.lightness() > 128 else "goetia.svg"
-    path = ICON_DIR / name
-    if path.exists():
-        return QIcon(str(path))
-    return QIcon()
+def _window_icon(fg):
+    try:
+        data = ICON_FILE.read_bytes()
+    except OSError:
+        return QIcon()
+    data = data.replace(b"currentColor", fg.name().encode("ascii"))
+    renderer = QSvgRenderer(QByteArray(data))
+    if not renderer.isValid():
+        return QIcon()
+    pm = QPixmap(256, 256)
+    pm.fill(Qt.transparent)
+    painter = QPainter(pm)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(pm)
 
 
 def main():
@@ -2120,11 +2131,11 @@ def main():
     spend = Spend()
     spend.follow(agents)
 
-    # The window icon follows the live palette's polarity (light bg -> the
-    # light-theme sigil variant, dark bg -> the dark one), re-picked on every
-    # theme change. Set before the window is created so the first map carries it.
-    app.setWindowIcon(_window_icon(palette.bg))
-    palette.changed.connect(lambda: app.setWindowIcon(_window_icon(palette.bg)))
+    # The window icon is the sigil recoloured to the live foreground, re-tinted
+    # on every theme change. Set before the window is created so the first map
+    # carries it.
+    app.setWindowIcon(_window_icon(palette.text))
+    palette.changed.connect(lambda: app.setWindowIcon(_window_icon(palette.text)))
 
     ctx.setContextProperty("Agents", agents)
     ctx.setContextProperty("Usage", usage)
