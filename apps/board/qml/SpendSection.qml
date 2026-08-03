@@ -11,13 +11,17 @@ import QtQuick
 // bar sized to that model's share of total cost (§9.3), then the figures —
 // how many agents it was dispatched, its cost, and its tokens in/out.
 //
-// Beside the list, right, a COMPACT TOKENS-PER-DAY CHART: one thin vertical bar
-// per day over the trailing month. Hovering a day rebinds the left bars to that
-// day — same bars, same hue, their length re-read as each model's share of THAT
-// day's tokens rather than of total cost — and the chart's caption becomes that
-// day's date and total (§9.3: one hover sample re-reads a sibling readout). With
-// nothing hovered the left bars are the whole-period cost share, as ever. The
-// per-day, per-model series is `boardspend.py`'s `Spend.daily`.
+// Beside the list, right, a COMPACT TOKENS-PER-DAY GRID: one small square per
+// day over the trailing month, laid out like a GitHub contribution graph (weeks
+// down the columns, weekday across the rows) and coloured by that day's tokens —
+// a single hue (accent2) stepped in intensity over an unlit bgAlt cell (§3.3.1,
+// §3.4), so a busy day is a bright square and a silent day is the bare cell.
+// Hovering a day rebinds the left bars to that day — same bars, same hue, their
+// length re-read as each model's share of THAT day's tokens rather than of total
+// cost — and the caption becomes that day's date and total (§9.3: one hover
+// sample re-reads a sibling readout). With nothing hovered the left bars are the
+// whole-period cost share, as ever. The per-day, per-model series is
+// `boardspend.py`'s `Spend.daily`.
 //
 // Below the list, one split bar for the whole system's tokens (input vs output), and the
 // one honest line §10/§10.5 demands: the Claude dollar is a compute-WEIGHT
@@ -50,7 +54,7 @@ Column {
         (Spend.totals && (Spend.totals["in"] + Spend.totals["out"]) > 0)
         ? (Spend.totals["in"] + Spend.totals["out"]) : 1
 
-    // ---- the tokens-per-day chart, and what hovering one of its days does ----
+    // ---- the tokens-per-day grid, and what hovering one of its days does ----
     // -1 = no day hovered, and the left bars show the whole-period cost share as
     // they always have. Otherwise it is an index into `Spend.daily`, and the left
     // bars are rebound to THAT day's per-model token breakdown — same bars, same
@@ -135,16 +139,16 @@ Column {
                 text: "no provider ledger could be read yet — nothing to show."
             }
 
-            // ---- the ranked model list (left) beside the per-day chart (right).
+            // ---- the ranked model list (left) beside the per-day grid (right).
             // The list is the same ranked horizontal-bar vocabulary as before;
-            // the chart is a compact month of tokens-per-day, and hovering one of
-            // its days rebinds these left bars to that day (docs/DESIGN.md §9.3).
+            // the grid is a compact month of tokens-per-day squares, and hovering
+            // one of its days rebinds these left bars to that day (§9.3).
             Row {
                 width: spendCol.width
                 spacing: 12
 
-                //: the chart's width — compact, a month of thin bars — but the
-                //  list keeps the rest. Zero (chart hidden) gives the list all.
+                //: the grid's width — compact, a month of small squares — but the
+                //  list keeps the rest. Zero (grid hidden) gives the list all.
                 readonly property int chartW:
                     (spendRoot.hasDaily && spendRoot.hasModels)
                     ? Math.max(96, Math.min(160, Math.round(width * 0.36))) : 0
@@ -250,79 +254,87 @@ Column {
                     }
                 }
 
-                // the tokens-per-day chart: one thin vertical bar per day over
-                // the trailing month, its height that day's share of the busiest
-                // day. Hover a bar to rebind the list. The section's hue is
-                // accent2; the day under the pointer takes the brighter accent
-                // step (§3.2), and its date + total replace the caption legend
-                // (§9.3 — a chart with no key is a squiggle).
+                // the tokens-per-day grid: one small square per day over the
+                // trailing month, laid out like a GitHub contribution graph —
+                // weeks step down the columns, weekday across the rows, so each
+                // square sits under its own day of the week. A day's colour is
+                // its share of the busiest day, in a single hue (accent2) stepped
+                // in intensity over an unlit bgAlt cell (§3.3.1, §3.4); the day
+                // under the pointer takes the brighter accent step (§3.2), and its
+                // date + total replace the caption legend (§9.3 — a chart with no
+                // key is a squiggle).
                 Item {
                     id: chart
                     visible: spendRoot.hasDaily && spendRoot.hasModels
                     width: parent.chartW
-                    height: chartBars.height + 4 + chartCap.implicitHeight
+                    height: gridH + 4 + chartCap.implicitHeight
 
                     readonly property var days: Spend.daily ? Spend.daily : []
-                    readonly property int nDays: days.length > 0 ? days.length : 30
-                    readonly property int barsH: 56
+                    readonly property int nDays: days.length
+
+                    // the weekday the oldest day falls on (0 = Sunday), so column
+                    // 0 is filled from that row down and each square lands under
+                    // its weekday — the calendar shape of a contribution graph.
+                    readonly property int firstDow:
+                        nDays > 0 ? new Date(days[0].date + "T00:00:00").getDay() : 0
+                    readonly property int nCols: Math.ceil((firstDow + nDays) / 7)
+
+                    // the busiest single day is the intensity denominator, exactly
+                    // as it was the tallest bar's denominator before.
                     readonly property real maxDay: {
                         var mx = 0;
                         for (var i = 0; i < days.length; ++i)
                             if (days[i].total > mx) mx = days[i].total;
                         return mx > 0 ? mx : 1;
                     }
-                    readonly property int barW:
-                        Math.max(2, Math.floor((width - (nDays - 1)) / nDays))
 
-                    Row {
-                        id: chartBars
-                        width: parent.width
-                        height: chart.barsH
-                        spacing: 1
-                        Repeater {
-                            model: chart.days
-                            delegate: Item {
-                                required property var modelData
-                                required property int index
-                                width: chart.barW
-                                height: chartBars.height
+                    readonly property int gap: 2
+                    readonly property int cell:
+                        Math.max(7, Math.min(13,
+                            Math.floor((width - (nCols - 1) * gap) / nCols)))
+                    readonly property int gridH: 7 * cell + 6 * gap
 
-                                // the day's bar, rising from the baseline. No
-                                // per-bar bgAlt track — a month of 1px tracks is
-                                // noise; the 1px baseline below is the axis, and a
-                                // silent day is simply no bar.
-                                Rectangle {
-                                    anchors.bottom: parent.bottom
-                                    width: parent.width
-                                    height: modelData.total > 0
-                                        ? Math.max(1, Math.round((chartBars.height - 1)
-                                            * modelData.total / chart.maxDay))
-                                        : 0
-                                    color: spendRoot.hoveredDay === index
-                                           ? Theme.accent : Theme.accent2
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onEntered: spendRoot.hoveredDay = index
-                                    onExited: if (spendRoot.hoveredDay === index)
-                                                  spendRoot.hoveredDay = -1
-                                }
+                    // amount -> one of four accent2 intensity steps over the unlit
+                    // cell; a silent day is the bare bgAlt cell (§3.4), so the
+                    // calendar shape still reads. One hue only (§3.3.1) — the
+                    // intensity is the key, never a second colour.
+                    function cellColor(total) {
+                        if (total <= 0) return Theme.bgAlt;
+                        var f = total / maxDay;
+                        var a = f > 0.66 ? 1.0 : f > 0.33 ? 0.72
+                              : f > 0.10 ? 0.48 : 0.28;
+                        return Qt.tint(Theme.bgAlt, Qt.rgba(
+                            Theme.accent2.r, Theme.accent2.g, Theme.accent2.b, a));
+                    }
+
+                    Repeater {
+                        model: chart.days
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            readonly property int slot: chart.firstDow + index
+                            x: Math.floor(slot / 7) * (chart.cell + chart.gap)
+                            y: (slot % 7) * (chart.cell + chart.gap)
+                            width: chart.cell
+                            height: chart.cell
+                            radius: 1
+                            color: spendRoot.hoveredDay === index
+                                   ? Theme.accent
+                                   : chart.cellColor(modelData.total)
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onEntered: spendRoot.hoveredDay = index
+                                onExited: if (spendRoot.hoveredDay === index)
+                                              spendRoot.hoveredDay = -1
                             }
                         }
                     }
-                    // the baseline the bars stand on (§4, a 1px border hairline).
-                    Rectangle {
-                        y: chartBars.height
-                        width: parent.width
-                        height: 1
-                        color: Theme.border
-                    }
-                    // the legend (§9.3): normally what the chart IS; under the
+                    // the legend (§9.3): normally what the grid IS; under the
                     // pointer, the hovered day's date and token total.
                     PixelText {
                         id: chartCap
-                        y: chartBars.height + 4
+                        y: chart.gridH + 4
                         width: parent.width
                         elide: Text.ElideRight
                         color: Theme.textDim
