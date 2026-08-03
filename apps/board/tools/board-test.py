@@ -23,11 +23,20 @@ Four layers, in the order a failure is cheapest to read:
      and an EMPTY agents section, which are the two states he will see most
      often, and the agents section with a running agent and a failed one in it.
 
-Run it with goetia's own Qt env, not the bare system python:
+Run it under a Python that has PySide6 — offscreen is forced at import (below),
+so no window ever maps. **NEVER source goetia's wrapper**, and the two hosts
+differ (see `apps/board/AGENTS.md` -> Verify, which is authoritative):
 
-    W=$(readlink -f "$(which goetia)"); sed '$d' "$W" > /tmp/brdenv.sh
-    ( . /tmp/brdenv.sh; "$(tail -1 "$W" | grep -o '/nix/store/[^"]*/bin/python3')" \\
-        apps/board/tools/board-test.py --shots /tmp/board-shots )
+    # book (Fedora): the system python IS goetia's — it runs the app directly.
+    /usr/bin/python3 apps/board/tools/board-test.py --shots /tmp/board-shots
+
+    # top (NixOS): use goetia's OWN python, read from the wrapper's exec line —
+    # do NOT `. ` the wrapper. Its LAST line is `exec … main.py`, and sourcing
+    # it (or any `sed`-trimmed prefix that still holds that line) LAUNCHES goetia
+    # on his real screen. On book the wrapper is NOTHING BUT that exec, so there
+    # the source recipe is pure window-leak — it has happened.
+    PY=$(grep -oE '/nix/store/[^"]*/bin/python3' "$(readlink -f "$(which goetia)")")
+    "$PY" apps/board/tools/board-test.py --shots /tmp/board-shots
 
 `XDG_STATE_HOME` is redirected into a scratch dir — a harness here must never
 rewrite where the user's own app reopens — and every write test runs against a
@@ -7597,6 +7606,53 @@ def test_hermes_proximity(tmp):
     del os.environ["BOARD_HERMES_DB"]
 
 
+def test_hermes_topup(tmp):
+    """THE TOP-UP MONEY LEFT IS THE ACCOUNT'S OWN FIGURE, OR AN HONEST UNKNOWN.
+
+    [his, 2026-08-02] "hermes agent usage should also show the top up money left
+    as well". Beside the monthly-subscription countdown (`hermes_proximity`),
+    the top-up is the purchased pay-as-you-go pool the portal publishes as
+    `purchased_credits_remaining`. `hermes_topup` reads it from the same
+    nous.json cache — never derives it, never invents one — and when no account
+    has been read on this host it is an explicit unknown, not a zero.
+    """
+    import json as _json
+    import boardusage as bu
+    print("\n=== the hermes top-up balance is the portal's own figure ===")
+    p = os.path.join(tmp, "topup-nous.json")
+    # No cache at all: honest unknown, nothing that reads as "$0 left".
+    t = bu.hermes_topup(path=p)
+    check("with no nous cache the top-up is an honest unknown, not a zero",
+          t["known"] is False and t["remaining"] is None
+          and "unknown" in t["text"] and "0" not in t["text"], t)
+
+    # A real-shape portal payload: the top-level purchased-credit field is read
+    # verbatim, even when the subscription's own monthly credits are spent (0).
+    now = time.time()
+    payload = {"subscription": {"monthly_credits": 22, "credits_remaining": 0},
+               "purchased_credits_remaining": 18.702807841,
+               "paid_service_access": {
+                   "purchased_credits_remaining": 18.702807841,
+                   "total_usable_credits": 18.702807841}}
+    _json.dump({"fetchedAtMs": int(now * 1000), "account": payload},
+               open(p, "w"))
+    t = bu.hermes_topup(now=now, path=p)
+    check("the top-up figure is the portal's purchased_credits_remaining",
+          t["known"] is True and t["remaining"] == 18.702807841, t)
+    check("the row identifies itself and reads '$18.70 top-up left'",
+          "$18.70" in t["text"] and "top-up left" in t["text"], t["text"])
+    check("the hover carries the figure and its read age (§3.5)",
+          "$18.70" in t["detail"] and "read" in t["detail"], t["detail"])
+
+    # The parser falls back to paid_service_access when the top level lacks it,
+    # and stays None (not 0) when the account publishes no purchased credit.
+    check("the parser falls back to paid_service_access.purchased_credits",
+          bu._nous_topup({"paid_service_access":
+                          {"purchased_credits_remaining": 5.0}}) == 5.0)
+    check("no purchased-credit field is None, never a fabricated 0",
+          bu._nous_topup({"subscription": {"credits_remaining": 0}}) is None)
+
+
 def test_subminister(tmp):
     """A CLAUDE MINISTER *OR THE ORCHESTRATOR* DELEGATES A CHUNK TO A DEEPSEEK
     SUBMINISTER.
@@ -7857,6 +7913,7 @@ def main():
         test_hermes(os.path.join(tmp, "herm"))
 
         test_hermes_proximity(os.path.join(tmp, "herm"))
+        test_hermes_topup(os.path.join(tmp, "herm"))
         test_subminister(os.path.join(tmp, "herm"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
