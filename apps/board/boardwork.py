@@ -152,6 +152,32 @@ REPO = os.environ.get("BOARD_WATCH_REPO", os.path.expanduser("~/nix"))
 #: changed. `BOARD_MAX_WORKERS` is for the harness; the file is for him.
 DEFAULT_CAP = 4
 
+#: The memory floor under which `promote()` will NOT start another worker, in
+#: MiB of MemAvailable. The cap counts heads; this counts what a head COSTS.
+#: Measured on book 2026-08-02 (7.3 GB): five workers plus the orchestrator,
+#: goetia, Hyprland and the panel OOM-killed the user slice — every worker
+#: SIGKILLed mid-task, and the panel's whole cgroup with them before
+#: `OOMPolicy=continue`. A Claude minister peaks near 2.8 GB, a deepseek
+#: (hermes) one near 350 MB, and neither knows which it is until it grows — so
+#: the floor leaves room for the desktop plus one more worker rather than
+#: trying to price the spawn. Under it the task stays QUEUED, the same "a slot
+#: frees" semantic it already has, and the next tick retries. `0` disables.
+MEM_MIN_AVAILABLE_MB = int(os.environ.get("BOARD_MEM_MIN_MB", "1536"))
+
+
+def memory_available_mb():
+    """MemAvailable from /proc/meminfo, in MiB; `None` when it cannot be read,
+    which must NEVER close the gate — a missing /proc is not a reason to stop
+    spawning on a machine that was fine before the file vanished."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
 #: What the dropdown beside the model chooser OFFERS, in the order it draws
 #: them. [his, 2026-07-29] *"between the model selector and the indicators, add
 #: another drop down for the max number of agents available."*
@@ -2680,6 +2706,17 @@ def promote(cap_=None):
     limit = cap() if cap_ is None else cap_
     for rec in pending():
         if len(live_workers()) >= limit:
+            break
+        # The cap counts heads; the FLOOR counts what a head costs. A spawn
+        # into memory the machine does not have is not a start — the kernel
+        # OOM-kills the slice and the worker dies mid-task, unrecorded. Under
+        # the floor the task stays queued and the next tick retries, exactly
+        # the "a slot frees" path it already has. `None` (unreadable) opens
+        # the gate: a missing /proc must never stop a healthy machine.
+        avail = memory_available_mb()
+        low = (MEM_MIN_AVAILABLE_MB and avail is not None
+               and avail < MEM_MIN_AVAILABLE_MB)
+        if low:
             break
         moved = ba._move(rec, work_dir("taken"))
         moved.update(_spawn_worker(moved))

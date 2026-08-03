@@ -3945,6 +3945,38 @@ def test_tier(tmp):
     del os.environ["BOARD_WORK_SPAWN"]
 
 
+def test_memory_floor(tmp):
+    """`promote()` will not start a worker into memory the machine does not
+    have: under the floor the task stays QUEUED (the same slot-frees path),
+    at or above it the spawn proceeds, and an UNREADABLE /proc opens the gate
+    rather than wedging a healthy machine."""
+    import boardagents as ba
+    import boardwork as bw
+    spawned = []
+    real_spawn, real_avail = bw._spawn_worker, bw.memory_available_mb
+    bw._spawn_worker = lambda rec: spawned.append(rec["task"]) or {}
+    try:
+        q = bw.dispatch("memory-gated work", where="apps/x/**",
+                        model="haiku 4.5 low", cap_=0)
+        check("(setup) it queued above the cap", q["state"] == "queued",
+              q["state"])
+        bw.memory_available_mb = lambda: 500          # under the 1536 floor
+        check("under the floor promote() spawns nothing",
+              bw.promote(cap_=8) == [] and spawned == [], spawned)
+        bw.memory_available_mb = lambda: 3000         # above it
+        check("above the floor promote() spawns the queued task",
+              spawned == [] and bw.promote(cap_=8) != [] and spawned,
+              spawned)
+        bw.memory_available_mb = lambda: None          # /proc vanished
+        q2 = bw.dispatch("memory-gated work two", where="apps/y/**",
+                         model="haiku 4.5 low", cap_=0)
+        check("an unreadable /proc opens the gate, never closes it",
+              bw.promote(cap_=8) != [] and spawned and q2["state"] == "queued",
+              spawned)
+    finally:
+        bw._spawn_worker, bw.memory_available_mb = real_spawn, real_avail
+
+
 def test_relay(tmp):
     """A minister at its turn budget hands the REST on instead of pushing
     through: one successor in `pending/`, the hop stamped as reported so
@@ -7805,6 +7837,8 @@ def main():
         test_overlap(os.path.join(tmp, "work"))
         os.makedirs(os.path.join(tmp, "tier"))
         test_tier(os.path.join(tmp, "tier"))
+        os.makedirs(os.path.join(tmp, "memfloor"))
+        test_memory_floor(os.path.join(tmp, "memfloor"))
         os.makedirs(os.path.join(tmp, "relay"))
         test_relay(os.path.join(tmp, "relay"))
         test_dead_worker_notes(os.path.join(tmp, "work"))
