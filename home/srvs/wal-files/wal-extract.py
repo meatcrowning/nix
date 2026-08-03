@@ -209,6 +209,19 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
     def struct(cap, val):
         return hsv_hex(h2, min(s2 * smul, cap * (1.0 if smul <= 1 else smul)), val)
 
+    # Foreground / background. With pure black ENABLED this is the settled look:
+    # #000 background, the accent as the ink. With it DISABLED, dark mode is the
+    # exact inverse of light mode — its background is what light mode paints as
+    # the FOREGROUND (the dark ink) and its foreground is light mode's paper
+    # (near-white). One recursive light-branch call so the two derivations can
+    # never drift apart. TEXT tracks the accent so body text stays the accent
+    # (§3.1.1). docs/DESIGN.md §3.1.2.
+    if pure_bg:
+        FG, BG = accent, "000000"
+    else:
+        lp = full_palette(h, s, v, clusters, False, variant, light=True)
+        FG, BG = lp["BG"], lp["ACCENT"]
+
     # Status ramp: each slot is SAMPLED from the wallpaper cluster nearest its
     # colour-coded anchor (green/amber/red/blue) — hue, saturation and value all
     # taken from the image, the hue clamped to a per-slot legible band (amber and
@@ -216,14 +229,14 @@ def full_palette(h, s, v, clusters, pure_bg, variant, light=False):
     # never stops reading as its state. CRIT keeps a chroma floor so an alarm
     # reads even in the muted variant. See status_color().
     return {
-        "ACCENT":    accent,
-        "TEXT":      accent,   # body text is still the accent (§3.1.1 focus rule)
+        "ACCENT":    FG,
+        "TEXT":      FG,       # body text is still the accent (§3.1.1 focus rule)
         "TEXTDIM":   hsv_hex(h, min(s, lcap * 1.15), 0.60),
         "DIM":       struct(0.50, 0.33),
         "BORDER":    struct(0.60, 0.22),
         "BGALT":     struct(0.55, 0.07),
         "HIGHLIGHT": struct(0.60, 0.13),
-        "BG":        "000000" if pure_bg else struct(0.55, 0.035),
+        "BG":        BG,
         "OK":        status_color(0.34, 0.10, clusters, ss,             0.90, 0.22, 0.70),
         "WARN":      status_color(0.12, 0.05, clusters, ss,             0.82, 0.22, 0.66),
         "CRIT":      status_color(0.00, 0.05, clusters, max(ss, 0.65),  0.98, 0.55, 0.85),
