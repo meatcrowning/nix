@@ -325,9 +325,9 @@ Window {
     // anywhere: `to do` and `shells` used to be trapped inside `needs` and the
     // triangle, so he could not lift `to do` above the decisions or drop it
     // below `summoner`. They are top-level entries now, so all six bands drag.
-    property var sectionOrder: ["needs", "todo", "summoner", "agents", "shells", "landed"]
+    property var sectionOrder: ["needs", "todo", "summoner", "agents", "shells", "spend", "landed"]
     function normalizeOrder(o) {
-        var def = ["needs", "todo", "summoner", "agents", "shells", "landed"];
+        var def = ["needs", "todo", "summoner", "agents", "shells", "spend", "landed"];
         var out = [];
         if (o) for (var i = 0; i < o.length; i++)
             if (def.indexOf(o[i]) >= 0 && out.indexOf(o[i]) < 0) out.push(o[i]);
@@ -1089,6 +1089,7 @@ Window {
                             case "summoner": return summonerSection
                             case "agents": return agentsSection
                             case "shells": return shellsSection
+                            case "spend": return spendSection
                             case "landed": return landedSection
                             }
                             return null
@@ -2259,6 +2260,14 @@ Component {
                             }
                         }
     }
+}
+
+Component {
+    id: spendSection
+    //: the spend section — what the board's automation costs across every
+    //  provider. Its own file (SpendSection.qml), a Column so it sizes to its
+    //  children and drags as one band like every other section.
+    SpendSection {}
 }
 
 Component {
