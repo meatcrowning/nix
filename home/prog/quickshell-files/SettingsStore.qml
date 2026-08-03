@@ -188,14 +188,11 @@ Singleton {
             property bool   pureBlackBg: true
             // Light vs dark polarity (wal-extract.py inverts the value ladder):
             // off = the settled black-background look; on = white bg + dark ink,
-            // same wallpaper hue. Orthogonal to themeMode and paletteFull.
+            // same wallpaper hue. Orthogonal to themeMode.
             property bool   lightMode: false
-            // Full-palette mode: off = the settled one-hue palette (§3.1);
-            // on = a whole palette read off the wallpaper (secondary-hue frames
-            // + real colour-coded status), styled by paletteVariant. Both are
-            // derived by wal-extract.py and fill the same Theme tokens.
-            property bool   paletteFull: false
-            property string paletteVariant: "pastel"   // vivid | muted | pastel (full mode only)
+            // The wallpaper-derived multi-colour palette (§3.1.2) is always on;
+            // paletteVariant styles it. (There is no one-hue toggle any more.)
+            property string paletteVariant: "pastel"   // vivid | muted | pastel
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
@@ -408,7 +405,7 @@ Singleton {
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, paletteColorCount: 16, pureBlackBg: true, lightMode: false,
-        paletteFull: false, paletteVariant: "pastel", windowBorderWidth: 2,
+        paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
