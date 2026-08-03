@@ -99,24 +99,32 @@ import boardparse as bp                                            # noqa: E402
 from boardparse import BoardError                                  # noqa: E402,F401
 
 
-def state_dir():
+def state_dir(path=None):
     """Where this app keeps its own bookkeeping. NOT `stash_dir()`: every
     `.json` in there is read back as an in-flight item (see `_stashes`), so a
-    file that is not one belongs here instead."""
-    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-    d = os.path.join(base, "board")
+    file that is not one belongs here instead.
+
+    `path` is the BOARD the state is ABOUT, and the default — None — means this
+    host's own, which is what every existing caller wants. A board that is not
+    it gets a scratch root instead (`boardparse.scratch_state_dir`), so a probe
+    run against a `/tmp` board cannot leave a card on his.
+    """
+    d = bp.scratch_state_dir(path) if path is not None else None
+    if d is None:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        d = os.path.join(base, "board")
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def stash_dir():
-    d = os.path.join(state_dir(), "inflight")
+def stash_dir(path=None):
+    d = os.path.join(state_dir(path), "inflight")
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def stash_file(key):
-    return os.path.join(stash_dir(), re.sub(r"[^a-z0-9-]", "_", key) + ".json")
+def stash_file(key, path=None):
+    return os.path.join(stash_dir(path), re.sub(r"[^a-z0-9-]", "_", key) + ".json")
 
 
 def _stat_fields(pid):
@@ -274,12 +282,15 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
         raise BoardError("nothing was written")
     # The stash is written AFTER the move, not before: a stash for an item still
     # sitting in NEEDS YOU would be reclaimed into a duplicate of itself.
-    with open(stash_file(rec["key"]), "w") as f:
+    # ...and it is written for THIS board: a stash for a board that is not this
+    # host's own goes to that board's scratch root, never into his `inflight/`
+    # where it would draw a minister card nothing can ever reap.
+    with open(stash_file(rec["key"], path), "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)
     return rec
 
 
-def adopt(key, pid):
+def adopt(key, pid, board=None):
     """Hand a stash's ownership to the process that is actually doing the work.
 
     `start()` runs BEFORE the agent exists, so the pid it stashes is the
@@ -295,8 +306,12 @@ def adopt(key, pid):
     Returns the updated record, or None if there is no stash for `key` — a
     caller whose `start()` failed still spawns the agent, and adopting nothing
     is not an error.
+
+    `board` is the same board `start()` was given, and for the same reason: the
+    stash it wrote is under that board's root. The default — this host's own —
+    is what board-watch and every other caller passes by omission.
     """
-    path = stash_file(key)
+    path = stash_file(key, board)
     try:
         with open(path) as f:
             rec = json.load(f)

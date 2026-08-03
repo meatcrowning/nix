@@ -412,6 +412,74 @@ def test_reorder(tmp):
 
 
 # --------------------------------------------------- 1b. moving between sections
+def test_scratch_state(tmp):
+    """State ABOUT a board that is not this host's own never lands in his.
+
+    This is the ONE test here that deliberately runs with `XDG_STATE_HOME`
+    UNSET — because that is the bug. Everything else in this file is isolated by
+    `main()` setting it, and so are both harnesses; what leaked into his real
+    `~/.local/state/board` was ad-hoc probe scripts that set nothing and ran
+    against a `/tmp` board. Measured on `top` 2026-08-02: 830 stale
+    `edit-*.lock` files, and a fixture stash in `inflight/` drawing a phantom
+    minister card with no process behind it, which nothing would ever reap.
+
+    So the assertion is made against his LIVE directory by listing it before and
+    after: if the guard regresses, this test says so instead of quietly adding
+    one more file to the pile it exists to prevent.
+    """
+    import boardmove as bm
+    import boardparse as B
+
+    live_root = os.path.expanduser("~/.local/state/board")
+    board = os.path.join(tmp, "scratchboard.md")
+
+    saved = os.environ.pop("XDG_STATE_HOME", None)
+    try:
+        def listing():
+            out = {}
+            for sub in ("", "inflight"):
+                d = os.path.join(live_root, sub)
+                try:
+                    out[sub] = sorted(os.listdir(d))
+                except OSError:
+                    out[sub] = []
+            return out
+
+        before = listing()
+
+        check("this host's own board is NOT diverted",
+              B.scratch_state_dir(B.board_path()) is None)
+        scratch = B.scratch_state_dir(board)
+        check("...but a board that is not it gets its own root",
+              scratch is not None and not scratch.startswith(live_root), scratch)
+        check("...and its lock goes there, not into his state dir",
+              not B.lock_path(board).startswith(live_root), B.lock_path(board))
+
+        # ...and a decision started against it stashes there too — the phantom
+        # card came from this exact call.
+        open(board, "w").write(FIXTURE)
+        doc = B.parse(B.read(board))
+        B.write(board, "".join(B.toggle_option(doc["lines"], doc["needs"][0], 0, True)))
+        rec = bm.start("1", where="apps/thing", path=board)
+        stash = bm.stash_file(rec["key"], board)
+        check("a decision started on it stashes under that scratch root",
+              os.path.exists(stash) and not stash.startswith(live_root), stash)
+        check("...and his own inflight/ never sees it",
+              rec["key"] not in [r.get("key") for r in bm._stashes()])
+        check("...and his state dir is byte-for-byte as it was",
+              listing() == before,
+              {k: sorted(set(listing()[k]) ^ set(before[k])) for k in before})
+
+        # The escape hatch is the one both harnesses already use, and it wins.
+        os.environ["XDG_STATE_HOME"] = os.path.join(tmp, "xdgstate")
+        check("a caller that isolated itself is left alone",
+              B.scratch_state_dir(board) is None)
+    finally:
+        os.environ.pop("XDG_STATE_HOME", None)
+        if saved is not None:
+            os.environ["XDG_STATE_HOME"] = saved
+
+
 def test_moves(tmp):
     """An answered decision has to STOP asking him, and a failed agent has to
     leave no trace. Both are byte-level claims, so they are tested here beside
@@ -7696,6 +7764,8 @@ def main():
         test_roundtrip(os.path.join(tmp, "rt"))
         test_reorder(os.path.join(tmp, "rt"))
         test_moves(os.path.join(tmp, "mv"))
+        os.makedirs(os.path.join(tmp, "scratch"))
+        test_scratch_state(os.path.join(tmp, "scratch"))
         os.makedirs(os.path.join(tmp, "ld"))
         test_landed(os.path.join(tmp, "ld"))
         os.makedirs(os.path.join(tmp, "ls"))
