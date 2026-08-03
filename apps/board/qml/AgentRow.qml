@@ -204,6 +204,13 @@ Item {
     // there is nothing he can do with a hex string on screen, and the name is
     // the thing he can type back at the machine.
     readonly property string name: agent && agent.name ? agent.name : ""
+    // The readable model tier this agent runs on — *"sonnet 5 medium"* — from
+    // `boardagents` (`main.py`'s `_row`). It already rides the agent's name on
+    // the card's leading SENTENCE (built in `boardphase`); this property carries
+    // it for the one case that has no sentence to carry it — the `titleFirst`
+    // name cell below, where the card leads with the name column itself. Empty
+    // for an agent with no chosen model, and drawn as nothing at all.
+    readonly property string model: agent && agent.model ? agent.model : ""
     readonly property var waiting: agent && agent.waiting ? agent.waiting : []
     readonly property string says: agent && agent.says ? agent.says : ""
     readonly property string actually: agent && agent.actually ? agent.actually : ""
@@ -638,8 +645,13 @@ Item {
             // possible place to elide. Nothing is drawn between this column
             // and the title, so a long name costs the title cells on ITS card
             // and nothing anywhere else.
+            // The name as drawn HERE — with its model tier appended, since this
+            // cell is the card's own leading identity when no sentence carries
+            // the name (`titleFirst`). *"[agent] ([model])"* [his, 2026-08-02].
+            readonly property string shownName: row.name
+                + (row.model !== "" ? " (" + row.model + ")" : "")
             readonly property real nameW: row.nameNeeded
-                ? Math.max(7, row.name.length + 1) * row.cellW : 0
+                ? Math.max(7, shownName.length + 1) * row.cellW : 0
 
             PixelText {
                 id: nameT
@@ -649,7 +661,7 @@ Item {
                 // Same rung as the rest of its row: lead tone when the title
                 // row IS the top line, the quiet one when it is the third.
                 color: row.titleFirst ? row.leadTone : Theme.dim
-                text: row.name
+                text: parent.shownName
             }
 
             PixelText {

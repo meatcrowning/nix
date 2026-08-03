@@ -816,6 +816,12 @@ class Agents(QObject):
             # log and the sidecar are named; `name` is what he READS. Both cross
             # over, and the card draws only the second.
             "id": a["id"], "name": a.get("name", ""),
+            # The readable model tier — *"sonnet 5 medium"* — already resolved by
+            # `boardagents.agents()`. It rides the name on the card's leading
+            # sentence (built in `boardphase`) and the name CELL when a stopped
+            # card has no sentence to carry it (`AgentRow` `titleFirst`). "" for
+            # an agent with no chosen model (a session, a pre-tiering record).
+            "model": a.get("model", ""),
             "kind": a["kind"], "title": a["title"],
             "where": a["where"], "state": a["state"],
             "running": a["state"] == "running",

@@ -379,7 +379,7 @@ def self_id():
 # same pid and the same start time, and a second record would be a second
 # definition of "running".
 def register(agent_id, title, pid, kind="note", where="board-watch", session="",
-             name="", confirmed=True, parent=""):
+             name="", confirmed=True, parent="", model="", effort=""):
     """`session` is the `--session-id` the spawner chose, and it is what makes
     the card able to say what the agent is really doing: `boardphase.py` finds
     `~/.claude/projects/*/<session>.jsonl` by it. An agent registered without
@@ -419,6 +419,17 @@ def register(agent_id, title, pid, kind="note", where="board-watch", session="",
     if parent:
         rec["parent"] = clean_id(parent)
         rec["parentName"] = name_of(parent) or name_for(parent)
+    # THE TIER IT RUNS ON, stamped at the spawn so the card can name it beside
+    # the agent — [his, 2026-08-02] *"Balam (ds v4 flash)"*. The spawner
+    # (`boardwork._spawn_worker`) has just resolved the exact `(flag, effort)`
+    # this one runs on; persisting it here means the label never has to be
+    # re-derived on a read and cannot change under him between two polls. Absent
+    # for a record that named no model (a hand call, a pre-tiering worker), which
+    # `boardwork.tier_label` reads back as "" — no parenthesis at all.
+    if model:
+        rec["model"] = model
+    if effort:
+        rec["effort"] = effort
     _write_json(os.path.join(agents_dir(), rec["id"] + ".json"), rec)
     return rec
 
@@ -915,6 +926,10 @@ def agents(procs=None):
                     # other kind carries "" here.
                     "parent": rec.get("parent") or "",
                     "parentName": rec.get("parentName") or "",
+                    # The tier it was spawned on (`register(model=,effort=)`),
+                    # raw here and turned into the readable label below.
+                    "model": rec.get("model") or "",
+                    "effort": rec.get("effort") or "",
                     "state": "running" if alive else "exited",
                     # ...and, for one that has stopped, WHETHER IT FINISHED.
                     # `describe()` used to call every stopped worker abandoned;
@@ -955,6 +970,11 @@ def agents(procs=None):
     # WHAT IT SAYS, AND WHAT IT IS DOING. Imported here rather than at the top:
     # `boardphase` imports this module, and the pair would not load otherwise.
     import boardphase as bph
+    # ...and `boardwork` for the tier label (`tier_label`/`orch_label`). Lazy for
+    # the same reason `boardphase` is: `boardwork` imports THIS module at its top,
+    # so a top-level import here would be circular; by the time `agents()` runs
+    # both are loaded and this returns the cached module.
+    import boardwork as bw
     # WHO SOLOMON IS WAITING ON, for his own card's `awaits` line — [his,
     # 2026-07-29] *"Solomon awaits <agent>..."*, and it NAMES the agent. Only
     # this function can see the other cards, so the name is resolved here and
@@ -964,6 +984,20 @@ def agents(procs=None):
     # that names nobody rather than an empty cell or the literal word "agent".
     # ...and it is one of the CARDS, so an unconfirmed summon does not put a
     # name in Solomon's mouth for a minister that is not on the board yet.
+    # THE TIER A WORKER RUNS ON, for a record written before the tier was stamped
+    # at registration (`register(model=)`) — an agent already running when that
+    # landed. The dispatch record in `taken/` is the authoritative per-task tier
+    # (`boardwork.dispatch`), joined by agent id here so an in-flight minister
+    # shows its model at once rather than only once its successor is spawned.
+    # Bounded: `taken/` holds only unreaped tasks, `reap()` moving the rest out.
+    taken_tier = {}
+    try:
+        for r in _list(bw.work_dir("taken")):
+            taid = clean_id(r.get("agent") or "")
+            if taid and r.get("model"):
+                taken_tier[taid] = (r.get("model"), r.get("effort") or "")
+    except OSError:
+        pass
     peers = [a.get("name") or "" for a in out
              if a.get("kind") != ORCHESTRATOR_KIND and a.get("state") == "running"
              and a.get("confirmed", True)]
@@ -985,13 +1019,35 @@ def agents(procs=None):
         # place to get that right beats one per surface.
         who = a.get("name") or ""
         orch = a["kind"] == ORCHESTRATOR_KIND
+        # THE MODEL TIER RIDES THE NAME — [his, 2026-08-02] the card's leading
+        # line reads *"[agent] ([model])"*: *"Balam (deepseek v4 flash)"*,
+        # *"Bael (sonnet 5 medium)"*. The label is the same one the chooser
+        # draws (`boardwork.tier_label`), off the `(flag, effort)` the spawner
+        # stamped on the record (`register(model=)`) — or, for an agent already
+        # running when that landed, the authoritative dispatch record in `taken/`
+        # joined above. `a["model"]` is overwritten from the raw pair to this
+        # readable label so the card (`AgentRow` name cell) binds it.
+        #
+        # NOT Solomon: he is the one orchestrator and speaks in his own voice
+        # (*"Solomon wields the ring..."*), and his examples were the MINISTERS.
+        # His card carries no tier, so his line stays exactly his wording.
+        tier = "" if orch else \
+            bw.tier_label(a.get("model") or "", a.get("effort") or "")
+        if not tier and not orch:
+            m, e = taken_tier.get(clean_id(a["id"]), ("", ""))
+            tier = bw.tier_label(m, e)
+        a["model"] = tier
+        # The subject the sentence lines lead with. Only when BOTH a name and a
+        # tier are known — Solomon, an unnamed session, or a pre-tiering record
+        # keeps the bare name, and nothing invents a parenthesis around nothing.
+        who_disp = "%s (%s)" % (who, tier) if (who and tier) else who
         # SOLOMON SPEAKS IN HIS OWN VOICE for the two words he actually uses —
         # `dispatching` -> *"Solomon is summoning..."*, `waiting` -> *"Solomon awaits
         # <agent>..."*, both his exact wordings. Everything else, his card
         # included, goes through the one shared `boardphase.predicate`, so the
         # verb form cannot drift between his card and a worker's.
-        a["saysLine"] = bph.orch_says_line(obs, who, awaits) if orch \
-            else bph.says_line(obs, who)
+        a["saysLine"] = bph.orch_says_line(obs, who_disp, awaits) if orch \
+            else bph.says_line(obs, who_disp)
         # ...and its SECOND line: what it said it is doing, on its own line
         # rather than after a hyphen on the first one (his call — see
         # `boardphase.says_detail`).
@@ -1001,7 +1057,7 @@ def agents(procs=None):
         # line by name, so when it leads it opens with the name; under a claim
         # it is the bare description. `saysLine` is already resolved above, so
         # its emptiness is exactly "will this line be first".
-        a["doingLine"] = bph.doing_line(obs, who, a["state"] == "running",
+        a["doingLine"] = bph.doing_line(obs, who_disp, a["state"] == "running",
                                         lead=a["saysLine"] == "")
         # SOLOMON ONLY: a live orchestrator with nothing observed yet gets his
         # own two-line startup pair instead of the bare `nothing yet` — [his,
@@ -1014,7 +1070,7 @@ def agents(procs=None):
         orch_line = ""
         if orch and a["state"] == "running":
             orch_line = bph.orch_doing_line(obs.get("observed") or "",
-                                            who or ORCHESTRATOR_NAME)
+                                            who_disp or ORCHESTRATOR_NAME)
             if orch_line:
                 a["doingLine"] = orch_line
         # A CARD IS ALWAYS DRAWN, AND ONE WITH NOTHING TO SAY YET SAYS THAT.
@@ -1048,7 +1104,7 @@ def agents(procs=None):
             # the placeholder this line exists to replace, so drawing both says
             # the same absence twice. `AgentRow` drops the title row and the
             # trailing metadata off this same flag.
-            a["saysLine"] = bph.arises_line(who)
+            a["saysLine"] = bph.arises_line(who_disp)
             a["saysDetail"] = ""
             a["doingLine"] = ""
         # `ok` / `quiet` / `none` / `starting` / `unlinked` — which of the honest

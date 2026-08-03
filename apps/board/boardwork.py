@@ -481,6 +481,25 @@ MINISTER_CEILING = (MINISTER_MODELS[0][0], MINISTER_MODELS[0][1])
 MINISTER_DEFAULT = (MINISTER_MODELS[-1][0], MINISTER_MODELS[-1][1])
 
 
+def tier_label(flag, effort=""):
+    """The human tier label for a spawn's `(flag, effort)` — *"sonnet 5 medium"*,
+    *"deepseek v4 flash"* — from the chooser tables the rest of this file reads,
+    MINISTER first then ORCH (the summoner-only tiers `fable`/`xhigh`/`max` live
+    only there). `""` for a spawn that named no model. An unofferable pair (an
+    old record, a hermes id) falls back to the wire values with the deepseek
+    path prefix stripped — never the raw `deepseek/...-0731` flag, which is a
+    wire value and not for reading (docs/DESIGN.md §2).
+    """
+    flag = (flag or "").strip()
+    if not flag:
+        return ""
+    effort = (effort or "").strip()
+    for f, e, lab in MINISTER_MODELS + ORCH_MODELS:
+        if f == flag and (not effort or e == effort):
+            return lab
+    return ("%s %s" % (flag.split("/")[-1], effort)).strip()
+
+
 def minister_choices():
     return {(f, e) for f, e, _ in MINISTER_MODELS}
 
@@ -1800,7 +1819,11 @@ def subminister(prompt, max_turns=None):
     except (OSError, ValueError) as e:
         raise ValueError("the deepseek subminister could not run: %s" % e)
     ba.register(aid, want[:70], p.pid, kind="subminister", where="",
-                session="", name=name, parent=parent)
+                session="", name=name, parent=parent,
+                # It always runs on deepseek flash; name that tier on its card
+                # like every other agent's, from the offerable flag (not the raw
+                # hermes id) so `tier_label` reads *"deepseek v4 flash"*.
+                model=MINISTER_DEFAULT[0], effort=MINISTER_DEFAULT[1])
     try:
         out, err = p.communicate(timeout=SUBMINISTER_TIMEOUT_S)
     except subprocess.TimeoutExpired:
@@ -2482,7 +2505,7 @@ def _spawn_worker(rec):
     # worker being double-started or reaped as dead.
     ba.register(aid, rec["task"][:70], pid, kind="worker",
                 where=rec.get("where") or "", session=session, name=name,
-                confirmed=False)
+                confirmed=False, model=flag, effort=effort)
     # The task file learns which agent owns it, so `reap()` can tell a worker
     # that finished and said so from one that vanished mid-sentence. Written
     # after the spawn: before it there is no id, and a task with an id but no
