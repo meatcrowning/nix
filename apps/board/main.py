@@ -1944,6 +1944,7 @@ class Spend(QObject):
         super().__init__(parent)
         self._models = []
         self._totals = {}
+        self._daily = []
         self._known = False
         self._estimated = False
         self._poll = QTimer(self)
@@ -1967,13 +1968,16 @@ class Spend(QObject):
             return
         models = snap.get("models", [])
         totals = snap.get("totals", {})
+        daily = snap.get("daily", [])
         known = bool(snap.get("known"))
         estimated = bool(snap.get("estimated"))
         if (models == self._models and totals == self._totals
+                and daily == self._daily
                 and known == self._known and estimated == self._estimated):
             return
         self._models = models
         self._totals = totals
+        self._daily = daily
         self._known = known
         self._estimated = estimated
         self.changed.emit()
@@ -1981,6 +1985,13 @@ class Spend(QObject):
     @Property("QVariantList", notify=changed)
     def models(self):
         return self._models
+
+    @Property("QVariantList", notify=changed)
+    def daily(self):
+        """The trailing month, one entry per day (oldest -> newest): each a
+        `{date,label,total,models}` — the token-per-day chart, and per day the
+        per-family token breakdown the ranked bars rebind to on hover."""
+        return self._daily
 
     @Property("QVariantMap", notify=changed)
     def totals(self):

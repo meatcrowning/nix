@@ -9,8 +9,17 @@ import QtQuick
 // there is only one hue to give, so a set of peers is one hue and the LABEL is
 // the key, never the colour). One row per model: its name is its own legend, a
 // bar sized to that model's share of total cost (§9.3), then the figures —
-// how many agents it was dispatched, its cost, and its tokens in/out. Below the
-// list, one split bar for the whole system's tokens (input vs output), and the
+// how many agents it was dispatched, its cost, and its tokens in/out.
+//
+// Beside the list, right, a COMPACT TOKENS-PER-DAY CHART: one thin vertical bar
+// per day over the trailing month. Hovering a day rebinds the left bars to that
+// day — same bars, same hue, their length re-read as each model's share of THAT
+// day's tokens rather than of total cost — and the chart's caption becomes that
+// day's date and total (§9.3: one hover sample re-reads a sibling readout). With
+// nothing hovered the left bars are the whole-period cost share, as ever. The
+// per-day, per-model series is `boardspend.py`'s `Spend.daily`.
+//
+// Below the list, one split bar for the whole system's tokens (input vs output), and the
 // one honest line §10/§10.5 demands: the Claude dollar is a compute-WEIGHT
 // (measured tokens x public API rates), NOT a bill — he is on a plan measured
 // in % of limit and there is no invoice to read. The hermes dollar is the
@@ -40,6 +49,49 @@ Column {
     readonly property real totalTokens:
         (Spend.totals && (Spend.totals["in"] + Spend.totals["out"]) > 0)
         ? (Spend.totals["in"] + Spend.totals["out"]) : 1
+
+    // ---- the tokens-per-day chart, and what hovering one of its days does ----
+    // -1 = no day hovered, and the left bars show the whole-period cost share as
+    // they always have. Otherwise it is an index into `Spend.daily`, and the left
+    // bars are rebound to THAT day's per-model token breakdown — same bars, same
+    // hue, the length re-read from one day (docs/DESIGN.md §9.3).
+    property int hoveredDay: -1
+
+    //: is there a month of days with anything in it to draw? (`known` can be true
+    //  with every day still zero on a box that has only ever run today.)
+    readonly property bool hasDaily: {
+        var d = Spend.daily;
+        if (!d || d.length === 0) return false;
+        for (var i = 0; i < d.length; ++i) if (d[i].total > 0) return true;
+        return false;
+    }
+
+    readonly property bool hasModels: Spend.models && Spend.models.length > 0
+
+    //: the hovered day's {family: tokens} map, or null when none is hovered.
+    readonly property var dayModels:
+        (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
+        ? Spend.daily[hoveredDay].models : null
+
+    //: the hovered day's whole-day token total, the denominator for the per-model
+    //  share text below each rebound bar.
+    readonly property real dayTotal:
+        (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
+        ? Spend.daily[hoveredDay].total : 0
+
+    //: the busiest single model in the hovered day — the bar denominator, exactly
+    //  as `maxCost` is for the cost bars, so the biggest bar fills the track.
+    readonly property real dayMaxModel: {
+        if (!dayModels) return 1;
+        var mx = 0;
+        for (var k in dayModels) if (dayModels[k] > mx) mx = dayModels[k];
+        return mx > 0 ? mx : 1;
+    }
+
+    //: this row's tokens on the hovered day (0 when it did nothing that day).
+    function dayTokensOf(model) {
+        return (dayModels && dayModels[model] !== undefined) ? dayModels[model] : 0;
+    }
 
     SectionHead {
         width: page.width
@@ -83,78 +135,203 @@ Column {
                 text: "no provider ledger could be read yet — nothing to show."
             }
 
-            // ---------------------------------------- one ranked row per model
-            Repeater {
-                model: Spend.models ? Spend.models : []
-                delegate: Item {
-                    id: mrow
-                    required property var modelData
-                    width: spendCol.width
-                    implicitHeight: mtop.implicitHeight + 2 + bar.height
-                                    + 2 + mbot.implicitHeight + 8
-                    height: implicitHeight
+            // ---- the ranked model list (left) beside the per-day chart (right).
+            // The list is the same ranked horizontal-bar vocabulary as before;
+            // the chart is a compact month of tokens-per-day, and hovering one of
+            // its days rebinds these left bars to that day (docs/DESIGN.md §9.3).
+            Row {
+                width: spendCol.width
+                spacing: 12
 
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.bottomMargin: 8
-                        color: mma.containsMouse ? Theme.highlight : "transparent"
-                    }
-                    MouseArea { id: mma; anchors.fill: parent; hoverEnabled: true }
+                //: the chart's width — compact, a month of thin bars — but the
+                //  list keeps the rest. Zero (chart hidden) gives the list all.
+                readonly property int chartW:
+                    (spendRoot.hasDaily && spendRoot.hasModels)
+                    ? Math.max(96, Math.min(160, Math.round(width * 0.36))) : 0
 
-                    // top line: model (its own legend, at foreground) hard left,
-                    // its cost hard right (§5.4 paired edges).
-                    PixelText {
-                        id: mname
-                        x: 0
-                        color: Theme.text
-                        text: mrow.modelData.model + "  (" + mrow.modelData.provider + ")"
-                    }
-                    PixelText {
-                        id: mcost
-                        x: Math.max(mname.x + mname.width + 8, parent.width - width)
-                        color: Theme.text
-                        text: "$" + mrow.modelData.cost.toFixed(2)
-                    }
+                Column {
+                    id: leftCol
+                    width: parent.chartW > 0
+                           ? parent.width - parent.chartW - parent.spacing
+                           : parent.width
 
-                    // the cost-share bar (§9.3): the whole hue is accent2, the
-                    // length is the meaning. Unlit track is bgAlt, never dim (§3.4).
-                    Rectangle {
-                        id: bar
-                        x: 0
-                        y: mtop.implicitHeight + 2
-                        width: parent.width
-                        height: Math.max(6, Math.round(Theme.fontSize / 2))
-                        color: Theme.bgAlt
-                        border.width: 1
-                        border.color: Theme.border
+                    Repeater {
+                        model: Spend.models ? Spend.models : []
+                        delegate: Item {
+                            id: mrow
+                            required property var modelData
+                            width: leftCol.width
+                            implicitHeight: mtop.implicitHeight + 2 + bar.height
+                                            + 2 + mbot.implicitHeight + 8
+                            height: implicitHeight
 
-                        Rectangle {
-                            x: 1
-                            y: 1
-                            height: parent.height - 2
-                            width: Math.round((parent.width - 2)
-                                   * mrow.modelData.cost / spendRoot.maxCost)
-                            visible: width > 0
-                            color: Theme.accent2
+                            //: this model's tokens on the hovered day (day mode).
+                            readonly property real dayTok:
+                                spendRoot.dayTokensOf(modelData.model)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.bottomMargin: 8
+                                color: mma.containsMouse ? Theme.highlight : "transparent"
+                            }
+                            MouseArea { id: mma; anchors.fill: parent; hoverEnabled: true }
+
+                            // top line: model (its own legend, at foreground) hard
+                            // left; hard right its cost, or — with a day hovered —
+                            // its tokens on that day (§5.4 paired edges).
+                            PixelText {
+                                id: mname
+                                x: 0
+                                color: Theme.text
+                                text: mrow.modelData.model + "  (" + mrow.modelData.provider + ")"
+                            }
+                            PixelText {
+                                id: mcost
+                                x: Math.max(mname.x + mname.width + 8, parent.width - width)
+                                color: Theme.text
+                                text: spendRoot.hoveredDay >= 0
+                                    ? Spend.fmtTokens(mrow.dayTok)
+                                    : "$" + mrow.modelData.cost.toFixed(2)
+                            }
+
+                            // the share bar (§9.3): the whole hue is accent2, the
+                            // length is the meaning — cost share by default, this
+                            // model's share of the hovered day's tokens in day
+                            // mode. Unlit track is bgAlt, never dim (§3.4).
+                            Rectangle {
+                                id: bar
+                                x: 0
+                                y: mtop.implicitHeight + 2
+                                width: parent.width
+                                height: Math.max(6, Math.round(Theme.fontSize / 2))
+                                color: Theme.bgAlt
+                                border.width: 1
+                                border.color: Theme.border
+
+                                Rectangle {
+                                    x: 1
+                                    y: 1
+                                    height: parent.height - 2
+                                    width: spendRoot.hoveredDay >= 0
+                                        ? Math.round((parent.width - 2)
+                                            * mrow.dayTok / spendRoot.dayMaxModel)
+                                        : Math.round((parent.width - 2)
+                                            * mrow.modelData.cost / spendRoot.maxCost)
+                                    visible: width > 0
+                                    color: Theme.accent2
+                                }
+                            }
+
+                            // the figures: agents dispatched + tokens in/out by
+                            // default; with a day hovered, this model's share of
+                            // that day (the date itself is the chart's caption).
+                            PixelText {
+                                id: mbot
+                                x: 0
+                                y: bar.y + bar.height + 2
+                                width: parent.width
+                                elide: Text.ElideRight
+                                color: Theme.textDim
+                                text: spendRoot.hoveredDay >= 0
+                                    ? (spendRoot.dayTotal > 0
+                                        ? Math.round(100 * mrow.dayTok / spendRoot.dayTotal)
+                                          + "% of the day's tokens"
+                                        : "nothing ran that day")
+                                    : mrow.modelData.dispatched + " agents  ·  "
+                                      + Spend.fmtTokens(mrow.modelData["in"]) + " in  /  "
+                                      + Spend.fmtTokens(mrow.modelData["out"]) + " out"
+                            }
+
+                            // an invisible sizing anchor for the top line's
+                            // height, so the bar's y does not depend on a
+                            // laid-out sibling's height.
+                            PixelText { id: mtop; visible: false; text: "X" }
                         }
                     }
+                }
 
-                    // the measured figures: agents dispatched, tokens in/out.
+                // the tokens-per-day chart: one thin vertical bar per day over
+                // the trailing month, its height that day's share of the busiest
+                // day. Hover a bar to rebind the list. The section's hue is
+                // accent2; the day under the pointer takes the brighter accent
+                // step (§3.2), and its date + total replace the caption legend
+                // (§9.3 — a chart with no key is a squiggle).
+                Item {
+                    id: chart
+                    visible: spendRoot.hasDaily && spendRoot.hasModels
+                    width: parent.chartW
+                    height: chartBars.height + 4 + chartCap.implicitHeight
+
+                    readonly property var days: Spend.daily ? Spend.daily : []
+                    readonly property int nDays: days.length > 0 ? days.length : 30
+                    readonly property int barsH: 56
+                    readonly property real maxDay: {
+                        var mx = 0;
+                        for (var i = 0; i < days.length; ++i)
+                            if (days[i].total > mx) mx = days[i].total;
+                        return mx > 0 ? mx : 1;
+                    }
+                    readonly property int barW:
+                        Math.max(2, Math.floor((width - (nDays - 1)) / nDays))
+
+                    Row {
+                        id: chartBars
+                        width: parent.width
+                        height: chart.barsH
+                        spacing: 1
+                        Repeater {
+                            model: chart.days
+                            delegate: Item {
+                                required property var modelData
+                                required property int index
+                                width: chart.barW
+                                height: chartBars.height
+
+                                // the day's bar, rising from the baseline. No
+                                // per-bar bgAlt track — a month of 1px tracks is
+                                // noise; the 1px baseline below is the axis, and a
+                                // silent day is simply no bar.
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width
+                                    height: modelData.total > 0
+                                        ? Math.max(1, Math.round((chartBars.height - 1)
+                                            * modelData.total / chart.maxDay))
+                                        : 0
+                                    color: spendRoot.hoveredDay === index
+                                           ? Theme.accent : Theme.accent2
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onEntered: spendRoot.hoveredDay = index
+                                    onExited: if (spendRoot.hoveredDay === index)
+                                                  spendRoot.hoveredDay = -1
+                                }
+                            }
+                        }
+                    }
+                    // the baseline the bars stand on (§4, a 1px border hairline).
+                    Rectangle {
+                        y: chartBars.height
+                        width: parent.width
+                        height: 1
+                        color: Theme.border
+                    }
+                    // the legend (§9.3): normally what the chart IS; under the
+                    // pointer, the hovered day's date and token total.
                     PixelText {
-                        id: mbot
-                        x: 0
-                        y: bar.y + bar.height + 2
+                        id: chartCap
+                        y: chartBars.height + 4
                         width: parent.width
                         elide: Text.ElideRight
                         color: Theme.textDim
-                        text: mrow.modelData.dispatched + " agents  ·  "
-                            + Spend.fmtTokens(mrow.modelData["in"]) + " in  /  "
-                            + Spend.fmtTokens(mrow.modelData["out"]) + " out"
+                        text: (spendRoot.hoveredDay >= 0
+                                && spendRoot.hoveredDay < chart.days.length)
+                            ? chart.days[spendRoot.hoveredDay].date + "  "
+                              + Spend.fmtTokens(spendRoot.dayTotal)
+                            : "tokens / day · 30d"
                     }
-
-                    // an invisible sizing anchor for the top line's height, so
-                    // the bar's y does not depend on a laid-out sibling's height.
-                    PixelText { id: mtop; visible: false; text: "X" }
                 }
             }
 
