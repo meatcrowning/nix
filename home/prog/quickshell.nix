@@ -201,6 +201,20 @@ in
       ExecStart = "%h/.config/scripts/hypr-session-env.sh ${qsBin}";
       Restart = "always";
       RestartSec = 1;
+      # OOMPolicy=continue, because the panel's cgroup is not just the panel.
+      # Apps launched from it (the runner, a taskbar action) inherit this unit's
+      # cgroup, so their memory is accounted here and their deaths are reported
+      # here. systemd's default OOMPolicy=stop fails the unit when the kernel
+      # OOM-kills ANY process in it — main process or not — and Restart=always
+      # then restarts, which SIGKILLs the whole cgroup: every app he opened from
+      # the panel dies with it. Measured on book 2026-08-02: a QtWebEngineProc
+      # renderer (oom_score_adj 300, surfer's) was the kernel's victim at 22:12
+      # and again at 22:19; `qs` itself was never touched, yet both times the
+      # journal reads "killed some processes in this unit" -> "Failed with
+      # result 'oom-kill'" -> restart. That is the "desktop crashes and restarts
+      # every couple of minutes, losing all my windows" he reported. With
+      # `continue`, only the main process being killed counts as a unit OOM.
+      OOMPolicy = "continue";
     };
   };
 }
