@@ -171,10 +171,19 @@ Column {
             }
         }
         SetRow {
+            // Dark-mode only. In light mode the toggle is greyed out and inert:
+            // its light analogue is pure WHITE (a control labelled "pure black"
+            // would be a lie there), and setLightMode already forces the key off
+            // on the way in — so there is nothing here to change. With it OFF in
+            // dark mode the background is now light mode's foreground and the
+            // foreground light mode's background (wal-extract.py's fg/bg swap).
             label: "pure black background"
-            desc: "off = bg takes the theme hue's extreme tone instead (darkest, or lightest in light mode)"
+            desc: page.d.lightMode
+                ? "dark mode only — light mode's analogue is pure white, chosen automatically"
+                : "off = dark mode becomes light mode inverted (bg/fg swapped); on = pure black"
             SetToggle {
                 checked: page.d.pureBlackBg
+                enabled: !page.d.lightMode
                 onToggled: (v) => { page.d.pureBlackBg = v; SettingsStore.save(); }
             }
         }

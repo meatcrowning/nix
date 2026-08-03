@@ -6,11 +6,16 @@ import QtQuick
 Rectangle {
     id: root
     property bool checked: false
+    // Greyed out and inert when a sibling setting makes this one meaningless
+    // (e.g. "pure black background" under light mode). 0.4 is the design
+    // language's disabled opacity; the row's desc says WHY, per §10.
+    property bool enabled: true
     signal toggled(bool value)
 
     width: 44
     height: 20
     radius: 0
+    opacity: enabled ? 1.0 : 0.4
     color: checked ? Theme.bgAlt : "transparent"
     border.width: 1
     border.color: (checked || ma.containsMouse) ? Theme.accent : Theme.border
@@ -46,7 +51,8 @@ Rectangle {
     MouseArea {
         id: ma
         anchors.fill: parent
-        hoverEnabled: true
+        enabled: root.enabled
+        hoverEnabled: root.enabled
         cursorShape: Qt.PointingHandCursor
         // Controlled: don't flip our own state — emit intent and let the
         // caller's binding (checked: Store.d.key) flow the new value back, so
