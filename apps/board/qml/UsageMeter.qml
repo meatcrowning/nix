@@ -7,9 +7,11 @@ import QtQuick
 // is no Fable row. This file only draws.
 //
 // Colour is BORROWED, not invented (docs/DESIGN.md §3.2): the ladder is the one the
-// panel's disk card already uses for "how full is it" — accent, `warn` past
-// three quarters, `crit` past nine tenths — so a bar here means the same thing
-// a bar there does. The unlit track is `bgAlt`, never `dim` (§3.4).
+// panel's disk card uses for "how full is it" — `warn` past three quarters,
+// `crit` past nine tenths. The nominal band used to be `accent`, copied
+// verbatim from the disk card; §3.8 law 2 moved it to `ok` here — nominal
+// usage isn't "active/focused", it's "healthy", and `ok` is the role that
+// already means that. The unlit track is `bgAlt`, never `dim` (§3.4).
 //
 // An UNKNOWN reading draws the empty track and the word, never a zero-length
 // bar that would read as "nothing used" (§10).
@@ -105,7 +107,7 @@ Item {
             visible: width > 0
             color: (meter.row && meter.row.percent >= 90) ? Theme.crit
                  : (meter.row && meter.row.percent >= 75) ? Theme.warn
-                 : Theme.accent
+                 : Theme.ok
         }
     }
 

@@ -428,16 +428,20 @@ Item {
     }
 
     // §9.1's subordination hairline: a subminister's card is a block that
-    // belongs to the minister's card above it, so it hangs a `Theme.border`
-    // rule (never accent) one 8px step in from that card's text (`col.x` 10),
-    // with this card's own text a further step (`subInset`, in `col.x` below).
+    // belongs to the minister's card above it, so it hangs a rule (never
+    // accent — that still means "current row", not "belongs to") one 8px step
+    // in from that card's text (`col.x` 10), with this card's own text a
+    // further step (`subInset`, in `col.x` below). `Theme.accent2` since
+    // §3.8: it is exactly the "group rule" the section says the secondary hue
+    // is for, so the belongs-to relationship reads in a second hue rather
+    // than the same neutral line every other hairline on the card uses.
     Rectangle {
         visible: row.subminister
         x: 10 + Theme.gap
         y: 3
         width: 1
         height: parent.height - 6
-        color: Theme.border
+        color: Theme.accent2
     }
 
     MouseArea {                          // §7.1: every row is right-clickable

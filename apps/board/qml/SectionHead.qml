@@ -5,9 +5,13 @@ import QtQuick
 // A heading here is told apart by a RULE and by spacing, never by size or
 // weight — reader's reading of docs/DESIGN.md §2.2 (the font ships Regular only
 // and every size on this desktop is one setting), and the same idiom so the two
-// document-shaped apps do not disagree one alt-tab apart. The three sections
-// differ by the rule's COLOUR: accent for the one that wants him, the border
-// hairline for the two that do not.
+// document-shaped apps do not disagree one alt-tab apart. The bands differ by
+// the rule's COLOUR: accent for the one that wants him (`needs you` — still
+// the ONLY thing "active" means on this control, §3.8 law 2), `accent2` — the
+// secondary hue, at foreground value — for every other one. It used to be the
+// plain `border` hairline; §3.8 names exactly this ("a section header, a
+// group rule") as the case that hue is for, so every band reads as structure
+// without any of them claiming to be current.
 //
 // It is also the collapse control, and it says so: `[-]` open, `[+]` closed,
 // ASCII because the font has no triangles (§2.3). Clicking the band toggles.
@@ -18,6 +22,7 @@ Item {
     property bool accented: false
     property bool collapsed: false
     property color fgAccent: Theme.accent
+    property color fgAccent2: Theme.accent2
     property color fgDim: Theme.textDim
     property bool interactive: true
     //: [his ask, 2026-08-01; re-ask 2026-08-02] the TOP-LEVEL bands are drag
@@ -72,7 +77,7 @@ Item {
         x: head.label === "" ? name.x : name.x + name.width + 8
         width: Math.max(0, parent.width - x)
         height: 1
-        color: head.accented ? head.fgAccent : Theme.border
+        color: head.accented ? head.fgAccent : head.fgAccent2
     }
 
     //: the drag's hidden proxy, so the band itself never moves — the page reads
