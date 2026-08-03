@@ -266,3 +266,36 @@ reach the network and write his real
 fetch against a stub `urlopen` instead.
 
 The *appearance* is his check, as always.
+
+## Two invariants nothing here may undo
+
+**State ABOUT a board that is not this host's own never lands in his state dir.**
+Both harnesses redirect `XDG_STATE_HOME` and always did; what leaked was
+one-off probe scripts an agent wrote against a `/tmp` board and ran with nothing
+set, inheriting his real `~/.local/state/board`. Measured on `top` 2026-08-02:
+830 stale `edit-*.lock` files from 830 throwaway board paths, and a fixture
+stash left in `inflight/` that drew a phantom minister card on his board — a
+decision agent with no process behind it, which nothing would ever reap because
+a stash with a null pid cannot be observed to die. `boardparse.scratch_state_dir`
+is the backstop: a board that is not `board_path()` gets a per-board root under
+`$XDG_RUNTIME_DIR`, loudly, and `lock_path` and `boardmove.start` route through
+it. Setting `XDG_STATE_HOME` yourself still wins — the guard is for the script
+that set nothing, not a replacement for isolating your harness. Anything already
+inside the state dir is left alone (`boardphase` locks its own sidecars through
+the same `locked()`). Pinned by `test_scratch_state`, which is the one test in
+that file that deliberately runs UNISOLATED and asserts against his real
+directory.
+
+**Nothing on a clock reads the whole machine on the GUI thread.** `Spend` did:
+`boardspend.snapshot()` walked every session transcript — 1,003 files, 526 MB,
+**1,134 ms** — from its constructor, from a 60s poll, and from every agent
+lifecycle change. That is what "goetia randomly freezes" and "it takes a long
+time to start up" were, and it got worse as the corpus grew (`claude-state`
+syncs book's transcripts in too). Two defences, and both are load-bearing:
+`boardspend._summary` memoizes per transcript on size+mtime, so a poll re-reads
+only the two or three being appended to (~5 ms), and `Spend` does the read on a
+worker thread exactly as `Usage` always has, applying it back through a private
+signal. A consequence worth knowing before you "fix" it: the window now draws
+BEFORE the numbers exist, so the section's `!Spend.known` row is on screen for
+about a second on a cold start — that is the honest state, not a gap to paper
+over with a zero.
