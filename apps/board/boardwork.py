@@ -449,13 +449,15 @@ def set_orch_model(name):
 #: is an ALLOWLIST rather than an ordering: "higher" needs no definition if the
 #: only reachable values are the ones written here.
 #:
-#: `(flag, effort, label)`, ceiling first because the ceiling is also the
-#: default — `("claude-opus-5", "medium")` is exactly what `ROLES` pinned before
-#: this control existed, so drawing the dropdown moved no behaviour on its own.
-#: Below it: the same model thinking less, then the smaller families. Effort
-#: never exceeds `medium` for ANY of them, because his sentence caps the thinking
-#: budget as well as the family and a bigger budget on a smaller model is still a
-#: tier he did not offer.
+#: `(flag, effort, label)`, ceiling FIRST because the ceiling is the hard cap
+#: this list exists to state — but the ceiling is no longer the default. [his,
+#: 2026-08-02] the minister DEFAULT is `deepseek v4 flash`, the LAST row and
+#: `MINISTER_DEFAULT` below: an unnamed dispatch runs cheap and Solomon tiers UP
+#: from there only for work that needs it (rubric in `ORCHESTRATOR_PROMPT`).
+#: Between the two: the same models thinking less, then the smaller families.
+#: Effort never exceeds `medium` for ANY of them, because his sentence caps the
+#: thinking budget as well as the family and a bigger budget on a smaller model
+#: is still a tier he did not offer.
 MINISTER_MODELS = [
     ("claude-opus-5", "medium", "opus 5 medium"),
     ("claude-opus-5", "low", "opus 5 low"),
@@ -468,9 +470,15 @@ MINISTER_MODELS = [
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
 ]
 
-#: The ceiling, named once. It is the first row of the list above and the value
-#: everything that cannot be honoured falls back to.
+#: The ceiling, named once — the hard cap [his, 2026-07-29], the first row of the
+#: list above and the value a stale or out-of-range file clamps DOWN to.
 MINISTER_CEILING = (MINISTER_MODELS[0][0], MINISTER_MODELS[0][1])
+
+#: The default, named once — [his, 2026-08-02] the minister DEFAULT is deepseek
+#: v4, the LAST row above and what an unnamed dispatch (and a never-chosen dial)
+#: gets. Solomon tiers UP from here per piece of work; the ceiling is where that
+#: tiering stops without asking him first (rubric in `ORCHESTRATOR_PROMPT`).
+MINISTER_DEFAULT = (MINISTER_MODELS[-1][0], MINISTER_MODELS[-1][1])
 
 
 def minister_choices():
@@ -498,17 +506,19 @@ def minister_model():
     dispatch and no running minister is re-pointed — the same mechanism
     `orch_model()` is, and for the same reason.
 
-    Anything the file says that is not one of `MINISTER_MODELS` — stale, hand
-    edited, or written by a version that offered more — is the CEILING, not the
-    file's value and not a spawn that dies on a CLI usage error. That is the
-    enforcement half of his rule: the dropdown cannot offer more, and this cannot
-    read more.
+    A never-chosen dial is `MINISTER_DEFAULT` — [his, 2026-08-02] the minister
+    DEFAULT is deepseek v4, so an unnamed dispatch runs cheap and Solomon tiers
+    UP from there. A value the file DOES hold that is not one of `MINISTER_MODELS`
+    — stale, hand edited, or written by a version that offered more — clamps to
+    the CEILING, not the file's value and not a spawn that dies on a CLI usage
+    error: a chosen-but-unofferable value is the one place the hard cap, not the
+    cheap default, is the safe fallback.
     """
     try:
         with open(minister_file()) as f:
             parts = f.read().split()
     except OSError:
-        return MINISTER_CEILING
+        return MINISTER_DEFAULT
     pair = (parts[0], parts[1]) if len(parts) >= 2 else None
     return pair if pair in minister_choices() else MINISTER_CEILING
 
@@ -554,16 +564,17 @@ def minister_tier(name=None):
     work, because the planner has just written the task sentence and the
     `--where` glob and is the only thing that knows what the piece IS.
 
-    **His dial becomes the CEILING rather than the setting**, which is the word
-    the guide already used for it: a dispatch naming no tier still gets exactly
-    what it got before, so nothing changes for an unclassified one.
+    **His dial is the DEFAULT a dispatch tiers UP from**, not a ceiling: [his,
+    2026-08-02] the dial defaults to deepseek v4, an unnamed dispatch gets it,
+    and Solomon names a higher `--model` only for work that needs one — up to the
+    opus 4.8 medium the rubric stops at without asking him first.
 
-    **An unreadable tier is his dial, never a cheap guess.** `resolve_minister`
-    refuses what it cannot name unambiguously and this swallows that refusal
-    upward — the safe direction, because a mis-tiered minister does not fail
-    loudly: it half-lands the work and reports `ENACTED`. The clamp in
-    `role_flags` still runs last and independently, so no route here can spawn
-    a minister above the ceiling either.
+    **An unresolvable tier falls back to his dial, never to an invented one.**
+    `resolve_minister` refuses what it cannot name unambiguously and this
+    swallows that refusal upward to `minister_model()` — his configured default
+    (deepseek v4 unless he has raised the dial), not a tier nobody chose. The
+    clamp in `role_flags` still runs last and independently, so no route here can
+    spawn a minister above the ceiling either.
     """
     if not (name or "").strip():
         return minister_model()
@@ -1239,25 +1250,32 @@ each pay a startup bill to do nothing.
 
 WHICH TIER EACH PIECE RUNS ON, and this is yours to say because you have just \
 written the task and the `--where` and nothing downstream knows the piece \
-better. `--model` on a `dispatch` picks it; leave it off and it runs on the \
-setting he chose, which is also the ceiling. The ministers are most of what \
-this system spends, and until now every one of them — a doc edit and a \
-compositor C++ change alike — ran on that one setting.
+better. [his, 2026-08-02] the DEFAULT is now `deepseek v4` — leave `--model` \
+off and the piece runs there, off his weekly Claude window entirely. You tier \
+UP from that default with `--model`, and only for a piece that is MORE than \
+mechanical or beyond what deepseek can usually handle, graded by how hard it \
+is. The ministers are most of what this system spends, so the cheap default is \
+the point: name a Claude tier because the work needs it, not by habit.
 
-  * `deepseek v4 flash` — an inventory, a survey, a wide read, prose and doc \
-edits, a mechanical rename. It runs on a different provider and does not touch \
-his weekly Claude window at all.
-  * `haiku 4.5 medium` / `sonnet 5 medium` — a change whose SHAPE is already \
+  * `deepseek v4 flash` (the DEFAULT, leave `--model` off) — an inventory, a \
+survey, a wide read, prose and doc edits, a mechanical rename, and anything \
+else mechanical or within what deepseek usually handles. Off his Claude window \
+entirely.
+  * `haiku 4.5 medium`, then `sonnet 5 medium` — the lowest Claude tiers, up \
+from the default for a change that needs Claude but whose SHAPE is already \
 decided: one file, a stated edit, a `.nix` packaging change, a harness run, a \
 test to repair.
-  * The ceiling (leave `--model` off) — the plugin's C++, QML and anything \
-visual, anything that reads `docs/DESIGN.md`, multi-file design work, and \
-anything you are not sure about.
+  * `opus 4.8 medium` (the CEILING you may reach on your own) — the plugin's \
+C++, QML and anything visual, anything that reads `docs/DESIGN.md`, multi-file \
+design work, and anything you are genuinely unsure about.
+  * **HIGHER than `opus 4.8 medium` — a stronger opus, more thinking — you ASK \
+him first** (`ask`), you do not dispatch it. That one tier decision is his.
 
-  * **WHEN IN DOUBT, TIER UP.** A minister on too small a model does not fail \
-where he can see it — it half-lands the work and reports that it is done, \
-which is the one thing nothing here may do. The cheap tiers are for work whose \
-shape is already settled, and no saving is worth a confident lie.
+  * **WHEN IN DOUBT, TIER UP — up to that ceiling.** A minister on too small a \
+model does not fail where he can see it — it half-lands the work and reports \
+that it is done, which is the one thing nothing here may do. The default is for \
+work that is plainly mechanical; when the difficulty is uncertain, tier up, and \
+no saving is worth a confident lie.
 
 SOMEBODY MAY ALREADY BE IN THOSE FILES. Run `agents` before you dispatch \
 anything. It lists what is running right now, each with the task it was given \
@@ -1894,9 +1912,11 @@ def context_flags(role):
 #: its job and he asked to be able to buy as much of it as he likes.
 #:
 #: A MINISTER's pair is his too — the fourth dropdown, read out of
-#: `minister_model()` at spawn — so the `claude-opus-5`/`medium` written below is
-#: what that function returns when he has never chosen, stated twice on purpose:
-#: it is the ceiling AND the default, and the two must not be able to drift.
+#: `minister_model()` at spawn (which `role_flags` overwrites the pair below
+#: with), so like the orchestrator's the value here is a dead fallback shape. It
+#: is `MINISTER_DEFAULT` — [his, 2026-08-02] the minister default is deepseek v4
+#: — named through the constant so it cannot drift from what `minister_model()`
+#: returns when he has never chosen.
 #:
 #: The two MINISTER roles. Both are drawn on his board as ministers and both are
 #: bound by the same ceiling, so the dropdown writes one store and this names who
@@ -1906,8 +1926,8 @@ MINISTER_ROLES = ("worker", "decision")
 
 ROLES = {
     "orchestrator": ("", "high"),
-    "worker": ("claude-opus-5", "medium"),
-    "decision": ("claude-opus-5", "medium"),
+    "worker": MINISTER_DEFAULT,
+    "decision": MINISTER_DEFAULT,
 }
 
 
