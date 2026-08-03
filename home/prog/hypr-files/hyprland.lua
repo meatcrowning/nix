@@ -132,6 +132,15 @@ local menu        = "hyprlauncher"
 
 -- Quickshell vertical panel (bar + launcher + workspaces + tray + clock)
 hl.on("hyprland.start", function()
+    -- FIRST, before anything below: make graphical-session.target active.
+    -- Nothing in a bare Hyprland session does, and units we do not own can
+    -- REQUIRE it rather than merely order against it — xdg-desktop-portal has
+    -- `Requisite=graphical-session.target`, which is never pulled in and cannot
+    -- be started by hand, so the portal (every file picker, every screen-share)
+    -- was dead for the whole session. hyprland-session.target BindsTo it; see
+    -- home/srvs/hypr-session-target.nix. The explicit starts below stay: they
+    -- are what makes the ordering deterministic.
+    hl.exec_cmd("systemctl --user start hyprland-session.target")
     -- The panel is a systemd user service (quickshell-panel, defined in
     -- quickshell.nix) with Restart=always, so a crash, an OOM kill or a stray
     -- `qs kill` recovers on its own in ~1s instead of leaving the desktop with
