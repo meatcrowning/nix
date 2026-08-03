@@ -88,23 +88,31 @@ def read_sessions():
 
 def write_export(now=None):
     """Refresh this host's export. Returns a short reason word for the unit's
-    log: `ok` (written), `same` (content unchanged, file untouched), `unknown`
+    log: `ok` (written), `same` (sessions unchanged, file untouched), `unknown`
     (ledger unreadable — previous export kept), `unwritable` (could not write
-    the file). Never raises."""
+    the file). Never raises.
+
+    The unchanged check is on the SESSIONS, never the whole document: `written`
+    is a timestamp and would differ on every tick, so comparing whole documents
+    would rewrite the file — and therefore mint a docs commit — every 15
+    minutes forever. The file is only touched when the ledger actually moved.
+    """
     now = time.time() if now is None else now
     sessions = read_sessions()
     if sessions is None:
         return "unknown"
-    doc = {"host": os.uname().nodename, "written": now,
-           "sessions": sessions}
-    body = json.dumps(doc, sort_keys=True) + "\n"
     out = export_path()
     try:
         with open(out, "r", encoding="utf-8") as f:
-            if f.read() == body:
-                return "same"
-    except OSError:
+            old = json.load(f)
+        if isinstance(old, dict) and old.get("sessions") == sessions \
+                and old.get("host") == os.uname().nodename:
+            return "same"
+    except (OSError, ValueError):
         pass
+    doc = {"host": os.uname().nodename, "written": now,
+           "sessions": sessions}
+    body = json.dumps(doc, sort_keys=True) + "\n"
     try:
         os.makedirs(os.path.dirname(out), exist_ok=True)
         tmp = out + ".new"

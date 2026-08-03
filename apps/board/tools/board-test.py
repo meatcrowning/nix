@@ -7724,7 +7724,7 @@ def test_hermes_spend_export(tmp):
           and len(doc["sessions"]) == 2, doc)
     st = os.stat(os.path.join(exdir, own))
     check("an unchanged export is left alone (no docs commit every 15 min)",
-          hse.write_export(now=now) == "same"
+          hse.write_export(now=now + 900) == "same"
           and os.stat(os.path.join(exdir, own)).st_mtime_ns == st.st_mtime_ns)
 
     # The OTHER host's export, as the docs sync would deliver it. A kimi model
