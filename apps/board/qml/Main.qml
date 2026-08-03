@@ -27,9 +27,10 @@ Window {
 
     // Focus-aware foreground, in lock-step with the titlebar (§3.1.1, filer's
     // idiom). Leaves take the tone they are handed; none reads Window.active.
-    readonly property color fgAccent: win.active ? Theme.accent  : Theme.inactive
-    readonly property color fgText:   win.active ? Theme.text    : Theme.inactive
-    readonly property color fgDim:    win.active ? Theme.textDim : Theme.inactive
+    readonly property color fgAccent:  win.active ? Theme.accent  : Theme.inactive
+    readonly property color fgAccent2: win.active ? Theme.accent2 : Theme.inactive
+    readonly property color fgText:    win.active ? Theme.text    : Theme.inactive
+    readonly property color fgDim:     win.active ? Theme.textDim : Theme.inactive
 
     // ONE measurement gives every layout its column (the font is monospace),
     // measured against the real family rather than derived from §2.7's rounded
@@ -1353,6 +1354,7 @@ Component {
                             label: "to do"
                             collapsed: win.isCollapsed("todo")
                             fgDim: win.fgDim
+                            fgAccent2: win.fgAccent2
                             // [his re-ask, 2026-08-02] the `to do` band is a
                             // top-level section grip now: a vertical drag places
                             // it anywhere among the other sections, a tap folds.
@@ -1425,6 +1427,7 @@ Component {
                                         label: todoGroup.modelData.label
                                         collapsed: todoGroup.folded
                                         fgDim: win.fgDim
+                                        fgAccent2: win.fgAccent2
                                         onToggled: win.toggleCollapsed(todoGroup.ckey)
                                     }
 
@@ -1872,6 +1875,7 @@ Component {
                     label: "summoner"
                     collapsed: win.isCollapsed("summoner")
                     fgAccent: win.fgAccent
+                    fgAccent2: win.fgAccent2
                     fgDim: win.fgDim
                     reorderable: true
                     onToggled: win.toggleCollapsed("summoner")
@@ -2040,6 +2044,7 @@ Component {
                            + " minister" + (Agents.boundMinisters === 1 ? "" : "s")
                     collapsed: win.isCollapsed("agents")
                     fgAccent: win.fgAccent
+                    fgAccent2: win.fgAccent2
                     fgDim: win.fgDim
                     reorderable: true
                     onToggled: win.toggleCollapsed("agents")
@@ -2217,6 +2222,7 @@ Component {
                     label: "workings"
                     collapsed: win.isCollapsed("shells")
                     fgAccent: win.fgAccent
+                    fgAccent2: win.fgAccent2
                     fgDim: win.fgDim
                     reorderable: true
                     onToggled: win.toggleCollapsed("shells")
@@ -2276,6 +2282,7 @@ Component {
                     label: "landed"
                     collapsed: win.isCollapsed("landed")
                     fgAccent: win.fgAccent
+                    fgAccent2: win.fgAccent2
                     fgDim: win.fgDim
                     reorderable: true
                     onToggled: win.toggleCollapsed("landed")
@@ -2331,6 +2338,7 @@ Component {
                                     label: String(group.modelData.date)
                                     collapsed: win.isCollapsed(group.ckey)
                                     fgDim: win.fgDim
+                                    fgAccent2: win.fgAccent2
                                     onToggled: win.toggleCollapsed(group.ckey)
                                 }
 

@@ -68,4 +68,14 @@ QtObject {
     readonly property color windowBorderInactive: Qt.rgba(0x59 / 255, 0x59 / 255, 0x59 / 255, 0xaa / 255)
     readonly property int   windowBorderWidth: 2
     readonly property int   windowRounding:    0
+
+    // The secondary hue, at a value legible as a FOREGROUND mark — a section
+    // rule, a group hairline, a category glyph that is not saying "active"
+    // (docs/DESIGN.md §3.8). `border`/`dim` already carry the wallpaper's
+    // secondary hue but at near-invisible value; no `accent2` infra token
+    // exists yet (the doc's own "natural next step"), so this borrows that
+    // hue from `border` and lifts it toward `text` the same way the panel's
+    // fan-card ladder lifts `accent` toward `dim` (§3.3.1, `Qt.tint`). Local to
+    // goetia's own Theme — nothing shared moves.
+    readonly property color accent2: Qt.tint(border, Qt.rgba(text.r, text.g, text.b, 0.55))
 }
