@@ -175,6 +175,20 @@ pkill -USR1 -x kitty >/dev/null 2>&1
 # both the border and the hyprvtb titlebar-plugin colours go through one
 # `hyprctl eval hl.config(...)` call for the live update, and sed against the
 # palette-tagged lines in hyprland.lua for persistence across restarts.
+#
+# shadow_alpha is a USER setting (Settings > Appearance > drop shadow), not a
+# palette colour — it lives in settings.json and the panel applies it live. But
+# this hl.config re-asserts the plugin.hyprvtb block, which reverted shadow_alpha
+# to the plugin default (0.6) on every theme/wallpaper change: the colours
+# survived because they are re-asserted here (and persisted in hyprland.lua) and
+# the shadow was not. So read the user's value and re-assert it in the SAME call,
+# so a theme switch RETAINS the chosen opacity instead of resetting it.
+SETTINGS="$CONFIG/quickshell/settings.json"
+SHADOW_ALPHA=0.6
+if [ -f "$SETTINGS" ]; then
+    v="$(sed -n 's/.*"shadowAlpha"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p' "$SETTINGS" | head -n1)"
+    [ -n "$v" ] && SHADOW_ALPHA="$v"
+fi
 hyprctl eval 'hl.config({
     general = { col = { active_border = "rgba('"${ACCENT}"'ee)" } },
     plugin = { hyprvtb = {
@@ -185,6 +199,7 @@ hyprctl eval 'hl.config({
         ["col.bg_alt"]        = "rgba('"${BGALT}"'ff)",
         ["col.crit"]          = "rgba('"${CRIT}"'ff)",
         ["col.warn"]          = "rgba('"${WARN}"'ff)",
+        ["shadow_alpha"]      = '"${SHADOW_ALPHA}"',
     } },
 })' >/dev/null 2>&1
 LUA="$CONFIG/hypr/hyprland.lua"
