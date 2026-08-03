@@ -3067,13 +3067,13 @@ def test_phase(tmp):
     # no-pressure rule. `boardphase.worked_line` carries the whole argument.
     now = time.time()
     check("a card says how long its agent has been working, in words",
-          bph.worked_line(now - 4 * 60) == "working for 4 minutes",
+          bph.worked_line(now - 4 * 60) == "4 minutes",
           bph.worked_line(now - 4 * 60))
     check("...reading naturally at every age, never as a seconds counter",
           (bph.worked_line(now - 5), bph.worked_line(now - 61),
            bph.worked_line(now - 3600), bph.worked_line(now - 3900))
-          == ("working for under a minute", "working for 1 minute",
-              "working for 1 hour", "working for 1 hour 5 minutes"),
+          == ("under a minute", "1 minute",
+              "1 hour", "1 hour 5 minutes"),
           (bph.worked_line(now - 5), bph.worked_line(now - 3900)))
     check("...and a STOPPED agent counts nothing - born-to-now is not how long "
           "a dead process worked",
@@ -5141,7 +5141,8 @@ def test_window(app, tmp):
               and shown[0].strip().startswith("%s awakens" % rising[0]["name"]),
               shown)
         check("...so the title, the tally and the worked-for stamp are all gone",
-              not any(rising[0]["title"] in s or "/" in s or "working for" in s
+              not any(rising[0]["title"] in s or "/" in s or "minute" in s
+                      or "hour" in s or "day" in s
                       for s in shown), shown)
     ba.unregister("w-rising")
     if old_tsc is None:
@@ -6779,7 +6780,7 @@ def test_usage_follows_agents(app):
     import main as brd
     print("\n=== usage follows the agents ===")
 
-    def card(cid, state, worked="working for 2 minutes", ctx=""):
+    def card(cid, state, worked="2 minutes", ctx=""):
         return {"id": cid, "name": "", "kind": "decision", "title": "T",
                 "where": "apps/x/**", "pid": 1, "session": "", "state": state,
                 "born": 1785380450.0, "unread": 0, "phase": "unreported",
@@ -6804,7 +6805,7 @@ def test_usage_follows_agents(app):
 
         # The churn: the same agent, two minutes older, with a context tally it
         # did not have. The card redraws; nothing was born and nothing died.
-        live[:] = [card("w-one", "running", "working for 4 minutes", "12% of 200k")]
+        live[:] = [card("w-one", "running", "4 minutes", "12% of 200k")]
         agents.refresh()
         check("a card merely redrawing does NOT re-read his usage",
               fired == [] and reads == [], (fired, reads))

@@ -234,7 +234,7 @@ Item {
     // empty means nothing could be measured, and empty is drawn as nothing.
     readonly property string contextLine: agent && agent.contextLine
                                           ? agent.contextLine : ""
-    // HOW LONG it has been working - `working for 4 minutes` (see below).
+    // HOW LONG it has been working - `4 minutes` (see below).
     readonly property string workedLine: agent && agent.workedLine
                                          ? agent.workedLine : ""
     // A card with no id is not an agent — it is a task waiting for a slot, or
@@ -522,8 +522,8 @@ Item {
     // `where`.
     PixelText {
         id: bornT
-        // Not while it is rising, same rule as the tally: *"working for 2
-        // seconds"* beside *"awakens..."* is two ways of saying it just started.
+        // Not while it is rising, same rule as the tally: *"4 minutes"* beside
+        // *"awakens..."* is two ways of saying it just started.
         visible: row.workedLine !== "" && !row.arising
                  && (row.saysLine !== "" || row.doingLine !== "")
         anchors.right: tallyT.visible ? tallyT.left : col.right

@@ -451,7 +451,7 @@ all of it.
   `~/.local/state/board/` (`inbox/`, `agents/`). `board.md`'s writers are still
   exactly three, all through `boardparse.edit()`.
 - **The no-pressure rule applies here too**, with the one exception recorded
-  above: the card's `working for ...` line is the only thing that counts, and
+  above: the card's `4 minutes` line is the only thing that counts, and
   it counts against the agent. Otherwise no ages, no
   counts, no urgency ordering, nothing from the warn/crit ramp. A running agent
   is just running. The order is BIRTH, oldest first (`boardwork.cards()`),
