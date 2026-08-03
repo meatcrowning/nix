@@ -182,8 +182,10 @@ Scope {
                 Loader {
                     id: pageLoader
                     // Reserve the scrollbar's gutter (§9.2, VScroll's barW) plus a
-                    // 4px breath so a control's right edge never sits under the bar.
-                    width: scroller.width - vscroll.barW - 4
+                    // breath equal to the window inset, so the gap from a control's
+                    // right edge to the bar matches the left margin — a symmetric
+                    // gutter rather than a control nearly touching the bar.
+                    width: scroller.width - vscroll.barW - scroller.anchors.margins
                     source: root.srcFor(root.current)
                 }
             }
