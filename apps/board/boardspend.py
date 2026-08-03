@@ -40,6 +40,7 @@ Read-only throughout. The transcripts and `~/.hermes/state.db` both belong to
 other programs; this module only ever opens them `mode=ro` and reads.
 """
 import collections
+import datetime
 import glob
 import json
 import os
@@ -64,6 +65,19 @@ RATES = {
 #: The order families are drawn in when costs tie — a stable, sensible ranking
 #: rather than dict insertion. Cost desc is the real sort; this only breaks ties.
 _FAMILY_ORDER = ("opus", "sonnet", "haiku", "fable", "deepseek", "other")
+
+#: How many days the per-day token chart spans — a month, one bar per day. This
+#: window is FIXED and independent of `snapshot`'s aggregate `window`: the ranked
+#: list may be all-time while the chart is always the trailing month, so the two
+#: never share a cutoff.
+DAILY_DAYS = 30
+
+
+def _day_str(epoch):
+    """The local calendar day an epoch falls in, `YYYY-MM-DD` — the bucket key
+    both the Claude and hermes daily series agree on (both use local time, as
+    does `snapshot`'s dense-day fill, so a bar lines up with the day he lived)."""
+    return datetime.date.fromtimestamp(epoch).isoformat()
 
 
 def _fam(model):
@@ -95,16 +109,24 @@ def _role_of(first_user):
 
 
 def _claude_rows(now, window):
-    """`{family: {"dispatched", "cost", "in", "out"}}` for board-spawned Claude
-    sessions, or an empty dict when there are no transcripts to read.
+    """`(agg, daily)` for board-spawned Claude sessions.
+
+    `agg` is `{family: {"dispatched", "cost", "in", "out"}}` over the aggregate
+    `window` (the ranked list's numbers). `daily` is `{day: {family: tokens}}`
+    over the trailing `DAILY_DAYS`, independent of the aggregate cutoff — its own
+    window, so the chart is always a month even when the list is all-time. Both
+    empty when there are no transcripts to read.
 
     One transcript is one dispatched agent, filed under the family of the model
-    that did most of its turns. Tokens are the real `usage` sums; `cost` is those
-    tokens weighted by `RATES` — a compute-weight, said so upstream."""
+    that did most of its turns, and attributed to the day of its last activity.
+    Tokens are the real `usage` sums; `cost` is those tokens weighted by `RATES`
+    — a compute-weight, said so upstream."""
     files = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", "*.jsonl"))
     out = collections.defaultdict(
         lambda: {"dispatched": 0, "cost": 0.0, "in": 0, "out": 0})
+    daily = collections.defaultdict(lambda: collections.defaultdict(int))
     cutoff = None if window is None else now - window
+    daily_cutoff = now - DAILY_DAYS * 86400
     for f in files:
         first_user = None
         entry = None
@@ -167,17 +189,22 @@ def _claude_rows(now, window):
         role = _role_of(first_user)
         if role is None or not models:
             continue
+        fam = _fam(models.most_common(1)[0][0]) or "other"
+        ts = _epoch(last_ts)
+        # The daily series has its OWN trailing-month window, applied before the
+        # aggregate cutoff so the chart stays a full month even when the list is
+        # narrower (or, as by default, all-time).
+        if ts is not None and ts >= daily_cutoff:
+            daily[_day_str(ts)][fam] += t_in + t_out
         if cutoff is not None:
-            ts = _epoch(last_ts)
             if ts is None or ts < cutoff:
                 continue
-        fam = _fam(models.most_common(1)[0][0]) or "other"
         row = out[fam]
         row["dispatched"] += 1
         row["cost"] += cost
         row["in"] += t_in
         row["out"] += t_out
-    return out
+    return out, daily
 
 
 def _epoch(iso):
@@ -259,6 +286,39 @@ def _hermes_label(model):
     return tail.split(":", 1)[0] or "hermes"
 
 
+def _hermes_daily(now):
+    """`{day: {label: tokens}}` for board (source=tool) hermes ministers over the
+    trailing `DAILY_DAYS`, bucketed by `started_at`'s local day, or an empty dict
+    when the ledger is unreachable. `tokens` folds every column the aggregate's
+    `in`/`out` do, so a day's chart bar equals the sum of its per-model figures."""
+    path = boardusage._hermes_db_path()
+    daily_cutoff = now - DAILY_DAYS * 86400
+    daily = collections.defaultdict(lambda: collections.defaultdict(int))
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    except (OSError, sqlite3.Error):
+        return daily
+    try:
+        q = ("SELECT model, started_at,"
+             " COALESCE(input_tokens,0)+COALESCE(cache_read_tokens,0)"
+             " +COALESCE(cache_write_tokens,0)+COALESCE(output_tokens,0)"
+             " +COALESCE(reasoning_tokens,0)"
+             " FROM sessions WHERE source=? AND started_at>=?")
+        rows = db.execute(q, (boardusage.HERMES_SOURCE, daily_cutoff)).fetchall()
+    except sqlite3.Error:
+        return daily
+    finally:
+        try:
+            db.close()
+        except sqlite3.Error:
+            pass
+    for model, started_at, toks in rows:
+        if started_at is None:
+            continue
+        daily[_day_str(float(started_at))][_hermes_label(model)] += int(toks or 0)
+    return daily
+
+
 #: Which provider a family/label belongs to, for the readout's provider tag.
 _PROVIDER = {
     "opus": "Claude", "sonnet": "Claude", "haiku": "Claude",
@@ -276,14 +336,22 @@ def snapshot(now=None, window=None):
           "models": [             # one per family, COST-DESC
              {"model","provider","dispatched","cost","in","out"}, ...],
           "totals": {"dispatched","cost","in","out"},
+          "daily": [              # exactly DAILY_DAYS entries, OLDEST -> NEWEST
+             {"date","label","total","models":{family: tokens}}, ...],
         }
+
+    `daily` is a dense trailing month — one entry per calendar day whether or not
+    anything ran, so the chart has a bar per day (a silent day is `total` 0 and
+    an empty `models`). Its per-family token figures share the ranked list's
+    family keys, so hovering a day can rebind the list's bars to that day.
 
     `window` is a span in seconds (None = everything ever recorded, the default:
     the board automation is a week old, so all-time IS the useful view). A
     provider with no readable source contributes nothing and never a zero row."""
     now = time.time() if now is None else now
-    claude = _claude_rows(now, window)
+    claude, claude_daily = _claude_rows(now, window)
     hermes = _hermes_rows(now, window)
+    hermes_daily = _hermes_daily(now)
 
     merged = {}
     for fam, r in claude.items():
@@ -319,12 +387,33 @@ def snapshot(now=None, window=None):
         days = window / 86400.0
         window_label = ("last %gh" % (window / 3600.0)
                         if days < 1 else "last %gd" % days)
+
+    # A dense trailing month: merge both providers' per-day maps, then emit one
+    # entry per calendar day (oldest -> newest) so the chart has a bar per day.
+    day_models = collections.defaultdict(lambda: collections.defaultdict(int))
+    for src in (claude_daily, hermes_daily):
+        for day, fams in src.items():
+            for fam, tok in fams.items():
+                day_models[day][fam] += int(tok)
+    today = datetime.date.fromtimestamp(now)
+    daily = []
+    for i in range(DAILY_DAYS - 1, -1, -1):
+        d = today - datetime.timedelta(days=i)
+        fams = day_models.get(d.isoformat(), {})
+        daily.append({
+            "date": d.isoformat(),
+            "label": str(d.day),
+            "total": int(sum(fams.values())),
+            "models": {k: int(v) for k, v in fams.items()},
+        })
+
     return {
         "known": bool(models),
         "estimated": any(m["provider"] == "Claude" for m in models),
         "window": window_label,
         "models": models,
         "totals": totals,
+        "daily": daily,
     }
 
 
