@@ -37,11 +37,16 @@ Column {
             }
         }
         SetRow {
-            label: "no wallpaper"
-            desc: "on = paint the theme's background colour instead of an image; turn off 'pure black background' below to tint it from the chosen palette"
+            // The ONE control for this feature: show the wallpaper image, or fill
+            // the desktop with a solid block of the theme's background colour
+            // (Theme.bg — WallpaperLayer.qml). The theme is identical either way;
+            // only the IMAGE is suppressed. Stored inverted as `wallpaperSolid`,
+            // so on = image, off = solid.
+            label: "display wallpaper"
+            desc: "on = show your wallpaper image; off = fill the desktop with a solid block of the theme's background colour"
             SetToggle {
-                checked: page.d.wallpaperSolid
-                onToggled: (v) => { page.d.wallpaperSolid = v; SettingsStore.save(); }
+                checked: !page.d.wallpaperSolid
+                onToggled: (v) => { page.d.wallpaperSolid = !v; SettingsStore.save(); }
             }
         }
         SetRow {
