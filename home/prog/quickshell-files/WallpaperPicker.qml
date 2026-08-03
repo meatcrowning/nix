@@ -338,7 +338,7 @@ PanelWindow {
         PixelText {
             id: title
             anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 10 }
-            text: root.solid ? "color theme" : "wallpaper"
+            text: "paper + theme"
             color: Theme.accent
         }
 
@@ -467,7 +467,7 @@ PanelWindow {
             // keeps the ~16:9 thumbnail plus a little vertical breathing room.
             readonly property int columns: 2
             cellWidth: Math.floor(width / columns)
-            cellHeight: 140
+            cellHeight: 158   // thumbnail + the theme's palette strip along the bottom
             model: root.images
             boundsBehavior: Flickable.StopAtBounds
             cacheBuffer: 800   // keep a couple of off-screen rows warm for smooth scroll
@@ -526,7 +526,10 @@ PanelWindow {
                     border.color: cell.index === list.currentIndex ? Theme.accent : Theme.border
 
                     Image {
-                        anchors.fill: parent
+                        anchors {
+                            top: parent.top; left: parent.left; right: parent.right
+                            bottom: paletteStrip.top
+                        }
                         anchors.margins: delegateRoot.border.width + 2
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
@@ -537,7 +540,7 @@ PanelWindow {
                     }
 
                     Rectangle {
-                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        anchors { left: parent.left; right: parent.right; bottom: paletteStrip.top }
                         anchors.margins: delegateRoot.border.width + 2
                         height: 18
                         color: Qt.rgba(0, 0, 0, 0.55)
@@ -551,6 +554,29 @@ PanelWindow {
                             // wallpaper and must stay byte-exact.
                             text: Glyphs.px(root.fileName(cell.path))
                             color: Theme.text
+                        }
+                    }
+
+                    // The theme this wallpaper produces: a compact strip of its
+                    // extracted palette along the bottom of the box, so every
+                    // entry shows the thumbnail AND the colour theme it applies.
+                    // Same idiom as the colour-theme grid above and DESIGN §3 —
+                    // equal-width columns of the wal tokens, no invented hues.
+                    // Empty (palette not generated yet) leaves the bare bgAlt.
+                    Row {
+                        id: paletteStrip
+                        readonly property var palette: (root.palettes && root.palettes[cell.index]) || []
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        anchors.margins: delegateRoot.border.width + 2
+                        height: 16
+                        Repeater {
+                            model: paletteStrip.palette
+                            delegate: Rectangle {
+                                required property string modelData
+                                width: Math.ceil(paletteStrip.width / Math.max(1, paletteStrip.palette.length))
+                                height: paletteStrip.height
+                                color: modelData
+                            }
                         }
                     }
 
