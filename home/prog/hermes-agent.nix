@@ -9,4 +9,13 @@
     "$HOME/.local/bin"
     "$HOME/.hermes/bin"
   ];
+
+  # home.sessionPath alone lives in hm-session-vars.sh, which self-guards on
+  # $__HM_SESS_VARS_SOURCED — a no-op for any shell descended from a process
+  # that already sourced an older copy (every terminal in an already-running
+  # session). envExtra has no such guard, so it's what actually reaches a
+  # freshly opened terminal without a full logout/login.
+  programs.zsh.envExtra = ''
+    export PATH="$HOME/.local/bin:$HOME/.hermes/bin''${PATH:+:}$PATH"
+  '';
 }
