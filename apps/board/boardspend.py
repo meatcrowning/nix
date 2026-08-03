@@ -85,6 +85,15 @@ _FAMILY_ORDER = ("opus", "sonnet", "haiku", "fable", "deepseek", "other")
 DAILY_DAYS = 30
 
 
+def _daily_bucket():
+    """One day's accumulator, shared by both providers' daily series: tokens and
+    cost per family, plus a count of distinct dispatches (one transcript / one
+    hermes session = one agent) that landed on the day."""
+    return {"tokens": collections.defaultdict(int),
+            "cost": collections.defaultdict(float),
+            "agents": 0}
+
+
 def _day_str(epoch):
     """The local calendar day an epoch falls in, `YYYY-MM-DD` — the bucket key
     both the Claude and hermes daily series agree on (both use local time, as
@@ -124,10 +133,12 @@ def _claude_rows(now, window):
     """`(agg, daily)` for board-spawned Claude sessions.
 
     `agg` is `{family: {"dispatched", "cost", "in", "out"}}` over the aggregate
-    `window` (the ranked list's numbers). `daily` is `{day: {family: tokens}}`
+    `window` (the ranked list's numbers). `daily` is
+    `{day: {"tokens": {family: tokens}, "cost": {family: cost}, "agents": int}}`
     over the trailing `DAILY_DAYS`, independent of the aggregate cutoff — its own
-    window, so the chart is always a month even when the list is all-time. Both
-    empty when there are no transcripts to read.
+    window, so the chart is always a month even when the list is all-time. The
+    per-day `cost` and `agents` count feed the hover readout beside the token
+    bars. Both empty when there are no transcripts to read.
 
     One transcript is one dispatched agent, filed under the family of the model
     that did most of its turns, and attributed to the day of its last activity.
@@ -136,7 +147,7 @@ def _claude_rows(now, window):
     files = glob.glob(os.path.join(CLAUDE_PROJECTS, "*", "*.jsonl"))
     out = collections.defaultdict(
         lambda: {"dispatched": 0, "cost": 0.0, "in": 0, "out": 0})
-    daily = collections.defaultdict(lambda: collections.defaultdict(int))
+    daily = collections.defaultdict(_daily_bucket)
     cutoff = None if window is None else now - window
     daily_cutoff = now - DAILY_DAYS * 86400
     live = set(files)
@@ -151,7 +162,10 @@ def _claude_rows(now, window):
         # aggregate cutoff so the chart stays a full month even when the list is
         # narrower (or, as by default, all-time).
         if ts is not None and ts >= daily_cutoff:
-            daily[_day_str(ts)][fam] += t_in + t_out
+            b = daily[_day_str(ts)]
+            b["tokens"][fam] += t_in + t_out
+            b["cost"][fam] += cost
+            b["agents"] += 1        # one transcript is one dispatched agent
         if cutoff is not None:
             if ts is None or ts < cutoff:
                 continue
@@ -408,22 +422,28 @@ def _hermes_label(model):
 
 
 def _hermes_daily(now):
-    """`{day: {label: tokens}}` for board (source=tool) hermes ministers on BOTH
-    hosts over the trailing `DAILY_DAYS`, bucketed by `started_at`'s local day,
-    or an empty dict when neither source is readable. `tokens` folds every
-    column the aggregate's `in`/`out` do, so a day's chart bar equals the sum of
-    its per-model figures. The other host's sessions ride its synced export
-    exactly as the ranked list's do."""
+    """`{day: {"tokens": {label: tokens}, "cost": {label: cost}, "agents": int}}`
+    for board (source=tool) hermes ministers on BOTH hosts over the trailing
+    `DAILY_DAYS`, bucketed by `started_at`'s local day, or an empty dict when
+    neither source is readable. `tokens` folds every column the aggregate's
+    `in`/`out` do, so a day's chart bar equals the sum of its per-model figures;
+    `cost` is the provider's own estimate and `agents` counts the day's
+    dispatches. The other host's sessions ride its synced export exactly as the
+    ranked list's do."""
     daily_cutoff = now - DAILY_DAYS * 86400
-    daily = collections.defaultdict(lambda: collections.defaultdict(int))
+    daily = collections.defaultdict(_daily_bucket)
     for sessions in [_hermes_db_sessions()] + \
             [_hermes_export_sessions(p) for p in _hermes_export_files()]:
-        for model, started_at, inp, crd, cwr, outp, reason, _cost in sessions:
+        for model, started_at, inp, crd, cwr, outp, reason, cost in sessions:
             if started_at is None or started_at < daily_cutoff:
                 continue
             toks = (int(inp or 0) + int(crd or 0) + int(cwr or 0)
                     + int(outp or 0) + int(reason or 0))
-            daily[_day_str(float(started_at))][_hermes_label(model)] += toks
+            label = _hermes_label(model)
+            b = daily[_day_str(float(started_at))]
+            b["tokens"][label] += toks
+            b["cost"][label] += float(cost or 0.0)
+            b["agents"] += 1
     return daily
 
 
@@ -445,13 +465,17 @@ def snapshot(now=None, window=None):
              {"model","provider","dispatched","cost","in","out"}, ...],
           "totals": {"dispatched","cost","in","out"},
           "daily": [              # exactly DAILY_DAYS entries, OLDEST -> NEWEST
-             {"date","label","total","models":{family: tokens}}, ...],
+             {"date","label","total","models":{family: tokens},
+              "costs":{family: cost},"cost":float,"agents":int}, ...],
         }
 
     `daily` is a dense trailing month — one entry per calendar day whether or not
-    anything ran, so the chart has a bar per day (a silent day is `total` 0 and
-    an empty `models`). Its per-family token figures share the ranked list's
-    family keys, so hovering a day can rebind the list's bars to that day.
+    anything ran, so the chart has a bar per day (a silent day is `total` 0 with
+    an empty `models`/`costs`, `cost` 0 and `agents` 0). Its per-family token
+    figures share the ranked list's family keys, so hovering a day can rebind
+    the list's bars to that day; `costs`/`cost`/`agents` are the day-scoped
+    figures the hover readout draws beside those bars (each model's spend, the
+    day's total spend, and how many agents ran).
 
     `window` is a span in seconds (None = everything ever recorded, the default:
     the board automation is a week old, so all-time IS the useful view). A
@@ -498,21 +522,30 @@ def snapshot(now=None, window=None):
 
     # A dense trailing month: merge both providers' per-day maps, then emit one
     # entry per calendar day (oldest -> newest) so the chart has a bar per day.
-    day_models = collections.defaultdict(lambda: collections.defaultdict(int))
+    day_acc = collections.defaultdict(_daily_bucket)
     for src in (claude_daily, hermes_daily):
-        for day, fams in src.items():
-            for fam, tok in fams.items():
-                day_models[day][fam] += int(tok)
+        for day, b in src.items():
+            acc = day_acc[day]
+            for fam, tok in b["tokens"].items():
+                acc["tokens"][fam] += int(tok)
+            for fam, c in b["cost"].items():
+                acc["cost"][fam] += float(c)
+            acc["agents"] += b["agents"]
     today = datetime.date.fromtimestamp(now)
     daily = []
     for i in range(DAILY_DAYS - 1, -1, -1):
         d = today - datetime.timedelta(days=i)
-        fams = day_models.get(d.isoformat(), {})
+        b = day_acc.get(d.isoformat())
+        toks = b["tokens"] if b else {}
+        costs = b["cost"] if b else {}
         daily.append({
             "date": d.isoformat(),
             "label": str(d.day),
-            "total": int(sum(fams.values())),
-            "models": {k: int(v) for k, v in fams.items()},
+            "total": int(sum(toks.values())),
+            "models": {k: int(v) for k, v in toks.items()},
+            "costs": {k: round(float(v), 4) for k, v in costs.items()},
+            "cost": round(float(sum(costs.values())), 2),
+            "agents": int(b["agents"]) if b else 0,
         })
 
     return {

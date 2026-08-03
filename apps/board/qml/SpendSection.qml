@@ -84,6 +84,28 @@ Column {
         (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
         ? Spend.daily[hoveredDay].models : null
 
+    //: the hovered day's {family: cost} map, or null when none is hovered — the
+    //  per-model spend the row's top-right figure reads in day mode.
+    readonly property var dayCosts:
+        (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
+        ? Spend.daily[hoveredDay].costs : null
+
+    //: the hovered day's whole-day spend, drawn in the grid caption beside the
+    //  agent count (§9.3: the hover re-reads the chart's own readout to the day).
+    readonly property real dayCost:
+        (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
+        ? Spend.daily[hoveredDay].cost : 0
+
+    //: how many agents ran on the hovered day (distinct dispatches).
+    readonly property int dayAgents:
+        (hoveredDay >= 0 && Spend.daily && hoveredDay < Spend.daily.length)
+        ? Spend.daily[hoveredDay].agents : 0
+
+    //: this row's spend on the hovered day (0 when it did nothing that day).
+    function dayCostOf(model) {
+        return (dayCosts && dayCosts[model] !== undefined) ? dayCosts[model] : 0;
+    }
+
     //: the hovered day's whole-day token total, the denominator for the per-model
     //  share text below each rebound bar.
     readonly property real dayTotal:
@@ -180,6 +202,10 @@ Column {
                             readonly property real dayTok:
                                 spendRoot.dayTokensOf(modelData.model)
 
+                            //: this model's spend on the hovered day (day mode).
+                            readonly property real dayModelCost:
+                                spendRoot.dayCostOf(modelData.model)
+
                             Rectangle {
                                 anchors.fill: parent
                                 anchors.bottomMargin: 8
@@ -188,8 +214,10 @@ Column {
                             MouseArea { id: mma; anchors.fill: parent; hoverEnabled: true }
 
                             // top line: model (its own legend, at foreground) hard
-                            // left; hard right its cost, or — with a day hovered —
-                            // its tokens on that day (§5.4 paired edges).
+                            // left; hard right its cost — the whole period's by
+                            // default, this model's spend on the hovered day in
+                            // day mode (§5.4 paired edges). Same $ figure, day
+                            // scope, so the edge reads the same thing throughout.
                             PixelText {
                                 id: mname
                                 x: 0
@@ -201,7 +229,7 @@ Column {
                                 x: Math.max(mname.x + mname.width + 8, parent.width - width)
                                 color: Theme.text
                                 text: spendRoot.hoveredDay >= 0
-                                    ? Spend.fmtTokens(mrow.dayTok)
+                                    ? "$" + mrow.dayModelCost.toFixed(2)
                                     : "$" + mrow.modelData.cost.toFixed(2)
                             }
 
@@ -234,8 +262,9 @@ Column {
                             }
 
                             // the figures: agents dispatched + tokens in/out by
-                            // default; with a day hovered, this model's share of
-                            // that day (the date itself is the chart's caption).
+                            // default; with a day hovered, this model's tokens on
+                            // that day and its share of the day (spend is on the
+                            // top line; the date itself is the chart's caption).
                             PixelText {
                                 id: mbot
                                 x: 0
@@ -245,7 +274,8 @@ Column {
                                 color: Theme.textDim
                                 text: spendRoot.hoveredDay >= 0
                                     ? (spendRoot.dayTotal > 0
-                                        ? Math.round(100 * mrow.dayTok / spendRoot.dayTotal)
+                                        ? Spend.fmtTokens(mrow.dayTok) + "  ·  "
+                                          + Math.round(100 * mrow.dayTok / spendRoot.dayTotal)
                                           + "% of the day's tokens"
                                         : "nothing ran that day")
                                     : mrow.modelData.dispatched + " agents  ·  "
@@ -361,18 +391,24 @@ Column {
                         onExited: spendRoot.hoveredDay = -1
                     }
                     // the legend (§9.3): normally what the grid IS; under the
-                    // pointer, the hovered day's date and token total.
+                    // pointer, the hovered day's readout — its date and token
+                    // total, then that day's spend and how many agents ran, and
+                    // the whole period's spend to read the day against. Wraps
+                    // rather than elides so the day figures are never clipped;
+                    // the rebind is instant, never animated (§9.3).
                     PixelText {
                         id: chartCap
                         y: chart.gridH + 4
                         width: parent.width
-                        elide: Text.ElideRight
+                        wrapMode: Text.WordWrap
                         color: Theme.textDim
                         text: (spendRoot.hoveredDay >= 0
                                 && spendRoot.hoveredDay < chart.days.length)
                             ? chart.days[spendRoot.hoveredDay].date + "  "
-                              + Spend.fmtTokens(spendRoot.dayTotal)
-                              + "  ·  $" + spendRoot.totalCost + " total"
+                              + Spend.fmtTokens(spendRoot.dayTotal) + "\n"
+                              + "$" + spendRoot.dayCost.toFixed(2) + " day  ·  "
+                              + spendRoot.dayAgents + " agents  ·  $"
+                              + spendRoot.totalCost + " total"
                             : "tokens / day · 30d"
                     }
                 }
