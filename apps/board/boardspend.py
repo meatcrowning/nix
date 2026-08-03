@@ -127,70 +127,14 @@ def _claude_rows(now, window):
     daily = collections.defaultdict(lambda: collections.defaultdict(int))
     cutoff = None if window is None else now - window
     daily_cutoff = now - DAILY_DAYS * 86400
+    live = set(files)
+    for stale in [k for k in _SUMMARIES if k not in live]:
+        del _SUMMARIES[stale]           # a transcript that was moved or deleted
     for f in files:
-        first_user = None
-        entry = None
-        models = collections.Counter()
-        t_in = t_out = 0
-        cost = 0.0
-        last_ts = None
-        try:
-            fh = open(f, errors="replace")
-        except OSError:
+        got = _summary(f)
+        if got is None:
             continue
-        with fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                except (ValueError, TypeError):
-                    continue
-                if entry is None and r.get("entrypoint"):
-                    entry = r.get("entrypoint")
-                mt = r.get("timestamp")
-                if mt:
-                    last_ts = mt
-                typ = r.get("type")
-                msg = r.get("message", {}) or {}
-                if typ == "user" and first_user is None:
-                    c = msg.get("content")
-                    if isinstance(c, str):
-                        first_user = c[:8000]
-                    elif isinstance(c, list):
-                        for x in c:
-                            if isinstance(x, dict) and x.get("type") == "text":
-                                first_user = (x.get("text") or "")[:8000]
-                                break
-                if typ == "assistant":
-                    u = msg.get("usage")
-                    if not u:
-                        continue
-                    model = msg.get("model")
-                    if model and model != "<synthetic>":
-                        models[model] += 1
-                    fm = _fam(model)
-                    if fm is None:
-                        continue
-                    fin = u.get("input_tokens", 0) or 0
-                    crd = u.get("cache_read_input_tokens", 0) or 0
-                    out_t = u.get("output_tokens", 0) or 0
-                    cc = u.get("cache_creation", {}) or {}
-                    w5 = cc.get("ephemeral_5m_input_tokens", 0) or 0
-                    w1 = cc.get("ephemeral_1h_input_tokens", 0) or 0
-                    cw = u.get("cache_creation_input_tokens", 0) or 0
-                    if not (w5 or w1) and cw:
-                        w5 = cw
-                    t_in += fin + crd + w5 + w1
-                    t_out += out_t
-                    rin, rrd, rw, rout = RATES[fm]
-                    cost += fin * rin + crd * rrd + (w5 + w1) * rw + out_t * rout
-        role = _role_of(first_user)
-        if role is None or not models:
-            continue
-        fam = _fam(models.most_common(1)[0][0]) or "other"
-        ts = _epoch(last_ts)
+        fam, t_in, t_out, cost, ts = got
         # The daily series has its OWN trailing-month window, applied before the
         # aggregate cutoff so the chart stays a full month even when the list is
         # narrower (or, as by default, all-time).
@@ -205,6 +149,110 @@ def _claude_rows(now, window):
         row["in"] += t_in
         row["out"] += t_out
     return out, daily
+
+
+#: The per-transcript memo behind `_summary`: `{path: ((size, mtime_ns), value)}`.
+#: Not an optimisation for its own sake — see `_summary` for the freeze it fixes.
+_SUMMARIES = {}
+
+
+def _summary(f):
+    """`_read_transcript(f)`, remembered until the file itself changes.
+
+    THE READ IS NOT CHEAP AND IT IS ON A CLOCK. `snapshot()` is polled every 60s
+    and kicked again on every agent lifecycle change, and `_claude_rows` re-read
+    EVERY transcript on every one of those — measured on `top` 2026-08-02, 1,003
+    files / 526 MB / **1,134 ms**, all of it here. That ran on the GUI thread, so
+    goetia stopped dead for over a second at least once a minute, and it got
+    worse as the corpus grew (`claude-state` syncs book's transcripts in too).
+
+    A transcript is immutable except for the live ones being appended to, so
+    size+mtime is a sound identity: unchanged file, unchanged numbers. In steady
+    state two or three sessions are being written and the other thousand are
+    answered from here. A file that shrank or vanished simply misses the key and
+    is re-read from scratch — this never has to be right about WHY it changed.
+    """
+    try:
+        st = os.stat(f)
+    except OSError:
+        _SUMMARIES.pop(f, None)
+        return None
+    key = (st.st_size, st.st_mtime_ns)
+    hit = _SUMMARIES.get(f)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    val = _read_transcript(f)
+    _SUMMARIES[f] = (key, val)
+    return val
+
+
+def _read_transcript(f):
+    """One transcript reduced to `(family, in, out, cost, last_epoch)`, or None
+    when it is not a board-spawned session at all (his own coding, or one with
+    no assistant turn to attribute). One file is one dispatched agent, filed
+    under the family of the model that did most of its turns."""
+    first_user = None
+    entry = None
+    models = collections.Counter()
+    t_in = t_out = 0
+    cost = 0.0
+    last_ts = None
+    try:
+        fh = open(f, errors="replace")
+    except OSError:
+        return None
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if entry is None and r.get("entrypoint"):
+                entry = r.get("entrypoint")
+            mt = r.get("timestamp")
+            if mt:
+                last_ts = mt
+            typ = r.get("type")
+            msg = r.get("message", {}) or {}
+            if typ == "user" and first_user is None:
+                c = msg.get("content")
+                if isinstance(c, str):
+                    first_user = c[:8000]
+                elif isinstance(c, list):
+                    for x in c:
+                        if isinstance(x, dict) and x.get("type") == "text":
+                            first_user = (x.get("text") or "")[:8000]
+                            break
+            if typ == "assistant":
+                u = msg.get("usage")
+                if not u:
+                    continue
+                model = msg.get("model")
+                if model and model != "<synthetic>":
+                    models[model] += 1
+                fm = _fam(model)
+                if fm is None:
+                    continue
+                fin = u.get("input_tokens", 0) or 0
+                crd = u.get("cache_read_input_tokens", 0) or 0
+                out_t = u.get("output_tokens", 0) or 0
+                cc = u.get("cache_creation", {}) or {}
+                w5 = cc.get("ephemeral_5m_input_tokens", 0) or 0
+                w1 = cc.get("ephemeral_1h_input_tokens", 0) or 0
+                cw = u.get("cache_creation_input_tokens", 0) or 0
+                if not (w5 or w1) and cw:
+                    w5 = cw
+                t_in += fin + crd + w5 + w1
+                t_out += out_t
+                rin, rrd, rw, rout = RATES[fm]
+                cost += fin * rin + crd * rrd + (w5 + w1) * rw + out_t * rout
+    if _role_of(first_user) is None or not models:
+        return None
+    return (_fam(models.most_common(1)[0][0]) or "other",
+            t_in, t_out, cost, _epoch(last_ts))
 
 
 def _epoch(iso):
