@@ -7654,6 +7654,149 @@ def test_hermes_topup(tmp):
           bu._nous_topup({"subscription": {"credits_remaining": 0}}) is None)
 
 
+def test_hermes_spend_export(tmp):
+    """THE HERMES SPEND IS SUMMED ACROSS HOSTS VIA THE SYNCED PER-HOST EXPORT.
+
+    [his answer, 2026-08-03] on combining the hermes minister rows across top
+    and book: *build the hermes per-host export and sum both*. The Claude side
+    already combines (transcripts sync through claude-state), but
+    `~/.hermes/state.db` does not, so each host mints `spend.<host>.json` into
+    docs/ (quarter-hourly unit) and the docs sync carries it over. What must
+    hold: the readout shows BOTH hosts' hermes ministers, the local host's own
+    export is NOT double-counted beside its live ledger, the daily chart merges
+    too, windows apply to the remote rows, and a missing or malformed remote
+    export degrades to the local side instead of crashing the section.
+    """
+    import boardspend as bsp
+    print("\n=== hermes spend sums the synced per-host export ===")
+
+    # The Claude side of snapshot() is not this test's subject — point it at an
+    # empty transcript dir so no real ~/.claude/projects rows leak into totals.
+    emptydir = os.path.join(tmp, "no-transcripts")
+    os.makedirs(emptydir)
+    bsp.CLAUDE_PROJECTS = emptydir
+
+    db = os.path.join(tmp, "spend-state.db")
+    os.environ["BOARD_HERMES_DB"] = db
+    con = _hermes_db(db)
+    now = time.time()
+    # Two board (source='tool') sessions on THIS host, a deepseek model: $1.00.
+    con.execute("INSERT INTO sessions (id, source, model, started_at,"
+                " input_tokens, output_tokens, cache_read_tokens,"
+                " cache_write_tokens, reasoning_tokens, estimated_cost_usd)"
+                " VALUES ('e1','tool','deepseek/x',?,100,20,50,0,5,0.40)",
+                (now - 60,))
+    con.execute("INSERT INTO sessions (id, source, model, started_at,"
+                " input_tokens, output_tokens, cache_read_tokens,"
+                " cache_write_tokens, reasoning_tokens, estimated_cost_usd)"
+                " VALUES ('e2','tool','deepseek/x',?,200,40,100,0,10,0.60)",
+                (now - 30,))
+    con.commit()
+
+    # The writer, loaded by path — its file name has hyphens, so no import.
+    spec = importlib.util.spec_from_file_location(
+        "hermes_spend_export",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "hermes-spend-export.py"))
+    hse = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hse)
+
+    exdir = os.path.join(tmp, "docs")
+    os.makedirs(exdir)
+    os.environ["BOARD_SPEND_EXPORT_DIR"] = exdir
+    own = "spend.%s.json" % os.uname().nodename
+
+    # A host with NO ledger at all: the writer says unknown and writes nothing
+    # (a missing source is unknown, never a confident empty file).
+    os.environ["BOARD_HERMES_DB"] = os.path.join(tmp, "missing.db")
+    check("with no ledger the writer reports unknown and writes nothing",
+          hse.write_export(now=now) == "unknown"
+          and not os.path.exists(os.path.join(exdir, own)))
+
+    # Back on the real ledger: the export is minted with this host's sessions.
+    os.environ["BOARD_HERMES_DB"] = db
+    check("the writer mints the export with the local board sessions",
+          hse.write_export(now=now) == "ok")
+    with open(os.path.join(exdir, own)) as f:
+        doc = json.load(f)
+    check("the export carries host, written and both sessions",
+          doc["host"] == os.uname().nodename and doc.get("written") == now
+          and len(doc["sessions"]) == 2, doc)
+    st = os.stat(os.path.join(exdir, own))
+    check("an unchanged export is left alone (no docs commit every 15 min)",
+          hse.write_export(now=now) == "same"
+          and os.stat(os.path.join(exdir, own)).st_mtime_ns == st.st_mtime_ns)
+
+    # The OTHER host's export, as the docs sync would deliver it. A kimi model
+    # so its label is distinct from the local deepseek's — the check is that
+    # BOTH labels appear and each carries only its own host's figures.
+    with open(os.path.join(exdir, "spend.other.json"), "w") as f:
+        json.dump({"host": "other", "written": now, "sessions": [
+            {"model": "kimi/kimi-k3", "started_at": now - 90,
+             "input_tokens": 500, "cache_read_tokens": 250,
+             "cache_write_tokens": 0, "output_tokens": 60,
+             "reasoning_tokens": 15, "estimated_cost_usd": 0.25}]}, f)
+
+    snap = bsp.snapshot(now=now)
+    models = {m["model"]: m for m in snap["models"]}
+    check("both hosts' hermes rows are in the ranked list",
+          "deepseek" in models and "kimi-k3" in models,
+          list(models))
+    d = models.get("deepseek")
+    check("the local deepseek row is the local ledger alone (own export NOT"
+          " double-counted)",
+          d and d["dispatched"] == 2 and abs(d["cost"] - 1.0) < 1e-9
+          and d["in"] == 450 and d["out"] == 75, d)
+    k = models.get("kimi-k3")
+    check("the remote kimi row rides the synced export",
+          k and k["dispatched"] == 1 and abs(k["cost"] - 0.25) < 1e-9
+          and k["in"] == 750 and k["out"] == 75, k)
+    t = snap["totals"]
+    check("totals sum both hosts",
+          t["dispatched"] == 3 and abs(t["cost"] - 1.25) < 1e-9, t)
+
+    # The per-day chart merges the remote sessions into the same day buckets.
+    day = list(snap["daily"])
+    today = day[-1]["models"] if day else {}
+    check("the daily chart carries both hosts' tokens on their day",
+          today.get("deepseek") == 525 and today.get("kimi-k3") == 825, today)
+
+    # A WINDOW filters the remote rows by started_at like the local ones:
+    # last minute keeps both local (at now-60/-30) and drops the remote (now-90).
+    snap60 = bsp.snapshot(now=now, window=60)
+    m60 = {m["model"]: m for m in snap60["models"]}
+    check("a window applies to the remote rows too",
+          "deepseek" in m60 and "kimi-k3" not in m60
+          and m60["deepseek"]["dispatched"] == 2, list(m60))
+
+    # A MALFORMED remote export is skipped, never a crash — and with the local
+    # ledger gone, the other host's export alone still shows.
+    with open(os.path.join(exdir, "spend.other.json"), "w") as f:
+        f.write("not json at all")
+    snap_bad = bsp.snapshot(now=now)
+    check("a malformed remote export degrades to the local side",
+          {m["model"] for m in snap_bad["models"]} == {"deepseek"},
+          snap_bad["models"])
+    # ...and with the ledger gone AND a healthy remote export, the other host's
+    # spend alone still shows (this is the whole point of the export).
+    with open(os.path.join(exdir, "spend.other.json"), "w") as f:
+        json.dump({"host": "other", "written": now, "sessions": [
+            {"model": "kimi/kimi-k3", "started_at": now - 90,
+             "input_tokens": 500, "cache_read_tokens": 250,
+             "cache_write_tokens": 0, "output_tokens": 60,
+             "reasoning_tokens": 15, "estimated_cost_usd": 0.25}]}, f)
+    os.environ["BOARD_HERMES_DB"] = os.path.join(tmp, "missing.db")
+    snap_remote_only = bsp.snapshot(now=now)
+    check("a host with no local ledger still shows the other host's spend",
+          {m["model"] for m in snap_remote_only["models"]} == {"kimi-k3"}
+          and snap_remote_only["known"] is True,
+          snap_remote_only["models"])
+
+    con.close()
+    del os.environ["BOARD_HERMES_DB"]
+    del os.environ["BOARD_SPEND_EXPORT_DIR"]
+
+
 def test_subminister(tmp):
     """A CLAUDE MINISTER *OR THE ORCHESTRATOR* DELEGATES A CHUNK TO A DEEPSEEK
     SUBMINISTER.
@@ -7915,6 +8058,7 @@ def main():
 
         test_hermes_proximity(os.path.join(tmp, "herm"))
         test_hermes_topup(os.path.join(tmp, "herm"))
+        test_hermes_spend_export(os.path.join(tmp, "herm"))
         test_subminister(os.path.join(tmp, "herm"))
         app = QGuiApplication(sys.argv)
         test_usage_follows_agents(app)
