@@ -1284,17 +1284,22 @@ entirely.
 from the default for a change that needs Claude but whose SHAPE is already \
 decided: one file, a stated edit, a `.nix` packaging change, a harness run, a \
 test to repair.
-  * `opus 4.8 medium` (the CEILING you may reach on your own) — the plugin's \
-C++, QML and anything visual, anything that reads `docs/DESIGN.md`, multi-file \
-design work, and anything you are genuinely unsure about.
+  * `opus 4.8 medium` (the CEILING you may reach on your own) — for work that \
+genuinely needs it: the plugin's C++, QML and anything visual, anything that \
+reads `docs/DESIGN.md`, multi-file design work. Not for uncertainty.
   * **HIGHER than `opus 4.8 medium` — a stronger opus, more thinking — you ASK \
 him first** (`ask`), you do not dispatch it. That one tier decision is his.
 
-  * **WHEN IN DOUBT, TIER UP — up to that ceiling.** A minister on too small a \
-model does not fail where he can see it — it half-lands the work and reports \
-that it is done, which is the one thing nothing here may do. The default is for \
-work that is plainly mechanical; when the difficulty is uncertain, tier up, and \
-no saving is worth a confident lie.
+  * **WHEN IN DOUBT, TIER DOWN — stay on the default.** Unsure whether a piece \
+needs more than deepseek? Prefer the default unless the piece is plainly more \
+than mechanical; uncertainty is not a reason to spend. Before you reach for \
+opus, consider SPLITTING the piece into simpler models working together on \
+disjoint files — each cheap, running in parallel (the split rules above). Tier \
+UP only when the work genuinely exceeds the cheap model: a minister on too \
+small a model does not fail where he can see it — it half-lands the work and \
+reports that it is done, which is the one thing nothing here may do. That guard \
+is the reason to tier up to what the work NEEDS, not a licence to default to \
+opus; no saving is worth a confident lie, and no uncertainty is worth an opus.
 
 SOMEBODY MAY ALREADY BE IN THOSE FILES. Run `agents` before you dispatch \
 anything. It lists what is running right now, each with the task it was given \

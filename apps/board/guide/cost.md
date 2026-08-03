@@ -104,10 +104,16 @@ deepseek flag.
   usually handle) **and Solomon tiers UP from it, by difficulty, only for work
   that needs it**: haiku 4.5 then sonnet 5 for a change whose shape is decided,
   up to a ceiling of `opus 4.8 medium` for the plugin's C++, QML, anything
-  visual and anything ambiguous — **and WHEN IN DOUBT, TIER UP** (to that
-  ceiling). Higher than opus 4.8 medium he is ASKED first. A minister on too
-  small a model does not fail where he can see it: it half-lands the work and
-  reports `ENACTED`.
+  visual, `docs/DESIGN.md` reads and multi-file design work — work that
+  demonstrably needs it, not uncertainty. **WHEN IN DOUBT, TIER DOWN**: unsure
+  whether a piece needs more than deepseek, prefer the default unless the piece
+  is plainly more than mechanical, and before reaching for opus consider
+  splitting the piece into simpler models working together on disjoint files —
+  each cheap, running in parallel. Higher than opus 4.8 medium he is ASKED
+  first. A minister on too small a model does not fail where he can see it: it
+  half-lands the work and reports `ENACTED` — so tier UP when the work
+  genuinely exceeds the cheap model, never because the difficulty is
+  uncertain.
 - Harness: `tools/board-test.py` → `test_tier`.
 
 ### The RELAY: a minister hands the rest on rather than running long
