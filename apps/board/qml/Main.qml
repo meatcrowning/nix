@@ -1040,6 +1040,37 @@ Window {
                                   ? Usage.hprox.reset : ""
                         }
                     }
+                    // ...and the TOP-UP money left [his, 2026-08-02: "hermes
+                    // agent usage should also show the top up money left as
+                    // well"]. The row above counts down the monthly
+                    // subscription; this one is the purchased pay-as-you-go pool
+                    // (`boardusage.hermes_topup` -> the portal's
+                    // `purchased_credits_remaining`), the money that is actually
+                    // left when the subscription credits are spent. Same clean
+                    // self-identifying line as the row above (§5.4) — "$18.70
+                    // top-up left" needs no label — bound never derived (§5.3,
+                    // §10), and an honest "top-up unknown" until the account has
+                    // been read here.
+                    Item {
+                        id: htopuprow
+                        width: usageCol.width
+                        height: lineH
+                        readonly property int lineH: Theme.fontSize + 4
+                        PixelText {
+                            y: Math.round((htopuprow.lineH - height) / 2)
+                            color: Usage.htopup && Usage.htopup.known
+                                   ? Theme.text : Theme.textDim
+                            text: Usage.htopup ? (Usage.htopup.text || "top-up unknown")
+                                               : "top-up unknown"
+                        }
+                        // The hover carries the read age — the same §3.5 honesty
+                        // the Anthropic meters draw, so a stale figure says so.
+                        ToolTipArea {
+                            anchors.fill: parent
+                            text: (Usage.htopup && Usage.htopup.detail)
+                                  ? Usage.htopup.detail : ""
+                        }
+                    }
                 }
             }
 

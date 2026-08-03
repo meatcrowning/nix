@@ -544,6 +544,29 @@ def _nous_account_fields(payload):
     return cap, remaining, renews
 
 
+def _nous_topup(payload):
+    """The purchased ("top-up") credit balance the account can still spend, or
+    None.
+
+    This is the pay-as-you-go pool the portal publishes as
+    `purchased_credits_remaining` — SEPARATE from the monthly subscription
+    `credits_remaining` that `_nous_account_fields` counts down. On a plan whose
+    monthly credits are spent (`credits_remaining` 0), this is the only usable
+    money left, which is exactly why it is drawn beside the subscription row.
+    Falls back to `paid_service_access.purchased_credits_remaining`, the same
+    figure the portal mirrors there. The account's own number, never derived
+    (§2).
+    """
+    if not isinstance(payload, dict):
+        return None
+    v = _num(payload.get("purchased_credits_remaining"))
+    if v is None:
+        psa = payload.get("paid_service_access")
+        if isinstance(psa, dict):
+            v = _num(psa.get("purchased_credits_remaining"))
+    return v
+
+
 def _nous_store(payload, now):
     """Write `payload` to `NOUS_LIVE_PATH`, atomically, in our own envelope."""
     doc = {"fetchedAtMs": int(now * 1000), "account": payload}
@@ -986,6 +1009,50 @@ def hermes_proximity(now=None):
         "known": False, "fraction": None, "remaining": None,
         "level": "unknown", "text": text, "detail": detail,
         "reset": _prox_reset(None, now),
+    }
+
+
+def hermes_topup(now=None, path=None):
+    """The account's TOP-UP balance — the purchased pay-as-you-go credit left.
+
+    [his, 2026-08-02] *"hermes agent usage should also show the top up money
+    left as well"*. `hermes_proximity` counts down the monthly SUBSCRIPTION
+    allowance; the top-up is the other pool — credits he bought outright, which
+    the portal publishes as `purchased_credits_remaining` (`_nous_topup`) beside
+    that subscription. On his Plus plan whose monthly credits are spent it is
+    the whole of what is usable, so it is its own row rather than folded in. The
+    figure is the account's own, read from the same `nous.json` cache the
+    proximity row uses, never derived and never invented (§2, docs/DESIGN.md
+    §10).
+
+    Returns a dict:
+      known     bool        True when a top-up figure is cached and readable
+      remaining float|None  $ of purchased credit left (None when not known)
+      text      str         one short data-backed line for the row
+      detail    str         the hover sentence: the figure and its read age
+
+    When no balance has been cached on this host (never fetched, or a payload
+    that carried no purchased-credit field) it is an honest unknown — nothing
+    is drawn as real that has not been read, exactly like `hermes_proximity`'s
+    fallback.
+    """
+    now = time.time() if now is None else now
+    payload, fetched = _nous_read(path)
+    topup = _nous_topup(payload)
+    if topup is None:
+        return {
+            "known": False, "remaining": None,
+            "text": "top-up unknown",
+            "detail": ("the nous account has not been read on this host yet, so "
+                       "the top-up balance is unknown"),
+        }
+    age = max(0.0, now - fetched) if fetched else -1.0
+    text = "%s top-up left" % _fmt_usd(topup)
+    detail = "%s of purchased top-up credit left" % _fmt_usd(topup)
+    detail += (" - read " + _age(age)) if age >= 0 else " - read age unknown"
+    return {
+        "known": True, "remaining": topup,
+        "text": text, "detail": detail,
     }
 
 
