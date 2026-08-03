@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Widgets
 import Quickshell.Io
 
 // A single notification toast. Text-only, coloured by urgency, click anywhere to
@@ -91,6 +92,33 @@ Rectangle {
                                 : urgency === 0 ? Theme.info
                                 : Theme.accent
 
+    // The header line — who the toast is from. Notifications.sender() usually
+    // returns the app's own name, but names the phone for a KDE Connect relay.
+    readonly property string headerText: Notifications.sender(card.notif)
+
+    // The sending app's icon, for the left of the header row. appIcon is the
+    // Notify() app_icon field: an icon-theme NAME most of the time, but the spec
+    // also allows an absolute path or a file: URI, so those are passed through
+    // untouched. When the app sent no usable icon we fall back to its
+    // desktopEntry, then to nothing — a name-only header, never a generic box.
+    readonly property string iconSource: {
+        if (!card.notif)
+            return "";
+        const ai = (card.notif.appIcon || "").toString();
+        if (ai.startsWith("/") || ai.startsWith("file:"))
+            return ai;
+        if (ai)
+            return Quickshell.iconPath(ai, true);
+        const de = (card.notif.desktopEntry || "").toString();
+        return de ? Quickshell.iconPath(de, true) : "";
+    }
+
+    // The summary is dropped when it merely repeats the header (many apps send
+    // their own name as both appName and summary), so the name shows ONCE.
+    readonly property string summaryText: card.notif ? Glyphs.px(card.notif.summary) : ""
+    readonly property bool summaryDupesHeader:
+        summaryText.trim().toLowerCase() === headerText.trim().toLowerCase()
+
     width: SettingsStore.d.notifWidth
     implicitHeight: Math.max(Theme.cell,
                              (hasImage ? thumbSize : 0) + 20,
@@ -154,31 +182,46 @@ Rectangle {
             width: parent.width - (thumb.visible ? thumb.width + bodyRow.spacing : 0)
             spacing: 4
 
-            // who it is from — the tinted header line. Usually the app's own name;
-            // for a notification relayed off his phone it is the PHONE's name, since
-            // KDE Connect's appName is the same useless "KDE Connect" on every one.
+            // who it is from — the tinted header line, with the sending app's
+            // icon to its left. Usually the app's own name; for a notification
+            // relayed off his phone it is the PHONE's name, since KDE Connect's
+            // appName is the same useless "KDE Connect" on every one.
             // Notifications.sender() owns that choice and the font map with it.
-            PixelText {
+            Row {
                 width: parent.width
-                text: Notifications.sender(card.notif)
-                color: card.tint
-                font.pixelSize: Theme.fontSize
-                elide: Text.ElideRight
+                spacing: 6
+
+                IconImage {
+                    id: appIcon
+                    visible: card.iconSource !== ""
+                    implicitSize: Theme.fontSize + 4
+                    source: card.iconSource
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                PixelText {
+                    width: parent.width - (appIcon.visible ? appIcon.width + parent.spacing : 0)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: card.headerText
+                    color: card.tint
+                    font.pixelSize: Theme.fontSize
+                    elide: Text.ElideRight
+                }
             }
 
-            // summary — the headline
+            // summary — the headline. Skips Notifications.plain() on purpose — a
+            // headline is not supposed to carry markup — but it is prose from a
+            // stranger just like the body, so it still needs the font map (done in
+            // card.summaryText). Hidden when it only repeats the header name.
             PixelText {
                 width: parent.width
-                // Summary skips Notifications.plain() on purpose — a headline is not
-                // supposed to carry markup — but it is prose from a stranger just
-                // like the body, so it still needs the font map.
-                text: card.notif ? Glyphs.px(card.notif.summary) : ""
+                text: card.summaryText
                 color: Theme.text
                 font.pixelSize: Theme.fontSize
                 wrapMode: Text.WordWrap
                 maximumLineCount: 2
                 elide: Text.ElideRight
-                visible: text.length > 0
+                visible: text.length > 0 && !card.summaryDupesHeader
             }
 
             // body — dimmed detail, capped so a wall of text can't fill the screen
