@@ -378,6 +378,7 @@ ORCH_MODELS = [
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
     ("deepseek/deepseek-v4-pro", "medium", "deepseek v4 pro"),
+    ("z-ai/glm-5.2", "medium", "glm 5.2"),
     ("moonshotai/kimi-k3", "medium", "kimi k3"),
 ]
 
@@ -495,6 +496,8 @@ MINISTER_MODELS = [
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("claude-haiku-4-5-20251001", "low", "haiku 4.5 low"),
     ("moonshotai/kimi-k3", "medium", "kimi k3"),
+    ("deepseek/deepseek-v4-pro", "medium", "deepseek v4 pro"),
+    ("minimax/minimax-m3", "medium", "minimax m3"),
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
 ]
 
@@ -1640,8 +1643,16 @@ class ClaudeBackend(AgentBackend):
 #: weekly Claude window without dropping all the way to flash. `kimi-k3`
 #: (Moonshot) is a third hermes model — a strong, large-context coding family
 #: offered in both dropdowns, same nous provider.
+#:
+#: [docs/agents/hermes-paid-models.md, 2026-08-03] three more rungs fill gaps in
+#: the ladder: `minimax-m3` (a mid step between the deepseek default and
+#: kimi/haiku) and `deepseek-v4-pro` as MINISTER rungs, and `z-ai/glm-5.2` — the
+#: portal's own silent default, a strong planner below the fable summoner — as a
+#: summoner option. All route through the same nous provider.
 HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731",
                  "deepseek/deepseek-v4-pro",
+                 "minimax/minimax-m3",
+                 "z-ai/glm-5.2",
                  "moonshotai/kimi-k3"}
 HERMES_PROVIDER = os.environ.get("BOARD_HERMES_PROVIDER", "nous")
 #: The Hermes toolsets a minister may reach. Mirrors the Claude `TOOLS` idea:
