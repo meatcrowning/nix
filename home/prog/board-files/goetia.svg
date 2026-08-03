@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- goetia app icon — the seal of Bael, first spirit of the Ars Goetia.
+       Redrawn as clean geometry from the 1904 Mathers/Crowley plate:
+       outer circle, three-headed bird (top + two side heads), body bands,
+       stem and forked tail. DARK-THEME variant: near-black tile with the
+       sigil in the desktop's default accent (#cc4400, the wal fallback
+       accent in apps/board/main.py PALETTE_DEFAULTS; body text = accent,
+       docs/DESIGN.md §3.1). Uniform 44-unit stroke = the desktop's 2px edge
+       weight scaled to icon size (docs/DESIGN.md §4). -->
+  <rect width="512" height="512" fill="#000000"/>
+  <g fill="none" stroke="#cc4400" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="112" r="36"/>
+    <path d="M256 148 L256 225"/>
+    <circle cx="168" cy="225" r="54"/>
+    <circle cx="344" cy="225" r="54"/>
+    <path d="M168 225 L344 225"/>
+    <path d="M200 295 L312 295"/>
+    <path d="M256 317 L256 352"/>
+    <path d="M256 352 L212 404"/>
+    <path d="M256 352 L300 404"/>
+  </g>
+  <g fill="#cc4400">
+    <circle cx="256" cy="112" r="13"/>
+    <circle cx="168" cy="225" r="21"/>
+    <circle cx="344" cy="225" r="21"/>
+  </g>
+</svg>
