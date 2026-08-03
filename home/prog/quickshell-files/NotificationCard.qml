@@ -16,6 +16,13 @@ import Quickshell.Io
 // image downloads out of ~/Downloads into ~/Pictures within seconds — so both
 // the thumbnail and the open resolve the file's CURRENT location via
 // scripts/dl-resolve.py rather than trusting the (possibly stale) hinted path.
+//
+// The screenshot and screen-recording completion toasts (Screenshot.qml) use
+// the same hint for the same thumbnail. A recording carries TWO paths: the
+// thumbnail is a poster frame (`x-download-image`, QML Image cannot decode an
+// mp4) while `x-open-path` points the click at the video itself. When
+// `x-open-path` differs from the thumbnail it is a path we control (a capture,
+// never in ~/Downloads), so the click opens it directly without dl-resolve.
 Rectangle {
     id: card
 
@@ -32,6 +39,13 @@ Rectangle {
         ? String(notif.hints["x-download-image"] || "").trim() : ""
     readonly property bool hasImage: imagePath !== ""
     readonly property int thumbSize: 48
+
+    // What clicking the card opens. `x-open-path` overrides the thumbnail path
+    // (a recording thumbnails a poster frame but opens the video); it falls back
+    // to the thumbnail so a plain image toast keeps opening its own image.
+    readonly property string openPath: notif && notif.hints
+        ? (String(notif.hints["x-open-path"] || "").trim() || imagePath) : imagePath
+    readonly property bool hasOpen: openPath !== ""
 
     // The file's CURRENT on-disk location, resolved via scripts/dl-resolve.py.
     // Starts at the hinted path and is replaced by the resolver as soon as the
@@ -267,14 +281,21 @@ Rectangle {
         onClicked: {
             if (!card.notif)
                 return;
-            if (card.hasImage) {
+            if (!card.hasOpen) {
+                card.notif.dismiss();
+                return;
+            }
+            if (card.openPath !== card.imagePath) {
+                // A distinct open target (a recording's video): a path we control
+                // that is not sorted away, so open it directly and skip resolve.
+                Quickshell.execDetached(["xdg-open", card.openPath]);
+                card.notif.dismiss();
+            } else {
                 // Resolve at CLICK time: sort-downloads may have moved the file
                 // out of ~/Downloads since the card rendered, so the open must
                 // not trust the hinted path. dl-resolve's return opens it.
                 card._openPending = true;
                 card.resolve();
-            } else {
-                card.notif.dismiss();
             }
         }
     }
