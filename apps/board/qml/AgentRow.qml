@@ -281,7 +281,8 @@ Item {
     // [his, follow-up to the subminister feature] a subminister gets its OWN
     // card, and it reads as subordinate to the minister that spawned it: it is
     // a §9.1 block that belongs to the row above it, so it is INDENTED one 8px
-    // step with a `Theme.border` hairline at the indent and its own text a step
+    // step with a `Theme.accent2` hairline at the indent (§3.8: the secondary
+    // hue is this desktop's "group rule" tone) and its own text a step
     // further — and it carries NO §9.1 accent gutter, because accent beside a
     // row already means *current* and two accents say nothing. `main.py`'s
     // `workers` interleaves each one directly under its parent; the card is
@@ -296,7 +297,7 @@ Item {
     readonly property bool subminister: agent && agent.subminister === true
                                         && !orphaned
     //: §9.1's two steps off the parent card's own text (`col.x` 10): the
-    //  `border` hairline rule sits 8px in, this card's text 8px past that.
+    //  `accent2` hairline rule sits 8px in, this card's text 8px past that.
     readonly property real subInset: subminister ? Theme.gap * 2 : 0
 
     // ---- the tick, and WHICH line carries it ----
@@ -753,9 +754,11 @@ Item {
         // duration and curve are the window roll's, through `Motion` — no
         // literal, ever (§6.2).
         //
-        // The spine is `Theme.border`, the hairline every non-accented rule on
-        // this desktop is drawn in: this is subordination, not attention, and the
-        // accent here means "current" (§9.1's gutter, two pixels to its left).
+        // The spine is `Theme.accent2` (§3.8): the same "belongs to the card
+        // above it" rule the subminister hairline draws in the secondary hue
+        // above, not the neutral `Theme.border` every other hairline on this
+        // desktop uses — this is subordination, not attention, and the accent
+        // here still means "current" (§9.1's gutter, two pixels to its left).
         Item {
             id: drawer
             width: col.width
@@ -773,7 +776,7 @@ Item {
                 y: 2
                 width: 1
                 height: drawer.openH - 4
-                color: Theme.border
+                color: Theme.accent2
             }
 
             Column {
