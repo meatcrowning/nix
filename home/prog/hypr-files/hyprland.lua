@@ -307,6 +307,15 @@ hl.config({
             ["col.bg_alt"]        = "rgba(120f08ff)",
             ["col.crit"]          = "rgba(fab424ff)",
             ["col.warn"]          = "rgba(e6c14aff)",
+            -- Drop-shadow opacity — a USER setting (Settings > Appearance),
+            -- persisted HERE like the colours above so a `hyprctl reload`
+            -- (or a restart) keeps the chosen value instead of reverting to
+            -- the C++ default 0.6. wal-set.sh rewrites this line from
+            -- settings.json's shadowAlpha on every apply, and the panel
+            -- (SettingsApply.qml) applies live changes over hl.config; this
+            -- line is only the persisted floor. The value is masked in
+            -- seed-drift.sh so the runtime rewrite is not flagged as drift.
+            ["shadow_alpha"]      = 0.6,
             -- THE DESKTOP'S MOTION. This is not just the window roll: the roll
             -- is the REFERENCE every sliding animation on this machine is
             -- matched to (docs/DESIGN.md 6.2), so this one number is also the
