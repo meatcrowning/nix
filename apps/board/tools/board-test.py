@@ -3303,9 +3303,16 @@ def test_work(tmp):
                 kind="orchestrator", where="board-watch",
                 session="deadbeef-0000-1111-2222-333344445555")
     fresh = [a for a in ba.agents() if a["id"] == "orch-fresh"]
+    # The card's leading line is `"Solomon (<model>) wields the ring..."` —
+    # the tier rides the name now (his, 2026-08-02), off the configured
+    # orchestrator pair when the registration stamps none, so the exact label
+    # is whatever `orch_label()` resolves here. The assertion is the VOICE,
+    # not the parenthesis: it wields the ring and never `cannot see`.
+    import boardwork as bw
+    want = "%s (%s) wields the ring..." % (ba.ORCHESTRATOR_NAME, bw.orch_label())
     check("a freshly spawned Solomon wields the ring, and never `cannot see`",
           len(fresh) == 1
-          and fresh[0]["doingLine"] == "%s wields the ring..." % ba.ORCHESTRATOR_NAME,
+          and fresh[0]["doingLine"] == want,
           [a.get("doingLine") for a in fresh])
     check("...and that is the ONLY thing it says, in either sentence",
           fresh and "cannot see" not in (fresh[0]["doingLine"]
@@ -3919,9 +3926,12 @@ def test_tier(tmp):
           "falling back", "tier:" in p.stdout and "using opus 5 medium" in p.stdout,
           p.stdout[-200:])
 
-    check("the orchestrator is told to pick a tier, and to tier UP when unsure",
+    check("the orchestrator is told to pick a tier, and doubt resolves DOWN "
+          "towards the cheap default before tiering up",
           "WHICH TIER EACH PIECE RUNS ON" in bw.ORCHESTRATOR_PROMPT
-          and "WHEN IN DOUBT, TIER UP" in bw.ORCHESTRATOR_PROMPT
+          and "WHEN IN DOUBT, TIER DOWN" in bw.ORCHESTRATOR_PROMPT
+          and "simpler models working together" in bw.ORCHESTRATOR_PROMPT
+          and "half-lands" in bw.ORCHESTRATOR_PROMPT
           and "--model" in bw.ORCHESTRATOR_PROMPT)
 
     os.environ["BOARD_MAX_WORKERS"] = "4"
