@@ -101,6 +101,7 @@ import boardmove  # noqa: E402  (beside this file)
 import boardagents  # noqa: E402  (beside this file)
 import boardwork  # noqa: E402  (beside this file)
 import boardusage  # noqa: E402  (beside this file)
+import boardspend  # noqa: E402  (beside this file — the spend section's data layer)
 import boardundo  # noqa: E402  (beside this file)
 import boardphase  # noqa: E402  (beside this file — the card drawer tails its transcript)
 
@@ -1916,6 +1917,88 @@ class Usage(QObject):
         return self._hprox
 
 
+class Spend(QObject):
+    """The spend section — the Qt skin on `boardspend`.
+
+    That module's docstring is authoritative for where the numbers come from and
+    why the Claude dollar is a compute-WEIGHT (tokens x public rates), not a bill,
+    while the hermes dollar is the provider's own estimate. This class only
+    re-reads and notifies.
+
+    A poll, not a watcher: the sources are session transcripts and Hermes'
+    ledger, both rewritten by other programs on the order of minutes. `refresh()`
+    re-runs `boardspend.snapshot()` and emits only on a real diff, so a poll that
+    reads the same numbers is silent. The same lifecycle kick `Usage` takes moves
+    it the moment an agent starts, finishes or dies (`follow`), with the 60s
+    clock as the floor under it.
+    """
+
+    changed = Signal()
+
+    #: The idle re-read cadence. The figures move slowly; 60s is well inside
+    #: "prompt" and each read is a snapshot over transcripts + one sqlite query.
+    POLL_MS = 60000
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._models = []
+        self._totals = {}
+        self._known = False
+        self._estimated = False
+        self._poll = QTimer(self)
+        self._poll.setInterval(self.POLL_MS)
+        self._poll.timeout.connect(self.refresh)
+        self._poll.start()
+        self.refresh()
+
+    def follow(self, agents):
+        """Re-read whenever an agent starts, finishes or dies — the same kick
+        `Usage.follow` takes, so a completed dispatch shows up in the spend
+        section while he is still looking at the card."""
+        agents.lives.connect(self.refresh)
+
+    @Slot()
+    def refresh(self):
+        try:
+            snap = boardspend.snapshot()
+        except Exception as e:  # a read of other programs' files; never fatal
+            print("spend: snapshot failed (%s)" % e, file=sys.stderr)
+            return
+        models = snap.get("models", [])
+        totals = snap.get("totals", {})
+        known = bool(snap.get("known"))
+        estimated = bool(snap.get("estimated"))
+        if (models == self._models and totals == self._totals
+                and known == self._known and estimated == self._estimated):
+            return
+        self._models = models
+        self._totals = totals
+        self._known = known
+        self._estimated = estimated
+        self.changed.emit()
+
+    @Property("QVariantList", notify=changed)
+    def models(self):
+        return self._models
+
+    @Property("QVariantMap", notify=changed)
+    def totals(self):
+        return self._totals
+
+    @Property(bool, notify=changed)
+    def known(self):
+        return self._known
+
+    @Property(bool, notify=changed)
+    def estimated(self):
+        return self._estimated
+
+    @Slot(float, result=str)
+    def fmtTokens(self, n):
+        """`boardspend.fmt_tokens` for the QML side — 1.2M / 48k, one place."""
+        return boardspend.fmt_tokens(n)
+
+
 class Settings(QObject):
     """board's own persisted UI state, `~/.local/state/board/state.json`.
 
@@ -2034,6 +2117,8 @@ def main():
     usage = Usage()
     # The bars move when the agent list does, not only on their own 60s clock.
     usage.follow(agents)
+    spend = Spend()
+    spend.follow(agents)
 
     # The window icon follows the live palette's polarity (light bg -> the
     # light-theme sigil variant, dark bg -> the dark one), re-picked on every
@@ -2043,6 +2128,7 @@ def main():
 
     ctx.setContextProperty("Agents", agents)
     ctx.setContextProperty("Usage", usage)
+    ctx.setContextProperty("Spend", spend)
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)

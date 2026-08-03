@@ -4169,7 +4169,7 @@ def build(app, path):
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     keep = (brd.Palette(brd.PANEL_THEME), DeskStyle(parent=engine), StubTitlebar(),
-            brd.Board(path), brd.Settings(), brd.Agents(), brd.Usage())
+            brd.Board(path), brd.Settings(), brd.Agents(), brd.Usage(), brd.Spend())
     ctx.setContextProperty("WalPalette", keep[0])
     ctx.setContextProperty("DeskStyle", keep[1])
     ctx.setContextProperty("Titlebar", keep[2])
@@ -4180,10 +4180,12 @@ def build(app, path):
     # window loads with a ReferenceError the harness cannot see and the section
     # is simply missing on his screen.
     ctx.setContextProperty("Usage", keep[6])
+    ctx.setContextProperty("Spend", keep[7])
     # ...and every WIRE between them, for the same reason: the usage bars follow
     # the agent list's lifecycle transitions, and a harness that skipped this
     # would report an app that does not.
     keep[6].follow(keep[5])
+    keep[7].follow(keep[5])
     comp = QQmlComponent(engine, QUrl.fromLocalFile(os.path.join(BOARD, "qml/theme/Theme.qml")))
     theme = comp.create()
     if theme is None:
