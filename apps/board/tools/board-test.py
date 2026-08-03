@@ -4465,11 +4465,11 @@ def test_window(app, tmp):
               for m, t in tips),
           [(t[0].property("text") if t else None) for m, t in tips])
     chips = [it for it in descendants(win.contentItem()) if it.property("z") == 5000]
-    # SEVEN now: the two meters, the four dropdowns (which carry their `hint`
-    # here rather than in the footer for the same reason) and the hermes
-    # proximity row's reset tooltip.
+    # EIGHT now: the two meters, the four dropdowns (which carry their `hint`
+    # here rather than in the footer for the same reason), the hermes proximity
+    # row's reset tooltip and the hermes top-up row's own tooltip.
     check("...and no chip is on screen until he dwells on one (8)",
-          len(chips) == 7 and all(c.width() == 0 and not c.isVisible() for c in chips),
+          len(chips) == 8 and all(c.width() == 0 and not c.isVisible() for c in chips),
           [(c.width(), c.isVisible()) for c in chips])
 
     # ---- ...and it slides out to the LEFT, out of a fixed right edge ----
