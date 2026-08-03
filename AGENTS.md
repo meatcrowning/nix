@@ -560,6 +560,16 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `ENACTED` (renamed from `COMPLETION` 2026-08-01), both accepted, so the
   rename cannot stop it. Kill switch `~/.local/state/board-notify/off`. Harness
   `tools/board-notify-test.py`.
+- `home/srvs/board-spend-export.nix` — **mints this host's hermes minister spend
+  into `~/nix/docs/spend.<host>.json` quarterly-hourly**, so the board's spend
+  section can show BOTH machines' hermes rows (the Claude side already combines
+  — transcripts sync — but `~/.hermes/state.db` does not). The writer is live
+  source at `apps/board/tools/hermes-spend-export.py`; the docs sync carries
+  the file to the other host, and `boardspend` folds the other host's export
+  into the ranked list, the daily chart and window filters — never its own
+  export beside the live ledger, so nothing double counts. Unchanged content is
+  not rewritten, so a quiet host mints no docs commits. Harness
+  `tools/board-test.py` → `test_hermes_spend_export`.
 - `home/srvs/lid.nix` + `lid-files/lid-close.sh` — **what closing the lid does,
   on `book` only** (`top` is a desktop; the module is gated on `host == "air"`).
   The setting is `lidClose` in `~/.config/quickshell/settings.json`
