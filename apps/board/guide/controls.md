@@ -156,12 +156,14 @@ exactly as the minister chooser (§4) does. One pick, one label (`opus 5 xhigh`)
   a file under `~/.local/state/board/`, which does not sync. `top` and `book`
   can summon on different models and efforts, and neither surprises the other.
 
-**Workers and decision agents are `claude-opus-5` at `medium`** — [his, same
-message] *"the other agents should all be opus 5 medium thinking"*. That
-replaces the earlier `("", "")`, which meant "inherit `~/.claude/settings.json`"
-on the reading that nobody had asked for them to be pinned. Somebody has. It is
-now the DEFAULT and the CEILING of the fourth dropdown below, which is the same
-value read twice on purpose.
+**Workers and decision agents default to `deepseek v4 flash`** — [his,
+2026-08-02] the minister default is deepseek, so an unnamed dispatch runs cheap
+and off the weekly Claude window, and Solomon tiers UP from there per piece of
+work. The `opus 5 medium` the fourth dropdown tops out at stays the CEILING (the
+hard cap, *"do not allow ministers to be anything higher than opus 5 medium"*
+[his, 2026-07-29]) — the two are no longer the same value: `MINISTER_DEFAULT`
+(the last row) is what an unset dial gives, `MINISTER_CEILING` (the first) is
+what a stale or out-of-range one clamps to.
 
 ### 3. ...and under THAT, how many agents may run at once
 

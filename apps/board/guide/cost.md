@@ -88,20 +88,26 @@ record, and `_spawn_worker` picks the BACKEND from that record's model —
 so a deepseek-tiered minister reaches hermes rather than Claude carrying a
 deepseek flag.
 
-- **His dial (`minister-model`) becomes the CEILING rather than the setting**,
-  which is the word this guide already used for it. A dispatch naming no tier
-  gets exactly what it got before.
+- **His dial (`minister-model`) is the DEFAULT a dispatch tiers UP from**, not a
+  ceiling. [his, 2026-08-02] it defaults to `deepseek v4`, so a dispatch naming
+  no tier runs cheap and off the weekly Claude window; Solomon names a higher
+  `--model` only for work that needs one. (The hard `role_flags` clamp — opus 5
+  medium — is a separate, higher SAFETY cap, untouched.)
 - **Resolved at DISPATCH, not at spawn.** A task that queues above the cap runs
   on the tier it was planned with, not on whatever the dial says whenever
   `promote()` finds it a slot.
 - **An unreadable tier is his dial, never a cheap guess**, and `boardctl` SAYS
   so rather than falling back silently. The `role_flags` clamp still runs last
   and independently, so no route here can spawn a minister above the ceiling.
-- **The prompt's rubric is deepseek-flash for inventories/surveys/doc edits,
-  haiku/sonnet for a change whose shape is decided, the ceiling for the
-  plugin's C++, QML, anything visual and anything ambiguous — and WHEN IN
-  DOUBT, TIER UP.** A minister on too small a model does not fail where he can
-  see it: it half-lands the work and reports `ENACTED`.
+- **The prompt's rubric makes deepseek-flash the DEFAULT** (inventories,
+  surveys, doc edits, mechanical renames, anything within what deepseek can
+  usually handle) **and Solomon tiers UP from it, by difficulty, only for work
+  that needs it**: haiku 4.5 then sonnet 5 for a change whose shape is decided,
+  up to a ceiling of `opus 4.8 medium` for the plugin's C++, QML, anything
+  visual and anything ambiguous — **and WHEN IN DOUBT, TIER UP** (to that
+  ceiling). Higher than opus 4.8 medium he is ASKED first. A minister on too
+  small a model does not fail where he can see it: it half-lands the work and
+  reports `ENACTED`.
 - Harness: `tools/board-test.py` → `test_tier`.
 
 ### The RELAY: a minister hands the rest on rather than running long
