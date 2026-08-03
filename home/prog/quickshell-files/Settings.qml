@@ -181,20 +181,23 @@ Scope {
 
                 Loader {
                     id: pageLoader
-                    width: scroller.width
+                    // Reserve the scrollbar's gutter (§9.2, VScroll's barW) plus a
+                    // 4px breath so a control's right edge never sits under the bar.
+                    width: scroller.width - vscroll.barW - 4
                     source: root.srcFor(root.current)
                 }
             }
 
-            // thin scroll indicator on the right edge of the body
-            Rectangle {
-                visible: scroller.contentHeight > scroller.height
-                width: 3
-                color: Theme.dim
-                anchors.right: scroller.right
-                anchors.rightMargin: -10
-                y: scroller.y + (scroller.contentHeight > 0 ? scroller.contentY / scroller.contentHeight * scroller.height : 0)
-                height: scroller.contentHeight > 0 ? Math.max(24, scroller.height * scroller.height / scroller.contentHeight) : 0
+            // The body's scrollbar — the desktop-wide pixel-era idiom (§9.2),
+            // its style bound to SettingsStore.d.scrollbarStyle so the Appearance
+            // control updates it live. A sibling of the flickable (a child would
+            // scroll away), sitting in the gutter pageLoader reserved above.
+            SetScroll {
+                id: vscroll
+                flick: scroller
+                anchors {
+                    top: scroller.top; bottom: scroller.bottom; right: scroller.right
+                }
             }
 
             // confirm before wiping every setting (reuses the file browser's
