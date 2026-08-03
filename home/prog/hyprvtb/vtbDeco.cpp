@@ -130,18 +130,6 @@ static constexpr float VTB_ROLL_REVEAL_HOLD = 0.09f;
 // The lone-bar fade at the tail of a window-close animation (after the roll-up).
 static constexpr float VTB_FADE_DURATION = 0.16f;
 
-// A window rolled up AT REST is this window's own chrome, not an inert
-// unfocused window — so its buttons/title do not take the unfocused grey. They
-// take a LIGHTER tint of the focused accent (accent mixed this far toward
-// white), the same idea as the weather widget's temperature bars: a lightened
-// tint of a base colour rather than a gray (WeatherContent.qml, DESIGN.md §3.2).
-static constexpr float VTB_SHADE_LIGHTEN = 0.4f;
-
-// accent mixed toward white by t (0 = accent, 1 = white), alpha kept.
-static CHyprColor lightenToward(const CHyprColor& c, float t) {
-    return CHyprColor{c.r + (1.0 - c.r) * t, c.g + (1.0 - c.g) * t, c.b + (1.0 - c.b) * t, c.a};
-}
-
 static float rollRemap(float x, float a, float b) {
     return std::clamp((x - a) / (b - a), 0.f, 1.f);
 }
@@ -722,15 +710,15 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // colour) when focused, the inactive-border grey otherwise.
     auto textColor = FOCUSED ? accentColor : inactiveColor;
 
-    // ...except a window rolled up AT REST: it is this window's chrome, not an
-    // inert unfocused window, so it takes a LIGHTER tint of accent instead of
-    // the unfocused grey (see VTB_SHADE_LIGHTEN — the weather temp-bars idea).
+    // ...except a window rolled up AT REST: its text reads in the unfocused
+    // grey, same as the tucked end of the roll animation below (rollSlideT->1).
+    // A rolled-up bar has handed focus away, so this matches how it already
+    // fades — the at-rest path just used to stop one code path short of it.
     // Excludes the open/close animations (which borrow the roll machinery) and
     // any live roll, whose focused<->unfocused crossfade owns the tint below.
     const bool   SHADED_REST   = m_bRolledUp && m_rollAnim == ROLL_NONE && !m_bOpening && !m_bClosing;
-    const auto   shadeColor    = lightenToward(accentColor, VTB_SHADE_LIGHTEN);
     if (SHADED_REST)
-        textColor = shadeColor;
+        textColor = inactiveColor;
 
     // During the roll animation the tint crossfades focused<->unfocused in step
     // with the SLIDE (rollSlideT: 0 fully out/focused .. 1 tucked/unfocused),
@@ -1043,9 +1031,9 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
             const bool  active   = !disabled && b.state == 1;    // held selection
             const bool  hoverLit = !disabled && hovered && !active;
             // lit cells grey to the inactive tone on unfocused windows, like
-            // the old in-window strip did (win.fgAccent) — but a rolled-up bar
-            // at rest takes the lighter accent tint, matching its title/glyphs.
-            const CHyprColor litCol = FOCUSED ? accentColor : (SHADED_REST ? shadeColor : inactiveColor);
+            // the old in-window strip did (win.fgAccent) — and a rolled-up bar
+            // at rest reads as unfocused too, matching its title/glyphs.
+            const CHyprColor litCol = FOCUSED ? accentColor : inactiveColor;
 
             // an active (state==1) cell holds the full inverted look — accent
             // fill + bg glyph — persistently, like a click-flash that never
