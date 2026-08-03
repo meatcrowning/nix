@@ -3440,11 +3440,13 @@ def test_work(tmp):
     check("a stale or hand-edited choice falls back, never reaching --model",
           bw.orch_model() == bw.DEFAULT_ORCH, bw.orch_model())
     os.unlink(bw.orch_model_file())
-    # [his, 2026-07-29] "the other agents should all be opus 5 medium thinking"
+    # [his, 2026-08-02] the minister DEFAULT is deepseek v4; the orchestrator's
+    # model is his own pick and never leaks into a minister's default.
     for role in ("worker", "decision"):
-        check("a %s is opus 5, medium, whatever he picked for the orchestrator"
-              % role,
-              bw.role_flags(role) == ["--model", "claude-opus-5",
+        check("a %s defaults to deepseek v4, whatever he picked for the "
+              "orchestrator" % role,
+              bw.role_flags(role) == ["--model",
+                                      "deepseek/deepseek-v4-flash-0731",
                                       "--effort", "medium"],
               bw.role_flags(role))
 
@@ -3452,9 +3454,10 @@ def test_work(tmp):
     # [his, 2026-07-29] "do not allow ministers to be anything higher than opus 5
     # medium thinking." Two independent halves: a list that cannot offer more, and
     # a spawn that cannot pass more. The second is what a hand-edited file meets.
-    check("with nothing chosen, a minister is the ceiling itself",
+    check("with nothing chosen, a minister is the DEFAULT (deepseek v4)",
           not os.path.exists(bw.minister_file())
-          and bw.minister_model() == bw.MINISTER_CEILING
+          and bw.minister_model() == bw.MINISTER_DEFAULT
+          and bw.MINISTER_DEFAULT == ("deepseek/deepseek-v4-flash-0731", "medium")
           and bw.MINISTER_CEILING == ("claude-opus-5", "medium"),
           bw.minister_model())
     check("nothing above the ceiling is even offered",
