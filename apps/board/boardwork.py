@@ -378,6 +378,7 @@ ORCH_MODELS = [
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
     ("deepseek/deepseek-v4-pro", "medium", "deepseek v4 pro"),
+    ("moonshotai/kimi-k3", "medium", "kimi k3"),
 ]
 
 #: What summons when he has never chosen. `(flag, effort)`, stated once:
@@ -493,6 +494,7 @@ MINISTER_MODELS = [
     ("claude-sonnet-5", "low", "sonnet 5 low"),
     ("claude-haiku-4-5-20251001", "medium", "haiku 4.5 medium"),
     ("claude-haiku-4-5-20251001", "low", "haiku 4.5 low"),
+    ("moonshotai/kimi-k3", "medium", "kimi k3"),
     ("deepseek/deepseek-v4-flash-0731", "medium", "deepseek v4 flash"),
 ]
 
@@ -1635,8 +1637,12 @@ class ClaudeBackend(AgentBackend):
 #:
 #: `deepseek-v4-pro` rides it too — a stronger, still-far-cheaper-than-Claude
 #: step up, offered in the summoner dropdown for a run that should stay off the
-#: weekly Claude window without dropping all the way to flash.
-HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-pro"}
+#: weekly Claude window without dropping all the way to flash. `kimi-k3`
+#: (Moonshot) is a third hermes model — a strong, large-context coding family
+#: offered in both dropdowns, same nous provider.
+HERMES_MODELS = {"deepseek/deepseek-v4-flash-0731",
+                 "deepseek/deepseek-v4-pro",
+                 "moonshotai/kimi-k3"}
 HERMES_PROVIDER = os.environ.get("BOARD_HERMES_PROVIDER", "nous")
 #: The Hermes toolsets a minister may reach. Mirrors the Claude `TOOLS` idea:
 #: a minister gets the shell, the file tools and the web pair — nothing bigger.
