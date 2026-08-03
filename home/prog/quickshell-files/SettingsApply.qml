@@ -108,7 +108,6 @@ Item {
         function onAccentOverrideChanged()    { root.reapplyTheme(); }
         function onPaletteColorCountChanged() { root.reapplyTheme(); }
         function onPureBlackBgChanged()       { root.reapplyTheme(); }
-        function onPaletteFullChanged()       { root.reapplyTheme(); }
         function onPaletteVariantChanged()    { root.reapplyTheme(); }
     }
 
@@ -127,7 +126,7 @@ Item {
     // real values readable there) and the timer applies only a genuine change.
     readonly property var _paletteKeys: ["themeMode", "accentOverride",
                                          "paletteColorCount", "pureBlackBg",
-                                         "paletteFull", "paletteVariant", "lightMode"]
+                                         "paletteVariant", "lightMode"]
     property string _paletteSig: ""
     function _sig() {
         const d = SettingsStore.d;

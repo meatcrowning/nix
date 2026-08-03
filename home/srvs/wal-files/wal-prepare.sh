@@ -78,7 +78,7 @@ fi
 #
 # settings.json is in that list because several Appearance keys are INPUTS to
 # wal-extract.py (themeMode, accentOverride, paletteColorCount, pureBlackBg,
-# paletteFull, paletteVariant, lightMode — it reads them itself). Keying on the
+# paletteVariant, lightMode — it reads them itself). Keying on the
 # file's mtime rather than on those values costs a re-extract (~0.2s, for one
 # image, lazily) after any unrelated
 # settings edit, and buys not having to parse JSON in two languages and keep
