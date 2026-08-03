@@ -657,6 +657,9 @@ hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("qs ipc call powermenu toggle"), { de
 -- Wallpaper picker: flip through ~/Pictures/wall with arrow keys, each
 -- highlight live-applies (wal-set.sh) as both wallpaper and theme.
 hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("qs ipc call wallpaper toggle"), { description = "Wallpaper picker" })
+-- Flip the desktop between light and dark from the same wallpaper hue; the
+-- panel re-runs wal-set.sh and the whole desktop re-themes live (theme IPC).
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("qs ipc call theme toggle"), { description = "Toggle light/dark theme" })
 -- Spectacle-style screenshot overlay (quickshell/Screenshot.qml): dim +
 -- drag-select / window pick, delay + exit in the bottom menu; saves to
 -- ~/Pictures/Screenshots and copies to the clipboard.

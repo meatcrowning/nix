@@ -526,6 +526,20 @@ Scope {
         }
     }
 
+    // Flip light/dark polarity live from a keybind: `qs ipc call theme toggle`
+    // (Meta+D), or `theme light` / `theme dark` to force a direction. All three
+    // go through SettingsStore.setLightMode — the same path the Settings toggle
+    // uses — so SettingsApply's onLightModeChanged re-runs wal-set.sh and the
+    // whole desktop re-themes with no panel reload. `theme mode` reports the
+    // current polarity, so the switch can be verified without looking.
+    IpcHandler {
+        target: "theme"
+        function toggle(): void { SettingsStore.toggleLightMode(); }
+        function light(): void { SettingsStore.setLightMode(true); }
+        function dark(): void { SettingsStore.setLightMode(false); }
+        function mode(): string { return SettingsStore.d.lightMode ? "light" : "dark"; }
+    }
+
     // Reload-continuity probe: `qs ipc call state carried`. Reports how much of
     // each carried blob survived the last reload, so the swap can be verified
     // without looking at the screen — all five must be non-zero after a reload

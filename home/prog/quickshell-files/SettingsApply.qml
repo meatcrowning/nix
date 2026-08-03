@@ -109,6 +109,11 @@ Item {
         function onPaletteColorCountChanged() { root.reapplyTheme(); }
         function onPureBlackBgChanged()       { root.reapplyTheme(); }
         function onPaletteVariantChanged()    { root.reapplyTheme(); }
+        // lightMode is in _paletteKeys (the loop guard), but without this it was
+        // never a trigger — so light->dark never re-themed live, and dark->light
+        // only did by the pureBlackBg side effect setLightMode forces. The
+        // Meta+D keybind (theme IPC) rides this same path.
+        function onLightModeChanged()         { root.reapplyTheme(); }
     }
 
     // Re-run the full wallpaper/theme apply. DEBOUNCED, because its last step

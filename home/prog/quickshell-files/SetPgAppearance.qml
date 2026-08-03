@@ -148,16 +148,13 @@ Column {
             desc: "on = a light background with dark ink, from the same wallpaper hue"
             SetToggle {
                 checked: page.d.lightMode
+                // Shared with the Meta+D keybind — see SettingsStore.setLightMode.
                 // Enabling light mode forces "pure black background" off: a
                 // black-titled control is a lie on a white desktop, and the two
                 // extremes fight (the light-mode analogue is pure WHITE, chosen
                 // by the same pureBlackBg key). The pure-black toggle flips off
                 // in the UI as this writes, so nothing hidden diverges.
-                onToggled: (v) => {
-                    page.d.lightMode = v;
-                    if (v) page.d.pureBlackBg = false;
-                    SettingsStore.save();
-                }
+                onToggled: (v) => SettingsStore.setLightMode(v)
             }
         }
     }

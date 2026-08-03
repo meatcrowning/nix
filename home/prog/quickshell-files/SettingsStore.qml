@@ -49,6 +49,20 @@ Singleton {
     function save() { saveTimer.restart(); }
     // Drop unsaved edits and re-read what's on disk.
     function revert() { file.reload(); }
+
+    // Flip light/dark polarity in ONE place, so the Settings toggle
+    // (SetPgAppearance) and the Meta+D keybind (shell.qml's `theme` IPC) share
+    // it and the logic is never edited twice. Enabling light forces "pure black
+    // background" off: its light analogue is pure WHITE and the two extremes
+    // fight, and a black-titled control is a lie on a white desktop. The write
+    // is what SettingsApply watches (onLightModeChanged) to re-run wal-set.sh,
+    // so both callers re-theme the whole desktop live with no panel reload.
+    function setLightMode(v) {
+        d.lightMode = v;
+        if (v) d.pureBlackBg = false;
+        save();
+    }
+    function toggleLightMode() { setLightMode(!d.lightMode); }
     // Pull the file in NOW, synchronously (blockLoading), and let the bindings
     // that depend on it re-evaluate before this call returns.
     //
