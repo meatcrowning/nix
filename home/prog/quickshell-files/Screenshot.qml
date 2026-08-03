@@ -273,14 +273,29 @@ PanelWindow {
         // fps/flag/geometry/audio/dir go through argv, never interpolated.
         // $4 (audio) is intentionally unquoted so "" contributes no argument.
         const audio = SettingsStore.d.recordingAudio ? "-a" : "";
+        // Same "copy to clipboard" setting the screenshot path reads (its label
+        // says "captures", plural). Raw video is not universally pasteable, so a
+        // recording is copied as a text/uri-list file:// URI — that pastes as the
+        // FILE into a file manager or chat, not as bytes.
+        const copy = SettingsStore.d.screenshotCopy ? "1" : "0";
         Quickshell.execDetached(["sh", "-c",
             'sleep 0.2; ' +
             'd="$5"; case "$d" in "~"*) d="$HOME${d#"~"}";; esac; mkdir -p "$d"; ' +
             'f="$d/Recording_$(date +%Y%m%d_%H%M%S).mp4"; ' +
             'if wf-recorder $4 -r "$1" "$2" "$3" -f "$f"; then ' +
-            '  notify-send -a recording Recording "$(basename "$f") saved"; ' +
+            '  msg="saved"; ' +
+            '  if [ "$6" = "1" ]; then wl-copy --type text/uri-list "$(printf %s "file://$f" | sed "s/ /%20/g")"; msg="saved + copied"; fi; ' +
+            // A poster frame for the toast thumbnail (QML Image cannot decode an
+            // mp4): first frame -> a PNG in the runtime dir, handed to the panel
+            // in x-download-image. x-open-path points the card's click at the
+            // VIDEO, not the poster. If ffmpeg is missing/fails, the toast still
+            // lands with just the open hint (no thumbnail box).
+            '  t="${XDG_RUNTIME_DIR:-/tmp}/qs-rec-thumb-$(date +%s).png"; ' +
+            '  if ffmpeg -y -loglevel error -i "$f" -frames:v 1 "$t" </dev/null && [ -s "$t" ]; then ' +
+            '    notify-send -a recording -h "string:x-download-image:$t" -h "string:x-open-path:$f" Recording "$(basename "$f") $msg"; ' +
+            '  else notify-send -a recording -h "string:x-open-path:$f" Recording "$(basename "$f") $msg"; fi; ' +
             'else notify-send -u critical -a recording Recording "recording failed"; fi',
-            "_", String(SettingsStore.d.recordingFps), flag, val, audio, SettingsStore.d.recordingDir]);
+            "_", String(SettingsStore.d.recordingFps), flag, val, audio, SettingsStore.d.recordingDir, copy]);
     }
 
     // Stop the running recording: SIGINT lets wf-recorder flush and finalise
@@ -315,9 +330,13 @@ PanelWindow {
             'sleep ' + wait + '; ' +
             'd="$1"; case "$d" in "~"*) d="$HOME${d#"~"}";; esac; mkdir -p "$d"; ' +
             'f="$d/Screenshot_$(date +%Y%m%d_%H%M%S).png"; ' +
+            // On success, copy the PNG as an image (--type image/png, so it
+            // pastes into an image editor rather than as raw text), and hand the
+            // panel the file path in x-download-image so its notification card
+            // draws the same 48px thumbnail + click-to-open surfer downloads get.
             'if grim -g "$2" "$f"; then ' +
-            '  if [ "$3" = "1" ]; then wl-copy < "$f"; msg="saved + copied"; else msg="saved"; fi; ' +
-            '  notify-send -a screenshot Screenshot "$(basename "$f") $msg"; ' +
+            '  if [ "$3" = "1" ]; then wl-copy --type image/png < "$f"; msg="saved + copied"; else msg="saved"; fi; ' +
+            '  notify-send -a screenshot -h "string:x-download-image:$f" Screenshot "$(basename "$f") $msg"; ' +
             'else notify-send -u critical -a screenshot Screenshot "capture failed"; fi',
             "_", SettingsStore.d.screenshotDir, g, copy]);
     }
