@@ -81,6 +81,9 @@ in
   # resolves class -> .desktop -> Icon= -> icon theme; a currentColor SVG it
   # tints to the title colour) — same pattern as goetia's seal.
   home.file.".local/share/icons/hicolor/scalable/apps/editor.svg".source = ./app-icons/editor.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "editor" ];
 
   home.file.".local/share/applications/editor.desktop".text = ''
     [Desktop Entry]

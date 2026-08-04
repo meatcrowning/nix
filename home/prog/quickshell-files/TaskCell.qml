@@ -78,9 +78,10 @@ Rectangle {
     border.width: focusedWin ? 2 : 1
     border.color: cell.stateColor
 
-    // The icon is always the (invisible) SOURCE the MultiEffect below recolours,
-    // never drawn straight: breeze-dark ships no dark VARIANT for its colourful
-    // app/mimetype icons (breeze-dark's system-file-manager, text-x-generic … are
+    // The icon is never drawn straight (AppIcon paints it — our own seals flat
+    // in the state colour, a foreign icon tinted to it): breeze-dark ships no
+    // dark VARIANT for its colourful app/mimetype icons (breeze-dark's
+    // system-file-manager, text-x-generic … are
     // byte-identical to breeze's), so a raw icon renders in its light-theme
     // colours and reads as "stuck on light mode" on this dark bar. Tinting every
     // one to the cell's state colour is docs/DESIGN.md §3.3's own rule — "the
@@ -89,20 +90,14 @@ Rectangle {
     // the fallback letter already ride, and the same move the tray makes with its
     // own tint. It also subsumes goetia's currentColor sigil, which used to be the
     // only icon tinted here.
-    IconImage {
-        id: taskIcon
+    AppIcon {
         anchors.centerIn: parent
-        visible: false
-        implicitSize: Theme.wsCell - 12
-        source: Quickshell.iconPath(cell.iconName, "application-x-executable")
-    }
-    MultiEffect {
-        anchors.fill: taskIcon
-        source: taskIcon
+        width: Theme.wsCell - 12
+        height: Theme.wsCell - 12
         visible: cell.iconName !== ""
-        colorization: 1.0
-        colorizationColor: cell.stateColor
-        opacity: cell.iconDim
+        iconName: cell.iconName
+        color: cell.stateColor
+        dim: cell.iconDim
     }
     // fallback: first letter of the app id in the pixel font
     PixelText {

@@ -390,6 +390,25 @@ minimized — with the icon knocked back in the last two, and the filled
 background left to mean FOCUS alone. Roll and minimize outrank focus, because a
 rolled-up window can still hold the keyboard.
 
+### Every program icon goes through `AppIcon.qml`
+
+Runner rows, task cells, tray items and a toast's header all draw one, and none
+of them draws it itself. The reason is our own app seals: they are
+`currentColor` sigils, so Qt renders them in the file's baked fallback
+(`#cc4400`, red) drawn raw, and `MultiEffect.colorization` — which scales the
+tint by the SOURCE's luminance — turns them into a dull fraction of the accent.
+`AppIcon` paints a seal as a MASK instead (a flat fill of the given colour cut
+to the sigil's alpha, the exact colour hyprvtb's titlebar gives it) and leaves a
+foreign icon on colorization, whose light/dark detail is the drawing.
+docs/DESIGN.md §12.2.1 is the rule.
+
+It tells the two apart by name, through the generated `AppSeals.qml` singleton —
+`Quickshell.iconPath` returns `image://icon/<name>`, never a path, so there is
+nothing to look at on disk. That list comes from `my.appSeals`, declared in each
+app's module beside the `home.file` that installs its svg (see
+`home/prog/app-icons/seals.nix`). **A new bespoke app declares its seal there or
+its icon renders red.**
+
 **Neither state is in the Wayland toplevel list** — they are hyprvtb's, not the
 protocol's — so `WinState.qml` polls `hyprctl clients -j` (~4 ms, once a second,
 idle when no windows) and derives them from what the plugin actually does:

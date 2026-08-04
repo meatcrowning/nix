@@ -275,6 +275,9 @@ in
   # icon theme; a currentColor SVG it tints to the title colour) — same pattern
   # as goetia's seal.
   home.file.".local/share/icons/hicolor/scalable/apps/surfer.svg".source = ./app-icons/surfer.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "surfer" ];
 
   home.file.".local/share/applications/surfer.desktop".text = ''
     [Desktop Entry]

@@ -65,6 +65,9 @@ in
   # IS body text, which follows the accent, not a baked light/dark hue).
   home.file.".local/share/icons/hicolor/scalable/apps/goetia.svg".source =
     ./board-files/goetia.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "goetia" ];
 
   home.file.".local/share/applications/board.desktop".text = ''
     [Desktop Entry]

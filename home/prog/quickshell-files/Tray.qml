@@ -24,22 +24,19 @@ Column {
             height: Theme.cell
 
             // Tray icons come from the icon theme, so Theme.* colours don't
-            // reach them; MultiEffect tints them to the wallpaper accent while
-            // keeping the icon's own light/dark detail (colorization = 1.0).
-            // With "tint tray icons" off, show the icons in their own colours.
-            IconImage {
-                id: trayIcon
+            // reach them; AppIcon tints them to the wallpaper accent while
+            // keeping the icon's own light/dark detail. With "tint tray icons"
+            // off, show the icons in their own colours — except one of OUR
+            // seals, which has no colours of its own to show (a currentColor
+            // sigil drawn raw is the file's baked red), so it takes the accent
+            // either way.
+            AppIcon {
                 anchors.centerIn: parent
-                implicitSize: Theme.cell - 18
+                width: Theme.cell - 18
+                height: Theme.cell - 18
                 source: entry.item.icon
-                visible: !SettingsStore.d.trayTint
-            }
-            MultiEffect {
-                anchors.fill: trayIcon
-                source: trayIcon
-                visible: SettingsStore.d.trayTint
-                colorization: 1.0
-                colorizationColor: Theme.accent
+                color: Theme.accent
+                tint: SettingsStore.d.trayTint
             }
 
             QsMenuAnchor {

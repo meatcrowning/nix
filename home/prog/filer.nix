@@ -90,6 +90,9 @@ in
   # (hyprvtb resolves class -> .desktop -> Icon= -> icon theme; a currentColor
   # SVG it tints to the title colour) find it — same pattern as goetia's seal.
   home.file.".local/share/icons/hicolor/scalable/apps/filer.svg".source = ./app-icons/filer.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "filer" ];
 
   # Desktop entry (written via home.file since xdg.enable is off here — see the
   # note that used to live in this file / commit history). Exec is the absolute
