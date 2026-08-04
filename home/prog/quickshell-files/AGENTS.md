@@ -427,14 +427,17 @@ geometry change, so a floating window dragged off the notch still waits for the
 instant. It is behind a Loader, not an import, so a Quickshell built without the
 Hyprland module loses the fast path rather than the panel.
 
-A THIRD trap, which cost a regression: `DesktopNotch` publishes `notchPx` /
-`notchH` into `ViewMode` through `Binding`, and those bindings MUST carry
-`restoreMode: Binding.RestoreNone`. A reload builds the new tree and then
-destroys the old one; a Binding's default restore mode resets its target as it
-dies, so the outgoing notch zeroed the incoming one's reservation and a
-maximized window covered the icon bar completely. Anything here that writes into
-a singleton from a per-reload tree has the same hazard — the singleton outlives
-the tree.
+**NEVER PUSH FROM THE PER-RELOAD TREE INTO A SINGLETON.** This cost the same
+regression twice: `DesktopNotch` published its size into `ViewMode` with a
+`Binding`, a reload builds the new tree and THEN tears the old one down, and the
+outgoing notch wrote its dying value (0 — its item goes invisible during
+teardown) over the incoming one's. The panel then reserved nothing for the notch
+and a maximized window covered the icon bar completely. `restoreMode:
+RestoreNone` does NOT fix it — the binding is live until destroyed, so it is the
+last EVALUATION that writes the zero, not the restore. The fix is structural:
+`NotchModel.qml` is a singleton that derives the content and the metrics from
+things that outlive a reload (settings, `DesktopEntries`, `Theme`), and
+`ViewMode.notchPx` / `notchH` are `readonly` pulls from it. Nothing writes.
 
 Two traps in the seam itself: `height` on a
 `PanelWindow` whose `visible` depends on that same computation is a circular

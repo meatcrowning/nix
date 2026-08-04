@@ -965,14 +965,14 @@ Scope {
                   ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
             // The shortcut notch: a slab protruding from the bar's inner edge,
-            // centred on it. Below barBody in z so the strip of it that reaches
-            // under the bar — the side that would otherwise show an outline —
-            // is covered by the bar's own opaque background, which is what
-            // makes it read as an opening in the panel rather than a box glued
-            // to its edge.
+            // centred on it. ABOVE barBody in z, because the part of it that
+            // reaches under the bar is what hides the accent strip behind the
+            // notch's mouth and lets its own outline overlap that strip to make
+            // the corners. It paints the bar's own background there, so the
+            // overlap is invisible against the bar.
             DesktopNotch {
                 id: notch
-                z: -1
+                z: 2
                 barLeft: bar.barLeft
                 anchors.verticalCenter: parent.verticalCenter
                 x: bar.barLeft ? barBody.x + barBody.width - overlap
@@ -1064,42 +1064,22 @@ Scope {
                 // border. Sits on the left when the bar is anchored right, and flips
                 // to the right when barEdge moves the bar to the left screen edge.
                 //
-                // TWO segments, not one: the strip stops at the notch and picks
-                // up below it, so the accent line runs down the panel, out
-                // around the notch's three exposed sides and back — one
-                // continuous outline rather than a line drawn across the
-                // notch's mouth, which would read as a box stuck on the bar.
-                // barBody is full height and anchored to the window's top, so
-                // the notch's window coordinates are these coordinates.
-                Repeater {
-                    model: 2
-                    Rectangle {
-                        required property int index
-                        z: 1
-                        anchors {
-                            left: bar.barLeft ? undefined : parent.left
-                            right: bar.barLeft ? parent.right : undefined
-                        }
-                        width: 2
-                        color: Theme.accent
-                        // Each segment runs INTO the notch's horizontal border
-                        // by its own width rather than stopping against it.
-                        // Abutting shapes are rounded independently at this
-                        // fractional scale, which left an unpainted block
-                        // exactly where the corner should be — [his] "it's like
-                        // two sides touching without a corner piece". The
-                        // overlap IS the corner piece.
-                        y: index === 0 ? 0
-                                       : (notch.visible
-                                          ? notch.y + notch.height - Theme.windowBorderWidth : 0)
-                        height: index === 0
-                                ? (notch.visible ? notch.y + Theme.windowBorderWidth
-                                                 : parent.height)
-                                : (notch.visible
-                                   ? parent.height - (notch.y + notch.height)
-                                     + Theme.windowBorderWidth
-                                   : 0)
+                // UNCUT, even where the shortcut notch crosses it: the notch is
+                // drawn OVER this (see the DesktopNotch above, and its z), and
+                // its fill hides the stretch behind its mouth while its own
+                // top and bottom pieces overlap this line to make the corners.
+                // Cutting it into two segments instead left an unpainted block
+                // at each corner — two shapes abutting, each rounding its own
+                // edge at a fractional scale.
+                Rectangle {
+                    z: 1
+                    anchors {
+                        top: parent.top; bottom: parent.bottom
+                        left: bar.barLeft ? undefined : parent.left
+                        right: bar.barLeft ? parent.right : undefined
                     }
+                    width: 2
+                    color: Theme.accent
                 }
 
                 // THE UAC SCRIM. While a `vista-askpass` window is up, Hyprland's

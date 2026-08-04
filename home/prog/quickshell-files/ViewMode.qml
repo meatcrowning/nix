@@ -327,16 +327,19 @@ Singleton {
     // was on that side. Shrinking needs no equivalent: it uncovers windows, and
     // moving them "back" would fight hyprvtb's own geometry memory.
     property int _lastReservePx: -1
-    // The shortcut notch's VISIBLE protrusion past the bar's inner edge,
-    // published by DesktopNotch.qml (0 when it is off). The panel reserves it
-    // along with its own width — [his] "reserve space when a window is
-    // maximized or the user disables floating mode globally or per window" —
-    // so a tiled or maximized window stops at the notch instead of covering it.
-    // A FLOATING window still can, exactly as it can cover the bar itself.
-    property int notchPx: 0
-    // ...and its height, for the seam patch (NotchSeam.qml), which has to cover
-    // exactly the part of a window's border the notch is beside.
-    property int notchH: 0
+    // The shortcut notch's VISIBLE protrusion past the bar's inner edge, and its
+    // height. The panel reserves the protrusion along with its own width —
+    // [his] "reserve space when a window is maximized or the user disables
+    // floating mode globally or per window" — so a tiled or maximized window
+    // stops at the notch instead of covering it. A FLOATING window still can,
+    // exactly as it can cover the bar itself.
+    //
+    // PULLED from NotchModel, never pushed here by the notch: a Binding from
+    // the per-reload tree into this singleton wrote its dying value over the
+    // new tree's twice, and each time the panel reserved nothing and a
+    // maximized window covered the icon bar. See NotchModel.qml.
+    readonly property int notchPx: NotchModel.protrusion
+    readonly property int notchH: NotchModel.slabH
     function applyReserve() {
         const edge = SettingsStore.d.barEdge === "left" ? "left" : "right";
         const px = dock ? barWidth + notchPx : 0;
