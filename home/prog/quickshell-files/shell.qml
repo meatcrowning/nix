@@ -761,6 +761,16 @@ Scope {
         WallpaperLayer {}
     }
 
+    // The compositor's event stream -> WinState.refresh(), so anything drawn
+    // against a window keeps up with it instead of waiting for the next poll.
+    // A Loader because the import is optional: a Quickshell without the
+    // Hyprland module loses the fast path, not the panel.
+    Loader {
+        source: "HyprEvents.qml"
+        onStatusChanged: if (status === Loader.Error)
+            console.warn("HyprEvents unavailable — window-state updates fall back to the 1s poll");
+    }
+
     // The seam between a maximized window's edge and the shortcut notch: the
     // one surface here that draws ABOVE windows, and only while one is flush.
     Variants {
@@ -1072,11 +1082,23 @@ Scope {
                         }
                         width: 2
                         color: Theme.accent
+                        // Each segment runs INTO the notch's horizontal border
+                        // by its own width rather than stopping against it.
+                        // Abutting shapes are rounded independently at this
+                        // fractional scale, which left an unpainted block
+                        // exactly where the corner should be — [his] "it's like
+                        // two sides touching without a corner piece". The
+                        // overlap IS the corner piece.
                         y: index === 0 ? 0
-                                       : (notch.visible ? notch.y + notch.height : 0)
+                                       : (notch.visible
+                                          ? notch.y + notch.height - Theme.windowBorderWidth : 0)
                         height: index === 0
-                                ? (notch.visible ? notch.y : parent.height)
-                                : (notch.visible ? parent.height - (notch.y + notch.height) : 0)
+                                ? (notch.visible ? notch.y + Theme.windowBorderWidth
+                                                 : parent.height)
+                                : (notch.visible
+                                   ? parent.height - (notch.y + notch.height)
+                                     + Theme.windowBorderWidth
+                                   : 0)
                     }
                 }
 

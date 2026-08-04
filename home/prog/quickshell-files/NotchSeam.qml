@@ -98,9 +98,14 @@ PanelWindow {
         // Over the notch's face and the window border that lands on it.
         x: root.barLeft ? root.edgeFromSide - Theme.windowBorderWidth - 1
                         : root.width - root.edgeFromSide - 1
-        y: root.notchTop
+        // The notch's INSIDE only. Covering its full height would paint over
+        // the ends of its own top and bottom borders — the corner pieces where
+        // the notch's outline meets the window's — and leave two sides touching
+        // with nothing in the corner. The window's border survives on those two
+        // rows, which is what the corner is made of.
+        y: root.notchTop + Theme.windowBorderWidth
         width: root.patchW
-        height: ViewMode.notchH
+        height: ViewMode.notchH - 2 * Theme.windowBorderWidth
         // The bar's background — the colour on BOTH sides of the seam, since
         // the window's chrome there is hyprvtb's titlebar (drawn in the same
         // Theme.bg) and the notch's inside is the bar body.
