@@ -85,7 +85,15 @@ def cmd_scan():
                     except Exception:
                         v = None
                     if v:
-                        return str(v[0] if isinstance(v, list) else v)
+                        val = v[0] if isinstance(v, list) else v
+                        if isinstance(val, bytes):
+                            # MP4FreeForm values (----:com.apple.iTunes: frames)
+                            # are bytes; str() would yield "b'...'"
+                            try:
+                                val = val.decode('utf-8')
+                            except UnicodeDecodeError:
+                                val = str(val)
+                        return str(val)
                 return None
 
             out.append({
