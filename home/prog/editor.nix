@@ -75,6 +75,13 @@ in
   # (apps/AGENTS.md: an app may only claim a field code it can honour). It also
   # accepts `+N` to open at a line, which is what a compiler error or `git grep`
   # hands you.
+  # App icon: the planetary seal of Mercury (the scribe), redrawn as clean
+  # vector SVG in app-icons/. Installed into the hicolor icon theme so the
+  # desktop entry's Icon= AND the titlebar program-icon slot find it (hyprvtb
+  # resolves class -> .desktop -> Icon= -> icon theme; a currentColor SVG it
+  # tints to the title colour) — same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/editor.svg".source = ./app-icons/editor.svg;
+
   home.file.".local/share/applications/editor.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -82,7 +89,7 @@ in
     GenericName=Text Editor
     Comment=Edit text and source files
     Exec=${editor}/bin/editor %F
-    Icon=text-x-generic
+    Icon=editor
     Terminal=false
     Categories=Development;TextEditor;Utility;
     Keywords=bespoke;text;code;source;edit;

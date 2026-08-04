@@ -71,6 +71,30 @@ in
   # via `sudo -A <cmd>`.
   home.packages = [ sudo-askpass askpass-dialog pkgs.kdePackages.ksshaskpass ];
 
+  # App icon: the planetary seal of Saturn (the gatekeeper), redrawn as clean
+  # vector SVG in app-icons/. Installed into the hicolor icon theme so the
+  # titlebar program-icon slot finds it (hyprvtb resolves class ->
+  # .desktop -> Icon= -> icon theme; a currentColor SVG it tints to the title
+  # colour) — same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/vista-askpass.svg".source = ./app-icons/askpass.svg;
+
+  # NoDisplay desktop entry: the dialog is not a launcher app, but the titlebar
+  # resolves the program icon through the freedesktop chain (class ->
+  # vista-askpass.desktop -> Icon=), so the seal needs a home here. NoDisplay
+  # keeps it out of the runner (Launcher.qml skips a.noDisplay).
+  home.file.".local/share/applications/vista-askpass.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=vista-askpass
+    Comment=SUDO_ASKPASS password dialog
+    Exec=${askpass-dialog}/bin/vista-askpass
+    Icon=vista-askpass
+    NoDisplay=true
+    Terminal=false
+    Categories=Utility;
+    Keywords=bespoke;sudo;askpass;
+  '';
+
   # SUDO_ASKPASS points at a STABLE path, not at the wrapper's /nix/store path.
   #
   # This is not cosmetic. `SUDO_ASKPASS` used to be the store path, which is a

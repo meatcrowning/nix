@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- viewer app icon - the planetary seal of Sol (the Sun): a circle with a
+       central dot and eight rays, the classic geometric solar sigil of the
+       Key-of-Solomon/Heptameron planetary tradition. Fits an image viewer:
+       the sun is light.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor
+       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="256" r="104"/>
+    <circle cx="256" cy="256" r="22"/>
+    <path d="M256 96 L256 152"/>
+    <path d="M256 360 L256 416"/>
+    <path d="M96 256 L152 256"/>
+    <path d="M360 256 L416 256"/>
+    <path d="M143 143 L183 183"/>
+    <path d="M329 329 L369 369"/>
+    <path d="M143 369 L183 329"/>
+    <path d="M329 143 L369 183"/>
+  </g>
+</svg>

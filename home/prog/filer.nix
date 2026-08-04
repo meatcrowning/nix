@@ -84,6 +84,13 @@ in
 {
   home.packages = [ filer ];
 
+  # App icon: the seal of Vine (a king of the Ars Goetia, its tree figure),
+  # redrawn as clean vector SVG in app-icons/. Installed into the hicolor icon
+  # theme so the desktop entry's Icon= AND the titlebar program-icon slot
+  # (hyprvtb resolves class -> .desktop -> Icon= -> icon theme; a currentColor
+  # SVG it tints to the title colour) find it — same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/filer.svg".source = ./app-icons/filer.svg;
+
   # Desktop entry (written via home.file since xdg.enable is off here — see the
   # note that used to live in this file / commit history). Exec is the absolute
   # store path so it resolves regardless of the launcher's PATH; it regenerates
@@ -95,7 +102,7 @@ in
     GenericName=File Browser
     Comment=Standalone file browser for the top desktop
     Exec=${filer}/bin/filer %f
-    Icon=system-file-manager
+    Icon=filer
     Terminal=false
     Categories=Utility;System;FileTools;
     Keywords=bespoke;

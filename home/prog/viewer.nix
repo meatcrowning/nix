@@ -47,6 +47,13 @@ in
 {
   home.packages = [ viewer ];
 
+  # App icon: the planetary seal of Sol (the sun), redrawn as clean vector SVG
+  # in app-icons/. Installed into the hicolor icon theme so the desktop entry's
+  # Icon= AND the titlebar program-icon slot find it (hyprvtb resolves class ->
+  # .desktop -> Icon= -> icon theme; a currentColor SVG it tints to the title
+  # colour) — same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/viewer.svg".source = ./app-icons/viewer.svg;
+
   # Desktop entry so viewer shows up in the runner and is eligible for image and
   # video types. Being the DEFAULT for them is set centrally, in
   # home/prog/mime-defaults.nix. (filer invokes `viewer` by name directly and
@@ -62,7 +69,7 @@ in
     GenericName=Media Viewer
     Comment=Standalone image and video viewer for the top desktop
     Exec=${viewer}/bin/viewer %F
-    Icon=image-x-generic
+    Icon=viewer
     Terminal=false
     Categories=Graphics;Viewer;AudioVideo;
     Keywords=bespoke;

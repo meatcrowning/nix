@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- player app icon - the seal of Amdusias, sixty-seventh spirit of the Ars
+       Goetia (a duke), redrawn as clean geometry from the 1904
+       Mathers/Crowley plate: outer circle and the horned figure that crowns
+       the seal - two curved horns rising from a head, like the pipes of a
+       pan flute. Amdusias' office is to cause all sorts of musical
+       instruments to be heard: the seal of a music player.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor
+       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="200" r="52"/>
+    <path d="M222 158 C200 120 190 104 196 76"/>
+    <path d="M290 158 C312 120 322 104 316 76"/>
+    <path d="M256 252 L256 330"/>
+    <path d="M256 330 L210 400"/>
+    <path d="M256 330 L302 400"/>
+  </g>
+</svg>

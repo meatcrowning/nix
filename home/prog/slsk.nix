@@ -44,6 +44,14 @@ in
 {
   home.packages = [ slsk ];
 
+  # App icon: the seal of Vassago (a prince of the Ars Goetia; his office is to
+  # find hidden or lost things), redrawn as clean vector SVG in app-icons/.
+  # Installed into the hicolor icon theme so the desktop entry's Icon= AND the
+  # titlebar program-icon slot find it (hyprvtb resolves class -> .desktop ->
+  # Icon= -> icon theme; a currentColor SVG it tints to the title colour) —
+  # same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/slsk.svg".source = ./app-icons/slsk.svg;
+
   # The desktop entry, so slsk is in the runner. It owns no file type — it is a
   # client over a network service, not an open-a-file app (the same reason
   # painter and goetia declare no MimeType=; see apps/AGENTS.md).
@@ -54,7 +62,7 @@ in
     GenericName=Soulseek Client
     Comment=Search and download from Soulseek via the local slskd daemon
     Exec=${slsk}/bin/slsk
-    Icon=network-server
+    Icon=slsk
     Terminal=false
     Categories=Network;AudioVideo;
     Keywords=bespoke;soulseek;slskd;download;music;
