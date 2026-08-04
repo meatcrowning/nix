@@ -536,16 +536,32 @@ player only ever sees a track once it is moved into `aud/` and rescanned. The
 pipeline's last step (`tools/player-add.py`, run automatically by
 soulseek-missing.py unless `--no-import`) closes that gap: it moves each
 completed download into `aud/<Artist>/<Album>/` following the library's folder
-convention, fills missing tags from the same `missing.tsv` (a Soulseek file can
-arrive bare — the 0181 mp3 had no artist/title), and does an incremental
+convention, fills missing tags from the pipeline's own record (a Soulseek file
+can arrive bare — the 0181 mp3 had no artist/title), and does an incremental
 rescan of `library.db`. Because the scan is tag-driven, the DB row comes from
 the file's own tags; a file whose tags arrive empty is only metadata-correct
 once the importer tags it from the pipeline's own record of what was queued.
-`player-add.py` runs under the **player's** python env (it reuses
-`main.py`'s `read_tags`/`open_db`/`rebuild_albums`), which soulseek-missing.py
-resolves from the `player` wrapper; it writes the DB out-of-process in WAL
-(busy-timeout 60s) like `tools/dbsync.py`, and never touches the running
-player's session.
+
+**Placement is by the pipeline's album record, not by the Soulseek file's
+tags.** soulseek-missing.py records the album identity of every queued download
+(album_artist, album, album_ref — the MusicBrainz release id / Spotify album
+id the album-missing inventory worked from) into `soulseek-state.tsv` at
+enqueue time. player-add.py places a download matched to that record into ITS
+album: the destination is the folder the library already groups the album
+under (live-DB folded album_artist+album, then the MB ref via the audit
+tagscan, then a shared-artist-token match), or a fresh
+`aud/<AlbumArtist>/<Album>/` per the convention when the album has no files
+yet; the file's album/album_artist tags are written to match that folder (the
+player groups by TAG, not folder — a track whose Soulseek tags name a
+different album would otherwise be invisible in the album it was downloaded
+for), and title/artist are filled only when the file is bare. A completed
+download that matches no pipeline record and has no usable tags is parked in
+`downloads/needs-attention/` and reported — never silently dropped into
+`aud/Unknown Artist/Unknown Album`. `player-add.py` runs under the **player's**
+python env (it reuses `main.py`'s `read_tags`/`open_db`/`rebuild_albums`),
+which soulseek-missing.py resolves from the `player` wrapper; it writes the DB
+out-of-process in WAL (busy-timeout 60s) like `tools/dbsync.py`, and never
+touches the running player's session.
 
 **Automatic pickup (`main.py`'s `AutoScanner`).** Both feeds into the library
 are watched by the app now, so a freshly downloaded track reaches "recently
