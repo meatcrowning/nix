@@ -453,7 +453,10 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   `docs/README.md` states the rule and indexes both. Syncs both ways with book
   every 5 min via
   `home/srvs/nix-docs.nix`, which reuses `claude-memory-sync.sh` verbatim — that
-  script is parametrized by `CM_SYNC_REPO`/`REMOTE`/`LOG`/`SEED`/`LABEL`, so a
+  script is parametrized by `CM_SYNC_REPO`/`REMOTE`/`LOG`/`SEED`/`LABEL`/
+  `MAX_MB` (docs arms the size cap at 25 MB — its only protection with no
+  gitignore; a 118 MB hermes export committed on 2026-08-03 wedged every push
+  on GitHub's 100 MB limit), so a
   second systemd user unit was all it took. Log `~/.cache/nix-docs-sync.log`;
   force a run with `systemctl --user start nix-docs-sync.service`.
   **ONE BOARD PER HOST, and nothing merges them.** Since 2026-07-30 the store
