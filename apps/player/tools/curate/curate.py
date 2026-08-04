@@ -250,8 +250,10 @@ def _cjk_fold(s):
 
 # A leading catalogue/chart/rank number is NOT part of the album title:
 # "486 # Maggot Brain" is Maggot Brain, "[LM041] Feel Infinite" is Feel
-# Infinite. Applied AFTER bracket stripping.
-_LEADING_NOISE = re.compile(r"^\s*[\(\[]?\s*\d+\s*[\)\]#\-–—\.:]?\s+")
+# Infinite. Applied AFTER bracket stripping. Handles both bare prefixes
+# ("486 # X") and bracketed catalogue ids ("[LM041] X").
+_LEADING_NOISE = re.compile(
+    r"^\s*(?:[\(\[]\s*[A-Za-z]*\s*\d+\s*[\)\]]|\d+\s*[#\-–—\.:]?)\s+")
 
 # Identities that are legitimately shared by many unrelated real artists
 # ("Various Artists" compilations, blank/placeholder tags) - never cluster
