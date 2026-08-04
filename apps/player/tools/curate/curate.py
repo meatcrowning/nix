@@ -96,10 +96,25 @@ def cmd_dupes(args):
     by_path = {r["path"]: r for r in rows}
     groups = collections.defaultdict(list)
     for r in rows:
-        artist = r["album_artist"] or r["artist"] or ""
-        for t in _dedupe_titles(r["title"]):
-            for k in trackmatch.keys(artist, t):
-                groups[k].append(r["path"])
+        # Key on BOTH the album_artist and the track artist, dropping
+        # compilation placeholders ("Various Artists"). album_artist used to
+        # win a single-candidate pick, so a remaster/comp copy tagged
+        # album_artist="Various Artists" never shared a fold-key with its
+        # studio-album twin and escaped dedup (433 files carry that tag). The
+        # real per-track credit lives on `artist`; never key on the
+        # placeholder itself, or unrelated same-title songs across comps fold
+        # together.
+        artists = [a for a in (r["album_artist"], r["artist"])
+                   if a and C.fold(a) not in _NOT_AN_ARTIST]
+        if not artists:
+            artists = [r["album_artist"] or r["artist"] or ""]
+        seen = set()
+        for artist in artists:
+            for t in _dedupe_titles(r["title"]):
+                for k in trackmatch.keys(artist, t):
+                    if k not in seen:
+                        seen.add(k)
+                        groups[k].append(r["path"])
     # union-find: a file can appear in several fold-keys, merge transitively
     parent = {p: p for p in by_path}
 
