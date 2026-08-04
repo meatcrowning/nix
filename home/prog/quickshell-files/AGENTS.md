@@ -418,6 +418,26 @@ seam patch covers the notch's INSIDE only — covering its full height painted o
 the ends of its own top and bottom borders, i.e. the corner pieces where the
 outline meets the window's border.
 
+**`WinState` has TWO fast paths, and the second one is not optional.** The
+compositor announces windows opening, closing and going fullscreen — and NOTHING
+for a geometry change. hyprvtb's maximize is a plain resize+move on a floating
+window (`vtbDeco.cpp`'s `toggleMaximize`), so the transition the notch's seam
+exists for produces no event at all and used to wait on the 1s poll: [his] "it
+seems only sometimes does it happen as quick as it needs to". So
+`scripts/win-watch.py` holds Hyprland's request socket open-and-closed at 120ms
+and prints the client list ONLY when it changes; `WinState.applyClients()` is
+the entry point it feeds, and the 1s `hyprctl` poll now only carries the monitor
+half. Measured: a pure geometry change lands in ~130ms (was ~1100), a maximize
+in ~30ms, an unmaximize in ~165ms — all inside the 260ms animation. Cost 0.3% of
+a core. **Do not put that poll in QML with `Quickshell.Io.Socket`**: Hyprland
+closes the connection after every reply and Quickshell logs a `PeerClosedError`
+for each one, which is five lines a second into the log the panel is diagnosed
+from.
+
+A refresh asked for while one is in flight is REMEMBERED (`_pending`), not
+dropped — a burst of events used to lose the one carrying the state that
+mattered.
+
 `HyprEvents.qml` keeps `WinState` up with the compositor: `hyprctl clients`
 reports a window's GOAL geometry rather than its animated one (measured), so a
 refresh driven off the event socket makes the seam appear and vanish as an

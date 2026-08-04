@@ -103,7 +103,32 @@ Singleton {
             || (String(s.model || "") === "" && String(s.serialNumber || "") === "");
     }
 
-    function refresh() { if (!clientsProc.running) clientsProc.running = true; }
+    // A refresh asked for while one is in flight is REMEMBERED, not dropped.
+    // Dropping it was why the notch's seam "only sometimes" kept up: a maximize
+    // fires several compositor events in a burst, the first one starts the
+    // hyprctl call, and every later one — including the one that carried the
+    // state we actually needed — hit a running process and returned silently.
+    // The panel then showed the previous world until the 1s tick.
+    property bool _pending: false
+    function refresh() {
+        if (clientsProc.running) {
+            root._pending = true;
+            return;
+        }
+        clientsProc.running = true;
+    }
+    // Re-runs a coalesced request as soon as the last call is off the wire. A
+    // Timer rather than a direct restart inside onRunningChanged: re-entering a
+    // property's own change handler is a good way to lose the second edge, and
+    // 30ms also rate-limits a burst into one extra call.
+    Timer {
+        id: pendingKick
+        interval: 30
+        onTriggered: if (root._pending) {
+            root._pending = false;
+            root.refresh();
+        }
+    }
 
     // 1s: fast enough that a roll-up recolours its icon while you are still
     // looking at it, cheap enough (~4ms of hyprctl) to leave running. Windows
@@ -156,8 +181,148 @@ Singleton {
     // carried rather than the id (a per-monitor widget holds a ShellScreen).
     property var frames: []
 
+    // ---- the world, split in two -----------------------------------------
+    // MONITORS and the plugin's bar width change when hardware or config does;
+    // CLIENTS change whenever a window so much as moves. They used to be read
+    // and parsed together, once a second, which set the pace of everything that
+    // watches a window — and hyprvtb's maximize is a plain resize+move on a
+    // floating window, so the compositor emits NO event for it and a poll tick
+    // was the ONLY way to learn about it. That is what "sometimes it waits way
+    // too long" was.
+    //
+    // So the monitor half stays on the 1s hyprctl poll, and `applyClients` is a
+    // public entry point: HyprEvents.qml pumps it from Hyprland's own request
+    // socket several times a second, which costs a socket round trip rather
+    // than three process spawns.
+    property var _shown: ({})
+    property var _box: ({})
+    property var _monName: ({})
+    property var _virt: ({})
+    property int _barW: 31
+    property bool _monsReady: false
+
+    function applyMonitors(mons) {
+        // The workspaces actually on screen, and each monitor's logical
+        // box. Hyprland reports monitor width/height in DEVICE pixels
+        // and window positions in LOGICAL ones, hence the divide.
+        const shown = {};
+        const box = {};
+        // monitor id -> name, for the frames published below.
+        const monName = {};
+        // monitor id -> true when the compositor has NO hardware
+        // identity for that output, i.e. it is virtual (see above).
+        const virt = {};
+        for (const m of mons) {
+            if (m.activeWorkspace) shown[m.activeWorkspace.id] = true;
+            const s = m.scale > 0 ? m.scale : 1;
+            box[m.id] = { x: m.x, right: m.x + Math.round(m.width / s) };
+            const identified = m.physicalWidth > 0 || m.physicalHeight > 0
+                || (m.make || "") !== "" || (m.model || "") !== ""
+                || (m.serial || "") !== "" || (m.description || "") !== "";
+            virt[m.id] = !identified
+                || String(m.name || "").indexOf("HEADLESS-") === 0;
+            monName[m.id] = m.name || "";
+        }
+        root._shown = shown;
+        root._box = box;
+        root._monName = monName;
+        root._virt = virt;
+        root._monsReady = true;
+    }
+
+    function applyClients(clients) {
+        if (!root._monsReady || !clients)
+            return;
+        const shown = root._shown, box = root._box;
+        const monName = root._monName, virt = root._virt, barW = root._barW;
+
+        const next = {};
+        const addrs = {};
+        const frames = [];
+        // key -> {v: on a virtual output, r: on a real one}. A key is
+        // only off-screen when NOTHING under it is on a real output.
+        const tally = {};
+        for (const c of clients) {
+            if (!c.mapped) continue;
+            // Before the state branches below, which skip most windows:
+            // this one is about every mapped client, not just the
+            // rolled and minimized ones. An unknown monitor id (-1 on a
+            // special workspace) counts as real — fail visible.
+            const tk = root.keyOf(c.class, c.title);
+            const t = tally[tk] || (tally[tk] = { v: 0, r: 0 });
+            if (virt[c.monitor]) t.v++; else t.r++;
+
+            // Frames: everything mapped and actually on screen. A rolled
+            // (hidden) window is not something anything can be flush
+            // against, and a window on a workspace that is not showing
+            // is not there at all.
+            if (!c.hidden && c.at && c.size
+                    && (!c.workspace || shown[c.workspace.id]))
+                frames.push({
+                    mon: monName[c.monitor] || "",
+                    l: c.at[0] - Theme.windowBorderWidth,
+                    r: c.at[0] + c.size[0] + 2 * barW + Theme.windowBorderWidth,
+                    t: c.at[1],
+                    b: c.at[1] + c.size[1],
+                    // Hyprland's fullscreen mode: 0 none, 1 MAXIMIZED,
+                    // 2 fullscreen. A maximized window is laid out
+                    // against the reserved area BY DEFINITION, which is
+                    // a far sturdier answer to "is it flush with the
+                    // panel" than measuring chrome — a window with no
+                    // hyprvtb titlebar (a rule, a layer-ish client)
+                    // makes the arithmetic below 64px wrong. A
+                    // FULLSCREEN one covers the panel entirely and is
+                    // deliberately not this.
+                    max: c.fullscreen === 1
+                });
+
+            const b = box[c.monitor];
+            // 4px of slack: the park position is the monitor's right
+            // edge, and width/scale can round a pixel or two off it.
+            const parked = b && c.at && c.at[0] >= b.right - 4;
+            const k = tk;
+            if (!c.hidden && parked)
+                next[k] = "minimized";
+            else if (c.hidden && c.workspace && shown[c.workspace.id])
+                next[k] = "rolled";
+            else
+                continue;
+            addrs[k] = c.address || "";
+        }
+
+        const off = {};
+        for (const tk in tally)
+            if (tally[tk].v > 0 && tally[tk].r === 0) off[tk] = true;
+
+        root.byKey = next;
+        root.addrByKey = addrs;
+        root.offOutputByKey = off;
+        root.frames = frames;
+    }
+
+    // The fast half: one persistent process on Hyprland's request socket,
+    // printing the client list only when it CHANGES (see scripts/win-watch.py
+    // for why this is not just a shorter Timer). It never touches the monitor
+    // half, so `_monsReady` gates it until the first full poll has landed.
+    Process {
+        id: winWatch
+        running: true
+        command: [Quickshell.shellDir + "/scripts/win-watch.py"]
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: line => {
+                try {
+                    root.applyClients(JSON.parse(line));
+                } catch (e) {
+                    // A partial line is a dropped sample, not a reason to stop.
+                }
+            }
+        }
+    }
+
     Process {
         id: clientsProc
+        onRunningChanged: if (!running && root._pending) pendingKick.restart()
         command: ["sh", "-c", "hyprctl -j monitors; echo '#--#'; hyprctl -j clients; echo '#--#'; hyprctl -j getoption plugin:hyprvtb:bar_width"]
         stdout: StdioCollector {
             onStreamFinished: {
@@ -169,85 +334,12 @@ Singleton {
                     clients = JSON.parse(halves[1]) || [];
                     if (halves.length > 2) vtb = JSON.parse(halves[2]);
                 } catch (e) { return; }
-                // The plugin's own bar width, so the frame maths below is the
+                // The plugin's own bar width, so the frame maths is the
                 // plugin's number and not a copy of it. Its shipped default is
                 // the fallback for the moment before the plugin answers.
-                const barW = (vtb && vtb.int > 0) ? vtb.int : 31;
-
-                // The workspaces actually on screen, and each monitor's logical
-                // box. Hyprland reports monitor width/height in DEVICE pixels
-                // and window positions in LOGICAL ones, hence the divide.
-                const shown = {};
-                const box = {};
-                // monitor id -> name, for the frames published below.
-                const monName = {};
-                // monitor id -> true when the compositor has NO hardware
-                // identity for that output, i.e. it is virtual (see above).
-                const virt = {};
-                for (const m of mons) {
-                    if (m.activeWorkspace) shown[m.activeWorkspace.id] = true;
-                    const s = m.scale > 0 ? m.scale : 1;
-                    box[m.id] = { x: m.x, right: m.x + Math.round(m.width / s) };
-                    const identified = m.physicalWidth > 0 || m.physicalHeight > 0
-                        || (m.make || "") !== "" || (m.model || "") !== ""
-                        || (m.serial || "") !== "" || (m.description || "") !== "";
-                    virt[m.id] = !identified
-                        || String(m.name || "").indexOf("HEADLESS-") === 0;
-                    monName[m.id] = m.name || "";
-                }
-
-                const next = {};
-                const addrs = {};
-                const frames = [];
-                // key -> {v: on a virtual output, r: on a real one}. A key is
-                // only off-screen when NOTHING under it is on a real output.
-                const tally = {};
-                for (const c of clients) {
-                    if (!c.mapped) continue;
-                    // Before the state branches below, which skip most windows:
-                    // this one is about every mapped client, not just the
-                    // rolled and minimized ones. An unknown monitor id (-1 on a
-                    // special workspace) counts as real — fail visible.
-                    const tk = root.keyOf(c.class, c.title);
-                    const t = tally[tk] || (tally[tk] = { v: 0, r: 0 });
-                    if (virt[c.monitor]) t.v++; else t.r++;
-
-                    // Frames: everything mapped and actually on screen. A rolled
-                    // (hidden) window is not something anything can be flush
-                    // against, and a window on a workspace that is not showing
-                    // is not there at all.
-                    if (!c.hidden && c.at && c.size
-                            && (!c.workspace || shown[c.workspace.id]))
-                        frames.push({
-                            mon: monName[c.monitor] || "",
-                            l: c.at[0] - Theme.windowBorderWidth,
-                            r: c.at[0] + c.size[0] + 2 * barW + Theme.windowBorderWidth,
-                            t: c.at[1],
-                            b: c.at[1] + c.size[1]
-                        });
-
-                    const b = box[c.monitor];
-                    // 4px of slack: the park position is the monitor's right
-                    // edge, and width/scale can round a pixel or two off it.
-                    const parked = b && c.at && c.at[0] >= b.right - 4;
-                    const k = tk;
-                    if (!c.hidden && parked)
-                        next[k] = "minimized";
-                    else if (c.hidden && c.workspace && shown[c.workspace.id])
-                        next[k] = "rolled";
-                    else
-                        continue;
-                    addrs[k] = c.address || "";
-                }
-
-                const off = {};
-                for (const tk in tally)
-                    if (tally[tk].v > 0 && tally[tk].r === 0) off[tk] = true;
-
-                root.byKey = next;
-                root.addrByKey = addrs;
-                root.offOutputByKey = off;
-                root.frames = frames;
+                root._barW = (vtb && vtb.int > 0) ? vtb.int : 31;
+                root.applyMonitors(mons);
+                root.applyClients(clients);
             }
         }
     }

@@ -14,10 +14,25 @@ import Quickshell.Hyprland
 // at the moment of the event already sees the restored rectangle. The border
 // comes back as the animation STARTS.
 //
-// Loaded through a Loader (shell.qml) rather than imported by WinState, so a
-// Quickshell built without the Hyprland module degrades to the 1s poll instead
-// of taking the whole panel down with a failed import.
+// It is one of TWO fast paths and the cheaper one: this catches the moments the
+// compositor announces (a window opening, closing, going fullscreen), while
+// scripts/win-watch.py catches the ones it does not (any geometry change,
+// including hyprvtb's maximize). Loaded through a Loader (shell.qml) rather
+// than imported by WinState, so a Quickshell built without the Hyprland module
+// degrades to the watcher and the 1s poll instead of taking the panel down with
+// a failed import.
 Item {
+    // A second look, shortly after. The event announces the DECISION; a couple
+    // of the things read back from it (a workspace's window list, a window's
+    // new fullscreen state) are settled a beat later, and one sample taken at
+    // exactly the wrong moment used to leave the panel a whole poll behind.
+    // Cheap: one extra hyprctl per user action, coalesced by WinState.
+    Timer {
+        id: settle
+        interval: 180
+        onTriggered: WinState.refresh()
+    }
+
     Connections {
         target: Hyprland
 
@@ -36,8 +51,13 @@ Item {
             case "monitoradded":
             case "monitorremoved":
             case "workspace":
+            case "workspacev2":
+            case "activewindow":
+            case "activewindowv2":
+            case "pin":
             case "focusedmon":
                 WinState.refresh();
+                settle.restart();
                 break;
             default:
                 break;

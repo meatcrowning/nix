@@ -107,6 +107,13 @@ in
       source = ./quickshell-files/scripts/proc-list.py;
       executable = true;
     };
+    # Streams Hyprland's client list to WinState, changes only, five times a
+    # second — the compositor emits no event for a geometry change, so this is
+    # the only way the panel learns about hyprvtb's maximize promptly.
+    "quickshell/scripts/win-watch.py" = {
+      source = ./quickshell-files/scripts/win-watch.py;
+      executable = true;
+    };
     # Image-download completion toasts (NotificationCard.qml): given the
     # ~/Downloads path surfer announced, resolve the file's CURRENT location —
     # sort-downloads files images out of ~/Downloads into ~/Pictures within
