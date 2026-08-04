@@ -91,15 +91,51 @@ def _dedupe_titles(title):
     return (title,)
 
 
+# A remix / live / acoustic / edit / instrumental / … is a DIFFERENT recording
+# that must survive beside the plain track. trackmatch.keys() (used for the
+# fold below, and rightly so for lyric lookup) strips these qualifiers, so a
+# "(remix)" copy shares a fold-key with its original; the >6s duration split is
+# the only backstop and it misses when the variant runs close to the original's
+# length (a rated "Bamboo Houses" was lost to its "(remix)" 1.8s apart). So two
+# copies only dedupe when their variant signatures MATCH. Deliberately WIDE and
+# one-directional-safe: an over-included marker only makes dedup more
+# conservative (keeps a copy), never removes one it should not. Edition noise
+# (remaster/deluxe/…) is intentionally NOT here — those DO dedupe.
+_VARIANT_MARKER = re.compile(
+    r"\b(remix|live|acoustic|instrumental|reprise|dub|vip|bootleg|rework|"
+    r"flip|demo|cover|edit|session|club|extended|radio|sped|slowed)\b",
+    re.IGNORECASE)
+
+
+def _variant_sig(title):
+    return frozenset(m.group(1).lower()
+                     for m in _VARIANT_MARKER.finditer(title or ""))
+
+
 def cmd_dupes(args):
     rows = _load_scan()
     by_path = {r["path"]: r for r in rows}
     groups = collections.defaultdict(list)
     for r in rows:
-        artist = r["album_artist"] or r["artist"] or ""
-        for t in _dedupe_titles(r["title"]):
-            for k in trackmatch.keys(artist, t):
-                groups[k].append(r["path"])
+        # Key on BOTH the album_artist and the track artist, dropping
+        # compilation placeholders ("Various Artists"). album_artist used to
+        # win a single-candidate pick, so a remaster/comp copy tagged
+        # album_artist="Various Artists" never shared a fold-key with its
+        # studio-album twin and escaped dedup (433 files carry that tag). The
+        # real per-track credit lives on `artist`; never key on the
+        # placeholder itself, or unrelated same-title songs across comps fold
+        # together.
+        artists = [a for a in (r["album_artist"], r["artist"])
+                   if a and C.fold(a) not in _NOT_AN_ARTIST]
+        if not artists:
+            artists = [r["album_artist"] or r["artist"] or ""]
+        seen = set()
+        for artist in artists:
+            for t in _dedupe_titles(r["title"]):
+                for k in trackmatch.keys(artist, t):
+                    if k not in seen:
+                        seen.add(k)
+                        groups[k].append(r["path"])
     # union-find: a file can appear in several fold-keys, merge transitively
     parent = {p: p for p in by_path}
 
@@ -141,18 +177,27 @@ def cmd_dupes(args):
         for b in buckets:
             if len(b) < 2:
                 continue
-            n_dupe_groups += 1
-            ranked = sorted(
-                b, key=lambda r: C.quality_of(r["path"], r["bitrate"], r["sample_rate"], r["dur"]),
-                reverse=True)
-            keep = ranked[0]
-            for loser in ranked[1:]:
-                reason = (f"duplicate of kept copy {keep['rel']!r} "
-                          f"(quality {C.quality_of(loser['path'], loser['bitrate'], loser['sample_rate'], loser['dur'])} "
-                          f"< {C.quality_of(keep['path'], keep['bitrate'], keep['sample_rate'], keep['dur'])})")
-                if args.apply:
-                    C.move_to_removed(loser["path"], "duplicates", reason)
-                n_moved += 1
+            # within a duration bucket, only copies with the SAME variant
+            # signature are true duplicates: a remix/live/acoustic/edit copy
+            # that folded in via trackmatch stays beside its plain original.
+            byvar = collections.defaultdict(list)
+            for r in b:
+                byvar[_variant_sig(r["title"])].append(r)
+            for vb in byvar.values():
+                if len(vb) < 2:
+                    continue
+                n_dupe_groups += 1
+                ranked = sorted(
+                    vb, key=lambda r: C.quality_of(r["path"], r["bitrate"], r["sample_rate"], r["dur"]),
+                    reverse=True)
+                keep = ranked[0]
+                for loser in ranked[1:]:
+                    reason = (f"duplicate of kept copy {keep['rel']!r} "
+                              f"(quality {C.quality_of(loser['path'], loser['bitrate'], loser['sample_rate'], loser['dur'])} "
+                              f"< {C.quality_of(keep['path'], keep['bitrate'], keep['sample_rate'], keep['dur'])})")
+                    if args.apply:
+                        C.move_to_removed(loser["path"], "duplicates", reason)
+                    n_moved += 1
     if args.apply:
         C.flush_audit("Duplicate tracks removed")
     print(f"duplicate clusters: {n_dupe_groups}, files to move: {n_moved}"
