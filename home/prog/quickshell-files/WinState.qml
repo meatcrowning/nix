@@ -142,24 +142,45 @@ Singleton {
     // logical geometry, and two hyprctl processes a second to answer one
     // question is one too many. `hyprctl -j` emits a bare array for each, so
     // they are separated by a sentinel rather than being expected to combine.
+    // Every mapped window's FRAME — the outer edge a person sees, decorations
+    // and border included. `hyprctl clients` reports the CONTENT box; hyprvtb's
+    // titlebar column (two cells of plugin:hyprvtb:bar_width) hangs off the
+    // RIGHT of it and Hyprland's own border outside that, so the edge that
+    // touches something is content + 2*barWidth + border on the right, and
+    // content - border on the left. Measured, not assumed: a window whose frame
+    // Hyprland had laid flush against the panel's reserved area read
+    // content-right 2252, border at 2316 — 64px of chrome, = 2*31 + 2.
+    //
+    // Published for whatever the panel draws AGAINST a window: the notch's seam
+    // (NotchSeam.qml) is the first, and it is the reason the monitor name is
+    // carried rather than the id (a per-monitor widget holds a ShellScreen).
+    property var frames: []
+
     Process {
         id: clientsProc
-        command: ["sh", "-c", "hyprctl -j monitors; echo '#--#'; hyprctl -j clients"]
+        command: ["sh", "-c", "hyprctl -j monitors; echo '#--#'; hyprctl -j clients; echo '#--#'; hyprctl -j getoption plugin:hyprvtb:bar_width"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const halves = this.text.split("#--#");
                 if (halves.length < 2) return;
-                let mons = [], clients = [];
+                let mons = [], clients = [], vtb = null;
                 try {
                     mons = JSON.parse(halves[0]) || [];
                     clients = JSON.parse(halves[1]) || [];
+                    if (halves.length > 2) vtb = JSON.parse(halves[2]);
                 } catch (e) { return; }
+                // The plugin's own bar width, so the frame maths below is the
+                // plugin's number and not a copy of it. Its shipped default is
+                // the fallback for the moment before the plugin answers.
+                const barW = (vtb && vtb.int > 0) ? vtb.int : 31;
 
                 // The workspaces actually on screen, and each monitor's logical
                 // box. Hyprland reports monitor width/height in DEVICE pixels
                 // and window positions in LOGICAL ones, hence the divide.
                 const shown = {};
                 const box = {};
+                // monitor id -> name, for the frames published below.
+                const monName = {};
                 // monitor id -> true when the compositor has NO hardware
                 // identity for that output, i.e. it is virtual (see above).
                 const virt = {};
@@ -172,10 +193,12 @@ Singleton {
                         || (m.serial || "") !== "" || (m.description || "") !== "";
                     virt[m.id] = !identified
                         || String(m.name || "").indexOf("HEADLESS-") === 0;
+                    monName[m.id] = m.name || "";
                 }
 
                 const next = {};
                 const addrs = {};
+                const frames = [];
                 // key -> {v: on a virtual output, r: on a real one}. A key is
                 // only off-screen when NOTHING under it is on a real output.
                 const tally = {};
@@ -188,6 +211,20 @@ Singleton {
                     const tk = root.keyOf(c.class, c.title);
                     const t = tally[tk] || (tally[tk] = { v: 0, r: 0 });
                     if (virt[c.monitor]) t.v++; else t.r++;
+
+                    // Frames: everything mapped and actually on screen. A rolled
+                    // (hidden) window is not something anything can be flush
+                    // against, and a window on a workspace that is not showing
+                    // is not there at all.
+                    if (!c.hidden && c.at && c.size
+                            && (!c.workspace || shown[c.workspace.id]))
+                        frames.push({
+                            mon: monName[c.monitor] || "",
+                            l: c.at[0] - Theme.windowBorderWidth,
+                            r: c.at[0] + c.size[0] + 2 * barW + Theme.windowBorderWidth,
+                            t: c.at[1],
+                            b: c.at[1] + c.size[1]
+                        });
 
                     const b = box[c.monitor];
                     // 4px of slack: the park position is the monitor's right
@@ -210,6 +247,7 @@ Singleton {
                 root.byKey = next;
                 root.addrByKey = addrs;
                 root.offOutputByKey = off;
+                root.frames = frames;
             }
         }
     }

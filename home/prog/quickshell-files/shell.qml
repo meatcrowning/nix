@@ -761,6 +761,13 @@ Scope {
         WallpaperLayer {}
     }
 
+    // The seam between a maximized window's edge and the shortcut notch: the
+    // one surface here that draws ABOVE windows, and only while one is flush.
+    Variants {
+        model: Quickshell.screens
+        NotchSeam {}
+    }
+
     // The volume/brightness OSD popup, one per monitor.
     Variants {
         model: Quickshell.screens
