@@ -2662,6 +2662,46 @@ def _died_transiently(aid):
     return bool(TRANSIENT_RE.search(tail))
 
 
+#: The one journal line only the RuntimeMaxSec cap writes. A unit that hit the
+#: cap prints `Service reached runtime time limit. Stopping.` and is then filed
+#: `Failed with result 'timeout'`; a crash, an OOM kill, a `force_stop` and a
+#: `systemctl stop` each leave a different record, so the marker cannot be
+#: confused with any of them.
+CAP_RE = re.compile(r"Service reached runtime time limit", re.I)
+
+
+def unit_capped(unit, since=None):
+    """Did this transient unit's run die of the RuntimeMaxSec cap?
+
+    The unit's own `Result=` is gone before the next tick usually runs:
+    `--collect` unloads a capped unit within seconds of its exit, and a
+    DECISION's unit name is reused by the next session of the same decision,
+    so `systemctl show` would answer for the wrong run anyway. The journal
+    keeps every session of a unit name, and the marker above is unambiguous.
+
+    `since` is an ISO timestamp naming the run, so only markers at or after
+    it count: a decision's unit name is shared by every session of that
+    decision, and a marker OLDER than the record's own start belongs to a
+    session that already handed back. A worker unit is unique to its one
+    spawn, so `None` (no filter) is correct there. Returns False on anything
+    unreadable: a box with no journal is not a box to invent causes on.
+    """
+    if not unit:
+        return False
+    args = ["journalctl", "--user", "-u", unit, "--no-pager"]
+    if since:
+        m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})", since)
+        if not m:
+            return False
+        args += ["--since", "%s %s" % m.groups()]
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(CAP_RE.search(p.stdout))
+
+
+
 # ------------------------------------- force-stopping ONE bound minister
 def _stop_unit(unit):
     """SIGKILL one transient unit's whole cgroup, synchronously. (ok, detail).
@@ -2811,6 +2851,11 @@ def reap():
                 log_postmortem(aid, session, rec.get("why") or "")
                 moved["transcript"] = transcript_hint(session, aid)
                 moved["notesBack"] = ba.requeue_taken(aid)
+                # The cap is a CAUSE, not a mystery: the unit's journal still
+                # says `runtime time limit` after `--collect` has unloaded the
+                # unit, and the board's failure bullet picks a wording that
+                # says the cap cut it off rather than that the work failed.
+                moved["capped"] = unit_capped(rec.get("unit") or "")
             (done if ok else failed).append(moved)
         try:
             os.unlink(reported_file(aid))
