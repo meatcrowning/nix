@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Widgets
 
@@ -53,6 +54,13 @@ Rectangle {
     }
     readonly property string iconName: appEntry && appEntry.icon
         ? appEntry.icon : (modelData.appId || "")
+    // A currentColor SVG (goetia's sigil) renders its baked fallback hue and so
+    // ignores the theme; a full-colour theme icon keeps its own colours.
+    readonly property bool monoIcon: MonoIcon.isMono(cell.iconName)
+    // Knocked back off-screen: the icon is most of the cell's ink and a border
+    // alone is easy to miss on a busy row.
+    readonly property real iconDim: cell.winState === "minimized" ? 0.45
+                                  : cell.winState === "rolled" ? 0.7 : 1
 
     // A window on an output the user cannot see is not one of HIS windows, and
     // the taskbar is the one place the sandbox's promise leaked: `tools/
@@ -74,15 +82,30 @@ Rectangle {
     border.color: cell.stateColor
 
     IconImage {
+        id: taskIcon
         anchors.centerIn: parent
-        visible: cell.iconName !== ""
+        // Drawn directly only for full-colour icons; for a mono icon it stays
+        // the (invisible) SOURCE the MultiEffect below recolours, exactly as the
+        // tray does with its own tint.
+        visible: cell.iconName !== "" && !cell.monoIcon
         implicitSize: Theme.wsCell - 12
         source: Quickshell.iconPath(cell.iconName, "application-x-executable")
-        // A window that isn't on screen has its icon knocked back to match,
-        // since the icon is most of the cell's ink and a border alone is easy to
-        // miss on a busy row.
-        opacity: cell.winState === "minimized" ? 0.45
-               : cell.winState === "rolled" ? 0.7 : 1
+        opacity: cell.iconDim
+    }
+    // The compositor's titlebar recolours currentColor SVGs with a librsvg
+    // stylesheet (../hyprvtb/vtbDeco.cpp iconTex); the panel's IconImage cannot,
+    // so goetia's sigil showed its baked #cc4400 fallback on every theme. Tint
+    // the mono icon to the cell's state colour — the accent ramp the border and
+    // the fallback letter already use (docs/DESIGN.md §3.1: the sigil IS body
+    // text, which follows the accent) — so the taskbar icon tracks the theme
+    // like the titlebar's does.
+    MultiEffect {
+        anchors.fill: taskIcon
+        source: taskIcon
+        visible: cell.iconName !== "" && cell.monoIcon
+        colorization: 1.0
+        colorizationColor: cell.stateColor
+        opacity: cell.iconDim
     }
     // fallback: first letter of the app id in the pixel font
     PixelText {
