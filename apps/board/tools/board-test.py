@@ -3796,6 +3796,57 @@ def test_finished_leaves(tmp):
           bad["id"] not in drawn(), drawn())
 
 
+def test_force_stop(tmp):
+    """FORCE-STOPPING one bound minister is HONEST: it reports what is really
+    true after, never off the kill command's own exit (docs/DESIGN.md §10,
+    §10.3). `boardwork.force_stop` SIGKILLs the minister's own transient unit
+    and RE-READS liveness before it answers.
+
+    The refusals matter as much as the kill: Solomon and a deepseek subminister
+    have no force-stoppable unit of their own, so `force_stop` declines both
+    (the card menu never offers it for them either) rather than silently no-op.
+    """
+    import boardagents as ba
+    import boardwork as bw
+
+    os.environ["BOARD_WORK_SPAWN"] = "sleep 30"
+    os.environ["BOARD_MAX_WORKERS"] = "3"
+    bw.reap()
+
+    live = lambda aid: any(a["id"] == aid and a["state"] == "running"
+                           for a in ba.agents())
+
+    w = bw.dispatch("run until stopped", where="apps/fsx/**")
+    check("(setup) the minister is running", live(w["id"]))
+
+    res = bw.force_stop(w["id"])
+    check("force-stop reports the minister stopped, by name",
+          res["ok"] and "force-stopped" in res["msg"], res)
+    check("...and it is REALLY gone, not just signalled", not live(w["id"]),
+          [a for a in ba.agents() if a["id"] == w["id"]])
+
+    again = bw.force_stop(w["id"])
+    check("stopping an already-stopped minister says so honestly",
+          again["ok"] and "already" in again["msg"], again)
+
+    miss = bw.force_stop("nosuch1")
+    check("a minister that is gone entirely is refused, not faked",
+          not miss["ok"] and "no such" in miss["msg"], miss)
+
+    ba.register("fs-orch", "planning", os.getpid(), kind="orchestrator")
+    so = bw.force_stop("fs-orch")
+    check("Solomon is refused before any signal is sent",
+          not so["ok"] and "Solomon" in so["msg"], so)
+    ba.unregister("fs-orch")
+
+    ba.register("fs-sub", "a chunk", os.getpid(), kind="subminister",
+                parent="fs-orch")
+    sub = bw.force_stop("fs-sub")
+    check("a subminister has no unit of its own and is refused",
+          not sub["ok"] and "inside its minister" in sub["msg"], sub)
+    ba.unregister("fs-sub")
+
+
 def test_overlap(tmp):
     """`dispatch` WARNS on a --where that overlaps a live worker's — the
     mechanical half of the prompt's `run agents first` rule. Warn only: a
@@ -8035,6 +8086,7 @@ def main():
         os.makedirs(os.path.join(tmp, "work"))
         test_work(os.path.join(tmp, "work"))
         test_overlap(os.path.join(tmp, "work"))
+        test_force_stop(os.path.join(tmp, "work"))
         os.makedirs(os.path.join(tmp, "tier"))
         test_tier(os.path.join(tmp, "tier"))
         os.makedirs(os.path.join(tmp, "memfloor"))

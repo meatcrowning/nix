@@ -1619,6 +1619,21 @@ class Agents(QObject):
                 boardwork.HOST, self._watcher)
         return "in the inbox - ctrl+z takes it back until a summoner acts"
 
+    # ---- force-stopping ONE bound minister from its card's menu ----
+    # Same shape as `send`: the returned string IS what the footer says, and it
+    # is the VERIFIED outcome, never the intent (§10, §10.3). `force_stop`
+    # SIGKILLs the minister's own transient unit and then re-reads liveness
+    # before it answers, so the footer can never claim a kill that did not
+    # happen — and the poll below redraws the card off the same read.
+    @Slot(str, result=str)
+    def forceStop(self, agent_id):
+        try:
+            res = boardwork.force_stop(agent_id)
+        except OSError as e:
+            res = {"msg": "could not stop it - " + (e.strerror or "?")}
+        self.refresh()
+        return res.get("msg", "")
+
     # ---- his second thoughts about something already queued ----
     # Same shape as `send`: the string IS what the footer says, and the failure
     # case has its own sentence rather than an empty one (§10.2 — refuse

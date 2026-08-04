@@ -2642,7 +2642,26 @@ Component {
                          trigger: () => ar.beginSend() });
         if (text !== "")
             items.push({ label: "copy line", trigger: () => Board.copy(text) });
-        menu.open(x, y, items.concat(fileItems()).concat(undoItems()));
+        items = items.concat(fileItems()).concat(undoItems());
+        // Force-stopping a bound minister — §10.3's destructive act, so it is a
+        // menu entry (never a click on a list that re-sorts under the cursor)
+        // at the FOOT of the menu behind its own separator, where the pointer
+        // does not land by accident. Offered ONLY for a RUNNING worker or
+        // decision minister: Solomon is not force-stopped from here and a
+        // subminister has no unit of its own (`boardwork.force_stop` refuses
+        // both, so nothing here can silently no-op). `forceStop` SIGKILLs the
+        // unit and re-reads liveness before the footer speaks, so this is never
+        // the inert control §10 rules out.
+        var k = ar.agent ? ar.agent.kind : "";
+        if (ar.running && ar.addressable && !ar.summoner
+                && (k === "worker" || k === "decision")) {
+            items.push({ separator: true });
+            items.push({ label: "force-stop "
+                                + (ar.name !== "" ? ar.name : "this minister"),
+                         trigger: () =>
+                             { win.status = Agents.forceStop(String(ar.agent.id)); } });
+        }
+        menu.open(x, y, items);
     }
 
     // Replying to one chore rather than to the board as a whole — *"the top
