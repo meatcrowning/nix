@@ -1018,11 +1018,14 @@ class Agents(QObject):
     def _transcript_lines(session, tools_only=False):
         """THE AGENT'S LITERAL OUTPUT, live, newest at the tail.
 
-        With `tools_only`, ONLY the tool invocations the agent runs — its
-        commands and tool calls — and none of its prose, reasoning or a
-        command's own output. [his, 2026-08-01] the shell band under a card
-        shows only the tools the agents use, not the agent's own output; the
-        DRAWER (`output`) is the opposite request and keeps the everything.
+        With `tools_only`, the tool invocations the agent runs AND their own
+        output — its commands, its tool calls and what each printed back — but
+        none of its prose or reasoning. [his, 2026-08-01] the workings band
+        under a card shows the tools the agents use, not the agent's narration;
+        [his, 2026-08-03] and it must show the ACTUAL OUTPUT of those tools, a
+        trailing log of what the command/script printed, not only the command
+        line. The DRAWER (`output`, `tools_only=False`) keeps everything,
+        prose included.
 
         Not a summary of it: his words are *"its literal actual thinking / tool
         call / coding output"*. So every line of every assistant `text` and
@@ -1077,15 +1080,21 @@ class Agents(QObject):
                 if kind == "tool_use" and role == "assistant":
                     out.extend(Agents._tool_use_lines(part.get("name"),
                                                       part.get("input")))
-                elif tools_only:
-                    # The shell band is the calls and nothing else — not prose,
-                    # not reasoning, not a command's own output.
-                    continue
                 elif kind == "tool_result":
-                    # Carried on a `user` entry by the platform, but it is the
-                    # TOOL's output and not his words — the one thing in a user
-                    # turn that belongs in the log.
+                    # The command's OWN OUTPUT — the stdout/text of the tool it
+                    # answers. Carried on a `user` entry by the platform, but it
+                    # is the TOOL's output and not his words, so it belongs in the
+                    # log — and, since [his, 2026-08-03], in the workings band
+                    # too: *"the tools section SHOULD NOT just be `ls | grep`... it
+                    # should be a trailing log of the ACTUAL OUTPUT"*. So it is
+                    # kept for BOTH readers, ahead of the `tools_only` skip below;
+                    # what that skip still drops is the minister's prose and
+                    # reasoning, never a command's result.
                     out.extend(Agents._result_lines(part))
+                elif tools_only:
+                    # The workings band is the calls and their OUTPUT — but not
+                    # the minister's own prose or reasoning.
+                    continue
                 elif role != "assistant":
                     continue
                 elif kind == "text":
@@ -1183,9 +1192,10 @@ class Agents(QObject):
         # Rebuilt off `cards` — the SAME drawn list the triangle shows — and
         # only for running, non-orchestrator rows, so the shells section can
         # never disagree with the triangle about who is bound. Each is the
-        # worker's tool-call trace (`_shell_lines`, the transcript's tool_use
-        # entries only — not its prose, its reasoning or its `.log`), cut to two
-        # lines. Emitted on its own signal so a moving tail does not
+        # worker's tool-and-output trace (`_shell_lines`, the transcript's
+        # tool_use entries AND their results — not its prose, its reasoning or
+        # its `.log`), cut to two lines. Emitted on its own signal so a moving
+        # tail does not
         # re-broadcast `changed` to the whole window.
         shells = self._shells_build(cards)
         if shells != self._shells:
@@ -1287,13 +1297,16 @@ class Agents(QObject):
     # background processes; sessions and Solomon have no unit, so they read none
     # rather than guessing.
     def _shell_lines(self, agent_id):
-        """The shell band's lines: ONLY the tool invocations a worker runs — its
-        commands and tool calls — never its prose, its reasoning, or its `.log`.
-        [his, 2026-08-01] the shell should show only the tools the agents use,
-        not the agent's own output. The DRAWER (`output`) is the opposite
-        request and still shows the literal everything, with a `.log` fallback;
-        this band is the compact tool-trace under a card, so it drops both the
-        prose and that fallback (the `.log` is the agent's own stdout — a log)."""
+        """The workings band's lines: the tool invocations a worker runs AND
+        their OUTPUT — its commands, its tool calls and what each printed —
+        never its prose, its reasoning, or its `.log`. [his, 2026-08-01] the
+        band shows the tools the agents use, not the agent's narration;
+        [his, 2026-08-03] and the ACTUAL OUTPUT of those tools, a trailing log
+        of what the command/script printed, not just `ls | grep`. The DRAWER
+        (`output`) is the opposite request and shows the literal everything,
+        prose included, with a `.log` fallback; this band is the compact
+        tool-and-output trace under a card, so it drops the prose and that
+        fallback (the `.log` is the agent's own stdout — a log)."""
         if not (agent_id or "").strip():
             return []
         rec = boardagents.record(agent_id) or {}
