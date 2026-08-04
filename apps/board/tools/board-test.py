@@ -6267,6 +6267,59 @@ def test_window(app, tmp):
     shot(win3, "05-missing-store")
 
 
+def test_top_line_fits(app, tmp):
+    """The card's TOP line is cut to ONE line and KEEPS its animated ellipsis.
+
+    [his, 2026-08-03] a top line long enough to reflow made the ticking `...`
+    jump onto a second line. `AgentRow.fitTop` cuts the line to the pixels it is
+    given (monospace, §2.7) and, on a ticking line, leaves the three moving cells
+    where a static marker would go — so the truncated line still reads as live.
+    Exercised by calling the QML function on a drawn card (PySide reaches it as a
+    method) at a known width, the same way the drawer's tail band is checked.
+    """
+    path = os.path.join(tmp, "board.md")
+    open(path, "w").write("# Board\n\n## NEEDS YOU\n\n## WAITING ON YOU TO DO\n\n"
+                          "## LANDED\n\n- did a thing (abc1234, 1:00 pm)\n")
+    engine, win, keep = build(app, path)
+    spin(300)
+    cards = [it for it in descendants(win.contentItem())
+             if it.property("saysLine") is not None and hasattr(it, "fitTop")]
+    check("a card exists to test the top-line fit against", bool(cards), len(cards))
+    if not cards:
+        return
+    row = cards[0]
+    cellW = float(row.property("cellW"))
+    ANIM = (".  ", ".. ", "...")               # the three ticking cells (§ tick)
+    wpx = 40 * cellW                            # room for ~40 cells
+    # `cells` from QML itself, not a Python `floor` of the same float (the two
+    # disagree by one at the boundary): a plainly-too-long non-ticking line is
+    # cut to EXACTLY one line's worth, so its length IS the cell count.
+    cells = len(str(row.fitTop("x" * 300, wpx)))
+    check("the line width resolves to a sane cell count", 30 <= cells <= 44, cells)
+
+    # A long TICKING line: cut to exactly one line, ending in a live cell.
+    longv = "editing a really quite long path apps/board/qml/AgentRow..."
+    got = str(row.fitTop(longv, wpx))
+    check("a long top line is cut to one line's worth of cells",
+          len(got) == cells, (len(got), cells))
+    check("...and it keeps the animated ellipsis, not a frozen marker",
+          got[-3:] in ANIM, repr(got[-6:]))
+    check("...cutting the TAIL, so the head of the line is still there",
+          got.startswith("editing a really"), repr(got[:20]))
+
+    # A short ticking line is left whole (base + the three cells).
+    got = str(row.fitTop("coding...", wpx))
+    check("a short top line is not truncated", got[:6] == "coding"
+          and got[-3:] in ANIM and len(got) == len("coding") + 3, repr(got))
+
+    # A long line that does NOT tick is a plain one-line clip (ASCII marker).
+    longp = "was last seen an extremely long time ago doing something verbose"
+    got = str(row.fitTop(longp, wpx))
+    check("a non-ticking top line is clipped to one line with an ASCII marker",
+          len(got) == cells and got.endswith("...")
+          and "…" not in got, (len(got), repr(got[-6:])))
+
+
 def test_placed_window(app, tmp):
     """The time reaches the screen, on both shapes, and costs the message nothing.
 
@@ -8220,6 +8273,8 @@ def main():
         test_real_store()
         test_real_window(app)
         test_window(app, os.path.join(tmp, "win"))
+        os.makedirs(os.path.join(tmp, "tlf"))
+        test_top_line_fits(app, os.path.join(tmp, "tlf"))
         os.makedirs(os.path.join(tmp, "plw"))
         test_placed_window(app, os.path.join(tmp, "plw"))
         os.makedirs(os.path.join(tmp, "unw"))

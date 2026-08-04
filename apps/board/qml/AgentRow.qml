@@ -380,6 +380,27 @@ Item {
         return s.length <= cells ? s : s.slice(0, cells - 3) + "..."
     }
 
+    // The card's TOP line to one line's worth of `wpx` pixels — [his, 2026-08-03]
+    // a top line long enough to reflow made the animated ellipsis jump onto a
+    // second line. So it never wraps (the caller sets `Text.NoWrap`); it is cut
+    // by character count like the inbox rows below, exact because the font is
+    // monospace (§2.7), the marker ASCII (§2.3). **The cut KEEPS the animated
+    // ellipsis**: a ticking line ends in the three moving cells, and when the
+    // words are too long those cells stay in place of a static `...` — so the
+    // truncated line still reads as live and as having more behind it, which is
+    // what he asked for. A top line that does not tick is a plain one-line clip.
+    function fitTop(s, wpx) {
+        var cells = Math.floor(wpx / cellW)
+        if (!s.endsWith("..."))
+            return clipTo(s, cells)
+        if (cells < 4)
+            return tick("...")            // no room for words; the live dots alone
+        var base = s.slice(0, -3)
+        if (base.length > cells - 3)
+            base = base.slice(0, cells - 3)
+        return tick(base + "...")
+    }
+
     implicitHeight: col.implicitHeight + 8
     height: implicitHeight
 
@@ -556,7 +577,11 @@ Item {
             visible: row.saysLine !== ""
             height: visible ? implicitHeight : 0
             color: row.leadTone
-            text: row.tick(row.saysLine)
+            // The top line never wraps: cut to one line, animated dots kept
+            // (`fitTop`) — his 2026-08-03 note about the ellipsis jumping down.
+            wrapMode: Text.NoWrap
+            clip: true
+            text: row.fitTop(row.saysLine, width)
         }
 
         // ---- ...and the words it gave for it, on their own line ----
@@ -601,8 +626,14 @@ Item {
             // his call twice: *"the third line ... should not have the animated
             // elipsies or any elipsies at the end of it"*, and *"the only line
             // ... is the top line. no others"*.
+            //
+            // As the top line it never wraps and its tail is clipped (`fitTop`,
+            // animated dots kept); under a claim it is the third line and wraps
+            // as it always has.
+            wrapMode: row.claimLeads ? Text.WordWrap : Text.NoWrap
+            clip: true
             text: row.claimLeads ? row.untick(row.doingLine)
-                                 : row.tick(row.doingLine)
+                                 : row.fitTop(row.doingLine, width)
         }
 
         // ---- THIRD LINE ----
