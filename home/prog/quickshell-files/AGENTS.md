@@ -410,7 +410,16 @@ windows** (`WlrLayer.Top`, empty input mask): a bar-background strip that hides
 the window border + the notch's own border where a flush window meets it, so the
 two read as connected. It is visible only while a frame is flush AND spans the
 notch, from `WinState.frames` — window FRAMES (content + `2 * bar_width` of
-hyprvtb titlebar + border). Two traps it was written around: `height` on a
+hyprvtb titlebar + border). A THIRD trap, which cost a regression: `DesktopNotch` publishes `notchPx` /
+`notchH` into `ViewMode` through `Binding`, and those bindings MUST carry
+`restoreMode: Binding.RestoreNone`. A reload builds the new tree and then
+destroys the old one; a Binding's default restore mode resets its target as it
+dies, so the outgoing notch zeroed the incoming one's reservation and a
+maximized window covered the icon bar completely. Anything here that writes into
+a singleton from a per-reload tree has the same hazard — the singleton outlives
+the tree.
+
+Two traps in the seam itself: `height` on a
 `PanelWindow` whose `visible` depends on that same computation is a circular
 dependency that silently reads the default 100px (use the ShellScreen's), and
 the reserve is a border less than the panel's face, so the frame lands on

@@ -86,15 +86,25 @@ Item {
     // Tell the panel how far to reserve. The bar's exclusive zone covers its
     // own width; this is the part that hangs past it, and without it a tiled or
     // maximized window is laid out straight over the notch.
+    // restoreMode: RestoreNone is LOAD-BEARING, not tidiness. A reload builds the
+    // new panel tree and THEN destroys the old one, and a Binding's default
+    // restore mode puts its target back the way it found it as it dies — so the
+    // outgoing notch reset ViewMode.notchPx to 0 seconds after the incoming one
+    // had set it, and the panel then reserved no room for the notch at all: a
+    // maximized window covered the icon bar completely. ViewMode is a singleton
+    // that OUTLIVES the reload, which is what makes the corpse's restore reach
+    // the living tree.
     Binding {
         target: ViewMode
         property: "notchPx"
         value: notch.visible ? notch.width - notch.overlap : 0
+        restoreMode: Binding.RestoreNone
     }
     Binding {
         target: ViewMode
         property: "notchH"
         value: notch.visible ? notch.height : 0
+        restoreMode: Binding.RestoreNone
     }
 
     // The slab. Bar background, bar accent — the same two colours the panel
