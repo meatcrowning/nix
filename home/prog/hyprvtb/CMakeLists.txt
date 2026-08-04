@@ -22,6 +22,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     xkbcommon
     pangocairo
     fontconfig
+    librsvg-2.0
 )
 target_link_libraries(hyprvtb PRIVATE rt PkgConfig::deps)
 

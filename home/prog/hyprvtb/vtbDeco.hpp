@@ -133,6 +133,7 @@ class CVtbDeco : public IHyprWindowDecoration {
 
     SP<Render::ITexture> m_pTitleTex;
     std::map<std::string, SP<Render::ITexture>> m_glyphCache; // "glyph|rgbahex" -> tex
+    std::map<std::string, SP<Render::ITexture>> m_iconCache;  // "class|sizepx|rgbahex" -> program icon tex
     std::string          m_szLastTitle;
     int                  m_iLastTitleRun = -1;
     float                m_fLastScale    = -1;
@@ -359,6 +360,10 @@ class CVtbDeco : public IHyprWindowDecoration {
     SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr,
                                           int* outLines = nullptr, bool ellipsis = true, bool flatColon = false);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
+    // The window's own program icon (resolved from its class -> .desktop -> icon
+    // theme), rendered square at sizePx device px. `color` styles currentColor
+    // SVGs (e.g. goetia's sigil) so they don't render black-on-black. Cached.
+    SP<Render::ITexture> iconTex(const std::string& cls, int sizePx, const CHyprColor& color);
 
     // title address editor
     bool                 titleEditEnabled();
