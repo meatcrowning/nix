@@ -7048,7 +7048,7 @@ def test_undo_window(app, tmp):
     rows = [str(it.property("text")) for it in descendants(win.contentItem())
             if "waiting for the next" in str(it.property("text") or "")]
     check("...and the row calls it an order, not a message",
-          rows == ["  order waiting for the next summoner: make the thing blue"],
+          rows == ["order waiting for the next summoner: make the thing blue"],
           rows)
 
     box = [it for it in descendants(win.contentItem())
@@ -7117,6 +7117,40 @@ def test_undo_window(app, tmp):
     spin(120)
     check("...and ctrl+z stops claiming what was a reply, not an order",
           agents.property("canUndo") is False)
+
+    # A LONG ORDER IS BOUNDED — the crowding fix. A whole paragraph typed into
+    # the box used to draw in full and take the page; now the pending row is ONE
+    # line, cut with an ASCII "..." (never U+2026, §2.3), and a `+` mark offers
+    # to expand it. Drain first so exactly one order is on the list.
+    ba.drain()
+    ba.send("please reorganise the entire music library " * 12)
+    agents.refresh()
+    spin(250)
+    qrow = [it for it in descendants(win.contentItem())
+            if "waiting for the next" in str(it.property("text") or "")]
+    check("a long pending order is bounded to one line",
+          len(qrow) == 1 and int(qrow[0].property("lineCount")) == 1,
+          [(str(it.property("text"))[:32], int(it.property("lineCount")))
+           for it in qrow])
+    check("...cut with an ASCII ellipsis, no U+2026 (§2.3)",
+          len(qrow) == 1 and str(qrow[0].property("text")).endswith("...")
+          and "…" not in str(qrow[0].property("text")),
+          str(qrow[0].property("text"))[-8:] if qrow else None)
+    check("...and a visible `+` mark offers to expand it",
+          any(str(it.property("text") or "") == "+" and it.property("visible")
+              for it in descendants(win.contentItem())))
+    # Expanded, it grows past one line and the mark flips to `-`.
+    win.setProperty("queuedExpanded", {ba.msg_id(ba.pending()[0]): True})
+    spin(200)
+    qrow = [it for it in descendants(win.contentItem())
+            if "waiting for the next" in str(it.property("text") or "")]
+    check("...and expands to the whole order when he asks",
+          len(qrow) == 1 and int(qrow[0].property("lineCount")) > 1
+          and not str(qrow[0].property("text")).endswith("..."),
+          int(qrow[0].property("lineCount")) if qrow else None)
+    ba.drain()
+    agents.refresh()
+    spin(120)
     shot(win, "07-pending-orders")
 
 

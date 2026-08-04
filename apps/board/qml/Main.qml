@@ -207,6 +207,24 @@ Window {
         Settings.set("todoFolded", f);
     }
 
+    // ---- ...and which pending orders he has expanded past their one line ----
+    // A queued order is his own prose, and a long one crowded the whole page, so
+    // `QueuedNote` draws it as ONE line until he expands it. The exception is
+    // held HERE and keyed by the message id, not in the delegate: a queued row
+    // is rebuilt whenever the queue list changes, so a bool in the delegate
+    // would collapse on the next drain. Session-only, unlike `todoFolded`: an id
+    // names a message board-watch will take, so there is nothing to remember
+    // next time this window opens.
+    property var queuedExpanded: ({})
+    function isQueuedExpanded(id) { return queuedExpanded[String(id)] === true; }
+    function toggleQueuedExpanded(id) {
+        var e = {};
+        for (var i in queuedExpanded) e[i] = queuedExpanded[i];
+        var k = String(id);
+        e[k] = !(e[k] === true);
+        queuedExpanded = e;      // reassigned: a mutated object notifies nothing
+    }
+
     // ---- ...and which cards have their output drawer open ----
     // [his, 2026-07-30] clicking a minister card slides a drawer out from under
     // it with what that minister is actually saying. Held HERE and keyed by the
@@ -2011,9 +2029,12 @@ Component {
                                     win.queuedNotes[qNote.index] || ({})
                                 width: summonerCol.width
                                 note: qNote.modelData
+                                cellW: win.cellW
                                 fgDim: win.fgDim
                                 fgText: win.fgText
                                 fgAccent: win.fgAccent
+                                expanded: win.isQueuedExpanded(qNote.modelData.id)
+                                onExpandToggled: win.toggleQueuedExpanded(qNote.modelData.id)
                                 draft: win.draftOf("queued:" + qNote.modelData.id)
                                 openCaret: win.caretOf("queued:" + qNote.modelData.id)
                                 onCaretHeld: (p) => win.caretHeld("queued:" + qNote.modelData.id, p)
