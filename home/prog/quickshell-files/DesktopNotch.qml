@@ -87,7 +87,11 @@ Item {
         id: column
         spacing: Theme.gap
         width: NotchModel.cellSize
-        x: notch.barLeft ? notch.overlap + NotchModel.pad : NotchModel.pad
+        // The outlined side carries the wider inset; the panel side carries the
+        // narrower one, because the panel's own margin continues it (see
+        // NotchModel's gapLeft/gapRight).
+        x: notch.barLeft ? notch.overlap + NotchModel.gapRight
+                         : NotchModel.columnInset
         anchors.verticalCenter: parent.verticalCenter
 
         Repeater {

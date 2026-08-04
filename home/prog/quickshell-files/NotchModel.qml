@@ -30,10 +30,27 @@ Singleton {
     // already uses, with the seal inset inside it.
     readonly property int cellSize: Theme.wsCell
     readonly property int iconSize: cellSize - 10
-    readonly property int pad: 6
     // How far the slab reaches under the bar body, so its panel-side edge has
     // no outline and the notch opens INTO the panel.
     readonly property int overlap: 6
+    readonly property int lineW: Theme.windowBorderWidth
+
+    // THE TWO GAPS AROUND AN ICON ARE THE SAME GAP, and neither is measured to
+    // the notch's own right edge — that edge is under the bar and nobody can
+    // see it. [his] "can you make it so the space between the icons on the left
+    // and right of the bar is the same? … based on the left edge of the bar,
+    // and the edge of the widgets in the panel, not the right side of the bar."
+    //
+    // To the right of an icon the eye crosses the rest of the notch, then the
+    // panel's face, and stops at the panel's own content — which is inset by
+    // `Theme.gap` (shell.qml's dockLayout margins). So the right-hand gap is
+    // `gapRight + panelInset`, and the left-hand one has to be that whole
+    // distance for the icon to sit centred BETWEEN WHAT IS VISIBLE.
+    readonly property int gapRight: 6
+    readonly property int panelInset: Theme.gap
+    readonly property int gapLeft: gapRight + panelInset
+    // Where the column starts inside the slab, measured from the outlined side.
+    readonly property int columnInset: lineW + gapLeft
 
     // Our own programs, alphabetical: the ones tagged `Keywords=bespoke;` in
     // their desktop entry — the same test the runner sorts by (Launcher.qml's
@@ -64,9 +81,12 @@ Singleton {
     readonly property bool shown: enabled && apps.length > 0
 
     // The whole slab, overlap included...
-    readonly property int slabW: cellSize + pad * 2 + overlap
+    readonly property int slabW: columnInset + cellSize + gapRight + overlap
+    // Vertically the notch is its own container, so the top and bottom insets
+    // are the plain gap either end — there is no panel content to line up with.
+    readonly property int padV: 6
     readonly property int slabH: shown
-        ? apps.length * cellSize + Math.max(0, apps.length - 1) * Theme.gap + pad * 2
+        ? apps.length * cellSize + Math.max(0, apps.length - 1) * Theme.gap + padV * 2
         : 0
     // ...and the part of it that sticks out past the bar, which is what the
     // panel has to reserve and what a window can be flush against.

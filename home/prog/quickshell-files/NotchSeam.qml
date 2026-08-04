@@ -69,12 +69,21 @@ PanelWindow {
     readonly property int notchTop: Math.round((modelData.height - ViewMode.notchH) / 2)
     readonly property int notchBottom: notchTop + ViewMode.notchH
 
-    // Is a window's frame flush with that face, over the notch's whole height?
-    // 3px of slack: the reserve is computed in logical pixels from a width that
-    // is itself a rounded fraction of the screen, so demanding equality would
-    // make this flicker with the panel width.
+    // Is a window flush with that face, over the notch's whole height?
+    //
+    // TWO answers, because the sturdy one does not cover every case. A MAXIMIZED
+    // window is laid out against the reserved area by definition — no measuring,
+    // no assumption about how much chrome hangs off its right side, and it is
+    // the case he asked for. Anything else has to be measured, and that
+    // measurement leans on hyprvtb's titlebar being the window's right-hand
+    // chrome; a window without it reads 64px too wide and simply never matches,
+    // which is a miss rather than a false positive.
+    //
+    // 3px of slack on the measured one: the reserve is computed in logical
+    // pixels from a width that is itself a rounded fraction of the screen, so
+    // demanding equality would make this flicker with the panel width.
     readonly property bool touching: {
-        if (ViewMode.notchH <= 0 || !SettingsStore.d.desktopIcons)
+        if (ViewMode.notchH <= 0 || !NotchModel.shown)
             return false;
         const fs = WinState.frames || [];
         const top = modelData.y + notchTop;
@@ -83,6 +92,8 @@ PanelWindow {
             const f = fs[i];
             if (f.mon !== modelData.name)
                 continue;
+            if (f.max)
+                return true;
             const edge = barLeft ? f.l : f.r;
             if (Math.abs(edge - boundaryX) <= 3 && f.t <= top && f.b >= bottom)
                 return true;
