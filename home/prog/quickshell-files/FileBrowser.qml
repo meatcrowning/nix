@@ -164,7 +164,7 @@ FloatingWindow {
                     onClicked: { view.selected = parent.abs; view.selectedIsDir = parent.fileIsDir; }
                     onDoubleClicked: {
                         if (parent.fileIsDir) view.go(parent.abs);
-                        else Quickshell.execDetached(["xdg-open", parent.abs]);
+                        else NixPath.launch(["xdg-open", parent.abs]);
                     }
                 }
             }

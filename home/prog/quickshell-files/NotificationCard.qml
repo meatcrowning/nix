@@ -76,7 +76,7 @@ Rectangle {
                 if (card._openPending) {
                     card._openPending = false;
                     if (p)
-                        Quickshell.execDetached(["xdg-open", p]);
+                        NixPath.launch(["xdg-open", p]);
                     if (card.notif)
                         card.notif.dismiss();
                 }
@@ -288,7 +288,7 @@ Rectangle {
             if (card.openPath !== card.imagePath) {
                 // A distinct open target (a recording's video): a path we control
                 // that is not sorted away, so open it directly and skip resolve.
-                Quickshell.execDetached(["xdg-open", card.openPath]);
+                NixPath.launch(["xdg-open", card.openPath]);
                 card.notif.dismiss();
             } else {
                 // Resolve at CLICK time: sort-downloads may have moved the file

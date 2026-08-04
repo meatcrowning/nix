@@ -40,6 +40,44 @@ Singleton {
             .concat(argv));
     }
 
+    // `run` for anything that OUTLIVES the click — a GUI application, not a
+    // `pkill`/`hyprctl` one-shot. Use it for every long-lived program the panel
+    // starts; `run` stays correct for fire-and-forget commands.
+    //
+    // execDetached detaches the PROCESS (double-fork, reparented to systemd)
+    // but NOT the CGROUP, which is inherited and cannot be left by running.
+    // So an app launched from the runner stayed inside
+    // `quickshell-panel.service` for its whole life, and that is two bugs:
+    //
+    //   * The unit is `KillMode=control-group` + `Restart=always` (systemd's
+    //     defaults), so ANY panel restart SIGTERMs the whole group — his
+    //     browser and every dock-launched app die with the bar.
+    //   * Their memory is charged to the panel. Measured on book 2026-08-03:
+    //     `quickshell-panel.service` at 1.79 GB current / 3.36 GB peak while
+    //     the `qs` process itself held 176 MB and was flat. The rest was
+    //     surfer + its QtWebEngine renderers. A 3.4 GB "panel leak" in the
+    //     journal was the browser, filed under the bar.
+    //
+    // `systemd-run --user --scope` is the escape: the app lands in its own
+    // `run-p<pid>-i<n>.scope` as a SIBLING under `app.slice`, verified on book.
+    // `--scope` (not `--unit`) is what keeps this a one-liner — a scope runs in
+    // the CALLER's context, so WAYLAND_DISPLAY and the rest are inherited and
+    // need no `--setenv` list (see the `settings` wrapper in quickshell.nix,
+    // which pays exactly that price for using a service instead).
+    // `--collect` reaps the scope when the app exits.
+    //
+    // If systemd-run is somehow absent the `&&` short-circuits to a plain exec,
+    // i.e. today's behaviour — a launch that still works, just uncontained.
+    // Never fail to start the program the user asked for.
+    function launch(argv) {
+        if (!argv || argv.length === 0) return;
+        Quickshell.execDetached(["sh", "-c", root.sh
+            + "command -v systemd-run >/dev/null 2>&1 && "
+            + "exec systemd-run --user --quiet --collect --scope -- \"$0\" \"$@\"; "
+            + "exec \"$0\" \"$@\""]
+            .concat(argv));
+    }
+
     // Every nix-only binary the panel launches. Probed once at startup so a
     // missing one shows up in `qs log` instead of as a dead button: silence,
     // not breakage, is what let this rot unnoticed on book.

@@ -81,10 +81,13 @@ PanelWindow {
         // Terminal apps launch inside the configured terminal emulator; the
         // rest run directly. entry.command is the parsed argv (field codes
         // stripped), spliced after the terminal's exec flag.
+        // NixPath.launch, not execDetached/entry.execute(): both of those leave
+        // the app inside quickshell-panel.service's cgroup, where a panel
+        // restart kills it. See NixPath.launch.
         if (entry.runInTerminal)
-            Quickshell.execDetached([SettingsStore.d.launcherTerminal, "-e"].concat(entry.command));
+            NixPath.launch([SettingsStore.d.launcherTerminal, "-e"].concat(entry.command));
         else
-            entry.execute();
+            NixPath.launch(entry.command);
         close();
     }
 
