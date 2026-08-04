@@ -881,10 +881,19 @@ static const std::string& iconSynonym(const std::string& name) {
 // class -> icon file, cached process-wide (the render path calls this every
 // frame). Falls back to the freedesktop generic executable icon so a window
 // with no resolvable icon still gets *something* rather than a blank slot.
+// The cache is FLUSHED on config reload (clearIconFileCache, from
+// onConfigReloaded) — a reinstalled/renamed icon (`Icon=` changing, or a
+// currentColor SVG landing where a breeze fallback used to resolve) would
+// otherwise be masked by a stale path for the life of the plugin process. The
+// per-deco texture cache (m_iconCache) clears there too; this is its resolution
+// half, which used to be a function-local static nothing could reach.
+static std::map<std::string, std::string> g_iconFileCache;
+static void                               clearIconFileCache() {
+    g_iconFileCache.clear();
+}
 static const std::string& iconFileForClass(const std::string& cls) {
-    static std::map<std::string, std::string> cache;
-    auto                                      it = cache.find(cls);
-    if (it != cache.end())
+    auto it = g_iconFileCache.find(cls);
+    if (it != g_iconFileCache.end())
         return it->second;
     std::string name = iconNameForClass(cls);
     std::string file = iconFileForName(name.empty() ? cls : name);
@@ -894,7 +903,7 @@ static const std::string& iconFileForClass(const std::string& cls) {
         file = iconFileForName(cls); // try the class as an icon name directly
     if (file.empty())
         file = iconFileForName("application-x-executable");
-    return cache.emplace(cls, file).first->second;
+    return g_iconFileCache.emplace(cls, file).first->second;
 }
 
 SP<Render::ITexture> CVtbDeco::iconTex(const std::string& cls, int sizePx, const CHyprColor& color) {
@@ -4318,7 +4327,10 @@ void CVtbDeco::updateWindow(PHLWINDOW pWindow) {
 void CVtbDeco::onConfigReloaded() {
     m_pTitleTex = nullptr;
     m_glyphCache.clear();
-    m_iconCache.clear(); // palette/theme may have changed the icon tint or theme
+    m_iconCache.clear();  // palette/theme may have changed the icon tint or theme
+    clearIconFileCache(); // AND its resolution: a reinstalled/renamed .desktop
+                          // Icon= (the per-app Lemegeton seals) must re-resolve,
+                          // not keep the pre-install breeze fallback path
     if (!validMapped(m_pWindow))
         return;
     g_pDecorationPositioner->repositionDeco(this);
