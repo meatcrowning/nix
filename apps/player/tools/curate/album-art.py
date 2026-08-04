@@ -38,6 +38,11 @@ REPORT = STATE / "report.json"
 
 CAA = "https://coverartarchive.org"
 
+# Cover-ish image names the player's folder_art() already trusts; a written
+# cover.jpg removes the dir from the next run's list (resumable).
+ART_RE = re.compile(
+    r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif|bmp)$", re.I)
+
 
 def caa_front(mbid):
     """URL of the 1200px front image for a release, or None."""
@@ -104,9 +109,6 @@ def main():
             continue
         key = f"{r['album_artist_dir']}/{r['album_dir']}"
         dirs.setdefault(key, []).append(r)
-
-    ART_RE = re.compile(
-        r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif|bmp)$", re.I)
 
     todo = []
     for key, recs in sorted(dirs.items()):
