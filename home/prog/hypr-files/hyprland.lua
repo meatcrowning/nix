@@ -101,7 +101,7 @@ hl.on("monitor.added", function(mon)
                 return
             end
         end
-    end, { timeout = 1200 })
+    end, { timeout = 1200, type = "oneshot" })
 end)
 -- <<< monitor-reclaim <<<
 
