@@ -335,6 +335,14 @@ The short version, and every line of it is a rule:
   existing `liveDots` timer (one step per desktop slide, §6.2). Animation is
   presentation and stays in QML: in the Python the string a test asserts on would
   change four times a second.
+  **The top line never wraps** — [his, 2026-08-03] a line long enough to reflow
+  made the ticking `...` jump onto a second line. `AgentRow.fitTop` cuts it to
+  the pixels it is given (`Text.NoWrap`, a character count since the font is
+  monospace, §2.7) and, on a ticking line, leaves the three MOVING cells where a
+  static marker would go — so a truncated top line still reads as live and as
+  having more behind it. Only the TOP line: `saysT` always, `doingT` only when it
+  leads (no claim above it); the detail and third lines wrap as before. Harness:
+  `board-test.py` → `test_top_line_fits`.
 - **`starting` exists because "not yet" and "cannot see" were the same branch.**
   [his, 2026-07-29] *"when solomon first takes a request, his section very
   briefly shows 'cannot see what solomon is doing' and then changes to 'Solomon
