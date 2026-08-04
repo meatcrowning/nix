@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Widgets
 import Quickshell.Wayland
@@ -219,10 +220,32 @@ PanelWindow {
                         anchors.leftMargin: 6
                         spacing: 8
 
-                        IconImage {
+                        // The icon is the invisible SOURCE a MultiEffect
+                        // recolours to the live foreground, never drawn straight
+                        // — same move as TaskCell (§3.3). The bespoke app seals
+                        // (home/prog/app-icons/*.svg) are `currentColor` sigils
+                        // whose baked fallback is the desktop accent (#cc4400):
+                        // Qt's SVG renderer resolves currentColor to that root
+                        // `color`, so drawn raw every seal reads pure red. The
+                        // colorization tints them — and every breeze app icon —
+                        // to the wal `text`, the same monochrome the runner label
+                        // rides.
+                        Item {
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitSize: 18
-                            source: Quickshell.iconPath(modelData.icon, "application-x-executable")
+                            implicitWidth: 18
+                            implicitHeight: 18
+                            IconImage {
+                                id: resultIcon
+                                anchors.fill: parent
+                                visible: false
+                                source: Quickshell.iconPath(modelData.icon, "application-x-executable")
+                            }
+                            MultiEffect {
+                                anchors.fill: resultIcon
+                                source: resultIcon
+                                colorization: 1.0
+                                colorizationColor: Theme.text
+                            }
                         }
                         PixelText {
                             anchors.verticalCenter: parent.verticalCenter
