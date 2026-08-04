@@ -25,32 +25,47 @@ Singleton {
 
     readonly property bool enabled: SettingsStore.d.desktopIcons
 
-    // Small, per his ask, and derived from a cell rather than a literal
-    // (docs/DESIGN.md §4): the workspace square, the smallest cell the panel
-    // already uses, with the seal inset inside it.
-    readonly property int cellSize: Theme.wsCell
-    readonly property int iconSize: cellSize - 10
+    // ---- ONE GAP, EVERYWHERE, MEASURED ICON-BOX TO EDGE ------------------
+    // [his] "the current padding between the top of the top icon and the top
+    // edge of the bar, can you use that as a guide for the left and right
+    // padding … and also for the padding between the icons themselves."
+    //
+    // THE UNIT IS `gap`, and everything is measured from the same two things:
+    // the seal's own box, and the INNER edge of the bar's outline. That is the
+    // fix as much as the number is — the top padding used to be measured from
+    // the slab's OUTER edge and the left from the border's inner one, so
+    // "6 and 6" drew as 9.6 and 11.4 (measured), and no amount of matching the
+    // constants would have made them look equal.
+    //
+    // Every one of these is `gap`:
+    //   the bar's top edge  -> the first seal's box
+    //   seal box            -> seal box
+    //   the bar's left edge -> a seal's box
+    //   a seal's box        -> the panel's widgets  (§12.2.2: measured to what
+    //                                                is visible, not to the
+    //                                                notch's hidden edge)
+    //
+    // 9 is what the top padding already was in these units, so his guide is
+    // preserved exactly and the others come to it.
+    readonly property int iconSize: 22
+    readonly property int gap: 9
+    // The hover chip and click target, drawn around the seal rather than laid
+    // out with it: a layout cell padded for the pointer would put its padding
+    // into every gap twice, which is what made "equal spacing" impossible to
+    // express before (two cell insets between seals, one against an edge).
+    readonly property int hitSize: iconSize + 8
+
     // How far the slab reaches under the bar body, so its panel-side edge has
     // no outline and the notch opens INTO the panel.
     readonly property int overlap: 6
     readonly property int lineW: Theme.windowBorderWidth
-
-    // THE TWO GAPS AROUND AN ICON ARE THE SAME GAP, and neither is measured to
-    // the notch's own right edge — that edge is under the bar and nobody can
-    // see it. [his] "can you make it so the space between the icons on the left
-    // and right of the bar is the same? … based on the left edge of the bar,
-    // and the edge of the widgets in the panel, not the right side of the bar."
-    //
-    // To the right of an icon the eye crosses the rest of the notch, then the
-    // panel's face, and stops at the panel's own content — which is inset by
-    // `Theme.gap` (shell.qml's dockLayout margins). So the right-hand gap is
-    // `gapRight + panelInset`, and the left-hand one has to be that whole
-    // distance for the icon to sit centred BETWEEN WHAT IS VISIBLE.
-    readonly property int gapRight: 6
+    // The panel's own content margin (shell.qml's dockLayout anchors.margins)
+    // is part of the right-hand gap. It is wider than the unit, so the seals
+    // sit a hair past the panel's face for the gap to the WIDGETS to be `gap`.
+    // Invisible: the notch's mouth opens into the panel there.
     readonly property int panelInset: Theme.gap
-    readonly property int gapLeft: gapRight + panelInset
-    // Where the column starts inside the slab, measured from the outlined side.
-    readonly property int columnInset: lineW + gapLeft
+    readonly property int columnInset: lineW + gap
+    readonly property int gapRight: gap - panelInset
 
     // Our own programs, alphabetical: the ones tagged `Keywords=bespoke;` in
     // their desktop entry — the same test the runner sorts by (Launcher.qml's
@@ -81,14 +96,13 @@ Singleton {
     readonly property bool shown: enabled && apps.length > 0
 
     // The whole slab, overlap included...
-    readonly property int slabW: columnInset + cellSize + gapRight + overlap
-    // Vertically the notch is its own container, so the top and bottom insets
-    // are the plain gap either end — there is no panel content to line up with.
-    readonly property int padV: 6
+    readonly property int protrusion0: columnInset + iconSize + gapRight
+    readonly property int slabW: protrusion0 + overlap
     readonly property int slabH: shown
-        ? apps.length * cellSize + Math.max(0, apps.length - 1) * Theme.gap + padV * 2
+        ? apps.length * iconSize + Math.max(0, apps.length - 1) * gap
+          + 2 * (lineW + gap)
         : 0
     // ...and the part of it that sticks out past the bar, which is what the
     // panel has to reserve and what a window can be flush against.
-    readonly property int protrusion: shown ? slabW - overlap : 0
+    readonly property int protrusion: shown ? protrusion0 : 0
 }
