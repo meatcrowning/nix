@@ -2267,7 +2267,9 @@ Component {
                     visible: win.agentShells.length > 0
                     height: visible ? implicitHeight : 0
                     // [ask 1, 2026-08-02] renamed from "shells": the band is the
-                    // live tail of each bound minister's tool calls, not a
+                    // live tail of each bound minister's tool calls AND their
+                    // output ([his, 2026-08-03] — the actual result of the
+                    // command/script, not just the command line), not a
                     // terminal — *"the other section labeled 'shells'"* read as
                     // the shell it runs in. `workings` names what it shows in the
                     // summoning register: what each spirit is actively doing. The

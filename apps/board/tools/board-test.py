@@ -7320,11 +7320,13 @@ def test_card_output(tmp):
 
 
 def test_shells(tmp):
-    """The triangle's live shells: a per-minister tail of the TOOL CALLS the
-    running agent runs — only those, [his, 2026-08-01] not its prose, its
-    reasoning or its `.log`. Off the same `cards` list the triangle draws, and
-    only for running ministers — the FILE under `~/.cache/board-work/<id>.log`
-    is buffered and empty until exit anyway, so the transcript is the source."""
+    """The triangle's live workings band: a per-minister tail of the TOOL CALLS
+    the running agent runs AND THEIR OUTPUT — [his, 2026-08-01] not its prose or
+    reasoning, [his, 2026-08-03] but the actual result of each command/script, a
+    trailing log of what it printed, not just the command line. Off the same
+    `cards` list the triangle draws, and only for running ministers — the FILE
+    under `~/.cache/board-work/<id>.log` is buffered and empty until exit anyway,
+    so the transcript is the source."""
     import main as brd
     import boardagents as ba
     print("\n=== the triangle shows each bound minister's tool-call shell ===")
@@ -7352,11 +7354,15 @@ def test_shells(tmp):
                                     {"type": "tool_result", "content": text}]}})
                     + "\n")
 
-    # Prose and reasoning INTERLEAVED with the calls: only the calls survive.
+    ba.register("w-trunc", "T", 1, kind="worker", session="ses-trunc",
+                where="apps/x/**")
+
+    # Prose and reasoning INTERLEAVED with the calls: the calls AND their output
+    # survive, the narration does not.
     say("ses-a", {"type": "thinking", "thinking": "let me think"},
         {"type": "text", "text": "I will grep for it"},
         {"type": "tool_use", "name": "Bash", "input": {"command": "grep foo x"}})
-    result("ses-a", "3 matches")     # a result is not an invocation - dropped
+    result("ses-a", "3 matches")     # the command's OUTPUT — now KEPT
     say("ses-a", {"type": "text", "text": "now push"},
         {"type": "tool_use", "name": "Bash", "input": {"command": "git push"}})
     say("ses-b", {"type": "tool_use", "name": "Read",
@@ -7365,23 +7371,40 @@ def test_shells(tmp):
     say("ses-prose", {"type": "text", "text": "just talking, no tools"})
     # an empty transcript, the shape of a running minister that has not spoken
     open(os.path.join(d, "ses-quiet.jsonl"), "w").close()
+    # A command whose output is LONG and holds a pathologically wide line: the
+    # band shows a bounded TAIL, and no single line arrives wider than
+    # OUTPUT_WIDTH (§5.2 — never megabytes on a card).
+    trunc_out = ["out %d" % i for i in range(1, 51)]
+    trunc_out[10] = "W" * 1000
+    say("ses-trunc", {"type": "tool_use", "name": "Bash",
+                      "input": {"command": "make output"}})
+    result("ses-trunc", "\n".join(trunc_out))
 
     cards = [
         {"id": "w-a", "name": "Marbas", "kind": "worker", "state": "running"},
         {"id": "w-b", "name": "Bune", "kind": "worker", "state": "running"},
         {"id": "w-prose", "name": "Vine", "kind": "worker", "state": "running"},
         {"id": "w-quiet", "name": "Camio", "kind": "worker", "state": "running"},
+        {"id": "w-trunc", "name": "Gremory", "kind": "worker", "state": "running"},
         {"id": "w-stop", "name": "X", "kind": "worker", "state": "exited"},
         {"id": "w-sum", "name": "Solomon", "kind": ba.ORCHESTRATOR_KIND,
          "state": "running"},
     ]
     shells = agents._shells_build(cards)
     by = {s["id"]: s for s in shells}
-    check("a running minister's shell tails only the tool calls it ran",
-          by["w-a"]["lines"] == ["$ grep foo x", "$ git push"], by)
-    check("...its prose, reasoning and tool results are NOT in the shell",
-          all(x.startswith("$ ") for x in by["w-a"]["lines"]), by)
-    check("...and a single call shows as itself",
+    # The whole tool-and-output trace, uncut, is command + its output + command,
+    # in file order — prose and reasoning dropped.
+    trace_a = brd.Agents._transcript_lines("ses-a", tools_only=True)
+    check("the workings trace is the calls AND their output, in file order",
+          trace_a == ["$ grep foo x", "3 matches", "$ git push"], trace_a)
+    check("...the minister's prose and reasoning are NOT in it",
+          "let me think" not in trace_a and "I will grep for it" not in trace_a
+          and "now push" not in trace_a, trace_a)
+    # The band itself is the trailing couple of lines of that trace — so a
+    # command's OUTPUT shows, not only the command line he complained about.
+    check("the band shows the ACTUAL OUTPUT of a command, not just the command",
+          by["w-a"]["lines"] == ["3 matches", "$ git push"], by)
+    check("...and a single call with no output yet shows as itself",
           by["w-b"]["lines"] == ["Read /a/b.py"], by)
     check("...a minister that has only talked (no tools) draws no shell row",
           "w-prose" not in by, list(by))
@@ -7391,10 +7414,19 @@ def test_shells(tmp):
           "w-stop" not in by, list(by))
     check("...and the orchestrator never is either (his card is the summoner)",
           "w-sum" not in by, list(by))
+    # Long output is BOUNDED: the band is the last SHELL_LINES lines of the
+    # trace, and no line anywhere in it is wider than OUTPUT_WIDTH.
+    check("a long command output is cut to a bounded trailing tail",
+          by["w-trunc"]["lines"] == ["out 49", "out 50"], by)
+    trace_trunc = brd.Agents._transcript_lines("ses-trunc", tools_only=True)
+    check("...and no single output line arrives wider than OUTPUT_WIDTH",
+          max(len(x) for x in trace_trunc) == brd.Agents.OUTPUT_WIDTH,
+          max(len(x) for x in trace_trunc))
     ba.unregister("w-a")
     ba.unregister("w-b")
     ba.unregister("w-prose")
     ba.unregister("w-quiet")
+    ba.unregister("w-trunc")
     del os.environ["BOARD_TRANSCRIPTS"]
 
 
