@@ -78,8 +78,9 @@ Rectangle {
     border.width: focusedWin ? 2 : 1
     border.color: cell.stateColor
 
-    // The icon is never drawn straight (AppIcon paints it — our own seals flat
-    // in the state colour, a foreign icon tinted to it): breeze-dark ships no
+    // The icon is never drawn straight (AppIcon tints it to the state colour,
+    // exactly for a seal, luminance-scaled for a foreign icon whose light/dark
+    // detail is the drawing): breeze-dark ships no
     // dark VARIANT for its colourful app/mimetype icons (breeze-dark's
     // system-file-manager, text-x-generic … are
     // byte-identical to breeze's), so a raw icon renders in its light-theme

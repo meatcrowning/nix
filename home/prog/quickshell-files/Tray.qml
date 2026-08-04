@@ -28,8 +28,8 @@ Column {
             // keeping the icon's own light/dark detail. With "tint tray icons"
             // off, show the icons in their own colours — except one of OUR
             // seals, which has no colours of its own to show (a currentColor
-            // sigil drawn raw is the file's baked red), so it takes the accent
-            // either way.
+            // sigil drawn raw is a plain white line drawing), so it takes the
+            // accent either way.
             AppIcon {
                 anchors.centerIn: parent
                 width: Theme.cell - 18

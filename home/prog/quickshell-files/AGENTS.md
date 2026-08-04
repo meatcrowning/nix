@@ -393,14 +393,19 @@ rolled-up window can still hold the keyboard.
 ### Every program icon goes through `AppIcon.qml`
 
 Runner rows, task cells, tray items and a toast's header all draw one, and none
-of them draws it itself. The reason is our own app seals: they are
-`currentColor` sigils, so Qt renders them in the file's baked fallback
-(`#cc4400`, red) drawn raw, and `MultiEffect.colorization` — which scales the
-tint by the SOURCE's luminance — turns them into a dull fraction of the accent.
-`AppIcon` paints a seal as a MASK instead (a flat fill of the given colour cut
-to the sigil's alpha, the exact colour hyprvtb's titlebar gives it) and leaves a
-foreign icon on colorization, whose light/dark detail is the drawing.
-docs/DESIGN.md §12.2.1 is the rule.
+of them draws it itself. `AppIcon` tints every icon to the colour it is given —
+`MultiEffect.colorization`, which scales the tint by the SOURCE's own luminance
+— and tints our own seals even where a surface leaves foreign icons alone.
+
+**That is exact only because a seal's `currentColor` fallback is white.**
+Against the old `#cc4400` fallback the same tint measured `#2b4b60`, 36% of it:
+the dull runner icons. Measurements and the rejected mask approach (it renders
+*nothing* — an invisible source item has no layer to sample) are in
+docs/DESIGN.md §12.2.1 and in `AppIcon.qml`'s own header. **Verify a change
+here on the sandbox output** (`tools/sandbox.sh` + `qs -p <test shell.qml>`,
+then read the pixels back): `QT_QPA_PLATFORM=offscreen` has no shader path, so
+MultiEffect renders nothing there and an offscreen grab will "confirm" whatever
+you already believe.
 
 It tells the two apart by name, through the generated `AppSeals.qml` singleton —
 `Quickshell.iconPath` returns `image://icon/<name>`, never a path, so there is

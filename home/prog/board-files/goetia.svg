@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
   <!-- goetia app icon — the seal of Bael, first spirit of the Ars Goetia.
        Redrawn as clean geometry from the 1904 Mathers/Crowley plate:
        outer circle, three-headed bird (top + two side heads), body bands,
@@ -14,7 +14,10 @@
        _window_icon), and re-tinted on every theme change. The root `color`
        above is only the fallback for external consumers that render the file
        directly (the desktop entry / panel task cell), which resolve
-       currentColor to it: the desktop's default accent. Uniform 44-unit
+       currentColor to it. IT IS WHITE ON PURPOSE: the panel tints through
+       MultiEffect, whose colorization scales the tint by the SOURCE's own
+       luminance, so only a white sigil comes out the exact theme colour
+       (measured — a #cc4400 fallback landed at 36% of it). Uniform 44-unit
        stroke = the 2px edge weight scaled to icon size (DESIGN.md §4). -->
   <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="256" cy="256" r="218"/>

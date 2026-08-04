@@ -3,29 +3,32 @@ import QtQuick.Effects
 import Quickshell
 import Quickshell.Widgets
 
-// ONE program icon, drawn the way this desktop draws program icons: our own
-// app seals as a flat fill of the live focus colour, every other icon tinted
-// to it.
+// ONE program icon, drawn the way this desktop draws program icons: tinted to
+// the live focus colour, and — for our own app seals — tinted whether or not
+// the surface tints anything else.
 //
-// The bespoke seals (home/prog/app-icons/*.svg, plus goetia's) are
-// `currentColor` sigils: the sigil IS the theme's foreground (docs/DESIGN.md
-// §3.1, body text = the accent), which is why hyprvtb's titlebar resolves it
-// through a librsvg stylesheet and goetia's window icon substitutes the token
-// textually before rendering. Qt's SVG renderer has no such hook — it resolves
-// currentColor to the file's baked root `color` (#cc4400) — so on the panel a
-// seal had two failure modes, and both are the ICON's ink deciding the colour
-// instead of the theme:
+// The seals (home/prog/app-icons/*.svg, plus goetia's) are `currentColor`
+// sigils: the sigil IS the theme's foreground (docs/DESIGN.md §3.1), so
+// whatever draws one has to supply the colour. hyprvtb does it with a librsvg
+// stylesheet and goetia's window icon by substituting the token before
+// rendering; Qt's SVG renderer has no such hook and resolves currentColor to
+// the file's baked root `color`, so on the panel the colour comes from the
+// tint — and the tint is only exact because that fallback is WHITE.
 //
-//   drawn straight (the notification card)  pure red, on every wallpaper
-//   through MultiEffect.colorization        the accent scaled by the source's
-//                                           own luminance, i.e. a dull fraction
-//                                           of the focus colour (the runner)
+// Measured on the sandbox output (tint #6dbdf2, one seal, four render paths):
 //
-// So a seal is drawn as a MASK — a flat rectangle of `color`, cut to the
-// sigil's alpha — which is exactly the colour hyprvtb paints it in the
-// titlebar of the same program. A full-colour theme icon still goes through
-// colorization when `tint` is set: its light/dark detail IS the drawing, and
-// flattening it would leave a silhouette.
+//   raw, #cc4400 fallback                    #cc4400   red on every wallpaper
+//   colorization over the #cc4400 fallback   #2b4b60   36% of the tint — the
+//                                                      dullness he reported
+//   MultiEffect mask (flat fill, cut to the
+//     sigil's alpha by maskSource)           nothing   an invisible source item
+//                                                      has no layer to sample
+//   colorization over a WHITE fallback       #6dbdf2   exact
+//
+// So colorization scales the tint by the SOURCE's own luminance, and the fix
+// lives in the artwork, not here: white in, exact theme colour out. Full-colour
+// theme icons keep their own light/dark detail through the same path, which is
+// what that scaling is FOR.
 Item {
     id: root
 
@@ -35,10 +38,9 @@ Item {
     property string iconName: ""
     property string source: iconName === ""
         ? "" : Quickshell.iconPath(iconName, "application-x-executable")
-    // The colour a seal is painted in, and the tint a foreign icon takes.
     property color color: Theme.accent
-    // Foreign icons only. A seal is always painted `color` — it has no colours
-    // of its own to keep, only the baked fallback.
+    // Whether a FOREIGN icon is tinted. A seal is tinted either way: drawn raw
+    // it is a white line drawing, which states the theme's colour nowhere.
     property bool tint: true
     property real dim: 1
 
@@ -52,35 +54,15 @@ Item {
         anchors.fill: parent
         source: root.source
         opacity: root.dim
-        // The invisible SOURCE the effects below read; drawn straight only for
-        // a foreign icon nobody asked to tint.
+        // Normally the invisible SOURCE the effect below reads; drawn straight
+        // only for a foreign icon nobody asked to tint.
         visible: !root.tint && !root.seal
-    }
-
-    // The ink for a seal. Never drawn itself — it is what the mask cuts.
-    Rectangle {
-        id: ink
-        anchors.fill: img
-        color: root.color
-        visible: false
-        // The layer IS the texture the mask reads, so it exists only for a
-        // seal — a taskbar full of foreign icons allocates no FBOs for it.
-        layer.enabled: root.seal
-    }
-
-    MultiEffect {
-        anchors.fill: img
-        source: ink
-        maskEnabled: true
-        maskSource: img
-        visible: root.seal && root.source !== ""
-        opacity: root.dim
     }
 
     MultiEffect {
         anchors.fill: img
         source: img
-        visible: root.tint && !root.seal && root.source !== ""
+        visible: (root.tint || root.seal) && root.source !== ""
         colorization: 1.0
         colorizationColor: root.color
         opacity: root.dim

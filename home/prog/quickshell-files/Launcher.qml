@@ -223,14 +223,14 @@ PanelWindow {
                         anchors.leftMargin: 6
                         spacing: 8
 
-                        // Never drawn straight: AppIcon paints our own seals
-                        // flat in the accent — the focus colour a hyprvtb
-                        // titlebar gives the same program — and tints every
-                        // foreign app icon to it. Tinting to `text` here used to
-                        // put the seals through MultiEffect's colorization,
-                        // which scales the tint by the icon's own luminance, so
-                        // a seal came out a dull fraction of the accent while
-                        // the taskbar drew the same sigil at full strength.
+                        // Never drawn straight: AppIcon tints every icon to the
+                        // accent — the focus colour a hyprvtb titlebar gives
+                        // the same program. Our own seals land on it EXACTLY
+                        // only because their currentColor fallback is white:
+                        // colorization scales the tint by the source's own
+                        // luminance, so against the old #cc4400 fallback a seal
+                        // came out at 36% of the tint (measured), which is what
+                        // made the runner's icons read dull and dark.
                         AppIcon {
                             anchors.verticalCenter: parent.verticalCenter
                             width: 18
