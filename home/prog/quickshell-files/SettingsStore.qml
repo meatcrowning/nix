@@ -228,9 +228,9 @@ Singleton {
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
-            // The column of program shortcuts down the right of the desktop
-            // (DesktopIcons.qml). On by default — it is the desktop's own
-            // programs, and there is nowhere else on the desktop to click.
+            // The shortcut notch on the panel's inner edge (DesktopNotch.qml).
+            // On by default — it is the desktop's own programs, and the panel
+            // is where this desktop keeps what you click.
             property bool   desktopIcons: true
             // Opacity of the window drop shadow hyprvtb draws to the bottom-left
             // of every titlebarred window. 0.6 is the shipped look; 0 = no

@@ -761,13 +761,6 @@ Scope {
         WallpaperLayer {}
     }
 
-    // Shortcuts to our own programs, a column of small icons down the right of
-    // the visible desktop. Bottom layer: above the wallpaper, below windows.
-    Variants {
-        model: Quickshell.screens
-        DesktopIcons {}
-    }
-
     // The volume/brightness OSD popup, one per monitor.
     Variants {
         model: Quickshell.screens
@@ -849,7 +842,11 @@ Scope {
             // edge changes its position too, and the compositor can apply the
             // new geometry a frame before the matching buffer arrives. The
             // surface must simply never change.
-            implicitWidth: ViewMode.maxPx
+            // ...plus the shortcut notch, which protrudes past the bar's inner
+            // edge and must have surface to paint on at every panel width,
+            // including the widest. Still a CONSTANT — that is the invariant
+            // above, and adding a constant to it does not break it.
+            implicitWidth: ViewMode.maxPx + notch.width
             color: "transparent"
             // Explicit coordinates rather than `Region { item: barBody }`. Both
             // should work, but this is the identical form EdgeGrip.qml uses, and
@@ -861,6 +858,16 @@ Scope {
                 y: 0
                 width: ViewMode.liveWidth
                 height: bar.height
+
+                // The notch hangs outside the bar rect, so its clicks need
+                // their own hole; everything between the two stays desktop.
+                Region {
+                    intersection: Intersection.Combine
+                    x: notch.x
+                    y: notch.y
+                    width: notch.width
+                    height: notch.height
+                }
             }
 
             // Publish the VISIBLE bar width for the drag trace (`qs ipc call
@@ -932,6 +939,21 @@ Scope {
                 (Procs.filterGrab && ViewMode.showDock) ? WlrKeyboardFocus.Exclusive
               : ((Procs.filterFocus || Procs.filterLatch) && ViewMode.showDock)
                   ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+            // The shortcut notch: a slab protruding from the bar's inner edge,
+            // centred on it. Below barBody in z so the strip of it that reaches
+            // under the bar — the side that would otherwise show an outline —
+            // is covered by the bar's own opaque background, which is what
+            // makes it read as an opening in the panel rather than a box glued
+            // to its edge.
+            DesktopNotch {
+                id: notch
+                z: -1
+                barLeft: bar.barLeft
+                anchors.verticalCenter: parent.verticalCenter
+                x: bar.barLeft ? barBody.x + barBody.width - overlap
+                               : barBody.x - width + overlap
+            }
 
             // THE VISIBLE BAR. Its width is the only thing that moves when the
             // panel is resized — a plain binding, applied in the frame it
@@ -1017,15 +1039,31 @@ Scope {
                 // accent strip down the bar's inner edge — same width as the window
                 // border. Sits on the left when the bar is anchored right, and flips
                 // to the right when barEdge moves the bar to the left screen edge.
-                Rectangle {
-                    z: 1
-                    anchors {
-                        top: parent.top; bottom: parent.bottom
-                        left: bar.barLeft ? undefined : parent.left
-                        right: bar.barLeft ? parent.right : undefined
+                //
+                // TWO segments, not one: the strip stops at the notch and picks
+                // up below it, so the accent line runs down the panel, out
+                // around the notch's three exposed sides and back — one
+                // continuous outline rather than a line drawn across the
+                // notch's mouth, which would read as a box stuck on the bar.
+                // barBody is full height and anchored to the window's top, so
+                // the notch's window coordinates are these coordinates.
+                Repeater {
+                    model: 2
+                    Rectangle {
+                        required property int index
+                        z: 1
+                        anchors {
+                            left: bar.barLeft ? undefined : parent.left
+                            right: bar.barLeft ? parent.right : undefined
+                        }
+                        width: 2
+                        color: Theme.accent
+                        y: index === 0 ? 0
+                                       : (notch.visible ? notch.y + notch.height : 0)
+                        height: index === 0
+                                ? (notch.visible ? notch.y : parent.height)
+                                : (notch.visible ? parent.height - (notch.y + notch.height) : 0)
                     }
-                    width: 2
-                    color: Theme.accent
                 }
 
                 // THE UAC SCRIM. While a `vista-askpass` window is up, Hyprland's

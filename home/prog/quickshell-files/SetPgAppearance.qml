@@ -265,8 +265,8 @@ Column {
             }
         }
         SetRow {
-            label: "desktop shortcuts"
-            desc: "a column of program icons down the right of the desktop"
+            label: "shortcut notch"
+            desc: "a notch on the panel's inner edge holding the desktop's own programs"
             SetToggle {
                 checked: page.d.desktopIcons
                 onToggled: (v) => { page.d.desktopIcons = v; SettingsStore.save(); }

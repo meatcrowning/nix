@@ -390,17 +390,27 @@ minimized — with the icon knocked back in the last two, and the filled
 background left to mean FOCUS alone. Roll and minimize outrank focus, because a
 rolled-up window can still hold the keyboard.
 
-### The desktop shortcut column
+### The shortcut notch
 
-`DesktopIcons.qml` — one `Bottom`-layer surface per monitor, a column of small
-program icons down the right of the VISIBLE desktop (`root.width -
-ViewMode.liveWidth` when the bar is over there, so it follows the panel edge
-live). Membership is the `Keywords=bespoke;` tag on the desktop entry, the same
-test `Launcher.qml`'s `rank` sorts by — never a hardcoded list. Input is masked
-to the column, so a click anywhere else is still a click on the wallpaper, and
-it never takes keyboard focus. Toggle: `desktopIcons` (Settings → appearance).
-Launch goes through `NixPath.launch`, never `entry.execute()` — see NixPath for
-the cgroup reason. docs/DESIGN.md §12.2.2 is the rule.
+`DesktopNotch.qml` — the slab that protrudes from the bar's inner edge, centred
+on it, holding a column of small program icons. It is instantiated INSIDE the
+bar's own layer surface (`shell.qml`), not in a surface of its own, so the
+notch's accent outline and the bar's inner-edge strip live in one coordinate
+space and cannot drift apart during a width drag. Three pieces have to move
+together, and all three are in `shell.qml`:
+
+- the surface's `implicitWidth` (`ViewMode.maxPx + notch.width` — still a
+  constant, which that comment requires),
+- the input `mask`, which needs a second `Region` for the notch or its icons
+  take no clicks,
+- the inner-edge accent strip, drawn as TWO segments with the gap at the notch.
+
+Membership is the `Keywords=bespoke;` tag on the desktop entry, the same test
+`Launcher.qml`'s `rank` sorts by — never a hardcoded list. Toggle:
+`desktopIcons` (Settings → appearance → shortcut notch). Launch goes through
+`NixPath.launch`, never `entry.execute()` — see NixPath for the cgroup reason.
+The notch is NOT protected by the bar's exclusive zone, so a window at the panel
+edge covers it. docs/DESIGN.md §12.2.2 is the rule.
 
 ### Every program icon goes through `AppIcon.qml`
 
