@@ -154,6 +154,11 @@ static int totalBarW() {
 static int           cellSize() {
     return colW() - VTB_PAD * 2;
 }
+// How far a full-colour program icon dims when its window is unfocused: the
+// same 0.55 the player fades its album art to (docs/DESIGN.md §3.1.1), the
+// desktop-wide "dim an image on unfocus" number — a currentColor icon greys via
+// the title tint, a full-colour one can only fade its opacity toward the bar.
+static constexpr float ICON_UNFOCUS_DIM = 0.55f;
 // The program-icon slot: one cell tall, directly below the pin cell (the last
 // of the VTB_CELLS system cells) and above the stacked title. [his,
 // 2026-08-03] "i'd like the programs icon to be placed just above where the
@@ -1186,8 +1191,25 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
         const int    ISZ   = std::max(1, (int)std::round((CELL - 2 * INSET) * SCALE));
         const auto&  ICLS  = !PWINDOW->m_class.empty() ? PWINDOW->m_class : PWINDOW->m_initialClass;
         auto         itex  = iconTex(ICLS, ISZ, textColor);
+        // Dim on unfocus, like the player greys its album art (docs/DESIGN.md
+        // §3.1.1): a currentColor icon greys with the title via textColor, but a
+        // full-colour theme icon ignores the tint and would stay lit. An image's
+        // one move without a shader is opacity — the icon composites toward the
+        // black bar behind it, the exact fade the cover makes toward bgAlt (both
+        // near-black), so the whole titlebar reads as one unfocused surface. The
+        // dim tracks the same focused<->unfocused transition the title tint does:
+        // full while focused/opening, ICON_UNFOCUS_DIM at rest unfocused or shaded,
+        // crossfading with the slide (rollSlideT) mid-roll.
+        float focusMix = FOCUSED ? 0.f : 1.f; // 0 focused .. 1 unfocused
+        if (SHADED_REST)
+            focusMix = 1.f;
+        if (m_bOpening)
+            focusMix = 0.f;
+        else if (ROLLANIM)
+            focusMix = rollSlideT;
+        const float iconDim = 1.f - (1.f - ICON_UNFOCUS_DIM) * focusMix;
         if (itex && itex->m_texID != 0)
-            Hl::texture(itex, localBox(sysColX() + INSET, iconSlotTop() + INSET, CELL - 2 * INSET, CELL - 2 * INSET).round(), {.a = a});
+            Hl::texture(itex, localBox(sysColX() + INSET, iconSlotTop() + INSET, CELL - 2 * INSET, CELL - 2 * INSET).round(), {.a = a * iconDim});
     }
 
     // ---- title, a column of upright letters (outer column, under the cells) ----
