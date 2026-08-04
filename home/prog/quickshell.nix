@@ -158,11 +158,16 @@ in
     GenericName=Desktop Settings
     Comment=Configure the Quickshell desktop
     Exec=${settings}/bin/settings show
-    Icon=preferences-desktop
+    Icon=settings
     Terminal=false
     Categories=Settings;DesktopSettings;
     Keywords=bespoke;
   '';
+
+  # The Settings program's own Lemegeton seal (Marbas), the last bespoke app to
+  # get one. Installed into the hicolor theme so `Icon=settings` above resolves
+  # to it; the runner tints its currentColor strokes to the live theme.
+  home.file.".local/share/icons/hicolor/scalable/apps/settings.svg".source = ./app-icons/settings.svg;
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     [ -e "$HOME/.config/quickshell/Theme.qml" ] || install -D -m644 ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml"
