@@ -167,10 +167,15 @@ static int iconSlotTop() {
     return VTB_PAD + VTB_CELLS * (cellSize() + VTB_CELL_GAP);
 }
 static int titleTop() {
-    // ...then the title starts one cell below the icon slot. Everything that
-    // reads titleTop()/titleTopEff() (spinner, hit-tests, the address editor,
-    // the playbar) shifts down together, so the icon reserves its row once.
-    return iconSlotTop() + (cellSize() + VTB_CELL_GAP) + 4;
+    // ...then the title starts one cell below the icon slot, with the SAME gap
+    // above and below the icon: the icon-to-pin gap is one VTB_CELL_GAP (the
+    // grid pitch), so the icon-to-title gap is one VTB_CELL_GAP too — measured
+    // to the drawn edges, both come out at VTB_CELL_GAP + INSET (the icon's own
+    // inset applies equally top and bottom). [his, 2026-08-03] the space to the
+    // pin button and the space to the name must be equal. Everything that reads
+    // titleTop()/titleTopEff() (spinner, hit-tests, the address editor, the
+    // playbar) shifts up together, so the icon reserves its row once.
+    return iconSlotTop() + (cellSize() + VTB_CELL_GAP);
 }
 
 // The two button columns (inner app column, then outer system column) are laid
