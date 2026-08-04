@@ -54,9 +54,6 @@ Rectangle {
     }
     readonly property string iconName: appEntry && appEntry.icon
         ? appEntry.icon : (modelData.appId || "")
-    // A currentColor SVG (goetia's sigil) renders its baked fallback hue and so
-    // ignores the theme; a full-colour theme icon keeps its own colours.
-    readonly property bool monoIcon: MonoIcon.isMono(cell.iconName)
     // Knocked back off-screen: the icon is most of the cell's ink and a border
     // alone is easy to miss on a busy row.
     readonly property real iconDim: cell.winState === "minimized" ? 0.45
@@ -81,28 +78,28 @@ Rectangle {
     border.width: focusedWin ? 2 : 1
     border.color: cell.stateColor
 
+    // The icon is always the (invisible) SOURCE the MultiEffect below recolours,
+    // never drawn straight: breeze-dark ships no dark VARIANT for its colourful
+    // app/mimetype icons (breeze-dark's system-file-manager, text-x-generic … are
+    // byte-identical to breeze's), so a raw icon renders in its light-theme
+    // colours and reads as "stuck on light mode" on this dark bar. Tinting every
+    // one to the cell's state colour is docs/DESIGN.md §3.3's own rule — "the
+    // program icons should actually show the states of every window … full accent
+    // colour for unrolled and focused" — the same accent ladder the border and
+    // the fallback letter already ride, and the same move the tray makes with its
+    // own tint. It also subsumes goetia's currentColor sigil, which used to be the
+    // only icon tinted here.
     IconImage {
         id: taskIcon
         anchors.centerIn: parent
-        // Drawn directly only for full-colour icons; for a mono icon it stays
-        // the (invisible) SOURCE the MultiEffect below recolours, exactly as the
-        // tray does with its own tint.
-        visible: cell.iconName !== "" && !cell.monoIcon
+        visible: false
         implicitSize: Theme.wsCell - 12
         source: Quickshell.iconPath(cell.iconName, "application-x-executable")
-        opacity: cell.iconDim
     }
-    // The compositor's titlebar recolours currentColor SVGs with a librsvg
-    // stylesheet (../hyprvtb/vtbDeco.cpp iconTex); the panel's IconImage cannot,
-    // so goetia's sigil showed its baked #cc4400 fallback on every theme. Tint
-    // the mono icon to the cell's state colour — the accent ramp the border and
-    // the fallback letter already use (docs/DESIGN.md §3.1: the sigil IS body
-    // text, which follows the accent) — so the taskbar icon tracks the theme
-    // like the titlebar's does.
     MultiEffect {
         anchors.fill: taskIcon
         source: taskIcon
-        visible: cell.iconName !== "" && cell.monoIcon
+        visible: cell.iconName !== ""
         colorization: 1.0
         colorizationColor: cell.stateColor
         opacity: cell.iconDim
