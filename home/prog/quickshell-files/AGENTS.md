@@ -465,6 +465,15 @@ dependency that silently reads the default 100px (use the ShellScreen's), and
 the reserve is a border less than the panel's face, so the frame lands on
 `face + windowBorderWidth`, not on the face.
 
+`NotchModel.gap` is the ONE spacing unit — top, bottom, left, seal-to-seal, and
+out to the panel's widgets — and it is measured from the outline's INNER edge to
+the seal's own box every time. Two traps it was written around: the vertical
+inset used to be measured from the slab's outer edge and the horizontal one from
+the border's inner edge (so equal constants drew unequal), and the layout unit
+used to be a 32px hit-target cell with the 22px seal inside it, which put two
+pointer margins between every pair of seals and one against each edge. The
+column is the width of a seal; the hover chip is drawn around it.
+
 Membership is the `Keywords=bespoke;` tag on the desktop entry, the same test
 `Launcher.qml`'s `rank` sorts by — never a hardcoded list. Toggle:
 `desktopIcons` (Settings → appearance → shortcut notch). Launch goes through

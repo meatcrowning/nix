@@ -83,13 +83,13 @@ Item {
         color: Theme.accent
     }
 
+    // The seals, one gap apart. The column is the width of a SEAL, not of a
+    // padded cell — the hover chip is drawn around each one instead of being
+    // laid out with it, so the pointer's padding never lands in the spacing.
     Column {
         id: column
-        spacing: Theme.gap
-        width: NotchModel.cellSize
-        // The outlined side carries the wider inset; the panel side carries the
-        // narrower one, because the panel's own margin continues it (see
-        // NotchModel's gapLeft/gapRight).
+        spacing: NotchModel.gap
+        width: NotchModel.iconSize
         x: notch.barLeft ? notch.overlap + NotchModel.gapRight
                          : NotchModel.columnInset
         anchors.verticalCenter: parent.verticalCenter
@@ -97,22 +97,29 @@ Item {
         Repeater {
             model: NotchModel.apps
 
-            delegate: Rectangle {
+            delegate: Item {
                 id: shortcut
                 required property var modelData
 
-                width: NotchModel.cellSize
-                height: NotchModel.cellSize
-                radius: Theme.windowRounding
+                width: NotchModel.iconSize
+                height: NotchModel.iconSize
+
                 // Nothing at rest — the slab is the container, and a chip under
                 // every icon would be a second frame inside it. The hover fill
-                // is the runner's selected-row highlight.
-                color: hover.containsMouse ? Theme.highlight : "transparent"
+                // is the runner's selected-row highlight, drawn AROUND the seal
+                // (and so overlapping the gap a little) rather than being the
+                // thing the layout spaces.
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: NotchModel.hitSize
+                    height: NotchModel.hitSize
+                    radius: Theme.windowRounding
+                    visible: hover.containsMouse
+                    color: Theme.highlight
+                }
 
                 AppIcon {
-                    anchors.centerIn: parent
-                    width: NotchModel.iconSize
-                    height: NotchModel.iconSize
+                    anchors.fill: parent
                     iconName: shortcut.modelData.icon
                     // The focus colour, like every other program icon on this
                     // desktop (docs/DESIGN.md §12.2.1).
@@ -121,7 +128,9 @@ Item {
 
                 MouseArea {
                     id: hover
-                    anchors.fill: parent
+                    anchors.centerIn: parent
+                    width: NotchModel.hitSize
+                    height: NotchModel.hitSize
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     // One click launches, like the runner's rows — this desktop
