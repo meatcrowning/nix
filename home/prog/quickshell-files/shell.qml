@@ -896,8 +896,15 @@ Scope {
             // fights the same frame the resize is trying to land in. Nothing is
             // lost by deferring it: windows are pushed clear once, on release
             // (applyReserve), which is also when the wallpaper recomposes.
+            //
+            // The NOTCH is reserved too, so a maximized or tiled window stops
+            // at it rather than covering it (the exclusive zone is one scalar
+            // per edge, so the strip it reserves runs the full height — above
+            // and below the notch that is wallpaper, which is the price of the
+            // notch being visible under a maximized window at all).
             exclusiveZone: (ViewMode.dragging ? ViewMode.barWidth
                                               : ViewMode.liveWidth)
+                           + ViewMode.notchPx
                            - Theme.windowBorderWidth
 
             WlrLayershell.layer: WlrLayer.Bottom

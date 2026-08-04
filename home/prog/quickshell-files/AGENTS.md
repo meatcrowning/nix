@@ -409,8 +409,10 @@ Membership is the `Keywords=bespoke;` tag on the desktop entry, the same test
 `Launcher.qml`'s `rank` sorts by — never a hardcoded list. Toggle:
 `desktopIcons` (Settings → appearance → shortcut notch). Launch goes through
 `NixPath.launch`, never `entry.execute()` — see NixPath for the cgroup reason.
-The notch is NOT protected by the bar's exclusive zone, so a window at the panel
-edge covers it. docs/DESIGN.md §12.2.2 is the rule.
+The notch publishes its protrusion as `ViewMode.notchPx` and the bar's
+`exclusiveZone` reserves it, so a tiled or maximized window stops at the notch;
+a floating window may still cover it, as it may cover the bar. docs/DESIGN.md
+§12.2.2 is the rule.
 
 ### Every program icon goes through `AppIcon.qml`
 

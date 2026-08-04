@@ -18,13 +18,15 @@ import Quickshell
 //   * the panel's own stacking, so it is the bar's material, not a card on a
 //     different layer that happens to touch it.
 //
-// WHAT IT DOES NOT GET is the bar's immunity from windows. The bar sits on the
-// BOTTOM layer and windows draw over it; what keeps them off is the exclusive
-// zone, and that reserves the BAR's width, not the notch's. So a window that
-// reaches the panel edge covers the notch, exactly as it covers the wallpaper.
-// Reserving the notch's width instead would push every window on the desktop
-// 44px left for a decoration that is 40% of the screen tall — his call, not a
-// default worth taking silently.
+// WINDOWS: the bar sits on the BOTTOM layer and windows draw over it — what
+// keeps them off is the exclusive zone, which reserves the bar's own width. The
+// notch hangs past that, so it publishes its protrusion (ViewMode.notchPx) and
+// the panel reserves that too. [his] "reserve space when a window is maximized
+// or the user disables floating mode globally or per window, yes" — so a tiled
+// or maximized window stops at the notch, and a FLOATING one may still cover
+// it, exactly as it may cover the bar. The zone is one scalar per edge, so the
+// reserved strip runs the full height and the desktop shows through it above
+// and below the notch.
 //
 // The right edge (the panel side) has no visible outline: the slab is drawn
 // `overlap` px wider than it looks and that strip sits UNDER barBody's opaque
@@ -80,6 +82,15 @@ Item {
                     + Math.max(0, apps.length - 1) * Theme.gap + pad * 2
     width: implicitWidth
     height: implicitHeight
+
+    // Tell the panel how far to reserve. The bar's exclusive zone covers its
+    // own width; this is the part that hangs past it, and without it a tiled or
+    // maximized window is laid out straight over the notch.
+    Binding {
+        target: ViewMode
+        property: "notchPx"
+        value: notch.visible ? notch.width - notch.overlap : 0
+    }
 
     // The slab. Bar background, bar accent — the same two colours the panel
     // body is made of, so it reads as the panel and not as a card sitting on
