@@ -136,6 +136,12 @@ class CVtbDeco : public IHyprWindowDecoration {
     std::map<std::string, SP<Render::ITexture>> m_iconCache;  // "class|sizepx|rgbahex" -> program icon tex
     std::string          m_szLastTitle;
     int                  m_iLastTitleRun = -1;
+    // Device-px offset from the title texture's top to the first line's actual
+    // ink: pango leads every line box above the glyph (and a lowercase initial
+    // like goetia's `g` starts a whole x-height lower). The static title is
+    // lifted by this so the drawn TOP of the name sits VTB_CELL_GAP+INSET below
+    // the icon — the same drawn-edge gap the pin box has above it (DESIGN §12.2).
+    int                  m_iTitleTopInk = 0;
     float                m_fLastScale    = -1;
     uint64_t             m_lastTextColor = 0;
     bool                 m_bLastFocus    = false;
@@ -358,7 +364,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 renderBar(PHLMONITOR, float a); // the actual bar drawing; renderPass wraps it (direct, or FBO-composited while fading)
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
     SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr,
-                                          int* outLines = nullptr, bool ellipsis = true, bool flatColon = false);
+                                          int* outLines = nullptr, bool ellipsis = true, bool flatColon = false, int* outTopInk = nullptr);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
     // The window's own program icon (resolved from its class -> .desktop -> icon
     // theme), rendered square at sizePx device px. `color` styles currentColor

@@ -510,7 +510,7 @@ void vtbRefreshFontMap() {
 // instead of a whole one, which is why the player's "3:45/5:12" readout asks
 // for it: two colons, two cells of the scrub column handed back.
 SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR, int* outTextH, int* outLines,
-                                                bool ellipsis, bool flatColon) {
+                                                bool ellipsis, bool flatColon, int* outTopInk) {
     const auto FONT  = Cfg::font();
     const int  SIZE  = std::round(Cfg::fontSize() * scale);
     const int  BARW  = std::round(colW() * scale);
@@ -577,13 +577,20 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     const int PAD    = std::max(1, (int)std::round(SIZE / 8.0));
     const int COLONH = DOT + 2 * PAD;
 
-    double    y = 0;
+    double    y          = 0;
+    bool      topInkDone  = false; // measured the first line's leading yet?
+    if (outTopInk)
+        *outTopInk = 0;
     for (size_t i = 0; i < lines.size();) {
         if (flatColon && lines[i] == ":") {
             const double cx = BARW / 2.0;
             cairo_rectangle(CR, std::round(cx - DOT - PAD / 2.0), std::round(y + PAD), DOT, DOT);
             cairo_rectangle(CR, std::round(cx + PAD / 2.0), std::round(y + PAD), DOT, DOT);
             cairo_fill(CR);
+            if (outTopInk && !topInkDone) {
+                *outTopInk  = PAD; // the colon's dots sit PAD below the cell top
+                topInkDone = true;
+            }
             y += COLONH;
             i++;
             continue;
@@ -596,6 +603,18 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
             run += lines[j];
         }
         pango_layout_set_text(layout, run.c_str(), -1);
+        // The first drawn line's ink top vs its cell top: the caller lifts the
+        // whole column by this so the name's visible top edge — not its cell —
+        // lands the intended gap below the icon (DESIGN §12.2).
+        if (outTopInk && !topInkDone) {
+            PangoRectangle ink{};
+            PangoLayoutLine* l0 = pango_layout_get_line_readonly(layout, 0);
+            if (l0) {
+                pango_layout_line_get_pixel_extents(l0, &ink, nullptr);
+                *outTopInk = std::max(0, ink.y);
+            }
+            topInkDone = true;
+        }
         cairo_move_to(CR, 0, y);
         pango_cairo_show_layout(CR, layout);
 
@@ -622,7 +641,7 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
 }
 
 void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& color) {
-    m_pTitleTex = renderStackedTex(m_szLastTitle, runLenPx, scale, color);
+    m_pTitleTex = renderStackedTex(m_szLastTitle, runLenPx, scale, color, nullptr, nullptr, /*ellipsis=*/true, /*flatColon=*/false, &m_iTitleTopInk);
 }
 
 SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprColor& color, float scale) {
@@ -1321,7 +1340,13 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
 
         if (m_pTitleTex && m_pTitleTex->m_texID != 0) {
             const auto TSZ  = m_pTitleTex->m_size;
-            CBox       tbox = {TITLEX, TITLEY, TSZ.x, TSZ.y};
+            // Lift by the first line's leading so the name's drawn TOP (not its
+            // cell top) sits VTB_CELL_GAP+INSET below the icon — the same gap the
+            // pin box has above the icon. Without this a lowercase initial (the
+            // `g` in goetia) left the icon-to-name gap visibly wider than
+            // icon-to-pin (DESIGN §12.2). The lifted-off transparent rows only
+            // overlap the icon's own bottom margin, so nothing is clipped.
+            CBox       tbox = {TITLEX, TITLEY - m_iTitleTopInk, TSZ.x, TSZ.y};
             Hl::texture(m_pTitleTex, tbox.round(), {.a = a});
         }
     }
