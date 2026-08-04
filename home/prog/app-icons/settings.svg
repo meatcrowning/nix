@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
   <!-- settings app icon - the seal of Marbas, fifth spirit of the Ars Goetia.
        Marbas answers truly of hidden and secret things and teaches the
        mechanical arts: the spirit of a machine's own configuration. Redrawn
@@ -13,8 +13,11 @@
        through QSvgRenderer (apps/board/main.py _window_icon); the panel task
        cell and the runner tint it per element (TaskCell.qml, Launcher.qml).
        The root `color` above is only the fallback external consumers resolve
-       currentColor to when they draw the file raw - the desktop's default
-       accent. Uniform 44-unit stroke = the 2px edge weight scaled to icon
+       currentColor to when they draw the file raw. IT IS WHITE ON PURPOSE:
+       the panel tints through MultiEffect, whose colorization scales the tint
+       by the SOURCE's own luminance, so only a white sigil comes out the exact
+       theme colour (measured - a #cc4400 fallback landed at 36% of it).
+       Uniform 44-unit stroke = the 2px edge weight scaled to icon
        size (DESIGN.md S4). -->
   <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="256" cy="256" r="218"/>

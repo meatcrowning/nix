@@ -208,9 +208,9 @@ Rectangle {
                 // A foreign app's icon keeps its own colours here — a toast is
                 // the one place an icon is identifying a stranger. Our own
                 // seals cannot: they are currentColor sigils, so drawn raw
-                // they came out in the file's baked fallback (#cc4400, red) on
-                // every wallpaper. AppIcon paints those in the header's tint,
-                // the colour the name beside them already rides.
+                // they come out in the file's baked fallback — plain white,
+                // which states nothing. AppIcon tints those to the header's
+                // tint, the colour the name beside them already rides.
                 AppIcon {
                     id: appIcon
                     visible: card.iconSource !== ""

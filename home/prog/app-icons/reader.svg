@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#ffffff">
   <!-- reader app icon - the seal of Buer, tenth spirit of the Ars Goetia (a
        president), redrawn as clean geometry from the 1904 Mathers/Crowley
        plate: outer circle and the five-pointed star at the heart of the seal,
@@ -11,7 +11,10 @@
        (body text = the accent) - the titlebar tints it via a user stylesheet
        (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
        (TaskCell.qml), and the desktop entry / launcher resolve currentColor
-       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       to the root `color` fallback above. THAT FALLBACK IS WHITE ON PURPOSE:
+       the panel tints through MultiEffect, whose colorization scales the tint
+       by the SOURCE's own luminance, so only a white sigil comes out the exact
+       theme colour (measured - a #cc4400 fallback landed at 36% of it). Uniform 44-unit stroke = the 2px
        edge weight scaled to icon size (DESIGN.md S4). -->
   <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="256" cy="256" r="218"/>
