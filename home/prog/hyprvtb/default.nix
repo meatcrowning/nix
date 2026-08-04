@@ -9,6 +9,7 @@
   lib,
   hyprland,
   hyprlandPlugins,
+  librsvg,
 }:
 hyprlandPlugins.mkHyprlandPlugin {
   pluginName = "hyprvtb";
@@ -16,6 +17,11 @@ hyprlandPlugins.mkHyprlandPlugin {
   src = ./.;
 
   inherit (hyprland) nativeBuildInputs;
+
+  # librsvg: renders each window's program icon (the breeze theme is all-SVG,
+  # and our own app icons are SVG too) into the new titlebar icon slot. pango/
+  # cairo/fontconfig already come in via hyprland.buildInputs; librsvg does not.
+  buildInputs = [ librsvg ];
 
   # Seam enforcement — the containment strategy in PORTING.md only works if it
   # can't quietly erode, so both halves are checked at build time.

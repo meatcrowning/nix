@@ -12,7 +12,10 @@
 #include <hyprutils/os/FileDescriptor.hpp>
 
 #include <pango/pangocairo.h>
+#include <librsvg/rsvg.h> // program-icon SVG rendering (breeze theme + our own app icons)
 #include <fontconfig/fontconfig.h> // FcInitReinitialize — see vtbRefreshFontMap
+#include <filesystem>
+#include <fstream>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cmath>
@@ -151,8 +154,18 @@ static int totalBarW() {
 static int           cellSize() {
     return colW() - VTB_PAD * 2;
 }
+// The program-icon slot: one cell tall, directly below the pin cell (the last
+// of the VTB_CELLS system cells) and above the stacked title. [his,
+// 2026-08-03] "i'd like the programs icon to be placed just above where the
+// programs name is displayed. so in between its name and the pin button."
+static int iconSlotTop() {
+    return VTB_PAD + VTB_CELLS * (cellSize() + VTB_CELL_GAP);
+}
 static int titleTop() {
-    return VTB_PAD + VTB_CELLS * (cellSize() + VTB_CELL_GAP) + 4;
+    // ...then the title starts one cell below the icon slot. Everything that
+    // reads titleTop()/titleTopEff() (spinner, hit-tests, the address editor,
+    // the playbar) shifts down together, so the icon reserves its row once.
+    return iconSlotTop() + (cellSize() + VTB_CELL_GAP) + 4;
 }
 
 // The two button columns (inner app column, then outer system column) are laid
@@ -616,6 +629,297 @@ SP<Render::ITexture> CVtbDeco::glyphTex(const std::string& glyph, const CHyprCol
     return tex;
 }
 
+// ---- program-icon resolution ----------------------------------------------
+// The window's own app icon, drawn in its titlebar slot. Hyprland 0.55/0.56
+// have no xdg-toplevel-icon and no window-icon helper, so the only handle is
+// the window class: class -> <class>.desktop (or a desktop file whose
+// StartupWMClass matches) -> Icon= -> a file in the active icon theme. All of
+// it is plain freedesktop lookup, so it works the same on top (breeze-dark, all
+// SVG) and on book (Fedora's theme) without naming either. See docs/DESIGN.md
+// open question 6 (the titlebar icon story was written down nowhere).
+
+// The XDG data roots ($XDG_DATA_HOME, $XDG_DATA_DIRS, ~/.local/share, and the
+// NixOS current-system profile), each of which may hold applications/ and
+// icons/ subtrees.
+static std::vector<std::string> xdgDataDirs() {
+    std::vector<std::string> out;
+    auto push = [&](const std::string& d) {
+        if (!d.empty() && std::find(out.begin(), out.end(), d) == out.end())
+            out.push_back(d);
+    };
+    const char* home = getenv("HOME");
+    if (const char* x = getenv("XDG_DATA_HOME"); x && *x)
+        push(x);
+    else if (home)
+        push(std::string(home) + "/.local/share");
+    const char* dd = getenv("XDG_DATA_DIRS");
+    std::string dirs = (dd && *dd) ? dd : "/usr/local/share:/usr/share";
+    for (size_t p = 0; p <= dirs.size();) {
+        size_t q = dirs.find(':', p);
+        push(dirs.substr(p, q == std::string::npos ? std::string::npos : q - p));
+        if (q == std::string::npos)
+            break;
+        p = q + 1;
+    }
+    push("/run/current-system/sw/share");
+    push("/usr/share");
+    return out;
+}
+
+// Value of `key` in group `[group]` of an ini-style file (.desktop, index.theme,
+// kdeglobals). First match wins.
+static std::string desktopKeyGroup(const std::string& file, const std::string& group, const std::string& key) {
+    std::ifstream in(file);
+    if (!in)
+        return "";
+    const std::string header  = "[" + group + "]";
+    std::string       line;
+    bool              inGroup = false;
+    while (std::getline(in, line)) {
+        // trim trailing CR/space
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+            line.pop_back();
+        if (!line.empty() && line.front() == '[') {
+            inGroup = (line == header);
+            continue;
+        }
+        if (!inGroup)
+            continue;
+        auto eq = line.find('=');
+        if (eq == std::string::npos)
+            continue;
+        if (line.substr(0, eq) == key)
+            return line.substr(eq + 1);
+    }
+    return "";
+}
+// Value of `key` in the [Desktop Entry] group.
+static std::string desktopKey(const std::string& file, const std::string& key) {
+    return desktopKeyGroup(file, "Desktop Entry", key);
+}
+
+// class -> Icon= name (or absolute path). Empty if no desktop file is found.
+static std::string iconNameForClass(const std::string& cls) {
+    std::string lc = cls;
+    std::transform(lc.begin(), lc.end(), lc.begin(), [](unsigned char c) { return std::tolower(c); });
+    for (const auto& base : xdgDataDirs()) {
+        std::filesystem::path apps = std::filesystem::path(base) / "applications";
+        std::error_code       ec;
+        if (!std::filesystem::is_directory(apps, ec))
+            continue;
+        // 1. direct <class>.desktop (exact, then lowercased)
+        for (const auto& name : {cls + ".desktop", lc + ".desktop"}) {
+            std::filesystem::path cand = apps / name;
+            if (std::filesystem::exists(cand, ec)) {
+                std::string icon = desktopKey(cand.string(), "Icon");
+                if (!icon.empty())
+                    return icon;
+            }
+        }
+        // 2. any desktop file whose StartupWMClass matches the class
+        for (auto it = std::filesystem::directory_iterator(apps, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+            if (it->path().extension() != ".desktop")
+                continue;
+            std::string wm = desktopKey(it->path().string(), "StartupWMClass");
+            std::string wl = wm;
+            std::transform(wl.begin(), wl.end(), wl.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (!wm.empty() && (wm == cls || wl == lc)) {
+                std::string icon = desktopKey(it->path().string(), "Icon");
+                if (!icon.empty())
+                    return icon;
+            }
+        }
+    }
+    return "";
+}
+
+// The active icon theme + its inheritance chain, ending at hicolor.
+static std::vector<std::string> iconThemeChain() {
+    std::vector<std::string> chain;
+    auto add = [&](const std::string& t) {
+        if (!t.empty() && std::find(chain.begin(), chain.end(), t) == chain.end())
+            chain.push_back(t);
+    };
+    // top: kdeglobals [Icons] Theme=; otherwise fall through to hicolor.
+    if (const char* home = getenv("HOME")) {
+        std::string t = desktopKeyGroup(std::string(home) + "/.config/kdeglobals", "Icons", "Theme");
+        add(t);
+    }
+    // walk Inherits= of each theme's index.theme (breeze-dark -> breeze,hicolor)
+    for (size_t i = 0; i < chain.size(); i++) {
+        for (const auto& base : xdgDataDirs()) {
+            std::filesystem::path idx = std::filesystem::path(base) / "icons" / chain[i] / "index.theme";
+            std::error_code       ec;
+            if (!std::filesystem::exists(idx, ec))
+                continue;
+            std::string inh = desktopKeyGroup(idx.string(), "Icon Theme", "Inherits");
+            for (size_t p = 0; p <= inh.size();) {
+                size_t q = inh.find(',', p);
+                add(inh.substr(p, q == std::string::npos ? std::string::npos : q - p));
+                if (q == std::string::npos)
+                    break;
+                p = q + 1;
+            }
+            break;
+        }
+    }
+    add("hicolor");
+    return chain;
+}
+
+// A named icon -> a file on disk. Handles absolute paths, then searches each
+// theme in the inherit chain (two directory levels deep, which covers both the
+// <category>/<size> and <size>/<category> layouts), preferring SVG and the
+// largest declared size, then falls back to /usr/share/pixmaps.
+static std::string iconFileForName(const std::string& name) {
+    std::error_code ec;
+    if (!name.empty() && name.front() == '/') {
+        if (std::filesystem::exists(name, ec))
+            return name;
+        return "";
+    }
+    auto sizeScore = [](const std::filesystem::path& p) {
+        int best = 0;
+        for (const auto& part : p) {
+            int n = std::atoi(part.string().c_str());
+            if (n > best)
+                best = n;
+        }
+        return best;
+    };
+    std::string bestSvg, bestPng;
+    int         bestSvgSz = -1, bestPngSz = -1;
+    auto        consider = [&](const std::filesystem::path& dir) {
+        for (const char* ext : {".svg", ".png"}) {
+            std::filesystem::path f = dir / (name + ext);
+            if (!std::filesystem::exists(f, ec))
+                continue;
+            int sc = sizeScore(dir);
+            if (std::string(ext) == ".svg") {
+                if (sc > bestSvgSz) {
+                    bestSvgSz = sc;
+                    bestSvg   = f.string();
+                }
+            } else if (sc > bestPngSz) {
+                bestPngSz = sc;
+                bestPng   = f.string();
+            }
+        }
+    };
+    for (const auto& theme : iconThemeChain()) {
+        for (const auto& base : xdgDataDirs()) {
+            std::filesystem::path root = std::filesystem::path(base) / "icons" / theme;
+            if (!std::filesystem::is_directory(root, ec))
+                continue;
+            for (auto l1 = std::filesystem::directory_iterator(root, ec); !ec && l1 != std::filesystem::directory_iterator(); l1.increment(ec)) {
+                if (!l1->is_directory(ec))
+                    continue;
+                consider(l1->path()); // theme/<name>.svg (rare, but cheap)
+                std::error_code ec2;
+                for (auto l2 = std::filesystem::directory_iterator(l1->path(), ec2); !ec2 && l2 != std::filesystem::directory_iterator(); l2.increment(ec2))
+                    if (l2->is_directory(ec2))
+                        consider(l2->path());
+            }
+        }
+        // a theme match anywhere in the chain wins over a later (more generic) theme
+        if (!bestSvg.empty() || !bestPng.empty())
+            return !bestSvg.empty() ? bestSvg : bestPng;
+    }
+    for (const auto& base : xdgDataDirs()) {
+        for (const char* ext : {".svg", ".png"}) {
+            std::filesystem::path f = std::filesystem::path(base) / "pixmaps" / (name + ext);
+            if (std::filesystem::exists(f, ec))
+                return f.string();
+        }
+    }
+    return "";
+}
+
+// A few freedesktop standard icon names that breeze/oxygen ship under a variant
+// (they prefix several app icons "internet-"/"multimedia-"). Tried only as a
+// fallback, so an app keeps the portable standard name in its .desktop (Adwaita
+// on book honours it) and this bridges the theme quirk in one place.
+static const std::string& iconSynonym(const std::string& name) {
+    static const std::map<std::string, std::string> syn = {
+        {"web-browser", "internet-web-browser"},
+        {"audio-player", "multimedia-audio-player"},
+    };
+    static const std::string none;
+    auto                     it = syn.find(name);
+    return it == syn.end() ? none : it->second;
+}
+
+// class -> icon file, cached process-wide (the render path calls this every
+// frame). Falls back to the freedesktop generic executable icon so a window
+// with no resolvable icon still gets *something* rather than a blank slot.
+static const std::string& iconFileForClass(const std::string& cls) {
+    static std::map<std::string, std::string> cache;
+    auto                                      it = cache.find(cls);
+    if (it != cache.end())
+        return it->second;
+    std::string name = iconNameForClass(cls);
+    std::string file = iconFileForName(name.empty() ? cls : name);
+    if (file.empty() && !name.empty() && !iconSynonym(name).empty())
+        file = iconFileForName(iconSynonym(name));
+    if (file.empty() && !name.empty())
+        file = iconFileForName(cls); // try the class as an icon name directly
+    if (file.empty())
+        file = iconFileForName("application-x-executable");
+    return cache.emplace(cls, file).first->second;
+}
+
+SP<Render::ITexture> CVtbDeco::iconTex(const std::string& cls, int sizePx, const CHyprColor& color) {
+    if (cls.empty() || sizePx < 1)
+        return nullptr;
+    const auto key = cls + "|" + std::to_string(sizePx) + "|" + std::format("{:08x}", color.getAsHex());
+    auto       it  = m_iconCache.find(key);
+    if (it != m_iconCache.end())
+        return it->second; // negative results (nullptr) cached too — don't re-scan every frame
+
+    const std::string&   file = iconFileForClass(cls);
+    SP<Render::ITexture> tex   = nullptr;
+    if (!file.empty()) {
+        auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sizePx, sizePx);
+        auto CR   = cairo_create(SURF);
+        if (file.size() > 4 && file.substr(file.size() - 4) == ".svg") {
+            GError*     err = nullptr;
+            RsvgHandle* h   = rsvg_handle_new_from_file(file.c_str(), &err);
+            if (h) {
+                // currentColor SVGs (our own app icons, e.g. goetia's sigil, are
+                // drawn in currentColor and would otherwise render black — invisible
+                // on the black bar). A user stylesheet resolves it to the bar's text
+                // colour; full-colour theme icons ignore it.
+                std::string css = std::format("*{{color:#{:02x}{:02x}{:02x};}}", (int)std::round(color.r * 255), (int)std::round(color.g * 255), (int)std::round(color.b * 255));
+                rsvg_handle_set_stylesheet(h, (const guint8*)css.data(), css.size(), nullptr);
+                RsvgRectangle vp = {0, 0, (double)sizePx, (double)sizePx};
+                rsvg_handle_render_document(h, CR, &vp, &err);
+                g_object_unref(h);
+            }
+            if (err)
+                g_error_free(err);
+        } else {
+            auto img = cairo_image_surface_create_from_png(file.c_str());
+            if (cairo_surface_status(img) == CAIRO_STATUS_SUCCESS) {
+                const double iw = cairo_image_surface_get_width(img), ih = cairo_image_surface_get_height(img);
+                if (iw > 0 && ih > 0) {
+                    const double s = std::min(sizePx / iw, sizePx / ih);
+                    cairo_translate(CR, (sizePx - iw * s) / 2.0, (sizePx - ih * s) / 2.0);
+                    cairo_scale(CR, s, s);
+                    cairo_set_source_surface(CR, img, 0, 0);
+                    cairo_paint(CR);
+                }
+            }
+            cairo_surface_destroy(img);
+        }
+        cairo_surface_flush(SURF);
+        tex = Hl::textureFromCairo(SURF);
+        cairo_destroy(CR);
+        cairo_surface_destroy(SURF);
+    }
+    m_iconCache[key] = tex;
+    return tex;
+}
+
 // ---- drawing --------------------------------------------------------------
 
 // Entry point (from CVtbPassElement). At rest / mid-roll the bar draws straight
@@ -871,6 +1175,20 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     const bool PINNED = PWINDOW->m_pinned;
     drawCell(4, accentColor, PINNED);
     drawGlyph(4, "o>", (PINNED || m_iHoverCell == 4) ? accentColor : textColor, PINNED);
+
+    // ---- program icon: the window's own app icon, in its own cell directly
+    // below the pin and above the stacked title. No frame/outline (it states
+    // identity, not an action) — knocked back a couple of px inside the cell so
+    // it doesn't crowd the pin, per docs/DESIGN.md (icon sizes derive from a
+    // cell, never literal). currentColor SVGs follow the title's textColor.
+    {
+        const int    INSET = 2;
+        const int    ISZ   = std::max(1, (int)std::round((CELL - 2 * INSET) * SCALE));
+        const auto&  ICLS  = !PWINDOW->m_class.empty() ? PWINDOW->m_class : PWINDOW->m_initialClass;
+        auto         itex  = iconTex(ICLS, ISZ, textColor);
+        if (itex && itex->m_texID != 0)
+            Hl::texture(itex, localBox(sysColX() + INSET, iconSlotTop() + INSET, CELL - 2 * INSET, CELL - 2 * INSET).round(), {.a = a});
+    }
 
     // ---- title, a column of upright letters (outer column, under the cells) ----
     // In edit mode the same region becomes the address editor: it shows the
@@ -3948,6 +4266,7 @@ void CVtbDeco::updateWindow(PHLWINDOW pWindow) {
 void CVtbDeco::onConfigReloaded() {
     m_pTitleTex = nullptr;
     m_glyphCache.clear();
+    m_iconCache.clear(); // palette/theme may have changed the icon tint or theme
     if (!validMapped(m_pWindow))
         return;
     g_pDecorationPositioner->repositionDeco(this);
