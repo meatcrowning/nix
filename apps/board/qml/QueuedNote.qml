@@ -31,6 +31,14 @@ Item {
     property color fgDim: Theme.textDim
     property color fgText: Theme.text
     property color fgAccent: Theme.accent
+    // Monospace cell width, for cutting the collapsed line in characters (§2.7).
+    property real cellW: 8
+    // BOUNDED BY DEFAULT — a long order he typed in the box crowded the whole
+    // page, so it is drawn as ONE line until he expands it. Held by the window
+    // and keyed by the message id (session-only: a queued id names a message
+    // board-watch will drain), the same way the card drawers are.
+    property bool expanded: false
+    signal expandToggled()
 
     signal draftEdited(string body)
     signal statusMessage(string text)
@@ -82,16 +90,55 @@ Item {
         return true;
     }
 
+    // Cut a string to `cells` characters, marking the cut with ASCII "..." —
+    // never U+2026, which the font lacks and whose absence clips the row
+    // (docs/DESIGN.md §2.3). Exact in characters because the font is monospace
+    // (§2.7). The twin of `Main.clipTo` / `AgentRow.clipTo`.
+    function clipTo(s, cells) {
+        if (cells < 4)
+            return "..."
+        return s.length <= cells ? s : s.slice(0, cells - 3) + "..."
+    }
+
+    // THE WORD IS ORDER — [his, 2026-07-29] this list says orders, not messages
+    // — and what it waits for is the next SUMMONER, which drains the queue
+    // (`board-watch.work_the_queue`); never a minister. Solomon reads it and
+    // decides who does it.
+    readonly property string bodyText:
+        "order waiting for the next summoner: " + (row.note ? row.note.text : "")
+    // Is there more than the collapsed one line shows? Collapsed, that is a
+    // character count against the row's width; expanded, it is whether the
+    // wrapped order took more than one line. A short order that fits gets
+    // neither the mark nor the toggle — a control that would do nothing is not
+    // drawn (docs/DESIGN.md §10).
+    readonly property bool overflowing:
+        row.expanded ? line.lineCount > 1
+                     : row.bodyText.length > Math.floor(line.width / row.cellW)
+
+    // The fold mark, in the same ASCII vocabulary the sections and the to-do
+    // bullets use (`+` folded, `-` open): the font has no triangles (§2.3).
+    PixelText {
+        id: mark
+        x: 0
+        y: 0
+        visible: row.overflowing
+        color: row.fgDim
+        text: row.expanded ? "-" : "+"
+    }
+
     Para {
         id: line
-        width: row.width
+        // Sits past the mark's cell, roughly where the old two-space indent was.
+        x: mark.implicitWidth + 6
+        width: row.width - x
         color: row.fgDim
-        // THE WORD IS ORDER — [his, 2026-07-29] this list says orders, not
-        // messages — and what it waits for is the next SUMMONER, which is who
-        // drains the queue (`board-watch.work_the_queue`). It never waits for a
-        // minister: Solomon is the one who reads it and decides who does it.
-        text: "  order waiting for the next summoner: "
-              + (row.note ? row.note.text : "")
+        // BOUNDED so a long order cannot crowd the page: one line until he
+        // expands it. Collapsed, the line is cut in characters with an ASCII
+        // marker (`clipTo`); expanded, the whole order, wrapped.
+        maximumLineCount: row.expanded ? 9999 : 1
+        text: row.expanded
+              ? row.bodyText
+              : row.clipTo(row.bodyText, Math.floor(width / row.cellW))
 
         MouseArea {
             anchors.fill: parent
@@ -109,6 +156,20 @@ Item {
                     row.beginEdit();
             }
         }
+    }
+
+    // The mark's own hit band — LEFT button only, so a right-click still opens
+    // the row menu underneath and a double-click still edits. It exceeds the one
+    // dim character it draws (§5.1: the hit band exceeds the ink), and it is
+    // inert when there is nothing to expand.
+    MouseArea {
+        x: 0
+        width: mark.implicitWidth + 6
+        height: line.implicitHeight
+        acceptedButtons: Qt.LeftButton
+        cursorShape: row.overflowing ? Qt.PointingHandCursor : Qt.ArrowCursor
+        enabled: row.overflowing
+        onClicked: row.expandToggled()
     }
 
     InputBox {
