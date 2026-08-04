@@ -135,6 +135,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 import uuid
@@ -2647,6 +2648,100 @@ def _died_transiently(aid):
     except OSError:
         return False
     return bool(TRANSIENT_RE.search(tail))
+
+
+# ------------------------------------- force-stopping ONE bound minister
+def _stop_unit(unit):
+    """SIGKILL one transient unit's whole cgroup, synchronously. (ok, detail).
+
+    `systemctl --user kill --signal=KILL` signals every process in the unit's
+    control group at once and returns at once, so a minister that would ignore
+    SIGTERM dies anyway, and `--collect` (set at `systemd-run` time) reaps the
+    unit afterwards. `ok` is None when systemctl could not be RUN at all — no
+    user manager — which the caller must NOT read as "stopped": it falls back to
+    the pid. A non-zero exit for a unit that is already gone is not an error
+    here either. Liveness, re-read by `force_stop`, is the only verdict.
+    """
+    if not shutil.which("systemctl"):
+        return None, "no systemctl"
+    try:
+        p = subprocess.run(
+            ["systemctl", "--user", "kill", "--signal=KILL", unit],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, str(e)
+    return (p.returncode == 0), (p.stderr or "").strip()
+
+
+def _kill_pid(pid):
+    """Last-resort SIGKILL for a minister with no unit — the detached fallback
+    on a box with no user manager. The process group first (a detached worker
+    leads its own session, `start_new_session=True`), then the pid itself in
+    case it is not a leader. Best effort: `force_stop` verifies liveness after,
+    whatever this reached."""
+    if not pid:
+        return
+    for send in (lambda: os.killpg(pid, signal.SIGKILL),
+                 lambda: os.kill(pid, signal.SIGKILL)):
+        try:
+            send()
+        except OSError:
+            pass
+
+
+def force_stop(agent_id):
+    """Force-stop ONE bound minister, and report what is ACTUALLY true after.
+
+    docs/DESIGN.md §10 forbids OFFERING an action that can silently fail, and
+    §10.3 makes a SIGKILL a menu entry rather than a click for the reason that
+    it cannot be undone. So this never reports success off a command's own exit
+    code: it stops the minister's own transient systemd unit (or, with no user
+    manager, SIGKILLs its process group), then RE-READS the one liveness rule
+    (`boardagents.agents()` -> `boardmove._alive`) and answers from that.
+    Returns {"ok": bool, "msg": <one line for him, addressed as "you">}.
+
+    Only a worker or a decision minister is force-stoppable (`MINISTER_ROLES`):
+    each runs as its own unit, so the kill is a real, reportable act. Solomon is
+    refused — the orchestrator is a brief planning burst that holds the
+    board-watch tick and then delegates, its resting card has no process at all
+    to stop, and killing it mid-plan would abandon a dispatch you asked for. A
+    deepseek subminister has no unit of its own: it lives inside its parent
+    minister's cgroup, so force-stopping that parent takes it down with it.
+    """
+    aid = ba.clean_id(agent_id)
+
+    def find():
+        return next((a for a in ba.agents() if a.get("id") == aid), None)
+
+    rec = find()
+    if rec is None:
+        return {"ok": False,
+                "msg": "no such minister - it may have already gone"}
+    name = rec.get("name") or aid
+    kind = rec.get("kind") or ""
+    if kind == ba.ORCHESTRATOR_KIND:
+        return {"ok": False, "msg": "Solomon is not force-stopped from here"}
+    if kind not in MINISTER_ROLES:
+        return {"ok": False,
+                "msg": "%s runs inside its minister - stop that one" % name}
+    if rec.get("state") != "running":
+        return {"ok": True, "msg": "%s had already stopped" % name}
+
+    prefix = DECISION_PREFIX if kind == "decision" else UNIT_PREFIX
+    ok, _detail = _stop_unit(unit_name(aid, prefix))
+    if ok is not True:
+        _kill_pid(rec.get("pid") or 0)
+
+    # THE ONLY VERDICT is whether it is really gone. A SIGKILL leaves the process
+    # a zombie until systemd reaps it, and `_alive` reads a zombie as dead, so
+    # the very next read is already true — the short poll only covers the reap.
+    for _ in range(10):
+        after = find()
+        if after is None or after.get("state") != "running":
+            return {"ok": True, "msg": "%s force-stopped" % name}
+        time.sleep(0.03)
+    return {"ok": False,
+            "msg": "could not stop %s - it is still running" % name}
 
 
 def reap():

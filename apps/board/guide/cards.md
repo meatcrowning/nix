@@ -608,6 +608,33 @@ agent's own voice, uncut except for width.
   and the card lights on hover, which is what says it can be clicked at all
   (§10). The right-click menu is untouched: that `MouseArea` takes
   `RightButton` only, which is why a left button reached nothing here before.
+
+### Right-clicking a card can FORCE-STOP that minister
+
+[his] the card's right-click menu (`Main.qml`'s `agentRowMenu`) ends with a
+**force-stop** entry for a RUNNING worker or decision minister — the destructive
+act §10.3 makes a menu entry rather than a click, at the FOOT of the menu behind
+its own separator (the same shape `todoMenu` uses for its one removal), so the
+two deliberate acts are the right-click and the entry, and the pointer never
+lands on it by accident.
+
+- **The kill is HONEST, per §10** — `boardwork.force_stop` SIGKILLs the
+  minister's own transient unit (`systemctl --user kill --signal=KILL
+  board-worker-<id>` / `board-decision-<id>`, the whole cgroup), then RE-READS
+  the one liveness rule (`boardmove._alive` via `boardagents.agents()`) and
+  reports what is actually true — never success off the command's own exit. A
+  minister with no unit (the detached fallback) is SIGKILLed by pid group
+  instead; the verdict is still the re-read, so nothing here can silently no-op.
+  `main.py`'s `Agents.forceStop` returns that verified line for the footer and
+  re-polls so the card redraws stopped at once.
+- **The entry is offered ONLY where a real unit can be stopped** — a running
+  `worker` or `decision`. **Solomon is excluded**: the orchestrator is a brief
+  planning burst that holds the board-watch tick and then delegates, its resting
+  card has no process to stop, and killing it mid-plan would abandon a dispatch
+  he asked for. **A subminister is excluded too**: it has no unit of its own and
+  lives in its parent minister's cgroup, so force-stopping that parent takes it
+  down with it. `force_stop` refuses both regardless, as defence in depth.
+  Harness: `test_force_stop`.
 - **The state is the WINDOW's, keyed by the agent's id** (`Main.qml`'s
   `outputOpen` map, session-only). A card is destroyed and rebuilt whenever the
   key list changes — one agent finishing is enough — so a drawer remembered in
