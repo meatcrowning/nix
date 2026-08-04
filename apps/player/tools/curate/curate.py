@@ -67,14 +67,39 @@ def _load_scan():
 
 # --- dupes -------------------------------------------------------------
 
+# A reissue tag on the TITLE ("And Dream of Sheep - 2018 Remaster", "In Your
+# Eyes (2012 Remaster)") is the same recording as the plain title, but
+# trackmatch keeps the suffix so the two never share a fold-key and the copy
+# survives beside its original. Strip an edition suffix (parenthesised OR
+# dash-tailed) so both forms produce the plain key too and dedupe against each
+# other. Deliberately NARROW: remix / acoustic / live / instrumental / edit /
+# version are DIFFERENT recordings and are NOT stripped (the >6s duration split
+# below is the second guard).
+_TITLE_EDITION_NOISE = re.compile(
+    r"(\s*[-–—]\s*|\s*[\(\[]\s*)(\d{4}\s+)?"
+    r"(remaster(?:ed)?|re-?master(?:ed)?|deluxe|expanded|anniversary|"
+    r"reissue|bonus|mono|stereo)\b.*$",
+    re.IGNORECASE)
+
+
+def _dedupe_titles(title):
+    """The raw title plus, if an edition suffix strips off, the bare title."""
+    title = title or ""
+    stripped = _TITLE_EDITION_NOISE.sub("", title).strip()
+    if stripped and stripped != title:
+        return (title, stripped)
+    return (title,)
+
+
 def cmd_dupes(args):
     rows = _load_scan()
     by_path = {r["path"]: r for r in rows}
     groups = collections.defaultdict(list)
     for r in rows:
         artist = r["album_artist"] or r["artist"] or ""
-        for k in trackmatch.keys(artist, r["title"] or ""):
-            groups[k].append(r["path"])
+        for t in _dedupe_titles(r["title"]):
+            for k in trackmatch.keys(artist, t):
+                groups[k].append(r["path"])
     # union-find: a file can appear in several fold-keys, merge transitively
     parent = {p: p for p in by_path}
 
