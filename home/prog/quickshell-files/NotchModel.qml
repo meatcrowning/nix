@@ -67,6 +67,22 @@ Singleton {
     readonly property int columnInset: lineW + gap
     readonly property int gapRight: gap - panelInset
 
+    // How far a window's own INK stops short of its frame edge on the side that
+    // faces the notch: its border, plus the margin hyprvtb leaves around the
+    // button grid (vtbDeco.cpp — `gridLeftMargin`, which works out to 3 for any
+    // bar_width, since the cell is the column less 2*VTB_PAD and the columns are
+    // VTB_CELL_GAP apart).
+    //
+    // The panel reserves that much LESS, so a maximized window's chrome lands
+    // exactly on the notch's inner edge and the gap from it to the seals is the
+    // same `gap` as everywhere else. [his] "the space between the left and right
+    // sides of the icons … should be the same. currently there is more space to
+    // the left of the icons than the right … without messing with the padding."
+    // Without it the left-hand gap reads `gap + 5`, because those 5px of the
+    // window's own chrome are empty.
+    readonly property int vtbGridMargin: 3
+    readonly property int chromeInset: lineW + vtbGridMargin
+
     // Our own programs, alphabetical: the ones tagged `Keywords=bespoke;` in
     // their desktop entry — the same test the runner sorts by (Launcher.qml's
     // `rank`), so the notch, the runner and the seal set cannot disagree and a
