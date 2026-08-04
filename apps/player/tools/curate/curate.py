@@ -19,6 +19,7 @@ import collections
 import difflib
 import json
 import os
+import re
 import sys
 import time
 
@@ -145,32 +146,99 @@ def _album_dirs(rows):
     return dirs
 
 
+# Edition/remaster noise that must not stop two directories of the same
+# release from folding together ("Hounds of Love" vs "Hounds Of Love (2018
+# Remaster)" are the same album, split by a reissue tag in the folder name).
+_EDITION_NOISE = re.compile(
+    r"[\(\[][^)\]]*\b(remaster(?:ed)?|deluxe|edition|reissue|bonus|expanded|"
+    r"anniversary|version|remix(?:ed)?|mono|stereo|ep|single)\b[^)\]]*[\)\]]",
+    re.IGNORECASE)
+
+# Identities that are legitimately shared by many unrelated real artists
+# ("Various Artists" compilations, blank/placeholder tags) - never cluster
+# these, or unrelated songs by unrelated artists get merged into one "album".
+_NOT_AN_ARTIST = {"", "various artists", "various", "va", "unknown artist",
+                  "unknown album", "unknown"}
+
+
+def _album_title_fold(s):
+    return C.fold(_EDITION_NOISE.sub("", s or ""))
+
+
+_NUMERAL = re.compile(r"\d+")
+_ROMAN_TOKEN = re.compile(r"^(i{1,3}|iv|vi{0,3}|ix|x)$")
+
+
+def _distinguishing_numbers(folded):
+    """Volume/part numbers that must NOT be folded away: 'vol 1' vs 'vol 2',
+    'ep i' vs 'ep ii', 'l a ep 1 x 3' vs '... 2 x 3' are different real
+    releases, not one release split by tagging noise - a high text-similarity
+    ratio alone would wrongly merge them."""
+    digits = set(_NUMERAL.findall(folded))
+    romans = {t for t in folded.split() if _ROMAN_TOKEN.match(t)}
+    return digits, romans
+
+
+def _same_album_title(bi, bj):
+    if bi == bj:
+        return True
+    if difflib.SequenceMatcher(None, bi, bj).ratio() <= 0.88:
+        return False
+    di, ri = _distinguishing_numbers(bi)
+    dj, rj = _distinguishing_numbers(bj)
+    if di != dj or ri != rj:
+        return False
+    return True
+
+
 def cmd_groups(args):
     rows = _load_scan()
     dirs = _album_dirs(rows)
     # candidate identity for a directory: canonical (album_artist, album) as
     # TAGGED (fall back to folder names if tags are blank), folded.
     def identity(recs):
-        aa = recs[0]["album_artist"] or recs[0]["album_artist_dir"]
+        # The FOLDER name, not the album_artist tag, is the artist identity to
+        # cluster on: a compilation/blog brand ("BIRP!", "Various Artists")
+        # is often the tag on many directories of genuinely unrelated real
+        # artists, while the folder itself already carries the real name
+        # (this library is organised AlbumArtist/Album/). Falling back to the
+        # tag only when there is no folder keeps a same-artist split (folder
+        # names identical or near-identical) matching while a compilation tag
+        # shared across unrelated folders no longer does.
+        aa = recs[0]["album_artist_dir"] or recs[0]["album_artist"]
         al = recs[0]["album"] or recs[0]["album_dir"]
         return aa, al
 
     items = []  # (dirkey, artist_raw, album_raw, artist_fold, album_fold, recs)
     for dirkey, recs in dirs.items():
         aa, al = identity(recs)
-        items.append((dirkey, aa, al, C.fold(aa), C.fold(al), recs))
+        af = C.fold(aa)
+        if af in _NOT_AN_ARTIST:
+            continue  # compilation / unlabeled - never a same-artist split
+        items.append((dirkey, aa, al, af, _album_title_fold(al), recs))
 
-    # bucket by folded album title first (cheap), then fuzzy-match artist
-    # within a bucket so "A, B & C" / "B, A, C" / "A feat. B, C" collapse.
-    by_album = collections.defaultdict(list)
+    # bucket by ARTIST first (fuzzy - "A, B & C" vs "B, A & C" vs "A feat. B,
+    # C" collapse via trackmatch.artist_matches), THEN fuzzy-match album title
+    # within an artist's own releases so an edition/remaster suffix in one
+    # folder's tag doesn't stop it folding into its sibling.
+    artist_keys = []  # representative fold per cluster
+    by_artist = collections.defaultdict(list)
     for it in items:
-        by_album[it[4]].append(it)
+        placed = False
+        for k in artist_keys:
+            if (it[3] == k or trackmatch.artist_matches(it[1], k)
+                    or difflib.SequenceMatcher(None, it[3], k).ratio() > 0.9):
+                by_artist[k].append(it)
+                placed = True
+                break
+        if not placed:
+            artist_keys.append(it[3])
+            by_artist[it[3]].append(it)
 
     report = []
-    for album_fold, group in by_album.items():
-        if len(group) < 2 or not album_fold:
+    for _artist_key, group in by_artist.items():
+        if len(group) < 2:
             continue
-        # cluster by artist similarity within this album-title bucket
         used = [False] * len(group)
         for i in range(len(group)):
             if used[i]:
@@ -178,20 +246,20 @@ def cmd_groups(args):
             cluster = [group[i]]
             used[i] = True
             for j in range(i + 1, len(group)):
-                if used[j]:
+                if used[j] or not group[j][4]:
                     continue
-                ai, aj = group[i][3], group[j][3]
-                same = (ai == aj or trackmatch.artist_matches(group[i][1], group[j][1])
-                        or difflib.SequenceMatcher(None, ai, aj).ratio() > 0.82)
-                if same:
+                bi, bj = group[i][4], group[j][4]
+                if _same_album_title(bi, bj):
                     cluster.append(group[j])
                     used[j] = True
             if len(cluster) < 2:
                 continue
+            # pick the longest raw album title as the report label
+            label = max((c[2] for c in cluster), key=len)
             report.append({
-                "album": cluster[0][2],
+                "album": label,
                 "dirs": [{"path": f"{c[0][0]}/{c[0][1]}", "artist": c[1],
-                          "n_tracks": len(c[5])} for c in cluster],
+                          "album_raw": c[2], "n_tracks": len(c[5])} for c in cluster],
             })
 
     report.sort(key=lambda g: -len(g["dirs"]))
