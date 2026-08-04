@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 
 import common as C
 import trackmatch
@@ -224,6 +225,34 @@ _EDITION_NOISE = re.compile(
     r"anniversary|version|remix(?:ed)?|mono|stereo|ep|single)\b[^)\]]*[\)\]]",
     re.IGNORECASE)
 
+# CJK scripts. NFKD-fold treats kana as opaque \w tokens, so the SAME album
+# titled in Japanese on one side and "English Name • 和名" on the other never
+# shares a fold key (the Sekito split). Match on the two script planes
+# separately instead.
+_CJK = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
+
+
+def _latin_fold(s):
+    """fold() of only the latin/cyrillic/etc. content, CJK stripped."""
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = _CJK.sub(" ", s)
+    return C.fold(s)
+
+
+def _cjk_fold(s):
+    """The CJK content only, NFKC-folded (ザ vs ザ compatibility forms),
+    punctuation and latin stripped."""
+    s = unicodedata.normalize("NFKC", s or "")
+    s = re.sub(r"[A-Za-z0-9]", " ", s)
+    s = re.sub(r"[^\w\s]", " ", s)
+    return re.sub(r"\s+", "", s)
+
+# A leading catalogue/chart/rank number is NOT part of the album title:
+# "486 # Maggot Brain" is Maggot Brain, "[LM041] Feel Infinite" is Feel
+# Infinite. Applied AFTER bracket stripping.
+_LEADING_NOISE = re.compile(r"^\s*[\(\[]?\s*\d+\s*[\)\]#\-–—\.:]?\s+")
+
 # Identities that are legitimately shared by many unrelated real artists
 # ("Various Artists" compilations, blank/placeholder tags) - never cluster
 # these, or unrelated songs by unrelated artists get merged into one "album".
@@ -232,7 +261,22 @@ _NOT_AN_ARTIST = {"", "various artists", "various", "va", "unknown artist",
 
 
 def _album_title_fold(s):
-    return C.fold(_EDITION_NOISE.sub("", s or ""))
+    return C.fold(_LEADING_NOISE.sub("", _EDITION_NOISE.sub("", s or "")))
+
+
+def _album_title_keys(s):
+    """The set of comparison keys an album title can match on: the full fold
+    (legacy), plus the latin and CJK planes separately so a bilingual title
+    and its single-script sibling share at least one key."""
+    base = _EDITION_NOISE.sub("", s or "")
+    base = _LEADING_NOISE.sub("", base)
+    keys = {C.fold(base)}
+    lat, cjk = _latin_fold(base), _cjk_fold(base)
+    if lat:
+        keys.add("L:" + lat)
+    if cjk:
+        keys.add("C:" + cjk)
+    return keys
 
 
 _NUMERAL = re.compile(r"\d+")
@@ -249,9 +293,39 @@ def _distinguishing_numbers(folded):
     return digits, romans
 
 
+# Sequel-ish tails that make a longer title a DIFFERENT record, not the same
+# album with a suffix: "In Decay, Too" ≠ "In Decay". Checked before any
+# containment match.
+_SEQUEL_TAIL = re.compile(r"\btoo\s*$")
+
+
+# Suffix classes that make a longer title a DIFFERENT release rather than
+# the same album with decoration: remixes / instrumentals / sessions / demos
+# are alternate-content versions, not the plain record. "Renaissance
+# (Remixes)" must not fold into "Renaissance".
+_VARIANT_SUFFIX = re.compile(
+    r"\b(remix(?:es|ed)?|instrumentals?|sessions?|demos?|reworks?|versions|"
+    r"unmixed|alternate|covers?|acoustics?|lost tracks?|outtakes?|bonus tracks?|"
+    r"b[- ]sides?)\b", re.IGNORECASE)
+
+
 def _same_album_title(bi, bj):
     if bi == bj:
         return True
+    bi_v, bj_v = bool(_VARIANT_SUFFIX.search(bi)), bool(_VARIANT_SUFFIX.search(bj))
+    if bi_v != bj_v:
+        return False
+    # One side's whole title nested in the other is a strong same-album
+    # signal ONLY when the nested side is substantial — "AM" inside "Whatever
+    # People Say I Am…" is coincidence, "Maggot Brain" inside "486 Maggot
+    # Brain" (after the leading-noise strip they're equal anyway) is not.
+    # Below the length floor, fall through to the similarity+numbers check.
+    if (min(len(bi), len(bj)) >= 8 and (bi in bj or bj in bi)
+            and not (_SEQUEL_TAIL.search(bi) or _SEQUEL_TAIL.search(bj))):
+        di, ri = _distinguishing_numbers(bi)
+        dj, rj = _distinguishing_numbers(bj)
+        if di == dj and ri == rj:
+            return True
     if difflib.SequenceMatcher(None, bi, bj).ratio() <= 0.88:
         return False
     di, ri = _distinguishing_numbers(bi)
@@ -290,13 +364,20 @@ def cmd_groups(args):
     # bucket by ARTIST first (fuzzy - "A, B & C" vs "B, A & C" vs "A feat. B,
     # C" collapse via trackmatch.artist_matches), THEN fuzzy-match album title
     # within an artist's own releases so an edition/remaster suffix in one
-    # folder's tag doesn't stop it folding into its sibling.
+    # folder's tag doesn't stop it folding into its sibling. A script-variant
+    # artist directory ("Shigeo Sekito" vs "Shigeo Sekito (関藤繁生)") shares
+    # its latin fold with the plain one — bucket on that when it exists, so a
+    # CJK parenthetical doesn't isolate one album dir from the rest.
     artist_keys = []  # representative fold per cluster
     by_artist = collections.defaultdict(list)
     for it in items:
+        af_lat = _latin_fold(it[1])
+        it_keys = {it[3]} | ({"L:" + af_lat} if af_lat else set())
         placed = False
         for k in artist_keys:
-            if (it[3] == k or trackmatch.artist_matches(it[1], k)
+            k_lat = _latin_fold(k)
+            k_keys = {k} | ({"L:" + k_lat} if k_lat else set())
+            if (it_keys & k_keys or trackmatch.artist_matches(it[1], k)
                     or difflib.SequenceMatcher(None, it[3], k).ratio() > 0.9):
                 by_artist[k].append(it)
                 placed = True
@@ -310,22 +391,46 @@ def cmd_groups(args):
         if len(group) < 2:
             continue
         used = [False] * len(group)
+        keysets = [_album_title_keys(g[2]) for g in group]
         for i in range(len(group)):
             if used[i]:
                 continue
             cluster = [group[i]]
             used[i] = True
             for j in range(i + 1, len(group)):
-                if used[j] or not group[j][4]:
+                if used[j]:
                     continue
                 bi, bj = group[i][4], group[j][4]
-                if _same_album_title(bi, bj):
-                    cluster.append(group[j])
-                    used[j] = True
+                if not bi or not bj:
+                    continue
+                # exact/similar on the full fold, or a shared script-plane
+                # key (bilingual vs single-script title of the same album).
+                # Plane matches only count when the plane carries real
+                # content: "brilliant electone the word" is fine, "lp" is not
+                # — a generic residual must not glue unrelated titles.
+                shared = keysets[i] & keysets[j]
+                shared = {k for k in shared
+                          if not k.startswith(("L:", "C:")) or len(k) >= 8}
+                if (_same_album_title(bi, bj) or shared):
+                    # the shared plane must still respect distinguishing
+                    # numbers - "Sailorwave II" vs "Sailorwave III" share the
+                    # latin plane's prefix but are different releases; and a
+                    # variant-suffix mismatch (remixes vs plain) never merges
+                    if _VARIANT_SUFFIX.search(bi) is not None or _VARIANT_SUFFIX.search(bj) is not None:
+                        if bool(_VARIANT_SUFFIX.search(bi)) != bool(_VARIANT_SUFFIX.search(bj)):
+                            continue
+                    di, ri = _distinguishing_numbers(bi)
+                    dj, rj = _distinguishing_numbers(bj)
+                    if di == dj and ri == rj:
+                        cluster.append(group[j])
+                        used[j] = True
             if len(cluster) < 2:
                 continue
-            # pick the longest raw album title as the report label
-            label = max((c[2] for c in cluster), key=len)
+            # pick the label: prefer the PRIMARY (most-tracks) dir's title —
+            # the longest raw title can be a bilingual string we do not want
+            # as the canonical ("Brilliant Electone • 華麗なるエレクトーン"
+            # over the plain 華麗なるエレクトーン the library mostly carries).
+            label = max(cluster, key=lambda c: len(c[5]))[2]
             report.append({
                 "album": label,
                 "dirs": [{"path": f"{c[0][0]}/{c[0][1]}", "artist": c[1],

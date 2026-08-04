@@ -182,6 +182,32 @@ def set_common_tags(audio, album=None, album_artist=None, date=None):
             tags["date"] = [date]
 
 
+def _has_embedded(path):
+    """True when the file carries embedded cover art (any APIC / covr /
+    METADATA_BLOCK_PICTURE). Cheap probe for album-art.py."""
+    try:
+        import mutagen
+        m = mutagen.File(path)
+    except Exception:
+        return False
+    if m is None or m.tags is None:
+        return False
+    t = m.tags
+    try:
+        from mutagen.id3 import ID3
+        from mutagen.mp4 import MP4
+        from mutagen.flac import FLAC
+        if isinstance(t, ID3):
+            return any(k.startswith("APIC") for k in t.keys())
+        if isinstance(m, MP4):
+            return "covr" in m
+        if isinstance(m, FLAC):
+            return bool(m.pictures)
+    except Exception:
+        return False
+    return False
+
+
 def read_mbid(path):
     """The album's MusicBrainz release id, from the file's own tags (~94% of
     this library carries one, per audit-tags-vs-mb.py)."""
