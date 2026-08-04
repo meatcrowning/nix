@@ -2347,7 +2347,8 @@ def test_decision_remove(tmp):
 
 
 # ------------------------------------------------- 1c. who is running, and the box
-def _stash(bm, key, title, pid, pid_start=None, where="apps/x/**"):
+def _stash(bm, key, title, pid, pid_start=None, where="apps/x/**",
+           model="", effort=""):
     """A stash exactly as `boardmove.start()` writes one. The harness fakes the
     RECORD, never the liveness rule: `_alive()` still decides, off a real pid and
     a real /proc start time."""
@@ -2356,6 +2357,7 @@ def _stash(bm, key, title, pid, pid_start=None, where="apps/x/**"):
            "block": [], "before": "", "pid": pid,
            "pidStart": pid_start if pid_start is not None
            else (bm._proc_start(pid) if pid else None),
+           "model": model, "effort": effort,
            "host": "top", "started": "now", "board": "/tmp/nowhere.md"}
     with open(bm.stash_file(key), "w") as f:
         json.dump(rec, f)
@@ -2433,6 +2435,29 @@ def test_agents(tmp):
                   for k in ("live-one", "dead-one", "hand-one")),
           str({k: seen.get(k, {}).get("name")
                for k in ("live-one", "dead-one", "hand-one")}))
+
+    # ---- a decision agent SHOWS ITS MODEL TIER ---- [his, 2026-08-03] the
+    # Alloces decision card showed no tier: board-watch spawned it but never
+    # stamped the model on its stash, so `AgentRow` had nothing to draw. A
+    # stamped stash now names its tier the same way a worker's does.
+    _stash(bm, "tiered-one", "A decision on a named tier", os.getpid(),
+           model="claude-sonnet-5", effort="medium")
+    tseen = {a["id"]: a for a in ba.agents()}
+    check("a decision card names the tier its spawn was stamped with",
+          tseen.get("tiered-one", {}).get("model") == "sonnet 5 medium",
+          tseen.get("tiered-one", {}).get("model"))
+    # A stash written before the stamp existed still shows a tier, off the SAME
+    # decision resolver its spawn used - never blank for a running minister...
+    check("...and an unstamped LIVE decision falls back to the decision tier, "
+          "not a blank",
+          tseen.get("live-one", {}).get("model") == bw.tier_label(
+              *bw.role_tier("decision")),
+          tseen.get("live-one", {}).get("model"))
+    # ...but a HAND-MOVED item is nobody running a model, so it honestly has none.
+    check("...while a hand-moved decision claims no tier it isn't running",
+          tseen.get("hand-one", {}).get("model") == "",
+          tseen.get("hand-one", {}).get("model"))
+    os.unlink(bm.stash_file("tiered-one"))
 
     # ---- the box: a LIVE agent ----
     m = ba.send("also fix the tooltip", to="live-one", to_title="A decision")
@@ -3533,6 +3558,15 @@ def test_work(tmp):
                                       "deepseek/deepseek-v4-flash-0731",
                                       "--effort", "medium"],
               bw.role_flags(role))
+        # `role_tier` is the pair a card is stamped from and `role_flags` the
+        # argv the spawn uses - one resolver, so the label and the launched
+        # model cannot disagree (the decision-card-blank bug was them diverging).
+        m, e = bw.role_tier(role)
+        check("...and role_tier(%s) is that same pair, so the card cannot "
+              "disagree with the launch" % role,
+              bw.role_flags(role) == (["--model", m] if m else [])
+              + (["--effort", e] if e else []),
+              (bw.role_tier(role), bw.role_flags(role)))
 
     # ---- what the MINISTERS run on, and the ceiling on it ----
     # [his, 2026-07-29] "do not allow ministers to be anything higher than opus 5
@@ -5575,10 +5609,13 @@ def test_window(app, tmp):
         if not any(nm in s for _, s, _ in drawn):
             anon.append(c.get("title"))
         elif it.property("nameNeeded") and it.property("titleFirst") and drawn \
-                and nm not in [s for y, s, _ in drawn if y == drawn[0][0]]:
+                and not any(nm in s for y, s, _ in drawn if y == drawn[0][0]):
             # the column is the ONLY place the name can be on such a card, and
             # when nothing is drawn above the title row it shares, that row is
-            # the card's own top line
+            # the card's own top line. SUBSTRING, not equality: a titleFirst card
+            # with a model tier draws the name as *"[agent] ([model])"* on that
+            # row ([his, 2026-08-02], `AgentRow.qml`), so the bare name is a part
+            # of the top-line string rather than the whole of it.
             anon.append(c.get("title") + " (name column not on the top line)")
     check("...and no card is anonymous, whichever of the three lines it has",
           anon == [], anon)

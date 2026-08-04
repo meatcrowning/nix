@@ -2003,6 +2003,29 @@ ROLES = {
 }
 
 
+def role_tier(role, model=None, effort=None):
+    """The `(model, effort)` pair `role_flags` resolves for `role`, WITHOUT the
+    argv formatting — so a spawner can stamp on a card the very tier its spawn
+    will run on. `role_flags` is this plus the `--model`/`--effort` framing, so
+    the launched model and the card's label are resolved by one function and
+    cannot disagree (a decision card was blank because its stash carried no
+    tier — this is what board-watch stamps it from). Same precedence and the
+    same minister clamp as `role_flags` documents below."""
+    m, e = ROLES.get(role, ("", ""))
+    if role == "orchestrator":
+        m, e = orch_model()  # his choice of model AND effort, re-read
+    elif role in MINISTER_ROLES:
+        m, e = minister_model()   # his choice, capped, re-read likewise
+    prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
+    # explicit arg > BOARD_* env > the role default, resolved independently for
+    # model and effort so a caller can pin one and leave the other.
+    model = (os.environ.get(prefix + "_MODEL", m) if model is None else model).strip()
+    effort = (os.environ.get(prefix + "_EFFORT", e) if effort is None else effort).strip()
+    if role in MINISTER_ROLES and (model, effort) not in minister_choices():
+        model, effort = MINISTER_CEILING
+    return model, effort
+
+
 def role_flags(role, model=None, effort=None):
     """argv fragment selecting the model and effort for `role`.
 
@@ -2026,18 +2049,7 @@ def role_flags(role, model=None, effort=None):
     `~/.claude/settings.json` says) by which a minister spawns above it. The
     variables can still LOWER a minister, which is all a harness ever wanted.
     """
-    m, e = ROLES.get(role, ("", ""))
-    if role == "orchestrator":
-        m, e = orch_model()  # his choice of model AND effort, re-read
-    elif role in MINISTER_ROLES:
-        m, e = minister_model()   # his choice, capped, re-read likewise
-    prefix = "BOARD_" + ("ORCH" if role == "orchestrator" else role.upper())
-    # explicit arg > BOARD_* env > the role default, resolved independently for
-    # model and effort so a caller can pin one and leave the other.
-    model = (os.environ.get(prefix + "_MODEL", m) if model is None else model).strip()
-    effort = (os.environ.get(prefix + "_EFFORT", e) if effort is None else effort).strip()
-    if role in MINISTER_ROLES and (model, effort) not in minister_choices():
-        model, effort = MINISTER_CEILING
+    model, effort = role_tier(role, model=model, effort=effort)
     argv = []
     if model:
         argv += ["--model", model]

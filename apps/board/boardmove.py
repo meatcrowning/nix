@@ -235,7 +235,7 @@ def said(lines, item):
 
 # ---------------------------------------------------------------- the moves
 def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
-          force=False, session=""):
+          force=False, session="", model="", effort=""):
     """Lift an answered decision OUT of NEEDS YOU, verbatim, into the stash.
     Returns the stash record.
 
@@ -273,6 +273,13 @@ def start(sel, where="agent", notes=None, pid=None, path=bp.BOARD_PATH,
                     # actually doing and not only that it is alive
                     # (`boardphase.py`). Empty for a hand-started item.
                     "session": session or "",
+                    # The tier this decision runs on — `boardwork.role_tier`
+                    # ("decision"), resolved by the spawner from the same
+                    # precedence `role_flags` launches it with, so the card's
+                    # model label can never disagree with the running model.
+                    # Empty for a hand-moved item (`boardctl start`), which is
+                    # nobody running a model at all.
+                    "model": model or "", "effort": effort or "",
                     "host": socket.gethostname(),
                     "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                     "board": os.path.abspath(path)})
