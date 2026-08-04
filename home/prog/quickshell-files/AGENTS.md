@@ -410,7 +410,24 @@ windows** (`WlrLayer.Top`, empty input mask): a bar-background strip that hides
 the window border + the notch's own border where a flush window meets it, so the
 two read as connected. It is visible only while a frame is flush AND spans the
 notch, from `WinState.frames` — window FRAMES (content + `2 * bar_width` of
-hyprvtb titlebar + border). A THIRD trap, which cost a regression: `DesktopNotch` publishes `notchPx` /
+hyprvtb titlebar + border). Two things the notch's outline depends on, both paid for once: the bar's accent
+strip segments run INTO the notch's horizontal borders by a border width rather
+than stopping against them (abutting shapes round independently at a fractional
+scale and left an unpainted block exactly where the corner should be), and the
+seam patch covers the notch's INSIDE only — covering its full height painted out
+the ends of its own top and bottom borders, i.e. the corner pieces where the
+outline meets the window's border.
+
+`HyprEvents.qml` keeps `WinState` up with the compositor: `hyprctl clients`
+reports a window's GOAL geometry rather than its animated one (measured), so a
+refresh driven off the event socket makes the seam appear and vanish as an
+animation STARTS instead of a poll tick later. Hyprland emits nothing for a plain
+geometry change, so a floating window dragged off the notch still waits for the
+1s poll; `fullscreen`, `open/closewindow` and friends are events and are
+instant. It is behind a Loader, not an import, so a Quickshell built without the
+Hyprland module loses the fast path rather than the panel.
+
+A THIRD trap, which cost a regression: `DesktopNotch` publishes `notchPx` /
 `notchH` into `ViewMode` through `Binding`, and those bindings MUST carry
 `restoreMode: Binding.RestoreNone`. A reload builds the new tree and then
 destroys the old one; a Binding's default restore mode resets its target as it
