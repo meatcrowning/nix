@@ -57,9 +57,22 @@ Singleton {
     // fight, and a black-titled control is a lie on a white desktop. The write
     // is what SettingsApply watches (onLightModeChanged) to re-run wal-set.sh,
     // so both callers re-theme the whole desktop live with no panel reload.
+    //
+    // The dark-mode pure-black choice is REMEMBERED across the round trip:
+    // captured into pureBlackBgDark on the way out to light (single writer, at
+    // the transition, so pre-existing state migrates for free), restored from it
+    // on the way back to dark. Without this, Meta+D into light and back left
+    // pure black off even for someone who had it on. The guards fire only on a
+    // genuine polarity change, so an idempotent call never clobbers the memory
+    // with the forced-off value.
     function setLightMode(v) {
+        if (v && !d.lightMode) {
+            d.pureBlackBgDark = d.pureBlackBg;   // remember, then force off
+            d.pureBlackBg = false;
+        } else if (!v && d.lightMode) {
+            d.pureBlackBg = d.pureBlackBgDark;   // restore the dark choice
+        }
         d.lightMode = v;
-        if (v) d.pureBlackBg = false;
         save();
     }
     function toggleLightMode() { setLightMode(!d.lightMode); }
@@ -200,6 +213,11 @@ Singleton {
             property int    fontSize: 15               // matches kitty's on-screen cell (11pt@96dpi ≈ 14.67px); see Theme.qml
             property int    paletteColorCount: 16      // wal quantize cluster count
             property bool   pureBlackBg: true
+            // Remembers the dark-mode pure-black choice while light mode has it
+            // forced off, so returning to dark restores it. Written only by
+            // setLightMode at the dark->light transition; not a wal input, so
+            // it is deliberately absent from SettingsApply._paletteKeys.
+            property bool   pureBlackBgDark: true
             // Light vs dark polarity (wal-extract.py inverts the value ladder):
             // off = the settled black-background look; on = white bg + dark ink,
             // same wallpaper hue. Orthogonal to themeMode.
@@ -418,7 +436,7 @@ Singleton {
     readonly property var defaults: ({
         schemaVersion: 1,
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
-        fontSize: 15, paletteColorCount: 16, pureBlackBg: true, lightMode: false,
+        fontSize: 15, paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
         windowRounding: 0, trayTint: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
