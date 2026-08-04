@@ -119,7 +119,13 @@ Singleton {
     // its own margin short of its border, and the panel's content stops
     // `panelInset` short of the panel's border, and those two happen to be the
     // same — so centring between the borders centres between what you SEE.
-    readonly property int columnInsetFlush: Math.round((protrusion0 - iconSize) / 2)
+    // Between the two EDGES, not the two outer faces: the window's border sits
+    // on the notch's face and its inner edge is where the window stops, so the
+    // channel runs from there to the panel's face. Centring on the faces put the
+    // seals a pixel left of even — [his] "the icons need to be moved JUST A
+    // SMIDGE to the right to be even spacing".
+    readonly property int columnInsetFlush:
+        lineW + Math.round((protrusion0 - lineW - iconSize) / 2)
 
     // Is a window's frame flush with the notch's face on this screen, spanning
     // it? The seam asks (it has to paint over the join) and so does the notch
