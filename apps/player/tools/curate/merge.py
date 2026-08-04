@@ -190,8 +190,8 @@ def process_group(g, by_dir, apply_):
                 if date:
                     break
         _retag_dir(primary_path, canonical_album, canonical_artist, date)
-        new_dir_name = canonical_album
-        if new_dir_name != primary_d["album_dir"]:
+        new_dir_name = C.reorg.san(canonical_album)
+        if new_dir_name != Path(primary_d["path"]).name:
             new_path = primary_path.parent / new_dir_name
             if not new_path.exists():
                 primary_path.rename(new_path)
@@ -251,9 +251,13 @@ def main():
                   f"(primary={res['primary']}, +{res['moved_in']} gap, "
                   f"{res['replaced']} replaced, {res['discarded']} discarded"
                   + (f", date={res['date']}" if res.get("date") else "") + ")")
+        if args.apply:
+            # flush after EVERY group, not just at the end - a run that dies or
+            # times out partway through (a real timeout, once) must not lose the
+            # audit rows for groups it already finished moving files for.
+            C.flush_audit(f"Album consolidation (groups merge) - {res['album']!r}")
 
     if args.apply:
-        C.flush_audit("Album consolidation (groups merge)")
         out = C.STATE / "merge-results.json"
         out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
         print(f"-> {out}")
