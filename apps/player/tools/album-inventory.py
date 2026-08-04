@@ -23,8 +23,10 @@ Outputs (--dump-dir, default the spotify dump dir):
                        total tracks on the reference, present in the library,
                        missing, status, missing titles.
   album-missing-mb.tsv the missing tracks as a work list in soulseek-missing.py's
-                       exact TSV format (COLS from spotify-missing.py), so the
-                       downloader can be pointed straight at it:
+                       TSV format (COLS from spotify-missing.py, plus
+                       album_artist + album_ref), so the downloader can be
+                       pointed straight at it and the import step can place
+                       each download into its album:
                        soulseek-missing.py --tsv album-missing-mb.tsv
 
 Matching is generous on purpose: a reference track counts as present if its
@@ -57,9 +59,14 @@ LIBRARY_DB = os.path.expanduser("~/.local/share/player/library.db")
 TAGSCAN = os.path.expanduser("~/.cache/library-tag-audit/tagscan.json")
 MBCACHE = os.path.expanduser("~/.cache/library-tag-audit/mbcache")
 
-# soulseek-missing.py's work-list columns (spotify-missing.py COLS).
+# soulseek-missing.py's work-list columns (spotify-missing.py COLS), plus the
+# album identity the placement step needs: album_artist (the folder artist,
+# NOT the track artist) and album_ref (the MusicBrainz release id / Spotify
+# album id the row's track list came from). soulseek-missing.py records them
+# into soulseek-state.tsv at enqueue, and player-add.py places each download
+# into its album folder from that record.
 COLS = ["artists", "title", "album", "year", "duration_ms", "isrc",
-        "spotify_id", "sources"]
+        "spotify_id", "sources", "album_artist", "album_ref"]
 
 
 def clean(v):
@@ -174,7 +181,8 @@ def main():
     work_rows = []
     seen_work = set()  # dedup identical missing tracks across references
 
-    def add_work(artists, title, album, year, duration_ms, isrc, spotify_id):
+    def add_work(artists, title, album, year, duration_ms, isrc, spotify_id,
+                 album_artist, album_ref):
         key = trackmatch.fold(artists) + "||" + trackmatch.fold(title)
         if key in seen_work:
             return
@@ -182,7 +190,8 @@ def main():
         work_rows.append({"artists": artists, "title": title, "album": album,
                           "year": year, "duration_ms": duration_ms,
                           "isrc": isrc, "spotify_id": spotify_id,
-                          "sources": album})
+                          "sources": album, "album_artist": album_artist,
+                          "album_ref": album_ref})
 
     # --- pass 1: MusicBrainz releases --------------------------------------
     by_mbid = {}
@@ -225,7 +234,8 @@ def main():
             year = (release.get("date") or "")[:4]
             for num, title, length, isrc, tarts in missing:
                 add_work(tarts, title, album, year,
-                         length if length else "", isrc or "", "")
+                         length if length else "", isrc or "", "",
+                         artist, mbid)
 
     # --- pass 2: Spotify saved albums (no MB id) ----------------------------
     jpath = os.path.join(args.dump_dir, "library.json")
@@ -267,7 +277,8 @@ def main():
                     add_work(t.get("artists") or alb_artist, t.get("title") or "",
                              name, str(alb.get("year") or ""),
                              t.get("duration_ms") or "", t.get("isrc") or "",
-                             t.get("spotify_id") or "")
+                             t.get("spotify_id") or "", alb_artist,
+                             alb.get("spotify_id", ""))
 
     # --- pass 3: library albums with neither reference -----------------------
     # (artist, album) groups whose files carry no mbid and which match no saved

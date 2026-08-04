@@ -195,10 +195,29 @@ QUICK_QUEUE_LIMIT = 200
 # would otherwise make the sweep churn forever on the one peer that offers it.
 STALLED_AVOID_FILENAME = "soulseek-stall-avoid.json"
 
-STATE_COLS = ["spotify_id", "isrc", "status", "user", "filename", "when"]
+STATE_COLS = ["spotify_id", "isrc", "status", "user", "filename", "when",
+              "artists", "title", "album_artist", "album", "year", "album_ref"]
 # status: have (already in library) / queued (search found + enqueued) /
 #         picked (dry-run: would have queued) / nofind (search returned no match)
 #         error (search/API failed)
+# The trailing six columns are the row's album identity, recorded at enqueue
+# so the import step (player-add.py) can place the download into the album it
+# was queued for -- even when the Soulseek file arrives bare or mis-tagged.
+# album_artist is the FOLDER artist (the album's artist, not the track's);
+# for plain missing.tsv rows (liked/playlist tracks) they are empty and
+# player-add falls back to the file's own tags.
+
+
+def _state_rec(row, status, user="", filename=""):
+    """Build a soulseek-state.tsv record for a work-list row."""
+    return {"spotify_id": row.get("spotify_id", ""),
+            "isrc": row.get("isrc", ""), "status": status, "user": user,
+            "filename": filename,
+            "when": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "artists": row.get("artists", ""), "title": row.get("title", ""),
+            "album_artist": row.get("album_artist", ""),
+            "album": row.get("album", ""), "year": row.get("year", ""),
+            "album_ref": row.get("album_ref", "")}
 
 
 class SlskdError(Exception):
@@ -296,8 +315,18 @@ def load_missing(tsv_path):
     return rows
 
 
+def _state_key(rec):
+    """The state-file lookup key for a record: mirror track_key() so a row
+    whose spotify_id is empty (the album-missing work list, where MB-referenced
+    tracks carry no spotify id) round-trips through load_state. Without this,
+    every MB row would collapse onto the single key \"\" -- the state of one
+    track deciding whether all the others are queued or nofind."""
+    return rec.get("spotify_id") or rec.get("isrc") or (
+        f"{rec.get('artists', '')}||{rec.get('title', '')}")
+
+
 def load_state(state_path):
-    """state file -> {spotify_id: row}. Missing file is an empty dict."""
+    """state file -> {track key: row}. Missing file is an empty dict."""
     if not os.path.isfile(state_path):
         return {}
     state = {}
@@ -307,7 +336,8 @@ def load_state(state_path):
             for line in f:
                 parts = line.rstrip("\n").split("\t")
                 fields = parts + [""] * (len(header) - len(parts))
-                state[parts[0]] = dict(zip(header, fields))
+                rec = dict(zip(header, fields))
+                state[_state_key(rec)] = rec
     except (OSError, IndexError):
         return {}
     return state
@@ -664,12 +694,12 @@ def requested_keys(rows, state):
     requested and must not be enqueued again. A track a rescue pass releases
     (its 'queued' state dropped) leaves this set automatically, so a genuine
     re-source is never blocked."""
-    rows_by_id = {r.get("spotify_id"): r for r in rows if r.get("spotify_id")}
+    rows_by_key = {track_key(r): r for r in rows}
     out = set()
-    for sid, rec in state.items():
+    for key, rec in state.items():
         if rec.get("status") != "queued":
             continue
-        row = rows_by_id.get(sid)
+        row = rows_by_key.get(key)
         if row is None:
             continue
         out |= trackmatch.keys(row.get("artists", ""), row.get("title", ""))
@@ -930,14 +960,16 @@ def reconcile_orphaned_queued(state, alive, present, rows, downloaded,
     Never mutates state under --dry-run (a preview must not unqueue a real
     download). Returns the number that would be re-queued.
     """
-    rows_by_id = {r.get("spotify_id"): r for r in rows if r.get("spotify_id")}
+    rows_by_key = {track_key(r): r for r in rows if r.get("spotify_id")}
+    rows_by_key.update({track_key(r): r for r in rows
+                        if not r.get("spotify_id")})
     reconciled = 0
-    for sid, rec in list(state.items()):
+    for key, rec in list(state.items()):
         if rec.get("status") != "queued":
             continue
         if (rec.get("user"), rec.get("filename")) in alive:
             continue  # a transfer is still working on it
-        row = rows_by_id.get(sid)
+        row = rows_by_key.get(key)
         if row is None:
             continue  # no longer on the work list; nothing to re-queue
         if present and any(k in present for k in
@@ -953,7 +985,7 @@ def reconcile_orphaned_queued(state, alive, present, rows, downloaded,
         if base and base in downloaded:
             continue  # completed file awaiting import; do not re-download
         if not dry_run:
-            del state[sid]
+            del state[key]
         reconciled += 1
     return reconciled
 
@@ -1325,7 +1357,7 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
             return False
         if args.retry:
             return True
-        rec = state.get(row.get("spotify_id"))
+        rec = state.get(track_key(row))
         if rec is None:
             return True
         # A transient search/enqueue failure must be retried on a later run,
@@ -1356,10 +1388,8 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
         ks = trackmatch.keys(r.get("artists", ""), r.get("title", ""))
         if present and any(k in present for k in ks):
             already_have += 1
-            state.setdefault(track_key(r), {
-                "spotify_id": r.get("spotify_id", ""), "isrc": r.get("isrc", ""),
-                "status": "have", "user": "", "filename": "-already-in-library-",
-                "when": time.strftime("%Y-%m-%d %H:%M:%S")})
+            state.setdefault(track_key(r), _state_rec(
+                r, "have", filename="-already-in-library-"))
             continue
         if requested and any(k in requested for k in ks):
             dup_skipped += 1  # a sibling row / earlier run already requested it
@@ -1488,9 +1518,7 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
                                    if c >= MAX_ENQUEUES_PER_PEER})
         except SlskdError as e:
             print(f"    ! search failed: {e}")
-            state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                          "isrc": row.get("isrc", ""), "status": "error",
-                          "user": "", "filename": f"ERR {e}", "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            state[sid] = _state_rec(row, "error", filename=f"ERR {e}")
             changed = True
             save_state(state_path, state)
             continue
@@ -1515,9 +1543,7 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
                 deferred.add(sid)
             else:
                 print("    no matching file found")
-                state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                              "isrc": row.get("isrc", ""), "status": "nofind",
-                              "user": "", "filename": "", "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+                state[sid] = _state_rec(row, "nofind")
                 changed = True
                 save_state(state_path, state)
             continue
@@ -1525,10 +1551,8 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
         user, filename, size = cand
         if already_handled(user, filename):
             print(f"    already queued from {user}: {filename}")
-            state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                          "isrc": row.get("isrc", ""), "status": "queued",
-                          "user": user, "filename": filename,
-                          "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            state[sid] = _state_rec(row, "queued", user=user,
+                                    filename=filename)
             requested |= ks
             changed = True
             save_state(state_path, state)
@@ -1543,10 +1567,8 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
             os.path.basename(str(filename).replace("\\", "/")))
         if cand_base and cand_base in downloaded:
             print(f"    already downloaded (awaiting import); skipped: {filename}")
-            state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                          "isrc": row.get("isrc", ""), "status": "queued",
-                          "user": user, "filename": filename,
-                          "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            state[sid] = _state_rec(row, "queued", user=user,
+                                    filename=filename)
             requested |= ks
             changed = True
             save_state(state_path, state)
@@ -1555,10 +1577,8 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
         if args.dry_run:
             print(f"    [dry-run] would queue from {user}: {filename}"
                   f" (size {size or '?'})")
-            state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                          "isrc": row.get("isrc", ""), "status": "picked",
-                          "user": user, "filename": filename,
-                          "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+            state[sid] = _state_rec(row, "picked", user=user,
+                                    filename=filename)
             requested |= ks
             run_user_counts[user] = run_user_counts.get(user, 0) + 1
         else:
@@ -1570,16 +1590,12 @@ def sweep_once(args, api_key, base, state_path, session, budget_override=None):
                 requested |= ks
                 enqueued += 1
                 run_user_counts[user] = run_user_counts.get(user, 0) + 1
-                state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                              "isrc": row.get("isrc", ""), "status": "queued",
-                              "user": user, "filename": filename,
-                              "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+                state[sid] = _state_rec(row, "queued", user=user,
+                                        filename=filename)
             except SlskdError as e:
                 print(f"    ! enqueue failed: {e}")
-                state[sid] = {"spotify_id": row.get("spotify_id", ""),
-                              "isrc": row.get("isrc", ""), "status": "error",
-                              "user": user, "filename": f"ERR {e}",
-                              "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+                state[sid] = _state_rec(row, "error", user=user,
+                                        filename=f"ERR {e}")
         changed = True
         save_state(state_path, state)
 

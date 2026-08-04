@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build an album-origin-only missing work list, in spotify-missing.py's exact
-TSV format (COLS + sources), so soulseek-missing.py can be pointed at just the
-saved-album tracks.
+"""Build an album-origin-only missing work list, in spotify-missing.py's TSV
+format (COLS + sources, plus album_artist + album_ref), so
+soulseek-missing.py can be pointed at just the saved-album tracks and the
+import step can place each download into its album.
 
 Same dedup + local-match logic as spotify-missing.py, but keeps only rows whose
 primary source is a saved album. Writes the album-only rows to --out.
@@ -13,7 +14,7 @@ import trackmatch
 
 DUMP = os.path.expanduser("~/.local/share/spotify-dump")
 COLS = ["artists", "title", "album", "year", "duration_ms", "isrc",
-        "spotify_id", "sources"]
+        "spotify_id", "sources", "album_artist", "album_ref"]
 
 def clean(v):
     return str(v).replace("\t", " ").replace("\n", " ").replace("\r", " ")
@@ -41,7 +42,14 @@ def main():
     for pl in data.get("playlists", []):
         rows.extend(pl.get("tracks", []))
     for alb in data.get("saved_albums", []):
-        rows.extend(alb.get("tracks", []))
+        for t in alb.get("tracks", []):
+            r = dict(t)
+            # carry the album's own identity so the import step can place the
+            # download into the saved album (album_ref = the album's Spotify id)
+            r["album_ref"] = alb.get("spotify_id", "")
+            if not r.get("album_artist"):
+                r["album_artist"] = alb.get("artists", "")
+            rows.append(r)
 
     uniq = {}
     for r in rows:
