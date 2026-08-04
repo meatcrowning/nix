@@ -368,14 +368,40 @@ class Rig:
             return [l.rstrip() for l in f][-n:]
 
 
-def check_session_id_is_passed(r):
-    """`spawn()` must hand `claude` a `--session-id` it chose.
+def _run_is_bound(cmd, session, prompt):
+    """A decision run is bound to its card by ONE of two mechanisms, and which
+    one depends on the backend its minister model rides. On `claude` it is the
+    `--session-id` we mint, which names the transcript at
+    `~/.claude/projects/*/<uuid>.jsonl`. On `hermes` — the deepseek-v4 minister
+    DEFAULT since 2026-08-02, which has no session flag — it is the `-q` query
+    text `boardphase.arm` hashes to find the run in `~/.hermes/state.db`. Either
+    way `apps/board/boardphase.py` can tail what it is doing; lose BOTH and a
+    card silently degrades to "cannot see what it is doing". Backend-aware so
+    this survives a change of the default minister model.
 
-    That flag is the ONLY reason his board can say what an agent is actually
-    doing rather than merely that it is alive: the transcript at
-    `~/.claude/projects/*/<uuid>.jsonl` is found by that uuid and tailed by
-    `apps/board/boardphase.py`. Lose the flag and every card silently degrades
-    to "cannot see what it is doing" — a regression with no error anywhere.
+    Returns `(ok, detail)`.
+    """
+    cmd = list(cmd or [])
+    if "--session-id" in cmd:
+        got = cmd[cmd.index("--session-id") + 1]
+        return got == session, "claude session-id=%s" % got
+    if "-q" in cmd:
+        q = cmd[cmd.index("-q") + 1]
+        return q.startswith(prompt), "hermes -q %r" % q[:24]
+    return False, str(cmd[:4])
+
+
+def check_session_id_is_passed(r):
+    """`spawn()` binds every decision run to its card — the claude `--session-id`
+    it mints, or the hermes `-q` query `boardphase.arm` hashes (`_run_is_bound`).
+
+    That binding is the ONLY reason his board can say what an agent is actually
+    doing rather than merely that it is alive: the transcript / hermes session
+    is found by it and tailed by `apps/board/boardphase.py`. Lose it and every
+    card silently degrades to "cannot see what it is doing" — a regression with
+    no error anywhere. BOTH backends are exercised here (the default hermes path
+    and a forced claude minister model) so neither binding can rot unnoticed
+    when the default flips.
 
     Checked by importing the watcher and intercepting `subprocess.Popen`,
     because the stub path (`BOARD_WATCH_SPAWN`) deliberately replaces the whole
@@ -391,31 +417,44 @@ def check_session_id_is_passed(r):
     old = dict(os.environ)
     os.environ.update({k: v for k, v in env.items() if isinstance(v, str)})
     os.environ.pop("BOARD_WATCH_SPAWN", None)
-    seen = {}
     try:
         spec.loader.exec_module(mod)
 
         class Done(Exception):
             pass
 
-        def fake_popen(cmd, **kw):
-            seen["cmd"] = cmd
-            raise Done()
+        def run_spawn(**kw):
+            seen = {}
 
-        real = mod.subprocess.Popen
-        mod.subprocess.Popen = fake_popen
-        try:
-            mod.spawn("a prompt", "k", "label", session="fixed-uuid-here")
-        except Done:
-            pass
-        finally:
-            mod.subprocess.Popen = real
+            def fake_popen(cmd, **kw2):
+                seen["cmd"] = cmd
+                raise Done()
+
+            real = mod.subprocess.Popen
+            mod.subprocess.Popen = fake_popen
+            try:
+                mod.spawn("a prompt", "k", "label",
+                          session="fixed-uuid-here", **kw)
+            except Done:
+                pass
+            finally:
+                mod.subprocess.Popen = real
+            return seen.get("cmd") or []
+
+        # The default minister model is deepseek/hermes: bound by the query text.
+        cmd = run_spawn()
+        ok, detail = _run_is_bound(cmd, "fixed-uuid-here", "a prompt")
+        check("the spawn binds the default decision run to its card", ok, detail)
+
+        # A claude minister model takes the `--session-id` we mint instead.
+        cmd = run_spawn(model="claude-opus-5", effort="medium")
+        ok = ("--session-id" in cmd
+              and cmd[cmd.index("--session-id") + 1] == "fixed-uuid-here")
+        check("...and a claude minister model takes the session id we mint",
+              ok, str(cmd[:8]))
     finally:
         os.environ.clear()
         os.environ.update(old)
-    cmd = seen.get("cmd") or []
-    ok = "--session-id" in cmd and cmd[cmd.index("--session-id") + 1] == "fixed-uuid-here"
-    check("the spawn hands claude the session id its card is read from", ok, str(cmd[:8]))
 
 
 def _load_watcher(env):
@@ -1447,10 +1486,10 @@ def test_decision_does_not_hold_the_tick():
                   seen.get("runtime") == mod.AGENT_TIMEOUT_S, str(seen.get("runtime")))
             check("...carrying the key every guard against firing twice reads",
                   (seen.get("env") or {}).get("BOARD_WATCH_KEY") == "some-key")
-            check("...and the session id its card is read from",
-                  "--session-id" in (seen.get("cmd") or [])
-                  and seen["cmd"][seen["cmd"].index("--session-id") + 1]
-                  == "fixed-uuid-here", str((seen.get("cmd") or [])[:6]))
+            bound, detail = _run_is_bound(seen.get("cmd") or [],
+                                          "fixed-uuid-here", "a prompt")
+            check("...and the run is bound to its card (session id, or the "
+                  "hermes query)", bound, detail)
             check("the stash follows the AGENT's pid, not the watcher's",
                   adopted == [4242], str(adopted))
             check("...and the caller is told there is nothing to report yet",
