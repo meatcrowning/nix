@@ -146,3 +146,63 @@ def flush_audit(heading):
 
 def fold(s):
     return trackmatch.fold(s)
+
+
+# --- generic cross-format tag write (album / album_artist / date only) ----
+# Mirrors reorg/common.py read_tags' per-format field map, in reverse. Used
+# via apps/player/atomicsave.py's atomic_save (copy -> mutate copy -> replace)
+# -- NEVER a bare mutagen.save() on a library file.
+
+def set_common_tags(audio, album=None, album_artist=None, date=None):
+    from mutagen.id3 import ID3, TALB, TPE2, TDRC
+    from mutagen.mp4 import MP4
+    tags = audio.tags
+    if tags is None:
+        return
+    if isinstance(tags, ID3):
+        if album is not None:
+            tags.setall("TALB", [TALB(encoding=3, text=[album])])
+        if album_artist is not None:
+            tags.setall("TPE2", [TPE2(encoding=3, text=[album_artist])])
+        if date is not None:
+            tags.setall("TDRC", [TDRC(encoding=3, text=[date])])
+    elif isinstance(audio, MP4):
+        if album is not None:
+            audio["\xa9alb"] = [album]
+        if album_artist is not None:
+            audio["aART"] = [album_artist]
+        if date is not None:
+            audio["\xa9day"] = [date]
+    else:  # Vorbis comment / APEv2 (FLAC, OGG, WV, APE, ...)
+        if album is not None:
+            tags["album"] = [album]
+        if album_artist is not None:
+            tags["albumartist"] = [album_artist]
+        if date is not None:
+            tags["date"] = [date]
+
+
+def read_mbid(path):
+    """The album's MusicBrainz release id, from the file's own tags (~94% of
+    this library carries one, per audit-tags-vs-mb.py)."""
+    try:
+        import mutagen
+        m = mutagen.File(path)
+    except Exception:
+        return None
+    if m is None or m.tags is None:
+        return None
+    t = m.tags
+    for k in ("TXXX:MusicBrainz Album Id", "musicbrainz_albumid",
+              "----:com.apple.iTunes:MusicBrainz Album Id"):
+        try:
+            v = t.get(k)
+        except Exception:
+            v = None
+        if v:
+            v = v[0] if isinstance(v, list) else v
+            s = bytes(v).decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
+            s = s.strip()
+            if len(s) == 36:
+                return s
+    return None
