@@ -38,6 +38,14 @@ Item {
     // Which side the bar hugs — the notch protrudes the other way, and the
     // outline-less edge (the overlap) is on the bar's side.
     property bool barLeft: false
+    // This panel's screen, for the one question that depends on windows.
+    property var screen: null
+
+    // A window up against the notch changes where the seals sit: with nothing
+    // there they take the same `gap` as every other inset; with a window flush
+    // they centre in the notch's MOUTH, evenly between the window's border and
+    // the panel's own. See NotchModel (columnInsetFlush, flushOn).
+    readonly property bool flush: NotchModel.flushOn(notch.screen)
 
     // Content and metrics live in the singleton, so nothing here has to survive
     // a reload for the panel's reservation to be right. See NotchModel.qml.
@@ -90,8 +98,18 @@ Item {
         id: column
         spacing: NotchModel.gap
         width: NotchModel.iconSize
-        x: notch.barLeft ? notch.overlap + NotchModel.gapRight
-                         : NotchModel.columnInset
+        readonly property int inset: notch.flush ? NotchModel.columnInsetFlush
+                                                 : NotchModel.columnInset
+        x: notch.barLeft ? notch.width - inset - width : inset
+        // It moves with the window that caused it: the desktop's own slide
+        // (docs/DESIGN.md §6.2), the one a window rolls at.
+        Behavior on x {
+            enabled: !ViewMode.settling
+            NumberAnimation {
+                duration: ViewMode.ms(ViewMode.slideMs)
+                easing.type: ViewMode.slideEasing
+            }
+        }
         anchors.verticalCenter: parent.verticalCenter
 
         Repeater {

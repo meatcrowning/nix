@@ -919,16 +919,10 @@ Scope {
             // per edge, so the strip it reserves runs the full height — above
             // and below the notch that is wallpaper, which is the price of the
             // notch being visible under a maximized window at all).
-            // ...and one CHROME INSET less again, so a maximized window's
-            // titlebar ink lands on the notch's inner edge rather than five
-            // pixels short of it (NotchModel.chromeInset). The window's own
-            // border ends up inside the notch's outline; NotchSeam paints over
-            // that stretch, outline included.
             exclusiveZone: (ViewMode.dragging ? ViewMode.barWidth
                                               : ViewMode.liveWidth)
                            + ViewMode.notchPx
                            - Theme.windowBorderWidth
-                           - (ViewMode.notchPx > 0 ? NotchModel.chromeInset : 0)
 
             WlrLayershell.layer: WlrLayer.Bottom
             WlrLayershell.namespace: "qs-bar"
@@ -980,6 +974,7 @@ Scope {
                 id: notch
                 z: 2
                 barLeft: bar.barLeft
+                screen: bar.modelData
                 // A ROUNDED y, not a verticalCenter anchor: the seam patch is
                 // in another surface and computes the same centre itself, and
                 // this surface's height is a fractional number of logical

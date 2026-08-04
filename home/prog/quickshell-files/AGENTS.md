@@ -405,6 +405,11 @@ together, and all three are in `shell.qml`:
   take no clicks,
 - the inner-edge accent strip, drawn as TWO segments with the gap at the notch.
 
+`NotchModel.flushOn(screen)` is the ONE test for "is a window up against the
+notch on this screen" — the seam paints over the join and the notch shifts its
+seals for it (`columnInsetFlush`, centred between the window's border and the
+panel's), and the two must never disagree. Do not grow a second copy of it.
+
 `NotchSeam.qml` is its companion and **the only surface this panel puts above
 windows** (`WlrLayer.Top`, empty input mask): a bar-background strip that hides
 the window border + the notch's own border where a flush window meets it, so the
