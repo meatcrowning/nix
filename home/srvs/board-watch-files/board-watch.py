@@ -545,6 +545,20 @@ WORKER_FAIL = (
     "again to have another go. {where}\n")
 
 
+#: The same death, with the cause: the 45-minute cap (RuntimeMaxSec) cut the
+#: worker off mid-work. Not a failure of the work, and — unlike a decision
+#: agent — not something that resumes on its own, so the tag stays FAILED and
+#: the wording says what actually happened rather than leaving him to guess
+#: why a minister that was working fine stopped. `boardwork.reap()` stamps the
+#: record (`capped`) from the unit's journal, which is the one record of the
+#: cap that survives `--collect`.
+WORKER_CAP_FAIL = (
+    "- FAILED: **the {cap}-minute cap cut the minister off mid-work**\n"
+    "    It was working on {task} when the cap SIGTERMed it; nothing landed, "
+    "and a worker does not resume on its own. Answer or type it again to "
+    "have another go. {where}\n")
+
+
 #: Where to READ what it did, on that same continuation line — one path, not a
 #: paragraph. `claude -p` writes its stdout ONCE, at exit, so the `.log` of a
 #: worker that was killed is a POINTER rather than a record: since 2026-07-30
@@ -569,8 +583,11 @@ def worker_fail_bullet(rec):
     transcript = bp.oneline(rec.get("transcript") or "", 200, code=True)
     where = (WHERE_TRANSCRIPT.format(transcript=transcript, aid=aid)
              if transcript else WHERE_LOG.format(aid=aid))
-    return WORKER_FAIL.format(
-        task=bp.oneline(rec.get("task", ""), 200, code=True), where=where)
+    task = bp.oneline(rec.get("task", ""), 200, code=True)
+    if rec.get("capped"):
+        return WORKER_CAP_FAIL.format(cap=bw.WORKER_TIMEOUT_S // 60,
+                                      task=task, where=where)
+    return WORKER_FAIL.format(task=task, where=where)
 
 
 def note_on_board(bullet, agent_id=None):
@@ -1268,15 +1285,35 @@ def tick():
     # with nothing working on it. Hand back every item whose owning process is
     # gone, before deciding what to fire on. Worst case is one timer interval.
     try:
-        for rec in bm.reconcile(path=BOARD):
-            # Say which of reconcile's two cases it was. A pid-less stash never
-            # had an agent to lose, and the bullet it writes on his board is
-            # careful about that — the log must not be the one place that
-            # invents a death to explain a row.
-            log("returned decision %s to NEEDS YOU: %s"
-                % (rec.get("num") or rec.get("key"),
-                   "its agent is gone" if rec.get("pid")
-                   else "nothing was ever working it"))
+        def capped(rec):
+            """Was this stash's death the cap's doing, not a crash's?
+
+            The unit name is the decision's key and is REUSED by every
+            session of the same decision, so only a journal marker at or
+            after the stash's own start counts — an older marker belongs to
+            a session that already handed back. `reconcile()` asks only for
+            a stash that HAD an owner, so the pid check is belt-and-braces.
+            """
+            key = rec.get("key") or ""
+            return bool(rec.get("pid")) and bool(key) and bw.unit_capped(
+                bw.DECISION_PREFIX + key, since=rec.get("started"))
+
+        for rec in bm.reconcile(path=BOARD, capped=capped):
+            # Say which of reconcile's cases it was. A cap cut is a CAUSE —
+            # the work is handed on, not lost — and the log must not be the
+            # one place that still reads it as a death. A pid-less stash
+            # never had an agent to lose, and the bullet it writes is
+            # careful about that; the log must not invent a death either.
+            if rec.get("capped"):
+                log("returned decision %s to NEEDS YOU: its agent was cut off "
+                    "by the cap - it resumes automatically"
+                    % (rec.get("num") or rec.get("key")))
+            elif rec.get("pid"):
+                log("returned decision %s to NEEDS YOU: its agent is gone"
+                    % (rec.get("num") or rec.get("key")))
+            else:
+                log("returned decision %s to NEEDS YOU: nothing was ever "
+                    "working it" % (rec.get("num") or rec.get("key")))
     except (bm.BoardError, OSError) as e:
         log("could not reconcile stranded items: %s" % e)
 

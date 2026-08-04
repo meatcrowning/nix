@@ -62,6 +62,12 @@ What it asserts, in order:
               TRANSCRIPT when the failed record carries one, and falls back to
               the log-only wording when it does not — both shapes placed
               through the real checks
+  cap         a minister cut off by the 45-minute cap is a CAUSE, not a death:
+              a decision comes back with a handoff INFORMATION bullet ("it
+              resumes automatically") instead of the FAILED "the agent working
+              X is gone" one, a cap-cut worker's failure bullet names the cap,
+              and `boardwork.unit_capped` really reads the marker off the
+              journal of a unit capped at one second
               returned to him as a failure. `boardundo.py`; the gate that
               refuses the run's verbs is `board-test.py`'s half
   the loop    the three defects behind 2026-07-28's 3,151 starts, kept apart
@@ -93,6 +99,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -103,6 +110,7 @@ sys.path[:0] = [os.path.join(REPO, "apps", "board"), os.path.join(REPO, "apps", 
 import boardagents as ba                                          # noqa: E402
 import boardmove as bm                                            # noqa: E402
 import boardparse as bp                                           # noqa: E402
+import boardwork as bw                                            # noqa: E402
 
 FIXTURE = """# Board
 
@@ -1415,10 +1423,20 @@ def test_dead_worker_names_its_transcript():
         check("...and never trails an empty span for the path it does not have",
               without.rstrip().endswith("board-work/we12345.log`"), without)
 
+        capped = mod.worker_fail_bullet(
+            {"agent": "we12345", "task": "outlive the tick", "transcript": tx,
+             "capped": True})
+        check("a cap-cut worker's bullet names the cap, not a mystery death",
+              "cap cut the minister off" in capped
+              and "stopped without finishing" not in capped, capped)
+        check("...and still names the transcript and the log",
+              tx in capped and "board-work/we12345.log" in capped, capped)
+
         # Nothing either shape adds may read as a bullet, a tag or a second ask
         # to the checks in `add_todo_bullet` — assert by actually placing them.
         for label, bullet in (("with a transcript", with_tx),
-                              ("without one", without)):
+                              ("without one", without),
+                              ("cut off by the cap", capped)):
             ok = r.state_home(lambda b=bullet: mod.note_on_board(b))
             why = open(r.log).read()[-300:] if os.path.exists(r.log) else ""
             check("the board accepts the bullet %s" % label, bool(ok), why)
@@ -1426,10 +1444,113 @@ def test_dead_worker_names_its_transcript():
                   if "a minister stopped without finishing" in l]
         check("...both landing as their own FAILED bullet", len(placed) == 2,
               str(placed))
+        placed = [l for l in r.text().splitlines()
+                  if "cap cut the minister off" in l]
+        check("...and the cap one as its own bullet too", len(placed) == 1,
+              str(placed))
         check("...and the transcript path reaches the file intact",
               tx in r.text(), r.text()[-400:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_cap_cut_decision_is_a_handoff_not_a_death():
+    """A DECISION AGENT CUT OFF BY THE CAP comes back with a handoff
+    INFORMATION bullet, not the FAILED "the agent working X is gone" one.
+
+    The cap is a scheduled SIGTERM at RuntimeMaxSec: the decision comes back
+    with his answer and its host stamp, and the same tick re-fires it, so the
+    death bullet would read as the work dying when it is being handed on —
+    [his, 2026-08-03] the message that read like "TASK FAILED AGENT DIED WAS
+    NOT HANDED OFF" is what prompted the whole cap question. `reconcile` gets
+    the verdict from its caller (`capped`); the default — the app, and every
+    harness that does not pass one — still writes the death bullet.
+    """
+    print("\na cap-cut decision hands on instead of dying")
+    d = tempfile.mkdtemp(prefix="board-watch-capcut-")
+    try:
+        r = Rig(d)
+        r.edit("- [ ] Do it the short way", "- [x] Do it the short way")
+        r.state_home(lambda: bm.start("first-question", pid=99999999,
+                                      path=r.board))
+        moved = r.state_home(lambda: bm.reconcile(path=r.board,
+                                                  capped=lambda rec: True))
+        check("reconcile hands the decision back", len(moved) == 1, str(moved))
+        check("...and stamps it capped for the caller's log line",
+              moved[0].get("capped") is True, str(moved[0]))
+        t = r.text()
+        check("the bullet names the cap and says the work resumes",
+              "INFORMATION:" in t and "cap cut the minister off" in t
+              and "resumes automatically" in t, t[-400:])
+        check("...and NOT that the agent died or failed",
+              "FAILED:" not in t and "agent working" not in t, t[-400:])
+        check("...and the decision is back in front of him",
+              "first-question" in [i["key"] for i in bp.parse(t)["needs"]],
+              str([i["key"] for i in bp.parse(t)["needs"]]))
+
+        # The same death without the verdict: still the FAILED bullet.
+        r.state_home(lambda: bm.start("first-question", pid=99999999,
+                                      path=r.board))
+        moved = r.state_home(lambda: bm.reconcile(path=r.board, capped=None))
+        t = r.text()
+        check("without the capped verdict the death bullet is unchanged",
+              "the minister working" in t and "exited without finishing" in t,
+              t[-400:])
+        check("...and reconcile still returned it", len(moved) == 1, str(moved))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_unit_capped_reads_the_journal():
+    """`boardwork.unit_capped` SEES THE CAP IN THE JOURNAL even after
+    `--collect` has unloaded the unit — the record the handoff bullet is
+    built on.
+
+    The unit's own `Result=` is gone before the next tick usually runs, and a
+    decision's unit name is reused by its next session, so the journal is the
+    only record that survives. Exercised against a REAL transient unit capped
+    at one second: nothing else in this harness spawns a real agent, but a
+    `sleep 30` that systemd SIGTERMs a second after start is not an agent.
+    """
+    print("\nunit_capped reads the cap off the journal")
+    if not shutil.which("systemd-run"):
+        print("    skipped: no systemd-run")
+        return
+    name = "board-test-cap-" + uuid.uuid4().hex[:8]
+    p = subprocess.run(["systemd-run", "--user", "--quiet", "--collect",
+                        "--unit", name, "--property=RuntimeMaxSec=1",
+                        "sleep", "30"],
+                       capture_output=True, text=True, timeout=30)
+    try:
+        if p.returncode != 0:
+            print("    skipped: could not start a transient unit (%s)"
+                  % p.stderr.strip()[:80])
+            return
+        ok = False
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if bw.unit_capped(name):
+                ok = True
+                break
+            time.sleep(0.5)
+        check("a unit that hit RuntimeMaxSec reads as capped from the journal",
+              ok, "no journal marker seen within 20s")
+        # The marker's timestamp has one-second granularity, so a `since`
+        # taken in the SAME second still includes it (journalctl `--since` is
+        # inclusive). In production the stash's `started` is 45 minutes before
+        # the marker, so the filter's real job — excluding a PREVIOUS session's
+        # marker — never meets this edge; the test just has to let the second
+        # turn.
+        time.sleep(1.2)
+        check("...and a `since` AFTER the cap filters it out",
+              not bw.unit_capped(
+                  name, since=time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+              "an old marker must not read as a new death")
+        check("...and a unit that never existed reads as not capped",
+              not bw.unit_capped("board-test-cap-" + uuid.uuid4().hex[:8]), "")
+    finally:
+        subprocess.run(["systemctl", "--user", "stop", name],
+                       capture_output=True, timeout=30)
 
 
 def test_decision_does_not_hold_the_tick():
@@ -1805,6 +1926,8 @@ def main():
     test_seed_guards_a_fresh_question_on_a_resting_board()
     test_landed_needs_no_tick()
     test_dead_worker_names_its_transcript()
+    test_cap_cut_decision_is_a_handoff_not_a_death()
+    test_unit_capped_reads_the_journal()
     test_decision_does_not_hold_the_tick()
 
     print()

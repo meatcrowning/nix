@@ -832,7 +832,29 @@ def _abandoned(rec):
     return not rec.get("pid") and _stash_age(rec) > UNOWNED_STRAND_S
 
 
-def reconcile(path=bp.BOARD_PATH):
+#: The hand-back bullet for a decision agent that was cut off by the cap rather
+#: than dying. The cap is a scheduled SIGTERM at RuntimeMaxSec; the decision
+#: comes back with his answer and host stamp intact and the same tick re-fires
+#: it, so the FAILED bullet would read as the work dying when it is in fact
+#: being handed on — the confident lie this file refuses everywhere else, in
+#: the other direction. [his, 2026-08-03] a hand-back that read like "TASK
+#: FAILED AGENT DIED WAS NOT HANDED OFF" was what prompted the whole cap
+#: question; this is the answer he asked for, in the first words he reads.
+#: `{title}` stays on the indented line, exactly as it does in the FAILED
+#: bullets: its length is not this file's to choose.
+DECISION_CAP_TEMPLATE = (
+    "- INFORMATION: **the {cap}-minute cap cut the minister off; it resumes "
+    "automatically**\n"
+    "    It was working on {title}; a fresh minister picks it up from its own "
+    "history, so nothing was lost and nothing for you to do.\n")
+
+
+def _cap_minutes():
+    """The decision cap in minutes, read the same way board-watch reads it."""
+    return int(os.environ.get("BOARD_WATCH_TIMEOUT", "2700")) // 60
+
+
+def reconcile(path=bp.BOARD_PATH, capped=None):
     """Give back every IN FLIGHT item whose owner is gone. Returns what moved.
 
     Run at the top of every board-watch tick. This is the guarantee that an item
@@ -842,6 +864,16 @@ def reconcile(path=bp.BOARD_PATH):
     Two ways to qualify, and the second is why this is a guarantee rather than
     nearly one: an owner that is provably gone (`_alive`), or no owner at all
     for long enough that nobody is coming (`_abandoned`).
+
+    `capped` is an optional callable `(rec) -> bool` saying whether the owner's
+    death was the RuntimeMaxSec cap (board-watch reads it off the unit's
+    journal — `boardwork.unit_capped`). When it says yes the hand-back bullet
+    says the work is handed on rather than that the minister died, because the
+    cap is a SCHEDULED cut: the answer comes back with its host stamp and the
+    same tick re-fires it, so `FAILED: the minister ... is gone` would be the
+    confident lie this module refuses everywhere else — in the other direction.
+    The app and the harnesses leave it `None` and get the death bullet as
+    before; it is only ever consulted for a stash that HAD an owner.
     """
     moved = []
     for rec in _stashes():
@@ -854,11 +886,16 @@ def reconcile(path=bp.BOARD_PATH):
         # case never had an agent to exit, and telling him one "is gone" would
         # be inventing a death to explain a row.
         if rec.get("pid"):
-            why = ("- FAILED: **the agent working %s is gone** - it exited "
-                   "without finishing.\n"
-                   "    It never said so; the decision is back above with your "
-                   "answer intact. Nothing was committed on its behalf. "
-                   "Log: `~/.cache/board-watch.log`" % title)
+            rec["capped"] = bool(capped) and bool(capped(rec))
+            if rec["capped"]:
+                why = DECISION_CAP_TEMPLATE.format(
+                    title=title, cap=_cap_minutes())
+            else:
+                why = ("- FAILED: **the minister working %s is gone** - it "
+                       "exited without finishing.\n"
+                       "    It never said so; the decision is back above with your "
+                       "answer intact. Nothing was committed on its behalf. "
+                       "Log: `~/.cache/board-watch.log`" % title)
         else:
             why = ("- FAILED: **nothing was working %s**\n"
                    "    It was taken by a session that recorded no process, and "

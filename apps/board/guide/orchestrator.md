@@ -162,10 +162,17 @@ Rules that fall out of it, all of them load-bearing:
   other machine owns is simply not this host's business, which it always was.
   **Do not reintroduce a synced record of what is running.** The two hosts
   cannot reconcile one, and that is the whole finding.
-- **A failed decision does NOT re-fire.** Its answer is already recorded in the
-  watcher's state, so it comes back to NEEDS YOU and sits there with the bullet
-  saying what happened. Re-answering it is what starts it again — deliberately,
-  because the alternative is a crash loop spawning an agent every five minutes.
+- **A returned decision re-fires only when its answer is STAMPED for this
+  host.** The stamp is the whole trigger: an app-answered decision comes back
+  from `give_back()` with `<!-- answered-on: <host> -->` intact, reads as
+  newly answered, and the same tick fires a fresh session of it — that IS the
+  auto-restart Alloces survives the cap on, and the cap-cut hand-back bullet
+  (`reconcile`'s `capped` verdict, read off the unit's journal) says the work
+  is handed on rather than that the minister died. A hand-edited answer has
+  no stamp and does NOT re-fire: it comes back to NEEDS YOU and sits there
+  with the bullet saying what happened, and re-answering it is what starts it
+  again — deliberately, because the alternative is a crash loop spawning an
+  agent every five minutes.
 - **Moving an item by hand SUPPRESSES the auto-spawn for it**, because only
   NEEDS YOU is fingerprinted. Correct — work is underway — but whoever moves it
   owns doing the work.
