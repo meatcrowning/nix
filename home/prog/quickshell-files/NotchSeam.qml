@@ -43,11 +43,22 @@ PanelWindow {
     mask: Region {}
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
-    // The two borders sit on the same 2px, plus a pixel of slack either side
-    // for the rounding in a reserve computed from a fractional panel width.
-    // The slack lands on Theme.bg on both sides anyway (hyprvtb's titlebar,
-    // the notch's inside), so it cannot show.
-    readonly property int patchW: Theme.windowBorderWidth + 2
+    // TWO ranges, and the difference between them is the whole trick.
+    //
+    // shell.qml now reserves a chrome inset less, so a flush window's INK ends
+    // exactly on the notch's inner edge and its border sits inside the notch's
+    // gap. What has to be erased is therefore only what lies BEYOND that ink:
+    // the window's empty chrome margin and its border. Erasing from the notch's
+    // outer edge instead would paint over the last pixels of hyprvtb's own
+    // buttons.
+    //
+    // The outline pieces reach further, from the notch's outer edge, because
+    // the window covers that stretch of the notch's top and bottom borders and
+    // something has to draw them: over the corner rows the panel's line wins.
+    readonly property int eraseX0: Theme.windowBorderWidth
+    readonly property int eraseW: NotchModel.chromeInset + 1
+    readonly property int lineWidth: Theme.windowBorderWidth
+                                     + NotchModel.chromeInset + 1
 
     // The notch's outer face, in this screen's coordinates and then in the
     // compositor's (which is what WinState's frames are in).
@@ -56,11 +67,10 @@ PanelWindow {
         ? modelData.x + edgeFromSide
         : modelData.x + modelData.width - edgeFromSide
     // Where a window's frame edge lands when the compositor lays it against the
-    // reserved area: one window border PAST the notch's face, because the panel
-    // deliberately reserves a border less so the two coincide instead of
-    // stacking (see shell.qml's exclusiveZone).
-    readonly property real boundaryX: faceX
-        + (barLeft ? -Theme.windowBorderWidth : Theme.windowBorderWidth)
+    // reserved area: a border plus a chrome inset PAST the notch's face, both of
+    // which shell.qml declines to reserve (see its exclusiveZone).
+    readonly property int frameOffset: Theme.windowBorderWidth + NotchModel.chromeInset
+    readonly property real boundaryX: faceX + (barLeft ? -frameOffset : frameOffset)
 
     // The SCREEN's height, not this surface's: `height` is only meaningful once
     // the window exists, and the window only exists while `touching` — which is
@@ -102,24 +112,39 @@ PanelWindow {
     }
 
     visible: touching
-    implicitWidth: edgeFromSide + patchW
+    implicitWidth: edgeFromSide + lineWidth + 2
 
+
+    // The notch's face in this surface's coordinates. Everything below is drawn
+    // from here, so the three pieces cannot slip against each other.
+    readonly property int faceLocal: barLeft ? edgeFromSide : width - edgeFromSide
 
     Rectangle {
-        // Over the notch's face and the window border that lands on it.
-        x: root.barLeft ? root.edgeFromSide - Theme.windowBorderWidth - 1
-                        : root.width - root.edgeFromSide - 1
-        // The notch's INSIDE only. Covering its full height would paint over
-        // the ends of its own top and bottom borders — the corner pieces where
-        // the notch's outline meets the window's — and leave two sides touching
-        // with nothing in the corner. The window's border survives on those two
-        // rows, which is what the corner is made of.
-        y: root.notchTop + Theme.windowBorderWidth
-        width: root.patchW
-        height: ViewMode.notchH - 2 * Theme.windowBorderWidth
         // The bar's background — the colour on BOTH sides of the seam, since
         // the window's chrome there is hyprvtb's titlebar (drawn in the same
         // Theme.bg) and the notch's inside is the bar body.
+        x: root.barLeft ? root.faceLocal - root.eraseX0 - root.eraseW
+                        : root.faceLocal + root.eraseX0
+        y: root.notchTop + Theme.windowBorderWidth
+        width: root.eraseW
+        height: ViewMode.notchH - 2 * Theme.windowBorderWidth
         color: Theme.bg
+    }
+
+    // ...and the outline REDRAWN across the stretch of it the window covers,
+    // from the same numbers as the erasure between them. Without this the
+    // window's border nicks the notch's top and bottom lines where it crosses
+    // them, and the corner reads as two lines meeting rather than turning.
+    Repeater {
+        model: 2
+        Rectangle {
+            required property int index
+            x: root.barLeft ? root.faceLocal - root.lineWidth : root.faceLocal
+            y: index === 0 ? root.notchTop
+                           : root.notchBottom - Theme.windowBorderWidth
+            width: root.lineWidth
+            height: Theme.windowBorderWidth
+            color: Theme.accent
+        }
     }
 }
