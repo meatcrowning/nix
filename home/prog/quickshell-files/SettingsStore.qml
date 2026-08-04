@@ -228,6 +228,10 @@ Singleton {
             property int    windowBorderWidth: 2
             property int    windowRounding: 0
             property bool   trayTint: true
+            // The column of program shortcuts down the right of the desktop
+            // (DesktopIcons.qml). On by default — it is the desktop's own
+            // programs, and there is nowhere else on the desktop to click.
+            property bool   desktopIcons: true
             // Opacity of the window drop shadow hyprvtb draws to the bottom-left
             // of every titlebarred window. 0.6 is the shipped look; 0 = no
             // shadow. Live-applied over `hl.config` (plugin:hyprvtb:shadow_alpha)
@@ -438,7 +442,7 @@ Singleton {
         themeMode: "auto", accentOverride: "#5c9fcc", fontFamily: "More Perfect DOS VGA",
         fontSize: 15, paletteColorCount: 16, pureBlackBg: true, pureBlackBgDark: true, lightMode: false,
         paletteVariant: "pastel", windowBorderWidth: 2,
-        windowRounding: 0, trayTint: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
+        windowRounding: 0, trayTint: true, desktopIcons: true, shadowAlpha: 0.6, scrollbarStyle: "win31",
         rgbFollowTheme: true, reduceMotion: false, animSpeed: 1.0,
         wallpaperDir: "~/Pictures/wall", wallpaperFit: "auto", wallpaperSort: "name",
         wallpaperSolid: false,

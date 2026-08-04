@@ -761,6 +761,13 @@ Scope {
         WallpaperLayer {}
     }
 
+    // Shortcuts to our own programs, a column of small icons down the right of
+    // the visible desktop. Bottom layer: above the wallpaper, below windows.
+    Variants {
+        model: Quickshell.screens
+        DesktopIcons {}
+    }
+
     // The volume/brightness OSD popup, one per monitor.
     Variants {
         model: Quickshell.screens
