@@ -264,6 +264,14 @@ Column {
                 onToggled: (v) => { page.d.trayTint = v; SettingsStore.save(); }
             }
         }
+        SetRow {
+            label: "desktop shortcuts"
+            desc: "a column of program icons down the right of the desktop"
+            SetToggle {
+                checked: page.d.desktopIcons
+                onToggled: (v) => { page.d.desktopIcons = v; SettingsStore.save(); }
+            }
+        }
     }
 
     SetSection {

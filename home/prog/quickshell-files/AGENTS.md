@@ -390,6 +390,18 @@ minimized — with the icon knocked back in the last two, and the filled
 background left to mean FOCUS alone. Roll and minimize outrank focus, because a
 rolled-up window can still hold the keyboard.
 
+### The desktop shortcut column
+
+`DesktopIcons.qml` — one `Bottom`-layer surface per monitor, a column of small
+program icons down the right of the VISIBLE desktop (`root.width -
+ViewMode.liveWidth` when the bar is over there, so it follows the panel edge
+live). Membership is the `Keywords=bespoke;` tag on the desktop entry, the same
+test `Launcher.qml`'s `rank` sorts by — never a hardcoded list. Input is masked
+to the column, so a click anywhere else is still a click on the wallpaper, and
+it never takes keyboard focus. Toggle: `desktopIcons` (Settings → appearance).
+Launch goes through `NixPath.launch`, never `entry.execute()` — see NixPath for
+the cgroup reason. docs/DESIGN.md §12.2.2 is the rule.
+
 ### Every program icon goes through `AppIcon.qml`
 
 Runner rows, task cells, tray items and a toast's header all draw one, and none
