@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- settings app icon - the seal of Marbas, fifth spirit of the Ars Goetia.
+       Marbas answers truly of hidden and secret things and teaches the
+       mechanical arts: the spirit of a machine's own configuration. Redrawn
+       as clean geometry in the house style - a crowned loop over an upward
+       chevron and a crossed spine.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent). The window icon is tinted at runtime by
+       substituting currentColor for the wal `text` colour and rendering
+       through QSvgRenderer (apps/board/main.py _window_icon); the panel task
+       cell and the runner tint it per element (TaskCell.qml, Launcher.qml).
+       The root `color` above is only the fallback external consumers resolve
+       currentColor to when they draw the file raw - the desktop's default
+       accent. Uniform 44-unit stroke = the 2px edge weight scaled to icon
+       size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="140" r="48"/>
+    <path d="M256 188 L256 400"/>
+    <path d="M180 300 L256 244 L332 300"/>
+    <path d="M196 358 L316 358"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="256" cy="140" r="16"/>
+    <circle cx="180" cy="300" r="21"/>
+    <circle cx="332" cy="300" r="21"/>
+  </g>
+</svg>
