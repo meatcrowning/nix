@@ -1973,8 +1973,42 @@ symlinked `/usr/local/sbin/cava` into the nix profile by hand, which is three
 workarounds for one problem:
 
 ```qml
-NixPath.run(["filer", dir])                       // instead of Quickshell.execDetached
+NixPath.launch(["filer", dir])                    // a GUI app — see below
+NixPath.run(["pkill", "-x", "hyprsunset"])        // a fire-and-forget one-shot
 command: ["sh", "-c", NixPath.sh + "exec cava …"] // instead of a bare sh body
+```
+
+**Anything that OUTLIVES the click goes through `NixPath.launch`, not `run`.**
+`execDetached` detaches the PROCESS — double-fork, reparented to systemd — but
+a process cannot leave its CGROUP by running, so every app started from the
+runner, the file browser, a notification or a disk tile stayed inside
+`quickshell-panel.service` for its whole life. Two bugs, one cause:
+
+- The unit is `KillMode=control-group` with `Restart=always` (both systemd
+  defaults), so **any** panel restart SIGTERMs the entire group. The browser and
+  every dock-launched app die with the bar.
+- Their memory is charged to the panel. Measured on book 2026-08-03:
+  `quickshell-panel.service` at **1.79 GB current / 3.36 GB peak** while the
+  `qs` process held **176 MB and was flat**. The rest was surfer plus its
+  QtWebEngine renderers. A journal line reading `3.4G memory peak` for the panel
+  was the browser, filed under the bar — and it was read as a panel leak until
+  the cgroup was split by `memory.stat` instead of trusted.
+
+`launch` wraps the argv in `systemd-run --user --quiet --collect --scope`, which
+puts the app in its own `run-p<pid>-i<n>.scope` as a SIBLING under `app.slice`.
+**`--scope`, not `--unit`**: a scope runs in the CALLER's context, so
+`WAYLAND_DISPLAY` and friends are inherited and need no `--setenv` list — the
+`settings` wrapper in `quickshell.nix` pays exactly that price for using a
+service instead, and is the older half of this same lesson. If `systemd-run` is
+missing the `&&` short-circuits to a plain exec, i.e. the old behaviour: never
+fail to start the program he asked for.
+
+Verify a launch site rather than assuming — the process tree lies here, because
+the app really is reparented to systemd while still sitting in the panel's group:
+
+```bash
+cat /proc/$(pgrep -f apps/surfer/main.py | head -1)/cgroup   # must NOT say quickshell-panel
+systemd-cgls --user-unit quickshell-panel.service            # should hold qs, cava, pactl — no apps
 ```
 
 `NixPath.sh` **appends** — the distro binary keeps winning wherever there is one

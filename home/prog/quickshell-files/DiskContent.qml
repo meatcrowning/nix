@@ -60,7 +60,7 @@ Item {
                         // NixPath.run, not execDetached: `filer` is one of the
                         // vendored nix apps and the panel's PATH on book is
                         // Fedora's, so a bare exec silently did nothing there.
-                        onClicked: NixPath.run(["filer", modelData.mount])
+                        onClicked: NixPath.launch(["filer", modelData.mount])
                     }
 
                     // name: click to rename (edits the real fs label), or an
