@@ -327,9 +327,16 @@ Singleton {
     // was on that side. Shrinking needs no equivalent: it uncovers windows, and
     // moving them "back" would fight hyprvtb's own geometry memory.
     property int _lastReservePx: -1
+    // The shortcut notch's VISIBLE protrusion past the bar's inner edge,
+    // published by DesktopNotch.qml (0 when it is off). The panel reserves it
+    // along with its own width — [his] "reserve space when a window is
+    // maximized or the user disables floating mode globally or per window" —
+    // so a tiled or maximized window stops at the notch instead of covering it.
+    // A FLOATING window still can, exactly as it can cover the bar itself.
+    property int notchPx: 0
     function applyReserve() {
         const edge = SettingsStore.d.barEdge === "left" ? "left" : "right";
-        const px = dock ? barWidth : 0;
+        const px = dock ? barWidth + notchPx : 0;
         const grew = px > _lastReservePx && _lastReservePx >= 0;
         _lastReservePx = px;
 
