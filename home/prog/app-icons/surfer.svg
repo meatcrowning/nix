@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- surfer app icon - the seal of Raphael, the archangel of Mercury and
+       communication in the Heptameron (the companion text of the Lemegeton,
+       whose day-angels carry the planetary seals), redrawn as clean geometry
+       from the Heptameron plate: outer circle and the central staff figure -
+       a vertical shaft, a ring at the top and a crossbar, the herald's staff.
+       Raphael is the messenger: the seal of a browser.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor
+       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <circle cx="256" cy="140" r="40"/>
+    <path d="M256 180 L256 400"/>
+    <path d="M196 260 L316 260"/>
+    <path d="M220 360 L292 360"/>
+  </g>
+</svg>

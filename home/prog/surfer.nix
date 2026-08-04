@@ -268,6 +268,14 @@ in
   # for two types it never declared: the association held, but surfer was absent
   # from the "Open with" list for them (that menu is built from mimeinfo.cache,
   # which is built from MimeType=). Declared now so all three agree.
+  # App icon: the seal of Raphael, the archangel of Mercury and communication
+  # (Heptameron), redrawn as clean vector SVG in app-icons/. Installed into the
+  # hicolor icon theme so the desktop entry's Icon= AND the titlebar
+  # program-icon slot find it (hyprvtb resolves class -> .desktop -> Icon= ->
+  # icon theme; a currentColor SVG it tints to the title colour) — same pattern
+  # as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/surfer.svg".source = ./app-icons/surfer.svg;
+
   home.file.".local/share/applications/surfer.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -275,7 +283,7 @@ in
     GenericName=Web Browser
     Comment=Minimal QtWebEngine browser for the top desktop
     Exec=${pkgs.coreutils}/bin/env SURFER_DESKTOP_LAUNCH=1 ${surfer}/bin/surfer %U
-    Icon=web-browser
+    Icon=surfer
     Terminal=false
     Categories=Network;WebBrowser;
     Keywords=bespoke;

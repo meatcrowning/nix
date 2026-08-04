@@ -104,6 +104,13 @@ in
     # No Install section: never auto-started at boot.
   };
 
+  # App icon: the planetary seal of Venus (beauty, art), redrawn as clean
+  # vector SVG in app-icons/. Installed into the hicolor icon theme so the
+  # desktop entry's Icon= AND the titlebar program-icon slot find it (hyprvtb
+  # resolves class -> .desktop -> Icon= -> icon theme; a currentColor SVG it
+  # tints to the title colour) — same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/painter.svg".source = ./app-icons/painter.svg;
+
   home.file.".local/share/applications/painter.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -111,7 +118,7 @@ in
     GenericName=Image Generation
     Comment=Text-to-image front end for a local ComfyUI
     Exec=${painter}/bin/painter
-    Icon=applications-graphics
+    Icon=painter
     Terminal=false
     Categories=Graphics;2DGraphics;
     Keywords=bespoke;

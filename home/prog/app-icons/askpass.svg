@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- askpass app icon - the planetary seal of Saturn: a cross with a curved
+       top, the classic geometric sigil of the Key-of-Solomon/Heptameron
+       planetary tradition. Saturn is the gatekeeper, the seal of boundaries
+       and guardianship: fitting the sudo password dialog that guards root.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor
+       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <path d="M176 140 C256 84 336 140 336 140"/>
+    <path d="M256 176 L256 400"/>
+    <path d="M206 250 L306 250"/>
+    <path d="M222 320 L290 320"/>
+  </g>
+</svg>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- filer app icon - the seal of Vine, forty-fifth spirit of the Ars Goetia
+       (a king), redrawn as clean geometry from the 1904 Mathers/Crowley
+       plate: outer circle, central trunk, three branch pairs and a crown -
+       the tree that IS Vine's seal. Fits a file browser: a file tree.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor
+       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <path d="M256 408 L256 150"/>
+    <path d="M256 350 L180 300"/>
+    <path d="M256 350 L332 300"/>
+    <path d="M256 290 L190 246"/>
+    <path d="M256 290 L322 246"/>
+    <path d="M256 230 L198 192"/>
+    <path d="M256 230 L314 192"/>
+    <path d="M256 150 L222 112"/>
+    <path d="M256 150 L290 112"/>
+  </g>
+</svg>

@@ -55,6 +55,14 @@ in
 {
   home.packages = [ player ];
 
+  # App icon: the seal of Amdusias (a duke of the Ars Goetia; his office is to
+  # make musical instruments heard), redrawn as clean vector SVG in app-icons/.
+  # Installed into the hicolor icon theme so the desktop entry's Icon= AND the
+  # titlebar program-icon slot find it (hyprvtb resolves class -> .desktop ->
+  # Icon= -> icon theme; a currentColor SVG it tints to the title colour) —
+  # same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/player.svg".source = ./app-icons/player.svg;
+
   # Desktop entry so player shows up in the runner. MPRIS DesktopEntry points
   # here too (the panel widget reads Identity from it).
   #
@@ -75,7 +83,7 @@ in
     GenericName=Music Player
     Comment=Standalone music player for the top desktop
     Exec=${player}/bin/player %F
-    Icon=audio-x-generic
+    Icon=player
     Terminal=false
     Categories=AudioVideo;Audio;Player;
     Keywords=bespoke;

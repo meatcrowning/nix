@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" color="#cc4400">
+  <!-- slsk app icon - the seal of Vassago, third spirit of the Ars Goetia (a
+       prince), redrawn as clean geometry from the 1904 Mathers/Crowley plate:
+       outer circle and the diamond lozenge at the heart of the seal, with its
+       vertical stem and side ticks. Vassago's office is to declare things
+       past, present and to come and to find hidden or lost things: the seal
+       of a search client.
+
+       ONE transparent, theme-tracking variant. No filled tile: the sigil
+       sits on transparency so it reads on any surface (DESIGN.md S3.1). The
+       strokes are `currentColor` so the sigil IS the live theme's foreground
+       (body text = the accent) - the titlebar tints it via a user stylesheet
+       (home/prog/hyprvtb/vtbDeco.cpp), the panel tints it per cell state
+       (TaskCell.qml), and the desktop entry / launcher resolve currentColor
+       to the root `color` fallback above. Uniform 44-unit stroke = the 2px
+       edge weight scaled to icon size (DESIGN.md S4). -->
+  <g fill="none" stroke="currentColor" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="256" cy="256" r="218"/>
+    <path d="M256 160 L340 256 L256 352 L172 256 Z"/>
+    <path d="M256 352 L256 408"/>
+    <path d="M172 256 L140 256"/>
+    <path d="M340 256 L372 256"/>
+  </g>
+</svg>

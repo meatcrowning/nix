@@ -68,6 +68,14 @@ in
   # two documents chosen by the user, not a queue), so several files means
   # several windows — which is what a single-file field code asks the launcher
   # for. It also accepts a DIRECTORY, opening that directory's README.
+  #
+  # App icon: the seal of Buer (a president of the Ars Goetia; the teacher),
+  # redrawn as clean vector SVG in app-icons/. Installed into the hicolor icon
+  # theme so the desktop entry's Icon= AND the titlebar program-icon slot find
+  # it (hyprvtb resolves class -> .desktop -> Icon= -> icon theme; a currentColor
+  # SVG it tints to the title colour) — same pattern as goetia's seal.
+  home.file.".local/share/icons/hicolor/scalable/apps/reader.svg".source = ./app-icons/reader.svg;
+
   home.file.".local/share/applications/reader.desktop".text = ''
     [Desktop Entry]
     Type=Application
@@ -75,7 +83,7 @@ in
     GenericName=Document Reader
     Comment=Browse and read markdown documents and PDFs
     Exec=${reader}/bin/reader %f
-    Icon=text-x-generic
+    Icon=reader
     Terminal=false
     Categories=Office;Viewer;TextEditor;
     Keywords=bespoke;markdown;md;pdf;
