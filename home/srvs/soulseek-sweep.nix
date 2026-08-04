@@ -82,8 +82,9 @@ lib.mkIf (host == "top") {
     Timer = {
       # The feeder normally runs continuously; `systemctl start` on an already-
       # active simple service is a no-op, so this timer only matters after a
-      # clean drain (it re-checks for newly-missing tracks) or a reboot. On boot
-      # the pool refills by itself via OnBootSec below; no hand-start needed.
+      # clean drain (it re-checks for newly-missing tracks) or a reboot. (It is
+      # not enabled while the download pipeline is stopped — see the Install
+      # block below.)
       OnBootSec = "5min";
       # Required alongside OnBootSec: it counts from system boot, but the user
       # manager starts at login; a login later than the offset would otherwise
@@ -97,6 +98,10 @@ lib.mkIf (host == "top") {
       OnUnitInactiveSec = "30min";
       Persistent = true;
     };
-    Install.WantedBy = [ "timers.target" ];
+    # Deliberately no Install.WantedBy since 2026-08-03 (pipeline stopped at
+    # his request): a home-manager switch must not re-enable this timer. The
+    # unit file stays, so the pool feeder can be re-armed by hand later —
+    # `systemctl --user enable --now soulseek-sweep.timer` (or re-add this
+    # block) when the download pipeline is allowed to run automatically again.
   };
 }

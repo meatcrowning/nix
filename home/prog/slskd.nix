@@ -125,10 +125,14 @@
     fi
   '';
 
-  # Run slskd as a systemd user service so the downloader always has a live
-  # loopback API without the user starting it by hand. slskd watches its config
-  # file by default and re-applies options on change; after adding the two
-  # ~/.secrets files, a rebuild regenerates slskd.yml and a
+  # Run slskd as a systemd user service so the downloader has a live loopback
+  # API. Deliberately NOT enabled since 2026-08-03: the download pipeline is
+  # stopped at his request, so nothing auto-starts it. The unit file stays so a
+  # later cleanup phase can start it for one-off downloads with
+  # `systemctl --user start slskd`; to make it automatic again, re-add the
+  # Install block below (or `systemctl --user enable slskd`). slskd watches its
+  # config file by default and re-applies options on change; after adding the
+  # two ~/.secrets files, a rebuild regenerates slskd.yml and a
   # `systemctl --user restart slskd` picks it up cleanly.
   systemd.user.services.slskd = {
     Unit = {
@@ -148,6 +152,7 @@
       Restart = "on-failure";
       RestartSec = 5;
     };
-    Install.WantedBy = [ "default.target" ];
+    # No Install.WantedBy: must not auto-start at login while the pipeline is
+    # stopped. Manual start only (`systemctl --user start slskd`).
   };
 }
