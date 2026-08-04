@@ -27,6 +27,18 @@
   # docs/ at it would silently untrack every file here. The script copies
   # `$SEED/gitignore` only `[ -f ]`, so omitting it leaves docs/ alone.
   #
+  # The size cap is the net that gitignore would be elsewhere. The script
+  # refuses to commit when the staged total exceeds CM_SYNC_MAX_MB — with no
+  # gitignore, that refusal is the ONLY thing standing between a stray large
+  # file and a wedged sync. It wedged anyway on 2026-08-03: a 118 MB hermes
+  # session export landed in the tree, the tick committed it, and every push
+  # after failed on GitHub's 100 MB limit — the timer kept committing locally
+  # ("commit is local and safe") while nothing reached the remote. Cap it at
+  # 25 MB: the largest file docs legitimately carries (DESIGN.md, 218 KB) is
+  # two orders of magnitude below it, and anything over it deserves a human
+  # decision, loudly, rather than a silent wedge. (claude-state uses 250 MB —
+  # too big here, since GitHub's hard limit is what actually breaks the push.)
+  #
   # A gitattributes IS seeded, and it carries exactly one rule. Prose here still
   # merges NORMALLY, not merge=union like the memory store: union is right for a
   # pile of independent one-fact files and wrong for prose, where it silently
@@ -87,6 +99,7 @@
         "CM_SYNC_LOG=%h/.cache/nix-docs-sync.log"
         "CM_SYNC_SEED=%h/.config/scripts/nix-docs-seed"
         "CM_SYNC_LABEL=doc"
+        "CM_SYNC_MAX_MB=25"
       ];
       ExecStartPre = "%h/.config/scripts/nix-docs-setup.sh";
       ExecStart = "%h/.config/scripts/claude-memory-sync.sh";
