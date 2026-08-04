@@ -51,6 +51,9 @@ in
   # Icon= -> icon theme; a currentColor SVG it tints to the title colour) —
   # same pattern as goetia's seal.
   home.file.".local/share/icons/hicolor/scalable/apps/slsk.svg".source = ./app-icons/slsk.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "slsk" ];
 
   # The desktop entry, so slsk is in the runner. It owns no file type — it is a
   # client over a network service, not an open-a-file app (the same reason

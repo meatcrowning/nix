@@ -143,6 +143,36 @@ in
           readonly property string name: "${host}"
       }
     '';
+    # Which icon names are OUR seals — generated from my.appSeals (declared by
+    # each app beside the home.file that installs its svg; see
+    # app-icons/seals.nix for why the panel has to be told). AppIcon.qml paints
+    # those flat in the focus colour; a foreign icon keeps its own drawing.
+    # Generated, like Host.qml, so adding an app cannot leave it stale.
+    "quickshell/AppSeals.qml".text = ''
+      pragma Singleton
+      import QtQuick
+
+      QtObject {
+          readonly property var names: [${
+            lib.concatMapStringsSep ", " (n: ''"${n}"'') (lib.sort (a: b: a < b) config.my.appSeals)
+          }]
+
+          // Accepts either half a caller may hold: the icon NAME, or a resolved
+          // path/URL whose basename still is it (image://icon/player,
+          // …/apps/player.svg).
+          function has(nameOrPath) {
+              if (!nameOrPath)
+                  return false;
+              var s = nameOrPath.toString();
+              var slash = s.lastIndexOf("/");
+              if (slash >= 0)
+                  s = s.substring(slash + 1);
+              if (s.endsWith(".svg"))
+                  s = s.substring(0, s.length - 4);
+              return names.indexOf(s) >= 0;
+          }
+      }
+    '';
   };
 
   home.packages = [ settings ];
@@ -168,6 +198,9 @@ in
   # get one. Installed into the hicolor theme so `Icon=settings` above resolves
   # to it; the runner tints its currentColor strokes to the live theme.
   home.file.".local/share/icons/hicolor/scalable/apps/settings.svg".source = ./app-icons/settings.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "settings" ];
 
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     [ -e "$HOME/.config/quickshell/Theme.qml" ] || install -D -m644 ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml"

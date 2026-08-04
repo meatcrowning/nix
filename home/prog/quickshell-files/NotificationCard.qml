@@ -205,11 +205,20 @@ Rectangle {
                 width: parent.width
                 spacing: 6
 
-                IconImage {
+                // A foreign app's icon keeps its own colours here — a toast is
+                // the one place an icon is identifying a stranger. Our own
+                // seals cannot: they are currentColor sigils, so drawn raw
+                // they came out in the file's baked fallback (#cc4400, red) on
+                // every wallpaper. AppIcon paints those in the header's tint,
+                // the colour the name beside them already rides.
+                AppIcon {
                     id: appIcon
                     visible: card.iconSource !== ""
-                    implicitSize: Theme.fontSize + 4
+                    width: Theme.fontSize + 4
+                    height: Theme.fontSize + 4
                     source: card.iconSource
+                    color: card.tint
+                    tint: false
                     anchors.verticalCenter: parent.verticalCenter
                 }
 

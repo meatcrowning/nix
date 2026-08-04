@@ -223,32 +223,20 @@ PanelWindow {
                         anchors.leftMargin: 6
                         spacing: 8
 
-                        // The icon is the invisible SOURCE a MultiEffect
-                        // recolours to the live foreground, never drawn straight
-                        // — same move as TaskCell (§3.3). The bespoke app seals
-                        // (home/prog/app-icons/*.svg) are `currentColor` sigils
-                        // whose baked fallback is the desktop accent (#cc4400):
-                        // Qt's SVG renderer resolves currentColor to that root
-                        // `color`, so drawn raw every seal reads pure red. The
-                        // colorization tints them — and every breeze app icon —
-                        // to the wal `text`, the same monochrome the runner label
-                        // rides.
-                        Item {
+                        // Never drawn straight: AppIcon paints our own seals
+                        // flat in the accent — the focus colour a hyprvtb
+                        // titlebar gives the same program — and tints every
+                        // foreign app icon to it. Tinting to `text` here used to
+                        // put the seals through MultiEffect's colorization,
+                        // which scales the tint by the icon's own luminance, so
+                        // a seal came out a dull fraction of the accent while
+                        // the taskbar drew the same sigil at full strength.
+                        AppIcon {
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitWidth: 18
-                            implicitHeight: 18
-                            IconImage {
-                                id: resultIcon
-                                anchors.fill: parent
-                                visible: false
-                                source: Quickshell.iconPath(modelData.icon, "application-x-executable")
-                            }
-                            MultiEffect {
-                                anchors.fill: resultIcon
-                                source: resultIcon
-                                colorization: 1.0
-                                colorizationColor: Theme.text
-                            }
+                            width: 18
+                            height: 18
+                            iconName: modelData.icon
+                            color: Theme.accent
                         }
                         PixelText {
                             anchors.verticalCenter: parent.verticalCenter

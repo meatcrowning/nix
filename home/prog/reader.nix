@@ -75,6 +75,9 @@ in
   # it (hyprvtb resolves class -> .desktop -> Icon= -> icon theme; a currentColor
   # SVG it tints to the title colour) — same pattern as goetia's seal.
   home.file.".local/share/icons/hicolor/scalable/apps/reader.svg".source = ./app-icons/reader.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "reader" ];
 
   home.file.".local/share/applications/reader.desktop".text = ''
     [Desktop Entry]

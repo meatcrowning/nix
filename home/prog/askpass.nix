@@ -77,6 +77,9 @@ in
   # .desktop -> Icon= -> icon theme; a currentColor SVG it tints to the title
   # colour) — same pattern as goetia's seal.
   home.file.".local/share/icons/hicolor/scalable/apps/vista-askpass.svg".source = ./app-icons/askpass.svg;
+  # …and declare it a SEAL, so the panel paints its currentColor strokes in
+  # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
+  my.appSeals = [ "vista-askpass" ];
 
   # NoDisplay desktop entry: the dialog is not a launcher app, but the titlebar
   # resolves the program icon through the freedesktop chain (class ->
