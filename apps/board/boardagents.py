@@ -893,6 +893,12 @@ def _stash_agents():
                     "title": rec.get("title") or rec.get("key") or "a decision",
                     "where": rec.get("where") or "", "pid": pid or 0,
                     "session": rec.get("session") or "", "state": state,
+                    # The tier board-watch stamped on the stash (`boardmove.start
+                    # (model=,effort=)`), raw here and turned into the readable
+                    # label in `agents()` — a decision card drew no tier because
+                    # this pair was never carried across.
+                    "model": rec.get("model") or "",
+                    "effort": rec.get("effort") or "",
                     # ...and WHETHER IT FINISHED, on the same fact and the same
                     # terms as a registration's (above), so `_drawable()` has
                     # one rule to apply and not two. Computed only for a stash
@@ -1044,6 +1050,11 @@ def agents(procs=None):
         if not tier and not orch:
             m, e = taken_tier.get(clean_id(a["id"]), ("", ""))
             tier = bw.tier_label(m, e)
+        # A DECISION whose stash predates the tier stamp still shows one, off the
+        # same decision resolver its spawn used — but not a hand-moved item
+        # (`unowned`), which is nobody running a model and honestly has none.
+        if not tier and a.get("kind") == "decision" and a.get("state") != "unowned":
+            tier = bw.tier_label(*bw.role_tier("decision"))
         a["model"] = tier
         # The subject the sentence lines lead with. Only when BOTH a name and a
         # tier are known — Solomon, an unnamed session, or a pre-tiering record

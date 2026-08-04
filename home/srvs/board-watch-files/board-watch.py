@@ -1500,9 +1500,16 @@ def tick():
     # the item back on its own.
     moved = False
     session = str(uuid.uuid4())
+    # THE TIER THIS DECISION SPAWNS ON, resolved ONCE here and both stamped on
+    # the card and handed to `spawn` — the same shape the orchestrator branch
+    # above uses, so the model the card names can never disagree with the model
+    # the run launches with. Left unstamped, the decision card drew no tier at
+    # all (`spawn` defaulted model=None -> `role_flags` still launched on the
+    # decision default, but the stash carried nothing for `AgentRow` to read).
+    dflag, deffort = bw.role_tier("decision")
     try:
         rec = bm.start(item["key"], where="board-watch", pid=os.getpid(),
-                       path=BOARD, session=session)
+                       path=BOARD, session=session, model=dflag, effort=deffort)
         moved = True
         log("took decision %s off NEEDS YOU" % (item["num"] or "?"))
     except (bm.BoardError, OSError) as e:
@@ -1518,7 +1525,7 @@ def tick():
     # later. Two agents, one job, 2026-07-30. `boardmove.adopt` has the timings.
     rc, how, secs = spawn(prompt, item["key"],
                           "board: decision %s" % (item["num"] or item["key"]),
-                          session=session,
+                          session=session, model=dflag, effort=deffort,
                           on_start=(lambda pid: bm.adopt(item["key"], pid))
                           if moved else None,
                           detach=True)
