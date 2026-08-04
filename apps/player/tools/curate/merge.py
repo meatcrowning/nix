@@ -138,6 +138,12 @@ def process_group(g, by_dir, apply_):
     for d, recs in dir_recs[1:]:
         src_dir = C.ROOT / d["path"]
         for r in recs:
+            # the scan can be older than a previous partial run: a file
+            # already moved (by us, or by an earlier --apply that died
+            # mid-group) is skipped, not crashed on.
+            if apply_ and not Path(r["path"]).exists():
+                notes.append(("already gone (stale scan row)", r["rel"], ""))
+                continue
             tk = title_key(r)
             existing = primary_by_title.get(tk)
             if not existing:
