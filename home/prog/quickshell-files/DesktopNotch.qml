@@ -91,6 +91,11 @@ Item {
         property: "notchPx"
         value: notch.visible ? notch.width - notch.overlap : 0
     }
+    Binding {
+        target: ViewMode
+        property: "notchH"
+        value: notch.visible ? notch.height : 0
+    }
 
     // The slab. Bar background, bar accent — the same two colours the panel
     // body is made of, so it reads as the panel and not as a card sitting on

@@ -334,6 +334,9 @@ Singleton {
     // so a tiled or maximized window stops at the notch instead of covering it.
     // A FLOATING window still can, exactly as it can cover the bar itself.
     property int notchPx: 0
+    // ...and its height, for the seam patch (NotchSeam.qml), which has to cover
+    // exactly the part of a window's border the notch is beside.
+    property int notchH: 0
     function applyReserve() {
         const edge = SettingsStore.d.barEdge === "left" ? "left" : "right";
         const px = dock ? barWidth + notchPx : 0;

@@ -405,6 +405,17 @@ together, and all three are in `shell.qml`:
   take no clicks,
 - the inner-edge accent strip, drawn as TWO segments with the gap at the notch.
 
+`NotchSeam.qml` is its companion and **the only surface this panel puts above
+windows** (`WlrLayer.Top`, empty input mask): a bar-background strip that hides
+the window border + the notch's own border where a flush window meets it, so the
+two read as connected. It is visible only while a frame is flush AND spans the
+notch, from `WinState.frames` — window FRAMES (content + `2 * bar_width` of
+hyprvtb titlebar + border). Two traps it was written around: `height` on a
+`PanelWindow` whose `visible` depends on that same computation is a circular
+dependency that silently reads the default 100px (use the ShellScreen's), and
+the reserve is a border less than the panel's face, so the frame lands on
+`face + windowBorderWidth`, not on the face.
+
 Membership is the `Keywords=bespoke;` tag on the desktop entry, the same test
 `Launcher.qml`'s `rank` sorts by — never a hardcoded list. Toggle:
 `desktopIcons` (Settings → appearance → shortcut notch). Launch goes through
