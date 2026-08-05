@@ -110,13 +110,68 @@ Aspect is **two integers you type** (any ratio, not a fixed list) plus MP;
 `recomputeDims()` is the one place width and height are computed, so the header
 badge, the `= WxH` readout and the submitted job are the same numbers by
 construction. The width/height boxes are gone — they were a second, contradicting
-source of truth. `GalleryView.reuse()` therefore restores an image's *ratio and
-MP* (reduced by gcd), not raw pixels, which would have been overwritten by the
-next recompute.
+source of truth. Injecting an image's parameters therefore restores its *ratio
+and MP* (reduced by gcd), not raw pixels, which the next recompute would have
+overwritten.
+
+## Escape is for letting go of a text box
+
+It used to cancel every queued job — a destructive action on the key people
+press to back out of one — while there was no way to leave a text box at all.
+Now `Escape` moves focus to `Main.qml`'s `focusSink` (focus has to LAND
+somewhere; clearing it outright leaves the window with no focus item and the
+next keystroke going nowhere), handled on the editors themselves as well as at
+the window, because a focused text item is where a window-level `Shortcut` is
+least reliable. Cancelling is the titlebar's `x`: a click, not a reflex.
+
+## An output is clicked to INJECT, and you choose what
+
+Left- or right-clicking a gallery image opens the shared `CtxMenu` with **inject
+all / inject prompt / inject params**, plus `open in viewer`. A PNG carries the
+whole job that made it, and which part you want is a decision — it used to be an
+unlabelled right-click that took everything. The three actions live on the
+window (`injectPrompt` / `injectParams` / `injectAll`), so the menu has no logic
+of its own; `injectParams` restores size as **aspect + MP**, never raw pixels
+(see above).
+
+## The window comes back the way it was left
+
+Persisted through `Prefs` (`~/.local/state/painter/prefs.json`): window size,
+which view, the split ratio, the prompts and every number in `gen`, the selected
+model, and each panel's collapsed state (`Panel.persistKey`). Two traps:
+
+- **Writes are debounced** (700ms) — `gen` changes on every keystroke.
+- **`applyDefaults()` is guarded by `defaultsFor`.** The startup selection fires
+  `modelChanged`, and without that guard a family's defaults would overwrite the
+  session that had just been restored, every launch. It holds the name of the
+  model whose defaults `gen` reflects; a restore sets it to the remembered one.
+
+The divider between the panes is dragged (`splitRatio`, saved on release,
+double-click to reset), clamped so neither side starves — the same shape as
+filer's splitter.
+
+## Starting fast is a property of the launch path
+
+~0.45s from click to window on book (0.23s launcher + 0.22s app), against a
+window that used to wait for ComfyUI to finish loading. Four things keep it
+there, and each was worth measuring:
+
+- **`top` before `top.local`.** Resolving the mDNS name takes ~5s on book
+  (measured) against 0.04s for `top`. It was the single largest cost in the
+  whole path — and the same ordering bug was in player's `air-launch.sh`.
+- **The launcher waits for the PORT, not the backend.** ComfyUI can take minutes
+  cold; the window opens as soon as the forward binds and says what it is
+  waiting for.
+- **Nothing blocks the GUI thread.** `systemctl` is an ssh round trip on book,
+  so `startBackend`/`stopBackend`/`is-active` all go through `QProcess`
+  (`_run_async`), never `subprocess.run`.
+- **The model list does not need the backend.** The registry scan runs on the
+  first tick and retries while it comes up empty, because the sshfs mount may
+  still be landing.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-68 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+100 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -127,8 +182,11 @@ can never start ComfyUI on top or open a window on his screen:
 It covers click-anywhere text boxes, the collapsible model panel, the pane split
 at seven widths, aspect+MP → pixels → header → submitted job, the dropdown
 overlay (opens, stays inside the window, picks, and the binding SURVIVES the
-pick), the live-binding regressions above, and a wiring audit that submits a job
-and compares every field. **A QML warning fails the run** — a binding loop shows
+pick), the live-binding regressions above, Escape (releases the box, cancels
+NOTHING), the inject menu and its three subsets, the draggable divider and its
+clamps, save-and-restore through a SECOND window on the same prefs file, that
+`startBackend` returns immediately, and a wiring audit that submits a job and
+compares every field. **A QML warning fails the run** — a binding loop shows
 as nothing at all on screen.
 
 ## The prompt boxes are spellchecked

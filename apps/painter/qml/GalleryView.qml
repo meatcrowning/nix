@@ -6,6 +6,32 @@ import "../../qmlcommon"
 Item {
     id: view
 
+    //: The menu cannot live in here — `CtxMenu` clamps itself into its own root,
+    //: and this pane can be 220px wide — so the items travel up to Main.qml,
+    //: which owns the one menu, in SCENE coordinates. Same arrangement as
+    //: PromptBox's spelling menu.
+    signal menuRequested(real sx, real sy, var items)
+
+    // An output's PNG carries the whole job that made it, so the useful question
+    // is WHICH PART to take: its words, its numbers, or both. That is a choice,
+    // and a choice is a menu — it used to be an unlabelled right-click that took
+    // everything, with no way to ask for less.
+    function menuFor(index, path) {
+        var p = Gallery.paramsAt(index)
+        if (!p) {
+            return [{ label: "no parameters stored in this file", enabled: false },
+                    { separator: true },
+                    { label: "open in viewer", trigger: () => App.openExternally(path) }]
+        }
+        return [
+            { label: "inject all", trigger: () => { root.injectAll(p); root.view = 0 } },
+            { label: "inject prompt", trigger: () => { root.injectPrompt(p); root.view = 0 } },
+            { label: "inject params", trigger: () => { root.injectParams(p); root.view = 0 } },
+            { separator: true },
+            { label: "open in viewer", trigger: () => App.openExternally(path) }
+        ]
+    }
+
     Row {
         id: head
         spacing: 10
@@ -84,13 +110,11 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // Either button opens the same menu: §7.1 says everything is
+                    // right-clickable, and left-click is where he reaches first.
                     onClicked: function (m) {
-                        if (m.button === Qt.RightButton) {
-                            var p = Gallery.paramsAt(index)
-                            if (p) view.reuse(p)
-                        } else {
-                            App.openExternally(path)
-                        }
+                        var pt = mapToItem(null, m.x, m.y)
+                        view.menuRequested(pt.x, pt.y, view.menuFor(index, path))
                     }
                 }
             }
@@ -114,49 +138,9 @@ Item {
         anchors.bottomMargin: 6
         width: parent.width
         elide: Text.ElideRight
-        text: view.width > 340 ? "click opens in viewer / right-click reuses parameters"
-                               : "click opens / right-click reuses"
+        text: view.width > 340 ? "click an image to inject its prompt, params or both"
+                               : "click an image to inject"
         color: Theme.dim
     }
 
-    // Pull an old image's settings back into the panel.
-    function reuse(p) {
-        // A CLONE, not the live object: `gen` is a `property var`, and assigning
-        // back the same object emits no change signal, so a reuse would land in
-        // the data and never appear on any control (see Main.qml's `set`).
-        var g = root.clone(root.gen)
-        if (p.positive !== undefined) g.positive = p.positive
-        if (p.negative !== undefined) g.negative = p.negative
-        if (p.steps !== undefined) g.steps = p.steps
-        if (p.cfg !== undefined) g.cfg = p.cfg
-        if (p.denoise !== undefined) g.denoise = p.denoise
-        if (p.sampler_name !== undefined) g.sampler_name = p.sampler_name
-        if (p.scheduler !== undefined) g.scheduler = p.scheduler
-        // Size comes back as the CONTROLS that produce it, not as raw pixels:
-        // width/height are derived now, so setting them here would be undone by
-        // the next recompute and the panel would quietly disagree with the
-        // image it was reused from. Reduce the ratio (gcd) and back out the
-        // megapixels, which reproduces the original size exactly whenever it
-        // was on the family's step to begin with.
-        if (p.width !== undefined && p.height !== undefined
-                && p.width > 0 && p.height > 0) {
-            var a = p.width, b = p.height
-            while (b) { var t = a % b; a = b; b = t }
-            g.aspectW = Math.round(p.width / a)
-            g.aspectH = Math.round(p.height / a)
-            g.megapixels = Math.round(p.width * p.height / 100000) / 10
-        }
-        if (p.seed !== undefined) { g.seed = p.seed; g.randomSeed = false }
-        if (p.toggles) {
-            g.negpip = p.toggles.negpip === true
-            g.modelSampling = p.toggles.model_sampling === true
-        }
-        if (p.model_sampling) {
-            g.ms = root.clone(g.ms)
-            for (var k in p.model_sampling) g.ms[k] = p.model_sampling[k]
-        }
-        root.gen = g
-        root.recomputeDims()
-        root.view = 0
-    }
 }

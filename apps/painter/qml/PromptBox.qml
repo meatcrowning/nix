@@ -90,6 +90,13 @@ Rectangle {
                     e.accepted = false
                 }
             }
+            // Escape LETS GO of the box — the one thing it is for here. Handled
+            // on the editor as well as at the window, because a focused text
+            // item is exactly where a window-level Shortcut is least reliable.
+            Keys.onEscapePressed: function (e) {
+                root.releaseFocus()
+                e.accepted = true
+            }
 
             // §7.1: everything selectable is right-clickable. Left-drag
             // selection stays Qt's (`selectByMouse`); this takes the right

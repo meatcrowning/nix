@@ -135,7 +135,60 @@ def fake_models(root):
     return root
 
 
+def fake_png(path, params):
+    """A real 1x1 PNG carrying a painter parameter chunk, so the gallery's
+    `paramsAt` reads it exactly as it reads a generated image."""
+    import zlib
+    import pngmeta
+
+    def chunk(t, body):
+        return (struct.pack(">I", len(body)) + t + body
+                + struct.pack(">I", zlib.crc32(t + body) & 0xFFFFFFFF))
+
+    raw = zlib.compress(b"\x00\x00\x00\x00")
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0))
+           + chunk(b"IDAT", raw) + chunk(b"IEND", b""))
+    png = pngmeta.upsert_text(png, pngmeta.describe(params))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(png)
+    return path
+
+
 # ------------------------------------------------------------------ the window
+def build_window(engine_only=False):
+    """A second window on the same prefs, for the restore test."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtQml import QQmlApplicationEngine
+    import main as P
+
+    ctl = P.Painter()
+    ctl._unit_poll.stop()
+    ctl._probe.stop()
+    engine = QQmlApplicationEngine()
+    ctx = engine.rootContext()
+    keep = (P.Palette(P.PANEL_THEME), _DESKSTYLE(parent=engine), P.Prefs(),
+            ctl, _STUBBAR(), P.SpellCheck())
+    for name, obj in (("WalPalette", keep[0]), ("DeskStyle", keep[1]),
+                      ("Prefs", keep[2]), ("App", ctl), ("Models", ctl.models),
+                      ("Loras", ctl.loras), ("LoraChoices", ctl.choices),
+                      ("Gallery", ctl.gallery), ("Titlebar", keep[4]),
+                      ("Spell", keep[5]), ("Theme", _THEME[0])):
+        ctx.setContextProperty(name, obj)
+    engine.warnings.connect(lambda ws: WARNINGS.extend(w.toString() for w in ws))
+    engine.load(QUrl.fromLocalFile(os.path.join(PAINTER, "qml/Main.qml")))
+    win = engine.rootObjects()[0]
+    ctl.rescan()
+    spin(400)
+    return engine, win, ctl, keep
+
+
+_DESKSTYLE = None
+_STUBBAR = None
+_THEME = [None]
+
+
 def build(tmp):
     from PySide6.QtCore import QObject, QUrl, Signal, Slot
     from PySide6.QtGui import QGuiApplication
@@ -197,6 +250,10 @@ def build(tmp):
         raise SystemExit("Theme.qml failed:\n" + comp.errorString())
     theme.setParent(app)
     ctx.setContextProperty("Theme", theme)
+
+    global _DESKSTYLE, _STUBBAR
+    _DESKSTYLE, _STUBBAR = DeskStyle, StubTitlebar
+    _THEME[0] = theme
 
     engine.load(QUrl.fromLocalFile(os.path.join(PAINTER, "qml/Main.qml")))
     roots = engine.rootObjects()
@@ -457,6 +514,216 @@ def test_dropdown(win, ctl):
         print("SKIP  picking a row (backend offline: no sampler list)")
 
 
+def test_escape(win, ctl):
+    """Escape lets go of a text box. It does not stop anything."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    content = win.contentItem()
+    box = find_all(content, "PromptBox")[0]
+    edit = find(box, "QQuickTextEdit")
+    click(win, box, dx=box.width() / 2, dy=box.height() - 6)
+    check("a prompt box takes focus", edit.property("activeFocus") is True)
+
+    cancelled = []
+    real_cancel = ctl.cancel
+    QTest.keyClick(win, Qt.Key_Escape)
+    spin(150)
+    check("Escape releases the text box", edit.property("activeFocus") is False)
+
+    # ...and nothing was cancelled: the queue is untouched. `_jobs` is the
+    # counter cancel() zeroes, so a non-zero one surviving Escape is the proof.
+    ctl._jobs = 3
+    ctl._busy = True
+    sp = find(content, "Spin")
+    inp = find(sp, "QQuickTextInput")
+    click(win, sp, dx=2, dy=sp.height() / 2)
+    check("a numeric box takes focus", inp.property("activeFocus") is True)
+    QTest.keyClick(win, Qt.Key_Escape)
+    spin(150)
+    check("Escape releases the numeric box", inp.property("activeFocus") is False)
+    check("...and Escape cancelled nothing", ctl._jobs == 3, ctl._jobs)
+    ctl._jobs = 0
+    ctl._busy = False
+
+
+def test_inject(win, ctl, tmp):
+    """Left-click an output -> inject all / prompt / params."""
+    params = {"positive": "injected positive", "negative": "injected negative",
+              "steps": 44, "cfg": 3.5, "denoise": 0.5, "sampler_name": "heun",
+              "scheduler": "beta", "seed": 99, "width": 1216, "height": 832,
+              "batch_size": 2,
+              "toggles": {"negpip": True, "model_sampling": False}}
+    path = fake_png(os.path.join(tmp, "out", "shot.png"), params)
+    ctl.gallery.add(path)
+    spin(150)
+    check("the gallery has the image", ctl.gallery.rowCount() == 1, ctl.gallery.rowCount())
+
+    gal = find(win.contentItem(), "GalleryView")
+    items = gal.metaObject().invokeMethod(gal, "menuFor", Q_ARG("QVariant", 0),
+                                          Q_ARG("QVariant", path))
+    # invokeMethod cannot return a JS array to Python, so drive the menu the way
+    # a click does and read what the shared CtxMenu was handed.
+    menu = find(win.contentItem(), "CtxMenu")
+    grid = find(gal, "KineticGridView")
+    cell = None
+    for c in walk(grid):
+        if c.metaObject().className().startswith("QQuickItem") and c.width() == grid.property("cellWidth"):
+            cell = c
+            break
+    if cell is not None:
+        click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2)
+        spin(150)
+        labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
+        check("left-clicking an output opens a menu", menu.isVisible(), menu.isVisible())
+        check("...offering inject all / prompt / params",
+              labels[:3] == ["inject all", "inject prompt", "inject params"], labels)
+        menu.metaObject().invokeMethod(menu, "close")
+        spin(60)
+
+    # The three actions, called the way the menu calls them.
+    base = prop(win, "gen")
+    base["positive"] = "before"; base["steps"] = 7; base["aspectW"] = 1; base["aspectH"] = 1
+    win.setProperty("gen", base)
+    spin(60)
+
+    win.metaObject().invokeMethod(win, "injectPrompt", Q_ARG("QVariant", params))
+    spin(120)
+    g = prop(win, "gen")
+    check("inject prompt takes the words", g["positive"] == "injected positive"
+          and g["negative"] == "injected negative", (g["positive"], g["negative"]))
+    check("...and leaves the numbers alone", g["steps"] == 7, g["steps"])
+
+    win.metaObject().invokeMethod(win, "injectParams", Q_ARG("QVariant", params))
+    spin(120)
+    g = prop(win, "gen")
+    check("inject params takes the numbers",
+          (g["steps"], g["cfg"], g["sampler_name"], g["seed"], g["randomSeed"])
+          == (44, 3.5, "heun", 99, False),
+          (g["steps"], g["cfg"], g["sampler_name"], g["seed"], g["randomSeed"]))
+    check("...including the size, as aspect + MP",
+          (g["aspectW"], g["aspectH"]) == (19, 13) and (g["width"], g["height"]) == (1216, 832),
+          (g["aspectW"], g["aspectH"], g["width"], g["height"]))
+
+    base = prop(win, "gen"); base["positive"] = "before"; base["steps"] = 7
+    win.setProperty("gen", base); spin(60)
+    win.metaObject().invokeMethod(win, "injectAll", Q_ARG("QVariant", params))
+    spin(120)
+    g = prop(win, "gen")
+    check("inject all takes both", g["positive"] == "injected positive" and g["steps"] == 44,
+          (g["positive"], g["steps"]))
+
+
+def test_split_and_state(win, ctl, keep):
+    """A draggable divider, and a window that comes back as it was left."""
+    prefs = keep[2]
+    content = win.contentItem()
+    win.setWidth(1200)
+    spin(120)
+    left = find(content, "KineticFlickable").parentItem()
+    before = win.property("paneLeadW")
+
+    win.setProperty("splitRatio", 0.65)
+    spin(120)
+    after = win.property("paneLeadW")
+    check("the divider moves the panes", after > before + 100, (before, after))
+    check("...and the right pane gives up exactly what the left took",
+          abs((win.width() - after - win.property("splitterW"))
+              - find(content, "GalleryView").parentItem().width()) < 1.5)
+
+    # Clamps: neither side can be starved.
+    win.setProperty("splitRatio", 0.99)
+    spin(120)
+    check("the handle cannot starve the gallery",
+          win.width() - win.property("paneLeadW") >= win.property("minRight"),
+          win.width() - win.property("paneLeadW"))
+    win.setProperty("splitRatio", 0.01)
+    spin(120)
+    check("...nor the controls", win.property("paneLeadW") >= win.property("minLeft"),
+          win.property("paneLeadW"))
+
+    # State: everything the window is asked to remember.
+    win.setProperty("splitRatio", 0.55)
+    win.setProperty("view", 1)
+    win.setWidth(1100); win.setHeight(800)
+    g = prop(win, "gen"); g["positive"] = "remember me"; g["steps"] = 23
+    win.setProperty("gen", g)
+    panel = find(content, "ParamsPanel")
+    panel.setProperty("collapsed", True)
+    spin(200)
+    win.metaObject().invokeMethod(win, "saveState")
+    spin(200)
+
+    check("the split is persisted", abs(prefs.get("splitRatio") - 0.55) < 1e-6,
+          prefs.get("splitRatio"))
+    check("the view is persisted", prefs.get("view") == 1, prefs.get("view"))
+    check("the window size is persisted",
+          (prefs.get("win.width"), prefs.get("win.height")) == (1100, 800),
+          (prefs.get("win.width"), prefs.get("win.height")))
+    saved = json.loads(prefs.get("gen") or "{}")
+    check("the prompt and the numbers are persisted",
+          saved.get("positive") == "remember me" and saved.get("steps") == 23,
+          (saved.get("positive"), saved.get("steps")))
+    check("a collapsed panel is persisted", prefs.get("panel.sampling") is True,
+          prefs.get("panel.sampling"))
+    check("the selected model is persisted", prefs.get("model") == ctl.property("selectedName"),
+          prefs.get("model"))
+    # NOT un-collapsed here: the restore test reads the prefs file next, and
+    # setting it back would (correctly) persist the newer value first.
+    win.setProperty("view", 0)
+    win.setWidth(1280)
+    spin(120)
+
+
+def test_restore(tmp):
+    """A SECOND window, same prefs file: it comes back the way it was left."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtQml import QQmlApplicationEngine
+    import main as P
+
+    # Same context objects, a fresh engine — as close to a relaunch as one
+    # process can get.
+    eng, win2, ctl2, keep2 = build_window()
+    check("restored: window size", (win2.width(), win2.height()) == (1100, 800),
+          (win2.width(), win2.height()))
+    check("restored: view", win2.property("view") == 1, win2.property("view"))
+    check("restored: split ratio", abs(win2.property("splitRatio") - 0.55) < 1e-6,
+          win2.property("splitRatio"))
+    g = prop(win2, "gen")
+    check("restored: the prompt", g["positive"] == "remember me", g["positive"])
+    check("restored: the numbers survive the model's defaults landing",
+          g["steps"] == 23, g["steps"])
+    panel = find(win2.contentItem(), "ParamsPanel")
+    check("restored: the collapsed panel", panel.property("collapsed") is True)
+    check("restored: the selected model",
+          ctl2.property("selectedName") == "alpha-model.safetensors",
+          ctl2.property("selectedName"))
+    win2.setProperty("restored", False)     # this window must not re-save
+    win2.close()
+    return eng, win2, ctl2, keep2
+
+
+def test_startup(ctl):
+    """Nothing on the launch path may block the GUI thread."""
+    import main as P
+    slow = P.unit_cmd
+    P.unit_cmd = lambda *v: ["sleep", "5"]
+    t0 = time.time()
+    ctl.startBackend()
+    dt = time.time() - t0
+    P.unit_cmd = slow
+    check("startBackend returns immediately (does not wait on systemctl/ssh)",
+          dt < 0.25, "%.2fs" % dt)
+    for proc in list(ctl._procs):
+        ctl._procs.remove(proc)
+        proc.kill()
+        proc.waitForFinished(500)
+    t0 = time.time()
+    ctl._refresh_unit()
+    dt = time.time() - t0
+    check("the unit poll returns immediately too", dt < 0.25, "%.2fs" % dt)
+
+
 def test_wiring(win, ctl):
     """Every control in the left column reaches the submitted job."""
     sent = {}
@@ -532,6 +799,11 @@ def main():
     print("== live bindings ==");     test_live_bindings(win, ctl)
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
+    print("== escape ==");            test_escape(win, ctl)
+    print("== inject ==");            test_inject(win, ctl, tmp)
+    print("== split + state ==");     test_split_and_state(win, ctl, keep)
+    print("== restore ==");           keep2 = test_restore(tmp)
+    print("== startup ==");           test_startup(ctl)
     print("== wiring ==");            test_wiring(win, ctl)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]

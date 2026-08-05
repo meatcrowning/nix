@@ -30,6 +30,19 @@ Window {
     readonly property int splitFloor: 560
     readonly property bool split: root.width >= root.splitFloor
 
+    // ...and WHERE the divider sits is yours, dragged and remembered. The
+    // clamps are the same two minimums as before, so the handle cannot starve
+    // either side: the controls stop reading below ~300px and the gallery below
+    // ~200px. Same shape as filer's splitter.
+    readonly property real splitDefault: 0.42
+    property real splitRatio: splitDefault
+    readonly property int splitterW: 4
+    readonly property int minLeft: 300
+    readonly property int minRight: 200
+    readonly property int paneLeadW: Math.max(minLeft,
+        Math.min(root.width - splitterW - minRight,
+                 Math.round((root.width - splitterW) * splitRatio)))
+
     // Chrome greys to the SAME tone the hyprvtb titlebar fades to when the
     // window loses focus, so painter reads as inactive in lock-step with its
     // own titlebar instead of staying brighter than the bar beside it — the
@@ -102,9 +115,16 @@ Window {
         return [w, h]
     }
 
+    // Which model's defaults `gen` currently reflects. A restored session sets
+    // it to the model that was selected when it was saved, so the selection that
+    // happens at startup does not immediately overwrite everything remembered.
+    property string defaultsFor: ""
+
     function applyDefaults() {
+        if (App.selectedName === root.defaultsFor) return
         var d = App.modelDefaults()
         if (!d || !d.steps) return
+        root.defaultsFor = App.selectedName
         var g = clone(gen)
         g.steps = d.steps; g.cfg = d.cfg; g.denoise = d.denoise !== undefined ? d.denoise : 1.0
         g.sampler_name = d.sampler_name; g.scheduler = d.scheduler
@@ -157,71 +177,99 @@ Window {
 
     // ---------------------------------------------------------------- panes
 
-    Row {
-        anchors.fill: parent
-        spacing: 0
+    // Explicit rects rather than a Row, because the divider between them is
+    // DRAGGABLE and the two panes are sized from one ratio — the same shape as
+    // filer's splitter (apps/filer/qml/Main.qml), including the 4px bar with a
+    // ±3px grab margin and the accent-on-hover.
+    Rectangle {
+        id: left
+        x: 0
+        y: 0
+        width: root.split ? root.paneLeadW : root.width
+        height: parent.height
+        color: Theme.bg
+        visible: root.split || root.view === 0
 
-        // left: everything you set
-        Rectangle {
-            id: left
-            // Never wider than half the split: the controls are legible from
-            // ~300px, and beyond that every extra pixel is worth more to the
-            // images than to a column of 20px boxes.
-            width: root.split ? Math.max(300, Math.min(520, Math.min(root.width * 0.42,
-                                                                     root.width - 220)))
-                              : root.width
-            height: parent.height
-            color: Theme.bg
-            visible: root.split || root.view === 0
+        KineticFlickable {
+            id: leftFlick
+            anchors.fill: parent
+            anchors.margins: 10
+            contentHeight: leftCol.implicitHeight
+            clip: true
+            ScrollBar.vertical: VScroll { id: vscroll }
 
-            KineticFlickable {
-                id: leftFlick
-                anchors.fill: parent
-                anchors.margins: 10
-                contentHeight: leftCol.implicitHeight
-                clip: true
-                ScrollBar.vertical: VScroll { id: vscroll }
+            Column {
+                id: leftCol
+                // The scrollbar's own width, never a literal — it is a
+                // desktop-wide setting (docs/DESIGN.md 9.2), 11-16px.
+                width: leftFlick.width - vscroll.barW
+                spacing: 10
 
-                Column {
-                    id: leftCol
-                    // The scrollbar's own width, never a literal — it is a
-                    // desktop-wide setting (docs/DESIGN.md 9.2), 11-16px.
-                    width: leftFlick.width - vscroll.barW
-                    spacing: 10
-
-                    ModelPicker { width: parent.width }
-                    PromptEditor {
-                        width: parent.width
-                        onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
-                    }
-                    LoraStack { width: parent.width }
-                    ParamsPanel { width: parent.width }
-                    ResolutionPanel { width: parent.width }
-                    TogglePanel { width: parent.width }
-                    Item { width: 1; height: 6 }
+                ModelPicker { width: parent.width; persistKey: "panel.model" }
+                PromptEditor {
+                    width: parent.width
+                    persistKey: "panel.prompt"
+                    onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
                 }
+                LoraStack { width: parent.width; persistKey: "panel.lora" }
+                ParamsPanel { width: parent.width; persistKey: "panel.sampling" }
+                ResolutionPanel { width: parent.width; persistKey: "panel.resolution" }
+                TogglePanel { width: parent.width; persistKey: "panel.patches" }
+                Item { width: 1; height: 6 }
             }
         }
+    }
 
-        Rectangle {
-            width: 1
-            height: parent.height
-            color: Theme.border
-            visible: left.visible && right.visible
-        }
+    Rectangle {
+        id: splitBar
+        visible: root.split
+        z: 10
+        x: root.paneLeadW
+        y: 0
+        width: root.splitterW
+        height: parent.height
+        color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
-        // right: what came out
-        Item {
-            id: right
-            width: root.split ? parent.width - left.width - 1 : parent.width
-            height: parent.height
-            visible: root.split || root.view === 1
-            // Margins shrink with the pane: 10px either side of a 220px column
-            // is 9% of it spent on nothing (docs/DESIGN.md §5.2).
-            GalleryView {
-                anchors.fill: parent
-                anchors.margins: right.width < 320 ? 4 : 10
+        MouseArea {
+            id: splitDrag
+            anchors.fill: parent
+            // a 4px divider is a 10px grab target, across the divider
+            anchors.leftMargin: -3
+            anchors.rightMargin: -3
+            hoverEnabled: true
+            cursorShape: Qt.SplitHCursor
+            preventStealing: true
+            onPositionChanged: function (m) {
+                if (!pressed) return
+                var p = mapToItem(root.contentItem, m.x, m.y)
+                root.splitRatio = Math.max(0, Math.min(1, p.x / Math.max(1, root.width)))
             }
+            // Written on release, not on every pixel of the drag: a ratio is one
+            // decision, not sixty file writes.
+            onReleased: Prefs.set("splitRatio", root.splitRatio)
+            // Double-click restores the default share, since a handle dragged
+            // to an edge is otherwise hard to get back.
+            onDoubleClicked: {
+                root.splitRatio = root.splitDefault
+                Prefs.set("splitRatio", root.splitRatio)
+            }
+        }
+    }
+
+    // right: what came out
+    Item {
+        id: right
+        x: root.split ? root.paneLeadW + root.splitterW : 0
+        y: 0
+        width: root.split ? Math.max(1, root.width - x) : root.width
+        height: parent.height
+        visible: root.split || root.view === 1
+        // Margins shrink with the pane: 10px either side of a 220px column is
+        // 9% of it spent on nothing (docs/DESIGN.md §5.2).
+        GalleryView {
+            anchors.fill: parent
+            anchors.margins: right.width < 320 ? 4 : 10
+            onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
         }
     }
 
@@ -319,9 +367,15 @@ Window {
         function onStatusChanged() { root.pushButtons() }
     }
 
-    onViewChanged: pushButtons()
     onShowSettingsChanged: pushButtons()
-    Component.onCompleted: { pushButtons(); applyDefaults() }
+    Component.onCompleted: {
+        restoreState()
+        pushButtons()
+        applyDefaults()
+        // The model list arrives after this (the registry scan is one tick
+        // later), so the remembered selection is restored when it lands.
+        App.selectModelByName(Prefs.get("model") || "")
+    }
 
     // The one context menu, over everything: a prompt box is 64-130px tall and
     // `CtxMenu` clamps into its own root, so a menu parented inside one would be
@@ -342,8 +396,119 @@ Window {
         anchors.fill: parent
     }
 
-    // Keyboard: Ctrl+Enter generates, Escape cancels.
+    // ESCAPE LETS GO OF A TEXT BOX. IT DOES NOT STOP ANYTHING. It used to cancel
+    // every queued job, which is a destructive action on the key people press to
+    // back out of one — and there was no way to leave a text box at all, so the
+    // one thing Escape should do was the one thing it could not. Cancelling is
+    // the titlebar's `x`, deliberately: a click, not a reflex.
+    //
+    // The sink is a plain focusable Item. Focus has to LAND somewhere; clearing
+    // it without a destination leaves the window with no focus item and the next
+    // keystroke going nowhere.
+    Item { id: focusSink; focus: false; activeFocusOnTab: false }
+    function releaseFocus() { focusSink.forceActiveFocus() }
+
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; onActivated: root.submit() }
-    Shortcut { sequence: "Escape"; onActivated: App.cancel() }
+    Shortcut { sequence: "Escape"; onActivated: root.releaseFocus() }
     Shortcut { sequence: "Ctrl+R"; onActivated: App.rescan() }
+
+    // ------------------------------------------------------- injecting params
+
+    // What "inject" means, in one place, for the gallery's menu. An image's PNG
+    // carries the whole job, and these are the three useful subsets of it:
+    // its words, its numbers, or both. Each hands back a NEW gen object (see
+    // `set` above) — mutating in place would change nothing on screen.
+    function injectPrompt(p) {
+        var g = clone(gen)
+        if (p.positive !== undefined) g.positive = p.positive
+        if (p.negative !== undefined) g.negative = p.negative
+        gen = g
+    }
+
+    function injectParams(p) {
+        var g = clone(gen)
+        if (p.steps !== undefined) g.steps = p.steps
+        if (p.cfg !== undefined) g.cfg = p.cfg
+        if (p.denoise !== undefined) g.denoise = p.denoise
+        if (p.sampler_name !== undefined) g.sampler_name = p.sampler_name
+        if (p.scheduler !== undefined) g.scheduler = p.scheduler
+        if (p.batch_size !== undefined) g.batch_size = p.batch_size
+        // The seed is a parameter, and reusing one is the whole point of
+        // reusing an image's numbers — so it also stops being random.
+        if (p.seed !== undefined) { g.seed = p.seed; g.randomSeed = false }
+        // Size comes back as the CONTROLS that produce it, not as raw pixels:
+        // width/height are derived, so setting them here would be undone by the
+        // next recompute and the panel would quietly disagree with the image it
+        // came from. Reduce the ratio (gcd) and back out the megapixels.
+        if (p.width > 0 && p.height > 0) {
+            var a = p.width, b = p.height
+            while (b) { var t = a % b; a = b; b = t }
+            g.aspectW = Math.round(p.width / a)
+            g.aspectH = Math.round(p.height / a)
+            g.megapixels = Math.round(p.width * p.height / 100000) / 10
+        }
+        if (p.toggles) {
+            g.negpip = p.toggles.negpip === true
+            g.modelSampling = p.toggles.model_sampling === true
+        }
+        if (p.model_sampling) {
+            g.ms = clone(g.ms)
+            for (var k in p.model_sampling) g.ms[k] = p.model_sampling[k]
+        }
+        gen = g
+        recomputeDims()
+    }
+
+    function injectAll(p) { injectPrompt(p); injectParams(p) }
+
+    // ------------------------------------------------------------ remembering
+
+    // The window comes back the way it was left: size, which view, where the
+    // divider sits, what was typed, and the numbers. Panels remember their own
+    // collapsed state (Panel.qml, `persistKey`). Written on change, debounced,
+    // because `gen` changes on every keystroke.
+    property bool restored: false
+
+    function saveState() {
+        if (!restored) return          // never persist the pre-restore defaults
+        Prefs.set("win.width", root.width)
+        Prefs.set("win.height", root.height)
+        Prefs.set("view", root.view)
+        Prefs.set("splitRatio", root.splitRatio)
+        Prefs.set("gen", JSON.stringify(root.gen))
+        Prefs.set("model", App.selectedName)
+    }
+
+    Timer {
+        id: saveSoon
+        interval: 700
+        onTriggered: root.saveState()
+    }
+    onGenChanged: if (root.restored) saveSoon.restart()
+    onViewChanged: { pushButtons(); if (root.restored) saveSoon.restart() }
+    onWidthChanged: if (root.restored) saveSoon.restart()
+    onHeightChanged: if (root.restored) saveSoon.restart()
+
+    function restoreState() {
+        var w = Prefs.get("win.width"), h = Prefs.get("win.height")
+        if (w > 0 && h > 0) { root.width = w; root.height = h }
+        var v = Prefs.get("view"); if (v === 0 || v === 1) root.view = v
+        var r = Prefs.get("splitRatio"); if (r > 0 && r < 1) root.splitRatio = r
+        var raw = Prefs.get("gen")
+        if (raw) {
+            try {
+                var saved = JSON.parse(raw)
+                var g = clone(gen)
+                for (var k in saved) if (g[k] !== undefined) g[k] = saved[k]
+                gen = g
+            } catch (e) {
+                // A corrupt prefs file must not cost him the app; defaults stand.
+            }
+        }
+        // The model whose defaults are already reflected in the restored `gen`.
+        // Without this, the startup selection fires modelChanged and applyDefaults
+        // overwrites everything that was just restored.
+        root.defaultsFor = Prefs.get("model") || ""
+        root.restored = true
+    }
 }
