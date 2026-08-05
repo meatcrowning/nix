@@ -79,7 +79,7 @@ def _load_scan():
 _TITLE_EDITION_NOISE = re.compile(
     r"(\s*[-–—]\s*|\s*[\(\[]\s*)(\d{4}\s+)?"
     r"(remaster(?:ed)?|re-?master(?:ed)?|deluxe|expanded|anniversary|"
-    r"reissue|bonus|mono|stereo)\b.*$",
+    r"reissue|bonus(\s+track)?|mono|stereo)\b.*$",
     re.IGNORECASE)
 
 
