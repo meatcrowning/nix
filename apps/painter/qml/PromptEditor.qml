@@ -14,8 +14,8 @@ Panel {
         width: parent.width
         height: 130
         placeholder: "positive"
-        text: root.gen.positive
-        onEdited: function (t) { var g = root.gen; g.positive = t; root.gen = g }
+        value: root.gen.positive
+        onEdited: function (t) { root.set("positive", t) }
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
 
@@ -24,8 +24,8 @@ Panel {
         height: 64
         placeholder: "negative"
         negative: true
-        text: root.gen.negative
-        onEdited: function (t) { var g = root.gen; g.negative = t; root.gen = g }
+        value: root.gen.negative
+        onEdited: function (t) { root.set("negative", t) }
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
 }

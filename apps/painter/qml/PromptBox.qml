@@ -5,9 +5,30 @@ import "../../qmlcommon"
 Rectangle {
     id: box
     property string placeholder: ""
-    property alias text: input.text
     property bool negative: false
     signal edited(string text)
+
+    // `value` is the MODEL's text; `input.text` is the editor's. They are synced
+    // one way, on change, and never bound to each other — `text: root.gen.positive`
+    // plus `onTextChanged -> root.set(...)` is a cycle, and the moment `gen`
+    // started notifying properly (see Main.qml) it became a live binding loop on
+    // every keystroke. The guard is the equality test: an echo of what was just
+    // typed writes nothing, so the caret never jumps.
+    property string value: ""
+    // ...and the write itself is flagged, so pushing the model INTO the editor
+    // does not come straight back out as a user edit. Without this the round
+    // trip (value -> text -> edited -> gen -> value) re-enters inside one
+    // evaluation pass and QML reports a binding loop, even though the values
+    // agree by the end of it.
+    property bool syncing: false
+    onValueChanged: {
+        if (input.text === value) return
+        syncing = true
+        input.text = value
+        syncing = false
+    }
+    // The editor's own text, for callers that want to read it back.
+    readonly property alias text: input.text
 
     //: A prompt is prose, so it is spellchecked (`qmlcommon/SpellMarks.qml`) and
     //: right-clicking a marked word offers corrections. The MENU cannot live in
@@ -25,13 +46,23 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 5
         contentWidth: width
-        contentHeight: input.implicitHeight
+        contentHeight: input.height
         clip: true
         ScrollBar.vertical: VScroll {}
 
         TextEdit {
             id: input
             width: flick.width
+            // THE WHOLE BOX IS THE TEXT BOX. A TextEdit is only as tall as its
+            // content, so in a 130px prompt box holding one line, every click
+            // below that first line hit nothing: the box looked like a text
+            // area and behaved like a 16px strip. Filling the viewport hands
+            // the empty space to the editor itself, so a click anywhere puts
+            // the caret at the nearest position (the end, past the last line)
+            // and a drag from empty space selects — Qt's own behaviour, not a
+            // MouseArea imitating it. Content taller than the box still scrolls:
+            // implicitHeight wins once it exceeds the viewport.
+            height: Math.max(implicitHeight, flick.height)
             wrapMode: TextEdit.Wrap
             color: box.negative ? Theme.textDim : Theme.text
             font.family: Theme.font
@@ -51,7 +82,7 @@ Rectangle {
             selectByMouse: true
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
-            onTextChanged: box.edited(text)
+            onTextChanged: if (!box.syncing) box.edited(text)
             // Ctrl+Enter belongs to the window, not the editor.
             Keys.onPressed: function (e) {
                 if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)

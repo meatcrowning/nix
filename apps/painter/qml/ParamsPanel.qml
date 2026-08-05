@@ -10,7 +10,7 @@ Panel {
         label: "steps"
         Spin {
             value: root.gen.steps; from: 1; to: 300; step: 1
-            onEdited: function (v) { var g = root.gen; g.steps = v; root.gen = g }
+            onEdited: function (v) { root.set("steps", v) }
         }
     }
 
@@ -18,7 +18,7 @@ Panel {
         label: "cfg"
         Spin {
             value: root.gen.cfg; from: 0; to: 30; step: 0.1; decimals: 2
-            onEdited: function (v) { var g = root.gen; g.cfg = v; root.gen = g }
+            onEdited: function (v) { root.set("cfg", v) }
         }
     }
 
@@ -26,7 +26,7 @@ Panel {
         label: "denoise"
         Spin {
             value: root.gen.denoise; from: 0; to: 1; step: 0.01; decimals: 2
-            onEdited: function (v) { var g = root.gen; g.denoise = v; root.gen = g }
+            onEdited: function (v) { root.set("denoise", v) }
         }
     }
 
@@ -36,7 +36,7 @@ Panel {
             width: 200
             options: App.samplers
             value: root.gen.sampler_name
-            onPicked: function (v) { var g = root.gen; g.sampler_name = v; root.gen = g }
+            onPicked: function (v) { root.set("sampler_name", v) }
         }
     }
 
@@ -46,7 +46,7 @@ Panel {
             width: 200
             options: App.schedulers
             value: root.gen.scheduler
-            onPicked: function (v) { var g = root.gen; g.scheduler = v; root.gen = g }
+            onPicked: function (v) { root.set("scheduler", v) }
         }
     }
 
@@ -59,13 +59,13 @@ Panel {
                 value: root.gen.seed; from: 0; to: 9007199254740992; step: 1
                 enabled: !root.gen.randomSeed
                 opacity: root.gen.randomSeed ? 0.45 : 1
-                onEdited: function (v) { var g = root.gen; g.seed = v; root.gen = g }
+                onEdited: function (v) { root.set("seed", v) }
             }
             Toggle {
                 label: "random"
                 checked: root.gen.randomSeed
                 anchors.verticalCenter: parent.verticalCenter
-                onToggled: function (v) { var g = root.gen; g.randomSeed = v; root.gen = g }
+                onToggled: function (v) { root.set("randomSeed", v) }
             }
         }
     }
@@ -78,7 +78,7 @@ Panel {
             Spin {
                 width: 56
                 value: root.gen.batch_size; from: 1; to: 16; step: 1
-                onEdited: function (v) { var g = root.gen; g.batch_size = v; root.gen = g }
+                onEdited: function (v) { root.set("batch_size", v) }
             }
             PixelText {
                 text: "count"
@@ -88,7 +88,7 @@ Panel {
             Spin {
                 width: 56
                 value: root.gen.count; from: 1; to: 100; step: 1
-                onEdited: function (v) { var g = root.gen; g.count = v; root.gen = g }
+                onEdited: function (v) { root.set("count", v) }
             }
         }
     }

@@ -8,8 +8,9 @@ import "../../qmlcommon"
 Panel {
     id: panel
     title: "model"
-    badge: Models.count + " found"
-    collapsible: false
+    // Collapsed, the badge is the only thing left saying what is selected, so
+    // it carries the name rather than just the count.
+    badge: panel.collapsed ? App.selectedName : (Models.count + " found")
 
     Rectangle {
         width: parent.width
