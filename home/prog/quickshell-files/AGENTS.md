@@ -518,9 +518,20 @@ beside the notch, then the slab growing outward — because each of them is what
   constant the exclusive zone derives from. Its panel-side edge sits on the
   panel's face (`margins.right: 0`) and it covers the notch for as long as it is
   out — Overlay is above the bar's `Top`.
-- **`visible` must track the CARD, not `open`** — `open || |x - closedX| > 1` —
-  so the pull plays to its end before the layer unmaps, and keyboard focus
-  (`OnDemand`, tied to `visible`) is released only as it goes.
+- **THE SURFACE IS NEVER UNMAPPED, and that is a bug fix, not an optimisation.**
+  Mapping it per open flashed the drawer at the TOP-RIGHT for a frame every few
+  opens ([his] "after every like 5 or so times"): a layer surface gets its
+  anchors, margins and size by CONFIGURE, and a first buffer committed before
+  that round-trip lands is drawn at the anchored corner with default margins —
+  up and to the right, for this window. A race, so it misses most of the time,
+  and `no_anim` took away the fade that used to cover it. So `visible: true`
+  always; `out` (open, or the card still travelling) gates the CARD's `visible`,
+  the input mask and the keyboard focus. `mask: Region {}` while in — the same
+  clickthrough idiom `NotchSeam.qml` uses — or the window is a 401x960 dead zone
+  over his desktop that also swallows the notch's hover tooltips.
+- **`out` must track the CARD, not `open`** — `open || |x - closedX| > 1` — so
+  the closing pull plays to its end before the card stops being drawn, and the
+  keyboard is handed back only once the drawer is home.
 - **THE SURFACE'S PLACEMENT IS THE OTHER HALF OF THE ILLUSION, and it is not
   where you would expect.** The bar's exclusive zone reserves the bar AND the
   notch (`liveWidth + notchPx - windowBorderWidth`), so a surface anchored to

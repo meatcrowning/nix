@@ -22,8 +22,9 @@ import Quickshell.Wayland
 //     panel — clipped away at the panel's face by `frame`, which is the whole
 //     illusion. The visible strip is `closedW` = NotchModel.protrusion wide,
 //     the notch's height, with the notch's outline and the seals at the notch's
-//     inset. Pixel for pixel the notch, so the surface can map and unmap under
-//     it with nothing to see.
+//     inset. Pixel for pixel the notch — and the card is simply not drawn
+//     there at all, because the real notch is what is on screen (the surface
+//     itself never unmaps; see `visible` below).
 //   * OPENING, it slides out by `openW - closedW`. The seals ride it because
 //     they are part of it; the names and the runner emerge from behind the
 //     panel because they are further back in the same drawer. Nothing fades,
@@ -56,11 +57,32 @@ PanelWindow {
 
     readonly property bool barLeft: SettingsStore.d.barEdge === "left"
 
-    // Mapped for as long as the drawer is out — gated on the CARD, not on
-    // `open`, so it travels all the way home before the surface goes. Closed it
-    // is identical to the notch underneath it, so the unmap is invisible.
-    visible: open || Math.abs(card.x - card.closedX) > 1
+    // THIS SURFACE IS NEVER UNMAPPED. It is transparent and empty while the
+    // drawer is in, and the card inside it is what appears and disappears.
+    //
+    // Mapping it per open was the last visible glitch: every few opens the
+    // drawer flashed at the TOP-RIGHT for a frame — [his] "it'll appear as if
+    // the bar glitches out an appears above and to the right … after every like
+    // 5 or so times". A layer surface's anchors, margins and size arrive by
+    // CONFIGURE, and a client that commits its first buffer before that
+    // round-trip completes is drawn at the anchored corner with default margins
+    // — which for this window (anchored right, negative margin, full height) is
+    // exactly up and to the right. It is a race, so it misses most of the time,
+    // and `no_anim` removed the fade that used to hide it.
+    //
+    // Staying mapped also takes the remaining map round-trip out of the open.
+    // The cost is one always-composited transparent surface, and the care below:
+    // `out` gates the CARD, the input mask and keyboard focus, so while the
+    // drawer is in, this window draws nothing, takes no input (the notch under
+    // it keeps its own clicks and hover tooltips) and holds no focus.
+    visible: true
+    readonly property bool out: open || Math.abs(card.x - card.closedX) > 1
     color: "transparent"
+
+    // No input region at all while the drawer is in — anything else would put a
+    // 401x323 dead zone over his desktop, and swallow the notch's own hover.
+    mask: launcher.out ? null : blank
+    property var blankRegion: Region { id: blank }
 
     // Full height, hard against the panel's FACE — the notch's own mouth.
     //
@@ -83,10 +105,11 @@ PanelWindow {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "qs-launcher"
     // OnDemand (not Exclusive): the runner accepts keyboard input but never
-    // fully steals focus, so you can click into a window and back again. Tie
-    // this to `visible` (not `open`) so the layer keeps keyboard focus through
-    // the pull and only releases it as it unmaps (see Cheatsheet).
-    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    // fully steals focus, so you can click into a window and back again. Tied
+    // to `out`, not `open`, so the layer keeps the keyboard through the closing
+    // pull and gives it back only once the drawer is home — and holds none of
+    // it the rest of the time, which matters now that the surface is permanent.
+    WlrLayershell.keyboardFocus: launcher.out ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     // ----- data -----
     property var results: []
@@ -264,6 +287,10 @@ PanelWindow {
             // The drawer is the notch's height, so the runner lives in whatever
             // the seal column comes to — which is what makes the whole thing
             // read as one object being moved rather than opened.
+            // Drawn only while the drawer is out. Closed, the notch itself is
+            // what is on screen — this card would be the same pixels on top of
+            // it, over any window that happens to cover the notch.
+            visible: launcher.out
             width: openW
             height: NotchModel.shown ? NotchModel.slabH : 300
             // A ROUNDED y OFF THE SCREEN, not a verticalCenter anchor and not
