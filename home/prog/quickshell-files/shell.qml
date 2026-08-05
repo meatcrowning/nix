@@ -1137,26 +1137,14 @@ Scope {
                         NumberAnimation { duration: ViewMode.ms(140); easing.type: ViewMode.slideEasing }
                     }
 
-                    // ---- top cluster: launcher, workspaces, tray ----
+                    // ---- top cluster: workspaces, tray ----
+                    // No runner button: the runner is the shortcut notch slid
+                    // out (Launcher.qml), and it opens on mainMod+Super alone.
                     Column {
                         id: top
                         anchors { top: parent.top; horizontalCenter: parent.horizontalCenter }
                         anchors.topMargin: Theme.gap
                         spacing: Theme.gap
-
-                        RunnerButton {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            active: launcher.open
-                            onToggled: launcher.open = !launcher.open
-                        }
-
-                        // divider
-                        Rectangle {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: Theme.cell - 8
-                            height: 1
-                            color: Theme.border
-                        }
 
                         Taskbar {
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -1282,8 +1270,6 @@ Scope {
                     DockHeader {
                         id: dockHeader
                         anchors { left: parent.left; right: parent.right; top: parent.top }
-                        runnerActive: launcher.open
-                        onRunnerToggled: launcher.open = !launcher.open
                     }
 
                     Rectangle {

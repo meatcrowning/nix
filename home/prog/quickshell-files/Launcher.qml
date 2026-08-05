@@ -4,27 +4,50 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Wayland
 
-// Program runner. Spawns beside the bar's launcher button.
+// THE ICON BAR, SLID OUT. This is the shortcut notch (DesktopNotch.qml /
+// NotchModel.qml) opened into a drawer: the same seals, in the same order, now
+// carrying their names — and beside them a runner for EVERY OTHER program on
+// the system. [his] "the icon bar on the left side of the panel to slide out,
+// revealing a program runner. to the right of the icons when that bar is slid
+// out will show the names of the icons, the program runner will be for every
+// other program on the system."
+//
+// TWO COLUMNS, seals on the left and the runner on the right — his pick, and the
+// reason the seals are NOT in the runner's list: the notch is the desktop's own
+// programs, the runner is everything else, and neither repeats the other.
+//
+// IT IS ITS OWN SURFACE, not part of the bar. The notch lives inside the bar's
+// layer surface so its outline and the bar's accent strip share one coordinate
+// space during a width drag; a drawer this wide cannot, because the bar's
+// surface width is a constant the exclusive zone is derived from (shell.qml).
+// So this is an Overlay-layer card whose right edge sits exactly on the panel's
+// face: fully open it covers the notch it grew out of, and its own outline is
+// the notch's — three accent sides with the panel-facing one left open, so the
+// drawer opens INTO the panel exactly as the notch does.
+//
+// HOTKEY ONLY. There is no runner button any more (removed from the classic
+// bar's top cluster and from DockHeader): mainMod+Super, which is
+// `qs ipc call launcher toggle` in hyprland.lua.
 PanelWindow {
     id: launcher
 
     property bool open: false
 
+    readonly property bool barLeft: SettingsStore.d.barEdge === "left"
+
     // Stay mapped through the slide-out so the close animation can play out,
-    // then hide once the card has travelled back off the right edge — matching
-    // the Cheatsheet.
-    visible: open || card.x < card.hidden - 1
+    // then hide once the card has travelled back off the panel-side edge —
+    // matching the Cheatsheet.
+    visible: open || Math.abs(card.x - card.hidden) > 1
     color: "transparent"
 
-    // Sit at the top-right, just left of the bar, so it reads as spawning
-    // out of the launcher button.
-    anchors { top: true; right: true }
-    margins.top: Theme.gap
-    // The bar's exclusive zone already reserves its width; this gap sits
-    // between the launcher's right edge and the bar, matching margins.top.
-    margins.right: Theme.gap
-    implicitWidth: 300
-    implicitHeight: 460
+    // Full height, hard against the panel's face — the notch's own mouth. The
+    // card inside is what has a height, and it is centred on the screen like
+    // the notch is, so the drawer grows out of it rather than beside it.
+    anchors { top: true; bottom: true; left: launcher.barLeft; right: !launcher.barLeft }
+    margins.right: 0
+    margins.left: 0
+    implicitWidth: card.width
     exclusiveZone: 0
 
     WlrLayershell.layer: WlrLayer.Overlay
@@ -39,12 +62,15 @@ PanelWindow {
     property var results: []
     property int selected: 0
 
-    // 0 for our own programs, 1 for everything else — the primary sort key.
-    function rank(entry) {
+    // Is this one of the desktop's own programs? `Keywords=bespoke;` on the
+    // entry — the same test NotchModel uses to decide what is in the notch, so
+    // the two halves of this drawer partition the system's programs between
+    // them with nothing counted twice and nothing dropped.
+    function bespoke(entry) {
         const kw = entry.keywords || [];
         for (let i = 0; i < kw.length; i++)
-            if (String(kw[i]).toLowerCase() === "bespoke") return 0;
-        return 1;
+            if (String(kw[i]).toLowerCase() === "bespoke") return true;
+        return false;
     }
 
     function rebuild() {
@@ -56,17 +82,15 @@ PanelWindow {
             for (let i = 0; i < apps.length; i++) {
                 const a = apps[i];
                 if (a.noDisplay) continue;
+                // EVERY OTHER PROGRAM: the seals have their own column an inch
+                // to the left, so listing them here again would be the same
+                // icon twice on one card.
+                if (bespoke(a)) continue;
                 const name = (a.name || "").toLowerCase();
                 if (q === "" || name.includes(q))
                     list.push(a);
             }
-            // The desktop's own programs (filer, player, painter, surfer,
-            // viewer, settings — everything tagged `Keywords=bespoke;` in its
-            // .desktop file) sort ahead of the distro's, alphabetical within
-            // each group. They're what this runner is mostly for, and it also
-            // means the result cap below never drops them.
-            list.sort((x, y) => rank(x) - rank(y)
-                             || (x.name || "").localeCompare(y.name || ""));
+            list.sort((x, y) => (x.name || "").localeCompare(y.name || ""));
         }
         // Cap the result count (0 = unlimited).
         const cap = SettingsStore.d.launcherMaxResults;
@@ -103,36 +127,168 @@ PanelWindow {
         }
     }
 
+    // Clicking the strip beside the card (above or below it) closes, the same
+    // way Escape does.
+    MouseArea {
+        anchors.fill: parent
+        onClicked: launcher.close()
+    }
+
     Rectangle {
         id: card
-        // Full window height, docked to the right — the edge it slides out from.
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: parent.width
 
-        // Slide in horizontally from the right edge — out from behind the bar.
-        // Open: flush against the window's right edge. Closed: fully off the
-        // right (a full width to the right, so it tucks behind the panel).
+        // ---- geometry -----------------------------------------------------
+        // The seal column is the notch's own column plus room for a name; the
+        // runner is the wider half, because it is the one holding a search box
+        // and a hundred elided program names.
+        readonly property int pad: NotchModel.gap
+        readonly property int sealW: 168
+        readonly property int runW: 264
+        readonly property int lineW: Theme.windowBorderWidth
+
+        width: pad * 2 + sealW + pad * 2 + 1 + runW
+        // Tall enough for a useful list, never taller than the screen, and
+        // never shorter than the notch it grew from.
+        height: Math.min(launcher.screen ? launcher.screen.height - 2 * Theme.gap : 460,
+                         Math.max(NotchModel.slabH, 460))
+        anchors.verticalCenter: parent.verticalCenter
+
+        // Slide out from behind the panel — open: flush against the window's
+        // panel-side edge; closed: a full width back behind it.
         readonly property real shown: 0
-        readonly property real hidden: width
+        readonly property real hidden: launcher.barLeft ? -width : width
         x: launcher.open ? shown : hidden
         Behavior on x { NumberAnimation { duration: ViewMode.ms(ViewMode.slideMs); easing.type: ViewMode.slideEasing } }
 
         color: Theme.bg
-        border.color: Theme.windowBorder
-        border.width: Theme.windowBorderWidth
-        radius: Theme.windowRounding
 
-        // Clicking anywhere in the runner returns typing focus to the search box
-        // (handy after focusing a window and clicking back).
+        // ---- the outline: three sides, like the notch ----------------------
+        // The panel-facing side carries none, so the drawer reads as opening
+        // into the panel rather than sitting against it as a box (see
+        // DesktopNotch.qml, which this is the slid-out form of).
+        Rectangle {   // the desktop-facing side
+            x: launcher.barLeft ? card.width - card.lineW : 0
+            width: card.lineW
+            height: card.height
+            color: Theme.accent
+        }
+        Rectangle {   // top
+            width: card.width
+            height: card.lineW
+            color: Theme.accent
+        }
+        Rectangle {   // bottom
+            y: card.height - card.lineW
+            width: card.width
+            height: card.lineW
+            color: Theme.accent
+        }
+
+        // Clicking anywhere in the drawer returns typing focus to the search
+        // box (handy after focusing a window and clicking back).
         MouseArea {
             anchors.fill: parent
             onClicked: input.forceActiveFocus()
         }
 
+        // ================= the seals, with their names =====================
+        // The notch's column, in the notch's order, at the notch's spacing —
+        // what changes when it slides out is only that each one gets its name.
+        KineticFlickable {
+            id: sealScroll
+            anchors {
+                left: parent.left; top: parent.top; bottom: parent.bottom
+                leftMargin: card.pad + card.lineW; topMargin: card.pad + card.lineW
+                bottomMargin: card.pad + card.lineW
+            }
+            width: card.sealW
+            clip: true
+            contentHeight: seals.height
+            boundsBehavior: Flickable.StopAtBounds
+
+            Column {
+                id: seals
+                width: sealScroll.width
+                spacing: NotchModel.gap
+
+                Repeater {
+                    model: NotchModel.apps
+
+                    delegate: Item {
+                        id: seal
+                        required property var modelData
+
+                        width: seals.width
+                        height: NotchModel.iconSize
+
+                        // The hover fill is drawn AROUND the row rather than
+                        // being the thing the layout spaces — same rule as the
+                        // notch, so the gaps stay the notch's gaps.
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: parent.width + 8
+                            height: NotchModel.hitSize
+                            radius: Theme.windowRounding
+                            visible: sealHover.containsMouse
+                            color: Theme.highlight
+                        }
+
+                        AppIcon {
+                            id: sealIcon
+                            anchors.left: parent.left
+                            width: NotchModel.iconSize
+                            height: NotchModel.iconSize
+                            iconName: seal.modelData.icon
+                            // The focus colour, like every other program icon
+                            // on this desktop (docs/DESIGN.md §12.2.1).
+                            color: Theme.accent
+                        }
+
+                        PixelText {
+                            anchors {
+                                left: sealIcon.right; leftMargin: NotchModel.gap
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+                            // Label only — `entry.command`, the argv that
+                            // actually runs, never comes near this.
+                            text: Glyphs.px(seal.modelData.name || "")
+                            elide: Text.ElideRight
+                            color: Theme.text
+                        }
+
+                        MouseArea {
+                            id: sealHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: launcher.launch(seal.modelData)
+                        }
+                    }
+                }
+            }
+        }
+
+        // the divider between the two halves
+        Rectangle {
+            id: split
+            anchors {
+                left: sealScroll.right; leftMargin: card.pad
+                top: parent.top; bottom: parent.bottom
+                topMargin: card.pad + card.lineW; bottomMargin: card.pad + card.lineW
+            }
+            width: 1
+            color: Theme.border
+        }
+
+        // ================= the runner: everything else =====================
         Column {
-            anchors.fill: parent
-            anchors.margins: 10
+            anchors {
+                left: split.right; leftMargin: card.pad
+                right: parent.right; rightMargin: card.pad
+                top: parent.top; topMargin: card.pad + card.lineW
+                bottom: parent.bottom; bottomMargin: card.pad + card.lineW
+            }
             spacing: 8
 
             // search box

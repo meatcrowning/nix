@@ -346,8 +346,8 @@ back and the artwork balloons for the last frames of the close.
 
 `ViewMode.qml`. `classic` is the 48px vertical bar this config has always had,
 with the desktop widgets pinned out on the wallpaper. `dock` turns the panel
-into a wide column (14–33% of screen, default 15%): `DockHeader.qml` (runner
-button at the left, task icons flowing across and wrapping) over `DockGrid.qml`
+into a wide column (14–33% of screen, default 15%): `DockHeader.qml` (task icons
+flowing across and wrapping, uptime at the right) over `DockGrid.qml`
 (the widget grid). There is no toggle button — you grab the bar's inner edge
 (`edgeGrip` in `shell.qml`) and pull.
 
@@ -480,13 +480,40 @@ pointer margins between every pair of seals and one against each edge. The
 column is the width of a seal; the hover chip is drawn around it.
 
 Membership is the `Keywords=bespoke;` tag on the desktop entry, the same test
-`Launcher.qml`'s `rank` sorts by — never a hardcoded list. Toggle:
+`Launcher.qml` PARTITIONS on — never a hardcoded list. Toggle:
 `desktopIcons` (Settings → appearance → shortcut notch). Launch goes through
 `NixPath.launch`, never `entry.execute()` — see NixPath for the cgroup reason.
 The notch publishes its protrusion as `ViewMode.notchPx` and the bar's
 `exclusiveZone` reserves it, so a tiled or maximized window stops at the notch;
 a floating window may still cover it, as it may cover the bar. docs/DESIGN.md
 §12.2.2 is the rule.
+
+### The runner IS the notch slid out (`Launcher.qml`)
+
+Two columns: the notch's seals down the left, each with its NAME to its right,
+and the search box + every OTHER program on the system down the right, against
+the panel. docs/DESIGN.md §12.2.4 is the rule; three mechanics live here.
+
+- **It is its own Overlay surface, and that is forced.** The notch is inside the
+  bar's surface so their outlines share one coordinate space during a width
+  drag; a drawer this wide cannot be, because the bar's surface width is the
+  constant the exclusive zone derives from. So the card's right edge sits on the
+  panel's face (`margins.right: 0`) and, fully open, it covers the notch it grew
+  out of — Overlay is above the bar's `Top`. Its outline is the notch's: three
+  `accent` sides, panel-facing one open, no rounding.
+- **`visible` must track the CARD, not `open`** — `open || |card.x - hidden| > 1`
+  — so the slide-out plays to its end before the layer unmaps, and keyboard
+  focus (`OnDemand`, tied to `visible`) is released only as it goes. Comparing
+  against `shown` instead leaves the surface mapped forever, invisibly eating
+  clicks down a strip of the desktop.
+- **The two columns partition, they don't filter.** `bespoke(entry)` is the same
+  keyword test `NotchModel` uses; the runner list drops every entry that passes
+  it, so no program is on the card twice and none is missing.
+
+**There is no runner button** — `RunnerButton.qml` is deleted, and neither the
+classic bar's top cluster nor `DockHeader` has one. The only way in is
+`qs ipc call launcher toggle`, bound to mainMod+Super in `hyprland.lua`. Don't
+grow a second entry point without asking.
 
 ### Every program icon goes through `AppIcon.qml`
 
