@@ -124,6 +124,13 @@ next keystroke going nowhere), handled on the editors themselves as well as at
 the window, because a focused text item is where a window-level `Shortcut` is
 least reliable. Cancelling is the titlebar's `x`: a click, not a reflex.
 
+**That Shortcut decides what Escape means for the whole window**, innermost
+thing first: open dropdown → context menu → settings drawer → release the text
+box. A window-level `Shortcut` sees a key before any focused item's `Keys`
+handler, so adding one for the text boxes alone silently took Escape away from
+the dropdown and the menu, which had been closing on it perfectly well — caught
+by the harness, not by looking.
+
 ## An output is clicked to INJECT, and you choose what
 
 Left- or right-clicking a gallery image opens the shared `CtxMenu` with **inject
@@ -171,7 +178,7 @@ there, and each was worth measuring:
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-100 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+104 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 

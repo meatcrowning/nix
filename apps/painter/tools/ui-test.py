@@ -546,6 +546,39 @@ def test_escape(win, ctl):
     ctl._jobs = 0
     ctl._busy = False
 
+    # A window-level Shortcut gets key events BEFORE a focused item's Keys
+    # handler, so adding one for Escape could quietly take Escape away from the
+    # two things that were already using it to close.
+    params = find(content, "ParamsPanel")
+    picker = find(params, "Picker")
+    overlay = find(content, "PickerOverlay")
+    click(win, find(picker, "QQuickRectangle"))
+    spin(120)
+    if overlay.isVisible():
+        QTest.keyClick(win, Qt.Key_Escape)
+        spin(150)
+        check("Escape still closes an open dropdown", not overlay.isVisible())
+    else:
+        check("Escape test: the dropdown opened", False, "did not open")
+
+    menu = find(content, "CtxMenu")
+    menu.metaObject().invokeMethod(menu, "open", Q_ARG("QVariant", 100),
+                                   Q_ARG("QVariant", 100),
+                                   Q_ARG("QVariant", [{"label": "x"}]))
+    spin(150)
+    if menu.isVisible():
+        QTest.keyClick(win, Qt.Key_Escape)
+        spin(150)
+        check("Escape still closes the context menu", not menu.isVisible())
+    else:
+        check("Escape test: the menu opened", False, "did not open")
+
+    win.setProperty("showSettings", True)
+    spin(150)
+    QTest.keyClick(win, Qt.Key_Escape)
+    spin(150)
+    check("Escape closes the settings drawer", win.property("showSettings") is False)
+
 
 def test_inject(win, ctl, tmp):
     """Left-click an output -> inject all / prompt / params."""

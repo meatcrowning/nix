@@ -409,7 +409,20 @@ Window {
     function releaseFocus() { focusSink.forceActiveFocus() }
 
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; onActivated: root.submit() }
-    Shortcut { sequence: "Escape"; onActivated: root.releaseFocus() }
+    // A window-level Shortcut sees a key BEFORE any focused item's Keys handler,
+    // so this one has to say what Escape means for the whole window — adding it
+    // for the text boxes alone silently took Escape away from the dropdown and
+    // the context menu, which were closing on it perfectly well. Innermost
+    // thing first, exactly as it looks on screen.
+    Shortcut {
+        sequence: "Escape"
+        onActivated: {
+            if (pickerOverlay.visible) pickerOverlay.close()
+            else if (ctxMenu.visible) ctxMenu.close()
+            else if (root.showSettings) root.showSettings = false
+            else root.releaseFocus()
+        }
+    }
     Shortcut { sequence: "Ctrl+R"; onActivated: App.rescan() }
 
     // ------------------------------------------------------- injecting params
