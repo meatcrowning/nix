@@ -80,10 +80,19 @@ in
   # desktop entry's Icon= AND the titlebar program-icon slot find it (hyprvtb
   # resolves class -> .desktop -> Icon= -> icon theme; a currentColor SVG it
   # tints to the title colour) — same pattern as goetia's seal.
-  home.file.".local/share/icons/hicolor/scalable/apps/editor.svg".source = ./app-icons/editor.svg;
+  #
+  # The icon NAME is `bespoke-editor`, not `editor`, and it is the one seal that
+  # cannot use the bare app name: breeze ships `actions/*/editor.svg` (a symlink
+  # to `document-edit.svg`, a pencil), and the theme chain is
+  # breeze-dark -> breeze -> hicolor, so a generic name is answered by the theme
+  # long before hicolor is reached — the seal was silently replaced by that
+  # pencil everywhere. Of the ten seals only this name collides; check a new one
+  # with `find -L /run/current-system/sw/share/icons/breeze -name '<name>.svg'`.
+  home.file.".local/share/icons/hicolor/scalable/apps/bespoke-editor.svg".source =
+    ./app-icons/editor.svg;
   # …and declare it a SEAL, so the panel paints its currentColor strokes in
   # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
-  my.appSeals = [ "editor" ];
+  my.appSeals = [ "bespoke-editor" ];
 
   home.file.".local/share/applications/editor.desktop".text = ''
     [Desktop Entry]
@@ -92,7 +101,7 @@ in
     GenericName=Text Editor
     Comment=Edit text and source files
     Exec=${editor}/bin/editor %F
-    Icon=editor
+    Icon=bespoke-editor
     Terminal=false
     Categories=Development;TextEditor;Utility;
     Keywords=bespoke;text;code;source;edit;
