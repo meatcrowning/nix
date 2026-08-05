@@ -775,6 +775,15 @@ Scope {
             console.warn("HyprEvents unavailable — window-state updates fall back to the 1s poll");
     }
 
+    // The Super tap that opens the runner, delivered by the compositor rather
+    // than by a spawned `qs ipc call` — same Loader-because-optional reason.
+    Loader {
+        source: "RunnerShortcut.qml"
+        onStatusChanged: if (status === Loader.Error)
+            console.warn("RunnerShortcut unavailable — the runner opens via the IPC bind only");
+        onLoaded: item.triggered.connect(() => launcher.open = !launcher.open)
+    }
+
     // The seam between a maximized window's edge and the shortcut notch: the
     // one surface here that draws ABOVE windows, and only while one is flush.
     Variants {

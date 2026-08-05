@@ -1,0 +1,32 @@
+import QtQuick
+import Quickshell.Hyprland
+
+// THE SUPER-TAP THAT OPENS THE RUNNER, taken straight off the compositor
+// instead of through a process.
+//
+// The bind used to be `hl.dsp.exec_cmd("qs ipc call launcher toggle")`, which
+// makes Hyprland fork a shell, exec Quickshell's CLI, have it connect to the
+// panel's IPC socket and exit — measured at 20-30ms on book, every tap, before
+// the panel has been told anything. hyprland-global-shortcuts-v1 delivers the
+// press to the running panel directly: `hl.dsp.global("quickshell:launcher")`
+// in hyprland.lua, and nothing is spawned.
+//
+// A SEPARATE FILE BEHIND A LOADER, like HyprEvents.qml and for the same reason:
+// `Quickshell.Hyprland` is an optional module, and an import of it in shell.qml
+// or Launcher.qml would cost the whole panel rather than this one shortcut on a
+// build without it. The IPC call it replaces is still there and still works —
+// it is the scriptable/debuggable path.
+QtObject {
+    id: root
+
+    signal triggered()
+
+    // `appid:name` is what the bind names. Keep both halves in step with
+    // hyprland.lua; a shortcut nothing binds is silently inert.
+    property var shortcut: GlobalShortcut {
+        appid: "quickshell"
+        name: "launcher"
+        description: "Open the program runner"
+        onPressed: root.triggered()
+    }
+}
