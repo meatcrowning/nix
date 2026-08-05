@@ -4,12 +4,30 @@ import "../../qmlcommon"
 // A dropdown.  Options always come from the backend's /object_info rather than a
 // hardcoded list, so a ComfyUI update that adds a sampler shows it here with no
 // change on this side.
+//
+// The BOX is here; the LIST is `pickerOverlay` at the top of the scene (see
+// PickerOverlay.qml). A popup parented here could never rise above what follows
+// it in the left column — `z` orders siblings, not strangers — and the column's
+// Flickable clipped it outright.
 Item {
     id: picker
     property var options: []
     property string value: ""
     property int visibleRows: 12
+    // Whose list is open: the overlay holds one callback, and ours is a stable
+    // function reference, so this is an identity test rather than bookkeeping
+    // two components have to keep in step.
+    readonly property bool open: pickerOverlay.visible && pickerOverlay.onPicked === picker.accept
     signal picked(string value)
+
+    // Report the pick; do NOT write `value`. It is bound to the model
+    // (`root.gen.sampler_name`, a row's `family`, …) and assigning a bound
+    // property destroys the binding — after one pick the box would stop
+    // following the model, so a family's defaults or a reused image could never
+    // move it again. Same rule as Spin.commit().
+    function accept(v) {
+        picker.picked(v)
+    }
 
     width: 160
     height: 20
@@ -18,7 +36,7 @@ Item {
         id: box
         anchors.fill: parent
         color: Theme.bg
-        border.color: pop.visible ? Theme.accent : Theme.border
+        border.color: picker.open ? Theme.accent : Theme.border
         border.width: 1
 
         PixelText {
@@ -41,63 +59,14 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: pop.visible = !pop.visible
-        }
-    }
-
-    Rectangle {
-        id: pop
-        visible: false
-        z: 100
-        width: Math.max(parent.width, 180)
-        height: Math.min(picker.visibleRows, list.count) * 19 + 2
-        anchors.top: box.bottom
-        anchors.topMargin: 1
-        color: Theme.bgAlt
-        border.color: Theme.accent
-        border.width: 1
-
-        KineticListView {
-            id: list
-            anchors.fill: parent
-            anchors.margins: 1
-            model: picker.options
-            clip: true
-            currentIndex: picker.options.indexOf(picker.value)
-            delegate: Rectangle {
-                width: list.width
-                height: 19
-                color: hover.containsMouse ? Theme.highlight
-                     : (modelData === picker.value ? Theme.highlight : "transparent")
-                PixelText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: 5
-                    width: parent.width - 10
-                    elide: Text.ElideRight
-                    text: modelData
-                    color: modelData === picker.value ? Theme.accent : Theme.text
-                }
-                MouseArea {
-                    id: hover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        picker.value = modelData
-                        picker.picked(modelData)
-                        pop.visible = false
-                    }
+            onClicked: {
+                if (picker.open) {
+                    pickerOverlay.close()
+                } else {
+                    pickerOverlay.visibleRows = picker.visibleRows
+                    pickerOverlay.openFor(box, picker.options, picker.value, picker.accept)
                 }
             }
         }
-    }
-
-    // Click anywhere else to dismiss.
-    MouseArea {
-        parent: picker.Window.contentItem
-        anchors.fill: parent
-        z: 99
-        visible: pop.visible
-        onClicked: pop.visible = false
     }
 }

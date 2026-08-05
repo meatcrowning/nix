@@ -39,6 +39,98 @@ records each one and what it became. What that leaves you with, mechanically:
 
 **Every scrollable surface here is a `Kinetic*` view from `../qmlcommon/`** — the gallery grid, the model/LoRA/dropdown lists, the left parameter column and the prompt boxes. painter used to carry its own copy of `WheelScroll.qml` that nothing imported, so every one of those was a bare Flickable adding Qt's flick on top of the compositor's momentum. Never write a bare `ListView`/`GridView`/`Flickable` here; see [`../AGENTS.md`](../AGENTS.md).
 
+## `gen` is a `property var` — NEVER mutate it in place
+
+`Main.qml`'s `gen` holds every generation setting, and this is the trap that
+made most of the UI silently wrong until 2026-08-04:
+
+```qml
+var g = root.gen; g.steps = v; root.gen = g   // WRONG: emits no change signal
+root.set("steps", v)                          // right: hands out a NEW object
+```
+
+Assigning a `property var` the object it already holds notifies nothing — proved
+directly, not inferred: the same edit through a fresh object updates its
+bindings, through the same object does not. Every panel used the first form, so
+the values still reached `submit()` (which reads `gen` at click time, which is
+why this looked like it worked) while **everything displayed from `gen` was
+stale**: the resolution badge, a `Spin` showing a family's default, the seed
+box's grey-out, and the entire ModelSampling block, bound to
+`root.gen.modelSampling` and therefore never revealed by its own toggle.
+
+`root.set(key, value)`, `root.setMs(key, value)` and `root.clone(o)` are the
+only sanctioned writers. Two corollaries, both the same rule one level down:
+
+- **A control must not assign its own bound property.** `Spin.commit()` used to
+  write `value`, and `Picker` used to write `value` — writing a bound property
+  in QML *destroys the binding*, so one edit permanently disconnected that box
+  from the model and no later family default or reused image could move it
+  again. Both now only emit (`edited` / `picked`) and let the value come back.
+- **A two-way text binding is a loop.** `PromptBox` takes `value` (model in) and
+  emits `edited` (user out), with the model→editor write flagged (`syncing`) so
+  an echo is not re-reported as a keystroke. Binding `text:` straight to
+  `root.gen.positive` is a live binding loop the moment `gen` notifies properly.
+
+`tools/ui-test.py` covers all of this — see below.
+
+## One dropdown, at the top of the scene
+
+`Picker` is the box; **the list is `pickerOverlay`** (`PickerOverlay.qml`), a
+single instance in `Main.qml` beside `CtxMenu` and for the same reason. A popup
+parented to its own picker cannot rise above what follows it — `z` orders
+siblings, not strangers — so it was clipped by the left column's Flickable and
+drawn under the panels below it, worse the deeper the picker sat. The overlay
+positions itself in scene coordinates, clamps into the window (flipping above
+the box near the bottom edge), and closes on an outside click, Escape or a
+wheel, since a list pinned to the scene would otherwise float away from a
+scrolling column.
+
+## The layout holds at every width
+
+Both panes used to vanish below 900px unless selected, so in the parameters view
+a narrower window had **no results pane at all**. `root.split` (≥`splitFloor`,
+560) keeps the two-pane layout at every usable width; the controls take
+`max(300, min(520, …))` and the gallery takes the rest, adapting to a single
+column if that is what fits — its cell can never be wider than its pane, which
+is what made a narrow pane look empty. Below the floor it is one pane at a time
+on the `p`/`g` buttons.
+
+## Text boxes take a click anywhere in them
+
+A `TextEdit` is only as tall as its content, so a 130px prompt box holding one
+line accepted clicks in a 16px strip and ignored the rest. The editor now fills
+the viewport (`height: Math.max(implicitHeight, flick.height)`), which hands the
+empty space to Qt itself — caret at the nearest position, drag-select from
+nowhere — rather than to a MouseArea imitating it. `Spin` covers its own padding
+strips with an I-beam MouseArea under the input.
+
+## The size is derived, never typed
+
+Aspect is **two integers you type** (any ratio, not a fixed list) plus MP;
+`recomputeDims()` is the one place width and height are computed, so the header
+badge, the `= WxH` readout and the submitted job are the same numbers by
+construction. The width/height boxes are gone — they were a second, contradicting
+source of truth. `GalleryView.reuse()` therefore restores an image's *ratio and
+MP* (reduced by gcd), not raw pixels, which would have been overwritten by the
+next recompute.
+
+## `tools/ui-test.py` — the offscreen UI harness
+
+68 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
+can never start ComfyUI on top or open a window on his screen:
+
+```bash
+/usr/bin/python3 apps/painter/tools/ui-test.py     # on book
+```
+
+It covers click-anywhere text boxes, the collapsible model panel, the pane split
+at seven widths, aspect+MP → pixels → header → submitted job, the dropdown
+overlay (opens, stays inside the window, picks, and the binding SURVIVES the
+pick), the live-binding regressions above, and a wiring audit that submits a job
+and compares every field. **A QML warning fails the run** — a binding loop shows
+as nothing at all on screen.
+
 ## The prompt boxes are spellchecked
 
 A prompt is prose, so both `PromptBox`es carry a `SpellMarks` overlay

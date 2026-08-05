@@ -22,10 +22,31 @@ Rectangle {
 
     function clamp(v) { return Math.max(from, Math.min(to, v)) }
     function fmt(v) { return decimals > 0 ? v.toFixed(decimals) : String(Math.round(v)) }
+    // NEVER assign `value` here. It is bound to the model (`root.gen.steps` and
+    // friends), and writing a bound property in QML DESTROYS the binding — so
+    // the first edit of a box permanently disconnected it, and every later
+    // model change (a family's defaults landing on model select, a reused
+    // image's parameters) silently stopped reaching it. Report the edit and let
+    // the owner write it back; the text is set here only so the box shows the
+    // CLAMPED number immediately rather than what was typed.
     function commit(v) {
         var c = clamp(v)
-        if (c !== value) { value = c; edited(c) }
-        input.text = fmt(value)
+        if (c !== value) edited(c)
+        input.text = fmt(c)
+    }
+
+    // The padding strips either side of the text used to be dead: a 92px box
+    // whose left 5px did nothing when clicked. This sits under the input and
+    // catches only what the input does not — clicking anywhere in the box now
+    // starts editing, with the caret at the end nearest the click.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        cursorShape: Qt.IBeamCursor
+        onPressed: function (m) {
+            input.forceActiveFocus()
+            input.cursorPosition = m.x < spin.width / 2 ? 0 : input.length
+        }
     }
 
     TextInput {

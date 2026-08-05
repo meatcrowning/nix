@@ -11,7 +11,7 @@ Panel {
     Toggle {
         label: "CLIPNegPip"
         checked: root.gen.negpip
-        onToggled: function (v) { var g = root.gen; g.negpip = v; root.gen = g }
+        onToggled: function (v) { root.set("negpip", v) }
     }
     PixelText {
         text: "  lets (tag:-1.0) act as a negative weight inside the positive prompt"
@@ -25,7 +25,7 @@ Panel {
     Toggle {
         label: "ModelSamplingSD3Advanced"
         checked: root.gen.modelSampling
-        onToggled: function (v) { var g = root.gen; g.modelSampling = v; root.gen = g }
+        onToggled: function (v) { root.set("modelSampling", v) }
     }
 
     Column {
@@ -41,13 +41,13 @@ Panel {
                 Spin {
                     width: 62
                     value: root.gen.ms.shift_start; from: 0; to: 100; step: 0.01; decimals: 2
-                    onEdited: function (v) { var g = root.gen; g.ms.shift_start = v; root.gen = g }
+                    onEdited: function (v) { root.setMs("shift_start", v) }
                 }
                 PixelText { text: "->"; color: Theme.dim; anchors.verticalCenter: parent.verticalCenter }
                 Spin {
                     width: 62
                     value: root.gen.ms.shift_end; from: 0; to: 100; step: 0.01; decimals: 2
-                    onEdited: function (v) { var g = root.gen; g.ms.shift_end = v; root.gen = g }
+                    onEdited: function (v) { root.setMs("shift_end", v) }
                 }
             }
         }
@@ -60,13 +60,13 @@ Panel {
                 Spin {
                     width: 62
                     value: root.gen.ms.start_percent; from: 0; to: 1; step: 0.01; decimals: 2
-                    onEdited: function (v) { var g = root.gen; g.ms.start_percent = v; root.gen = g }
+                    onEdited: function (v) { root.setMs("start_percent", v) }
                 }
                 PixelText { text: "->"; color: Theme.dim; anchors.verticalCenter: parent.verticalCenter }
                 Spin {
                     width: 62
                     value: root.gen.ms.end_percent; from: 0; to: 1; step: 0.01; decimals: 2
-                    onEdited: function (v) { var g = root.gen; g.ms.end_percent = v; root.gen = g }
+                    onEdited: function (v) { root.setMs("end_percent", v) }
                 }
             }
         }
@@ -77,7 +77,7 @@ Panel {
                 width: 150
                 options: App.curves
                 value: root.gen.ms.curve
-                onPicked: function (v) { var g = root.gen; g.ms.curve = v; root.gen = g }
+                onPicked: function (v) { root.setMs("curve", v) }
             }
         }
 
@@ -88,7 +88,7 @@ Panel {
                 width: 150
                 options: App.outsideWindows
                 value: root.gen.ms.outside_window
-                onPicked: function (v) { var g = root.gen; g.ms.outside_window = v; root.gen = g }
+                onPicked: function (v) { root.setMs("outside_window", v) }
             }
         }
 
@@ -96,7 +96,7 @@ Panel {
             label: "multiplier"
             Spin {
                 value: root.gen.ms.multiplier; from: 0; to: 10; step: 0.01; decimals: 2
-                onEdited: function (v) { var g = root.gen; g.ms.multiplier = v; root.gen = g }
+                onEdited: function (v) { root.setMs("multiplier", v) }
             }
         }
     }

@@ -95,7 +95,6 @@ PALETTE_DEFAULTS = {
     "ok": "#e08e65", "warn": "#b86237", "crit": "#fa5c0c", "info": "#ad7457",
 }
 
-ASPECTS = ["1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "4:5", "5:4"]
 
 
 # ---------------------------------------------------------------------------
@@ -520,11 +519,14 @@ class Painter(QObject):
     schedulers = Property("QStringList", lambda self: self._schedulers, notify=optionsChanged)
     curves = Property("QStringList", lambda self: self._curves, notify=optionsChanged)
     outsideWindows = Property("QStringList", lambda self: self._windows, notify=optionsChanged)
-    aspects = Property("QStringList", lambda self: ASPECTS, constant=True)
     selectedIndex = Property(int, lambda self: self._selected, notify=modelChanged)
     encoderName = Property(str, lambda self: self._enc_name, notify=modelChanged)
     vaeName = Property(str, lambda self: self._vae_name, notify=modelChanged)
     familyLabel = Property(str, lambda self: self._fam_label, notify=modelChanged)
+    # The selected model's own name. The model panel collapses now, and collapsed
+    # its header badge is the only thing left saying what will be generated with.
+    selectedName = Property(str, lambda self: getattr(
+        self.models.entry_at(self._selected), "name", ""), notify=modelChanged)
 
     # -- backend -----------------------------------------------------------
 
