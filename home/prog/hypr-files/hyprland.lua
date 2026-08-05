@@ -881,6 +881,20 @@ hl.window_rule({
 -- })
 -- overlayLayerRule:set_enabled(false)
 
+-- THE RUNNER DRAWER MUST NOT FADE IN OR OUT (`qs-launcher`, Launcher.qml).
+-- It is the shortcut notch pulled out of the panel: closed it is drawn pixel
+-- for pixel on top of the notch, so mapping and unmapping the surface is meant
+-- to be invisible and the ONLY thing that may be seen is its travel. But
+-- `layersIn`/`layersOut` are enabled (style = "fade"), so every open faded the
+-- drawer up over the notch and every close faded it out — [his] "i can still
+-- see the transistion between the unrolled and rolled bar". Nothing else on
+-- this desktop wants that exemption; keep it to this namespace.
+hl.layer_rule({
+    name    = "no-anim-runner-drawer",
+    match   = { namespace = "^qs-launcher$" },
+    no_anim = true,
+})
+
 -- Hyprland-run windowrule
 hl.window_rule({
     name  = "move-hyprland-run",
