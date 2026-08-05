@@ -62,10 +62,21 @@ PanelWindow {
     visible: open || Math.abs(card.x - card.closedX) > 1
     color: "transparent"
 
-    // Full height, hard against the panel's face — the notch's own mouth.
+    // Full height, hard against the panel's FACE — the notch's own mouth.
+    //
+    // THE NEGATIVE MARGIN IS LOAD-BEARING, and getting it wrong is what made
+    // this read as "another bar spawns" no matter how the motion was written.
+    // The bar's exclusive zone reserves the bar AND the notch
+    // (`liveWidth + notchPx - windowBorderWidth`, shell.qml), so a surface
+    // anchored to this edge is placed at the NOTCH'S OUTER FACE — a drawer sat
+    // there is beside the notch, never over it, and its closed strip is a
+    // second copy of the notch drawn next to the real one (measured on book:
+    // reserved 359 of 1536, panel face at 1209, surface edge at 1177). Cancel
+    // exactly what the zone added and the closed drawer lands ON the notch.
     anchors { top: true; bottom: true; left: launcher.barLeft; right: !launcher.barLeft }
-    margins.right: 0
-    margins.left: 0
+    readonly property int faceOffset: -(ViewMode.notchPx - Theme.windowBorderWidth)
+    margins.right: launcher.barLeft ? 0 : launcher.faceOffset
+    margins.left: launcher.barLeft ? launcher.faceOffset : 0
     implicitWidth: card.openW
     exclusiveZone: 0
 
@@ -137,6 +148,25 @@ PanelWindow {
         open = false;
     }
 
+    // "Is the closed drawer exactly the notch?" — answerable without opening it
+    // on his screen, which is the only way this may be checked. `notchY` is the
+    // notch's own centring arithmetic (DesktopNotch's `y`), so notchY == cardY
+    // and slabH == cardH is the whole test; `edgeGap` is how far the drawer's
+    // panel-side edge is from the panel's face, and must be 0.
+    // `qs ipc call launcher geom`.
+    function geomReport() {
+        const sh = launcher.screen ? launcher.screen.height : -1;
+        return "cardY=" + card.y + " notchY=" + Math.round((sh - NotchModel.slabH) / 2)
+             + " cardH=" + card.height + " slabH=" + NotchModel.slabH
+             + " screenH=" + sh
+             + " cardX=" + Math.round(card.x) + " closedX=" + card.closedX
+             + " closedW=" + card.closedW + " openW=" + card.openW
+             + " edgeGap=" + (launcher.width - card.openW)
+             + " faceOffset=" + launcher.faceOffset
+             + " notchPx=" + ViewMode.notchPx
+             + " open=" + launcher.open;
+    }
+
     onOpenChanged: {
         if (open) {
             input.text = "";
@@ -183,7 +213,17 @@ PanelWindow {
             // read as one object being moved rather than opened.
             width: openW
             height: NotchModel.shown ? NotchModel.slabH : 300
-            anchors.verticalCenter: parent.verticalCenter
+            // A ROUNDED y OFF THE SCREEN, not a verticalCenter anchor and not
+            // `parent.height`. Two traps, both measured:
+            //   * the notch rounds its own centring (fractional logical pixels
+            //     at this 1.67 scale), so anchor arithmetic lands half a pixel
+            //     off it and the closed drawer stops being the notch;
+            //   * an UNMAPPED layer surface has no size — `parent.height` reads
+            //     0 while the drawer is closed, which centred the card at
+            //     y = -161 against the notch's 319 (`qs ipc call launcher
+            //     geom`). It mapped that high and settled afterwards: [his]
+            //     "its currently higher than the bar itself".
+            y: Math.round(((launcher.screen ? launcher.screen.height : parent.height) - height) / 2)
 
             // Closed: pushed back until only the notch strip is this side of the
             // panel's face. Open: fully out. The ONE animated property here.

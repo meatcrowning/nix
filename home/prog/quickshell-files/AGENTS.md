@@ -521,6 +521,24 @@ beside the notch, then the slab growing outward — because each of them is what
 - **`visible` must track the CARD, not `open`** — `open || |x - closedX| > 1` —
   so the pull plays to its end before the layer unmaps, and keyboard focus
   (`OnDemand`, tied to `visible`) is released only as it goes.
+- **THE SURFACE'S PLACEMENT IS THE OTHER HALF OF THE ILLUSION, and it is not
+  where you would expect.** The bar's exclusive zone reserves the bar AND the
+  notch (`liveWidth + notchPx - windowBorderWidth`), so a surface anchored to
+  that screen edge is placed at the NOTCH'S OUTER FACE — the drawer lands beside
+  the notch, never over it, and its closed strip reads as a second copy of the
+  notch spawning next to the real one. It is cancelled with a negative margin of
+  exactly what the zone added (`-(notchPx - windowBorderWidth)`). Measured on
+  book: reserved 359 of 1536, panel face at 1209, unmargined surface edge 1177.
+- **An UNMAPPED layer surface has no size.** `parent.height` is 0 while the
+  drawer is closed, so centring the card on it put it at y = -161 against the
+  notch's 319 — it mapped that high and settled afterwards ([his] "its currently
+  higher than the bar itself"). Centre on `launcher.screen.height`, and ROUND
+  it: the notch rounds its own (fractional logical pixels at 1.67 scale), and
+  half a pixel out is half a pixel of not-being-the-notch.
+- **Check it without opening it** — `qs ipc call launcher geom` prints the card's
+  y/height beside the notch's own arithmetic plus the edge gap. `cardY==notchY`,
+  `cardH==slabH`, `edgeGap==0`. Opening it to look is not available: it is on his
+  screen and it takes the keyboard.
 - **The two columns partition, they don't filter.** `bespoke(entry)` is the same
   keyword test `NotchModel` uses; the runner list drops every entry that passes
   it, so no program is on the card twice and none is missing.

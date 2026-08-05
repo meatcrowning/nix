@@ -648,6 +648,10 @@ Scope {
     IpcHandler {
         target: "launcher"
         function toggle(): void { launcher.open = !launcher.open; }
+        // Whether the CLOSED drawer is pixel-identical to the notch — the one
+        // thing this file's illusion depends on, and the only way to check it
+        // without putting it on his screen. See Launcher.geomReport.
+        function geom(): string { return launcher.geomReport(); }
         function show(): void { launcher.open = true; }
         function hide(): void { launcher.open = false; }
     }

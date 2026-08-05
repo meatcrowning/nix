@@ -102,6 +102,7 @@ qs log | tail                     # panel parse/binding errors — CUMULATIVE, s
 qs ipc call view geom             # panel widths + drag thresholds
 qs ipc call view trace            # per-pointer-event samples of the last drag
 qs ipc call state carried         # what survived the last panel reload
+qs ipc call launcher geom         # is the CLOSED runner drawer exactly the notch?
 qs ipc call wallpaper status      # path, mode, and whether the frame actually decoded
 hyprctl plugin list               # exactly one hyprvtb, at the new Version
 hyprctl configerrors              # must be empty
