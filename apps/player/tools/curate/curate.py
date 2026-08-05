@@ -338,116 +338,68 @@ def _same_album_title(bi, bj):
 
 
 def cmd_groups(args):
+    """Cluster on the TAG axis (what the player groups by), via tagclusters.
+    Writes groups.json with an `action` per cluster: retag / merge / board.
+    Only `merge` clusters feed merge.py; retag is retag.py's input; board is
+    for him, never auto-acted."""
+    import tagclusters as TC
     rows = _load_scan()
-    dirs = _album_dirs(rows)
-    # candidate identity for a directory: canonical (album_artist, album) as
-    # TAGGED (fall back to folder names if tags are blank), folded.
-    def identity(recs):
-        # The FOLDER name, not the album_artist tag, is the artist identity to
-        # cluster on: a compilation/blog brand ("BIRP!", "Various Artists")
-        # is often the tag on many directories of genuinely unrelated real
-        # artists, while the folder itself already carries the real name
-        # (this library is organised AlbumArtist/Album/). Falling back to the
-        # tag only when there is no folder keeps a same-artist split (folder
-        # names identical or near-identical) matching while a compilation tag
-        # shared across unrelated folders no longer does.
-        aa = recs[0]["album_artist_dir"] or recs[0]["album_artist"]
-        al = recs[0]["album"] or recs[0]["album_dir"]
-        return aa, al
-
-    items = []  # (dirkey, artist_raw, album_raw, artist_fold, album_fold, recs)
-    for dirkey, recs in dirs.items():
-        aa, al = identity(recs)
-        af = C.fold(aa)
-        if af in _NOT_AN_ARTIST:
-            continue  # compilation / unlabeled - never a same-artist split
-        items.append((dirkey, aa, al, af, _album_title_fold(al), recs))
-
-    # bucket by ARTIST first (fuzzy - "A, B & C" vs "B, A & C" vs "A feat. B,
-    # C" collapse via trackmatch.artist_matches), THEN fuzzy-match album title
-    # within an artist's own releases so an edition/remaster suffix in one
-    # folder's tag doesn't stop it folding into its sibling. A script-variant
-    # artist directory ("Shigeo Sekito" vs "Shigeo Sekito (関藤繁生)") shares
-    # its latin fold with the plain one — bucket on that when it exists, so a
-    # CJK parenthetical doesn't isolate one album dir from the rest.
-    artist_keys = []  # representative fold per cluster
-    by_artist = collections.defaultdict(list)
-    for it in items:
-        af_lat = _latin_fold(it[1])
-        it_keys = {it[3]} | ({"L:" + af_lat} if af_lat else set())
-        placed = False
-        for k in artist_keys:
-            k_lat = _latin_fold(k)
-            k_keys = {k} | ({"L:" + k_lat} if k_lat else set())
-            if (it_keys & k_keys or trackmatch.artist_matches(it[1], k)
-                    or difflib.SequenceMatcher(None, it[3], k).ratio() > 0.9):
-                by_artist[k].append(it)
-                placed = True
-                break
-        if not placed:
-            artist_keys.append(it[3])
-            by_artist[it[3]].append(it)
-
+    cl = TC.clusters(rows)
     report = []
-    for _artist_key, group in by_artist.items():
-        if len(group) < 2:
-            continue
-        used = [False] * len(group)
-        keysets = [_album_title_keys(g[2]) for g in group]
-        for i in range(len(group)):
-            if used[i]:
-                continue
-            cluster = [group[i]]
-            used[i] = True
-            for j in range(i + 1, len(group)):
-                if used[j]:
-                    continue
-                bi, bj = group[i][4], group[j][4]
-                if not bi or not bj:
-                    continue
-                # exact/similar on the full fold, or a shared script-plane
-                # key (bilingual vs single-script title of the same album).
-                # Plane matches only count when the plane carries real
-                # content: "brilliant electone the word" is fine, "lp" is not
-                # — a generic residual must not glue unrelated titles.
-                shared = keysets[i] & keysets[j]
-                shared = {k for k in shared
-                          if not k.startswith(("L:", "C:")) or len(k) >= 8}
-                if (_same_album_title(bi, bj) or shared):
-                    # the shared plane must still respect distinguishing
-                    # numbers - "Sailorwave II" vs "Sailorwave III" share the
-                    # latin plane's prefix but are different releases; and a
-                    # variant-suffix mismatch (remixes vs plain) never merges
-                    if _VARIANT_SUFFIX.search(bi) is not None or _VARIANT_SUFFIX.search(bj) is not None:
-                        if bool(_VARIANT_SUFFIX.search(bi)) != bool(_VARIANT_SUFFIX.search(bj)):
-                            continue
-                    di, ri = _distinguishing_numbers(bi)
-                    dj, rj = _distinguishing_numbers(bj)
-                    if di == dj and ri == rj:
-                        cluster.append(group[j])
-                        used[j] = True
-            if len(cluster) < 2:
-                continue
-            # pick the label: prefer the PRIMARY (most-tracks) dir's title —
-            # the longest raw title can be a bilingual string we do not want
-            # as the canonical ("Brilliant Electone • 華麗なるエレクトーン"
-            # over the plain 華麗なるエレクトーン the library mostly carries).
-            label = max(cluster, key=lambda c: len(c[5]))[2]
-            report.append({
-                "album": label,
-                "dirs": [{"path": f"{c[0][0]}/{c[0][1]}", "artist": c[1],
-                          "album_raw": c[2], "n_tracks": len(c[5])} for c in cluster],
-            })
-
-    report.sort(key=lambda g: -len(g["dirs"]))
+    for c in cl:
+        dirs = []
+        for (aa, al), recs in c["variants"].items():
+            for d in sorted({f"{r['album_artist_dir']}/{r['album_dir']}" for r in recs}):
+                drecs = [r for r in recs
+                         if f"{r['album_artist_dir']}/{r['album_dir']}" == d]
+                dirs.append({"path": d, "artist": aa, "album_raw": al,
+                             "n_tracks": len(drecs)})
+        label = max(c["variants"].items(), key=lambda kv: len(kv[1]))[0][1]
+        report.append({"album": label, "action": c["action"],
+                       "reason": c["reason"], "dirs": dirs})
+    report.sort(key=lambda g: (g["action"] != "merge", -len(g["dirs"])))
     out_path = C.STATE / "groups.json"
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=1))
-    print(f"{len(report)} album groups spread across >1 directory -> {out_path}")
+    import collections
+    by = collections.Counter(g["action"] for g in report)
+    print(f"{len(report)} tag-axis clusters -> {out_path}  "
+          f"(merge {by.get('merge',0)}, retag {by.get('retag',0)}, "
+          f"board {by.get('board',0)})")
     for g in report[:25]:
-        print(f"  {g['album']!r}: " + " | ".join(f"{d['path']} ({d['n_tracks']}t)" for d in g["dirs"]))
+        print(f"  [{g['action']}] {g['album']!r}: "
+              + " | ".join(f"{d['path']} ({d['n_tracks']}t)" for d in g["dirs"])[:100])
+def cmd_run(args):
+    """scan -> dupes -> groups -> retag -> merge -> verify, idempotent.
+
+    Every stage is a no-op when the library is already converged, so `run`
+    is safe behind a timer: silent when clean, a work list when not. Board
+    clusters are reported, never acted on. Without --apply the mutating
+    stages (dupes/retag/merge) run dry."""
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    py = sys.executable
+
+    def stage(name, argv):
+        print(f"\n=== {name} ===", flush=True)
+        script, rest = argv[0], argv[1:]
+        r = subprocess.run([py, os.path.join(here, script)] + rest, check=False)
+        if r.returncode not in (0, 1):  # verify exits 1 when dirty; that's data
+            print(f"!! {name} failed ({r.returncode})", file=sys.stderr)
+            sys.exit(r.returncode)
+
+    stage("scan", ["curate.py", "scan"])
+    stage("dupes", ["curate.py", "dupes"] + (["--apply"] if args.apply else []))
+    stage("groups", ["curate.py", "groups"])
+    stage("retag", ["retag.py"] + (["--apply"] if args.apply else []))
+    stage("merge", ["merge.py"] + (["--apply"] if args.apply else []))
+    if args.apply:
+        # files moved/retagged: the scan is stale, refresh before verifying
+        stage("scan (post-apply)", ["curate.py", "scan"])
+    stage("verify", ["verify.py"])
 
 
-CMDS = {"scan": cmd_scan, "dupes": cmd_dupes, "groups": cmd_groups}
+CMDS = {"scan": cmd_scan, "dupes": cmd_dupes, "groups": cmd_groups,
+        "run": cmd_run}
 
 if __name__ == "__main__":
     import argparse
@@ -457,5 +409,8 @@ if __name__ == "__main__":
     dp = sub.add_parser("dupes")
     dp.add_argument("--apply", action="store_true")
     sub.add_parser("groups")
+    rp = sub.add_parser("run")
+    rp.add_argument("--apply", action="store_true")
     a = p.parse_args()
     CMDS[a.cmd](a)
+
