@@ -679,7 +679,13 @@ hl.bind(mainMod .. " + SHIFT + S", hl.dsp.exec_cmd("qs ipc call screenshot toggl
 -- wrapper lives in the nix profile, which is NOT on Hyprland's exec PATH.
 hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("$HOME/.nix-profile/bin/settings"), { description = "Settings" })
 -- Bare Super tap opens the Quickshell runner (fires on release of Super).
-hl.bind(mainMod .. " + Super_L", hl.dsp.exec_cmd("qs ipc call launcher toggle"), { release = true })
+--
+-- `global`, not `exec_cmd`: hyprland-global-shortcuts-v1 hands the press
+-- straight to the running panel (RunnerShortcut.qml claims `quickshell:launcher`),
+-- where `qs ipc call launcher toggle` forked a shell and exec'd Quickshell's CLI
+-- to say the same thing — 20-30ms of process, measured on book, on every tap.
+-- The IPC path still exists and still works; it is just not on the key any more.
+hl.bind(mainMod .. " + Super_L", hl.dsp.global("quickshell:launcher"), { release = true })
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo(), { description = "Pseudo-tile" })
 hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"), { description = "Toggle split" })    -- dwindle only
 

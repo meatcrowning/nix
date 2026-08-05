@@ -103,24 +103,37 @@ PanelWindow {
         return false;
     }
 
+    // THE CORPUS IS BUILT ONCE, not on every open and not on every keystroke.
+    // Scanning `DesktopEntries.applications.values`, dropping the seals and the
+    // `NoDisplay` entries, and sorting the ~300 that remain is work that only
+    // changes when the SYSTEM's programs do — so it is a binding on that list,
+    // and pressing Super does none of it. Each row carries its own lowercased
+    // name, because the search would otherwise redo that per program per
+    // keystroke.
+    //
+    // EVERY OTHER PROGRAM: the seals are in the drawer's own column, so listing
+    // them here too would be the same icon twice.
+    readonly property var corpus: {
+        if (!SettingsStore.d.launcherProviderApps)
+            return [];
+        const apps = DesktopEntries.applications.values;
+        let out = [];
+        for (let i = 0; i < apps.length; i++) {
+            const a = apps[i];
+            if (a.noDisplay || bespoke(a)) continue;
+            out.push({ entry: a, lname: (a.name || "").toLowerCase() });
+        }
+        out.sort((x, y) => (x.entry.name || "").localeCompare(y.entry.name || ""));
+        return out;
+    }
+
     function rebuild() {
         const q = input.text.trim().toLowerCase();
+        const src = corpus;
         let list = [];
-        // Desktop-apps provider (toggleable).
-        if (SettingsStore.d.launcherProviderApps) {
-            const apps = DesktopEntries.applications.values;
-            for (let i = 0; i < apps.length; i++) {
-                const a = apps[i];
-                if (a.noDisplay) continue;
-                // EVERY OTHER PROGRAM: the seals are in the drawer's own column,
-                // so listing them here too would be the same icon twice.
-                if (bespoke(a)) continue;
-                const name = (a.name || "").toLowerCase();
-                if (q === "" || name.includes(q))
-                    list.push(a);
-            }
-            list.sort((x, y) => (x.name || "").localeCompare(y.name || ""));
-        }
+        for (let i = 0; i < src.length; i++)
+            if (q === "" || src[i].lname.includes(q))
+                list.push(src[i].entry);
         // Cap the result count (0 = unlimited).
         const cap = SettingsStore.d.launcherMaxResults;
         if (cap > 0 && list.length > cap)
@@ -169,8 +182,13 @@ PanelWindow {
 
     onOpenChanged: {
         if (open) {
-            input.text = "";
-            rebuild();
+            // Clearing the box already rebuilds through onTextChanged; calling
+            // rebuild() unconditionally as well meant every open did the work
+            // twice.
+            if (input.text === "")
+                rebuild();
+            else
+                input.text = "";
             input.forceActiveFocus();
         }
     }

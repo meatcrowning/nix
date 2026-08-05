@@ -548,6 +548,26 @@ beside the notch, then the slab growing outward — because each of them is what
   `TextMetrics` through the list inside a binding makes the binding depend on
   the `width` it is stepping through, and QML floods the log with binding-loop
   warnings for `nameW`.
+- **The key does NOT spawn a process.** `RunnerShortcut.qml` claims
+  `quickshell:launcher` over hyprland-global-shortcuts-v1 and the bind is
+  `hl.dsp.global("quickshell:launcher")`; the old
+  `exec_cmd("qs ipc call launcher toggle")` forked a shell and exec'd
+  Quickshell's CLI on every tap — 20-30ms measured on book before the panel
+  heard anything. It is a Loader like `HyprEvents.qml` because
+  `Quickshell.Hyprland` is optional, and `qs ipc call launcher toggle` still
+  works as the scriptable path. Check the claim with `hyprctl globalshortcuts`;
+  the appid:name there, in `RunnerShortcut.qml` and in `hyprland.lua` must
+  agree, and a shortcut nothing binds is silently inert.
+- **Opening does no scanning.** The runner's corpus — every non-seal,
+  non-`NoDisplay` entry, sorted, each with its lowercased name — is a binding on
+  `DesktopEntries.applications.values`, so it is rebuilt when the SYSTEM's
+  programs change, not per open and not per keystroke. `rebuild()` only filters
+  it. (And `onOpenChanged` must not both clear the box and call `rebuild()`:
+  clearing already rebuilds through `onTextChanged`.)
+- **What is left is not ours.** The bind fires on RELEASE — that is what makes a
+  bare Super tap distinguishable from Super-as-a-modifier — so the human hold
+  time is in the path and no code here can take it out. Firing on press would
+  open the runner on every Super chord.
 - **Check it without opening it** — `qs ipc call launcher geom` prints the card's
   y/height beside the notch's own arithmetic plus the edge gap. `cardY==notchY`,
   `cardH==slabH`, `edgeGap==0`. Opening it to look is not available: it is on his
