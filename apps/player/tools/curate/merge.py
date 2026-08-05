@@ -243,6 +243,10 @@ def main():
     if not GROUPS_JSON.exists():
         C.reorg.die("no groups.json - run `curate.py groups` first")
     groups = json.loads(GROUPS_JSON.read_text())
+    # tag-axis groups.json carries retag/board clusters too; merge only acts
+    # on dir-splits. Entries without an `action` key predate the tag axis —
+    # treat them as merge (they were all dir-splits by construction).
+    groups = [g for g in groups if g.get("action", "merge") == "merge"]
     by_dir = _load_scan_by_dir()
 
     results = []
