@@ -201,7 +201,42 @@ PanelWindow {
             // and both fall back to sane numbers — the drawer then comes
             // straight out of the panel's edge with no seal column.
             readonly property int closedW: NotchModel.protrusion
-            readonly property int nameW: 132
+            // MEASURED, not guessed. A constant here is dead space between the
+            // names and the runner for every seal set but the one it was picked
+            // for (docs/DESIGN.md §5.2) — [his] "theres too much empty space
+            // between the icons text and the runner". TextMetrics is
+            // synchronous, so one instance driven round the list in the binding
+            // gives the widest name at the face the rows actually draw in.
+            TextMetrics {
+                id: nameMetrics
+                font.family: Theme.font
+                font.pixelSize: Theme.fontSize
+                font.hintingPreference: Font.PreferFullHinting
+            }
+            //
+            // MEASURED IMPERATIVELY, never as a binding: driving `text` round
+            // the list inside a binding makes the binding depend on the very
+            // `width` it is stepping through, and QML reports it as a binding
+            // loop on `nameW` (one warning per app per evaluation, thousands of
+            // lines into `qs log`). A Theme change reloads the whole panel, so
+            // the app list is the only thing this has to follow.
+            property int nameW: 0
+            function measureNames() {
+                const a = NotchModel.apps;
+                let w = 0;
+                for (let i = 0; i < a.length; i++) {
+                    nameMetrics.text = Glyphs.px(a[i].name || "");
+                    w = Math.max(w, nameMetrics.width);
+                }
+                nameW = Math.ceil(w);
+            }
+            Component.onCompleted: measureNames()
+            // DesktopEntries scans lazily, so the seal list arrives after the
+            // first pass (the trap TaskCell.qml documents).
+            Connections {
+                target: NotchModel
+                function onAppsChanged(): void { card.measureNames(); }
+            }
             readonly property int runW: 264
             readonly property int openW: NotchModel.columnInset + NotchModel.iconSize
                                        + NotchModel.gap + nameW

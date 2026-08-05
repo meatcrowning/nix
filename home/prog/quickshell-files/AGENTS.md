@@ -535,6 +535,19 @@ beside the notch, then the slab growing outward — because each of them is what
   higher than the bar itself"). Centre on `launcher.screen.height`, and ROUND
   it: the notch rounds its own (fractional logical pixels at 1.67 scale), and
   half a pixel out is half a pixel of not-being-the-notch.
+- **The MAP must not fade, and that is a compositor rule, not a QML one.**
+  `layersIn`/`layersOut` are enabled with `style = "fade"` (hyprland.lua), so
+  opening faded the drawer up over the notch and closing faded it out — [his]
+  "i can still see the transistion between the unrolled and rolled bar". A
+  `hl.layer_rule` with `no_anim` on `^qs-launcher$` is what makes the map
+  invisible; `hyprland.lua` is seed-once, so edit BOTH copies. Nothing here can
+  fix this from the QML side.
+- **The name column is MEASURED** (`measureNames()` + `TextMetrics`), not a
+  constant — a constant is dead space between the names and the runner for every
+  seal set but the one it was picked for. Do it IMPERATIVELY: stepping a
+  `TextMetrics` through the list inside a binding makes the binding depend on
+  the `width` it is stepping through, and QML floods the log with binding-loop
+  warnings for `nameW`.
 - **Check it without opening it** — `qs ipc call launcher geom` prints the card's
   y/height beside the notch's own arithmetic plus the edge gap. `cardY==notchY`,
   `cardH==slabH`, `edgeGap==0`. Opening it to look is not available: it is on his
