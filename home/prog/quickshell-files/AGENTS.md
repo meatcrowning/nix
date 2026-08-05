@@ -558,6 +558,21 @@ beside the notch, then the slab growing outward — because each of them is what
   works as the scriptable path. Check the claim with `hyprctl globalshortcuts`;
   the appid:name there, in `RunnerShortcut.qml` and in `hyprland.lua` must
   agree, and a shortcut nothing binds is silently inert.
+- **A `{ release = true }` bind makes the client see a RELEASE, not a press.**
+  Hyprland's `global` action sends whichever event the KEY was in
+  (`ConfigActions.cpp`: `sendGlobalShortcutEvent(..., m_passPressed)`;
+  `KeybindManager.cpp`: `m_passPressed = pressed`), so the bare-Super tap — which
+  MUST be a release bind or every Super chord opens the runner — dispatches at
+  key-up and `onPressed` never fires. That is a dead key with nothing wrong
+  anywhere you would look: the shortcut registers, the bind exists, `hyprctl
+  globalshortcuts` lists it. `RunnerShortcut.qml` handles both signals, with a
+  250ms coalesce so a press-type bind's pressed+released pair cannot toggle
+  twice.
+- **Probe the protocol half without touching his keyboard**:
+  `hyprctl eval 'hl.dispatch(hl.dsp.global("quickshell:launcher"))'` runs the
+  action outside a keybind (`m_passPressed` is -1, so the client gets `pressed`)
+  — it proves the appid:name and the delivery, not the key path. Disconnect the
+  toggle first, or the probe opens the runner on his screen.
 - **Opening does no scanning.** The runner's corpus — every non-seal,
   non-`NoDisplay` entry, sorted, each with its lowercased name — is a binding on
   `DesktopEntries.applications.values`, so it is rebuilt when the SYSTEM's
