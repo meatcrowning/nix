@@ -57,6 +57,35 @@ CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "painte
 PREFS = STATE / "prefs.json"
 UNIT = "comfy-painter.service"
 
+# WHERE THE BACKEND'S UNIT LIVES. On top it is local, so this is plain
+# `systemctl --user`. On book there is no comfy-painter.service at all
+# (home/prog/painter.nix gates the unit on host != "air") — the backend is
+# top's, reached through the ssh forward that comfy-tunnel.sh holds open, and a
+# LOCAL systemctl there fails with "unit not found" for every start, stop and
+# status: the app opened saying "backend failed to start" while the backend it
+# was tunnelled to sat there running. So the launcher exports the host it
+# resolved and we drive systemd over the same ssh connection.
+#
+# The control socket matters: `is-active` runs every 3s, and paying a full ssh
+# handshake for each would be ~0.2s of network per poll. Same master the
+# launcher already opened, so this rides a connection that exists.
+BACKEND_SSH = os.environ.get("PAINTER_BACKEND_SSH", "")
+_SSH_BIN = os.environ.get("PAINTER_BACKEND_SSH_BIN", "/usr/bin/ssh")
+_SSH_CTL = os.environ.get("PAINTER_BACKEND_SSH_CTL", "")
+
+
+def unit_cmd(*verb: str) -> list[str]:
+    """`systemctl --user <verb> comfy-painter.service`, here or on top."""
+    local = ["systemctl", "--user", *verb, UNIT]
+    if not BACKEND_SSH:
+        return local
+    ssh = [_SSH_BIN, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+    if _SSH_CTL:
+        ssh += ["-o", "ControlMaster=auto", "-o", "ControlPersist=30",
+                "-o", f"ControlPath={_SSH_CTL}"]
+    return ssh + [BACKEND_SSH, " ".join(local)]
+
+
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
 PALETTE_KEYS = ["bg", "bgAlt", "border", "accent", "dim", "text", "textDim",
                 "highlight", "ok", "warn", "crit", "info"]
@@ -506,8 +535,8 @@ class Painter(QObject):
     def _refresh_unit(self):
         state = "unknown"
         try:
-            r = subprocess.run(["systemctl", "--user", "is-active", UNIT],
-                               check=False, capture_output=True, text=True, timeout=5)
+            r = subprocess.run(unit_cmd("is-active"),
+                               check=False, capture_output=True, text=True, timeout=10)
             state = (r.stdout or r.stderr or "").strip() or "unknown"
         except Exception:  # noqa: BLE001 - an unknown unit is still a state we can draw
             pass
@@ -518,8 +547,8 @@ class Painter(QObject):
     @Slot()
     def startBackend(self):
         try:
-            r = subprocess.run(["systemctl", "--user", "start", UNIT],
-                               check=False, capture_output=True, text=True, timeout=20)
+            r = subprocess.run(unit_cmd("start"),
+                               check=False, capture_output=True, text=True, timeout=30)
         except Exception as exc:  # noqa: BLE001
             self._refresh_unit()
             self.toast.emit(f"could not start the backend: {exc}", True)
@@ -538,8 +567,8 @@ class Painter(QObject):
     @Slot()
     def stopBackend(self):
         try:
-            r = subprocess.run(["systemctl", "--user", "stop", UNIT], check=False,
-                               capture_output=True, text=True, timeout=20)
+            r = subprocess.run(unit_cmd("stop"), check=False,
+                               capture_output=True, text=True, timeout=30)
         except Exception as exc:  # noqa: BLE001
             self._refresh_unit()
             self.toast.emit(f"could not stop the backend: {exc}", True)

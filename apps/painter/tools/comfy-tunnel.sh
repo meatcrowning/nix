@@ -96,14 +96,6 @@ if [ -n "${PAINTER_NO_TUNNEL:-}" ]; then
     exit 0
 fi
 
-# Already tunnelled — a second painter, or a manual forward being held. Use it
-# rather than fight over the port.
-if comfy_answers; then
-    say "127.0.0.1:$PORT already answers - using it"
-    [ ${#APP[@]} -gt 0 ] && exec "${APP[@]}"
-    exit 0
-fi
-
 if [ -n "${COMFY_HOST:-}" ]; then
     CANDIDATES=("$COMFY_HOST")
 else
@@ -113,8 +105,8 @@ fi
 # One ssh master for the probe, the unit start and the forward: three
 # handshakes become one. %C hashes (host, port, user), so top.local and top
 # cannot collide on the socket name.
-SSH_MUX=(-o ControlMaster=auto -o ControlPersist=30
-         -o "ControlPath=${XDG_RUNTIME_DIR:-/tmp}/painter-comfy-ssh-%C")
+SSH_CTL="${XDG_RUNTIME_DIR:-/tmp}/painter-comfy-ssh-%C"
+SSH_MUX=(-o ControlMaster=auto -o ControlPersist=30 -o "ControlPath=$SSH_CTL")
 
 HOST=""
 for cand in "${CANDIDATES[@]}"; do
@@ -125,6 +117,25 @@ for cand in "${CANDIDATES[@]}"; do
 done
 [ -n "$HOST" ] || die "can't reach top (tried: ${CANDIDATES[*]}) - is it awake? Off the home LAN this needs the tailnet up on both machines (tailscale status)."
 say "reaching top as '$HOST'"
+
+# The app's own start/stop/status controls drive `systemctl --user` on the unit,
+# and on book that unit is TOP's — a local systemctl finds nothing and every
+# control fails, backend running or not. Hand the app the host we resolved and
+# the master socket we already opened, so it drives systemd where the backend
+# actually is. main.py's unit_cmd() reads exactly these three.
+export PAINTER_BACKEND_SSH="$HOST"
+export PAINTER_BACKEND_SSH_BIN="$SSH"
+export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
+
+# Already tunnelled — a second painter, or a manual forward being held. Use it
+# rather than fight over the port. Resolving the host first (rather than
+# short-circuiting on the open port) is deliberate: the app needs the host to
+# drive the unit, and a port that answers proves top is reachable anyway.
+if comfy_answers; then
+    say "127.0.0.1:$PORT already answers - using it"
+    [ ${#APP[@]} -gt 0 ] && exec "${APP[@]}"
+    exit 0
+fi
 
 # Is the backend already up over there? The unit is the only thing that binds
 # that port, so `is-active` is the cheap question — and whether it truly ANSWERS
