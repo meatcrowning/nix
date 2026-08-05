@@ -122,6 +122,20 @@ now **symlinks** to it; that keeps cte working without editing its `config.py`,
 which regenerates its own `extra_model_paths.yaml` on every import. Never in
 git. Reached only via `/home/lam/models/extra_model_paths.yaml`.
 
+**On top. book has no copy, and cannot fake one from a file list** — the
+registry *reads* every model (tensor headers, then a second read per file for
+LoRA target matching), so painter there mounts top's model root read-only over
+sshfs at `~/.cache/painter/models-top` and points `PAINTER_MODELS` at it;
+`comfy-tunnel.sh` does the mount and unmounts on exit. Only headers cross the
+wire — 57 files, ~2.6s for a cold scan, near-free afterwards from
+`fingerprint.py`'s size+mtime cache — never the 249G. Verified identical
+identification to top's for all 57 files (role, family, loader, quant).
+`PAINTER_NO_MODELS_MOUNT=1` skips it. An unmountable root is **not** fatal (the
+backend is the precondition, not the picker), but it says so in a toast rather
+than leaving an empty list that reads as "top has no models". Generated images
+still land locally: the app downloads each result over the tunnel's `/view` and
+writes it to book's own `OUT_DIR`, so book's gallery shows what book made.
+
 ## Model identification is by tensor header, not filename
 
 `fingerprint.py`, pure stdlib, whole 246G collection in ~0.2s: safetensors' JSON

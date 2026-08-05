@@ -40,6 +40,11 @@ trap '' PIPE
 PORT="${COMFY_PORT:-8188}"
 SSH="${COMFY_SSH:-/usr/bin/ssh}"   # Fedora's ssh: nix-built binaries on book
                                    # cannot resolve .local names (nss-mdns).
+# Same reason for sshfs and fusermount3 — Fedora's, under /usr/sbin.
+SSHFS="${COMFY_SSHFS:-/usr/sbin/sshfs}"
+FUSERMOUNT="${COMFY_FUSERMOUNT:-/usr/sbin/fusermount3}"
+MODELS_REMOTE="${COMFY_MODELS:-/home/lam/models}"
+MODELS_LOCAL="${PAINTER_MODELS_MOUNT:-${XDG_CACHE_HOME:-$HOME/.cache}/painter/models-top}"
 # How long to wait for the backend to serve. A warm one is seconds; a cold one
 # is a torch import plus however many GB of weights; and if the nix-shell env
 # has been garbage-collected since the last run it is a few hundred MB of store
@@ -110,7 +115,13 @@ SSH_MUX=(-o ControlMaster=auto -o ControlPersist=30 -o "ControlPath=$SSH_CTL")
 
 HOST=""
 for cand in "${CANDIDATES[@]}"; do
+    # Twice, and the second time WITHOUT the shared master: a previous painter's
+    # ControlPersist socket expiring underneath this connect fails the whole
+    # probe, and "can't reach top" for a top that is sitting right there is the
+    # worst message this script can produce. Observed once in testing.
     if "$SSH" "${SSH_MUX[@]}" -o BatchMode=yes -o ConnectTimeout="$CONNECT_TIMEOUT" \
+              -o StrictHostKeyChecking=accept-new "$cand" true 2>/dev/null ||
+       "$SSH" -o BatchMode=yes -o ConnectTimeout="$CONNECT_TIMEOUT" \
               -o StrictHostKeyChecking=accept-new "$cand" true 2>/dev/null; then
         HOST="$cand"; break
     fi
@@ -127,13 +138,62 @@ export PAINTER_BACKEND_SSH="$HOST"
 export PAINTER_BACKEND_SSH_BIN="$SSH"
 export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
 
+# THE MODELS ARE TOP'S TOO, and painter identifies them by READING THEM: the
+# registry fingerprints every file's tensor header (fingerprint.py), and LoRA
+# compatibility re-reads the base's and the adapter's headers later on demand.
+# None of that can be answered from a file list, and /home/lam/models does not
+# exist on book — so the app found nothing to load and offered an empty model
+# picker. Mount top's model root read-only over sshfs and point PAINTER_MODELS
+# at it; only headers ever cross the wire (57 files, a few KB each, cached by
+# size+mtime after the first scan), never the 249G.
+#
+# The graphs are unaffected: they name a model by BASENAME and ComfyUI resolves
+# it against top's own extra_model_paths.yaml, so this mount is for
+# identification here and nothing else.
+mount_models() {
+    findmnt -rn "$MODELS_LOCAL" >/dev/null 2>&1 && { MOUNTED_BY_US=""; return 0; }
+    mkdir -p "$MODELS_LOCAL" || return 1
+    # ro: nothing here ever writes a model. follow_symlinks: the roots were
+    # consolidated in 2026-07 and the tree still holds server-side symlinks,
+    # which would otherwise arrive as dangling links.
+    "$SSHFS" -o ro,follow_symlinks,reconnect,BatchMode=yes \
+             -o ServerAliveInterval=15,ServerAliveCountMax=3 \
+             "$HOST:$MODELS_REMOTE" "$MODELS_LOCAL" 2>/dev/null || return 1
+    MOUNTED_BY_US=1
+    return 0
+}
+
+unmount_models() {
+    [ -n "${MOUNTED_BY_US:-}" ] || return 0
+    "$FUSERMOUNT" -u "$MODELS_LOCAL" 2>/dev/null
+}
+
+if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
+    if mount_models; then
+        export PAINTER_MODELS="$MODELS_LOCAL"
+        say "models from $HOST:$MODELS_REMOTE at $MODELS_LOCAL"
+    else
+        # Not fatal: the backend is what painter cannot work without, and the
+        # picker being empty says so plainly. Say why, once, rather than let it
+        # read as "top has no models".
+        say "could not mount $HOST:$MODELS_REMOTE - the model picker will be empty"
+        command -v notify-send >/dev/null 2>&1 &&
+            notify-send -a painter -u critical "painter" \
+                "could not mount top's models over sshfs - the model picker will be empty" 2>/dev/null
+    fi
+fi
+
 # Already tunnelled — a second painter, or a manual forward being held. Use it
 # rather than fight over the port. Resolving the host first (rather than
 # short-circuiting on the open port) is deliberate: the app needs the host to
 # drive the unit, and a port that answers proves top is reachable anyway.
 if comfy_answers; then
     say "127.0.0.1:$PORT already answers - using it"
-    [ ${#APP[@]} -gt 0 ] && exec "${APP[@]}"
+    if [ ${#APP[@]} -gt 0 ]; then
+        trap unmount_models EXIT
+        "${APP[@]}"
+        exit $?
+    fi
     exit 0
 fi
 
@@ -170,7 +230,10 @@ fi
 
 "${FWD[@]}" &
 TUN=$!
-trap 'kill "$TUN" 2>/dev/null' EXIT
+# One trap, set once, covering every exit including the die()s below: a forward
+# left running or a mount left behind is exactly the residue that makes the NEXT
+# launch take a stale path.
+trap 'kill "$TUN" 2>/dev/null; unmount_models' EXIT
 
 deadline=$(( SECONDS + READY_TIMEOUT ))
 until comfy_answers; do
