@@ -488,27 +488,42 @@ The notch publishes its protrusion as `ViewMode.notchPx` and the bar's
 a floating window may still cover it, as it may cover the bar. docs/DESIGN.md
 §12.2.2 is the rule.
 
-### The runner IS the notch slid out (`Launcher.qml`)
+### The runner IS the notch, pulled out (`Launcher.qml`)
 
-Two columns: the notch's seals down the left, each with its NAME to its right,
-and the search box + every OTHER program on the system down the right, against
-the panel. docs/DESIGN.md §12.2.4 is the rule; three mechanics live here.
+The slab travels away from the panel with its seals aboard, and the space it
+uncovers is the runner: search box over every OTHER program on the system.
+docs/DESIGN.md §12.2.4 is the rule — including *why* it is not a card that
+slides in beside the notch, which is what this was on the first attempt and what
+he rejected as a "disjointed phantom runner". The mechanics:
 
+- **CLOSED IT MUST BE THE NOTCH, to the pixel.** `closedW` is
+  `NotchModel.protrusion`, `closedH` is `slabH`, the seal inset is the notch's
+  own — flush case included, via `NotchModel.flushOn(screen)`. The surface maps
+  and unmaps behind that identity, so there is nothing to see at either end. Any
+  disagreement is a visible twitch at the start of the pull, not a subtle one.
+- **Only the OUTER edge moves.** The card is anchored by its panel-side edge and
+  its `width`/`height` animate; the slab is anchored to the moving edge, the
+  runner to the fixed one, and the slab is opaque and above it — so closed, the
+  slab covers the runner completely, and it is uncovered by the travel rather
+  than faded on top of. Do not "simplify" this into an `x` translation of the
+  whole card: that is the phantom again.
 - **It is its own Overlay surface, and that is forced.** The notch is inside the
   bar's surface so their outlines share one coordinate space during a width
   drag; a drawer this wide cannot be, because the bar's surface width is the
-  constant the exclusive zone derives from. So the card's right edge sits on the
-  panel's face (`margins.right: 0`) and, fully open, it covers the notch it grew
-  out of — Overlay is above the bar's `Top`. Its outline is the notch's: three
-  `accent` sides, panel-facing one open, no rounding.
-- **`visible` must track the CARD, not `open`** — `open || |card.x - hidden| > 1`
-  — so the slide-out plays to its end before the layer unmaps, and keyboard
-  focus (`OnDemand`, tied to `visible`) is released only as it goes. Comparing
-  against `shown` instead leaves the surface mapped forever, invisibly eating
-  clicks down a strip of the desktop.
+  constant the exclusive zone derives from. So the card's panel-side edge sits
+  on the panel's face (`margins.right: 0`) and it covers the notch for as long
+  as it is out — Overlay is above the bar's `Top`.
+- **`visible` must track the CARD, not `open`** — `open || width > closedW + 1`
+  — so the pull plays to its end before the layer unmaps, and keyboard focus
+  (`OnDemand`, tied to `visible`) is released only as it goes.
+- **Revealed content fades on `card.out`**, the pull's own 0..1 progress, not on
+  a Behavior of its own.
 - **The two columns partition, they don't filter.** `bespoke(entry)` is the same
   keyword test `NotchModel` uses; the runner list drops every entry that passes
   it, so no program is on the card twice and none is missing.
+- **A `Behavior` needs a writable property.** `readonly property int inset: …`
+  loads as `Invalid property assignment: "inset" is a read-only property` — a
+  bound `property int` animates fine and is still driven by its binding.
 
 **There is no runner button** — `RunnerButton.qml` is deleted, and neither the
 classic bar's top cluster nor `DockHeader` has one. The only way in is
