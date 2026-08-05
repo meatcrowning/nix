@@ -26,13 +26,16 @@
 # directly there, so there is no reachability check to get wrong.
 set -uo pipefail
 
-# Names for top, tried in order: the mDNS name answers only on the home LAN;
-# `top` is the tailscale MagicDNS name and works from any network the tailnet
-# reaches (sys/net/tailscale.nix). PLAYER_SYNC_HOST pins the list to one name.
+# Names for top, tried in order. `top` FIRST, and it is worth five seconds of
+# every launch: measured on book 2026-08-04, resolving `top.local` takes ~5s
+# (mDNS, after the other resolvers time out) against 0.04s for `top`, which the
+# LAN's own DNS answers at home and tailscale's MagicDNS answers off it. The
+# mDNS name stays as the fallback for a network where neither knows it.
+# PLAYER_SYNC_HOST pins the list to one name.
 if [ -n "${PLAYER_SYNC_HOST:-}" ]; then
     CANDIDATES=("$PLAYER_SYNC_HOST")
 else
-    CANDIDATES=(top.local top)
+    CANDIDATES=(top top.local)
 fi
 MOUNT="/run/media/lam/SSD/aud"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
