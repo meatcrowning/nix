@@ -29,8 +29,8 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
-                            QObject, Property, QSortFilterProxyModel, Qt, QTimer,
-                            QUrl, Signal, Slot)
+                            QObject, Property, QProcess, QSortFilterProxyModel, Qt,
+                            QTimer, QUrl, Signal, Slot)
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 
@@ -478,7 +478,25 @@ class Painter(QObject):
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         self.gallery.load_existing()
 
+        self._procs = []                  # live QProcesses, so none is GC'd mid-run
+        self._want_model = ""             # a remembered selection, until the rows land
         QTimer.singleShot(0, self.startBackend)
+        # THE MODEL LIST DOES NOT NEED THE BACKEND. It used to be built only when
+        # /object_info landed, so painter opened to an empty picker and sat there
+        # until ComfyUI had finished loading — on a cold start, minutes of
+        # looking at nothing. The registry reads model headers off disk (over
+        # book's sshfs mount), so it can answer straight away; the backend still
+        # fills in the sampler/scheduler lists when it arrives.
+        QTimer.singleShot(0, self.rescan)
+        # ...and again while it comes up empty, because on book the model root is
+        # an sshfs mount the launcher may still be making (it no longer blocks the
+        # window on it). Six tries over six seconds, then it stops asking: an
+        # empty root really is empty, and a scan of one costs nothing.
+        self._scan_tries = 0
+        self._scan_retry = QTimer(self)
+        self._scan_retry.setInterval(1000)
+        self._scan_retry.timeout.connect(self._retry_scan)
+        self._scan_retry.start()
         self._probe = QTimer(self)
         self._probe.setInterval(2000)
         self._probe.timeout.connect(self._poll_backend)
@@ -534,60 +552,85 @@ class Painter(QObject):
     # the start/stop controls can be lit from what systemd says rather than
     # from what the last click intended. "activating" counts as running: the
     # unit is up, ComfyUI just has not finished loading.
+    # NOTHING HERE MAY BLOCK THE GUI THREAD. These are `systemctl` calls, and on
+    # book every one of them is an ssh round trip to top — run synchronously at
+    # startup they held the window closed before it had painted a pixel, which
+    # is most of what "painter takes a while to start" was. QProcess instead:
+    # the window comes up immediately and the answer arrives when it arrives.
+    def _run_async(self, argv, done=None):
+        proc = QProcess(self)
+        self._procs.append(proc)
+
+        def finished(*_):
+            # Defensive on both ends: a QProcess whose C++ side has already gone
+            # (teardown, or a second emission after deleteLater) would otherwise
+            # raise out of a signal handler, where nothing can catch it.
+            if proc not in self._procs:
+                return
+            self._procs.remove(proc)
+            try:
+                out = (bytes(proc.readAllStandardOutput()).decode(errors="replace")
+                       + bytes(proc.readAllStandardError()).decode(errors="replace"))
+                rc = proc.exitCode()
+            except RuntimeError:
+                return
+            if done:
+                done(rc, out.strip())
+            proc.deleteLater()
+
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda *_: None)   # reported through finished
+        proc.start(argv[0], argv[1:])
+        return proc
+
+    # The unit's real state, refreshed on a timer and after every action, so
+    # the start/stop controls can be lit from what systemd says rather than
+    # from what the last click intended. "activating" counts as running: the
+    # unit is up, ComfyUI just has not finished loading.
     def _refresh_unit(self):
-        state = "unknown"
-        try:
-            r = subprocess.run(unit_cmd("is-active"),
-                               check=False, capture_output=True, text=True, timeout=10)
-            state = (r.stdout or r.stderr or "").strip() or "unknown"
-        except Exception:  # noqa: BLE001 - an unknown unit is still a state we can draw
-            pass
-        if state != self._unit_state:
-            self._unit_state = state
-            self.statusChanged.emit()
+        def got(_rc, out):
+            state = out.splitlines()[-1].strip() if out else "unknown"
+            if state != self._unit_state:
+                self._unit_state = state
+                self.statusChanged.emit()
+
+        self._run_async(unit_cmd("is-active"), got)
 
     @Slot()
     def startBackend(self):
-        try:
-            r = subprocess.run(unit_cmd("start"),
-                               check=False, capture_output=True, text=True, timeout=30)
-        except Exception as exc:  # noqa: BLE001
+        self._set_status("starting ComfyUI...")
+
+        def done(rc, out):
             self._refresh_unit()
-            self.toast.emit(f"could not start the backend: {exc}", True)
-            return
-        self._refresh_unit()
-        if r.returncode != 0:
-            detail = (r.stderr or r.stdout or "").strip().splitlines()
-            self._set_status("backend failed to start")
-            self.toast.emit("systemctl start failed: "
-                            + (detail[-1] if detail else f"exit {r.returncode}"), True)
-            return
-        self._set_status("waiting for ComfyUI...")
-        self._probe.start()
-        self._poll_backend()
+            if rc != 0:
+                detail = out.splitlines()
+                self._set_status("backend failed to start")
+                self.toast.emit("systemctl start failed: "
+                                + (detail[-1] if detail else f"exit {rc}"), True)
+                return
+            self._set_status("waiting for ComfyUI...")
+            self._probe.start()
+            self._poll_backend()
+
+        self._run_async(unit_cmd("start"), done)
 
     @Slot()
     def stopBackend(self):
-        try:
-            r = subprocess.run(unit_cmd("stop"), check=False,
-                               capture_output=True, text=True, timeout=30)
-        except Exception as exc:  # noqa: BLE001
+        def done(rc, out):
             self._refresh_unit()
-            self.toast.emit(f"could not stop the backend: {exc}", True)
-            return
-        self._refresh_unit()
-        # Report what happened, not what was asked for: a non-zero exit (or a
-        # unit still active afterwards) with a "backend stopped" label is the
-        # exact "reports a change that did not happen" failure docs/DESIGN.md §10
-        # forbids.
-        if r.returncode != 0 or self._unit_state == "active":
-            detail = (r.stderr or r.stdout or "").strip().splitlines()
-            self.toast.emit("systemctl stop failed: "
-                            + (detail[-1] if detail else f"exit {r.returncode}"), True)
-            return
-        self._probe.stop()
-        self._object_info = None
-        self._set_status("backend stopped")
+            # Report what happened, not what was asked for: a non-zero exit with
+            # a "backend stopped" label is the exact "reports a change that did
+            # not happen" failure docs/DESIGN.md §10 forbids.
+            if rc != 0:
+                detail = out.splitlines()
+                self.toast.emit("systemctl stop failed: "
+                                + (detail[-1] if detail else f"exit {rc}"), True)
+                return
+            self._probe.stop()
+            self._object_info = None
+            self._set_status("backend stopped")
+
+        self._run_async(unit_cmd("stop"), done)
 
     def _poll_backend(self):
         def got(doc):
@@ -615,7 +658,11 @@ class Painter(QObject):
         self._curves = G.enum_values(oi, "ModelSamplingSD3Advanced", "curve") or []
         self._windows = G.enum_values(oi, "ModelSamplingSD3Advanced", "outside_window") or []
         self.optionsChanged.emit()
-        self.rescan()
+        # Only if the startup scan found nothing (an empty or unreadable model
+        # root at launch): the list is normally already up by now, and rebuilding
+        # it would throw away the selection.
+        if self.models.rowCount() == 0:
+            self.rescan()
         self.statusChanged.emit()
 
     # -- models ------------------------------------------------------------
@@ -644,11 +691,48 @@ class Painter(QObject):
             })
         rows.sort(key=lambda r: (not r["known"], r["label"].lower(), r["name"].lower()))
         self.models.set_rows(rows)
-        if self._selected < 0 and rows:
+        want = getattr(self, "_want_model", "")
+        if want:
+            for i in range(self.models.rowCount()):
+                e = self.models.entry_at(i)
+                if e is not None and e.name == want:
+                    self._want_model = ""
+                    self.selectModel(i)
+                    break
+            else:
+                self.selectModel(0 if rows else -1)
+        elif self._selected < 0 and rows:
             self.selectModel(0)
         else:
             self.selectModel(min(self._selected, len(rows) - 1))
         self._set_status(f"{len(rows)} models")
+
+    def _retry_scan(self):
+        self._scan_tries += 1
+        if self.models.rowCount() > 0 or self._scan_tries > 6:
+            self._scan_retry.stop()
+            return
+        self.rescan()
+
+    @Slot(str)
+    def selectModelByName(self, name):
+        """Restore a remembered selection.
+
+        Called from Component.onCompleted, which runs BEFORE the scan has
+        finished, so the wanted name is also remembered and applied when the rows
+        land — otherwise the restore would be a silent no-op on every launch,
+        which is the same as not remembering at all.
+        """
+        self._want_model = name or ""
+        if not name:
+            return
+        for i in range(self.models.rowCount()):
+            e = self.models.entry_at(i)
+            if e is not None and e.name == name:
+                self._want_model = ""
+                if i != self._selected:
+                    self.selectModel(i)
+                return
 
     @Slot(int)
     def selectModel(self, i):

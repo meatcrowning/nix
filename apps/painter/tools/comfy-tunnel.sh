@@ -3,9 +3,11 @@
 #
 # This is also painter's LAUNCHER on book: home/prog/painter.nix's `air` branch
 # execs `comfy-tunnel.sh -- python3 main.py`, so opening painter from the runner
-# does the whole thing by itself — probe top, start the backend there if it is
-# not already up, forward 8188, wait until it actually answers, run the app,
-# tear the forward down after.
+# does the whole thing by itself — probe top, forward 8188 and mount top's model
+# root at the same time, start the backend there if it is not already up, run the
+# app as soon as the port is bound, and tear both down after. It does NOT wait
+# for ComfyUI to finish loading: the window opens now and says what it is waiting
+# for.
 #
 # The backend is loopback-only on purpose (home/prog/painter.nix passes
 # `--listen 127.0.0.1`, and sys/net/tailscale.nix opens only 22 and 445 on
@@ -104,7 +106,14 @@ fi
 if [ -n "${COMFY_HOST:-}" ]; then
     CANDIDATES=("$COMFY_HOST")
 else
-    CANDIDATES=(top.local top)
+    # `top` FIRST, and this is worth 5 seconds of every launch. Measured on book:
+    # resolving `top.local` takes ~5s (mDNS, after the other resolvers time out)
+    # against 0.04s for `top` — which the LAN's own DNS answers at home and
+    # tailscale's MagicDNS answers everywhere else. Trying the mDNS name first
+    # meant the window waited five seconds on a name lookup before anything else
+    # could even begin. `top.local` stays as the fallback for a network where
+    # neither DNS knows the name.
+    CANDIDATES=(top top.local)
 fi
 
 # One ssh master for the probe, the unit start and the forward: three
@@ -138,6 +147,24 @@ export PAINTER_BACKEND_SSH="$HOST"
 export PAINTER_BACKEND_SSH_BIN="$SSH"
 export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
 
+# -N: no remote command. ExitOnForwardFailure so a refused bind is loud rather
+# than a tunnel that silently forwards nothing.
+FWD=("$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes
+     -o ServerAliveInterval=20 -o ServerAliveCountMax=3
+     -N -L "127.0.0.1:$PORT:127.0.0.1:$PORT" "$HOST")
+
+# Started HERE, before the mount and the unit check, because none of the three
+# needs the others: paying for them one after another put a second of pure
+# waiting in front of a window that now opens in a quarter of one.
+if [ ${#APP[@]} -gt 0 ]; then
+    "${FWD[@]}" &
+    TUN=$!
+    # One trap, set once, covering every exit including the die()s below: a
+    # forward left running or a mount left behind is exactly the residue that
+    # makes the NEXT launch take a stale path.
+    trap 'kill "$TUN" 2>/dev/null; unmount_models' EXIT
+fi
+
 # THE MODELS ARE TOP'S TOO, and painter identifies them by READING THEM: the
 # registry fingerprints every file's tensor header (fingerprint.py), and LoRA
 # compatibility re-reads the base's and the adapter's headers later on demand.
@@ -169,8 +196,12 @@ unmount_models() {
 }
 
 if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
+    # The path is known before the mount exists, so the app can be told where the
+    # models WILL be and started straight away — sshfs takes about a second, and
+    # that second was spent with no window on screen. main.py's scan retries
+    # while the list is empty, so it picks them up as soon as the mount lands.
+    export PAINTER_MODELS="$MODELS_LOCAL"
     if mount_models; then
-        export PAINTER_MODELS="$MODELS_LOCAL"
         say "models from $HOST:$MODELS_REMOTE at $MODELS_LOCAL"
     else
         # Not fatal: the backend is what painter cannot work without, and the
@@ -190,59 +221,52 @@ fi
 if comfy_answers; then
     say "127.0.0.1:$PORT already answers - using it"
     if [ ${#APP[@]} -gt 0 ]; then
-        trap unmount_models EXIT
+        # Ours lost the race for the port (someone else's forward is up and
+        # serving), so drop it rather than leave a dead ssh in the tree.
+        kill "$TUN" 2>/dev/null
         "${APP[@]}"
         exit $?
     fi
     exit 0
 fi
 
-# Is the backend already up over there? The unit is the only thing that binds
-# that port, so `is-active` is the cheap question — and whether it truly ANSWERS
-# is proven below through the forward either way, so a wedged one is still
-# caught.
-STATE="$("$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
-         'systemctl --user is-active comfy-painter.service' 2>/dev/null)"
-if [ "$STATE" = "active" ]; then
-    say "comfy-painter already running on $HOST"
-else
-    say "comfy-painter is ${STATE:-unknown} on $HOST - starting it"
-    command -v notify-send >/dev/null 2>&1 &&
-        notify-send -a painter "painter" "starting ComfyUI on top…" 2>/dev/null
-    # No wantedBy on the unit, so it is not running unless someone asked for it.
-    # Type=exec, so this returns once python is exec'd — long before the weights
-    # are loaded, which is what the readiness poll below is for.
-    "$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
-        'systemctl --user start comfy-painter.service' 2>/dev/null ||
-        die "could not start comfy-painter on top (is a user session up there?)"
+# STARTING THE BACKEND IS THE APP'S JOB, NOT THIS SCRIPT'S — when there is an
+# app. main.py fires startBackend() on its first tick, over this same ssh
+# connection and without blocking its GUI thread, and reports progress in the
+# window where he can see it. Doing it here as well only added an ssh round trip
+# in front of the window, to say the same thing in a toast.
+#
+# With no app (`comfy-tunnel.sh` holding a forward by hand) there is nobody else
+# to ask, so it still starts it here.
+if [ ${#APP[@]} -eq 0 ]; then
+    STATE="$("$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
+             'systemctl --user is-active comfy-painter.service' 2>/dev/null)"
+    if [ "$STATE" = "active" ]; then
+        say "comfy-painter already running on $HOST"
+    else
+        say "comfy-painter is ${STATE:-unknown} on $HOST - starting it"
+        "$SSH" "${SSH_MUX[@]}" -o BatchMode=yes "$HOST" \
+            'systemctl --user start comfy-painter.service' 2>/dev/null ||
+            die "could not start comfy-painter on top (is a user session up there?)"
+    fi
 fi
-
-# -N: no remote command. ExitOnForwardFailure so a refused bind is loud rather
-# than a tunnel that silently forwards nothing.
-FWD=("$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes
-     -o ServerAliveInterval=20 -o ServerAliveCountMax=3
-     -N -L "127.0.0.1:$PORT:127.0.0.1:$PORT" "$HOST")
 
 if [ ${#APP[@]} -eq 0 ]; then
     say "forwarding 127.0.0.1:$PORT -> $HOST:$PORT (ctrl-c to stop)"
     exec "${FWD[@]}"
 fi
-
-"${FWD[@]}" &
-TUN=$!
-# One trap, set once, covering every exit including the die()s below: a forward
-# left running or a mount left behind is exactly the residue that makes the NEXT
-# launch take a stale path.
-trap 'kill "$TUN" 2>/dev/null; unmount_models' EXIT
-
-deadline=$(( SECONDS + READY_TIMEOUT ))
-until comfy_answers; do
+# WAIT FOR THE FORWARD, NOT FOR THE BACKEND. The port has to be bound before the
+# app's first probe or it gives up on a connection refused — but waiting for
+# ComfyUI to actually SERVE held the window closed for the whole cold start
+# (weights, and a rebuilt nix-shell before them: minutes of no window at all).
+# The app opens now and says "waiting for ComfyUI..." while it polls; its model
+# list does not need the backend either, so there is something to do meanwhile.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null && break
     kill -0 "$TUN" 2>/dev/null ||
         die "ssh forward to $HOST died - on top: journalctl --user -u comfy-painter -n50"
-    [ "$SECONDS" -lt "$deadline" ] ||
-        die "ComfyUI on $HOST did not answer within ${READY_TIMEOUT}s - on top: journalctl --user -u comfy-painter -n50"
-    sleep 1
+    sleep 0.1
 done
-say "backend ready on $HOST via 127.0.0.1:$PORT"
+say "forwarding 127.0.0.1:$PORT -> $HOST:$PORT; starting painter"
 
 "${APP[@]}"

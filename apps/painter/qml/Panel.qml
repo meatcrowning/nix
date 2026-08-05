@@ -4,7 +4,12 @@ import QtQuick
 Rectangle {
     id: panel
     property string title: ""
+    // Collapsed or not is remembered per panel, under this key. A panel without
+    // one still collapses; it just forgets (nothing in-tree does that).
+    property string persistKey: ""
     property bool collapsed: false
+    Component.onCompleted: if (persistKey) collapsed = Prefs.get(persistKey) === true
+    onCollapsedChanged: if (persistKey) Prefs.set(persistKey, collapsed)
     property bool collapsible: true
     property string badge: ""
     default property alias content: inner.data

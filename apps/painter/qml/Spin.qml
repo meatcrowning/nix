@@ -66,6 +66,13 @@ Rectangle {
         onEditingFinished: spin.commit(parseFloat(text) || 0)
         Keys.onUpPressed: spin.commit(spin.value + spin.step)
         Keys.onDownPressed: spin.commit(spin.value - spin.step)
+        // Escape leaves the box, restoring what the model says rather than
+        // keeping a half-typed number on screen.
+        Keys.onEscapePressed: function (e) {
+            input.text = spin.fmt(spin.value)
+            root.releaseFocus()
+            e.accepted = true
+        }
     }
 
     // Value only follows the model while the box is not being typed into.
