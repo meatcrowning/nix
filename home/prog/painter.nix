@@ -38,8 +38,16 @@ let
 
   painter =
     if host == "air" then
+      # book has no backend of its own — no NVIDIA, no 246G of weights — so it
+      # borrows top's, over the ssh forward. The launcher probes top, starts
+      # comfy-painter there if it is not already up, waits for it to answer and
+      # only then opens the window; unreachable top is fatal with a
+      # notification, because a painter that cannot generate is worse than one
+      # that did not open. Live source, so it is fixable on book with no
+      # home-manager rebuild.
       pkgs.writeShellScriptBin "painter" ''
-        exec /usr/bin/python3 /home/lam/nix/apps/painter/main.py "$@"
+        exec /home/lam/nix/apps/painter/tools/comfy-tunnel.sh -- \
+             /usr/bin/python3 /home/lam/nix/apps/painter/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

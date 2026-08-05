@@ -72,13 +72,32 @@ stay warm between launches. Logs: `journalctl --user -u comfy-painter -f`.
 The unit passes `--listen 127.0.0.1`, and that is a **security boundary, not a
 default**: ComfyUI has no authentication and a workflow graph is arbitrary code
 with filesystem access. Never rebind it to `0.0.0.0`, and never add 8188 to the
-tailnet allowlist in `sys/net/tailscale.nix`. To drive top's backend from air,
+tailnet allowlist in `sys/net/tailscale.nix`. To drive top's backend from book,
 tunnel it behind ssh's key auth:
 
 ```bash
 apps/painter/tools/comfy-tunnel.sh            # start it on top, forward 8188
 apps/painter/tools/comfy-tunnel.sh -- painter # ...and run painter over it
 ```
+
+**On book that is not a manual step: it IS painter's launcher.** `painter.nix`'s
+`air` branch execs `comfy-tunnel.sh -- python3 main.py`, so opening painter
+there probes top (`top.local`, then the tailnet name `top`), starts
+`comfy-painter.service` over ssh if it is not already active, forwards 8188,
+waits until the backend actually serves `/system_stats`, and only then opens the
+window; the forward dies with the app. An unreachable top is **fatal with a
+notification** rather than a window that can only fail on the first Generate —
+same rule as player's `air-launch.sh`. `PAINTER_NO_TUNNEL=1` launches plainly
+against whatever is on the local port, for UI work with no top;
+`COMFY_HOST`/`COMFY_PORT`/`COMFY_READY_TIMEOUT`/`COMFY_CONNECT_TIMEOUT` pin the
+rest.
+
+Two traps that cost a debugging session and must not be reintroduced into the
+readiness probe: while the backend warms, ssh **accepts** the local connection
+and only then learns the far end refuses — so a port check is not a readiness
+check (hence the HTTP probe), and the read that fails with ECONNRESET leaves
+`line` unset, which under `set -u` killed the launcher one second after it had
+started the backend, silently. Hence `local line=""` and `trap '' PIPE`.
 
 `comfy.py`'s `DEFAULT_URL` stays `http://127.0.0.1:8188` so the app needs no
 configuration — it talks to the local end of the forward. `PAINTER_COMFY_URL`
