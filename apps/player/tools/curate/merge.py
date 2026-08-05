@@ -54,17 +54,26 @@ def _load_scan_by_dir():
 
 
 def _canonical_artist(dirs):
-    """The shortest artist string that every other dir's artist string is a
-    superset-match of (curate.py's own subset/prefix rule) - the real primary
-    credit a feature-heavy variant was built from ('Kid Cudi' out of 'Kid
-    Cudi; Trippie Redd', 'SebastiAn' out of 'SebastiAn Mayer Hawthorne')."""
-    cands = sorted({d["artist"] for d in dirs}, key=len)
+    """Pick the cluster's canonical artist credit. Majority by track count
+    first (the spelling the library already mostly uses), then the shortest
+    hub string every other credit is a superset-match of. Majority matters:
+    'christtt' (15t) must beat 'chris†††' (8t) even when the dagger variant
+    sits in the primary dir — the daggers fold to 'chris', which is NOT how
+    the rest of the library credits him."""
+    counts = {}
+    for d in dirs:
+        counts[d["artist"]] = counts.get(d["artist"], 0) + d.get("n_tracks", 1)
+    best = max(counts, key=lambda a: (counts[a], -len(a)))
+    # the majority credit wins outright when it matches the rest
+    if all(trackmatch.artist_matches(best, d["artist"]) or
+           C.fold(best) == C.fold(d["artist"]) for d in dirs):
+        return best
+    cands = sorted(counts, key=len)
     for c in cands:
         if all(trackmatch.artist_matches(c, d["artist"]) or C.fold(c) == C.fold(d["artist"])
                for d in dirs):
             return c
-    # no clean hub - fall back to the primary dir's own credit
-    return dirs[0]["artist"]
+    return best
 
 
 def _canonical_album(label):
