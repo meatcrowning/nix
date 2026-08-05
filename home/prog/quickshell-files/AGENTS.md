@@ -488,36 +488,39 @@ The notch publishes its protrusion as `ViewMode.notchPx` and the bar's
 a floating window may still cover it, as it may cover the bar. docs/DESIGN.md
 §12.2.2 is the rule.
 
-### The runner IS the notch, pulled out (`Launcher.qml`)
+### The runner IS the notch, pulled out — a DRAWER (`Launcher.qml`)
 
-The slab travels away from the panel with its seals aboard, and the space it
-uncovers is the runner: search box over every OTHER program on the system.
-docs/DESIGN.md §12.2.4 is the rule — including *why* it is not a card that
-slides in beside the notch, which is what this was on the first attempt and what
-he rejected as a "disjointed phantom runner". The mechanics:
+One rigid card, built at full size, whose only animated property is `x`. The
+panel's face is a clip (`frame`), so everything not yet pulled out is behind it:
+closed, the only thing this side of the edge is a `NotchModel.protrusion`-wide
+strip that IS the notch; open, the seals have travelled out and their names and
+the runner have come out from behind the panel after them. docs/DESIGN.md
+§12.2.4 is the rule, and it records the two rejected attempts — a card sliding in
+beside the notch, then the slab growing outward — because each of them is what a
+"tidy-up" here would reinvent.
 
-- **CLOSED IT MUST BE THE NOTCH, to the pixel.** `closedW` is
-  `NotchModel.protrusion`, `closedH` is `slabH`, the seal inset is the notch's
-  own — flush case included, via `NotchModel.flushOn(screen)`. The surface maps
-  and unmaps behind that identity, so there is nothing to see at either end. Any
-  disagreement is a visible twitch at the start of the pull, not a subtle one.
-- **Only the OUTER edge moves.** The card is anchored by its panel-side edge and
-  its `width`/`height` animate; the slab is anchored to the moving edge, the
-  runner to the fixed one, and the slab is opaque and above it — so closed, the
-  slab covers the runner completely, and it is uncovered by the travel rather
-  than faded on top of. Do not "simplify" this into an `x` translation of the
-  whole card: that is the phantom again.
+- **NOTHING RESIZES OR FADES.** No animated `width`, no animated `height` ([his]
+  "it should not grow in height"), no opacity ramp on the revealed content. The
+  reveal is the clip. If content needs to fade in to look right, the geometry is
+  wrong.
+- **CLOSED IT MUST BE THE NOTCH, to the pixel** — `closedW` is
+  `NotchModel.protrusion`, the height is `slabH`, the seal inset is the notch's
+  own, flush case included via `NotchModel.flushOn(screen)`. The surface maps and
+  unmaps behind that identity, so there is nothing to see at either end; any
+  disagreement is a visible twitch at the start of the pull.
+- **The drawer's height is the seal column's height**, so the runner list gets
+  whatever `slabH` comes to (~290px at nine seals). With `desktopIcons` off
+  there is no notch to match, so it falls back to a plain 300px card coming out
+  of the panel's edge.
 - **It is its own Overlay surface, and that is forced.** The notch is inside the
   bar's surface so their outlines share one coordinate space during a width
   drag; a drawer this wide cannot be, because the bar's surface width is the
-  constant the exclusive zone derives from. So the card's panel-side edge sits
-  on the panel's face (`margins.right: 0`) and it covers the notch for as long
-  as it is out — Overlay is above the bar's `Top`.
-- **`visible` must track the CARD, not `open`** — `open || width > closedW + 1`
-  — so the pull plays to its end before the layer unmaps, and keyboard focus
+  constant the exclusive zone derives from. Its panel-side edge sits on the
+  panel's face (`margins.right: 0`) and it covers the notch for as long as it is
+  out — Overlay is above the bar's `Top`.
+- **`visible` must track the CARD, not `open`** — `open || |x - closedX| > 1` —
+  so the pull plays to its end before the layer unmaps, and keyboard focus
   (`OnDemand`, tied to `visible`) is released only as it goes.
-- **Revealed content fades on `card.out`**, the pull's own 0..1 progress, not on
-  a Behavior of its own.
 - **The two columns partition, they don't filter.** `bespoke(entry)` is the same
   keyword test `NotchModel` uses; the runner list drops every entry that passes
   it, so no program is on the card twice and none is missing.
