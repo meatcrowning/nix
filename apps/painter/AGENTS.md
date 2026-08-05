@@ -92,6 +92,16 @@ against whatever is on the local port, for UI work with no top;
 `COMFY_HOST`/`COMFY_PORT`/`COMFY_READY_TIMEOUT`/`COMFY_CONNECT_TIMEOUT` pin the
 rest.
 
+**The app's own start/stop/status controls follow the tunnel.** `main.py` drives
+`systemctl --user` on `comfy-painter.service`, including once unconditionally at
+startup — and on book that unit does not exist, so every one of those calls
+failed with "unit not found" and painter opened saying *backend failed to start*
+while the backend it was tunnelled to sat there serving. `unit_cmd()` sends them
+over ssh to the host the launcher resolved, via `PAINTER_BACKEND_SSH` /
+`_SSH_BIN` / `_SSH_CTL` (the launcher's own control socket, because `is-active`
+polls every 3s and a fresh handshake each time is ~0.2s of network). Unset — on
+top, or under `PAINTER_NO_TUNNEL=1` — it stays a plain local `systemctl`.
+
 Two traps that cost a debugging session and must not be reintroduced into the
 readiness probe: while the backend warms, ssh **accepts** the local connection
 and only then learns the far end refuses — so a port check is not a readiness
