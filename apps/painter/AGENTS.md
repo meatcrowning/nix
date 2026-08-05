@@ -176,6 +176,26 @@ there, and each was worth measuring:
   first tick and retries while it comes up empty, because the sshfs mount may
   still be landing.
 
+## `tools/tunnel-test.sh` — the LAUNCHER's harness
+
+`ui-test.py` can see nothing outside the window, and **both bugs that left
+painter unusable on book were in the launcher**, not the QML: the readiness
+probe's unset variable killing the script a second after it started the backend,
+and the reuse check reading OUR OWN forward as somebody else's and killing it —
+after which the app talked to a closed port for ever and said *backend is not
+ready yet*. That second one is why the reuse test now comes BEFORE the forward
+is started, and why this file exists.
+
+```bash
+apps/painter/tools/tunnel-test.sh      # on book; uses the real top, no GUI
+```
+
+It asserts the one thing that matters — **when the launcher hands over, the app
+can GET /system_stats through the port** — in both the fresh and the
+already-forwarded case, that a borrowed forward is not killed, that the model
+mount is visible to the app, and that neither the mount nor a forward is left
+behind. Re-run it after touching `comfy-tunnel.sh`.
+
 ## `tools/ui-test.py` — the offscreen UI harness
 
 104 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a

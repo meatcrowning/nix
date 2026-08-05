@@ -147,24 +147,6 @@ export PAINTER_BACKEND_SSH="$HOST"
 export PAINTER_BACKEND_SSH_BIN="$SSH"
 export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
 
-# -N: no remote command. ExitOnForwardFailure so a refused bind is loud rather
-# than a tunnel that silently forwards nothing.
-FWD=("$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes
-     -o ServerAliveInterval=20 -o ServerAliveCountMax=3
-     -N -L "127.0.0.1:$PORT:127.0.0.1:$PORT" "$HOST")
-
-# Started HERE, before the mount and the unit check, because none of the three
-# needs the others: paying for them one after another put a second of pure
-# waiting in front of a window that now opens in a quarter of one.
-if [ ${#APP[@]} -gt 0 ]; then
-    "${FWD[@]}" &
-    TUN=$!
-    # One trap, set once, covering every exit including the die()s below: a
-    # forward left running or a mount left behind is exactly the residue that
-    # makes the NEXT launch take a stale path.
-    trap 'kill "$TUN" 2>/dev/null; unmount_models' EXIT
-fi
-
 # THE MODELS ARE TOP'S TOO, and painter identifies them by READING THEM: the
 # registry fingerprints every file's tensor header (fingerprint.py), and LoRA
 # compatibility re-reads the base's and the adapter's headers later on demand.
@@ -215,19 +197,40 @@ if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
 fi
 
 # Already tunnelled — a second painter, or a manual forward being held. Use it
-# rather than fight over the port. Resolving the host first (rather than
-# short-circuiting on the open port) is deliberate: the app needs the host to
-# drive the unit, and a port that answers proves top is reachable anyway.
+# rather than fight over the port.
+#
+# THIS TEST MUST COME BEFORE WE START OUR OWN FORWARD. It did not, briefly, and
+# the answer it got was our own tunnel one moment old — so the branch killed the
+# forward it had just started, the app found nothing on 8188, and painter sat on
+# "backend is not ready yet" for ever.
 if comfy_answers; then
     say "127.0.0.1:$PORT already answers - using it"
     if [ ${#APP[@]} -gt 0 ]; then
-        # Ours lost the race for the port (someone else's forward is up and
-        # serving), so drop it rather than leave a dead ssh in the tree.
-        kill "$TUN" 2>/dev/null
+        # Run, do not `exec`: exec replaces this shell and the EXIT trap never
+        # fires, so the sshfs mount we just made would outlive the app.
+        trap unmount_models EXIT
         "${APP[@]}"
         exit $?
     fi
     exit 0
+fi
+
+# -N: no remote command. ExitOnForwardFailure so a refused bind is loud rather
+# than a tunnel that silently forwards nothing.
+FWD=("$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes
+     -o ServerAliveInterval=20 -o ServerAliveCountMax=3
+     -N -L "127.0.0.1:$PORT:127.0.0.1:$PORT" "$HOST")
+
+# Backgrounded, so the app starts as soon as the port is bound rather than after
+# a full handshake — the window opens in about a quarter of a second and must not
+# wait on anything it does not strictly need.
+if [ ${#APP[@]} -gt 0 ]; then
+    "${FWD[@]}" &
+    TUN=$!
+    # One trap, set once, covering every exit including the die()s below: a
+    # forward left running or a mount left behind is exactly the residue that
+    # makes the NEXT launch take a stale path.
+    trap 'kill "$TUN" 2>/dev/null; unmount_models' EXIT
 fi
 
 # STARTING THE BACKEND IS THE APP'S JOB, NOT THIS SCRIPT'S — when there is an
