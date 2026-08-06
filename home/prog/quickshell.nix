@@ -215,7 +215,16 @@ in
   # at all, so a pull that changed it did nothing. The write only happens when
   # the reconciled result actually differs — writing this file hot-reloads the
   # panel, and a rebuild must not do that for nothing.
+  #
+  # gawk explicitly on PATH: the carry is an awk pass, and home-manager's
+  # activation PATH carries no awk on book (Fedora's /usr/bin is not on it
+  # either). It failed there on every switch, silently — the reconcile then
+  # wrote the nix source's DEFAULT palette over the live wal-derived one, so a
+  # `home-manager switch` recoloured the panel away from the wallpaper until
+  # the next wal-set.sh run put it back. The script now refuses to write when
+  # the carry fails; this is what stops the carry failing.
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    PATH="${lib.makeBinPath [ pkgs.gawk ]}:$PATH" \
     run bash ${../../tools/seed-reconcile.sh} theme-qml \
       ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml" || true
   '';
