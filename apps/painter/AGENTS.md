@@ -85,6 +85,54 @@ the box near the bottom edge), and closes on an outside click, Escape or a
 wheel, since a list pinned to the scene would otherwise float away from a
 scrolling column.
 
+## Results left, controls right
+
+The two panes swapped on 2026-08-05 [his] *"switch the left and right sections
+with eachother"*, so `paneLeadW` sizes the RESULTS pane and the floors went with
+it (`minLead` 200 for the gallery, `minTrail` 300 for the controls). A
+`splitRatio` saved before the swap describes the other pane, so `restoreState`
+inverts it once and records that under `splitSwapped` — without that the divider
+comes back mirrored on the first launch after the change.
+
+## The preview viewport
+
+Above the history, off by default, toggled from the titlebar's `pv` cell
+(`PreviewPane.qml`, height dragged by the same grip a prompt box has, remembered
+as `preview.h`). It shows two things, in this order:
+
+1. **the sampler's own preview frames** while a job runs — `main.py`'s
+   `LivePreview` (a `QQuickImageProvider`) fed from `ComfyClient.jobPreview`,
+   addressed as `image://livepreview/<tick>` because an `Image` whose URL never
+   changes never reloads. **The backend only sends them with
+   `--preview-method`**, which `home/prog/painter.nix` now passes; without it
+   nothing arrives and the pane falls through to (2) rather than sitting empty.
+2. **an output** — the newest, or whichever one was clicked. A click previews,
+   a DOUBLE-click opens it in viewer. A clip plays here looped and **muted**: it
+   is a thumbnail that moves, beside a music player he is probably listening to,
+   and sound is what viewer is for.
+
+That pane is why `painter.nix` carries `qtmultimedia` — and with it viewer's
+NVDEC pin, for the reason measured there.
+
+## A muted copy is a derivative, not an output
+
+The model generates sound with the picture, so the gallery's right-click menu
+offers **copy muted copy** on a clip: `<name>-muted.mp4` beside the original,
+made with `-map 0 -map -0:a -c copy` (no re-encode, IO speed), **reused when it
+is already there and not older than its source** so asking twice cannot leave
+three files behind, and hidden from the history — `is_muted_copy()` filters both
+the initial scan and anything that lands while running, or every clip would be
+listed twice.
+
+**The clipboard goes through `wl-copy --type text/uri-list`, never
+`QClipboard`.** Two reasons, one of them fatal: a Wayland selection dies with
+the process that offered it (wl-clipboard forks a holder that outlives painter),
+and `QClipboard.setMimeData` takes a Python-built `QMimeData` whose wrapper Qt's
+global-static clipboard frees AFTER the interpreter is gone — a SIGSEGV in
+`__run_exit_handlers` on the way out of any run that had copied something. The
+harness caught it as exit 139 with every check passing; if you ever put
+something on the clipboard from Python here, do it the same way.
+
 ## The layout holds at every width
 
 Both panes used to vanish below 900px unless selected, so in the parameters view
@@ -215,7 +263,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-125 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+141 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -394,12 +442,15 @@ What is genuinely different, and therefore what the left column stops offering:
 - **Two VAEs.** Video and audio latents decode separately and `CreateVideo`
   muxes them, so `pair()` resolves a `vae_audio` as well and a missing one is a
   problem reported up front.
-- **Two modes, one template.** With a first frame (`VideoPanel`'s toggle, an
+- **Three modes, one template.** With a first frame (`VideoPanel`'s toggle, an
   image dropped on the well) it is image-to-video: `LoadImage ->
   ImageScaleToTotalPixels -> GetImageSize` and the frame size comes **out of the
   image**, which is why `ResolutionPanel` drops to the MP box alone. Without
   one, `_build_video` drops those three nodes (`Graph.drop`, which refuses while
-  anything still reads them) and feeds painter's own aspect + MP.
+  anything still reads them) and feeds painter's own aspect + MP. **Looping** is
+  the third: `last_frame` is another optional input, so the dropped image goes in
+  at both ends and the clip returns to where it started — one more link, not
+  another graph, and only offered while there is an image to put there.
 - **The first frame is uploaded, not read.** `ComfyClient.upload_image` PUTs it
   under the input directory's `painter/` subfolder and the graph names
   `painter/<file>` — on book the backend is top's and the socket is all they

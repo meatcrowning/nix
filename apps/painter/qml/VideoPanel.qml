@@ -13,6 +13,7 @@ Panel {
     id: panel
     title: "video"
     badge: App.videoFrames(root.gen.duration) + "f"
+           + (root.gen.useInputImage && root.gen.loopVideo ? " loop" : "")
 
     Toggle {
         label: "first frame"
@@ -85,6 +86,17 @@ Panel {
                 }
             }
         }
+    }
+
+    // LOOPING IS THE SAME FRAME AT BOTH ENDS — the node takes an optional
+    // `last_frame`, so the dropped image goes in twice and the clip returns to
+    // where it started. Only offered with a first frame: there is nothing to
+    // loop back to in text-to-video.
+    Toggle {
+        label: "loop (first frame = last)"
+        visible: root.gen.useInputImage
+        checked: root.gen.loopVideo
+        onToggled: function (v) { root.set("loopVideo", v) }
     }
 
     Row {

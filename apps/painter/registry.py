@@ -466,6 +466,12 @@ class Registry:
 
         if image:
             g.set_input("load_image", "image", image)
+            # LOOPING IS THE SAME FRAME AT BOTH ENDS. `last_frame` is an
+            # optional input on the node, so a clip that starts and finishes on
+            # the dropped image is one more link, not another graph — and it is
+            # only offered while there IS a dropped image to put there.
+            if p.get("loop_video"):
+                g.set_input("video", "last_frame", [g.id_of("load_image"), 0])
             g.set_input("scale_image", "megapixels", mp)
             g.set_input("scale_image", "resolution_steps",
                         int((fam.get("resolution") or {}).get("multiple", 32)))
@@ -503,7 +509,8 @@ class Registry:
                 raise G.ValidationError(problems)
         params = {**p, "positive": pos, "negative": "", "frames": frames,
                   "fps": fps, "megapixels": mp, "kind": "video",
-                  "input_image": image, "use_input_image": bool(image)}
+                  "input_image": image, "use_input_image": bool(image),
+                  "loop_video": bool(image and p.get("loop_video"))}
         if w and h:
             params["width"], params["height"] = int(w), int(h)
         return {"prompt": prompt, "pairing": pairing, "params": params}

@@ -23,6 +23,7 @@ so weights stay warm between launches:  journalctl --user -u comfy-painter -f
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -31,8 +32,9 @@ from pathlib import Path
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
                             QObject, Property, QProcess, QSortFilterProxyModel, Qt,
                             QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
+from PySide6.QtQuick import QQuickImageProvider
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -377,6 +379,35 @@ class LoraChoices(QAbstractListModel):
 
 
 VIDEO_SUFFIXES = (".mp4", ".webm", ".mkv")
+# A "<name>-muted.mp4" beside a clip is a DERIVATIVE, not an output: painter
+# makes one when you ask for a soundless copy to paste somewhere. It stays out
+# of the history, or every video would be there twice.
+MUTED_TAG = "-muted"
+
+
+def is_muted_copy(path) -> bool:
+    p = Path(path)
+    return p.suffix.lower() in VIDEO_SUFFIXES and p.stem.endswith(MUTED_TAG)
+
+
+class LivePreview(QQuickImageProvider):
+    """The sampler's own preview frames, handed to QML without touching disk.
+
+    ComfyUI pushes a JPEG/PNG down the websocket every few steps (with
+    `--preview-method` on). They are transient — the next one replaces this one
+    — so they are held as one QImage and addressed by a counter, because an
+    Image whose `source` never changes never reloads.
+    """
+
+    def __init__(self):
+        super().__init__(QQuickImageProvider.ImageType.Image)
+        self.image = QImage()
+
+    def requestImage(self, _id, size, _requested):
+        if size is not None:
+            size.setWidth(self.image.width())
+            size.setHeight(self.image.height())
+        return self.image
 
 
 class Gallery(QAbstractListModel):
@@ -412,6 +443,9 @@ class Gallery(QAbstractListModel):
                 self.NameRole: r["name"], self.VideoRole: r["is_video"],
                 self.PosterRole: r["poster"]}.get(role)
 
+    def has_path(self, path):
+        return any(r["path"] == str(path) for r in self._rows)
+
     def _row_for(self, path):
         p = Path(path)
         is_video = p.suffix.lower() in VIDEO_SUFFIXES
@@ -419,6 +453,8 @@ class Gallery(QAbstractListModel):
                 "name": p.name, "is_video": is_video, "poster": ""}
 
     def add(self, path):
+        if is_muted_copy(path) or self.has_path(path):
+            return
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._rows.insert(0, self._row_for(path))
         self.endInsertRows()
@@ -434,6 +470,7 @@ class Gallery(QAbstractListModel):
             files = list(OUT_DIR.glob("*.png"))
             for suffix in VIDEO_SUFFIXES:
                 files += list(OUT_DIR.glob(f"video/*{suffix}"))
+            files = [p for p in files if not is_muted_copy(p)]
             files = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
         except OSError:
             return
@@ -504,6 +541,14 @@ class Gallery(QAbstractListModel):
                 self.dataChanged.emit(idx, idx, [self.PosterRole])
                 return
 
+    @Slot(int, result=str)
+    def pathAt(self, i):
+        return self._rows[i]["path"] if 0 <= i < len(self._rows) else ""
+
+    @Slot(int, result=bool)
+    def isVideoAt(self, i):
+        return bool(self._rows[i]["is_video"]) if 0 <= i < len(self._rows) else False
+
     @Slot(int, result="QVariant")
     def paramsAt(self, i):
         if not (0 <= i < len(self._rows)):
@@ -529,6 +574,7 @@ class Painter(QObject):
     busyChanged = Signal()
     optionsChanged = Signal()
     inputImageChanged = Signal()
+    previewChanged = Signal()
     toast = Signal(str, bool)          # message, isError
 
     def __init__(self, parent=None):
@@ -555,6 +601,8 @@ class Painter(QObject):
         self._jobs = 0
         self._unit_state = "unknown"
         self._job_start = 0.0             # when the running job started, for the clock
+        self.preview = None               # the live-preview image provider, set in main()
+        self._preview_tick = 0            # an Image reloads on a CHANGED url, so count
         self._input_image = ""            # the first frame, as a local path
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
 
@@ -564,6 +612,7 @@ class Painter(QObject):
         self.client.jobStarted.connect(self._on_started)
         self.client.jobProgress.connect(self._on_progress)
         self.client.jobNode.connect(self._on_node)
+        self.client.jobPreview.connect(self._on_preview)
         self.client.jobFinished.connect(self._on_finished)
         self.client.jobFailed.connect(self._on_failed)
         self.client.connected.connect(self._on_ws_connected)
@@ -629,6 +678,13 @@ class Painter(QObject):
     busy = Property(bool, lambda self: self._busy, notify=busyChanged)
     # Seconds the running job has been going, so the bar can say how long as
     # well as how far. Zero when nothing is running.
+    # The live preview: a counter QML puts in the image URL, and whether one has
+    # arrived at all for the job that is running (a backend started without
+    # --preview-method never sends any, and the pane must not sit on a stale
+    # frame from an hour ago claiming to be this job).
+    previewTick = Property(int, lambda self: self._preview_tick, notify=previewChanged)
+    hasPreview = Property(bool, lambda self: bool(self._busy and self._preview_tick),
+                          notify=previewChanged)
     elapsed = Property(float, lambda self: (
         max(0.0, time.time() - self._job_start) if (self._busy and self._job_start) else 0.0),
         notify=statusChanged)
@@ -1066,6 +1122,7 @@ class Painter(QObject):
         self._busy = False
         self._clock.stop()
         self._progress = 0.0
+        self.previewChanged.emit()
         self.busyChanged.emit()
         self.statusChanged.emit()
 
@@ -1089,11 +1146,31 @@ class Painter(QObject):
         self._busy = True
         self._job_start = time.time()
         self._clock.start()
+        # A new job has no preview frame yet; the pane must not show the last
+        # job's while this one warms up.
+        self._preview_tick = 0
+        self.previewChanged.emit()
         self.busyChanged.emit()
 
     def _on_progress(self, _job, value, maximum):
         self._progress = (value / maximum) if maximum else 0.0
         self.statusChanged.emit()
+
+    def _on_preview(self, _job, data, fmt):
+        """A sampler preview frame off the websocket, into the image provider.
+
+        Silently ignored if the backend was started without `--preview-method`
+        — then none of these ever arrive and the pane simply shows the last
+        output instead.
+        """
+        if self.preview is None:
+            return
+        img = QImage()
+        if not img.loadFromData(data, fmt.upper()):
+            return
+        self.preview.image = img
+        self._preview_tick += 1
+        self.previewChanged.emit()
 
     def _on_node(self, _job, role):
         self._current = role
@@ -1136,6 +1213,7 @@ class Painter(QObject):
             self._clock.stop()
             self._progress = 0.0
             self._current = ""
+            self.previewChanged.emit()
             self.busyChanged.emit()
         took = f" in {job.duration:.1f}s" if job.duration else ""
         self.toast.emit(f"done{took}", False)
@@ -1146,9 +1224,95 @@ class Painter(QObject):
         if self._jobs == 0:
             self._busy = False
             self._clock.stop()
+            self.previewChanged.emit()
             self.busyChanged.emit()
         self.toast.emit(message.split("\n")[0][:200], True)
         self.statusChanged.emit()
+
+    # -- a soundless copy, on the clipboard ---------------------------------
+
+    @Slot(str)
+    def copyMuted(self, path):
+        """Put a silent copy of this clip on the clipboard, making one if needed.
+
+        The model generates sound with the picture, which is not always what a
+        clip is wanted for. The copy is `<name>-muted.mp4` beside the original
+        and is REUSED when it is already there and not older than the source —
+        asking twice must not leave three files behind. Nothing is re-encoded
+        (`-c copy`, audio subtracted), so it runs at IO speed and the video is
+        the same video.
+
+        The clipboard gets a `text/uri-list` file:// URI, which is how this
+        desktop passes a video around (docs/DESIGN.md §11 — raw video is not
+        pasteable).
+        """
+        src = Path(path.replace("file://", ""))
+        if not src.exists():
+            self.toast.emit("that file is gone", True)
+            return
+        if is_muted_copy(src):
+            self._clip_file(src)
+            return
+        dest = src.with_name(f"{src.stem}{MUTED_TAG}{src.suffix}")
+        try:
+            fresh = dest.exists() and dest.stat().st_mtime >= src.stat().st_mtime
+        except OSError:
+            fresh = False
+        if fresh:
+            self._clip_file(dest)
+            return
+
+        self._set_status("muting a copy...")
+
+        def done(rc, out):
+            if rc != 0 or not dest.exists():
+                detail = (out.splitlines() or [f"exit {rc}"])[-1]
+                self.toast.emit(f"could not mute it: {detail}", True)
+                self._set_status("ready")
+                return
+            self._clip_file(dest)
+            self._set_status("ready")
+
+        # -map 0 -map -0:a keeps everything that is not audio; -dn drops the
+        # data streams an mp4 copy otherwise refuses. Same command filer's
+        # videoconv uses for "copy without audio".
+        self._run_async(["ffmpeg", "-hide_banner", "-nostdin", "-y",
+                         "-loglevel", "error", "-i", str(src),
+                         "-map", "0", "-map", "-0:a", "-c", "copy", "-dn",
+                         "-movflags", "+faststart", str(dest)], done)
+
+    def _clip_file(self, path):
+        """Put `path` on the clipboard as a file, via wl-copy.
+
+        NOT Qt's clipboard, for two reasons. A Wayland selection dies with the
+        process that offered it, so a file copied out of painter would stop
+        being pasteable the moment painter closed — `wl-copy` forks a tiny
+        holder that survives it. And `QClipboard.setMimeData` takes ownership of
+        a Python-built QMimeData that PySide still has a wrapper for: Qt's
+        clipboard is a global static destroyed AFTER the interpreter, so it frees
+        an object whose type is gone and the process dies in
+        `__run_exit_handlers` — a SIGSEGV on exit from any run that had copied
+        something, which is how the UI harness exited 139 with every check
+        passing.
+
+        `text/uri-list` is what the rest of this desktop hands a video around as
+        (the panel's recording toast does the same — docs/DESIGN.md §11).
+        """
+        uri = QUrl.fromLocalFile(str(path)).toString()
+        name = Path(path).name
+        wl = shutil.which("wl-copy")
+        if not wl:
+            self.toast.emit(f"made {name}, but wl-copy is missing to copy it", True)
+            return
+
+        def done(rc, out):
+            if rc != 0:
+                self.toast.emit(f"could not copy it: {out.splitlines()[-1] if out else rc}",
+                                True)
+                return
+            self.toast.emit(f"{name} copied — paste it as a file", False)
+
+        self._run_async([wl, "--type", "text/uri-list", "--", uri], done)
 
     @Slot(str)
     def openExternally(self, path):
@@ -1247,6 +1411,11 @@ def main():
     spell = SpellCheck()
 
     engine = QQmlApplicationEngine()
+    # The sampler's preview frames, addressed as image://livepreview/<tick>.
+    # Ownership passes to the engine, so the controller keeps only a reference.
+    preview = LivePreview()
+    ctl.preview = preview
+    engine.addImageProvider("livepreview", preview)
     ctx = engine.rootContext()
     # Keep python-side references: context properties are not owned by QML.
     ctx.setContextProperty("WalPalette", palette)
