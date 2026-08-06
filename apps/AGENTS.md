@@ -114,6 +114,30 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 `apps/` tree must move together or none of it does. Tools one level deeper use
 `parent.parent.parent`.
 
+- **`handoff.py`** — hand a request to an app that is ALREADY running, so the
+  common case starts no process. Measured on book, opening an image from filer
+  cost ~0.5s of which the file was 0.04s; the rest was python + PySide6 + the
+  QML engine + a GL context. filer now asks a live `viewer` over an AF_UNIX
+  socket in `$XDG_RUNTIME_DIR` and only launches one when nobody takes it —
+  **0.7ms instead of ~500ms**.
+  - **The client half imports no Qt, on purpose.** `import PySide6` is 0.10s of
+    the 0.5s, so a caller must be able to try the handoff before paying it;
+    `viewer/main.py` runs it ABOVE its own imports for exactly that reason.
+    Keep it stdlib-only.
+  - **A refusal is normal and must stay cheap.** The server answers "no"
+    whenever it cannot do the job *visibly* — viewer's rule is
+    `QWindow.isExposed()`, false on another workspace, rolled up or minimised —
+    and the caller then launches as it always did. A false "taken" is a click
+    that does nothing, which is the one outcome worse than being slow.
+  - `Listener` listens FIRST and only calls `removeServer()` when nothing is
+    actually accepting on the path. An unconditional `removeServer()` (the
+    obvious way to clear a stale socket) makes every later instance steal the
+    name from the running one; `tools/handoff-test.py` stands up two Listeners
+    to catch precisely that.
+  - Harnesses: `apps/pylib/tools/handoff-test.py` (the transport, both halves)
+    and `apps/viewer/tools/handoff-test.py` (what viewer does with a request —
+    the exposure refusal, `--order`, caller-relative paths).
+
 - **`vtbclient.py`** — the hyprvtb titlebar-button socket bridge. Every app's
   chrome (transport buttons, close/zoom, view switchers) is drawn by the
   compositor plugin, not by QML, and goes through here.

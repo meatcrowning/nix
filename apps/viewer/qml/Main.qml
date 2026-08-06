@@ -50,6 +50,23 @@ Window {
                                      && paneRep.itemAt(focusPane))
                                     ? paneRep.itemAt(focusPane).view : null
 
+    // Show a different set of images in THIS window, instead of a second
+    // viewer being started to do it (main.py's Listener; pylib/handoff.py).
+    // Called on a click in filer, so it has to look like an open: the focused
+    // pane lands on the requested image and the window comes forward. Any
+    // other pane is kept, clamped into the new list — a split view the user
+    // arranged must not be torn down because one image was opened into it.
+    function openSet(newImages, index) {
+        if (!newImages || !newImages.length) return;
+        images = newImages;
+        for (var p = 0; p < panes.count; p++)
+            panes.setProperty(p, "idx", Math.min(panes.get(p).idx, images.length - 1));
+        setPaneIdx(focusPane, Math.max(0, Math.min(index, images.length - 1)));
+        paneRev += 1;
+        raise();
+        requestActivate();
+    }
+
     function paneIdx(p) {
         return (p >= 0 && p < panes.count) ? panes.get(p).idx : -1;
     }

@@ -28,6 +28,21 @@ import sys
 import tempfile
 from pathlib import Path
 
+# ---- hand off to a viewer that is already open, BEFORE importing Qt --------
+# Opening an image cost ~0.5s and only 0.04s of that was the file; the rest was
+# starting this process. So the first thing a new `viewer` does is ask a running
+# one to show the image instead — and it has to do that up here, above the
+# PySide6 imports, because those imports are 0.10s of what we are trying not to
+# spend. A running viewer that cannot do it VISIBLY says no, and we carry on and
+# open our own window; see pylib/handoff.py and `--new-window` below.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pylib"))
+if __name__ == "__main__" and "--new-window" not in sys.argv[1:]:
+    from handoff import send as _handoff_send, took as _handoff_took  # noqa: E402
+
+    if _handoff_took(_handoff_send("viewer", {"argv": sys.argv[1:],
+                                              "cwd": os.getcwd()})):
+        raise SystemExit(0)
+
 from PySide6.QtCore import QObject, Slot, Signal, Property, QUrl, QFileSystemWatcher
 from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
@@ -37,6 +52,7 @@ QML = HERE / "qml"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
+from handoff import Listener  # noqa: E402  (pylib; the running-app socket)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 
 # Same set filer classifies as images, so anything filer shows a thumbnail for
@@ -119,7 +135,12 @@ MAX_PANES = 9
 
 
 def split_args(argv):
-    """(--order file or None, --split seen?, the remaining positional paths)."""
+    """(--order file or None, --split seen?, the remaining positional paths).
+
+    `--new-window` is consumed here and nowhere else: it is acted on at the top
+    of this file, before Qt is even imported, and only has to be kept out of
+    `rest` — everything left over is treated as a path to open, so a flag that
+    fell through would be opened as a file."""
     order, split, rest, it = None, False, [], iter(argv)
     for a in it:
         if a == "--order":
@@ -128,6 +149,8 @@ def split_args(argv):
             order = a[len("--order="):]
         elif a == "--split":
             split = True
+        elif a == "--new-window":
+            pass
         else:
             rest.append(a)
     return order, split, rest
@@ -406,6 +429,36 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
+    win = engine.rootObjects()[0]
+
+    # ---- be the viewer the NEXT one hands off to ---------------------------
+    # The rule for taking a request is one thing and one thing only: is this
+    # window on screen right now? `isExposed()` is false for a window on
+    # another workspace, rolled up, or minimised — a compositor sends no frame
+    # callbacks to a surface nobody can see — and loading an image into one of
+    # those would make the click do nothing at all, which is strictly worse
+    # than being slow. Refuse, and the caller opens its own window where the
+    # person actually is. (See pylib/handoff.py; the caller is either another
+    # `viewer` invocation or filer, which speaks the same protocol directly and
+    # so pays no process at all.)
+    def _can_take():
+        return bool(win.isExposed())
+
+    def _take(payload):
+        argv = [str(a) for a in (payload.get("argv") or [])]
+        cwd = payload.get("cwd") or os.getcwd()
+        here = os.getcwd()
+        try:
+            os.chdir(cwd)          # the caller's relative paths, not ours
+            entries, index, _panes = images_for(argv)
+        finally:
+            os.chdir(here)
+        if not entries:
+            raise ValueError("nothing openable in that request")
+        win.openSet(entries, index)
+
+    listener = Listener("viewer", _can_take, _take, parent=app)  # noqa: F841
+    # (not listening = another viewer already owns the socket; nothing to do)
 
     sys.exit(app.exec())
 

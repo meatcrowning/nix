@@ -27,7 +27,9 @@ Rectangle {
     property bool inMultiSelection: false
 
     signal clicked(int mods)   // mods: the keyboard modifiers at press (shift/ctrl)
-    signal opened()
+    // carries the click's modifiers: shift-open means a NEW viewer window
+    // rather than reusing the one already on screen (BrowserPane.openFile).
+    signal opened(int mods)
     // A drag-out starting/ending here. The view has to freeze its model while
     // one is live, or the rebuild destroys this tile mid-drag — the crash
     // documented on BrowserPane.qml's `rebuild()`.
@@ -194,6 +196,6 @@ Rectangle {
             tile.dragStateChanged(false);
         }
         onCanceled: tile.dragStateChanged(false)
-        onDoubleClicked: tile.opened()
+        onDoubleClicked: (m) => tile.opened(m.modifiers)
     }
 }

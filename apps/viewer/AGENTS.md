@@ -119,3 +119,41 @@ W=$(readlink -f "$(which viewer)"); sed '$d' "$W" > /tmp/vwrenv.sh
   just keeps zooming smoothly and the clamp holds. Its `interactive: true` buys
   drag-panning only. Everything ELSE in `apps/` must use `../qmlcommon/`'s
   `Kinetic*` views — see [`../AGENTS.md`](../AGENTS.md).
+
+## One viewer, reused — a click should not start a process
+
+Opening an image from filer used to cost ~0.5s, and almost none of it was the
+image: measured on book, the file was 0.04s and the rest was a fresh python +
+PySide6 + QML engine + GL context. So the common case no longer starts one.
+
+- **filer speaks the socket directly** (`FileOps.handOff`), because filer is
+  already running — a click on an image that a live viewer takes costs **0.7ms**
+  instead of ~500ms. A `viewer` started from anywhere else (a terminal,
+  another app) does the same thing itself, at the very top of `main.py`
+  **above the PySide6 imports** — those imports are 0.10s and the whole point
+  is not to spend them. Protocol and rationale: `../pylib/handoff.py`.
+- **The rule for taking a request is `win.isExposed()`, and nothing else.**
+  A window on another workspace, rolled up or minimised gets no frame callbacks,
+  so `isExposed()` is false — and loading an image into one would make the click
+  do nothing at all. It refuses, filer launches a window where the person
+  actually is, and the old behaviour is what you get. *This is the one
+  assumption not verified on the live session* (checking it means switching his
+  workspace); if a compositor ever reports a hidden window as exposed, the
+  symptom is an image opening out of sight rather than in a new window.
+- **`openSet()` (qml/Main.qml) is the swap**: the focused pane goes to the
+  requested image, every other pane is KEPT and clamped into the new list — a
+  split the user arranged must not be torn down because one image was opened
+  into it — then `raise()` + `requestActivate()`.
+- **`--new-window` skips the ask entirely**, and is what filer sends on a
+  shift-click (`BrowserPane.openFile`'s `mods`). It is consumed in
+  `split_args()`, which matters: everything not recognised there is treated as
+  a path to open, so a flag that fell through would be "opened" as a file.
+- An instance that finds the socket already claimed simply does not listen.
+  First one in owns it; see the `removeServer()` note in `../AGENTS.md`.
+
+Verify with `tools/handoff-test.py` (offscreen, 12 checks: the swap, the
+refusal, `--order` over a handoff, caller-relative paths, an unopenable
+request, and the flag). It points `$XDG_RUNTIME_DIR` at a temp directory before
+importing anything, so it cannot touch the socket of the viewer the user has
+open. It reuses `split-test.py`'s `build()`, which is why that file grew an
+`if __name__ == "__main__"` guard.
