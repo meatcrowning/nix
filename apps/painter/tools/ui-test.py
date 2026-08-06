@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.join(APPS, "pylib"))
 
 FAILS = []
 WARNINGS = []
+OPENED = []          # what the app would have launched (see _NoLaunch in build)
 
 
 def check(name, cond, detail=""):
@@ -248,6 +249,17 @@ def build(tmp):
 
     # Never reach the backend: no systemctl anywhere, local or over ssh.
     P.unit_cmd = lambda *verb: ["true"]
+
+    # ...and NEVER LAUNCH ANYTHING. A left-click in the gallery opens the output
+    # in viewer, which is a window on HIS screen — this harness spawned two
+    # before that click was even the behaviour under test. Popen is recorded,
+    # not run; OPENED is what the test reads back.
+    class _NoLaunch:
+        @staticmethod
+        def Popen(argv, *a, **k):
+            OPENED.append(list(argv))
+            return None
+    P.subprocess = _NoLaunch
     ctl = P.Painter()
     ctl._unit_poll.stop()
     ctl._probe.stop()
@@ -313,7 +325,9 @@ def test_text_boxes(win, ctl):
 
     # A click 6px from the BOTTOM of a 130px box holding no text: the old
     # TextEdit was ~16px tall, so this landed on nothing.
-    click(win, box, dx=box.width() / 2, dy=box.height() - 6)
+    # -14, not -6: the bottom edge of the box is now the resize grip, and a
+    # click there is a drag handle, not a caret.
+    click(win, box, dx=box.width() / 2, dy=box.height() - 14)
     check("a click low in an empty prompt box starts editing",
           edit.property("activeFocus") is True)
 
@@ -324,7 +338,7 @@ def test_text_boxes(win, ctl):
     check("the model's text reaches the editor", edit.property("text") == "one two three",
           edit.property("text"))
     edit.setProperty("cursorPosition", 0)
-    click(win, box, dx=box.width() - 40, dy=box.height() - 6)
+    click(win, box, dx=box.width() - 40, dy=box.height() - 14)
     check("...and the caret goes to the end of the text",
           edit.property("cursorPosition") == len("one two three"),
           edit.property("cursorPosition"))
@@ -341,6 +355,61 @@ def test_text_boxes(win, ctl):
     click(win, sp, dx=2, dy=sp.height() / 2)
     check("a click on a numeric box's padding starts editing",
           inp.property("activeFocus") is True)
+
+
+def test_chrome(win, ctl):
+    """The bits of furniture: the badge, the grips, the bars, the bottom strip."""
+    content = win.contentItem()
+
+    # A panel badge can be a filename, and it must not run out of its panel.
+    panel = find(content, "ModelPicker")
+    panel.setProperty("collapsed", True)
+    was = win.width()
+    win.setWidth(760)          # a narrow-ish column, where the name does not fit
+    spin(150)
+    badge = find_all(panel, "PixelText",
+                     pred=lambda it: it.property("text") == ctl.property("selectedName"))
+    check("the badge names the model", bool(badge), ctl.property("selectedName"))
+    if badge:
+        b = badge[0]
+        check("...and is elided inside the panel, not spilling out of it",
+              b.x() + b.width() <= panel.width() + 0.5
+              and b.property("truncated") is True,
+              (b.x(), b.width(), panel.width(), b.property("truncated")))
+    win.setWidth(was)
+    panel.setProperty("collapsed", False)
+    spin(120)
+
+    # The splitter is a drag target; the status bar is under it and must not be.
+    bar = find(content, "QueueBar")
+    split = [it for it in walk(content)
+             if it.property("width") == win.property("splitterW")
+             and it.height() > 100]
+    check("the splitter stops above the status bar",
+          bool(split) and split[0].height() <= win.height() - bar.height() + 0.5,
+          (split[0].height() if split else None, win.height(), bar.height()))
+
+    # One scrollbar, and on the side whose content is unbounded.
+    left = find(content, "KineticFlickable")
+    grid = find(content, "KineticGridView")
+    col = find(left, "QQuickColumn")
+    check("the parameter column has no scrollbar gutter",
+          col is not None and abs(col.width() - left.width()) < 0.5,
+          (col.width() if col else None, left.width()))
+    check("...and the results grid has one", find(grid, "VScroll") is not None)
+
+    # A prompt box is dragged taller by its bottom edge, and remembers it.
+    box = find_all(content, "PromptBox")[0]
+    before = box.height()
+    box.setProperty("boxHeight", int(before + 70))
+    spin(120)
+    check("a prompt box takes a new height", abs(box.height() - (before + 70)) < 1.5,
+          (before, box.height()))
+    edit = find(box, "QQuickTextEdit")
+    check("...and the editor still fills it", edit.height() >= box.height() - 20,
+          (edit.height(), box.height()))
+    box.setProperty("boxHeight", int(before))
+    spin(60)
 
 
 def test_model_panel(win, ctl):
@@ -456,6 +525,13 @@ def test_video(win, ctl, tmp):
     check("the negative prompt box is gone", [b.isVisible() for b in boxes] == [True, False],
           [b.isVisible() for b in boxes])
     check("the video panel is there", find(content, "VideoPanel").isVisible())
+    # ...and the box that went takes its SPACE with it: a Column skips a hidden
+    # child when positioning, but the panel sizes itself from childrenRect.
+    editor = find(content, "PromptEditor")
+    check("no blank where the negative box was",
+          boxes[1].height() == 0
+          and editor.height() < boxes[0].height() + 60,
+          (boxes[1].height(), editor.height(), boxes[0].height()))
     check("the patches panel is not", not find(content, "TogglePanel").isVisible())
     cfg = find(find(content, "ParamsPanel"), "Field",
                pred=lambda it: it.property("label") == "cfg")
@@ -669,7 +745,7 @@ def test_escape(win, ctl):
     content = win.contentItem()
     box = find_all(content, "PromptBox")[0]
     edit = find(box, "QQuickTextEdit")
-    click(win, box, dx=box.width() / 2, dy=box.height() - 6)
+    click(win, box, dx=box.width() / 2, dy=box.height() - 14)
     check("a prompt box takes focus", edit.property("activeFocus") is True)
 
     cancelled = []
@@ -756,10 +832,17 @@ def test_inject(win, ctl, tmp):
             cell = c
             break
     if cell is not None:
+        from PySide6.QtCore import Qt
+        OPENED.clear()
         click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2)
         spin(150)
+        check("left-clicking an output opens it, and raises no menu",
+              not menu.isVisible() and OPENED and OPENED[-1][-1] == path,
+              (menu.isVisible(), OPENED))
+        click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2, button=Qt.RightButton)
+        spin(150)
         labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
-        check("left-clicking an output opens a menu", menu.isVisible(), menu.isVisible())
+        check("right-clicking one opens the menu", menu.isVisible(), menu.isVisible())
         check("...offering inject all / prompt / params",
               labels[:3] == ["inject all", "inject prompt", "inject params"], labels)
         menu.metaObject().invokeMethod(menu, "close")
@@ -978,6 +1061,7 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     print("== text boxes ==");        test_text_boxes(win, ctl)
+    print("== chrome ==");            test_chrome(win, ctl)
     print("== model panel ==");       test_model_panel(win, ctl)
     print("== panes ==");             test_panes(win)
     print("== live bindings ==");     test_live_bindings(win, ctl)

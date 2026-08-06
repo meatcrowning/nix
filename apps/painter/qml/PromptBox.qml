@@ -37,6 +37,21 @@ Rectangle {
     //: SCENE coordinates.
     signal menuRequested(real sx, real sy, var items)
 
+    // HOW TALL IS HIS DECISION. A prompt here runs from four words to the
+    // multi-paragraph shot description a video model wants, and a fixed box
+    // meant scrolling a 64px window through the second kind. The bottom edge is
+    // a grab strip: drag it, and the height is remembered (`resized` -> Prefs,
+    // in PromptEditor).
+    // The drag writes `boxHeight`, a plain property, and `height` is bound to
+    // it — writing `height` itself would destroy that binding, and the hidden
+    // case below (video, no negative prompt) would never fold back to zero.
+    property int boxHeight: 130
+    property int minHeight: 40
+    property int maxHeight: 600
+    signal resized(int h)
+
+    height: visible ? boxHeight : 0
+
     color: Theme.bg
     border.color: input.activeFocus ? Theme.accent : Theme.border
     border.width: 1
@@ -45,6 +60,7 @@ Rectangle {
         id: flick
         anchors.fill: parent
         anchors.margins: 5
+        anchors.bottomMargin: 7          // clear of the grab strip
         contentWidth: width
         contentHeight: input.height
         clip: true
@@ -141,4 +157,56 @@ Rectangle {
         }
     }
 
+    // The grab strip. 5px drawn, ±3px of grab margin across it — the same
+    // shape as the window's own splitter, so a drag target behaves the same
+    // way everywhere in this app.
+    Rectangle {
+        id: grip
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 1
+        height: 5
+        color: grab.pressed || grab.containsMouse ? Theme.accent : "transparent"
+
+        // Three pixels of texture so the strip reads as a handle rather than a
+        // stray border (docs/DESIGN.md §2.3: draw a mark, never letter it).
+        Row {
+            anchors.centerIn: parent
+            spacing: 3
+            Repeater {
+                model: 3
+                Rectangle {
+                    width: 3
+                    height: 1
+                    color: grab.pressed || grab.containsMouse ? Theme.bg : Theme.dim
+                }
+            }
+        }
+
+        MouseArea {
+            id: grab
+            anchors.fill: parent
+            anchors.topMargin: -3
+            anchors.bottomMargin: -3
+            hoverEnabled: true
+            cursorShape: Qt.SizeVerCursor
+            preventStealing: true
+            property real startY: 0
+            property int startH: 0
+            onPressed: function (m) {
+                startY = mapToItem(null, m.x, m.y).y
+                startH = box.boxHeight
+            }
+            onPositionChanged: function (m) {
+                if (!pressed) return
+                var dy = mapToItem(null, m.x, m.y).y - startY
+                box.boxHeight = Math.max(box.minHeight,
+                                         Math.min(box.maxHeight, Math.round(startH + dy)))
+            }
+            // Written on release, not on every pixel of the drag: a height is
+            // one decision, not sixty file writes.
+            onReleased: box.resized(box.boxHeight)
+        }
+    }
 }

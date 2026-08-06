@@ -226,13 +226,16 @@ Window {
             anchors.margins: 10
             contentHeight: leftCol.implicitHeight
             clip: true
-            ScrollBar.vertical: VScroll { id: vscroll }
+            // NO BAR ON THE LEFT. The parameter column is a stack of panels
+            // that collapse — its length is something he sets, not something he
+            // has to navigate — and the gutter cost every control 11-16px of a
+            // 300px column. The scrollbar that §9.2 asks for is on the results
+            // side, where the content really is unbounded. The wheel and the
+            // compositor's kinetic scroll are untouched.
 
             Column {
                 id: leftCol
-                // The scrollbar's own width, never a literal — it is a
-                // desktop-wide setting (docs/DESIGN.md 9.2), 11-16px.
-                width: leftFlick.width - vscroll.barW
+                width: leftFlick.width
                 spacing: 10
 
                 ModelPicker { width: parent.width; persistKey: "panel.model" }
@@ -276,7 +279,9 @@ Window {
         x: root.paneLeadW
         y: 0
         width: root.splitterW
-        height: parent.height
+        // Stops at the status bar: a handle drawn over it also GRABS over it,
+        // so the last 26px of the divider swallowed clicks meant for the bar.
+        height: parent.height - root.barH
         color: splitDrag.pressed || splitDrag.containsMouse ? Theme.accent : Theme.border
 
         MouseArea {
@@ -324,11 +329,16 @@ Window {
 
     // ------------------------------------------------------------- overlays
 
+    // The status bar owns the bottom strip of the window; the splitter stops
+    // above it (see splitBar) rather than crossing it, which put a drag target
+    // on top of the generate button.
+    readonly property int barH: 26
+
     QueueBar {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 26
+        height: root.barH
     }
 
     // Not a centred modal: it slides out from the "st" titlebar cell that owns
