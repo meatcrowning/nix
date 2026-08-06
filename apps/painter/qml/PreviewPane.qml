@@ -1,22 +1,24 @@
 import QtQuick
 import QtMultimedia
 
-// A viewport above the history: what is being made right now, or an output you
-// picked out of the grid.  Off by default and toggled from the titlebar ("pv"),
-// because a 400px preview is worth the room while you are iterating and dead
-// weight while you are reading the list.
+// THE JOB THAT IS RUNNING, and then what it made.  Off by default, toggled from
+// the titlebar ("pv"), and deliberately not a picker:
 //
-// Two sources, in this order:
+//   [his] "when toggled it should only show the preview frames of the
+//          generating image or video and when complete should just show that
+//          image or video, no clicking on other outputs or anything"
 //
-//   1. THE SAMPLER'S OWN PREVIEW, while a job runs — the frames ComfyUI pushes
-//      down the websocket (`App.hasPreview`, fed by main.py's LivePreview image
-//      provider). The backend only sends them with `--preview-method` set, which
-//      home/prog/painter.nix does; with it off nothing arrives and this falls
-//      through to (2) rather than showing an empty box.
-//   2. THE PICKED OUTPUT — right-click an output and choose `preview`, or the
-//      newest one otherwise. A video plays here looped and MUTED: it is a
-//      thumbnail that moves, next to a music player he is probably listening
-//      to. Sound is what `viewer` is for (left-click).
+// So it has exactly two states and no controls. While a job runs it shows the
+// sampler's own preview frames (the ones ComfyUI pushes down the websocket,
+// `App.hasPreview`, fed by main.py's LivePreview image provider). When the job
+// lands it shows that output — the newest row in the gallery — and a clip plays
+// looped and MUTED, because it is a preview beside a music player, not
+// playback. Playback is `viewer`, on a double-click in the grid.
+//
+// ComfyUI's video preview is a STILL FRAME PER STEP, not a moving clip:
+// Latent2RGBPreviewer takes x0[0, :, 0] out of a 5-D latent, i.e. the first
+// frame. That is what its own web UI shows too, so a video job previews as a
+// single frame that refreshes as it denoises.
 Item {
     id: pane
 
@@ -26,28 +28,27 @@ Item {
     readonly property int minHeight: 90
     readonly property int maxHeight: 900
 
+    // What the last finished job produced. Nothing else ever sets these — the
+    // pane follows the newest output, it is not a way to browse older ones.
     property string source: ""
     property bool sourceIsVideo: false
 
-    function show(path, isVideo) {
-        pane.source = path
-        pane.sourceIsVideo = isVideo === true
+    function showNewest() {
+        if (Gallery.count > 0) {
+            pane.source = Gallery.pathAt(0)
+            pane.sourceIsVideo = Gallery.isVideoAt(0)
+        }
     }
 
     visible: open
     height: open ? paneHeight : 0
 
-    // The newest output, until something is picked by hand. `Gallery.count`
-    // changing is the signal a job landed; the row it added is row 0.
+    // A landed job is a new row 0, which is the thing to show.
     Connections {
         target: Gallery
-        function onCountChanged() {
-            if (Gallery.count > 0 && pane.source === "")
-                pane.show(Gallery.pathAt(0), Gallery.isVideoAt(0))
-        }
+        function onCountChanged() { pane.showNewest() }
     }
-    Component.onCompleted: if (Gallery.count > 0)
-        pane.show(Gallery.pathAt(0), Gallery.isVideoAt(0))
+    Component.onCompleted: pane.showNewest()
 
     Rectangle {
         id: frame
@@ -71,7 +72,7 @@ Item {
             asynchronous: true
         }
 
-        // (2a) a picked still
+        // (2a) the finished still
         Image {
             anchors.fill: parent
             anchors.margins: 1
@@ -82,7 +83,7 @@ Item {
             asynchronous: true
         }
 
-        // (2b) a picked clip — looped, and muted on purpose (see above)
+        // (2b) the finished clip — looped, and muted on purpose (see above)
         AudioOutput { id: silent; muted: true }
         MediaPlayer {
             id: player
@@ -109,8 +110,15 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             visible: !App.hasPreview && pane.source === ""
-            text: App.busy ? "waiting for the first preview frame"
-                           : "nothing to preview yet - generate, or right-click an output"
+            // BE HONEST ABOUT THE LIKELY REASON. A backend started before the
+            // --preview-method flag existed sends nothing at all, and "waiting"
+            // would be a lie that never resolves. A first step can genuinely
+            // take half a minute on a video model, so the hint waits for the
+            // clock rather than firing immediately.
+            text: !App.busy ? "nothing generated yet"
+                : App.elapsed > 45
+                  ? "no preview frames - if the backend has been up a while, restart it from settings so --preview-method takes effect"
+                  : "waiting for the first preview frame"
             color: Theme.dim
         }
 

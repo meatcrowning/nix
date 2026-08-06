@@ -98,18 +98,33 @@ comes back mirrored on the first launch after the change.
 
 Above the history, off by default, toggled from the titlebar's `pv` cell
 (`PreviewPane.qml`, height dragged by the same grip a prompt box has, remembered
-as `preview.h`). It shows two things, in this order:
+as `preview.h`). **It is the RUNNING JOB, not a browser** — [his] *"it should
+only show the preview frames of the generating image or video and when complete
+should just show that image or video, no clicking on other outputs or
+anything"*. Two states, no controls:
 
 1. **the sampler's own preview frames** while a job runs — `main.py`'s
    `LivePreview` (a `QQuickImageProvider`) fed from `ComfyClient.jobPreview`,
    addressed as `image://livepreview/<tick>` because an `Image` whose URL never
-   changes never reloads. **The backend only sends them with
-   `--preview-method`**, which `home/prog/painter.nix` now passes; without it
-   nothing arrives and the pane falls through to (2) rather than sitting empty.
-2. **an output** — the newest, or whichever one was clicked. A click previews,
-   a DOUBLE-click opens it in viewer. A clip plays here looped and **muted**: it
-   is a thumbnail that moves, beside a music player he is probably listening to,
-   and sound is what viewer is for.
+   changes never reloads.
+2. **what it made**, once it lands: the newest gallery row, full stop. A clip
+   plays looped and **muted** — a preview beside a music player, not playback.
+   Playback is viewer, on a double-click in the grid. A single click in the grid
+   does nothing at all, deliberately.
+
+Two things about the backend, both worth knowing before debugging an empty pane:
+
+- **ComfyUI sends nothing without `--preview-method`** (its default is
+  `NoPreviews`), which `home/prog/painter.nix` now passes — but the unit is
+  `X-RestartIfChanged=false`, so a backend that was already up keeps running
+  without it until it is restarted. That is why the pane says so once a job has
+  been going 45s with no frame, rather than "waiting" forever.
+- **A video preview is a STILL FRAME PER STEP, not a moving clip.**
+  `Latent2RGBPreviewer` takes `x0[0, :, 0]` out of a 5-D latent — the first
+  frame — and Comfy's own web UI shows the same thing. `MiniMaxH3AV` carries the
+  RGB factors, so `auto` works with no extra files; the `taehv` route (a real
+  decode rather than the RGB approximation) needs `models/vae_approx/taehv*`,
+  which is not installed, and is still one frame at a time.
 
 That pane is why `painter.nix` carries `qtmultimedia` — and with it viewer's
 NVDEC pin, for the reason measured there.

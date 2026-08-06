@@ -74,6 +74,14 @@ def prop(obj, name):
     return v.toVariant() if hasattr(v, "toVariant") else v
 
 
+def hasattr_qml(item, method):
+    """Whether a QML item exposes `method` as an invokable — used to assert that
+    a control that WAS there is gone, rather than trusting the source."""
+    mo = item.metaObject()
+    return any(mo.method(i).name().data().decode() == method
+               for i in range(mo.methodCount()))
+
+
 def find(root, type_name, pred=None):
     """First item whose QML type starts with `type_name`, depth-first."""
     for it in walk(root):
@@ -455,6 +463,11 @@ def test_chrome(win, ctl):
     spin(120)
     check("...and folds away to nothing", not pv.isVisible() and pv.height() == 0,
           pv.height())
+
+    # It follows the JOB, not a selection: the newest output is what it shows,
+    # and nothing in the grid can point it elsewhere.
+    check("the preview pane has no way to be pointed at an old output",
+          not hasattr_qml(pv, "show"), None)
 
     # A prompt box is dragged taller by its bottom edge, and remembers it.
     box = find_all(content, "PromptBox")[0]
@@ -911,15 +924,12 @@ def test_inject(win, ctl, tmp):
         from PySide6.QtCore import Qt
         OPENED.clear()
         pv = find(win.contentItem(), "PreviewPane")
-        pv.setProperty("source", "")
         click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2)
         spin(150)
-        # ONE click previews (and opens the viewport), TWO open the file. A
-        # single click must not launch anything.
-        check("left-clicking an output previews it and launches nothing",
-              not menu.isVisible() and not OPENED
-              and pv.property("source") == path and win.property("showPreview") is True,
-              (menu.isVisible(), OPENED, pv.property("source")))
+        # A single click does NOTHING: no menu, no launch, and no reaching into
+        # the preview pane, which follows the running job and nothing else.
+        check("a single left click on an output does nothing",
+              not menu.isVisible() and not OPENED, (menu.isVisible(), OPENED))
         doubleclick(win, cell)
         spin(200)
         check("double-clicking it opens it in viewer",
