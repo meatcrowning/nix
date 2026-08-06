@@ -29,8 +29,20 @@ halves are `docs/hyprvtb-titlebar-flash.md`.
 **QtWebEngine spellcheck is imperative-only**: the declarative QML
 `WebEngineProfile` `spellCheck*` properties are silently dropped — set
 `setSpellCheckEnabled`/`setSpellCheckLanguages` imperatively in `_wire_profile`.
-That covers **web pages only** — Chromium's checker, an `en-US.bdic` compiled by
-`qwebengine_convert_dict` in `surfer.nix`. surfer's own QML fields (the find bar,
+
+**And the language tag is a FILENAME, not a locale.** Chromium opens
+`<tag>.bdic` under the dictionaries directory and does no locale matching at
+all, so the tag must be resolved against what is installed: `top` has
+`en-US.bdic`, compiled by `qwebengine_convert_dict` in `surfer.nix` and pointed
+at with `QTWEBENGINE_DICTIONARIES_PATH`; `book` has Fedora's
+`/usr/share/qt6/qtwebengine_dictionaries/en_US.bdic` and no env var. A
+hardcoded `"en-US"` therefore checked nothing at all on `book` — and said
+nothing, because `isSpellCheckEnabled()` is True either way. `main.py`'s
+`_spell_language()` picks the tag whose `.bdic` exists; `tools/spell-test.py`
+is the regression test (offscreen, right-clicks a misspelling and reads the
+context-menu request — the only honest check).
+
+That covers **web pages only** — Chromium's checker. surfer's own QML fields (the find bar,
 the file picker) are queries and paths and are deliberately NOT checked; the
 apps' checker for ordinary QML inputs is `pylib/spellcheck.py`
 (`../AGENTS.md`), which reads the same `hunspellDicts.en_US` this `.bdic` is
