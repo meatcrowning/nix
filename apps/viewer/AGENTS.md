@@ -68,6 +68,30 @@ same time" is not two.
 - Only the **focused** pane's video is audible (`AudioOutput.muted`); four clips
   at once would otherwise be four soundtracks, and the titlebar can pause one.
 
+## Video decodes on NVDEC, never VAAPI (`top`)
+
+`home/prog/viewer.nix` sets `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda` on the
+NVIDIA host, and that is not a tuning knob — it is the fix for two coredumps
+(2026-07-30 and 2026-08-03, a `.webm` each).
+
+Qt's ffmpeg backend probes hardware decoders in its own order and takes **VAAPI**
+first. The VAAPI provider on `top`'s default render node (`/dev/dri/renderD128`)
+is NVIDIA's own shim, `nvidia_drv_video.so`, and it cannot export a surface as a
+DRM-prime handle at all: measured on the sandbox monitor 2026-08-05,
+`vaExportSurfaceHandle failed` **202 times in 9 s** for a VP9 clip and 392 for a
+VP8 one — every frame. Qt then falls back to a per-frame CPU transfer, which is
+both why video played badly *and* how viewer died:
+`av_hwframe_transfer_data` → `vaapi_transfer_data_from` → `av_image_copy` hits an
+`av_assert0` on a plane-size mismatch and `abort()`s, in the render thread or the
+GUI thread depending on where the upload ran.
+
+`cuda` is real NVDEC and logs zero export failures on the same clips. Qt falls
+back to software on its own for anything NVDEC cannot decode, so this **narrows**
+the probe order rather than forcing a decoder. It is `--set-default`, so
+`QT_FFMPEG_DECODING_HW_DEVICE_TYPES= viewer x.webm` still bisects it by hand —
+that env var is the first thing to reach for if video misbehaves again. `book` is
+not NVIDIA and keeps Qt's default.
+
 **Keys**: ‹ / › flip · Space play/next · `+` `-` `0` zoom/fit (with or without
 Ctrl) · Ctrl+wheel or plain wheel zooms the pane under the cursor · `\` add pane
 · Ctrl+W close pane (quits on the last one) · Tab / Shift+Tab · Ctrl+1..9.
