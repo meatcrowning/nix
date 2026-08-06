@@ -107,6 +107,33 @@ WebEngineView still needs `qtwebenginequickplugin` on the QML import path) but
 never runs the wrapper — its third line would hand the arguments to the user's
 live browser.
 
+## Video: hardware decode loses the GL context on BOTH machines
+
+Each host disables a different piece of Chromium's video path in `main()`, and
+neither flag works on the other machine. On `top` (NVIDIA 595.84, RTX 5070) the
+accelerated decoder publishes its frames as a **platform GpuMemoryBuffer in
+multiplanar NV12**, and QtWebEngine has no shared-image backing factory for that
+shape — `Could not find SharedImageBackingFactory … (Y_UV, 420, 8unorm) …
+MailboxVideoFrameConverter`. That does not degrade to software: it **loses the
+GL context on the first decoded frame**, so the whole page stops painting and
+the log fills with `Context lost during MakeCurrent` and `non-existent mailbox`
+at frame rate. That is the "embedded mp4s glitch out and won't play" report.
+
+**Why webm looked hit-or-miss:** it is per codec, not per container. Measured on
+`top` 2026-08-05, a real `WebEngineView` on the sandbox output, one clip per
+codec — h264, vp9 and av1 all lose the context on frame one; **vp8 is clean**,
+because it is the one codec this stack has no hardware decoder for and so never
+enters the path. 4chan serves both, hence the coin flip.
+
+`--disable-features=AcceleratedVideoDecodeLinuxGL` is the whole fix: 0 errors
+against 234 in the same clip without it, with page compositing and rasterisation
+still on the GPU and decode in software (free on this CPU). Two things that do
+**not** work, both measured, so don't retry them: air's
+`--disable-gpu-memory-buffer-video-frames`, and
+`--disable-features=VaapiVideoDecodeLinuxGL,VaapiVideoDecoder` without the
+`Accelerated…` name. `SURFER_GPU=hwvideo` puts the decoder back for a re-test
+after an NVIDIA or Qt bump; `SURFER_GPU`'s other modes are air's.
+
 ## Downloads — the progress toast gate is TIME, not size
 
 Downloads land in `~/Downloads`. Every download gets a completion/failure toast;

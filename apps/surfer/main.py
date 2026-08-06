@@ -3637,14 +3637,43 @@ def main():
     #              costs some raster throughput on heavy pages.
     #   safe       the old blunt --disable-gpu-compositing, if video ever
     #              glitches out again.
+    #
+    # top ALSO needs a video workaround, and it is a different one — the line
+    # above saying "top's GPU is fine" was wrong. On NVIDIA (595.84, RTX 5070)
+    # Chromium's accelerated video decoder hands its frames over as a PLATFORM
+    # GpuMemoryBuffer in multiplanar NV12, and QtWebEngine's shared-image
+    # factories have no backing for that combination:
+    #
+    #   Could not find SharedImageBackingFactory with params: usage:
+    #   Gles2Read|RasterRead|DisplayRead|Scanout, format: (Y_UV, 420, 8unorm,
+    #   ExtSamplerOn), gmb_type: platform, debug_label: MailboxVideoFrameConverter
+    #
+    # That failure LOSES THE GL CONTEXT on the first decoded frame, so the page
+    # stops painting — the video and everything around it — and the log fills
+    # with `Context lost during MakeCurrent` + `non-existent mailbox` at frame
+    # rate. This is the "embedded mp4s on 4chan glitch out and won't play"
+    # report, and it is why webm was hit-or-miss: measured on top 2026-08-05
+    # against a real WebEngineView on the sandbox output, h264/vp9/av1 all lose
+    # the context on frame one while **vp8 is clean** — vp8 is the one codec
+    # this stack has no hardware decoder for, so it never enters the path.
+    # Disabling that one Chromium feature is enough (0 errors vs 234 in the same
+    # run without it) and leaves page compositing and rasterisation on the GPU;
+    # decode falls to software, which this CPU does not notice.
+    # --disable-gpu-memory-buffer-video-frames does NOT fix it (measured), so
+    # the narrow flag air uses is not transferable here.
+    _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+    _mode = os.environ.get("SURFER_GPU", "")
     if ON_AIR:
-        _flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
-        _mode = os.environ.get("SURFER_GPU", "")
         _gpu = "--disable-gpu-memory-buffer-video-frames"
         if _mode == "safe":
             _gpu = "--disable-gpu-compositing"
         elif _mode == "softraster":
             _gpu += " --disable-gpu-rasterization"
+    else:
+        # SURFER_GPU=hwvideo restores the accelerated decoder, to re-test this
+        # after an NVIDIA or Qt bump.
+        _gpu = "" if _mode == "hwvideo" else "--disable-features=AcceleratedVideoDecodeLinuxGL"
+    if _gpu:
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (_flags + " " + _gpu).strip()
 
     # Register the gmxhr:// scheme used for the SCOPED CORS bypass (only
