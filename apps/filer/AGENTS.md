@@ -498,7 +498,105 @@ before changing it.
   Fedora state this repo cannot declare (`systemctl enable --now sshd` there);
   until then the address fails with a "cannot reach book / connection refused"
   toast, which is the honest answer.
+### Why it is as fast as it is — measure before you retune
+
+All numbers book -> top, 5 GHz wifi, 7 ms RTT. **The link is the ceiling**: raw
+ssh moves 39 MB/s and every cipher measures the same (39-40 MB/s for chacha20,
+aes128-gcm, aes256-gcm, aes128-ctr), so nothing is to be won by changing
+ciphers, and a single sshfs stream at 30 MB/s was already at 77% of it.
+Directory metadata is not the problem either — 1191 entries list in 0.11s cold
+and 0.04s cached, and stat-ing all of them costs 0.06s.
+
+What actually moved the needle, and what each is worth:
+
+- **`auto_cache` — the big one.** Without it a re-read is the full transfer
+  again, and re-reading is the normal case: the preview grid thumbnails an
+  image, you click it, viewer reads the same bytes. Measured on a 12 MB image,
+  thumbnail-read then click-read: **0.40s + 0.38s before, 0.41s + 0.011s
+  after**. On an 87 MB PNG: 2.94s + 2.94s before, 2.93s + 0.066s after.
+  Not `kernel_cache`, which never revalidates; `auto_cache` checks size and
+  mtime. Its one hole, measured: a remote file rewritten to the *same byte
+  length* inside `cache_timeout` is served stale. A size change is seen at once.
+- **`max_conns=4`.** One connection is one stream, so the thumbnail pool's four
+  workers shared 30 MB/s. Four connections reach **37 MB/s** — the link's own
+  ceiling — and cost a single stream nothing.
+- **`cache_timeout` 20 -> 5.** With `auto_cache` the attribute cache also bounds
+  how long stale *content* can be served, and listings are cheap enough (above)
+  that revalidating four times as often is not perceptible.
+- **`Remote.prefetch()`, called from `openFile` before the app is launched.**
+  viewer needs 0.22s to stand its QML up and only then reads the file; starting
+  the transfer at click time instead means it overlaps that. Measured on cold
+  6-9 MB images, viewer's own wait: **0.224s -> 0.048s mean**, click-to-shown
+  0.42s -> 0.27s. It only works *because* of `auto_cache` — without it the
+  second reader pays the full transfer again and the prefetch is a pure loss.
+  Capped at `PREFETCH_MAX` so clicking a 4 GB video does not try to haul it.
+- **Measured and NOT adopted:** bigger `max_read`/readahead (no change, 28-30
+  MB/s either way); `kernel_cache` (same speed as `auto_cache`, no
+  revalidation).
+
+**Still on the table, measured, not built: thumbnailing on the remote side.**
+`ssh top magick <file> -thumbnail 256x256 png:-` over a multiplexed connection
+costs 0.15s for a 330 KB jpeg and **1.9s for an 87 MB PNG, versus ~3.5s to pull
+and decode it locally** — so it wins above roughly 4 MB and loses below it,
+which makes it a size-thresholded path, not a replacement. The prize is the
+whole-folder case: `~/Pictures` on top is 1191 files and **4.4 GB**, average 3.8
+MB, and scrolling the grid pulls all of it; remote thumbnails would make that
+~36 MB. `magick` and `ffmpeg` are both already on top. Nothing of this is
+implemented.
+
 - **Two sshfs properties, not filer bugs**: a remote directory's thumbnails
   pull the files over the wire, and a remote symlink to an absolute path
   (`/nix/store/...`) resolves against THIS machine's copy of that path,
   because the link text crosses untranslated.
+
+## "copy under 4MB" — the stills half of videoconv
+
+`imgconv.py`, and it is deliberately the same shape as `videoconv.py`: a
+right-click on an image too big for wherever you are about to paste it, a copy
+**beside the original** (`photo.png` -> `photo-4mb.jpg`, never clobbering), a
+desktop toast, and `finished(outPath)` so the view lands the selection on the
+new file. No dialog and no questions — a still needs no ffprobe, no encoder
+choice and no progress stream, so this one is a fraction of its sibling's size.
+
+- **Quality first, then resolution.** A lower JPEG quality costs detail you
+  have to look for; discarding pixels costs detail that is simply gone. So each
+  rung of `SCALES` gets a binary search over quality (~5 encodes), and the next
+  smaller rung is only reached when even `Q_MIN` will not fit there. An image
+  barely over the line therefore comes back **full resolution** — measured, a
+  6.6 MB source lands at 1.06 MB, q=92, 2642x1270, in 0.2s — and only a
+  genuinely huge one is scaled.
+- **Everything is measured by encoding into a `QBuffer`**, never by writing and
+  stat-ing. Construct it as `QBuffer()`, using its own internal array: handing
+  it a `QByteArray()` makes it borrow a Python-owned temporary that is collected
+  while the JPEG writer is still filling it — a hard SEGV inside
+  `QBuffer::writeData`, on the first encode, every time.
+- **JPEG, unless the alpha is actually used.** A PNG from almost any tool
+  carries an alpha channel that is opaque everywhere, so `hasAlphaChannel()`
+  would send the common case to WebP for nothing; `_uses_alpha()` samples a
+  64x64 reduction instead. A source that IS transparent becomes lossy WebP,
+  which keeps it — flattening onto an invented background would be a silent
+  wrong answer.
+- **The menu entry is only offered when it can work**: `kind === "image"` and
+  `size > 4000000`, both already in the model, so it costs no stat and no
+  decode per right-click. Everything else is refused out loud with a reason —
+  an animation (one frame of a GIF is not a copy of it), an undecodable file,
+  a budget nothing can meet.
+- **Qt's 256 MB decode ceiling is raised, process-wide, from here.** Any image
+  whose uncompressed form exceeds it fails with the thoroughly misleading
+  "Unable to read image data" — so the images most worth shrinking were exactly
+  the ones that silently could not be. Measured on a 9000x8113 PNG from top (73
+  MP, 292 MB as ARGB32): refused before, and 82.9M -> 3.5M at full resolution
+  in 2.0s after. **It fixed the preview grid too** — that same PNG got no
+  thumbnail tile at all for the same reason, verified both ways at 256 MB and
+  at the new limit. `MAX_SRC_PIXELS` is the real guard; the allocation limit is
+  set to exactly what that allows.
+
+Verify with `tools/imgconv-test.py` (offscreen, ~21 checks, self-contained). It
+generates its own noise sources — a gradient would fit the budget at any
+quality and prove nothing — and asserts the copy is under the limit AND
+decodable, that quality is spent before pixels, that transparency survives as
+WebP while an opaque ARGB image does not, that a second run does not clobber
+the first, and each refusal. The animated-GIF case builds a real 60-frame gif
+with ffmpeg and skips out loud without it: a hand-assembled two-frame gif was
+tried first and Qt's reader reported `imageCount() == 1` for it, so the harness
+quietly skipped the one refusal it existed to check.

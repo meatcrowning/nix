@@ -345,6 +345,12 @@ Window {
         function onFinished(outPath) { if (outPath) win.refreshAll(outPath); }
     }
 
+    // ...and the same courtesy for "copy under 4MB" (imgconv.py).
+    Connections {
+        target: ImgConv
+        function onFinished(outPath) { if (outPath) win.refreshAll(outPath); }
+    }
+
     // external change in a watched dir (something added/removed by another
     // process — a finishing download, a shell mv, …): same keep-scroll refresh
     // as a file op. DirWatch debounces, so a burst of writes lands as one.

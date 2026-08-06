@@ -47,6 +47,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
+from imgconv import ImgConv  # noqa: E402  (next to this file; the stills half of the same idea)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
 from phone import Phone  # noqa: E402  (next to this file; KDE Connect "send to phone")
 from remote import Remote  # noqa: E402  (next to this file; the `:top` address bar syntax)
@@ -89,6 +90,11 @@ def preview_kind(name, is_dir):
 # the file already) is a near-instant read of a tiny PNG; a miss decodes once,
 # writes back into the shared cache (so Dolphin benefits too), and is instant
 # ever after. The heavy work runs off the GUI thread (see ThumbProvider).
+#
+# NB: Qt's 256 MB decode ceiling used to stop this dead on large PNGs — a 73
+# megapixel one got no tile at all, with "Unable to read image data" for a
+# reason. `imgconv` raises that limit process-wide at import; see the comment
+# on MAX_SRC_PIXELS there.
 THUMB_ROOT = Path.home() / ".cache" / "thumbnails"
 THUMB_MAX = 256  # the "large" band; tiles are 96px, so 256 is crisp with headroom
 THUMB_MAX_SRC = 128 * 1024 * 1024  # skip generating for sources above this (see make_thumb)
@@ -973,6 +979,7 @@ def main():
     titlebar = Titlebar()
     dirwatch = DirWatch()
     videoconv = VideoConv()
+    imgconv = ImgConv()
     phone = Phone()
     remote = Remote()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
@@ -986,6 +993,7 @@ def main():
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("VideoConv", videoconv)
+    ctx.setContextProperty("ImgConv", imgconv)
     ctx.setContextProperty("Phone", phone)
     ctx.setContextProperty("Remote", remote)
     ctx.setContextProperty("Picker", picker)

@@ -271,6 +271,13 @@ Rectangle {
             items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path) });
             items.push({ label: "copy without audio", trigger: () => VideoConv.stripAudio(e.path) });
         }
+        // The stills equivalent, and only where it means something: an image
+        // ALREADY under the limit has nothing to shrink, so the entry is not
+        // offered rather than offered and then refused (docs/DESIGN.md's rule
+        // about actions that can silently fail). The size is already in the
+        // model, so this costs no stat and no decode per right-click.
+        if (!e.isDir && e.kind === "image" && e.size > 4000000)
+            items.push({ label: "copy under 4MB", trigger: () => ImgConv.start(e.path) });
         return items.concat(sendToPhoneItems()).concat([
             { separator: true },
             { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },
@@ -398,6 +405,11 @@ Rectangle {
             if (Picker.selectable(p)) { selectSingle(p, false); pickBar.submit(); }
             return;
         }
+        // A file on another machine: start pulling it across NOW, not when the
+        // app that shows it gets round to reading it. viewer needs ~0.22s to
+        // stand its QML up, and that is 0.22s the transfer can be running in
+        // (remote.py). A local path is a no-op.
+        Remote.prefetch(p);
         if (kind === "image" || kind === "video") {
             const order = FileOps.writeOrder(orderPaths());
             FileOps.execDetached(order ? ["viewer", "--order", order, p]
