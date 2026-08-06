@@ -19,9 +19,13 @@ Panel {
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
 
+    // NO NEGATIVE PROMPT FOR VIDEO. MiniMaxH3ImageToVideo takes the prompt
+    // itself and produces the conditioning — there is no second CLIPTextEncode
+    // for a negative to reach, so a box for one would be typing into nothing.
     PromptBox {
         width: parent.width
         height: 64
+        visible: !App.isVideo
         placeholder: "negative"
         negative: true
         value: root.gen.negative

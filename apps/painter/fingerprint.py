@@ -322,6 +322,17 @@ def _loader_for(quant: str, path: str) -> str:
 def detect_diffusion(v: View):
     """Return (family, dims) or (None, {}).  Order matters; first hit wins."""
 
+    # --- MiniMax H3: video and audio patch projectors side by side --------
+    # The only model here that generates both modalities in one pass, so the
+    # pair of projectors is the signature -- and it is what makes the family a
+    # `kind: video` one (two VAEs, no CFG, a frame count instead of a batch).
+    if v.has("video_patch_proj.weight") and v.has("audio_patch_proj.weight"):
+        return "minimax_h3", {
+            "blocks": v.count_prefix("blocks."),
+            "video_in": v.dim("video_patch_proj.weight", 1),
+            "audio_in": v.dim("audio_patch_proj.weight", 1),
+        }
+
     # --- Krea 2: the txtfusion projector is unique to it ------------------
     if v.has("txtfusion.projector.weight"):
         return "krea2", {

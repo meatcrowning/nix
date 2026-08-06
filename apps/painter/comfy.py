@@ -450,6 +450,60 @@ class ComfyClient(QtCore.QObject):
         })
         return f"{self.url}/view?{q}"
 
+    def upload_image(self, path: str, callback, subfolder: str = "painter"):
+        """Put a local file in ComfyUI's input directory; `callback(ref, error)`.
+
+        `ref` is what a LoadImage node takes — "subfolder/name" — and it has to
+        travel over HTTP rather than being read off disk: on book the backend is
+        top's, behind the ssh forward, and the only thing the two machines share
+        is that socket. Uploading under our own subfolder keeps his input
+        directory from filling up with painter's drops.
+        """
+        try:
+            fh = QtCore.QFile(path)
+            if not fh.open(QtCore.QIODevice.OpenModeFlag.ReadOnly):
+                callback(None, f"cannot read {os.path.basename(path)}")
+                return
+        except Exception as exc:  # noqa: BLE001
+            callback(None, f"{exc}")
+            return
+
+        multipart = QtNetwork.QHttpMultiPart(
+            QtNetwork.QHttpMultiPart.ContentType.FormDataType)
+        image_part = QtNetwork.QHttpPart()
+        image_part.setHeader(
+            QtNetwork.QNetworkRequest.KnownHeaders.ContentDispositionHeader,
+            f'form-data; name="image"; filename="{os.path.basename(path)}"')
+        image_part.setBodyDevice(fh)
+        fh.setParent(multipart)          # the device must outlive the request
+        multipart.append(image_part)
+        for name, value in (("overwrite", "true"), ("subfolder", subfolder)):
+            part = QtNetwork.QHttpPart()
+            part.setHeader(QtNetwork.QNetworkRequest.KnownHeaders.ContentDispositionHeader,
+                           f'form-data; name="{name}"')
+            part.setBody(value.encode())
+            multipart.append(part)
+
+        def done(reply):
+            try:
+                raw = bytes(reply.readAll()).decode("utf-8", "replace")
+                if reply.error() != QtNetwork.QNetworkReply.NetworkError.NoError:
+                    callback(None, raw.strip() or reply.errorString())
+                    return
+                doc = json.loads(raw)
+                sub = doc.get("subfolder") or ""
+                name = doc.get("name") or os.path.basename(path)
+                callback(f"{sub}/{name}" if sub else name, None)
+            except Exception as exc:  # noqa: BLE001
+                callback(None, f"{exc}")
+            finally:
+                reply.deleteLater()
+
+        req = QtNetwork.QNetworkRequest(QtCore.QUrl(f"{self.url}/upload/image"))
+        reply = self.net.post(req, multipart)
+        multipart.setParent(reply)
+        reply.finished.connect(lambda r=reply: done(r))
+
     def download(self, image: dict, callback):
         """Fetch one output image's bytes."""
         def done(reply):

@@ -64,6 +64,12 @@ Window {
         // with the graph.
         aspectW: 1, aspectH: 1, megapixels: 1.0, multiple: 64,
         width: 1024, height: 1024,
+        // Video only (a `kind: video` family). `useInputImage` is the mode
+        // switch: on, the dropped image is the first frame AND the thing that
+        // decides the aspect, so only MP is left to choose; off, it is plain
+        // text-to-video with painter's usual aspect + MP. The image itself is a
+        // file path and lives on App, not in here.
+        duration: 5.0, fps: 24.0, useInputImage: false,
         negpip: false, modelSampling: false,
         ms: ({ shift_start: 3.5, shift_end: 1.2, start_percent: 0.0,
                end_percent: 0.5, curve: "ease_in", outside_window: "hold",
@@ -126,7 +132,14 @@ Window {
         if (!d || !d.steps) return
         root.defaultsFor = App.selectedName
         var g = clone(gen)
-        g.steps = d.steps; g.cfg = d.cfg; g.denoise = d.denoise !== undefined ? d.denoise : 1.0
+        g.steps = d.steps
+        // A video family has no CFG at all (BasicGuider takes none), so it
+        // declares no default for it — keep what was there rather than writing
+        // an undefined into the settings every time such a model is selected.
+        if (d.cfg !== undefined) g.cfg = d.cfg
+        g.denoise = d.denoise !== undefined ? d.denoise : 1.0
+        if (d.duration !== undefined) g.duration = d.duration
+        if (d.fps !== undefined) g.fps = d.fps
         g.sampler_name = d.sampler_name; g.scheduler = d.scheduler
         var a = parseAspect(d.aspect)
         g.aspectW = a[0]; g.aspectH = a[1]
@@ -157,6 +170,23 @@ Window {
 
     function submit() {
         var g = gen
+        // A video job is a different set of controls, not a superset: one
+        // prompt, a duration instead of a batch, no CFG and no patches. Sending
+        // the image fields anyway would have painter claim settings the video
+        // graph never reads.
+        if (App.isVideo) {
+            App.generate({
+                positive: g.positive,
+                steps: g.steps, denoise: g.denoise,
+                sampler_name: g.sampler_name, scheduler: g.scheduler,
+                seed: g.seed, randomSeed: g.randomSeed,
+                duration: g.duration, fps: g.fps,
+                megapixels: g.megapixels,
+                width: g.width, height: g.height,
+                use_input_image: g.useInputImage
+            }, g.count)
+            return
+        }
         App.generate({
             positive: g.positive, negative: g.negative,
             steps: g.steps, cfg: g.cfg, denoise: g.denoise,
@@ -212,9 +242,28 @@ Window {
                     onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
                 }
                 LoraStack { width: parent.width; persistKey: "panel.lora" }
+                // Only for a video family, and the two below it follow the same
+                // rule from the inside: no negative prompt, no CFG, no batch, and
+                // no aspect while a first frame is deciding it. A Column skips
+                // invisible children, so these leave no gap.
+                VideoPanel {
+                    width: parent.width
+                    persistKey: "panel.video"
+                    visible: App.isVideo
+                }
                 ParamsPanel { width: parent.width; persistKey: "panel.sampling" }
-                ResolutionPanel { width: parent.width; persistKey: "panel.resolution" }
-                TogglePanel { width: parent.width; persistKey: "panel.patches" }
+                ResolutionPanel {
+                    width: parent.width
+                    persistKey: "panel.resolution"
+                    // In image-to-video the size comes out of the dropped image,
+                    // and MP is the only part of it left to choose — that is
+                    // handled inside the panel, which keeps its MP box.
+                }
+                TogglePanel {
+                    width: parent.width
+                    persistKey: "panel.patches"
+                    visible: !App.isVideo
+                }
                 Item { width: 1; height: 6 }
             }
         }
@@ -490,6 +539,7 @@ Window {
         Prefs.set("splitRatio", root.splitRatio)
         Prefs.set("gen", JSON.stringify(root.gen))
         Prefs.set("model", App.selectedName)
+        Prefs.set("inputImage", App.inputImage)
     }
 
     Timer {
@@ -522,6 +572,9 @@ Window {
         // Without this, the startup selection fires modelChanged and applyDefaults
         // overwrites everything that was just restored.
         root.defaultsFor = Prefs.get("model") || ""
+        // The dropped first frame comes back too, quietly: a file that has since
+        // moved just leaves the well empty.
+        App.restoreInputImage(Prefs.get("inputImage") || "")
         root.restored = true
     }
 }

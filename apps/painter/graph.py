@@ -169,6 +169,26 @@ class Graph:
         self._reindex()
         return self
 
+    def drop(self, role: str):
+        """Delete a node outright, refusing if anything still reads it.
+
+        `remove()` splices a node OUT of a chain and needs `painter_bypass` to
+        say what replaces it.  A source node (LoadImage) has no input standing
+        in for its output: text-to-video simply does not have one, so its
+        consumers are rewired to plain values first and this asserts that they
+        were -- a dangling link is a submit-time error from ComfyUI with a node
+        id in it, which is the failure this class exists to prevent.
+        """
+        if not self.has(role):
+            return self
+        nid = self.id_of(role)
+        left = [f"{oid}.{key}" for oid, key, _ in self._consumers(nid)]
+        if left:
+            raise GraphError(f"cannot drop {role!r}: still read by {', '.join(left)}")
+        del self.nodes[nid]
+        self._reindex()
+        return self
+
     def retarget(self, old, new, skip=()):
         """Point every consumer of link `old` at `new`."""
         old = list(old)
@@ -252,19 +272,35 @@ def input_spec(object_info: dict, class_type: str, key: str):
 
 
 def enum_values(object_info: dict, class_type: str, key: str):
-    """Combo options, tolerating both /object_info shapes.
+    """Combo options, tolerating all three /object_info shapes.
 
-    Older nodes give `[[a, b, c], {...}]`; newer ones give `["COMBO", {"options": [...]}]`.
+    Older nodes give `[[a, b, c], {...}]`; newer ones give `["COMBO", {"options":
+    [...]}]`; a DynamicCombo (SaveVideo's `codec`) gives that same list with each
+    option a `{"key": ..., "inputs": {...}}` DICT, and the value a graph carries
+    is the key alone.  Reading those literally made every video graph fail
+    validation on a `codec` the backend accepts.
     """
     spec = input_spec(object_info, class_type, key)
     if not spec:
         return None
     head = spec[0]
     if isinstance(head, list):
-        return head
-    opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
-    vals = opts.get("options")
-    return vals if isinstance(vals, list) else None
+        vals = head
+    else:
+        opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+        vals = opts.get("options")
+    if not isinstance(vals, list):
+        return None
+    return [v.get("key") if isinstance(v, dict) else v for v in vals]
+
+
+# Enums that are a LIVE DIRECTORY LISTING rather than a node contract. The file
+# painter uploads for image-to-video lands in ComfyUI's input directory a moment
+# before the graph is submitted, so it cannot be in the /object_info fetched at
+# startup — validating against that list rejects the one graph that is certainly
+# correct. Model names are deliberately NOT in here: those really are a contract,
+# and a missing weight file should fail before it reaches the backend.
+LIVE_ENUMS = {("LoadImage", "image"), ("LoadImageMask", "image")}
 
 
 def validate(prompt: dict, object_info: dict, check_enums: bool = True):
@@ -286,7 +322,7 @@ def validate(prompt: dict, object_info: dict, check_enums: bool = True):
                 if val[0] not in prompt:
                     problems.append(f"{role} ({cls}): {key} links to missing node {val[0]}")
                 continue
-            if check_enums and isinstance(val, str):
+            if check_enums and isinstance(val, str) and (cls, key) not in LIVE_ENUMS:
                 allowed = enum_values(object_info, cls, key)
                 if allowed is not None and val not in allowed:
                     sample = ", ".join(map(str, allowed[:6]))
