@@ -261,11 +261,16 @@ Rectangle {
             { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind) },
             { label: "open with...", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
         ];
-        // videos get the "squeeze it under an upload limit" action. Only the
-        // clicked entry, not the selection: each conversion is its own long
-        // job with its own toast.
-        if (!e.isDir && VideoConv.isVideo(e.path))
+        // videos get the "squeeze it under an upload limit" action and the
+        // "same clip, no soundtrack" one. Only the clicked entry, not the
+        // selection: each job is its own long job with its own toast.
+        // No probe here to hide "copy without audio" on a silent file — the
+        // menu must not pay an ffprobe per right-click; VideoConv.stripAudio
+        // toasts that instead.
+        if (!e.isDir && VideoConv.isVideo(e.path)) {
             items.push({ label: "compress to <10MB", trigger: () => compressVideo(e.path) });
+            items.push({ label: "copy without audio", trigger: () => VideoConv.stripAudio(e.path) });
+        }
         return items.concat(sendToPhoneItems()).concat([
             { separator: true },
             { label: "cut" + n,  trigger: () => { clip = { op: "cut",  paths: selection.slice() }; } },

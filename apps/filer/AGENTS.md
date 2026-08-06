@@ -358,8 +358,9 @@ notifications on the user's screen, and the assertions need the exact strings.
 > selection cleared and the list refreshed. `home/prog/filer.nix` now prefixes
 > `glib`'s bin dir onto the wrapper's PATH. Silence is what let it rot.
 
-- **`videoconv.py`** — the context menu's "compress to <10MB" (an upload-limit
-  squeeze). Exposed as the `VideoConv` context property; the only part of filer
+- **`videoconv.py`** — the context menu's two video actions, "compress to
+  <10MB" (an upload-limit squeeze) and "copy without audio". Exposed as the
+  `VideoConv` context property; the only part of filer
   that shells out to `ffmpeg`/`ffprobe` (PATH-resolved through `notify.tool`,
   like `kitty` — nothing was added to `filer.nix` for those, so a missing tool
   surfaces as a failure toast, not a broken build; `gio` is the one exception,
@@ -380,11 +381,27 @@ notifications on the user's screen, and the assertions need the exact strings.
     a short clip. book has no NVENC and falls through to x264 automatically.
   - The output is verified against the 10MB line after the encode; one
     corrective pass runs if it somehow overshot.
+  - **"copy without audio" (`stripAudio`) is a stream copy, and that is the
+    whole design.** `-map 0 -map -0:a -c copy -dn`: everything but the audio is
+    copied bit-for-bit, so it runs at IO speed and the video is the *same*
+    video, not a generation-loss copy of it (`tools/strip-audio-test.py` hashes
+    the video bitstream to hold that). Consequences: the output **keeps the
+    source's container/extension** (`clip.mkv` -> `clip-muted.mkv`), unlike the
+    compressor's always-mp4; there is no `plan()`, no dialog and no quality
+    decision to make; and a container that refuses one of the copied
+    subtitle/attachment streams gets one silent retry with the video alone.
+  - It has **no menu-time probe**: the row appears for every video, and a file
+    with no audio track is refused with a toast when clicked. An ffprobe per
+    right-click would be the alternative, and a silent `-muted` duplicate the
+    worse one.
+  - The job table is keyed **`<kind>:<src>`**, so compressing a file and
+    stripping its audio are not each other's "already running".
 
 ## "send to phone" — KDE Connect, in the file context menu
 
 `phone.py` + `sendToPhoneItems()`/`sendToPhone()` in `qml/BrowserPane.qml`. It
-sits with `open` / `open with...` / `compress to <10MB`, before the first
+sits with `open` / `open with...` / `compress to <10MB` / `copy without audio`,
+before the first
 separator: nothing about it is destructive and it must not be next to `trash`.
 
 - **One row per device, named after the device.** `CtxMenu` has no submenus, and
