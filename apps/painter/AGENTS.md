@@ -239,12 +239,33 @@ The numeric `Spin`/`Field` controls are not spellchecked and must not be.
 ## The backend is NOT packaged
 
 ComfyUI stays the venv+`nix-shell` checkout at `/home/lam/comfy` (symlink →
-`Downloads/git/ComfyUI`, v0.26.0); its `shell.nix` already pins nixpkgs-24.11,
+`Downloads/git/ComfyUI`, v0.30.0); its `shell.nix` already pins nixpkgs-24.11,
 installs torch cu128 and patchelfs Triton's `ptxas` for NixOS, which is the
 hard-won part. `home/prog/painter.nix` only adds a `systemd --user` unit
 `comfy-painter.service` (no `[Install]`, never starts at boot) that painter
 starts on demand and deliberately does **not** stop on exit, so 8-16G of weights
 stay warm between launches. Logs: `journalctl --user -u comfy-painter -f`.
+
+**Upgrading it** is a rebase, not a pull — the checkout carries three local
+`shell.nix` commits that must stay on top: `git fetch && git rebase v<tag>`.
+Two things bite:
+
+- **The venv does not follow the rebase.** `shell.nix` installs deps once and
+  guards on `.venv/.comfy_deps_installed`; delete that marker and re-enter
+  `nix-shell` or the new `requirements.txt` pins never land. torch is unpinned
+  there, so this does *not* disturb the cu128 build.
+- **`models/` on disk is a symlink to `/home/lam/models`**, so upstream's
+  placeholder files under it read as 36 deletions and any checkout would write
+  into the real 246G root. They are `--skip-worktree` as of 2026-08-05; leave
+  them that way.
+
+Then gate it on the three harnesses in this order, each of which catches a
+different kind of breakage: `tools/validate-graphs.py` (node contracts, every
+family × all four toggles), `tools/coverage-test.py` (every base model actually
+loads and decodes — 19/19 on v0.30.0), and the custom-node import block in the
+startup log, since a bump silently disables a node that fails to import rather
+than refusing to start. `coverage-test.py` writes its PNGs into the real
+gallery (`~/Pictures/painter/out`, prefix `painter_cov_`) — delete them after.
 
 The unit passes `--listen 127.0.0.1`, and that is a **security boundary, not a
 default**: ComfyUI has no authentication and a workflow graph is arbitrary code
