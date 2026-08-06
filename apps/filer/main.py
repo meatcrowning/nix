@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -50,21 +51,29 @@ from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docst
 from phone import Phone  # noqa: E402  (next to this file; KDE Connect "send to phone")
 
 # Preview classification. `kind` is the scaffold for file previews: the QML side
-# groups/renders entries by it (images get a thumbnail grid at the top of the
-# dir; everything else stays a plain row). Extend this — a new extension set and
-# a new kind — to teach filer to preview more types (video poster frames, PDFs,
-# …); the matching render branch lives in qml/PreviewTile.qml.
+# groups/renders entries by it (previewable files get a thumbnail grid at the top
+# of the dir; everything else stays a plain row). Extend this — a new extension
+# set and a new kind — to teach filer to preview more types (PDF first pages, …);
+# the matching render branch lives in qml/PreviewTile.qml.
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
               ".avif", ".jxl", ".tif", ".tiff", ".ico", ".ppm", ".pgm"}
+# Mirrors apps/viewer/main.py's VIDEO_EXTS, and for the same reason filer's
+# openFile hands these to `viewer` rather than xdg-open: they are one media set
+# the two apps have to agree on, or a file gets a tile here and no player there.
+VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mpg",
+              ".mpeg", ".wmv", ".flv", ".ts", ".ogv", ".3gp", ".m2ts"}
 
 
 def preview_kind(name, is_dir):
-    """Coarse type of an entry, for the preview layer. "dir" | "image" | "file"."""
+    """Coarse type of an entry, for the preview layer.
+    "dir" | "image" | "video" | "file"."""
     if is_dir:
         return "dir"
     ext = os.path.splitext(name)[1].lower()
     if ext in IMAGE_EXTS:
         return "image"
+    if ext in VIDEO_EXTS:
+        return "video"
     return "file"
 
 
@@ -145,15 +154,95 @@ def _atomic_write(img, dest, texts):
             pass
 
 
-def _generate(path, mtime):
-    """Decode the original scaled down to THUMB_MAX, cache it, and return it.
-    On decode failure, drop a fail marker and return a null image."""
-    reader = QImageReader(path)
-    reader.setAutoTransform(True)  # honour EXIF orientation
-    size = reader.size()
-    if size.isValid() and (size.width() > THUMB_MAX or size.height() > THUMB_MAX):
-        reader.setScaledSize(size.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio))
-    img = reader.read()
+# Where in a clip to look for a poster frame, as fractions of its duration, in
+# the order they are tried. A third of the way in rather than the more obvious
+# 10% because a clip's opening second is so often black, a fade-in or a slate
+# that 10% picks the lead-in outright on anything short — measured, not assumed:
+# tools/thumb-test.py builds a clip with a black first second and 10% returned
+# #000000 for it. The rest are the fallbacks a blank first pick falls through to,
+# and 0.0 is the last resort for a stream whose duration ffprobe cannot read.
+VIDEO_SEEK_FRACTIONS = (1.0 / 3, 0.6, 0.1, 0.0)
+
+
+def _is_blank(img):
+    """Whether `img` is a flat field — a black lead-in, a white slate, a fade.
+    Judged on an 8x8 reduction, which is both cheap and immune to grain: a real
+    frame varies across it, a blank one does not."""
+    if img.isNull():
+        return True
+    small = img.scaled(8, 8, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    lo, hi = 255, 0
+    for y in range(small.height()):
+        for x in range(small.width()):
+            v = small.pixelColor(x, y).lightness()
+            lo, hi = min(lo, v), max(hi, v)
+    return hi - lo < 12
+
+
+def _video_frame(path):
+    """One poster frame from a video as a QImage, or a null QImage.
+
+    Walks VIDEO_SEEK_FRACTIONS and takes the first frame that is not a flat
+    field, so a clip that opens on black does not get a black tile. The `-ss`
+    goes BEFORE `-i` so ffmpeg jumps to the nearest keyframe instead of decoding
+    up to it — that is what makes this cheap enough to run over a whole folder:
+    the cost is one keyframe, not the file. The usual case is one ffmpeg; a
+    lead-in costs a second, and the result is cached for ever either way.
+
+    This runs on a ThumbProvider pool thread, so no call may block for ever: a
+    malformed file that makes ffmpeg spin costs one tile, not the grid. There is
+    no `ffmpeg` in filer.nix on purpose — like `kitty` and the videoconv binaries
+    it is PATH-resolved through notify.tool, so a machine without it shows the
+    no-preview marker rather than failing to build.
+    """
+    try:
+        probe = subprocess.run(
+            [tool("ffprobe"), "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, timeout=15)
+        dur = float(probe.stdout.decode("utf-8", "replace").strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        dur = 0.0
+    seeks, seen = [], set()
+    for f in VIDEO_SEEK_FRACTIONS:
+        t = 0.0 if dur <= 1.0 else round(max(0.0, min(dur * f, dur - 0.1)), 3)
+        if t not in seen:
+            seen.add(t)
+            seeks.append(t)
+    first = QImage()
+    for seek in seeks:
+        try:
+            # image2pipe + png so the frame comes back on stdout; no -vf scale,
+            # because the tail of _generate already bounds every thumbnail to
+            # THUMB_MAX and one scaler is easier to reason about than two.
+            out = subprocess.run(
+                [tool("ffmpeg"), "-v", "error", "-ss", "%.3f" % seek, "-i", path,
+                 "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"],
+                capture_output=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            return first
+        img = QImage()
+        if not (out and img.loadFromData(out, "PNG")) or img.isNull():
+            continue
+        if not _is_blank(img):
+            return img
+        if first.isNull():
+            first = img        # every candidate blank? then a blank frame IS the
+    return first               # honest answer — better than a no-preview marker
+
+
+def _generate(path, mtime, kind):
+    """Produce the thumbnail for `path` scaled down to THUMB_MAX, cache it, and
+    return it. On failure, drop a fail marker and return a null image."""
+    if kind == "video":
+        img = _video_frame(path)
+    else:
+        reader = QImageReader(path)
+        reader.setAutoTransform(True)  # honour EXIF orientation
+        size = reader.size()
+        if size.isValid() and (size.width() > THUMB_MAX or size.height() > THUMB_MAX):
+            reader.setScaledSize(size.scaled(THUMB_MAX, THUMB_MAX, Qt.KeepAspectRatio))
+        img = reader.read()
     uri = _thumb_uri(path)
     meta = {"Thumb::URI": uri, "Thumb::MTime": str(int(mtime)), "Software": "filer"}
     if img.isNull():
@@ -187,13 +276,20 @@ def make_thumb(path):
             return hit
     if _valid_for(_fail_path(path), mtime) is not None:
         return QImage()
+    kind = preview_kind(os.path.basename(path), False)
     # oversized-source guard (cf. Dolphin's "max preview size"): don't tie up a
     # pool thread fully decoding a monster file — render the no-preview marker
     # instead. Placed after the cache lookup so an already-thumbnailed big file
     # still shows instantly.
-    if st.st_size > THUMB_MAX_SRC:
+    #
+    # VIDEO IS EXEMPT, and has to be: the guard is about decode cost, and a
+    # video's cost is one seek plus one keyframe no matter how long the film is.
+    # A 4 GB .mkv is *cheaper* to thumbnail than a 130 MB TIFF. Applying the
+    # byte cap here would leave exactly the files most worth a poster frame
+    # showing the no-preview marker.
+    if kind != "video" and st.st_size > THUMB_MAX_SRC:
         return QImage()
-    return _generate(path, mtime)
+    return _generate(path, mtime, kind)
 
 
 class ThumbResponse(QQuickImageResponse, QRunnable):
