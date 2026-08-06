@@ -44,6 +44,7 @@ QML = HERE / "qml"
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
+from handoff import send as handoff_send, took as handoff_took  # noqa: E402  (pylib)
 
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
@@ -629,6 +630,27 @@ class FileOps(QObject):
             prog = os.path.basename(argv[0])
             self._report("cannot run " + prog, prog + " is not installed, or not on filer's PATH")
         return ok
+
+    @Slot(list, result=bool)
+    def handOff(self, argv):
+        """Ask an already-open `argv[0]` to do this instead of starting another
+        one. True if it took it; False means nobody is listening or it declined,
+        and the caller must launch as usual.
+
+        This is the whole reason opening an image is quick now. Measured on
+        book, a click on a remote image cost ~0.5s of which the file was 0.04s;
+        the rest was a fresh python + PySide6 + QML engine + GL context. Going
+        through the socket from HERE — filer is already running — skips even the
+        `viewer` process that would have asked, so the cost is the decode.
+
+        A decline is normal, not an error: a viewer on another workspace refuses
+        precisely so the click opens a window where the person is looking. See
+        pylib/handoff.py."""
+        argv = [str(a) for a in argv]
+        if not argv:
+            return False
+        return handoff_took(handoff_send(os.path.basename(argv[0]),
+                                         {"argv": argv[1:], "cwd": os.getcwd()}))
 
     @Slot(list, result=str)
     def writeOrder(self, paths):

@@ -544,6 +544,17 @@ MB, and scrolling the grid pulls all of it; remote thumbnails would make that
 ~36 MB. `magick` and `ffmpeg` are both already on top. Nothing of this is
 implemented.
 
+**And the thing that actually made a click feel quick, which was none of the
+above.** Measured after all of it: a 1.25 MB image over the mount was 0.04-0.12s
+of transfer against **0.23s of viewer's own startup** — python + PySide6 + the
+QML engine — so ~85% of the wait was starting a process and the network work is
+invisible on a normal image. `openFile` now offers the job to a viewer that is
+already open (`FileOps.handOff` -> `pylib/handoff.py`), which costs **0.7ms**,
+and only launches one when nobody takes it. Shift-click forces a new window.
+The full rationale is in [`../viewer/AGENTS.md`](../viewer/AGENTS.md); the rule
+that keeps it honest is that a viewer nobody can see refuses, so a click can
+never go nowhere.
+
 - **Two sshfs properties, not filer bugs**: a remote directory's thumbnails
   pull the files over the wire, and a remote symlink to an absolute path
   (`/nix/store/...`) resolves against THIS machine's copy of that path,

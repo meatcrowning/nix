@@ -312,5 +312,9 @@ def main():
     print("all split-view checks passed")
 
 
-QTimer.singleShot(0, lambda: None)
-main()
+# Guarded, so this file can be IMPORTED for its build()/spin() helpers the way
+# filer's thumb-test reuses dragsource-test's. Without the guard the import
+# runs the whole suite and then dies constructing a second QGuiApplication.
+if __name__ == "__main__":
+    QTimer.singleShot(0, lambda: None)
+    main()

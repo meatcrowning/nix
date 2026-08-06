@@ -258,7 +258,7 @@ Rectangle {
         const one = selection.length === 1;
         const n = selection.length > 1 ? " (" + selection.length + ")" : "";
         const items = [
-            { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind) },
+            { label: "open", trigger: () => e.isDir ? go(e.path) : openFile(e.path, e.kind, 0) },
             { label: "open with...", trigger: () => { openWithDlg.targetPath = e.path; openWithDlg.open(); } },
         ];
         // videos get the "squeeze it under an upload limit" action and the
@@ -400,11 +400,16 @@ Rectangle {
     // In picker mode "open" means "this is my answer" — double-clicking a
     // file returns it. Launching viewer/xdg-open from inside a dialog the
     // portal spawned would be both wrong and, for xdg-open, circular.
-    function openFile(p, kind) {
+    function openFile(p, kind, mods) {
         if (view.picking) {
             if (Picker.selectable(p)) { selectSingle(p, false); pickBar.submit(); }
             return;
         }
+        // Shift forces a SECOND viewer window; without it an already-open one
+        // shows the image instead of a new process being started for it (see
+        // below, and pylib/handoff.py). Shift and not a menu entry because the
+        // choice belongs to the click, not to the file.
+        const newWindow = !!(mods & Qt.ShiftModifier);
         // A file on another machine: start pulling it across NOW, not when the
         // app that shows it gets round to reading it. viewer needs ~0.22s to
         // stand its QML up, and that is 0.22s the transfer can be running in
@@ -412,8 +417,15 @@ Rectangle {
         Remote.prefetch(p);
         if (kind === "image" || kind === "video") {
             const order = FileOps.writeOrder(orderPaths());
-            FileOps.execDetached(order ? ["viewer", "--order", order, p]
-                                       : ["viewer", p]);
+            const argv = order ? ["viewer", "--order", order, p] : ["viewer", p];
+            // Ask a viewer that is already on screen to show it — that is the
+            // difference between ~0.05s and ~0.5s, because the 0.5s was almost
+            // entirely a new python + Qt + QML + GL. It declines when it is not
+            // visible (another workspace, rolled up), and then this falls
+            // through and opens a window where the user actually is, exactly as
+            // it always did. `--new-window` skips the ask altogether.
+            if (newWindow) FileOps.execDetached(argv.concat(["--new-window"]));
+            else if (!FileOps.handOff(argv)) FileOps.execDetached(argv);
         }
         else FileOps.execDetached(["xdg-open", p]);
     }
@@ -697,7 +709,7 @@ Rectangle {
                 dragPaths: view.dragPaths(cell.modelData.path)
                 inMultiSelection: view.selection.length > 1 && selected
                 onClicked: (mods) => { view.claimFocus(); view.clickSelect(cell.modelData.path, false, mods); }
-                onOpened: view.openFile(cell.modelData.path, cell.modelData.kind)
+                onOpened: (mods) => view.openFile(cell.modelData.path, cell.modelData.kind, mods)
                 onDragStateChanged: (active) => view.dragStateChanged(active)
             }
         }
@@ -868,9 +880,9 @@ Rectangle {
                     view.dragStateChanged(false);
                 }
                 onCanceled: view.dragStateChanged(false)
-                onDoubleClicked: {
+                onDoubleClicked: (m) => {
                     if (row.modelData.isDir) view.go(row.abs);
-                    else view.openFile(row.abs, row.modelData.kind);
+                    else view.openFile(row.abs, row.modelData.kind, m.modifiers);
                 }
             }
 
