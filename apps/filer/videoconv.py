@@ -1,9 +1,14 @@
-"""videoconv — filer's "compress to <10MB" context-menu action.
+"""videoconv — filer's video context-menu actions.
 
-One job: take a video the user right-clicked and produce an mp4 next to it that
-is comfortably under the 10MB ceiling every upload form/chat app enforces, as
-fast as this machine can do it, without the user answering any questions about
-codecs.
+Two of them, sharing one QProcess/toast harness:
+
+  * **"compress to <10MB"** — the main job: take a video the user right-clicked
+    and produce an mp4 next to it that is comfortably under the 10MB ceiling
+    every upload form/chat app enforces, as fast as this machine can do it,
+    without the user answering any questions about codecs. Everything below the
+    next paragraph is about this one.
+  * **"copy without audio"** — `strip_argv()`/`stripAudio()`, at the bottom.
+    A stream copy, not an encode: no plan, no dialog, no quality decisions.
 
 Two halves:
 
@@ -181,6 +186,37 @@ def out_path_for(src):
     return cand
 
 
+def mute_path_for(src):
+    """`clip.mkv` -> `clip-muted.mkv`, next to the source, never clobbering an
+    existing file. Keeps the source's EXTENSION, unlike the compressor's: this
+    is a stream copy, so the container stays exactly what it was."""
+    stem, ext = os.path.splitext(str(src))
+    cand = stem + "-muted" + ext
+    n = 2
+    while os.path.lexists(cand):
+        cand = "%s-muted-%d%s" % (stem, n, ext)
+        n += 1
+    return cand
+
+
+def strip_argv(src, dst, video_only=False):
+    """The ffmpeg command for "copy without audio". Everything but the audio is
+    copied bit-for-bit — no re-encode, so it runs at IO speed and the video is
+    the same video, not a generation-loss copy of it.
+
+    `-map 0 -map -0:a` takes every stream and then subtracts the audio ones, so
+    subtitles and mkv attachments survive; `-dn` drops data streams, which are
+    the usual reason a copy into mp4 refuses. `video_only` is the retry for a
+    container/codec combination that still won't take (see `_on_done`)."""
+    argv = [_tool("ffmpeg"), "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+            "-progress", "pipe:1", "-nostats", "-i", src]
+    argv += ["-map", "0:v"] if video_only else ["-map", "0", "-map", "-0:a"]
+    argv += ["-c", "copy", "-dn"]
+    if os.path.splitext(dst)[1].lower() in (".mp4", ".m4v", ".mov"):
+        argv += ["-movflags", "+faststart"]
+    return argv + [dst]
+
+
 def plan(path, size=None):
     """Decide how (and whether) to squeeze `path` under LIMIT.
 
@@ -313,21 +349,25 @@ def build_argv(src, dst, p, crf_bump=0, rate_scale=1.0):
 
 
 class VideoConv(QObject):
-    """Bridge for the context menu's "compress to <10MB".
+    """Bridge for the video rows of the context menu.
 
     `plan(path)` is synchronous (one ffprobe) and returns the dict above so QML
     can decide between "just do it" and "ask first". `start(path)` runs the
     encode asynchronously and reports entirely through desktop toasts — a live
     one that updates in place while encoding, then a completion/failure toast —
     the same notify-send --replace-id trick surfer's downloads use, so filer's
-    progress looks like every other toast on this desktop.
+    progress looks like every other toast on this desktop. `stripAudio(path)` is
+    the second action and rides the same plumbing; only `_on_done` differs.
     """
 
     finished = Signal(str)   # output path ("" on failure) — QML reselects it
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._jobs = {}     # src path -> job dict (also the "already running" set)
+        # key ("<kind>:<src>") -> job dict; also the "already running" set. The
+        # kind is in the key so stripping one file's audio doesn't look like a
+        # compression of it already being in flight.
+        self._jobs = {}
 
     # ---- toasts ----
     def _toast(self, job, title, body, value=None, urgency=None, persist=False):
@@ -350,12 +390,12 @@ class VideoConv(QObject):
 
     @Slot(str, result=bool)
     def isBusy(self, path):
-        return str(path) in self._jobs
+        return any(j["src"] == str(path) for j in self._jobs.values())
 
     @Slot(str, result="QVariant")
     def plan(self, path):
         p = plan(str(path))
-        if p.get("ok") and str(path) in self._jobs:
+        if p.get("ok") and "compress:" + str(path) in self._jobs:
             return {"ok": False, "reason": "already compressing that file"}
         return p
 
@@ -364,19 +404,55 @@ class VideoConv(QObject):
         """Begin (or refuse) a conversion. Safe to call straight from the menu:
         it re-plans, so nothing depends on the QML side having done so."""
         src = str(path)
-        if src in self._jobs:
+        if "compress:" + src in self._jobs:
             return
         p = plan(src)
         if not p.get("ok"):
             self._toast({}, "can't compress", p.get("reason", "?"), urgency="normal")
             return
-        job = {"src": src, "dst": p["outPath"], "plan": p, "pct": -1,
+        job = {"kind": "compress", "verb": "compressing", "key": "compress:" + src,
+               "src": src, "dst": p["outPath"], "plan": p, "pct": -1,
                "attempt": 1, "nid": None, "err": ""}
-        self._jobs[src] = job
+        self._jobs[job["key"]] = job
         self._toast(job, "compressing " + os.path.basename(src),
                     "%s\n%s ~%s" % (self._bar(0), p["summary"], p["estStr"]), 0,
                     persist=True)
         self._spawn(job, build_argv(src, job["dst"], p))
+
+    @Slot(str)
+    def stripAudio(self, path):
+        """"copy without audio": the same video, minus its soundtrack, beside
+        it. A stream copy — there is nothing to decide and nothing to warn
+        about, so unlike `start()` this has no `plan()` half and the menu calls
+        it directly. Refusals (not a video, no audio in it, already running)
+        come back as a toast, the way a failed compression does."""
+        src = str(path)
+        key = "mute:" + src
+        if key in self._jobs:
+            return
+        if not is_video(src):
+            self._toast({}, "can't strip audio", "not a video file", urgency="normal")
+            return
+        info = probe(src)
+        if info is None:
+            self._toast({}, "can't strip audio", "no video stream ffmpeg can read",
+                        urgency="normal")
+            return
+        if not info["audio"]:
+            # Nothing to do, and a silent "-muted" duplicate would be a
+            # confusing thing to find in the directory.
+            self._toast({}, "can't strip audio",
+                        "%s has no audio track" % os.path.basename(src),
+                        urgency="normal")
+            return
+        job = {"kind": "mute", "verb": "stripping audio from", "key": key,
+               "src": src, "dst": mute_path_for(src), "pct": -1, "attempt": 1,
+               "nid": None, "err": "",
+               "plan": {"durationSec": info["duration"], "summary": "stream copy"}}
+        self._jobs[key] = job
+        self._toast(job, "stripping audio from " + os.path.basename(src),
+                    "%s\nstream copy" % self._bar(0), 0, persist=True)
+        self._spawn(job, strip_argv(src, job["dst"]))
 
     def _spawn(self, job, argv):
         proc = QProcess(self)
@@ -412,7 +488,7 @@ class VideoConv(QObject):
             return
         job["pct"] = pct
         pass_note = "" if job["attempt"] == 1 else "  (pass %d)" % job["attempt"]
-        self._toast(job, "compressing " + os.path.basename(job["src"]),
+        self._toast(job, job["verb"] + " " + os.path.basename(job["src"]),
                     "%s %d%%\n%s%s" % (self._bar(pct), pct,
                                        job["plan"]["summary"], pass_note), pct,
                     persist=True)
@@ -427,13 +503,30 @@ class VideoConv(QObject):
                 job["err"] = line.strip()   # keep the last real line for the toast
 
     def _on_error(self, job):
-        if job["src"] in self._jobs:
+        if job["key"] in self._jobs:
             self._fail(job, job["err"] or "ffmpeg could not be started")
 
     def _on_done(self, job, code):
-        if job["src"] not in self._jobs:      # already finished/failed
+        if job["key"] not in self._jobs:      # already finished/failed
             return
         dst = job["dst"]
+        if job["kind"] == "mute":
+            if code == 0 and os.path.exists(dst):
+                self._toast(job, "audio stripped: " + os.path.basename(dst),
+                            "%s\ncopied without the soundtrack" % _human(os.path.getsize(dst)),
+                            100)
+                self._cleanup(job)
+                self.finished.emit(dst)
+                return
+            if job["attempt"] == 1:
+                # A container that won't take one of the copied subtitle/
+                # attachment streams. Retry with the video alone, which every
+                # container this menu offers can hold.
+                job["attempt"], job["pct"] = 2, -1
+                self._restart(job, strip_argv(job["src"], dst, video_only=True))
+                return
+            self._fail(job, job["err"] or "ffmpeg exited %d" % code)
+            return
         if code != 0 or not os.path.exists(dst):
             self._fail(job, job["err"] or "ffmpeg exited %d" % code)
             return
@@ -452,10 +545,8 @@ class VideoConv(QObject):
             self._toast(job, "compressing " + os.path.basename(job["src"]),
                         "%s\n%s  (pass 2 - overshot)" % (self._bar(0), job["plan"]["summary"]), 0,
                         persist=True)
-            if job.get("proc") is not None:
-                job["proc"].deleteLater()   # deferred: we're inside its finished()
-            self._spawn(job, build_argv(job["src"], dst, job["plan"],
-                                        crf_bump=3, rate_scale=scale))
+            self._restart(job, build_argv(job["src"], dst, job["plan"],
+                                          crf_bump=3, rate_scale=scale))
             return
         self._toast(job, "compressed " + os.path.basename(dst),
                     "%s -> %s\n%s" % (_human(os.path.getsize(job["src"])),
@@ -463,19 +554,28 @@ class VideoConv(QObject):
         self._cleanup(job)
         self.finished.emit(dst)
 
+    def _restart(self, job, argv):
+        """Second pass of a job whose first one is finishing right now. The
+        deleteLater is deferred on purpose: we are inside that QProcess's own
+        finished() handler."""
+        if job.get("proc") is not None:
+            job["proc"].deleteLater()
+        self._spawn(job, argv)
+
     def _fail(self, job, msg):
         try:
             if os.path.exists(job["dst"]):
-                os.unlink(job["dst"])       # never leave a truncated mp4 behind
+                os.unlink(job["dst"])       # never leave a truncated file behind
         except OSError:
             pass
-        self._toast(job, "compress failed: " + os.path.basename(job["src"]),
+        verb = "strip failed" if job.get("kind") == "mute" else "compress failed"
+        self._toast(job, verb + ": " + os.path.basename(job["src"]),
                     msg[:200], urgency="critical")
         self._cleanup(job)
         self.finished.emit("")
 
     def _cleanup(self, job):
-        self._jobs.pop(job["src"], None)
+        self._jobs.pop(job["key"], None)
         proc = job.get("proc")
         if proc is not None:
             proc.deleteLater()
