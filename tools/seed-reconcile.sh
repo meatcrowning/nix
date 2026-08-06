@@ -47,7 +47,7 @@ if [ ! -e "$LIVE" ]; then
 fi
 
 TMP="$(mktemp)" || exit 1
-trap 'rm -f "$TMP" "$TMP.blk"' EXIT
+trap 'rm -f "$TMP" "$TMP.blk" "$TMP.out"' EXIT
 cp "$SRC" "$TMP" || exit 1
 
 # carry <ere-prefix> <ere-value>
@@ -86,11 +86,27 @@ case "$KIND" in
     if grep -q '// >>> wal palette' "$LIVE" && grep -q '// >>> wal palette' "$TMP"; then
         sed -n '/\/\/ >>> wal palette/,/\/\/ <<< wal palette/p' "$LIVE" \
             | sed '1d;$d' > "$TMP.blk"
-        awk -v inc="$TMP.blk" '
+        # Bail rather than write, if the carry could not be done: what is in
+        # $TMP at this point is the nix source with the DEFAULT palette, and
+        # writing that recolours the whole desktop off the wallpaper. This is
+        # not hypothetical — book's home-manager activation had no `awk` on its
+        # PATH, so this block failed silently on every switch and the live wal
+        # palette was replaced by the source's each time (fixed in
+        # home/prog/quickshell.nix, which now supplies gawk).
+        if [ ! -s "$TMP.blk" ]; then
+            echo "seed-reconcile: the live wal palette block is empty; leaving $LIVE alone" >&2
+            exit 1
+        fi
+        if ! awk -v inc="$TMP.blk" '
             /\/\/ >>> wal palette/ { print; while ((getline line < inc) > 0) print line; skip=1; next }
             /\/\/ <<< wal palette/ { skip=0 }
             !skip { print }
-        ' "$TMP" > "$TMP.out" && mv "$TMP.out" "$TMP"
+        ' "$TMP" > "$TMP.out"; then
+            echo "seed-reconcile: cannot carry the live wal palette across; leaving $LIVE alone" >&2
+            rm -f "$TMP.out"
+            exit 1
+        fi
+        mv "$TMP.out" "$TMP"
     fi
     ;;
   *)
