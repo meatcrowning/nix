@@ -554,6 +554,7 @@ class Painter(QObject):
         self._object_info = None
         self._jobs = 0
         self._unit_state = "unknown"
+        self._job_start = 0.0             # when the running job started, for the clock
         self._input_image = ""            # the first frame, as a local path
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
 
@@ -598,6 +599,13 @@ class Painter(QObject):
         # click. It runs for the app's whole life: a control that is right only
         # while its drawer happens to be open is not a control that reflects
         # state.
+        # A per-cent with no clock beside it says how far, never how long. The
+        # tick only runs while something is running, and it drives the same
+        # statusChanged everything else in the bar reads.
+        self._clock = QTimer(self)
+        self._clock.setInterval(1000)
+        self._clock.timeout.connect(self.statusChanged.emit)
+
         self._unit_poll = QTimer(self)
         self._unit_poll.setInterval(3000)
         self._unit_poll.timeout.connect(self._refresh_unit)
@@ -619,6 +627,11 @@ class Painter(QObject):
     progress = Property(float, lambda self: self._progress, notify=statusChanged)
     currentNode = Property(str, lambda self: self._current, notify=statusChanged)
     busy = Property(bool, lambda self: self._busy, notify=busyChanged)
+    # Seconds the running job has been going, so the bar can say how long as
+    # well as how far. Zero when nothing is running.
+    elapsed = Property(float, lambda self: (
+        max(0.0, time.time() - self._job_start) if (self._busy and self._job_start) else 0.0),
+        notify=statusChanged)
     ready = Property(bool, lambda self: self._object_info is not None, notify=statusChanged)
     # What systemd says about comfy-painter.service, so start/stop can be lit
     # from the world instead of from intent (docs/DESIGN.md §10).
@@ -1051,6 +1064,7 @@ class Painter(QObject):
         self.client.cancel_all()
         self._jobs = 0
         self._busy = False
+        self._clock.stop()
         self._progress = 0.0
         self.busyChanged.emit()
         self.statusChanged.emit()
@@ -1073,6 +1087,8 @@ class Painter(QObject):
 
     def _on_started(self, _job):
         self._busy = True
+        self._job_start = time.time()
+        self._clock.start()
         self.busyChanged.emit()
 
     def _on_progress(self, _job, value, maximum):
@@ -1117,6 +1133,7 @@ class Painter(QObject):
         self._jobs = max(0, self._jobs - 1)
         if self._jobs == 0:
             self._busy = False
+            self._clock.stop()
             self._progress = 0.0
             self._current = ""
             self.busyChanged.emit()
@@ -1128,6 +1145,7 @@ class Painter(QObject):
         self._jobs = max(0, self._jobs - 1)
         if self._jobs == 0:
             self._busy = False
+            self._clock.stop()
             self.busyChanged.emit()
         self.toast.emit(message.split("\n")[0][:200], True)
         self.statusChanged.emit()

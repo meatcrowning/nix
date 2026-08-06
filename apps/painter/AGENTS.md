@@ -95,7 +95,7 @@ column if that is what fits — its cell can never be wider than its pane, which
 is what made a narrow pane look empty. Below the floor it is one pane at a time
 on the `p`/`g` buttons.
 
-## Text boxes take a click anywhere in them
+## Text boxes take a click anywhere in them, and he sets how tall
 
 A `TextEdit` is only as tall as its content, so a 130px prompt box holding one
 line accepted clicks in a 16px strip and ignored the rest. The editor now fills
@@ -103,6 +103,17 @@ the viewport (`height: Math.max(implicitHeight, flick.height)`), which hands the
 empty space to Qt itself — caret at the nearest position, drag-select from
 nowhere — rather than to a MouseArea imitating it. `Spin` covers its own padding
 strips with an I-beam MouseArea under the input.
+
+**The bottom 5px of a prompt box is a RESIZE GRIP**, not text — dragged, clamped
+to 40-600px, and remembered per box (`prompt.posH` / `prompt.negH` in `Prefs`,
+written on release). A prompt here runs from four words to the multi-paragraph
+shot description a video model wants, and a fixed 130px box meant scrolling a
+window through the second kind. The drag writes `boxHeight`, never `height`:
+`height` is bound to `visible ? boxHeight : 0`, and writing it directly would
+destroy that binding — which is what folds the negative box to nothing for a
+video family. Hidden is not enough on its own: a `Column` skips an invisible
+child when it POSITIONS, but `Panel` sizes itself from `childrenRect`, so the
+box that was not there still left a hand-sized blank under the prompt.
 
 ## The size is derived, never typed
 
@@ -131,15 +142,21 @@ handler, so adding one for the text boxes alone silently took Escape away from
 the dropdown and the menu, which had been closing on it perfectly well — caught
 by the harness, not by looking.
 
-## An output is clicked to INJECT, and you choose what
+## An output is LEFT-clicked to open, right-clicked to choose
 
-Left- or right-clicking a gallery image opens the shared `CtxMenu` with **inject
-all / inject prompt / inject params**, plus `open in viewer`. A PNG carries the
-whole job that made it, and which part you want is a decision — it used to be an
-unlabelled right-click that took everything. The three actions live on the
-window (`injectPrompt` / `injectParams` / `injectAll`), so the menu has no logic
-of its own; `injectParams` restores size as **aspect + MP**, never raw pixels
-(see above).
+Left-click hands the file to `viewer`; right-click opens the shared `CtxMenu`
+with **inject all / inject prompt / inject params**, plus `open in viewer`. Both
+buttons used to raise the menu, which put a question between him and the thing
+he had just made. A PNG carries the whole job that made it, and which part you
+want is a decision (§7.1: everything is still right-clickable). The three
+actions live on the window (`injectPrompt` / `injectParams` / `injectAll`), so
+the menu has no logic of its own; `injectParams` restores size as **aspect +
+MP**, never raw pixels (see above).
+
+Because a left-click LAUNCHES something, `tools/ui-test.py` replaces
+`main.subprocess` with a recorder — it spawned two real `viewer` windows on his
+desktop the first time that click was exercised, which is the one thing a
+harness here may never do.
 
 ## The window comes back the way it was left
 
@@ -198,7 +215,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-116 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+125 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -211,7 +228,9 @@ at seven widths, aspect+MP → pixels → header → submitted job, the dropdown
 overlay (opens, stays inside the window, picks, and the binding SURVIVES the
 pick), the live-binding regressions above, Escape (releases the box, cancels
 NOTHING), the inject menu and its three subsets, the draggable divider and its
-clamps, the video column (a synthetic video family written into the scratch
+clamps, the furniture (an elided panel badge, the splitter stopping above the
+status bar, the one scrollbar being on the results side, a prompt box taking a
+dragged height), the video column (a synthetic video family written into the scratch
 root and removed again — a fully paired model sorts to the top of the list and
 would otherwise be every later test's selection), save-and-restore through a
 SECOND window on the same prefs file, that

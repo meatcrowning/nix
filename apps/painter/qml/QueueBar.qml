@@ -36,6 +36,18 @@ Rectangle {
             text: Math.round(App.progress * 100) + "%"
             color: Theme.text
         }
+        // How far, then how long. A per-cent alone cannot say whether a job is
+        // slow or stuck; the clock ticks once a second while one is running.
+        PixelText {
+            visible: App.busy
+            text: {
+                var s = Math.floor(App.elapsed)
+                var m = Math.floor(s / 60)
+                var r = s % 60
+                return m + ":" + (r < 10 ? "0" : "") + r
+            }
+            color: Theme.textDim
+        }
         PixelText {
             visible: App.queue > 0
             text: "queued " + App.queue

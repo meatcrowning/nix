@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import "../../qmlcommon"
 
 // Results, newest first.  Every image carries the parameters that made it in a
@@ -58,12 +59,19 @@ Item {
         anchors.bottomMargin: 28
         clip: true
         model: Gallery
+        // The results are the unbounded side, so this is where the desktop's
+        // scrollbar belongs (docs/DESIGN.md §9.2); the parameter column gave its
+        // gutter back to the controls.
+        ScrollBar.vertical: VScroll { id: gscroll }
         // Fit whole columns to the pane, and NEVER a cell wider than the pane:
         // the old 150px floor meant a 140px-wide pane laid out a 150px cell, so
         // the single column was clipped and the grid looked empty — the
         // "outputs don't show when the window is small" bug, once the pane
         // itself stopped being hidden. One column is a legitimate answer.
-        cellWidth: Math.max(60, Math.floor(width / Math.max(1, Math.round(width / 210))))
+        // Whole columns in what is left AFTER the bar's gutter — a cell sized to
+        // the full width would run under it.
+        readonly property real usable: Math.max(1, width - gscroll.barW)
+        cellWidth: Math.max(60, Math.floor(usable / Math.max(1, Math.round(usable / 210))))
         cellHeight: cellWidth
         wheelLines: 1
         wheelStep: cellHeight
@@ -150,9 +158,16 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    // Either button opens the same menu: §7.1 says everything is
-                    // right-clickable, and left-click is where he reaches first.
+                    // LEFT OPENS IT, right asks what else. Both buttons used to
+                    // raise the same menu, which put a question between him and
+                    // the thing he had just made; looking at an output is the
+                    // obvious act and the menu is where the rest lives (§7.1:
+                    // everything is still right-clickable).
                     onClicked: function (m) {
+                        if (m.button === Qt.LeftButton) {
+                            App.openExternally(path)
+                            return
+                        }
                         var pt = mapToItem(null, m.x, m.y)
                         view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
                     }
@@ -178,8 +193,8 @@ Item {
         anchors.bottomMargin: 6
         width: parent.width
         elide: Text.ElideRight
-        text: view.width > 340 ? "click an image to inject its prompt, params or both"
-                               : "click an image to inject"
+        text: view.width > 340 ? "click to open, right-click to inject prompt, params or both"
+                               : "click to open, right-click for more"
         color: Theme.dim
     }
 

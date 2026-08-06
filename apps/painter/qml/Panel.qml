@@ -36,15 +36,24 @@ Rectangle {
             color: Theme.dim
         }
         PixelText {
+            id: titleText
             anchors.verticalCenter: parent.verticalCenter
             x: panel.collapsible ? 20 : 8
             text: panel.title
             color: root.fgAccent
         }
+        // A BADGE IS NEVER WIDER THAN WHAT IS LEFT. The model panel's badge is a
+        // filename, which in a 300px column ran off the edge and out of the
+        // panel entirely. Elided in the middle, because the tail of a model name
+        // (the quant, the variant) is the half worth keeping.
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
             anchors.rightMargin: 8
+            anchors.left: titleText.right
+            anchors.leftMargin: 10
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideMiddle
             text: panel.badge
             color: Theme.textDim
         }
