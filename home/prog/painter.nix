@@ -11,8 +11,17 @@
 #     cte did.
 #   * ffmpeg on PATH — a video family's outputs are clips, and the gallery
 #     shows each one's poster frame (extracted once into ~/.cache/painter/
-#     posters). Without it a video tile is simply blank; on book the wrapper is
-#     Fedora's python and ffmpeg comes from its PATH.
+#     posters), plus the muted copy the right-click menu makes. `wl-copy` is
+#     beside it for the same feature: a Wayland selection dies with the process
+#     that offered it, so the copy is handed to wl-clipboard's holder rather
+#     than to QClipboard. Without either, a video tile is blank / the copy says
+#     it could not happen; on book the wrapper is Fedora's python and both come
+#     from its PATH.
+#   * qtmultimedia — the preview viewport plays clips (looped and muted) as well
+#     as showing stills, the same QtMultimedia surface viewer uses, including
+#     its NVDEC pin: Qt's ffmpeg backend probes VAAPI first and top's VAAPI
+#     provider is NVIDIA's shim, which cannot export a surface at all (the whole
+#     measurement is in home/prog/viewer.nix). book keeps Qt's default.
 #   * a systemd --user unit for the backend. ComfyUI is NOT packaged here: it
 #     stays the venv+nix-shell checkout at /home/lam/comfy (a symlink to
 #     Downloads/git/ComfyUI), whose shell.nix already handles the hard parts
@@ -36,6 +45,22 @@
 # `home/prog/editor.nix` for the same note at length.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
+
+  # The side-effect-free way to borrow painter's Qt environment — the harnesses
+  # need it, and since the preview viewport pulled in QtMultimedia, the raw
+  # store python no longer has the QML modules `tools/ui-test.py` loads. With
+  # arguments it execs them inside that environment; with none it prints the
+  # variables as `export` lines. Same shape as `surfer-qtenv`, and for the same
+  # reason: never source an app's wrapper to get at its env (apps/AGENTS.md).
+  qtenvBody = pkgs.writeShellScript "painter-qtenv-body" ''
+    if [ "$#" -eq 0 ]; then
+      for v in ''${!QT_@} ''${!QML@} ''${!NIXPKGS_QT@} LOCALE_ARCHIVE PATH; do
+        if [ -n "''${!v-}" ]; then printf 'export %s=%q\n' "$v" "''${!v}"; fi
+      done
+      exit 0
+    fi
+    exec "$@"
+  '';
 
   comfyDir = "/home/lam/comfy";
   modelsYaml = "/home/lam/models/extra_model_paths.yaml";
@@ -65,6 +90,7 @@ let
           pkgs.qt6.qtdeclarative
           pkgs.qt6.qtwebsockets   # ComfyUI progress/event socket
           pkgs.qt6.qtimageformats # webp/tiff alongside qtbase's png/jpg
+          pkgs.qt6.qtmultimedia   # the preview viewport's video surface
         ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
@@ -73,9 +99,17 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg pkgs.wl-clipboard ]} \
+            --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
             --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \
+            "''${qtWrapperArgs[@]}"
+
+          # Same Qt environment, none of painter's body:
+          #     painter-qtenv python3 apps/painter/tools/ui-test.py
+          # air needs no equivalent — there the interpreter IS /usr/bin/python3.
+          makeWrapper ${qtenvBody} $out/bin/painter-qtenv \
+            --prefix PATH : ${pyEnv}/bin \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
@@ -90,6 +124,12 @@ in
     Unit = {
       Description = "ComfyUI headless inference backend (painter)";
       After = [ "graphical-session.target" ];
+      # NEVER RESTARTED BY A REBUILD. This unit holds 8-16G of warm weights and
+      # is usually mid-sample; home-manager's default is to restart a changed
+      # user service, which would kill a running generation to apply an edit to
+      # its own command line. Changes here land at the next start (painter's
+      # settings drawer has stop/start).
+      X-RestartIfChanged = false;
     };
     Service = {
       Type = "exec";
@@ -104,6 +144,7 @@ in
         exec nix-shell shell.nix --run '
           exec python main.py \
             --disable-api-nodes \
+            --preview-method auto \
             --listen 127.0.0.1 --port 8188 \
             --output-directory "$HOME/Pictures/painter/out" \
             --extra-model-paths-config ${modelsYaml}

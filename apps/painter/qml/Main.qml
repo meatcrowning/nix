@@ -18,6 +18,8 @@ Window {
 
     property int view: 0            // 0 = params, 1 = gallery
     property bool showSettings: false
+    // The preview viewport above the history — off by default, remembered.
+    property bool showPreview: false
 
     // THE OUTPUT PANE IS NOT A LUXURY OF WIDE WINDOWS. Both panes used to vanish
     // below 900px unless they were the selected view, so in the parameters view
@@ -34,13 +36,18 @@ Window {
     // clamps are the same two minimums as before, so the handle cannot starve
     // either side: the controls stop reading below ~300px and the gallery below
     // ~200px. Same shape as filer's splitter.
-    readonly property real splitDefault: 0.42
+    // THE RESULTS LEAD. The controls used to be on the left; they are on the
+    // right now, so `paneLeadW` sizes the RESULTS pane and the two floors swap
+    // with them — a gallery stops being readable at ~200px, the controls at
+    // ~300px. A ratio saved before the swap is inverted once on restore, so the
+    // divider comes back where it looked rather than mirrored.
+    readonly property real splitDefault: 0.58
     property real splitRatio: splitDefault
     readonly property int splitterW: 4
-    readonly property int minLeft: 300
-    readonly property int minRight: 200
-    readonly property int paneLeadW: Math.max(minLeft,
-        Math.min(root.width - splitterW - minRight,
+    readonly property int minLead: 200      // results
+    readonly property int minTrail: 300     // controls
+    readonly property int paneLeadW: Math.max(minLead,
+        Math.min(root.width - splitterW - minTrail,
                  Math.round((root.width - splitterW) * splitRatio)))
 
     // Chrome greys to the SAME tone the hyprvtb titlebar fades to when the
@@ -69,7 +76,7 @@ Window {
         // decides the aspect, so only MP is left to choose; off, it is plain
         // text-to-video with painter's usual aspect + MP. The image itself is a
         // file path and lives on App, not in here.
-        duration: 5.0, fps: 24.0, useInputImage: false,
+        duration: 5.0, fps: 24.0, useInputImage: false, loopVideo: false,
         negpip: false, modelSampling: false,
         ms: ({ shift_start: 3.5, shift_end: 1.2, start_percent: 0.0,
                end_percent: 0.5, curve: "ease_in", outside_window: "hold",
@@ -183,7 +190,8 @@ Window {
                 duration: g.duration, fps: g.fps,
                 megapixels: g.megapixels,
                 width: g.width, height: g.height,
-                use_input_image: g.useInputImage
+                use_input_image: g.useInputImage,
+                loop_video: g.loopVideo
             }, g.count)
             return
         }
@@ -211,63 +219,38 @@ Window {
     // DRAGGABLE and the two panes are sized from one ratio — the same shape as
     // filer's splitter (apps/filer/qml/Main.qml), including the 4px bar with a
     // ±3px grab margin and the accent-on-hover.
-    Rectangle {
-        id: left
+    // results, and the preview above them
+    Item {
+        id: results
         x: 0
         y: 0
         width: root.split ? root.paneLeadW : root.width
-        height: parent.height
-        color: Theme.bg
-        visible: root.split || root.view === 0
+        height: parent.height - root.barH
+        visible: root.split || root.view === 1
 
-        KineticFlickable {
-            id: leftFlick
-            anchors.fill: parent
-            anchors.margins: 10
-            contentHeight: leftCol.implicitHeight
-            clip: true
-            // NO BAR ON THE LEFT. The parameter column is a stack of panels
-            // that collapse — its length is something he sets, not something he
-            // has to navigate — and the gutter cost every control 11-16px of a
-            // 300px column. The scrollbar that §9.2 asks for is on the results
-            // side, where the content really is unbounded. The wheel and the
-            // compositor's kinetic scroll are untouched.
+        PreviewPane {
+            id: preview
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: results.width < 320 ? 4 : 10
+            anchors.bottomMargin: 0
+            open: root.showPreview
+        }
 
-            Column {
-                id: leftCol
-                width: leftFlick.width
-                spacing: 10
-
-                ModelPicker { width: parent.width; persistKey: "panel.model" }
-                PromptEditor {
-                    width: parent.width
-                    persistKey: "panel.prompt"
-                    onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
-                }
-                LoraStack { width: parent.width; persistKey: "panel.lora" }
-                // Only for a video family, and the two below it follow the same
-                // rule from the inside: no negative prompt, no CFG, no batch, and
-                // no aspect while a first frame is deciding it. A Column skips
-                // invisible children, so these leave no gap.
-                VideoPanel {
-                    width: parent.width
-                    persistKey: "panel.video"
-                    visible: App.isVideo
-                }
-                ParamsPanel { width: parent.width; persistKey: "panel.sampling" }
-                ResolutionPanel {
-                    width: parent.width
-                    persistKey: "panel.resolution"
-                    // In image-to-video the size comes out of the dropped image,
-                    // and MP is the only part of it left to choose — that is
-                    // handled inside the panel, which keeps its MP box.
-                }
-                TogglePanel {
-                    width: parent.width
-                    persistKey: "panel.patches"
-                    visible: !App.isVideo
-                }
-                Item { width: 1; height: 6 }
+        // Margins shrink with the pane: 10px either side of a 220px column is
+        // 9% of it spent on nothing (docs/DESIGN.md §5.2).
+        GalleryView {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: preview.visible ? preview.bottom : parent.top
+            anchors.bottom: parent.bottom
+            anchors.margins: results.width < 320 ? 4 : 10
+            anchors.topMargin: preview.visible ? 8 : (results.width < 320 ? 4 : 10)
+            onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
+            onPreviewRequested: function (path, isVideo) {
+                root.showPreview = true
+                preview.show(path, isVideo)
             }
         }
     }
@@ -310,20 +293,66 @@ Window {
         }
     }
 
-    // right: what came out
-    Item {
-        id: right
+    // controls, on the right
+    Rectangle {
+        id: controls
         x: root.split ? root.paneLeadW + root.splitterW : 0
         y: 0
         width: root.split ? Math.max(1, root.width - x) : root.width
         height: parent.height
-        visible: root.split || root.view === 1
-        // Margins shrink with the pane: 10px either side of a 220px column is
-        // 9% of it spent on nothing (docs/DESIGN.md §5.2).
-        GalleryView {
+        color: Theme.bg
+        visible: root.split || root.view === 0
+
+        KineticFlickable {
+            id: controlsFlick
             anchors.fill: parent
-            anchors.margins: right.width < 320 ? 4 : 10
-            onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
+            anchors.margins: 10
+            anchors.bottomMargin: root.barH
+            contentHeight: controlsCol.implicitHeight
+            clip: true
+            // NO BAR ON THIS SIDE. The parameter column is a stack of panels
+            // that collapse — its length is something he sets, not something he
+            // has to navigate — and the gutter cost every control 11-16px of a
+            // 300px column. The scrollbar that §9.2 asks for is on the results
+            // side, where the content really is unbounded. The wheel and the
+            // compositor's kinetic scroll are untouched.
+
+            Column {
+                id: controlsCol
+                width: controlsFlick.width
+                spacing: 10
+
+                ModelPicker { width: parent.width; persistKey: "panel.model" }
+                PromptEditor {
+                    width: parent.width
+                    persistKey: "panel.prompt"
+                    onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
+                }
+                LoraStack { width: parent.width; persistKey: "panel.lora" }
+                // Only for a video family, and the two below it follow the same
+                // rule from the inside: no negative prompt, no CFG, no batch, and
+                // no aspect while a first frame is deciding it. A Column skips
+                // invisible children, so these leave no gap.
+                VideoPanel {
+                    width: parent.width
+                    persistKey: "panel.video"
+                    visible: App.isVideo
+                }
+                ParamsPanel { width: parent.width; persistKey: "panel.sampling" }
+                ResolutionPanel {
+                    width: parent.width
+                    persistKey: "panel.resolution"
+                    // In image-to-video the size comes out of the dropped image,
+                    // and MP is the only part of it left to choose — that is
+                    // handled inside the panel, which keeps its MP box.
+                }
+                TogglePanel {
+                    width: parent.width
+                    persistKey: "panel.patches"
+                    visible: !App.isVideo
+                }
+                Item { width: 1; height: 6 }
+            }
         }
     }
 
@@ -401,6 +430,8 @@ Window {
             "-",
             { id: "p",    label: "p",    state: root.view === 0 ? 1 : 0, tip: "Parameters" },
             { id: "g",    label: "g",    state: root.view === 1 ? 1 : 0, tip: "Gallery" },
+            { id: "pv",   label: "pv",   state: root.showPreview ? 1 : 0,
+              tip: "Preview viewport" },
             "-",
             { id: "set",  label: "st",   state: root.showSettings ? 1 : 0,
               tip: "Settings", bottom: true }
@@ -416,6 +447,7 @@ Window {
             else if (id === "stop") App.cancel()
             else if (id === "p") root.view = 0
             else if (id === "g") root.view = 1
+            else if (id === "pv") root.showPreview = !root.showPreview
             else if (id === "set") root.showSettings = !root.showSettings
         }
     }
@@ -427,6 +459,10 @@ Window {
     }
 
     onShowSettingsChanged: pushButtons()
+    onShowPreviewChanged: {
+        pushButtons()
+        if (root.restored) Prefs.set("showPreview", root.showPreview)
+    }
     Component.onCompleted: {
         restoreState()
         pushButtons()
@@ -566,7 +602,14 @@ Window {
         var w = Prefs.get("win.width"), h = Prefs.get("win.height")
         if (w > 0 && h > 0) { root.width = w; root.height = h }
         var v = Prefs.get("view"); if (v === 0 || v === 1) root.view = v
-        var r = Prefs.get("splitRatio"); if (r > 0 && r < 1) root.splitRatio = r
+        root.showPreview = Prefs.get("showPreview") === true
+        var r = Prefs.get("splitRatio")
+        if (r > 0 && r < 1) {
+            // The panes swapped sides on 2026-08-05; a ratio saved before that
+            // describes the other pane. Flip it once, and record that it was.
+            root.splitRatio = Prefs.get("splitSwapped") === true ? r : (1 - r)
+        }
+        Prefs.set("splitSwapped", true)
         var raw = Prefs.get("gen")
         if (raw) {
             try {

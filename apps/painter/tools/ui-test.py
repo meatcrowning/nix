@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.join(APPS, "pylib"))
 FAILS = []
 WARNINGS = []
 OPENED = []          # what the app would have launched (see _NoLaunch in build)
+RAN = []             # ...and what it would have run (wl-copy / ffmpeg)
 
 
 def check(name, cond, detail=""):
@@ -101,6 +102,15 @@ def scene_rect(item):
     from PySide6.QtCore import QPointF
     p = item.mapToScene(QPointF(0, 0))
     return (p.x(), p.y(), item.width(), item.height())
+
+
+def doubleclick(win, item, dx=None, dy=None):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtTest import QTest
+    p = item.mapToScene(QPointF(item.width() / 2 if dx is None else dx,
+                                item.height() / 2 if dy is None else dy))
+    QTest.mouseDClick(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(p.x()), int(p.y())))
+    spin(60)
 
 
 def click(win, item, dx=None, dy=None, button=None):
@@ -192,6 +202,8 @@ def build_window(engine_only=False):
     ctl._unit_poll.stop()
     ctl._probe.stop()
     engine = QQmlApplicationEngine()
+    ctl.preview = P.LivePreview()
+    engine.addImageProvider("livepreview", ctl.preview)
     ctx = engine.rootContext()
     keep = (P.Palette(P.PANEL_THEME), _DESKSTYLE(parent=engine), P.Prefs(),
             ctl, _STUBBAR(), P.SpellCheck())
@@ -260,11 +272,30 @@ def build(tmp):
             OPENED.append(list(argv))
             return None
     P.subprocess = _NoLaunch
+
+    # ...and no wl-copy either: it forks a holder process that OWNS his
+    # clipboard until something else replaces it. RAN records what would have
+    # been run; everything else (systemctl, ffmpeg) still goes through QProcess.
+    real_async = P.Painter._run_async
+
+    def recorded(self, argv, done=None):
+        if os.path.basename(argv[0]) in ("wl-copy", "ffmpeg"):
+            RAN.append(list(argv))
+            if done:
+                done(0, "")
+            return None
+        return real_async(self, argv, done)
+    P.Painter._run_async = recorded
     ctl = P.Painter()
     ctl._unit_poll.stop()
     ctl._probe.stop()
 
     engine = QQmlApplicationEngine()
+    # The live-preview provider, as main() installs it: without it the preview
+    # pane's Image warns "Invalid image provider" the moment a frame arrives,
+    # and a QML warning fails this run.
+    ctl.preview = P.LivePreview()
+    engine.addImageProvider("livepreview", ctl.preview)
     ctx = engine.rootContext()
     keep = (P.Palette(P.PANEL_THEME), DeskStyle(parent=engine), P.Prefs(),
             ctl, StubTitlebar(), P.SpellCheck())
@@ -389,14 +420,41 @@ def test_chrome(win, ctl):
           bool(split) and split[0].height() <= win.height() - bar.height() + 0.5,
           (split[0].height() if split else None, win.height(), bar.height()))
 
+    # The panes swapped sides: results lead, controls trail.
+    gal = find(content, "GalleryView")
+    ctrl = find(content, "ModelPicker")
+    check("the results are on the LEFT and the controls on the right",
+          scene_rect(gal)[0] < scene_rect(ctrl)[0], (scene_rect(gal)[0], scene_rect(ctrl)[0]))
+
     # One scrollbar, and on the side whose content is unbounded.
-    left = find(content, "KineticFlickable")
+    colFlick = find(content, "KineticFlickable",
+                    pred=lambda it: find(it, "ModelPicker") is not None)
     grid = find(content, "KineticGridView")
-    col = find(left, "QQuickColumn")
+    col = find(colFlick, "QQuickColumn")
     check("the parameter column has no scrollbar gutter",
-          col is not None and abs(col.width() - left.width()) < 0.5,
-          (col.width() if col else None, left.width()))
+          col is not None and abs(col.width() - colFlick.width()) < 0.5,
+          (col.width() if col else None, colFlick.width()))
     check("...and the results grid has one", find(grid, "VScroll") is not None)
+
+    # The preview viewport: off by default, toggled from the titlebar, dragged
+    # taller, and sitting ABOVE the grid rather than over it.
+    pv = find(content, "PreviewPane")
+    check("the preview viewport starts closed", not pv.isVisible())
+    win.setProperty("showPreview", True)
+    spin(150)
+    check("...opens above the history",
+          pv.isVisible() and scene_rect(pv)[1] + pv.height() <= scene_rect(grid)[1] + 1.5,
+          (scene_rect(pv), scene_rect(grid)))
+    h = pv.height()
+    pv.setProperty("paneHeight", int(h + 60))
+    spin(120)
+    check("...and takes a dragged height", abs(pv.height() - (h + 60)) < 1.5,
+          (h, pv.height()))
+    pv.setProperty("paneHeight", int(h))
+    win.setProperty("showPreview", False)
+    spin(120)
+    check("...and folds away to nothing", not pv.isVisible() and pv.height() == 0,
+          pv.height())
 
     # A prompt box is dragged taller by its bottom edge, and remembers it.
     box = find_all(content, "PromptBox")[0]
@@ -589,6 +647,24 @@ def test_video(win, ctl, tmp):
           (sent.get("duration"), "batch_size" in sent))
     check("...and no negative prompt or CFG",
           "negative" not in sent and "cfg" not in sent, sorted(sent))
+
+    # Looping: the dropped frame at BOTH ends. Only offered with an image, so
+    # the flag only means anything alongside one.
+    sent.clear()
+    ctl._input_image = os.path.join(root, "first.png")
+    write_safetensors(os.path.join(root, "unused.safetensors"), {"x": [1]})
+    open(ctl._input_image, "wb").write(b"not really a png")
+    ctl._uploaded = (ctl._input_image, "painter/first.png")
+    g = prop(win, "gen")
+    g.update({"useInputImage": True, "loopVideo": True})
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("looping sends the first frame as the last one too",
+          sent.get("loop_video") is True and sent.get("use_input_image") is True,
+          (sent.get("loop_video"), sent.get("use_input_image")))
+    ctl.clearInputImage()
 
     # An image-to-video job with nothing dropped must not be silently sent as
     # text-to-video: it says so and submits nothing (docs/DESIGN.md §10).
@@ -834,11 +910,20 @@ def test_inject(win, ctl, tmp):
     if cell is not None:
         from PySide6.QtCore import Qt
         OPENED.clear()
+        pv = find(win.contentItem(), "PreviewPane")
+        pv.setProperty("source", "")
         click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2)
         spin(150)
-        check("left-clicking an output opens it, and raises no menu",
-              not menu.isVisible() and OPENED and OPENED[-1][-1] == path,
-              (menu.isVisible(), OPENED))
+        # ONE click previews (and opens the viewport), TWO open the file. A
+        # single click must not launch anything.
+        check("left-clicking an output previews it and launches nothing",
+              not menu.isVisible() and not OPENED
+              and pv.property("source") == path and win.property("showPreview") is True,
+              (menu.isVisible(), OPENED, pv.property("source")))
+        doubleclick(win, cell)
+        spin(200)
+        check("double-clicking it opens it in viewer",
+              bool(OPENED) and OPENED[-1][-1] == path, OPENED)
         click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2, button=Qt.RightButton)
         spin(150)
         labels = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
@@ -881,32 +966,133 @@ def test_inject(win, ctl, tmp):
           (g["positive"], g["steps"]))
 
 
+def QtBuffer():
+    from PySide6.QtCore import QBuffer
+    return QBuffer()
+
+
+def QtIODeviceWriteOnly():
+    from PySide6.QtCore import QIODevice
+    return QIODevice.OpenModeFlag.WriteOnly
+
+
+def test_muted(ctl, tmp):
+    """A muted copy is a derivative: hidden from the history, reused, and put
+    on the clipboard as a file URI rather than as pixels."""
+    import main as P
+
+    vid = os.path.join(tmp, "out", "video")
+    os.makedirs(vid, exist_ok=True)
+    clip = os.path.join(vid, "clip_00001_.mp4")
+    muted = os.path.join(vid, "clip_00001_-muted.mp4")
+    for f in (clip, muted):
+        with open(f, "wb") as fh:
+            fh.write(b"\0" * 64)
+    os.utime(muted, (time.time() + 5, time.time() + 5))   # newer than its source
+
+    ctl.gallery.load_existing()
+    spin(150)
+    names = [ctl.gallery.data(ctl.gallery.index(i, 0), P.Gallery.NameRole)
+             for i in range(ctl.gallery.rowCount())]
+    check("the clip is in the history", "clip_00001_.mp4" in names, names)
+    check("...and its muted copy is NOT", "clip_00001_-muted.mp4" not in names, names)
+    ctl.gallery.add(muted)
+    spin(60)
+    check("...not even when one lands while running",
+          ctl.gallery.rowCount() == len(names), ctl.gallery.rowCount())
+
+    # The sampler's own preview frames: a real JPEG through the provider, and
+    # the counter the QML Image's URL is built from moving with it.
+    import main as P2
+    from PySide6.QtGui import QImage
+    img = QImage(8, 8, QImage.Format.Format_RGB32)
+    img.fill(0x336699)
+    buf = QtBuffer()
+    buf.open(QtIODeviceWriteOnly())
+    img.save(buf, "JPG")
+    ctl._busy = True
+    before_tick = ctl.property("previewTick")
+    ctl._on_preview(None, bytes(buf.data()), "jpeg")
+    spin(60)
+    check("a sampler preview frame reaches the image provider",
+          ctl.property("previewTick") == before_tick + 1
+          and ctl.property("hasPreview") is True
+          and not ctl.preview.image.isNull(),
+          (ctl.property("previewTick"), ctl.property("hasPreview")))
+    ctl._busy = False
+    check("...and a finished job stops claiming to have one",
+          ctl.property("hasPreview") is False)
+
+    # An existing, fresh copy is REUSED — asking twice must not leave three
+    # files behind — and ffmpeg is never even started.
+    before = sorted(os.listdir(vid))
+    RAN.clear()
+    ctl.copyMuted(clip)
+    spin(200)
+    check("an existing muted copy is reused, not remade",
+          sorted(os.listdir(vid)) == before
+          and not any(os.path.basename(a[0]) == "ffmpeg" for a in RAN),
+          (sorted(os.listdir(vid)), RAN))
+    copied = [a for a in RAN if os.path.basename(a[0]) == "wl-copy"]
+    check("...and it is copied as a text/uri-list file URI",
+          bool(copied) and "text/uri-list" in copied[-1]
+          and copied[-1][-1].endswith("clip_00001_-muted.mp4"),
+          copied)
+
+    # Asking about a copy that is already muted copies THAT, not a copy of it.
+    RAN.clear()
+    ctl.copyMuted(muted)
+    spin(150)
+    copied = [a for a in RAN if os.path.basename(a[0]) == "wl-copy"]
+    check("a muted file copies itself rather than making another",
+          sorted(os.listdir(vid)) == before and bool(copied)
+          and copied[-1][-1].endswith("clip_00001_-muted.mp4"),
+          (sorted(os.listdir(vid)), copied))
+
+    # ...and a clip with NO muted copy yet makes exactly one, with -c copy.
+    RAN.clear()
+    os.remove(muted)
+    ctl.copyMuted(clip)
+    spin(200)
+    made = [a for a in RAN if os.path.basename(a[0]) == "ffmpeg"]
+    check("a clip with no muted copy gets one made, without re-encoding",
+          len(made) == 1 and "-c" in made[0] and "copy" in made[0]
+          and made[0][-1].endswith("clip_00001_-muted.mp4"), made)
+    os.remove(clip)
+    ctl.gallery.load_existing()
+
+
 def test_split_and_state(win, ctl, keep):
     """A draggable divider, and a window that comes back as it was left."""
     prefs = keep[2]
     content = win.contentItem()
     win.setWidth(1200)
     spin(120)
-    left = find(content, "KineticFlickable").parentItem()
+    left = find(content, "GalleryView").parentItem()
     before = win.property("paneLeadW")
 
-    win.setProperty("splitRatio", 0.65)
+    win.setProperty("splitRatio", 0.3)
+    spin(120)
+    before = win.property("paneLeadW")
+    win.setProperty("splitRatio", 0.7)
     spin(120)
     after = win.property("paneLeadW")
     check("the divider moves the panes", after > before + 100, (before, after))
-    check("...and the right pane gives up exactly what the left took",
-          abs((win.width() - after - win.property("splitterW"))
-              - find(content, "GalleryView").parentItem().width()) < 1.5)
+    trail = find(content, "KineticFlickable",
+                 pred=lambda it: find(it, "ModelPicker") is not None).parentItem()
+    check("...and the trailing pane gives up exactly what the leading one took",
+          abs((win.width() - after - win.property("splitterW")) - trail.width()) < 1.5,
+          (win.width(), after, trail.width()))
 
     # Clamps: neither side can be starved.
     win.setProperty("splitRatio", 0.99)
     spin(120)
-    check("the handle cannot starve the gallery",
-          win.width() - win.property("paneLeadW") >= win.property("minRight"),
+    check("the handle cannot starve the controls",
+          win.width() - win.property("paneLeadW") >= win.property("minTrail"),
           win.width() - win.property("paneLeadW"))
     win.setProperty("splitRatio", 0.01)
     spin(120)
-    check("...nor the controls", win.property("paneLeadW") >= win.property("minLeft"),
+    check("...nor the results", win.property("paneLeadW") >= win.property("minLead"),
           win.property("paneLeadW"))
 
     # State: everything the window is asked to remember.
@@ -1070,6 +1256,7 @@ def main():
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
     print("== inject ==");            test_inject(win, ctl, tmp)
+    print("== muted copies ==");      test_muted(ctl, tmp)
     print("== split + state ==");     test_split_and_state(win, ctl, keep)
     print("== restore ==");           keep2 = test_restore(tmp)
     print("== startup ==");           test_startup(ctl)

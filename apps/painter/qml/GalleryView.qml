@@ -12,6 +12,9 @@ Item {
     //: which owns the one menu, in SCENE coordinates. Same arrangement as
     //: PromptBox's spelling menu.
     signal menuRequested(real sx, real sy, var items)
+    //: A single click asks for the preview viewport above this grid; Main.qml
+    //: owns the pane and opens it if it is closed.
+    signal previewRequested(string path, bool isVideo)
 
     // An output's PNG carries the whole job that made it, so the useful question
     // is WHICH PART to take: its words, its numbers, or both. That is a choice,
@@ -22,16 +25,25 @@ Item {
         if (!p) {
             return [{ label: isVideo ? "a video carries its ComfyUI graph, not these settings"
                                      : "no parameters stored in this file", enabled: false },
-                    { separator: true },
-                    { label: "open in viewer", trigger: () => App.openExternally(path) }]
+                    { separator: true }].concat(view.commonItems(index, path, isVideo))
         }
         return [
             { label: "inject all", trigger: () => { root.injectAll(p); root.view = 0 } },
             { label: "inject prompt", trigger: () => { root.injectPrompt(p); root.view = 0 } },
             { label: "inject params", trigger: () => { root.injectParams(p); root.view = 0 } },
-            { separator: true },
-            { label: "open in viewer", trigger: () => App.openExternally(path) }
-        ]
+            { separator: true }
+        ].concat(view.commonItems(index, path, isVideo))
+    }
+
+    // The items every output gets, parameters or not. The muted copy is
+    // video-only: there is nothing to strip off a still.
+    function commonItems(index, path, isVideo) {
+        var items = [{ label: "open in viewer", trigger: () => App.openExternally(path) }]
+        if (isVideo) {
+            items.push({ label: "copy muted copy",
+                         trigger: () => App.copyMuted(path) })
+        }
+        return items
     }
 
     Row {
@@ -158,18 +170,22 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    // LEFT OPENS IT, right asks what else. Both buttons used to
-                    // raise the same menu, which put a question between him and
-                    // the thing he had just made; looking at an output is the
-                    // obvious act and the menu is where the rest lives (§7.1:
-                    // everything is still right-clickable).
+                    // ONE CLICK PREVIEWS, TWO OPEN, right asks what else. Both
+                    // buttons used to raise the same menu, which put a question
+                    // between him and the thing he had just made; now the cheap
+                    // look is a click (the viewport above this grid), the real
+                    // one is a double-click into viewer, and the menu keeps
+                    // everything else (§7.1: everything is still right-clickable).
                     onClicked: function (m) {
                         if (m.button === Qt.LeftButton) {
-                            App.openExternally(path)
+                            view.previewRequested(path, isVideo === true)
                             return
                         }
                         var pt = mapToItem(null, m.x, m.y)
                         view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
+                    }
+                    onDoubleClicked: function (m) {
+                        if (m.button === Qt.LeftButton) App.openExternally(path)
                     }
                 }
             }
@@ -193,8 +209,8 @@ Item {
         anchors.bottomMargin: 6
         width: parent.width
         elide: Text.ElideRight
-        text: view.width > 340 ? "click to open, right-click to inject prompt, params or both"
-                               : "click to open, right-click for more"
+        text: view.width > 340 ? "click to preview, double-click to open, right-click for more"
+                               : "click previews, double-click opens"
         color: Theme.dim
     }
 
