@@ -60,8 +60,10 @@ def build(app, start_dir):
     ctx = engine.rootContext()
     keep = (filermain.FileOps(), filermain.Palette(filermain.PANEL_THEME),
             filermain.Settings(), filermain.DirWatch(), filermain.WinCtl(),
-            filermain.VideoConv(), StubTitlebar(), filermain.Picker(None))
+            filermain.VideoConv(), StubTitlebar(), filermain.Picker(None),
+            filermain.Remote())
     ctx.setContextProperty("FileOps", keep[0])
+    ctx.setContextProperty("Remote", keep[8])
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[1])
     ctx.setContextProperty("DeskStyle", _deskstyle)

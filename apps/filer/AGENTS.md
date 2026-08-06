@@ -438,3 +438,67 @@ flags for none/one/two devices, that the count is the *sendable* count, that a
 row's own JS closure runs one `kdeconnect-cli -d <id> --share <file>` per file
 inside one batch, and where the entry lands relative to the separators.
 **It never runs the real binary and never sends anything to a real device.**
+
+## `:top` in the address bar — browsing the other machine
+
+Type `:top` into the path bar and filer shows lam's home on `top`. It is an
+sshfs mount and a name rewrite, and everything else in the app is untouched:
+by the time the tree, the preview grid, drag and drop, a copy or `viewer` sees
+a path, it is an ordinary local path under the mountpoint. `remote.py` is the
+whole feature; its docstring is the reference and this is what an agent needs
+before changing it.
+
+- **The mount is the remote's `/`, one per host**, at
+  `$XDG_RUNTIME_DIR/filer-remote/<user>@<host>`. Mounting the *home* instead
+  would need a mountpoint per (host, root) pair — `:top` and `:top:/etc` would
+  collide on one directory — and would make the reverse map ambiguous. Rooting
+  at `/` makes the rewrite a plain prefix swap, keeps `^` walking out of the
+  home the way it does locally, and puts the mount in a directory a logout
+  takes away with it.
+- **`pretty()` and `parse()` are inverses, and that is load-bearing.** The
+  window title *is* the editable address bar, so it shows `:top/dl` rather
+  than the runtime-dir mountpoint — and pressing Enter on that text unchanged
+  must land where it already is. `tools/remote-test.py` asserts the round trip
+  for every shape (home, subpath, explicit `:host:/abs`, non-default user, and
+  the `/home/lambda` near-miss that must NOT be read as a subpath of
+  `/home/lam`). It is offline: nothing mounts, connects or resolves a name.
+- **Mounting is off the GUI thread**, because an ssh handshake to a sleeping
+  machine takes as long as `ConnectTimeout`. `Remote.open()` returns at once;
+  `Main.qml` remembers *which pane asked* (not `focusPane` — a click in the
+  other half mid-connect must not redirect the navigation) and navigates on
+  `ready`. A failure toasts the reason ssh gave and moves nothing: this is the
+  "never let an action fail silently" rule (docs/DESIGN.md 10.4), and the path
+  bar sitting on the old directory with no explanation is exactly what it
+  forbids.
+- **An address naming this machine needs no mount** — `:book` on book is just
+  `/home/lam`, resolved locally.
+- **A false positive in `parse()` costs a local directory.** Anything it
+  claims stops being treated as a path, so the "must stay local" half of
+  `remote-test.py` matters as much as the accepting half.
+- **Auth is keys only** (`BatchMode=yes`): there is no terminal for a
+  passphrase prompt, and without it a mount hangs until the timeout. Unknown
+  host keys are taken on first use (`accept-new`), the same answer a person
+  gives the interactive prompt. `reconnect` + keepalives are set so a laptop
+  that slept comes back instead of leaving a wedged mountpoint; `_live()`
+  checks a mount is actually readable rather than trusting `ismount`, because
+  a dropped sshfs leaves the mountpoint standing with every call on it
+  returning `ENOTCONN`.
+- **PACKAGING differs per host.** `top` gets `pkgs.sshfs` on the wrapper's
+  PATH in `home/prog/filer.nix` (like `gio`: `home.packages` is not enough for
+  an app launched from a .desktop entry). `book` needs nothing from this repo
+  — it runs Fedora's python3 with `/usr/sbin/sshfs` on PATH, and nixpkgs'
+  sshfs would be the *wrong* one there, its libfuse looking for the setuid
+  `fusermount3` in `/run/wrappers/bin`, which exists only on NixOS. Both are
+  resolved through `notify.tool()`, which is why that function's fallback list
+  grew `/run/wrappers/bin` and `/usr/sbin`.
+- **What works today, in each direction.** `:top` from `book` works over the
+  LAN now and over the tailnet once both nodes are joined — `top` is the same
+  name either way (MagicDNS), which is why the address is a bare hostname and
+  not an address. `:book` from `top` does NOT: book runs no sshd. That is
+  Fedora state this repo cannot declare (`systemctl enable --now sshd` there);
+  until then the address fails with a "cannot reach book / connection refused"
+  toast, which is the honest answer.
+- **Two sshfs properties, not filer bugs**: a remote directory's thumbnails
+  pull the files over the wire, and a remote symlink to an absolute path
+  (`/nix/store/...`) resolves against THIS machine's copy of that path,
+  because the link text crosses untranslated.

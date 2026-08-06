@@ -49,6 +49,7 @@ from notify import tool, toast  # noqa: E402  (next to this file; filer's one to
 from videoconv import VideoConv  # noqa: E402  (next to this file; see its docstring)
 from pick import Picker, load_spec  # noqa: E402  (picker mode — see its docstring)
 from phone import Phone  # noqa: E402  (next to this file; KDE Connect "send to phone")
+from remote import Remote  # noqa: E402  (next to this file; the `:top` address bar syntax)
 
 # Preview classification. `kind` is the scaffold for file previews: the QML side
 # groups/renders entries by it (previewable files get a thumbnail grid at the top
@@ -973,6 +974,7 @@ def main():
     dirwatch = DirWatch()
     videoconv = VideoConv()
     phone = Phone()
+    remote = Remote()
     # NB: exposed as "WalPalette", not "Palette" — "Palette" is a built-in Qt
     # Quick type name and would shadow the context property.
     # WalPalette first, so Theme's bindings resolve it when Theme is instantiated.
@@ -985,6 +987,7 @@ def main():
     ctx.setContextProperty("Settings", settings)
     ctx.setContextProperty("VideoConv", videoconv)
     ctx.setContextProperty("Phone", phone)
+    ctx.setContextProperty("Remote", remote)
     ctx.setContextProperty("Picker", picker)
     ctx.setContextProperty("startDir", start_dir)
     # Last-used sort + hidden-files toggle, restored into the view on startup.
