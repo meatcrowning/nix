@@ -23,7 +23,6 @@ so weights stay warm between launches:  journalctl --user -u comfy-painter -f
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -38,6 +37,9 @@ from PySide6.QtQuick import QQuickImageProvider
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
+# The clipboard holder (pylib, stdlib-only), run as a program rather than
+# imported: it forks and stays alive owning the selection. See _clip_file.
+CLIPFILE = HERE.parent / "pylib" / "clipfile.py"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 try:
@@ -1282,28 +1284,27 @@ class Painter(QObject):
                          "-movflags", "+faststart", str(dest)], done)
 
     def _clip_file(self, path):
-        """Put `path` on the clipboard as a file, via wl-copy.
+        """Put `path` on the clipboard as a FILE, via `pylib/clipfile.py`.
 
-        NOT Qt's clipboard, for two reasons. A Wayland selection dies with the
-        process that offered it, so a file copied out of painter would stop
-        being pasteable the moment painter closed — `wl-copy` forks a tiny
-        holder that survives it. And `QClipboard.setMimeData` takes ownership of
-        a Python-built QMimeData that PySide still has a wrapper for: Qt's
-        clipboard is a global static destroyed AFTER the interpreter, so it frees
-        an object whose type is gone and the process dies in
-        `__run_exit_handlers` — a SIGSEGV on exit from any run that had copied
-        something, which is how the UI harness exited 139 with every check
+        NOT Qt's clipboard: a Wayland selection dies with the process that
+        offered it, so a file copied out of painter would stop being pasteable
+        the moment painter closed, and `QClipboard.setMimeData` takes ownership
+        of a Python-built QMimeData that PySide still has a wrapper for — Qt's
+        clipboard is a global static destroyed AFTER the interpreter, so it
+        frees an object whose type is gone and the process dies in
+        `__run_exit_handlers`. That was a SIGSEGV on exit from any run that had
+        copied something, and how the UI harness exited 139 with every check
         passing.
 
-        `text/uri-list` is what the rest of this desktop hands a video around as
-        (the panel's recording toast does the same — docs/DESIGN.md §11).
+        And no longer `wl-copy --type text/uri-list` either — the same idea one
+        MIME type short. GTK, and Chromium/Electron behind it (a browser, a chat
+        client), decide a paste is a FILE from `x-special/gnome-copied-files`,
+        which wl-copy cannot offer alongside anything else; without it the paste
+        arrived as the path in TEXT. `clipfile` owns the selection itself and
+        offers both, forks a holder that outlives painter exactly as wl-copy's
+        did, and its exit code means the selection is ours.
         """
-        uri = QUrl.fromLocalFile(str(path)).toString()
         name = Path(path).name
-        wl = shutil.which("wl-copy")
-        if not wl:
-            self.toast.emit(f"made {name}, but wl-copy is missing to copy it", True)
-            return
 
         def done(rc, out):
             if rc != 0:
@@ -1312,7 +1313,7 @@ class Painter(QObject):
                 return
             self.toast.emit(f"{name} copied — paste it as a file", False)
 
-        self._run_async([wl, "--type", "text/uri-list", "--", uri], done)
+        self._run_async([sys.executable, str(CLIPFILE), str(path)], done)
 
     @Slot(str)
     def openExternally(self, path):

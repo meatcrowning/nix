@@ -281,13 +281,16 @@ def build(tmp):
             return None
     P.subprocess = _NoLaunch
 
-    # ...and no wl-copy either: it forks a holder process that OWNS his
-    # clipboard until something else replaces it. RAN records what would have
-    # been run; everything else (systemctl, ffmpeg) still goes through QProcess.
+    # ...and no clipfile either: it forks a holder process that OWNS his
+    # clipboard until something else replaces it (pylib/clipfile.py is exercised
+    # for real, against a headless compositor, by pylib/tools/clipfile-test.sh).
+    # RAN records what would have been run; everything else (systemctl, ffmpeg)
+    # still goes through QProcess.
     real_async = P.Painter._run_async
 
     def recorded(self, argv, done=None):
-        if os.path.basename(argv[0]) in ("wl-copy", "ffmpeg"):
+        if os.path.basename(argv[-2] if len(argv) > 1 else argv[0]) == "clipfile.py" \
+           or os.path.basename(argv[0]) in ("wl-copy", "ffmpeg"):
             RAN.append(list(argv))
             if done:
                 done(0, "")
@@ -1043,17 +1046,16 @@ def test_muted(ctl, tmp):
           sorted(os.listdir(vid)) == before
           and not any(os.path.basename(a[0]) == "ffmpeg" for a in RAN),
           (sorted(os.listdir(vid)), RAN))
-    copied = [a for a in RAN if os.path.basename(a[0]) == "wl-copy"]
-    check("...and it is copied as a text/uri-list file URI",
-          bool(copied) and "text/uri-list" in copied[-1]
-          and copied[-1][-1].endswith("clip_00001_-muted.mp4"),
-          copied)
+    copied = [a for a in RAN if a[-1].endswith("clip_00001_-muted.mp4")
+              and os.path.basename(a[-2]) == "clipfile.py"]
+    check("...and it is handed to clipfile, as a file",
+          bool(copied), RAN)
 
     # Asking about a copy that is already muted copies THAT, not a copy of it.
     RAN.clear()
     ctl.copyMuted(muted)
     spin(150)
-    copied = [a for a in RAN if os.path.basename(a[0]) == "wl-copy"]
+    copied = [a for a in RAN if os.path.basename(a[-2]) == "clipfile.py"]
     check("a muted file copies itself rather than making another",
           sorted(os.listdir(vid)) == before and bool(copied)
           and copied[-1][-1].endswith("clip_00001_-muted.mp4"),

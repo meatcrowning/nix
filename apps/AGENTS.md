@@ -194,6 +194,33 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
       in painter too.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
+- **`clipfile.py`** — **THE way to put a FILE on the clipboard here.** Run as a
+  program (`python3 clipfile.py FILE…`), not imported: it forks and stays alive
+  as the selection's owner, because a Wayland selection dies with the process
+  that offered it. Exit 0 means the clipboard is ours; the holder lets go when
+  something else takes it.
+    - `wl-copy --type text/uri-list` is what painter used, and it is one MIME
+      type short: wl-copy offers exactly one (plus the text/plain aliases it
+      guesses for a `text/*` type), while GTK — and Chromium/Electron behind
+      it, so a browser or a chat client — reads `x-special/gnome-copied-files`
+      to decide a paste is a FILE. Missing it, "copy muted" pasted the path as
+      TEXT. wl-copy also appends a newline to argv content unless given `-n`,
+      so the uri-list was LF- rather than CRLF-terminated (RFC 2483).
+    - `QClipboard` cannot do this job at all: `wl_data_device.set_selection`
+      wants an input-event serial, which only a focused window has, and the
+      selection would die with the app anyway. It also SIGSEGVs PySide on exit
+      (Qt's global-static clipboard frees a Python-built `QMimeData` after the
+      interpreter is gone — painter's harness exited 139 with every check
+      passing).
+    - It speaks the Wayland wire protocol directly, stdlib only, over
+      `zwlr_data_control_manager_v1` / `ext_data_control_manager_v1` — the
+      protocol wl-clipboard itself uses, and the one that needs neither a
+      surface nor focus.
+    - Harness: `apps/pylib/tools/clipfile-test.sh`. It copies and pastes for
+      real, inside a **headless sway** with its own `XDG_RUNTIME_DIR`, so it
+      can neither take his clipboard nor put anything on screen — his socket is
+      not in that directory. Use that shape for anything else that needs a
+      compositor of its own; a nested Hyprland is a window in the live session.
 
 ## `qmlcommon/` — shared QML, resolved relatively
 
