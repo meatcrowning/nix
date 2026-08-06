@@ -248,10 +248,6 @@ Window {
             anchors.margins: results.width < 320 ? 4 : 10
             anchors.topMargin: preview.visible ? 8 : (results.width < 320 ? 4 : 10)
             onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
-            onPreviewRequested: function (path, isVideo) {
-                root.showPreview = true
-                preview.show(path, isVideo)
-            }
         }
     }
 

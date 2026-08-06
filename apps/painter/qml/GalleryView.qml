@@ -12,9 +12,6 @@ Item {
     //: which owns the one menu, in SCENE coordinates. Same arrangement as
     //: PromptBox's spelling menu.
     signal menuRequested(real sx, real sy, var items)
-    //: A single click asks for the preview viewport above this grid; Main.qml
-    //: owns the pane and opens it if it is closed.
-    signal previewRequested(string path, bool isVideo)
 
     // An output's PNG carries the whole job that made it, so the useful question
     // is WHICH PART to take: its words, its numbers, or both. That is a choice,
@@ -170,17 +167,13 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    // ONE CLICK PREVIEWS, TWO OPEN, right asks what else. Both
-                    // buttons used to raise the same menu, which put a question
-                    // between him and the thing he had just made; now the cheap
-                    // look is a click (the viewport above this grid), the real
-                    // one is a double-click into viewer, and the menu keeps
-                    // everything else (§7.1: everything is still right-clickable).
+                    // DOUBLE-CLICK OPENS, right-click asks what else. A single
+                    // left click does nothing on purpose: the preview viewport
+                    // above shows the job that is running and then what it made
+                    // (his words: "no clicking on other outputs or anything"),
+                    // so a click here would have nowhere to put an old output.
                     onClicked: function (m) {
-                        if (m.button === Qt.LeftButton) {
-                            view.previewRequested(path, isVideo === true)
-                            return
-                        }
+                        if (m.button === Qt.LeftButton) return
                         var pt = mapToItem(null, m.x, m.y)
                         view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
                     }
@@ -209,8 +202,8 @@ Item {
         anchors.bottomMargin: 6
         width: parent.width
         elide: Text.ElideRight
-        text: view.width > 340 ? "click to preview, double-click to open, right-click for more"
-                               : "click previews, double-click opens"
+        text: view.width > 340 ? "double-click to open in viewer, right-click for more"
+                               : "double-click opens"
         color: Theme.dim
     }
 
