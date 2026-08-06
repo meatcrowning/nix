@@ -209,8 +209,15 @@ in
   # the focus colour instead of the file's baked fallback (app-icons/seals.nix).
   my.appSeals = [ "settings" ];
 
+  # Seeded once and then RECONCILED on every switch: the nix source wins on
+  # structure, the live `// >>> wal palette` block is carried across. Seeding it
+  # once and never touching it again meant a rebuild could not update Theme.qml
+  # at all, so a pull that changed it did nothing. The write only happens when
+  # the reconciled result actually differs — writing this file hot-reloads the
+  # panel, and a rebuild must not do that for nothing.
   home.activation.seedQuickshellTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    [ -e "$HOME/.config/quickshell/Theme.qml" ] || install -D -m644 ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml"
+    run bash ${../../tools/seed-reconcile.sh} theme-qml \
+      ${./quickshell-files/Theme.qml} "$HOME/.config/quickshell/Theme.qml" || true
   '';
 
   # The panel (bar + launcher + tray + clock, and it draws the wallpaper) runs
