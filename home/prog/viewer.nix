@@ -31,6 +31,24 @@ let
         # qtmultimedia adds the QtMultimedia QML module + its FFmpeg backend so
         # viewer can play videos (the scrub bar / play-pause controls live in the
         # hyprvtb titlebar); qtimageformats/qtsvg add the webp/tiff/svg plugins.
+        #
+        # NVDEC, NEVER VAAPI (this branch is `top`, i.e. the NVIDIA box). Qt's
+        # ffmpeg backend probes hw decoders in its own order and picks VAAPI
+        # first; the VAAPI provider on `top`'s default render node
+        # (/dev/dri/renderD128) is NVIDIA's own shim, nvidia_drv_video.so, and it
+        # cannot export a surface as a DRM-prime handle at all — measured on the
+        # sandbox monitor 2026-08-05, `vaExportSurfaceHandle failed` 202x in 9s
+        # for a VP9 clip and 392x for a VP8 one, i.e. EVERY frame. Qt then falls
+        # back to a per-frame CPU transfer, which is both why video played badly
+        # and how viewer died: av_hwframe_transfer_data -> vaapi_transfer_data_from
+        # -> av_image_copy asserts on a plane-size mismatch and abort()s, which is
+        # both viewer coredumps on `top` (2026-07-30 and 2026-08-03, a .webm each).
+        # `cuda` is real NVDEC and logs zero export failures on the same clips;
+        # Qt falls back to software on its own for anything NVDEC cannot decode,
+        # so this narrows the choice rather than forcing it. --set-default, so
+        # `QT_FFMPEG_DECODING_HW_DEVICE_TYPES= viewer x.webm` still bisects it by
+        # hand. book is not NVIDIA and keeps Qt's default (the `air` branch above
+        # has no wrapper to set it in).
         buildInputs = [ pyEnv pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg pkgs.qt6.qtmultimedia ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
@@ -39,6 +57,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/viewer \
             --add-flags /home/lam/nix/apps/viewer/main.py \
+            --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
