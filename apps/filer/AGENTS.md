@@ -18,8 +18,9 @@ six apps.
   kept for its `devShells`, which is what `run.sh` consumes; fixing `nix run`
   means copying those files and `../pylib` in, and `../pylib` is outside the
   flake's `src`.
-- `openFile` shells out to `viewer <path>` for images — the image overlay used
-  to live in here and was split out into [`../viewer`](../viewer/AGENTS.md).
+- `openFile` shells out to `viewer <path>` for images **and video** — the image
+  overlay used to live in here and was split out into
+  [`../viewer`](../viewer/AGENTS.md).
 - Titlebar chrome comes from hyprvtb via `pylib/vtbclient.py`.
 - **The preview grid and the tree list are `KineticGridView` / `KineticListView`** (`../qmlcommon/`), not bare views — the desktop's momentum is compositor-side and Qt's own flick fights it. Any new scrollable surface here must use those too; see [`../AGENTS.md`](../AGENTS.md).
 
@@ -102,6 +103,44 @@ must also set every `startSplit*` context property (`drop-test.py`,
 `pick-test.py` do) — an unqualified read of a missing one is a `ReferenceError`
 that takes the whole `Component.onCompleted` with it.
 
+## The preview grid: images AND video poster frames
+
+`preview_kind` (`main.py`) sorts every entry into `dir | image | video | file`;
+`buildRows` diverts the first two at depth 0 into the pane's **`previews`**
+model, which is what the grid at the top of the pane shows. (The property was
+called `images` until video joined it.)
+
+- **One provider, keyed on the PATH.** `qml/PreviewTile.qml` asks
+  `image://thumb/<abs>` for both kinds and `make_thumb` works out how to make
+  one, so a new previewable kind needs a branch in `_generate`, not in the QML.
+- **The video poster frame is ffmpeg, seeked, and blank-rejecting.**
+  `_video_frame` walks `VIDEO_SEEK_FRACTIONS` (⅓, 0.6, 0.1, 0) and takes the
+  first frame that is not a flat field. `-ss` goes **before** `-i` — fast
+  keyframe seek, so the cost is one keyframe rather than the file, which is what
+  makes a folder of films affordable. 10% was the obvious fraction and is wrong:
+  a clip with a black first second returned `#000000` for it, measured. A clip
+  that is blank all the way through still gets its blank frame; the no-preview
+  marker would be a lie about a file that decodes fine.
+- **The oversized-source cap (`THUMB_MAX_SRC`) does NOT apply to video**, and
+  must not: it exists to bound *decode* cost, and a 4 GB `.mkv` is cheaper to
+  thumbnail than a 130 MB TIFF. Applying it would blank exactly the files most
+  worth a poster frame.
+- Results land in the **shared freedesktop cache** like every other thumbnail,
+  so a warm revisit is a small PNG read and Dolphin gets the benefit too.
+- `ffmpeg`/`ffprobe` are **not** in `filer.nix` — PATH-resolved via
+  `notify.tool` like `kitty` and videoconv's binaries, so a machine without them
+  shows the no-preview marker instead of failing to build.
+- **The play marker is DRAWN, not lettered** — a seven-row staircase of
+  `Rectangle`s in a `Loader`. `▶` is glyph 0 in two of the three selectable
+  pixel fonts (docs/DESIGN.md §2.3), and the `Loader` keeps a still tile from
+  paying for nine items it never shows.
+- filer's `VIDEO_EXTS` **must equal viewer's** — filer hands these to `viewer`,
+  so a mismatch is a file with a tile here and no player there. `thumb-test.py`
+  asserts it.
+
+Verify with `tools/thumb-test.py` (offscreen, ~33 checks; it generates every
+clip it thumbnails with ffmpeg, so it never touches his media or his cache).
+
 ## Drag and drop — both halves
 
 **Drag out** is on the file rows (`qml/BrowserPane.qml`) and the preview tiles
@@ -136,9 +175,33 @@ view, etc.
 - Transfers reuse the paste machinery — `transferInto` → `runPaste` — so a drop
   gets the same no-clobber default and overwrite confirm a paste does.
 
+- **NOTHING MAY REBUILD A PANE'S MODEL WHILE A DRAG-OUT IS IN FLIGHT.** This is
+  the rule the four `top` coredumps of 2026-08-03..05 bought. `Drag.active` is
+  bound on the delegate, so `QQuickDragAttached::startDrag` runs `QDrag::exec()`
+  — a **nested event loop** — from inside the delegate's own
+  `QQuickMouseArea::mouseMoveEvent`. Timers still run in that loop, so
+  `DirWatch`'s 200 ms debounce fires, `refreshAll()` reassigns
+  `rows`/`previews`, and every delegate is destroyed underneath the drag. When
+  the loop returns, `mouseMoveEvent` resumes on a freed MouseArea (SEGV in
+  `QQuickItem::parentItem`) and the `QDrag` — which `QQuickDragAttached` parents
+  to the **source item** — has been freed with it, so `QBasicDrag::eventFilter`
+  `deleteLater()`s a dead object (SEGV in `lockThreadPostEventList`). Both
+  signatures are in the dumps.
+  - The window carries `dragInFlight` (`Main.qml`); each pane takes it as a
+    property and reports its own drags back through `dragStateChanged`. It is
+    per WINDOW because the source is one pane's delegate while `refreshAll` hits
+    both — dragging into the other pane is exactly that case.
+  - `rebuild()` is the one choke point every model reassignment goes through
+    (refresh, expand/collapse, cd, sort), so the guard lives there and defers:
+    `rebuildDeferred` flushes the moment the drag ends. **Deferred, never
+    dropped** — a file that appeared mid-drag still has to show up.
+
 Verify with `tools/drop-test.py` (offscreen; posts real `QDragEnter`/`QDrop`
 events at the window, so the DropArea, the target hit-test and the transfer are
-all exercised without a window on anyone's screen).
+all exercised without a window on anyone's screen) and `tools/dragsource-test.py`
+for the source half. The latter asserts the invariant rather than the crash: the
+offscreen platform's `QPlatformDrag` returns without spinning `QDrag::exec()`'s
+nested loop, so the use-after-free window never opens there.
 
 ## filer as the desktop's FILE PICKER (`portal.py` + `pick.py`) — ships DORMANT
 

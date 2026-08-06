@@ -336,6 +336,14 @@ Window {
     // Dragging a file from one pane to the other is ordinary DnD — the panes
     // are two DropAreas in one process, and the move/copy/link menu the drop
     // raises is the same one a drop from Dolphin gets (see AGENTS.md).
+    //
+    // A drag-out is live SOMEWHERE in this window. It is per WINDOW, not per
+    // pane, because the drag source is one pane's delegate while the refresh
+    // that would destroy it (`refreshAll`) hits BOTH — dragging into the other
+    // pane is exactly that case. Every pane freezes its model while it is set;
+    // BrowserPane.qml's `rebuild()` documents the use-after-free that costs.
+    property bool dragInFlight: false
+
     BrowserPane {
         id: paneL
         x: 0
@@ -349,6 +357,8 @@ Window {
         watchKey: "left"
         paneFocused: win.focusPane === 0
         onFocusClaimed: win.focusPane = 0
+        dragInFlight: win.dragInFlight
+        onDragStateChanged: (active) => win.dragInFlight = active
     }
 
     Loader {
@@ -368,6 +378,8 @@ Window {
             watchKey: "right"
             paneFocused: win.focusPane === 1
             onFocusClaimed: win.focusPane = 1
+            dragInFlight: win.dragInFlight
+            onDragStateChanged: (active) => win.dragInFlight = active
         }
     }
 

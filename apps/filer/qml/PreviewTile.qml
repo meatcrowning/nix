@@ -1,16 +1,21 @@
 import QtQuick
 
 // One cell of the directory's preview grid (the strip of thumbnails filer pins
-// above the file list). Currently renders images only — straight from the file
-// through a downscaled, async Image — but the `entry.kind` switch is the
-// scaffold for file previews in general: add a branch here per previewable kind
-// (video poster frame, PDF first page, …) and a matching classifier in main.py's
-// `preview_kind`. Non-image kinds fall through to a filename-only card, so a new
-// kind still renders something before its preview branch exists.
+// above the file list). Renders images and video poster frames — both straight
+// from `image://thumb/`, because the provider is keyed on the PATH and works out
+// how to make a thumbnail itself (main.py's make_thumb / _video_frame). The
+// `entry.kind` switch is the scaffold for previews in general: add a branch here
+// per previewable kind (PDF first page, …) and a matching classifier in main.py's
+// `preview_kind`. Kinds with no branch fall through to a filename-only card, so
+// a new kind still renders something before its preview branch exists.
 Rectangle {
     id: tile
 
     required property var entry     // a listDir row: { name, path, kind, ... }
+    // Everything the thumbnail provider can serve. Video differs from an image
+    // only in wearing the play marker below.
+    readonly property bool isVideo: entry.kind === "video"
+    readonly property bool hasThumb: entry.kind === "image" || isVideo
     property bool selected: false
     property bool winActive: true
     property int tileSize: 96
@@ -23,6 +28,10 @@ Rectangle {
 
     signal clicked(int mods)   // mods: the keyboard modifiers at press (shift/ctrl)
     signal opened()
+    // A drag-out starting/ending here. The view has to freeze its model while
+    // one is live, or the rebuild destroys this tile mid-drag — the crash
+    // documented on BrowserPane.qml's `rebuild()`.
+    signal dragStateChanged(bool active)
 
     width: tileSize
     height: tileSize
@@ -57,8 +66,8 @@ Rectangle {
         id: thumb
         anchors.fill: parent
         anchors.margins: 3
-        visible: tile.entry.kind === "image"
-        source: tile.entry.kind === "image" ? ("image://thumb" + encodeURI(tile.entry.path)) : ""
+        visible: tile.hasThumb
+        source: tile.hasThumb ? ("image://thumb" + encodeURI(tile.entry.path)) : ""
         sourceSize.width: tile.tileSize * 2
         sourceSize.height: tile.tileSize * 2
         fillMode: Image.PreserveAspectFit
@@ -80,11 +89,58 @@ Rectangle {
     // maps them to.
     PixelText {
         anchors.centerIn: parent
-        visible: tile.entry.kind !== "image" || thumb.status !== Image.Ready
-        text: tile.entry.kind !== "image" ? "■"
+        visible: !tile.hasThumb || thumb.status !== Image.Ready
+        text: !tile.hasThumb ? "■"
             : thumb.status === Image.Error ? "x" : "..."
-        color: (tile.entry.kind === "image" && thumb.status === Image.Error)
+        color: (tile.hasThumb && thumb.status === Image.Error)
                ? Theme.crit : (tile.winActive ? Theme.textDim : Theme.inactive)
+    }
+
+    // The play marker: this tile is a clip, not a still. Only once the poster
+    // frame is actually up — over the "..." placeholder it would claim a preview
+    // that has not arrived, and over the "x" it would label a file that could not
+    // be decoded as playable (docs/DESIGN.md §10: never say an action is available
+    // when it may silently fail).
+    //
+    // DRAWN, NOT LETTERED. The obvious "▶" is U+25B6, and the pixel font is the
+    // user's choice: Botis 4x6 has it, More Perfect DOS VGA and Perfect DOS VGA
+    // 437 both return glyph 0 (checked with QRawFont.glyphIndexesForString, the
+    // same way §2.3's other traps were found), so on two of the three fonts it
+    // would take a fallback's taller ascent and clip the chip. A triangle built
+    // from a staircase of 1px-tall rows needs no glyph, is exact at any size, and
+    // is the same dot-matrix construction the panel's clock uses (§3.4).
+    // A Loader, not a `visible: false` Rectangle: the chip is nine items
+    // (frame + 7 staircase rows + their parent) and the grid is virtualized for
+    // folders of thousands, so a still must not pay for a marker it never wears.
+    Loader {
+        active: tile.isVideo && thumb.status === Image.Ready
+        anchors { left: parent.left; top: parent.top; margins: 4 }
+        sourceComponent: Rectangle {
+            width: 15
+            height: 15
+            radius: 2
+            color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.72)
+            border.width: 1
+            border.color: tile.winActive ? Theme.border : Theme.inactive
+            Item {
+                anchors.centerIn: parent
+                width: 7
+                height: 7
+                Repeater {
+                    model: 7
+                    Rectangle {
+                        required property int index
+                        // rows 0..6 widen 1,2,3,4,3,2,1 — a symmetric arrowhead
+                        // pointing right, centred on the middle row.
+                        x: 0
+                        y: index
+                        height: 1
+                        width: 4 - Math.abs(index - 3)
+                        color: tile.winActive ? Theme.text : Theme.inactive
+                    }
+                }
+            }
+        }
     }
 
     // filename ribbon across the bottom, over a translucent scrim so it stays
@@ -118,7 +174,10 @@ Rectangle {
         // false by the time onReleased runs. (Same rule as the file rows.)
         property bool deferSelect: false
         property bool dragged: false
-        drag.onActiveChanged: if (tileMa.drag.active) tileMa.dragged = true;
+        drag.onActiveChanged: {
+            if (tileMa.drag.active) tileMa.dragged = true;
+            tile.dragStateChanged(tileMa.drag.active);
+        }
         onPressed: (mouse) => {
             tileMa.dragged = false;
             tileMa.deferSelect = !(mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
@@ -132,7 +191,9 @@ Rectangle {
         onReleased: {
             if (tileMa.deferSelect && !tileMa.dragged) tile.clicked(0);   // plain click: collapse to this one
             tileMa.deferSelect = false;
+            tile.dragStateChanged(false);
         }
+        onCanceled: tile.dragStateChanged(false)
         onDoubleClicked: tile.opened()
     }
 }

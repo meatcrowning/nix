@@ -22,9 +22,13 @@ import "../../qmlcommon"
 //   watchKey    this pane's slot in the shared DirWatch (see main.py) — two
 //               panes watch two different sets and setDirs() is keyed, or the
 //               second pane's rebuild would silently unwatch the first's dirs
+//   dragInFlight  a drag-out is live SOMEWHERE in this window (see below) — no
+//               pane may reassign its model while one is
 //
-// and `focusClaimed` goes back the other way: any press in here means "the
-// chrome is talking to this pane now".
+// and `focusClaimed` / `dragStateChanged` go back the other way: any press in
+// here means "the chrome is talking to this pane now", and a drag starting or
+// ending in here is the window's business because the other pane must freeze
+// its model too.
 
 Rectangle {
     id: view
@@ -37,7 +41,9 @@ Rectangle {
     property bool picking: false
     property bool primary: true
     property string watchKey: "main"
+    property bool dragInFlight: false
     signal focusClaimed()
+    signal dragStateChanged(bool active)
     // Called from every press site in here. Cheap and idempotent: the window
     // ignores it unless the focus actually moves.
     function claimFocus() { if (!paneFocused) focusClaimed(); }
@@ -58,7 +64,7 @@ Rectangle {
     // the delegates can bind `indexOf` reactively); `selected` is the
     // primary/anchor path used by single-item ops (rename) and titlebar
     // state; `anchor` is where a shift-range extends FROM. Range selection
-    // works across the whole view — the preview grid's images then the tree
+    // works across the whole view — the preview grid's tiles then the tree
     // rows, in `orderPaths()` order — so shift-clicking spans both.
     property var selection: []
     property string selected: ""        // primary (anchor) selected path
@@ -190,10 +196,10 @@ Rectangle {
     }
 
     // The flat top-to-bottom order of every selectable item: the preview
-    // grid's images (Flow order == array order) followed by the tree rows.
+    // grid's tiles (Flow order == array order) followed by the tree rows.
     function orderPaths() {
         const out = [];
-        for (let i = 0; i < images.length; i++) out.push(images[i].path);
+        for (let i = 0; i < previews.length; i++) out.push(previews[i].path);
         for (let i = 0; i < rows.length; i++) out.push(rows[i].path);
         return out;
     }
@@ -228,11 +234,11 @@ Rectangle {
     // or null for empty space. Uses the views' own indexAt hit-testing, so
     // the one right-click overlay covers tiles, rows and background alike.
     function entryAt(x, y) {
-        if (hasImages) {
+        if (hasPreviews) {
             const g = view.mapToItem(pgrid, x, y);
             if (g.x >= 0 && g.y >= 0 && g.x < pgrid.width && g.y < pgrid.height) {
                 const i = pgrid.indexAt(g.x + pgrid.contentX, g.y + pgrid.contentY);
-                return i >= 0 ? images[i] : null;
+                return i >= 0 ? previews[i] : null;
             }
         }
         if (hasRows) {
@@ -334,7 +340,7 @@ Rectangle {
             { label: "new...", trigger: () => newDlg.open() },
             { label: "paste", enabled: clip !== null, trigger: () => pasteInto(path) },
             { separator: true },
-            { label: "select all", enabled: rows.length + images.length > 0, trigger: () => selectAll() },
+            { label: "select all", enabled: rows.length + previews.length > 0, trigger: () => selectAll() },
             { label: "copy path", trigger: () => FileOps.copyText(path) },
             { separator: true },
             { label: "open terminal here", trigger: () => FileOps.execDetached(["kitty", "--directory", path]) },
@@ -349,18 +355,18 @@ Rectangle {
 
     // Image entries of the CURRENT dir, pulled out of `rows` and shown in a
     // thumbnail grid pinned above the list (the preview panel). Only the
-    // current dir — images inside expanded subdirs stay inline as rows.
-    property var images: []
-    readonly property bool hasImages: images.length > 0
+    // current dir — previewable files inside expanded subdirs stay inline as rows.
+    property var previews: []
+    readonly property bool hasPreviews: previews.length > 0
     // Whether the list has anything (dirs, non-image files, expanded subtrees).
-    // When a dir is nothing but images, `rows` is empty and the bottom section
+    // When a dir is nothing but previewable files, `rows` is empty and the bottom section
     // + splitter are hidden so the preview grid takes the whole window.
     readonly property bool hasRows: rows.length > 0
 
     // Height (px) of the preview panel above the list. User-adjustable by
     // dragging the splitter between the panel and the list; persisted across
     // runs (Settings "gridPanelH"). The panel caps at its own content height,
-    // so a dir with only a few images shows a snug panel, not empty space.
+    // so a dir with only a few tiles shows a snug panel, not empty space.
     property int gridPanelH: startGridPanelH
 
     // The scrollbar is `qmlcommon/VScroll.qml` (imported above), not an inline
@@ -368,8 +374,9 @@ Rectangle {
     // 19.1 listed this copy as a real divergence. Folded in 2026-07-28 with the
     // rewrite to the three pixel-era variants.
 
-    // Open a file with the right thing for its kind: images go to `viewer`
-    // (the standalone image/media viewer), the rest to xdg-open. (Dirs → go().)
+    // Open a file with the right thing for its kind: images and video go to
+    // `viewer` (the standalone image/media viewer, which plays both and flips
+    // between them), the rest to xdg-open. (Dirs → go().)
     //
     // viewer would otherwise build its flip-through set by name-sorting the
     // file's directory itself, which contradicts what the user is looking at
@@ -386,7 +393,7 @@ Rectangle {
             if (Picker.selectable(p)) { selectSingle(p, false); pickBar.submit(); }
             return;
         }
-        if (kind === "image") {
+        if (kind === "image" || kind === "video") {
             const order = FileOps.writeOrder(orderPaths());
             FileOps.execDetached(order ? ["viewer", "--order", order, p]
                                        : ["viewer", p]);
@@ -474,9 +481,9 @@ Rectangle {
     }
 
     // Recursively flatten `dir` into `out`, descending into any subdir whose
-    // path is in expandedPaths. At depth 0 (the current dir) images are
+    // path is in expandedPaths. At depth 0 (the current dir) previewable files are
     // diverted into `imgOut` instead of `out` — they render in the preview
-    // grid, not the list. Reassigning `rows`/`images` at the end drives the view.
+    // grid, not the list. Reassigning `rows`/`previews` at the end drives the view.
     function buildRows(dir, depth, out, imgOut) {
         const entries = sortEntries(FileOps.listDir(dir));
         for (let i = 0; i < entries.length; i++) {
@@ -486,7 +493,7 @@ Rectangle {
             // for. Directories always survive — they are how you navigate —
             // so `dir` mode leaves a pure folder tree. (pick.py::accepts)
             if (view.picking && !Picker.accepts(e.name, e.isDir)) continue;
-            if (depth === 0 && e.kind === "image") { imgOut.push(e); continue; }
+            if (depth === 0 && (e.kind === "image" || e.kind === "video")) { imgOut.push(e); continue; }
             const exp = e.isDir && view.expandedPaths.has(e.path);
             out.push({ name: e.name, path: e.path, isDir: e.isDir, kind: e.kind,
                        size: e.size, created: e.created, modified: e.modified,
@@ -494,10 +501,36 @@ Rectangle {
             if (exp) buildRows(e.path, depth + 1, out, imgOut);
         }
     }
+    // A rebuild reassigns `rows`/`previews`, which destroys EVERY delegate. If one
+    // of them is the source of a drag-out that is still in flight, that is a
+    // use-after-free twice over, and it took filer down four times between
+    // 2026-08-03 and 2026-08-05:
+    //
+    //   `Drag.active` is bound on the delegate, so QQuickDragAttached::startDrag
+    //   runs QDrag::exec() — a NESTED event loop — from inside the delegate's own
+    //   QQuickMouseArea::mouseMoveEvent. Timers keep running in that loop, so
+    //   DirWatch's 200ms debounce fires, refreshAll() rebuilds, and the delegate
+    //   goes away underneath it. When the loop returns, mouseMoveEvent resumes on
+    //   a freed MouseArea (SEGV in QQuickItem::parentItem), and the QDrag — which
+    //   QQuickDragAttached parents to the SOURCE ITEM — has been freed with it, so
+    //   QBasicDrag::eventFilter deleteLater()s a dead object (SEGV in
+    //   lockThreadPostEventList). Both signatures are in the coredumps.
+    //
+    // So a rebuild asked for during a drag is DEFERRED, never dropped: the flag
+    // clears when the drag ends and the rebuild runs then. This is the one choke
+    // point every reassignment goes through (refresh, expand/collapse, cd, sort),
+    // so guarding it here covers all of them.
+    property bool rebuildDeferred: false
+    onDragInFlightChanged: {
+        if (dragInFlight || !rebuildDeferred) return;
+        rebuildDeferred = false;
+        rebuildKeepScroll();
+    }
     function rebuild() {
+        if (view.dragInFlight) { view.rebuildDeferred = true; return; }
         const out = [], imgs = [];
         buildRows(path, 0, out, imgs);
-        rows = out; images = imgs;
+        rows = out; previews = imgs;
         // keep the watch set in lock-step with what's on screen: the
         // current dir + every expanded subdir (deleted ones are dropped
         // python-side; a stale expandedPaths entry is harmless).
@@ -560,7 +593,14 @@ Rectangle {
     Component.onCompleted: { rebuild(); refreshDirSize(); }
     // A closing pane (the split folding back to one) must hand its watch slot
     // back, or DirWatch keeps firing rebuilds for a directory nothing shows.
-    Component.onDestruction: DirWatch.setDirs(view.watchKey, [])
+    // A pane going away mid-drag takes its delegates — and so the only thing
+    // that would ever clear the flag — with it, and a flag stuck true freezes
+    // the surviving pane's listing for good. Cheap insurance; a pane can only
+    // close from a titlebar click, which cannot happen during a drag anyway.
+    Component.onDestruction: {
+        DirWatch.setDirs(view.watchKey, []);
+        if (view.dragInFlight) view.dragStateChanged(false);
+    }
 
     // integer byte size -> compact string (delegate helper)
     function sizeStr(b) {
@@ -603,10 +643,10 @@ Rectangle {
         onPressed: (m) => { view.claimFocus(); m.accepted = false; }
     }
 
-    // ---- preview panel: the current dir's images, in a VIRTUALIZED grid
+    // ---- preview panel: the current dir's thumbnails, in a VIRTUALIZED grid
     // above the list. A GridView (not the old Flow+Repeater, which realised
     // every tile up front) so only the cells on screen exist and only their
-    // thumbnails are requested — a folder of thousands of images stays cheap,
+    // thumbnails are requested — a folder of thousands of files stays cheap,
     // the way Dolphin recycles item widgets. `cacheBuffer` prefetches ~2 rows
     // for smooth scrolling without an unbounded request storm.
     KineticGridView {
@@ -614,12 +654,12 @@ Rectangle {
         anchors { top: parent.top; left: parent.left; right: parent.right; margins: 2 }
         // no list below → the panel takes the whole window; otherwise it's the
         // user's splitter height, capped at the grid's own content height.
-        height: !view.hasImages ? 0
+        height: !view.hasPreviews ? 0
                 : !view.hasRows ? (view.height - 4)
                 : Math.min(view.gridPanelH, contentHeight)
-        visible: view.hasImages
+        visible: view.hasPreviews
         clip: true
-        model: view.images
+        model: view.previews
         cellWidth: 100
         cellHeight: 100
         cacheBuffer: cellHeight * 2
@@ -641,6 +681,7 @@ Rectangle {
                 inMultiSelection: view.selection.length > 1 && selected
                 onClicked: (mods) => { view.claimFocus(); view.clickSelect(cell.modelData.path, false, mods); }
                 onOpened: view.openFile(cell.modelData.path, cell.modelData.kind)
+                onDragStateChanged: (active) => view.dragStateChanged(active)
             }
         }
     }
@@ -651,8 +692,8 @@ Rectangle {
     MouseArea {
         id: splitter
         anchors { top: pgrid.bottom; left: parent.left; right: parent.right }
-        height: (view.hasImages && view.hasRows) ? 7 : 0
-        visible: view.hasImages && view.hasRows
+        height: (view.hasPreviews && view.hasRows) ? 7 : 0
+        visible: view.hasPreviews && view.hasRows
         hoverEnabled: true
         cursorShape: Qt.SplitVCursor
         preventStealing: true
@@ -781,7 +822,15 @@ Rectangle {
                 // time onReleased runs.
                 property bool deferSelect: false
                 property bool dragged: false
-                drag.onActiveChanged: if (rowMa.drag.active) rowMa.dragged = true;
+                // The window freezes every pane's model for as long as this is
+                // true — see `rebuild()`. onReleased/onCanceled clear it again
+                // as belt and braces: a flag stuck true stops the listing
+                // updating, which is bad, but a rebuild during the drag is a
+                // use-after-free, which is worse.
+                drag.onActiveChanged: {
+                    if (rowMa.drag.active) rowMa.dragged = true;
+                    view.dragStateChanged(rowMa.drag.active);
+                }
                 onPressed: (m) => {
                     view.claimFocus();
                     rowMa.dragged = false;
@@ -799,7 +848,9 @@ Rectangle {
                     if (rowMa.deferSelect && !rowMa.dragged)
                         view.selectSingle(row.abs, row.modelData.isDir);
                     rowMa.deferSelect = false;
+                    view.dragStateChanged(false);
                 }
+                onCanceled: view.dragStateChanged(false)
                 onDoubleClicked: {
                     if (row.modelData.isDir) view.go(row.abs);
                     else view.openFile(row.abs, row.modelData.kind);
