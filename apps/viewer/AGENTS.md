@@ -157,3 +157,33 @@ request, and the flag). It points `$XDG_RUNTIME_DIR` at a temp directory before
 importing anything, so it cannot touch the socket of the viewer the user has
 open. It reuses `split-test.py`'s `build()`, which is why that file grew an
 `if __name__ == "__main__"` guard.
+
+## Never stat per entry — it is invisible locally and it is the whole latency
+
+Opening an image from filer on a folder that lives on `top` took **4.07s to the
+first frame, 3.70s of it inside `images_for()`**, and the same click on a local
+folder was instant. `order_from()` was calling `os.path.isfile()` on every path
+in filer's order file — one round trip each over sshfs, 891 files, 890 of which
+nobody had asked to see. `feh` on the same files was immediate, which is the
+tell: nothing about showing one image is slow. It is now **0.26s**.
+
+- **A path list from a caller is trusted.** filer builds it from a directory it
+  has just listed; re-checking each entry buys almost nothing and costs O(n)
+  round trips. `is_media()` is a string test and stays. A path that really has
+  gone shows as a broken image if you flip to it — rare, visible, honest.
+- **filer excludes directories from the order file** (`orderPaths`), which is
+  what makes dropping the stat safe: extension filtering alone would let a
+  directory named `stuff.png` through.
+- **The rule generalises: nothing on an open path may do per-file I/O.** A
+  directory scan is ONE call (`os.scandir` carries the type, so `e.is_file()`
+  is free); a loop of `os.path.isfile` / `os.stat` / `os.path.exists` over a
+  listing is n. Locally the difference is microseconds and you will not see it
+  in any test on a temp directory — which is exactly how this survived.
+
+Guard: `tools/order-test.py`. It **counts filesystem calls** rather than
+timing anything, because a timing assertion on a local temp dir passes happily
+with the bug back in; it requires the count not to grow with the number of
+entries (measured: 4 calls for 400 entries, 804 with the stat restored). It
+also pins the rest of the contract that makes the trust safe — extension
+filtering, the file being consumed, and a list not containing the clicked file
+still being rejected.
