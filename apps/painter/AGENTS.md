@@ -139,14 +139,20 @@ three files behind, and hidden from the history — `is_muted_copy()` filters bo
 the initial scan and anything that lands while running, or every clip would be
 listed twice.
 
-**The clipboard goes through `wl-copy --type text/uri-list`, never
-`QClipboard`.** Two reasons, one of them fatal: a Wayland selection dies with
-the process that offered it (wl-clipboard forks a holder that outlives painter),
-and `QClipboard.setMimeData` takes a Python-built `QMimeData` whose wrapper Qt's
-global-static clipboard frees AFTER the interpreter is gone — a SIGSEGV in
-`__run_exit_handlers` on the way out of any run that had copied something. The
-harness caught it as exit 139 with every check passing; if you ever put
-something on the clipboard from Python here, do it the same way.
+**The clipboard goes through `pylib/clipfile.py`, never `QClipboard`.** A
+Wayland selection dies with the process that offered it, so the copy is owned by
+a forked holder that outlives painter; and `QClipboard.setMimeData` takes a
+Python-built `QMimeData` whose wrapper Qt's global-static clipboard frees AFTER
+the interpreter is gone — a SIGSEGV in `__run_exit_handlers` on the way out of
+any run that had copied something, which the harness caught as exit 139 with
+every check passing.
+
+It was `wl-copy --type text/uri-list` until 2026-08-05, and that pasted the
+copy as TEXT rather than as the file into anything GTK-flavoured: wl-copy offers
+exactly ONE mime type, and a file paste in GTK (so also Chromium/Electron — a
+browser, a chat client) is recognised by `x-special/gnome-copied-files`.
+clipfile owns the selection itself and offers both. The whole argument, and the
+headless-sway harness that proves it, is in `apps/AGENTS.md` → `pylib/`.
 
 ## The layout holds at every width
 

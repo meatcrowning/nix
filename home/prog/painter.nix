@@ -11,12 +11,12 @@
 #     cte did.
 #   * ffmpeg on PATH — a video family's outputs are clips, and the gallery
 #     shows each one's poster frame (extracted once into ~/.cache/painter/
-#     posters), plus the muted copy the right-click menu makes. `wl-copy` is
-#     beside it for the same feature: a Wayland selection dies with the process
-#     that offered it, so the copy is handed to wl-clipboard's holder rather
-#     than to QClipboard. Without either, a video tile is blank / the copy says
-#     it could not happen; on book the wrapper is Fedora's python and both come
-#     from its PATH.
+#     posters), plus the muted copy the right-click menu makes. Without it a
+#     video tile is blank; on book the wrapper is Fedora's python and ffmpeg
+#     comes from its PATH. Putting that copy on the clipboard needs nothing on
+#     PATH at all any more — `pylib/clipfile.py` is stdlib-only and owns the
+#     selection itself, because wl-copy can offer only one mime type and a file
+#     paste needs two (apps/AGENTS.md → pylib).
 #   * qtmultimedia — the preview viewport plays clips (looped and muted) as well
 #     as showing stills, the same QtMultimedia surface viewer uses, including
 #     its NVDEC pin: Qt's ffmpeg backend probes VAAPI first and top's VAAPI
@@ -99,7 +99,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg pkgs.wl-clipboard ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg ]} \
             --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
             --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
             --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \
