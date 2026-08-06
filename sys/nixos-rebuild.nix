@@ -40,10 +40,23 @@ let
       upgrade=0
     fi
 
-    LOCKDIR=/tmp/claude-1000/-home-lam-nix
+    # /tmp/claude-1000 is CLAUDE CODE's own scratch root, not ours — we only
+    # borrow a subdirectory of it for the lock. Claude Code refuses to start
+    # when it finds that directory owned by another uid ("/tmp/claude-1000 is
+    # in use by uid 0") and makes him delete it and log in again. `mkdir -p`
+    # here runs as ROOT and used to chmod only the CHILD, leaving the parent
+    # root:root 0755 — so on any boot (which empties /tmp) where a rebuild
+    # happened before the first `claude`, the next `claude` was locked out.
+    # Create the parent as the invoking user, and repair a root-owned one left
+    # by an older wrapper.
+    CLAUDE_TMP=/tmp/claude-1000
+    LOCKDIR=$CLAUDE_TMP/-home-lam-nix
     LOCK=$LOCKDIR/rebuild.lock
     if [ ! -d "$LOCKDIR" ]; then
       mkdir -p "$LOCKDIR" && chmod 1777 "$LOCKDIR"
+    fi
+    if [ -n "''${SUDO_UID:-}" ] && [ "$(stat -c %u "$CLAUDE_TMP" 2>/dev/null)" = 0 ]; then
+      chown "$SUDO_UID:''${SUDO_GID:-$SUDO_UID}" "$CLAUDE_TMP" && chmod 700 "$CLAUDE_TMP"
     fi
     if [ ! -e "$LOCK" ]; then
       : >"$LOCK" && chmod 666 "$LOCK"
