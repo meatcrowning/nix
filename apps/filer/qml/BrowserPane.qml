@@ -200,7 +200,14 @@ Rectangle {
     function orderPaths() {
         const out = [];
         for (let i = 0; i < previews.length; i++) out.push(previews[i].path);
-        for (let i = 0; i < rows.length; i++) out.push(rows[i].path);
+        // Directories are left out: this list is also what `viewer --order`
+        // consumes, and viewer no longer stats each entry to find out what it
+        // is (one round trip per file on a network mount — 3.6s for a folder
+        // on top). It filters on the extension alone, so a directory called
+        // `stuff.png` would arrive as a broken image. Excluding them here is
+        // exact and free — the model already knows.
+        for (let i = 0; i < rows.length; i++)
+            if (!rows[i].isDir) out.push(rows[i].path);
         return out;
     }
     function selectSingle(p, isDir) { selection = [p]; selected = p; anchor = p; selectedIsDir = isDir; }

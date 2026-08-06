@@ -122,9 +122,18 @@ def order_from(order_file, target):
         return None
     finally:
         _consume(order_file)
+    # NO STAT PER ENTRY. This list comes from a caller that has just finished
+    # listing the directory, and `os.path.isfile()` on every path used to be
+    # here to drop anything that had gone away since. Over a network mount that
+    # is one round trip each: measured on book against a folder on top, 891
+    # entries cost **3.6s** before viewer had even built its window — the whole
+    # of "opening a remote image takes ages", spent stat-ing 890 files nobody
+    # asked to see. `is_media` is a string test and stays; a path that really
+    # has vanished now shows as a broken image if you flip to it, which is a
+    # rare, visible and honest failure rather than a guaranteed one.
     entries = [{"name": os.path.basename(p), "path": p}
                for p in (os.path.abspath(q) for q in raw.split("\0") if q)
-               if is_media(p) and os.path.isfile(p)]
+               if is_media(p)]
     idx = next((i for i, e in enumerate(entries) if e["path"] == target), -1)
     return (entries, idx) if idx >= 0 else None
 
