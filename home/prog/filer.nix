@@ -58,6 +58,14 @@ let
         # now (a "cannot run gio" toast), and this makes it work instead.
         # book gets /usr/bin/gio from Fedora's glib2 and needs nothing.
 
+        # sshfs is what the address bar's `:host` syntax mounts with
+        # (apps/filer/remote.py). It is here rather than in home.packages for
+        # the same reason gio is: the app inherits no profile bin dir when the
+        # runner or a .desktop entry launches it. book needs nothing added —
+        # it runs Fedora's python3 with /usr/sbin on PATH, and nixpkgs' sshfs
+        # would be the wrong one there anyway (its libfuse looks for the setuid
+        # fusermount3 in /run/wrappers/bin, which only exists on NixOS).
+
         # File-MimeInfo gives `mimetype`, and this is the ONLY way it reaches
         # the one caller that matters. Opening a non-image shells out to
         # `xdg-open`, whose generic branch asks `xdg-mime query filetype`,
@@ -75,7 +83,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/filer \
             --add-flags /home/lam/nix/apps/filer/main.py \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.glib pkgs.perlPackages.FileMimeInfo ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.glib pkgs.perlPackages.FileMimeInfo pkgs.sshfs ]} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';

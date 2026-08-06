@@ -85,8 +85,10 @@ def build(app, start_dir):
     ops = filermain.FileOps()
     keep = (ops, filermain.Palette(filermain.PANEL_THEME), filermain.Settings(),
             filermain.DirWatch(), filermain.WinCtl(), filermain.VideoConv(),
-            StubTitlebar(), filermain.Picker(None), filermain.Phone())
+            StubTitlebar(), filermain.Picker(None), filermain.Phone(),
+            filermain.Remote())
     ctx.setContextProperty("FileOps", keep[0])
+    ctx.setContextProperty("Remote", keep[9])
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[1])
     # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the

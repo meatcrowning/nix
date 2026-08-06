@@ -35,9 +35,15 @@ def tool(name):
     found = shutil.which(name)
     if not found:
         user = os.environ.get("USER", "")
+        # /run/wrappers/bin and /usr/sbin are here for remote.py's pair:
+        # NixOS keeps the setuid `fusermount3` in the former, and Fedora ships
+        # `sshfs` in the latter — the two halves of an sshfs mount, on the two
+        # machines, and neither is on the PATH of an app launched from a
+        # .desktop entry.
         for d in (os.path.expanduser("~/.nix-profile/bin"),
                   "/etc/profiles/per-user/%s/bin" % user,
-                  "/run/current-system/sw/bin", "/usr/bin"):
+                  "/run/current-system/sw/bin", "/run/wrappers/bin",
+                  "/usr/bin", "/usr/sbin"):
             cand = os.path.join(d, name)
             if os.path.exists(cand):
                 found = cand

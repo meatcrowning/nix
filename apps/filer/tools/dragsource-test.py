@@ -152,9 +152,9 @@ def build(app, start_dir):
     keep = (filermain.FileOps(), filermain.Palette(filermain.PANEL_THEME),
             filermain.Settings(), filermain.DirWatch(), filermain.WinCtl(),
             filermain.VideoConv(), StubTitlebar(), filermain.Picker(None),
-            filermain.Phone())
+            filermain.Phone(), filermain.Remote())
     names = ("FileOps", "WalPalette", "Settings", "DirWatch", "WinCtl",
-             "VideoConv", "Titlebar", "Picker", "Phone")
+             "VideoConv", "Titlebar", "Picker", "Phone", "Remote")
     for n, o in zip(names, keep):
         ctx.setContextProperty(n, o)
     _deskstyle = DeskStyle(parent=engine)

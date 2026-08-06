@@ -143,7 +143,13 @@ Window {
     // The window title IS the address bar: the hyprvtb plugin renders it as an
     // editable path field (setTitleEdit below), same as surfer's URL bar. It
     // mirrors the focused pane's directory and, on submit, navigates there.
-    title: pane.path
+    //
+    // Remote.pretty() shows a directory on another machine as the `:top/...`
+    // that was typed to reach it, rather than the sshfs mountpoint under
+    // $XDG_RUNTIME_DIR that nobody asked for and could not usefully retype. It
+    // round-trips — submitting the bar unchanged lands back where it is — and
+    // a purely local path comes back untouched. See remote.py.
+    title: Remote.pretty(pane.path)
     width: 720
     height: 460
     minimumWidth: 540
@@ -266,10 +272,32 @@ Window {
         }
         // the in-bar path editor was submitted: navigate if it's a directory
         // (expanding a leading ~ / ~user first).
+        //
+        // `:host` first, though — `:top` browses lam's home on top, over an
+        // sshfs mount Remote brings up on demand (remote.py). That can take an
+        // ssh handshake, so it is asynchronous: remember which pane asked and
+        // navigate on `ready`, whose payload is an ordinary local path under
+        // the mountpoint. A failure toasts from remote.py and moves nothing.
         function onAddrSubmitted(text) {
-            const p = FileOps.expandUser(text.trim());
+            const t = text.trim();
+            if (Remote.isAddr(t)) { win.remotePane = win.pane; Remote.open(t); return; }
+            const p = FileOps.expandUser(t);
             if (p !== "" && FileOps.isDir(p)) win.pane.go(p);
         }
+    }
+
+    // The pane that submitted a `:host` address, held across the mount. It is
+    // the pane and not `focusPane`, because a click in the other half while a
+    // remote is connecting must not redirect the navigation the user asked for.
+    property var remotePane: null
+    Connections {
+        target: Remote
+        function onReady(path) {
+            const p = win.remotePane || win.pane;
+            win.remotePane = null;
+            if (p && FileOps.isDir(path)) p.go(path);
+        }
+        function onFailed(host) { win.remotePane = null; }
     }
 
     // F3 splits and unsplits (Dolphin's key for it) in the orientation you are
