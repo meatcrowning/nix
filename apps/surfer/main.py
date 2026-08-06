@@ -3610,6 +3610,52 @@ class SingleInstance(QObject):
             self.openUrl.emit(line[4:].strip())
 
 
+# Spell-check dictionary discovery.
+#
+# Chromium does not resolve a language tag through any locale machinery: the
+# string handed to setSpellCheckLanguages IS the basename of a `.bdic` file it
+# opens under the dictionaries directory. So the tag has to match whatever is
+# installed, and the two hosts do not agree — top gets `en-US.bdic` (built by
+# surfer.nix's qwebengine_convert_dict and pointed at with
+# QTWEBENGINE_DICTIONARIES_PATH), book gets Fedora's qt6-qtwebengine, whose
+# dictionaries are named by the HUNSPELL locale: `en_US.bdic`, in Qt's default
+# directory with no env var set. Asking for "en-US" there opens nothing and
+# spell-checking is silently dead — enabled, no squiggle, no suggestions.
+# Measured with tools/spell-test.py: `en-US` -> misspelled=[], `en_US` ->
+# misspelled=[wrongg] + suggestions.
+SPELL_TAGS = ("en-US", "en_US", "en-GB", "en_GB")
+
+
+def _spell_dirs():
+    """Directories Chromium will look in, most specific first."""
+    dirs = []
+    env = os.environ.get("QTWEBENGINE_DICTIONARIES_PATH")
+    if env:
+        dirs.extend(env.split(os.pathsep))
+    try:
+        from PySide6.QtCore import QLibraryInfo
+        dirs.append(os.path.join(
+            QLibraryInfo.path(QLibraryInfo.DataPath), "qtwebengine_dictionaries"))
+    except Exception:
+        pass
+    dirs.append("/usr/share/qt6/qtwebengine_dictionaries")
+    seen, out = set(), []
+    for d in dirs:
+        if d and d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+def _spell_language():
+    """The tag naming a .bdic that actually exists, or None."""
+    for d in _spell_dirs():
+        for tag in SPELL_TAGS:
+            if os.path.isfile(os.path.join(d, tag + ".bdic")):
+                return tag
+    return None
+
+
 def main():
     # air (Fedora/Asahi) has no working VA-API or Vulkan (the GPU logs show
     # vaInitialize failing + Vulkan disabled), and Chromium's handling of video
@@ -3868,15 +3914,23 @@ def main():
                 # (the spellcheck adapter isn't wired yet), so misspellings never
                 # get marked — no red squiggle, no right-click suggestions.
                 # Calling the setters now (tree built) makes it stick. Languages
-                # first, then enable. Dictionaries come from the en-US .bdic on
-                # QTWEBENGINE_DICTIONARIES_PATH (set by surfer.nix's wrapper).
+                # first, then enable. The tag is not a locale name — it is the
+                # BASENAME of a .bdic file, so it must be resolved against the
+                # dictionaries that are actually installed (_spell_language).
                 try:
-                    prof.setSpellCheckLanguages(["en-US"])
-                    prof.setSpellCheckEnabled(True)
-                    sys.stderr.write(
-                        "surfer spellcheck: en-US enabled=%s\n"
-                        % prof.isSpellCheckEnabled()
-                    )
+                    lang = _spell_language()
+                    if lang:
+                        prof.setSpellCheckLanguages([lang])
+                        prof.setSpellCheckEnabled(True)
+                        sys.stderr.write(
+                            "surfer spellcheck: %s enabled=%s\n"
+                            % (lang, prof.isSpellCheckEnabled())
+                        )
+                    else:
+                        sys.stderr.write(
+                            "surfer spellcheck: no .bdic dictionary found in %s "
+                            "— spell-checking off\n" % (_spell_dirs(),)
+                        )
                 except Exception as e:
                     sys.stderr.write(f"surfer spellcheck: setup failed ({e})\n")
                 # Bound the Chromium disk cache. With no cap (0) Chromium lets it

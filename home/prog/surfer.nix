@@ -104,13 +104,18 @@ let
 
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 adblock ]);
 
-  # Spell-check dictionaries for QtWebEngine. Chromium doesn't read Hunspell
-  # .dic/.aff directly — it wants them compiled to its own .bdic format, which
-  # qwebengine_convert_dict (shipped inside qtwebengine) produces. The top
-  # wrapper points QTWEBENGINE_DICTIONARIES_PATH here; Main.qml's profile sets
-  # spellCheckEnabled + spellCheckLanguages ["en-US"]. The file MUST be named by
-  # the exact BCP-47 tag Chromium looks up (en-US.bdic), NOT the Hunspell locale
-  # (en_US). Without this dir the engine simply reports no suggestions.
+  # Spell-check dictionaries for QtWebEngine, for `top` only. Chromium doesn't
+  # read Hunspell .dic/.aff directly — it wants them compiled to its own .bdic
+  # format, which qwebengine_convert_dict (shipped inside qtwebengine)
+  # produces. The top wrapper points QTWEBENGINE_DICTIONARIES_PATH here; the
+  # profile is switched on imperatively in main.py's _wire_profile.
+  #
+  # The filename IS the language tag Chromium opens — it does no locale
+  # matching — so main.py resolves the tag against whatever .bdic is actually
+  # installed rather than hardcoding one. book gets no derivation here (that
+  # would mean building qtwebengine from source on aarch64) and needs none:
+  # Fedora's qt6-qtwebengine ships /usr/share/qt6/qtwebengine_dictionaries,
+  # named by the Hunspell locale (en_US.bdic), in Qt's default lookup dir.
   spellDicts = pkgs.runCommand "surfer-spellcheck-dicts" { } ''
     mkdir -p "$out"
     ${pkgs.qt6.qtwebengine}/libexec/qwebengine_convert_dict \

@@ -867,8 +867,10 @@ Window {
         // as QML properties on a QQuickWebEngineProfile at construction time is
         // silently dropped (the spellcheck adapter isn't ready yet) — the words
         // never get marked. Calling the setters once the tree is built makes it
-        // stick. Needs the en-US Hunspell dict compiled to .bdic on
-        // QTWEBENGINE_DICTIONARIES_PATH (surfer.nix builds it + points there).
+        // stick. The language tag it passes is the BASENAME of an installed
+        // .bdic, not a locale, and differs per host — main.py's
+        // _spell_language() resolves it (en-US.bdic built by surfer.nix on top,
+        // Fedora's en_US.bdic on book). tools/spell-test.py is the check.
         // downloads land in ~/Downloads; slow or large ones get a live progress
         // toast (updated in place), every one gets a completion/failure toast —
         // see the Downloads bridge in main.py.
