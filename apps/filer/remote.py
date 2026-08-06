@@ -68,6 +68,30 @@ _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # reconnect + keepalives so a laptop that slept comes back rather than leaving
 # a wedged mountpoint; BatchMode because there is no terminal for a passphrase
 # prompt; a short ConnectTimeout because the user is waiting on the address bar.
+#
+# The three that are about SPEED, all measured book -> top over 5GHz wifi, where
+# raw ssh tops out at 39 MB/s and a single sshfs stream reaches 30:
+#
+#   auto_cache   Re-reading a file is otherwise the FULL transfer again, every
+#                time — and the common case here is exactly a re-read: the
+#                preview grid thumbnails an image, then you click it and viewer
+#                reads the same bytes seconds later. Measured 30 MB/s -> 1.5
+#                GB/s on the second read of a 30 MB file (67x), because the
+#                page cache is now allowed to answer. `auto_cache` and not
+#                `kernel_cache`: it revalidates against the remote's size and
+#                mtime, where kernel_cache never revalidates at all. The
+#                residual risk is a remote file rewritten to the SAME byte
+#                length within `cache_timeout` — measured, that one is served
+#                stale; a size change is picked up at once.
+#   max_conns=4  One ssh connection is a single stream, so four parallel reads
+#                (the thumbnail pool's width) share 30 MB/s. Four connections
+#                reach 37 MB/s on the same test — the link's own ceiling. No
+#                cost to a single stream.
+#   cache_timeout=5  Was 20. With auto_cache the attribute cache also bounds how
+#                long stale CONTENT can be served, and 20s of that is too long
+#                for a file browser; a directory listing of 1191 entries costs
+#                0.04s cached and 0.11s cold, so revalidating four times as
+#                often is not something you can feel.
 SSHFS_OPTS = [
     "reconnect",
     "ServerAliveInterval=15",
@@ -77,8 +101,16 @@ SSHFS_OPTS = [
     "StrictHostKeyChecking=accept-new",
     "idmap=user",          # remote uid/gid shown as ours; we are the same user
     "dir_cache=yes",
-    "cache_timeout=20",
+    "cache_timeout=5",
+    "auto_cache",
+    "max_conns=4",
 ]
+
+# How much of a file `prefetch()` pulls. Big enough to cover essentially every
+# still image whole; small enough that clicking a 4 GB video does not try to
+# haul it across the wifi. A video player streams, and the head is all it needs
+# to start.
+PREFETCH_MAX = 64 * 1024 * 1024
 
 
 def _local_names():
@@ -182,6 +214,8 @@ class Remote(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._busy = set()      # hosts with a mount attempt in flight
+        self._warming = set()   # paths a prefetch thread is already pulling
+        self._lock = threading.Lock()
 
     @Slot(str, result=bool)
     def isAddr(self, text):
@@ -193,6 +227,43 @@ class Remote(QObject):
     def pretty(self, path):
         """What the address bar shows for `path` — see `pretty_of()`."""
         return pretty_of(path)
+
+    @Slot(str)
+    def prefetch(self, path):
+        """Start pulling `path` into the page cache, now, in the background.
+
+        Called the instant a remote file is opened, BEFORE the app that will
+        show it is launched. Measured on book: viewer takes 0.22s to get its
+        QML up and only then reads the file, and the wire runs at ~30 MB/s — so
+        starting the transfer at click time rather than at read time hides
+        about 6 MB of it behind a startup that was happening anyway, and the
+        rest of it overlaps instead of following. It works only because the
+        mount now has `auto_cache`: without it the second reader pays the full
+        transfer again and this would make things strictly worse.
+
+        A no-op for a local path (nothing to warm — the kernel already did it)
+        and for a file already being warmed. Never raises: a prefetch that
+        fails costs nothing, because the real read is still to come."""
+        p = str(path or "")
+        if not p.startswith(MOUNT_ROOT.rstrip("/") + "/"):
+            return
+        with self._lock:
+            if p in self._warming:
+                return
+            self._warming.add(p)
+        threading.Thread(target=self._warm, args=(p,), daemon=True).start()
+
+    def _warm(self, p):
+        try:
+            left = PREFETCH_MAX
+            with open(p, "rb", buffering=0) as f:
+                while left > 0 and f.read(min(4 << 20, left)):
+                    left -= 4 << 20
+        except OSError:
+            pass
+        finally:
+            with self._lock:
+                self._warming.discard(p)
 
     @Slot(str)
     def open(self, text):
@@ -235,6 +306,11 @@ class Remote(QObject):
             self.failed.emit(host)
 
     def _do_mount(self, user, host, mp):
+        # Already up — two windows, or two panes, can ask at once, and sshfs
+        # over a live mountpoint fails with a bare "Permission denied" that
+        # reads as an auth problem and is not one.
+        if _live(mp):
+            return True, ""
         if os.path.exists(mp) and not _live(mp):
             _unmount(mp)                # stale mount from a previous session
         try:
