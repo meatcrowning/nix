@@ -40,11 +40,16 @@ cat /tmp/Theme.bak > ~/.config/quickshell/Theme.qml   # …then restore, in plac
   dirty and flake eval ignores untracked files, so a brand-new `Foo.qml` is
   silently missing from the build otherwise.
 
-**`Theme.qml` is seed-once.** It is installed only if absent, because
-`wal-set.sh` rewrites it in place at runtime. To change it, edit **both** the
-nix source here and the live `~/.config/quickshell/Theme.qml` — with a targeted
-string edit, never a wholesale overwrite, or you reset the live wal palette.
-Check with `~/nix/tools/seed-drift.sh` before you start and after you finish.
+**`Theme.qml` is mutable, and RECONCILED on every switch.** It cannot be a
+store symlink, because `wal-set.sh` splices the live palette into its
+`// >>> wal palette` block in place. It used to be seeded once and then left
+alone — which meant a rebuild could never update it, so a pull that changed it
+did nothing until someone hand-edited the live copy too. Since 2026-08-05
+`tools/seed-reconcile.sh` runs from activation: **edit the nix source here
+only**, and the switch rewrites the live file in place, carrying the live
+palette block across. A live-only edit is overwritten (copy in
+`~/.cache/seed-reconcile/`). `~/nix/tools/seed-drift.sh` is the tripwire and
+should stay silent.
 
 ---
 
@@ -551,7 +556,8 @@ beside the notch, then the slab growing outward — because each of them is what
   opening faded the drawer up over the notch and closing faded it out — [his]
   "i can still see the transistion between the unrolled and rolled bar". A
   `hl.layer_rule` with `no_anim` on `^qs-launcher$` is what makes the map
-  invisible; `hyprland.lua` is seed-once, so edit BOTH copies. Nothing here can
+  invisible; edit `hyprland.lua`'s nix source and rebuild — the switch
+  reconciles the live copy. Nothing here can
   fix this from the QML side.
 - **The name column is MEASURED** (`measureNames()` + `TextMetrics`), not a
   constant — a constant is dead space between the names and the runner for every
@@ -2187,7 +2193,7 @@ depend on the runtime override being set. Nothing in this directory does: the
 `Kinetic*` types are Qt-side and work whether the compositor is coasting or not.
 
 ```bash
-grep -n "kinetic" ~/nix/home/prog/hypr-files/hyprland.lua   # BOTH copies: seed-once
+grep -n "kinetic" ~/nix/home/prog/hypr-files/hyprland.lua   # the nix source; rebuild reconciles live
 ```
 
 ---

@@ -86,8 +86,8 @@ Get an edit live:
 # panel (.qml)     — rebuild, then force Quickshell's hot reload; see home/prog/quickshell-files/AGENTS.md
 sudo rebuild-top && printf '\n// x\n' >> ~/.config/quickshell/Theme.qml   # then restore the file
 
-# hyprland.lua     — edit BOTH copies (seed-once), then:
-hyprctl reload
+# hyprland.lua     — edit the nix SOURCE only; the switch reconciles the live copy:
+sudo rebuild-top && hyprctl reload
 
 # hyprvtb (C++)    — bump the version in main.cpp, then:
 sudo rebuild-top && hyprctl reload    # NEVER `hyprctl plugin load/unload`
@@ -107,7 +107,7 @@ qs ipc call wallpaper status      # path, mode, and whether the frame actually d
 hyprctl plugin list               # exactly one hyprvtb, at the new Version
 hyprctl configerrors              # must be empty
 hyprctl layers                    # layer namespaces + sizes
-./tools/seed-drift.sh             # source vs live for every seed-once file; exit 1 = drift, --quiet for scripts
+./tools/seed-drift.sh             # tripwire: source vs live for both mutable dotfiles; exit 1 = drift, --quiet for scripts
 qmllint -I <import paths> qml/Main.qml
 ./tools/sandbox.sh start|exec CMD|shot|clients|stop    # off-screen monitor for GUI tests
 ```
@@ -300,8 +300,9 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   which host misses out — never silently. See Conventions.
 - `git commit` with an explicit pathspec: `git commit -m msg -- <paths>`.
 - Commit **and push to `main`** after a working change. No branch, no PR.
-- Run `tools/seed-drift.sh` before *and* after touching a seed-once file
-  (`Theme.qml`, `hyprland.lua`) — and edit **both** copies.
+- Edit the **nix source** of a mutable file (`Theme.qml`, `hyprland.lua`), never
+  the live copy — the switch reconciles it. `tools/seed-drift.sh` after, as the
+  tripwire.
 - Bump the version string in `main.cpp` for every `hyprvtb` change.
 - Tear down the worktree you were given once your commits are on
   `origin/main`.
@@ -342,10 +343,13 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   is under "Testing without interfering with the user" above.
 - **Never call `save_session()` from a script.** It arms a window-spawning
   restore at the next login. It is a manual act (Meta+Ctrl+S) only.
-- **Never edit only one side of a seed-once file.** The running system keeps
-  the old behaviour indefinitely, and a live-only edit is lost on the next
-  fresh install. This is the single most common way a change here appears to
-  do nothing.
+- **Never edit the LIVE copy of a mutable file** (`~/.config/hypr/hyprland.lua`,
+  `~/.config/quickshell/Theme.qml`). The next switch reconciles it from the nix
+  source and your edit is gone (a copy lands in `~/.cache/seed-reconcile/`).
+  Until 2026-08-05 the rule was the opposite — *edit both copies* — because
+  those files were seeded once and a rebuild never updated them; that was the
+  single most common way a change here appeared to do nothing, and
+  `tools/seed-reconcile.sh` is what removed it.
 - **Never `git add` a file that is already tracked** just so the rebuild sees
   it — flake eval reads the working tree. New files: `git add -N` only.
 - **Never leave content staged** across a rebuild, a test run, or a question.
@@ -410,7 +414,10 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
     - `pylib` is found relatively (`HERE.parent / "pylib"`), so the `apps/`
       tree moves as a unit or not at all.
 - `tools/` — the maintenance scripts the documented workflows depend on:
-  `preflight.sh`, `seed-drift.sh`, `prune-worktrees.sh` (aliased `wtprune`),
+  `preflight.sh`, `seed-drift.sh` and `seed-reconcile.sh` (the pair that keeps
+  the two runtime-mutable dotfiles level with their nix source — the reconciler
+  runs from activation, the drift check is the tripwire behind it),
+  `prune-worktrees.sh` (aliased `wtprune`),
   `sandbox.sh`, `leak-check.sh` (a test that leaked into his live session —
   residue *and* the live symptoms; preflight runs it) and `lib/session-guard.sh`
   (sourced by the harnesses; the anti-fall-through guards, see "Testing without

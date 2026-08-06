@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Bring a seed-once file's LIVE copy up to its nix SOURCE, carrying across the
+# handful of values runtime scripts own.
+#
+# Two dotfiles here cannot be plain /nix/store symlinks, because runtime
+# scripts rewrite them in place: wal-set.sh splices the wallpaper palette into
+# both, and cursor-recolor.sh renames the cursor theme in hyprland.lua. They
+# were therefore installed only if ABSENT — which meant a rebuild never updated
+# them, so `git pull && rebuild` silently did not apply anything either file
+# had changed. That is the whole of "seed drift": not a fussy check, but a pull
+# that did not reach the running system.
+#
+# This script closes it. The nix source is authoritative for STRUCTURE; the
+# live file is authoritative for the named runtime-owned VALUES, and those are
+# carried forward onto the source before it is written back. Run from
+# home.activation on every switch (home/prog/hyprland.nix, quickshell.nix), so
+# the live copy can no longer fall behind.
+#
+#   seed-reconcile.sh <kind> <nix-source> <live-path>     # seed or reconcile
+#   seed-reconcile.sh --dry-run <kind> <src> <live>       # report, write nothing
+#
+# <kind> is `hyprland-lua` or `theme-qml` — it selects which values are
+# runtime-owned. tools/seed-drift.sh is the tripwire that says this script is
+# not doing its job; the two must agree on that list.
+#
+# Exit: 0 = in sync, seeded, or reconciled. 1 = something went wrong.
+#       With --dry-run: 0 = in sync, 1 = would change.
+
+set -uo pipefail
+
+DRY=0
+[ "${1:-}" = "--dry-run" ] && { DRY=1; shift; }
+
+KIND="${1:?usage: seed-reconcile.sh [--dry-run] <kind> <src> <live>}"
+SRC="${2:?}"
+LIVE="${3:?}"
+
+[ -f "$SRC" ] || { echo "seed-reconcile: missing source $SRC" >&2; exit 1; }
+
+# Never seeded yet (fresh install): install the source verbatim and stop. There
+# are no runtime values to carry, and wal-set.sh will write its own on first run.
+if [ ! -e "$LIVE" ]; then
+    [ "$DRY" -eq 1 ] && { echo "seed-reconcile: would SEED $LIVE"; exit 1; }
+    install -D -m644 "$SRC" "$LIVE" || exit 1
+    echo "seed-reconcile: seeded $LIVE"
+    exit 0
+fi
+
+TMP="$(mktemp)" || exit 1
+trap 'rm -f "$TMP" "$TMP.blk"' EXIT
+cp "$SRC" "$TMP" || exit 1
+
+# carry <ere-prefix> <ere-value>
+# Read the value the live file currently holds for the line matching
+# ^<prefix><value>, and write it into the same line of the working copy. The
+# prefix must anchor tightly enough to name exactly one line: a loose one (say,
+# any rgba) would also drag across values nix owns — hyprland.lua's
+# inactive_border is right next to a colour wal-set.sh does own.
+carry() {
+    local pre="$1" val="$2" v esc
+    v=$(sed -nE "s|^(${pre})(${val})(.*)\$|\2|p" "$LIVE" | head -1)
+    [ -n "$v" ] || return 0
+    esc=${v//\\/\\\\}; esc=${esc//|/\\|}; esc=${esc//&/\\&}
+    sed -i -E "s|^(${pre})(${val})(.*)\$|\1${esc}\3|" "$TMP"
+}
+
+case "$KIND" in
+  hyprland-lua)
+    # wal-set.sh steps 5-6: the general border colour, seven named plugin
+    # colours and the shadow alpha. Anchored at line start so `active_border`
+    # cannot match inside `inactive_border`, and requiring `= "` so it cannot
+    # match the commented-out gradient form on the next line.
+    carry '[[:space:]]*active_border[[:space:]]*=[[:space:]]*"' 'rgba\([0-9a-fA-F]+\)'
+    for k in bg_color 'col\.text' 'col\.button_border' 'col\.accent' 'col\.bg_alt' 'col\.crit' 'col\.warn'; do
+        carry "[[:space:]]*\\[\"${k}\"\\][[:space:]]*=[[:space:]]*\"" 'rgba\([0-9a-fA-F]+\)'
+    done
+    carry '[[:space:]]*\["shadow_alpha"\][[:space:]]*=[[:space:]]*' '[0-9.]+'
+    # cursor-recolor.sh: the generated GoogleDot-<accent><outline> theme name.
+    carry 'hl\.env\("XCURSOR_THEME", "'    'GoogleDot-[^"]*'
+    carry 'hl\.env\("HYPRCURSOR_THEME", "' 'GoogleDot-[^"]*'
+    ;;
+  theme-qml)
+    # wal-set.sh step 7 rewrites everything between the two markers wholesale,
+    # so carry the live block across rather than value by value — a new colour
+    # role added to the block by wal-set.sh then needs no change here.
+    if grep -q '// >>> wal palette' "$LIVE" && grep -q '// >>> wal palette' "$TMP"; then
+        sed -n '/\/\/ >>> wal palette/,/\/\/ <<< wal palette/p' "$LIVE" \
+            | sed '1d;$d' > "$TMP.blk"
+        awk -v inc="$TMP.blk" '
+            /\/\/ >>> wal palette/ { print; while ((getline line < inc) > 0) print line; skip=1; next }
+            /\/\/ <<< wal palette/ { skip=0 }
+            !skip { print }
+        ' "$TMP" > "$TMP.out" && mv "$TMP.out" "$TMP"
+    fi
+    ;;
+  *)
+    echo "seed-reconcile: unknown kind '$KIND'" >&2; exit 1 ;;
+esac
+
+if cmp -s "$TMP" "$LIVE"; then
+    exit 0
+fi
+
+if [ "$DRY" -eq 1 ]; then
+    echo "seed-reconcile: would RECONCILE $LIVE ($(diff "$LIVE" "$TMP" | grep -c '^[<>]') differing lines)"
+    exit 1
+fi
+
+# Keep a copy of what the live file said. The nix source wins here, so a change
+# made ONLY to the live copy — an agent testing in place, a hand edit on the
+# wrong side — is about to be discarded, and it should be recoverable.
+BAK="${XDG_CACHE_HOME:-$HOME/.cache}/seed-reconcile"
+mkdir -p "$BAK"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+cp "$LIVE" "$BAK/$(basename "$LIVE").$STAMP.bak" 2>/dev/null
+
+# In place, same inode, never a rename: Quickshell watches each loaded QML file
+# by inode, so `mv` over Theme.qml leaves the panel watching the old unlinked
+# one and the change is never seen. (Harmless for hyprland.lua; done the same
+# way so there is one rule.)
+cat "$TMP" > "$LIVE" || exit 1
+echo "seed-reconcile: reconciled $LIVE from nix source (was backed up to $BAK/$(basename "$LIVE").$STAMP.bak)"

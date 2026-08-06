@@ -36,28 +36,43 @@ in an animated `CBox` — the degenerate rect `renderRect` aborts on.
 
 ---
 
-## `hyprland.lua` is seed-once — edit BOTH copies
+## `hyprland.lua` is mutable — edit the SOURCE, let the switch carry it
 
-It is installed only if absent, because `cursor-recolor.sh` rewrites it in place
-at runtime. A fix applied to the nix source does nothing until it is also put in
-the live file — the running system keeps the old behaviour indefinitely — and
-the reverse, a live-only edit, is silently lost on the next fresh install.
-**Editing only one side is the single most common way a change here appears to
-do nothing.** It has bitten repeatedly: a stale `focus workspace 50` line lived
-on in the live file long after it was removed from source, scattering windows
-across two workspaces; a later episode shipped a dead `SettingsStore` binding.
+It cannot be a `/nix/store` symlink: `wal-set.sh` seds the border and seven
+plugin colours into it and `cursor-recolor.sh` the cursor theme name, all in
+place at runtime. It used to be *seeded once* and then never touched, which
+meant a rebuild could not update it at all — so a fix applied to the nix source
+did nothing until someone also hand-edited the live file, and `git pull &&
+rebuild` silently applied none of it. That was "seed drift", and it bit
+repeatedly: a stale `focus workspace 50` line outlived its removal from source
+and scattered windows across two workspaces; a later episode shipped a dead
+`SettingsStore` binding.
+
+Since 2026-08-05 `home.activation.seedHyprMutableFiles` **reconciles** it on
+every switch (`tools/seed-reconcile.sh`): the nix source is authoritative for
+structure, the live file for the named runtime-owned values, which are carried
+forward. So:
 
 ```bash
-~/nix/tools/seed-drift.sh          # BEFORE you start — see what is already stale
-# …edit home/prog/hypr-files/hyprland.lua AND ~/.config/hypr/hyprland.lua,
-#    with targeted string edits — never a wholesale overwrite (it holds the live
-#    wal palette and border colours)
-~/nix/tools/seed-drift.sh          # AFTER — prove both copies moved. exit 1 = drift
+# …edit home/prog/hypr-files/hyprland.lua ONLY.
+sudo rebuild-top                   # activation rewrites the live copy in place
 hyprctl reload                     # re-runs the live Lua, re-registers hl.bind, no session disturbance
+~/nix/tools/seed-drift.sh          # tripwire — should now be silent. exit 1 = the reconciler missed something
 ```
 
-Adding a new seed-once file means adding it to the `PAIRS` list in that script.
-Never trust a written claim about current drift state — run the script.
+**The live copy is no longer a place to edit.** A live-only change is
+overwritten by the next switch (a copy goes to `~/.cache/seed-reconcile/`, and
+the reconcile says so). Editing it directly is only for a value the reconciler
+carries — i.e. one `wal-set.sh` owns — and even then wal-set.sh is the writer.
+
+**Adding a runtime-owned value means teaching the reconciler about it**: a new
+`sed -i` in `wal-set.sh`/`cursor-recolor.sh` needs a matching `carry` call in
+`tools/seed-reconcile.sh`, or the switch will stamp the template value back
+over it. Anchor the pattern at the key, never at the value shape — a blanket
+`rgba(...)` would also drag `inactive_border`, which nix owns, across from the
+live file. `tools/seed-drift.sh`'s `PAIRS` and `normalize()` are the tripwire
+for exactly that mistake; keep the two in step. Never trust a written claim
+about current drift state — run the script.
 
 ---
 
@@ -460,7 +475,8 @@ obligations on the receiving code:
    appropriately, or a wheel notch moves one pixel while a coast moves pages.
 
 **The single source of truth for the feel is the `plugin:hyprvtb:kinetic*`
-keys in `hypr-files/hyprland.lua` (BOTH copies — seed-once), with the per-host
+keys in `hypr-files/hyprland.lua` (the nix source; the switch reconciles the
+live copy), with the per-host
 `kinetic` flag generated into `host.lua` by `hypr-host.nix`.** Tune there, never
 with a per-file literal, and never by re-deriving the physics client-side.
 
