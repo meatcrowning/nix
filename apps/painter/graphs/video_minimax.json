@@ -1,0 +1,132 @@
+{
+  "_comment": [
+    "The video graph, in the shape the workflow that produced the first outputs",
+    "used (read back out of MiniMax_H3_0000*.mp4's embedded `prompt`).  Same",
+    "rules as universal.json: nodes are addressed by `painter_role`, never by id.",
+    "",
+    "One template covers both modes.  IMAGE-TO-VIDEO is what is written here:",
+    "the dropped image is scaled to the pixel budget and the frame size comes",
+    "back OUT of it (GetImageSize), which is why the aspect controls disappear",
+    "in that mode -- the image decides.  TEXT-TO-VIDEO drops `load_image`,",
+    "`scale_image` and `image_size` (registry._build_video) and feeds the width",
+    "and height painter computed from aspect + MP straight into `video`.",
+    "",
+    "MiniMaxH3ImageToVideo is conditioning (0) AND latent (1) in one node, and",
+    "it takes the prompt itself -- there is no CLIPTextEncode and no negative",
+    "prompt to encode, so the negative box is hidden for this family rather",
+    "than sent somewhere it would do nothing.  BasicGuider takes no CFG for the",
+    "same reason.",
+    "",
+    "The audio VAE is not optional: the model emits video and audio latents",
+    "together and CreateVideo muxes both."
+  ],
+  "1": {
+    "inputs": { "unet_name": "", "weight_dtype": "default" },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Load Diffusion Model", "painter_role": "loader" }
+  },
+  "2": {
+    "inputs": { "clip_name": "", "type": "minimax", "device": "default" },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Load CLIP", "painter_role": "clip" }
+  },
+  "3": {
+    "inputs": { "vae_name": "" },
+    "class_type": "VAELoader",
+    "_meta": { "title": "Load VAE (video)", "painter_role": "vae" }
+  },
+  "4": {
+    "inputs": { "vae_name": "" },
+    "class_type": "VAELoader",
+    "_meta": { "title": "Load VAE (audio)", "painter_role": "vae_audio" }
+  },
+  "10": {
+    "inputs": { "image": "" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Image", "painter_role": "load_image" }
+  },
+  "11": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 0.3,
+      "resolution_steps": 32,
+      "image": ["10", 0]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": { "title": "Scale Image to Total Pixels", "painter_role": "scale_image" }
+  },
+  "12": {
+    "inputs": { "image": ["11", 0] },
+    "class_type": "GetImageSize",
+    "_meta": { "title": "Get Image Size", "painter_role": "image_size" }
+  },
+  "20": {
+    "inputs": {
+      "prompt": "",
+      "width": ["12", 0],
+      "height": ["12", 1],
+      "length": 124,
+      "clip": ["2", 0],
+      "vae": ["3", 0],
+      "first_frame": ["10", 0]
+    },
+    "class_type": "MiniMaxH3ImageToVideo",
+    "_meta": { "title": "MiniMax H3 Image to Video", "painter_role": "video" }
+  },
+  "21": {
+    "inputs": { "sampler_name": "res_multistep" },
+    "class_type": "KSamplerSelect",
+    "_meta": { "title": "Sampler", "painter_role": "sampler_select" }
+  },
+  "22": {
+    "inputs": { "scheduler": "simple", "steps": 20, "denoise": 1.0, "model": ["1", 0] },
+    "class_type": "BasicScheduler",
+    "_meta": { "title": "Scheduler", "painter_role": "scheduler" }
+  },
+  "23": {
+    "inputs": { "noise_seed": 0 },
+    "class_type": "RandomNoise",
+    "_meta": { "title": "Noise", "painter_role": "noise" }
+  },
+  "24": {
+    "inputs": { "model": ["1", 0], "conditioning": ["20", 0] },
+    "class_type": "BasicGuider",
+    "_meta": { "title": "Guider", "painter_role": "guider" }
+  },
+  "25": {
+    "inputs": {
+      "noise": ["23", 0],
+      "guider": ["24", 0],
+      "sampler": ["21", 0],
+      "sigmas": ["22", 0],
+      "latent_image": ["20", 1]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": { "title": "Sampler", "painter_role": "sampler" }
+  },
+  "30": {
+    "inputs": { "samples": ["25", 0], "vae": ["3", 0] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode", "painter_role": "decode" }
+  },
+  "31": {
+    "inputs": { "samples": ["25", 0], "vae": ["4", 0] },
+    "class_type": "VAEDecodeAudio",
+    "_meta": { "title": "VAE Decode Audio", "painter_role": "decode_audio" }
+  },
+  "32": {
+    "inputs": { "fps": 24.0, "bit_depth": 8, "images": ["30", 0], "audio": ["31", 0] },
+    "class_type": "CreateVideo",
+    "_meta": { "title": "Create Video", "painter_role": "create_video" }
+  },
+  "33": {
+    "inputs": {
+      "filename_prefix": "video/painter",
+      "format": "auto",
+      "codec": "auto",
+      "video": ["32", 0]
+    },
+    "class_type": "SaveVideo",
+    "_meta": { "title": "Save Video", "painter_role": "save" }
+  }
+}

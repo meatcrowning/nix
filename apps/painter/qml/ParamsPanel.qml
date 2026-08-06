@@ -14,8 +14,12 @@ Panel {
         }
     }
 
+    // CFG and batch are image-only. The video graph guides with BasicGuider,
+    // which takes no CFG, and its "batch" is the frame count — set as a duration
+    // in the video panel. Both would be controls that change nothing here.
     Field {
         label: "cfg"
+        visible: !App.isVideo
         Spin {
             value: root.gen.cfg; from: 0; to: 30; step: 0.1; decimals: 2
             onEdited: function (v) { root.set("cfg", v) }
@@ -71,17 +75,21 @@ Panel {
     }
 
     Field {
-        label: "batch"
-        hint: "Images per submitted job (one sampler run); count queues separate jobs."
+        label: App.isVideo ? "count" : "batch"
+        hint: App.isVideo
+              ? "How many separate video jobs to queue."
+              : "Images per submitted job (one sampler run); count queues separate jobs."
         Row {
             spacing: 8
             Spin {
                 width: 56
+                visible: !App.isVideo
                 value: root.gen.batch_size; from: 1; to: 16; step: 1
                 onEdited: function (v) { root.set("batch_size", v) }
             }
             PixelText {
                 text: "count"
+                visible: !App.isVideo
                 color: Theme.textDim
                 anchors.verticalCenter: parent.verticalCenter
             }

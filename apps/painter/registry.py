@@ -192,6 +192,7 @@ class Registry:
             "family_id": entry.family,
             "encoder": None,
             "vae": None,
+            "vae_audio": None,
             "problems": [],
             "notes": [],
         }
@@ -205,13 +206,20 @@ class Registry:
             out["notes"].append("bundled checkpoint: encoder and VAE come from the file")
         else:
             out["encoder"] = self._pick_encoder(fam, entry, ov)
-            out["vae"] = self._pick_vae(fam, ov)
+            out["vae"] = self._pick_vae(fam.get("vae"), ov)
             if out["encoder"] is None:
                 want = (fam.get("text_encoder") or {}).get("te_model")
                 out["problems"].append(f"no text encoder of type {want} found")
             if out["vae"] is None:
                 want = (fam.get("vae") or {}).get("arch")
                 out["problems"].append(f"no {want} VAE found")
+            # A video family decodes two latents: pictures and sound. The audio
+            # VAE is a second, separate file, and missing it is a problem here
+            # rather than a submit-time node error.
+            if fam.get("vae_audio"):
+                out["vae_audio"] = self._pick_vae(fam.get("vae_audio"), ov, key="vae_audio")
+                if out["vae_audio"] is None:
+                    out["problems"].append("no audio VAE found")
         return out
 
     def _pick_encoder(self, fam, entry, ov):
@@ -230,12 +238,12 @@ class Registry:
         exact = [e for e in cands if e.dims.get("hidden") == hidden]
         return (exact or cands)[0]
 
-    def _pick_vae(self, fam, ov):
-        if ov.get("vae"):
-            v = self.find(ov["vae"])
+    def _pick_vae(self, spec, ov, key="vae"):
+        if ov.get(key):
+            v = self.find(ov[key])
             if v:
                 return v
-        spec = fam.get("vae") or {}
+        spec = spec or {}
         for name in spec.get("prefer") or []:
             v = self.find(name)
             if v:
@@ -331,7 +339,11 @@ class Registry:
         if fam.get("loader_shape") == "checkpoint":
             g.set_input("loader", "ckpt_name", entry.name)
         else:
-            loader = entry.loader or "UNETLoader"
+            # A family may pin the loader class. MiniMax H3 ships comfy-quantized,
+            # so the fingerprinter reaches for OTUNetLoaderW8A8, but the workflow
+            # that produced the first outputs loads it on the plain UNETLoader.
+            # What is known to run wins over what is inferred.
+            loader = fam.get("loader_class") or entry.loader or "UNETLoader"
             if loader == "UnetLoaderGGUF":
                 g.set_class("loader", "UnetLoaderGGUF", drop=("weight_dtype",))
                 g.set_input("loader", "unet_name", entry.name)
@@ -352,6 +364,11 @@ class Registry:
             g.set_input("clip", "clip_name", pairing["encoder"].name)
             g.set_input("clip", "type", te.get("clip_type", "stable_diffusion"))
             g.set_input("vae", "vae_name", pairing["vae"].name)
+            if pairing.get("vae_audio") is not None:
+                g.set_input("vae_audio", "vae_name", pairing["vae_audio"].name)
+
+        if fam.get("kind") == "video":
+            return self._build_video(entry, fam, g, p, pairing, object_info)
 
         # --- optional nodes --------------------------------------------------
         toggles = {**(fam.get("toggles") or {}), **(p.get("toggles") or {})}
@@ -416,6 +433,94 @@ class Registry:
             "params": {**p, "positive": pos, "negative": neg,
                        "width": int(w), "height": int(h), "toggles": toggles},
         }
+
+
+    # -- video --------------------------------------------------------------
+
+    def _build_video(self, entry, fam, g, p, pairing, object_info):
+        """The video branch of build(): one template, two modes.
+
+        Image-to-video keeps the LoadImage -> scale -> GetImageSize chain, so
+        the frame size comes out of the dropped image and the only size control
+        is the pixel budget.  Text-to-video drops that chain and takes painter's
+        own aspect + MP.  Nothing else differs between the two.
+        """
+        spec = fam.get("video") or {}
+        fps = float(p.get("fps", spec.get("fps", 24.0)))
+        mp = float(p.get("megapixels") or (fam.get("resolution") or {}).get("megapixels", 0.3))
+        image = (p.get("input_image") or "").strip() if p.get("use_input_image") else ""
+
+        # --- LoRA chain (same shape as the image path) ------------------------
+        loras = p.get("loras") or []
+        if loras:
+            g.insert_lora_chain(loras, [g.id_of("loader"), 0], None)
+
+        # --- prompt (the node takes it raw; there is no CLIPTextEncode) -------
+        pos = G.apply_prompt_transform(p.get("positive", ""), fam.get("prompt_transform"))
+        g.set_input("video", "prompt", pos)
+
+        frames = video_frames(p.get("duration", spec.get("duration", 5.0)), fps,
+                              int(spec.get("min_frames", 5)),
+                              int(spec.get("frame_chunk", 17)))
+        g.set_input("video", "length", frames)
+
+        if image:
+            g.set_input("load_image", "image", image)
+            g.set_input("scale_image", "megapixels", mp)
+            g.set_input("scale_image", "resolution_steps",
+                        int((fam.get("resolution") or {}).get("multiple", 32)))
+            g.set_input("scale_image", "upscale_method",
+                        spec.get("upscale_method", "nearest-exact"))
+            w = h = None
+        else:
+            w, h = p.get("width"), p.get("height")
+            if not w or not h:
+                res = fam.get("resolution") or {}
+                w, h = calc_dims(res.get("aspect", "1:1"), mp, res.get("multiple", 32))
+            # The size is a pair of numbers now, so the image chain has nothing
+            # left reading it and can go (Graph.drop refuses if anything does).
+            g.set_input("video", "width", int(w))
+            g.set_input("video", "height", int(h))
+            g.node("video").get("inputs", {}).pop("first_frame", None)
+            g.drop("image_size")
+            g.drop("scale_image")
+            g.drop("load_image")
+
+        # --- sampling ---------------------------------------------------------
+        g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "res_multistep"))
+        g.set_input("scheduler", "scheduler", p.get("scheduler", "simple"))
+        g.set_input("scheduler", "steps", int(p.get("steps", 20)))
+        g.set_input("scheduler", "denoise", float(p.get("denoise", 1.0)))
+        g.set_input("noise", "noise_seed", int(p.get("seed", 0)))
+        g.set_input("create_video", "fps", fps)
+        g.set_input("create_video", "bit_depth", int(spec.get("bit_depth", 8)))
+        g.set_input("save", "filename_prefix", p.get("filename_prefix", "video/painter"))
+
+        prompt = g.to_prompt()
+        if object_info is not None:
+            problems = G.validate(prompt, object_info)
+            if problems:
+                raise G.ValidationError(problems)
+        params = {**p, "positive": pos, "negative": "", "frames": frames,
+                  "fps": fps, "megapixels": mp, "kind": "video",
+                  "input_image": image, "use_input_image": bool(image)}
+        if w and h:
+            params["width"], params["height"] = int(w), int(h)
+        return {"prompt": prompt, "pairing": pairing, "params": params}
+
+
+def video_frames(duration: float, fps: float, min_frames: int = 5, chunk: int = 17) -> int:
+    """Seconds -> the frame count the model will accept.
+
+    MiniMax H3 packs frames in groups of 17 after a first one, so a length has
+    to be congruent to `min_frames` mod `chunk`; the source workflow expressed
+    this as a ComfyMathExpression and 5s at 24fps came out as 124.  It is four
+    lines of arithmetic, so painter does it here rather than depending on a
+    custom node.
+    """
+    n = max(int(min_frames), int(round(float(duration) * float(fps))))
+    n += (int(min_frames) - (n % int(chunk))) % int(chunk)
+    return int(n)
 
 
 def calc_dims(aspect: str, megapixels: float, multiple: int = 64):

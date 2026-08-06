@@ -9,13 +9,22 @@ import QtQuick
 // hand and the aspect above it was simply wrong, with nothing saying which one
 // the graph would use. One place decides now: ratio + megapixels -> the pixels
 // in the badge, which are the pixels submitted.
+// IMAGE-TO-VIDEO HAS NO ASPECT TO SET. The video workflow scales the dropped
+// image to the pixel budget and reads the frame size back OUT of it
+// (ImageScaleToTotalPixels -> GetImageSize), so an aspect box there would be a
+// control that changes nothing — §10 again. It goes, and the readout says where
+// the size is coming from instead of quoting numbers painter did not decide.
 Panel {
     id: panel
     title: "resolution"
-    badge: root.gen.width + "x" + root.gen.height
+    // Whether the image, not this panel, is deciding the shape.
+    readonly property bool fromImage: App.isVideo && root.gen.useInputImage
+    badge: fromImage ? "from the image" : (root.gen.width + "x" + root.gen.height)
 
     Field {
         label: "aspect"
+        // The inner Column skips invisible children, so this leaves no gap.
+        visible: !panel.fromImage
         hint: "Any two whole numbers - 3:2, 5:3, 21:9. The pixel size comes from this and MP."
         Row {
             spacing: 6
@@ -61,7 +70,9 @@ Panel {
             // which is why the size is rarely the round number you asked for
             // (docs/DESIGN.md §10: report what will happen, not what was meant).
             PixelText {
-                text: "= " + root.gen.width + "x" + root.gen.height + " /" + root.gen.multiple
+                text: panel.fromImage
+                      ? "= the dropped image, at this budget"
+                      : ("= " + root.gen.width + "x" + root.gen.height + " /" + root.gen.multiple)
                 color: Theme.textDim
                 anchors.verticalCenter: parent.verticalCenter
             }

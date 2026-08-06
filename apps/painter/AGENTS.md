@@ -198,7 +198,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-104 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+116 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -211,7 +211,10 @@ at seven widths, aspect+MP → pixels → header → submitted job, the dropdown
 overlay (opens, stays inside the window, picks, and the binding SURVIVES the
 pick), the live-binding regressions above, Escape (releases the box, cancels
 NOTHING), the inject menu and its three subsets, the draggable divider and its
-clamps, save-and-restore through a SECOND window on the same prefs file, that
+clamps, the video column (a synthetic video family written into the scratch
+root and removed again — a fully paired model sorts to the top of the list and
+would otherwise be every later test's selection), save-and-restore through a
+SECOND window on the same prefs file, that
 `startBackend` returns immediately, and a wiring audit that submits a job and
 compares every field. **A QML warning fails the run** — a binding loop shows
 as nothing at all on screen.
@@ -354,11 +357,57 @@ bump moves a signal. Consequences worth remembering:
 Unrecognised files stay visible in the picker with a family dropdown;
 assignments persist in `~/.local/state/painter/overrides.json`.
 
+## Video is a different pipeline, not a flag on the image one
+
+A family may declare `"kind": "video"` (`families/minimax_h3.json`, the MiniMax
+H3 model that generates picture and sound together). That is one branch in
+`registry.build()` — `_build_video()` — and one extra template,
+`graphs/video_minimax.json`, transcribed from the workflow that produced the
+first outputs (its API graph is embedded in every `MiniMax_H3_*.mp4`, which is
+where to look if the node contract ever moves).
+
+What is genuinely different, and therefore what the left column stops offering:
+
+- **One prompt.** `MiniMaxH3ImageToVideo` takes the text itself and emits
+  conditioning *and* latent, so there is no `CLIPTextEncode` and **no negative
+  prompt** — the box is hidden rather than typed into nothing. `BasicGuider`
+  takes **no CFG** for the same reason, and the frame count replaces the batch.
+- **Two VAEs.** Video and audio latents decode separately and `CreateVideo`
+  muxes them, so `pair()` resolves a `vae_audio` as well and a missing one is a
+  problem reported up front.
+- **Two modes, one template.** With a first frame (`VideoPanel`'s toggle, an
+  image dropped on the well) it is image-to-video: `LoadImage ->
+  ImageScaleToTotalPixels -> GetImageSize` and the frame size comes **out of the
+  image**, which is why `ResolutionPanel` drops to the MP box alone. Without
+  one, `_build_video` drops those three nodes (`Graph.drop`, which refuses while
+  anything still reads them) and feeds painter's own aspect + MP.
+- **The first frame is uploaded, not read.** `ComfyClient.upload_image` PUTs it
+  under the input directory's `painter/` subfolder and the graph names
+  `painter/<file>` — on book the backend is top's and the socket is all they
+  share. Once per file, not once per job. `LoadImage`'s `image` enum is a live
+  directory listing, so it is in `graph.LIVE_ENUMS` and not validated against the
+  `/object_info` painter fetched at startup.
+- **Frame counts are quantised.** `registry.video_frames()`: seconds × fps,
+  rounded up to the next length congruent to 5 mod 17 — 5s at 24fps is 124
+  frames, matching the source workflow's `ComfyMathExpression`. Done in python so
+  the graph needs no custom math node.
+- **Outputs are clips.** `SaveVideo` writes them under `video/` in the output
+  directory (which IS `~/Pictures/painter/out` — the backend is launched with
+  `--output-directory`), the gallery globs that too, and each tile wears a
+  poster frame extracted once by ffmpeg into `~/.cache/painter/posters` plus the
+  drawn play marker (docs/DESIGN.md §2.3). A video carries ComfyUI's graph in its
+  container metadata, **not** painter's parameters, so "inject" has nothing to
+  offer for one and says so.
+
+`tools/ui-test.py`'s `test_video` covers the whole column reshaping and what
+`submit()` sends; `tools/validate-graphs.py` builds both modes against the live
+`/object_info`.
+
 ## One graph, not one per model
 
-`graphs/universal.json`; the sole exception is `universal_ckpt.json` for bundled
+`graphs/universal.json`; the exceptions are `universal_ckpt.json` for bundled
 checkpoints, which need `CheckpointLoaderSimple` instead of the loader/clip/vae
-trio. Per-family difference is expressed three ways only: a value, an optional
+trio, and `video_minimax.json` above. Per-family difference is expressed three ways only: a value, an optional
 node spliced in/out, or a node-class swap at one role
 (`UNETLoader`/`UnetLoaderGGUF`/`OTUNetLoaderW8A8` — a GGUF physically cannot
 load on the plain loader).
@@ -383,9 +432,10 @@ must not be touched). The string actually sent is what gets recorded in the PNG.
 
 ## Adding a family
 
-Drop a `families/<id>.json`. No code, no new graph. Verify with
-`tools/validate-graphs.py` (every family × all four toggle combinations, checked
-against live `/object_info`), `registry.py --pair-all`,
+Drop a `families/<id>.json`. No code, no new graph — unless it is a `kind`
+the app does not have yet, which is what video cost (see above). Verify with
+`tools/validate-graphs.py` (every family × all four toggle combinations, plus
+both video modes, checked against live `/object_info`), `registry.py --pair-all`,
 `registry.py --lora-matrix`, and `tools/coverage-test.py`, which actually runs
 **every** base model for one step — 19/19 as of 2026-07-25, including the
 int8-convrot loader, three GGUFs, both bundled checkpoints, and the pixel-space

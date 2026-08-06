@@ -125,14 +125,38 @@ def fake_models(root):
     os.makedirs(d, exist_ok=True)
     for name, keys in (("alpha-model.safetensors", ["double_blocks.0.img_attn.qkv.weight"]),
                        ("beta-model.safetensors", ["model.diffusion_model.input_blocks.0.0.weight"])):
-        hdr = {k: {"dtype": "BF16", "shape": [16, 16], "data_offsets": [0, 512]} for k in keys}
-        hdr["__metadata__"] = {"format": "pt"}
-        blob = json.dumps(hdr).encode()
-        with open(os.path.join(d, name), "wb") as fh:
-            fh.write(struct.pack("<Q", len(blob)))
-            fh.write(blob)
-            fh.write(b"\0" * 512)
+        write_safetensors(os.path.join(d, name), {k: [16, 16] for k in keys})
     return root
+
+
+def write_safetensors(path, keys):
+    """A parseable safetensors header and nothing else — `keys` is name -> shape."""
+    hdr = {k: {"dtype": "BF16", "shape": list(shape), "data_offsets": [0, 512]}
+           for k, shape in keys.items()}
+    hdr["__metadata__"] = {"format": "pt"}
+    blob = json.dumps(hdr).encode()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(struct.pack("<Q", len(blob)))
+        fh.write(blob)
+        fh.write(b"\0" * 512)
+
+
+# A whole video family, headers only: the diffusion model (recognised by its two
+# patch projectors), the Qwen3-VL encoder its `hidden` picks out, and the two
+# VAEs the family names outright. Written and then REMOVED by test_video,
+# because a fully-paired model sorts to the top of the list and would otherwise
+# become the default selection for every test after it.
+VIDEO_FAKES = {
+    "unet/mini-video.safetensors": {"video_patch_proj.weight": [16, 96],
+                                    "audio_patch_proj.weight": [16, 32],
+                                    "blocks.0.attn.qkv_proj.weight": [16, 16]},
+    "text_encoders/fake-qwen3vl.safetensors": {
+        "model.visual.deepstack_merger_list.0.norm.weight": [16],
+        "model.layers.0.post_attention_layernorm.weight": [5120]},
+    "vae/minimax_h3_video_vae_fp16.safetensors": {"decoder.conv_in.weight": [8, 16, 3, 3]},
+    "vae/minimax_h3_audio_vae_fp32.safetensors": {"decoder.conv_in.weight": [8, 16, 3, 3]},
+}
 
 
 def fake_png(path, params):
@@ -306,7 +330,11 @@ def test_text_boxes(win, ctl):
           edit.property("cursorPosition"))
 
     # A numeric box: the 5px padding strip used to be dead.
-    sp = find(content, "Spin")
+    # A VISIBLE one: the left column carries panels that only a video family
+    # reveals, and an item inside a hidden panel still answers to `find` —
+    # clicking one lands wherever its stale geometry says, which was three
+    # unrelated failures and a model selected by a click nobody aimed.
+    sp = find(content, "Spin", pred=lambda it: it.isVisible())
     inp = find(sp, "QQuickTextInput")
     inp.setProperty("focus", False)
     spin(60)
@@ -394,6 +422,125 @@ def test_resolution(win, ctl):
           panel.property("badge"))
     check("the size boxes are gone",
           len(find_all(panel, "Spin")) == 3, len(find_all(panel, "Spin")))
+
+
+def test_video(win, ctl, tmp):
+    """A video family reshapes the left column, and submits video settings.
+
+    The graph itself is covered by tools/validate-graphs.py against a live
+    backend; what is checked here is that the WINDOW stops offering what a video
+    job has no room for — a negative prompt, a CFG, an aspect while the dropped
+    first frame is deciding it — and that what it does send is the video set.
+    """
+    content = win.contentItem()
+    root = os.environ["PAINTER_MODELS"]
+    for rel, keys in VIDEO_FAKES.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    import fingerprint as fp
+    fp.save_cache({})                     # the scratch root is new on every run
+    ctl.rescan()
+    spin(200)
+    ctl.selectModelByName("mini-video.safetensors")
+    spin(200)
+
+    check("a video model is recognised and paired",
+          ctl.property("selectedName") == "mini-video.safetensors"
+          and ctl.property("isVideo") is True,
+          (ctl.property("selectedName"), ctl.property("isVideo")))
+    if not ctl.property("isVideo"):
+        for rel in VIDEO_FAKES:
+            os.remove(os.path.join(root, rel))
+        return
+
+    boxes = find_all(content, "PromptBox")
+    check("the negative prompt box is gone", [b.isVisible() for b in boxes] == [True, False],
+          [b.isVisible() for b in boxes])
+    check("the video panel is there", find(content, "VideoPanel").isVisible())
+    check("the patches panel is not", not find(content, "TogglePanel").isVisible())
+    cfg = find(find(content, "ParamsPanel"), "Field",
+               pred=lambda it: it.property("label") == "cfg")
+    check("there is no CFG to set", not cfg.isVisible())
+
+    res = find(content, "ResolutionPanel")
+    aspect = find(res, "Field", pred=lambda it: it.property("label") == "aspect")
+    g = prop(win, "gen")
+    g["useInputImage"] = True
+    win.setProperty("gen", g)
+    spin(120)
+    check("with a first frame the aspect is the image's, so the box goes",
+          not aspect.isVisible() and res.property("badge") == "from the image",
+          res.property("badge"))
+    g = prop(win, "gen")
+    g["useInputImage"] = False
+    win.setProperty("gen", g)
+    spin(120)
+    check("...and text-to-video gets it back", aspect.isVisible())
+
+    # Seconds -> frames, the same arithmetic the graph uses.
+    import registry as R
+    panel = find(content, "VideoPanel")
+    g = prop(win, "gen")
+    g["duration"] = 5.0
+    win.setProperty("gen", g)
+    spin(120)
+    check("the panel says how many frames that is",
+          panel.property("badge") == "%df" % R.video_frames(5.0, 24.0),
+          panel.property("badge"))
+
+    # What submit() actually sends for a video job.
+    sent = {}
+    orig_build, orig_submit = ctl.reg.build, ctl.client.submit
+
+    class FakeJob:
+        def __init__(self):
+            self.meta = {}
+
+    ctl.reg.build = lambda entry, params, object_info=None: (
+        sent.update(params) or {"prompt": {}, "params": dict(params), "pairing": {}})
+    ctl.client.submit = lambda prompt, params: (sent.update(_submitted=True) or FakeJob())
+    ctl._object_info = {"stub": True}
+    g = prop(win, "gen")
+    g.update({"positive": "a clip", "negative": "ignored", "duration": 3.0,
+              "steps": 12, "seed": 99, "randomSeed": False, "count": 1,
+              "useInputImage": False})
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("a video job is submitted", sent.get("_submitted") is True)
+    check("...with the duration, not a batch",
+          sent.get("duration") == 3.0 and "batch_size" not in sent,
+          (sent.get("duration"), "batch_size" in sent))
+    check("...and no negative prompt or CFG",
+          "negative" not in sent and "cfg" not in sent, sorted(sent))
+
+    # An image-to-video job with nothing dropped must not be silently sent as
+    # text-to-video: it says so and submits nothing (docs/DESIGN.md §10).
+    sent.clear()
+    ctl.clearInputImage()
+    g = prop(win, "gen")
+    g["useInputImage"] = True
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("image-to-video with no image refuses rather than guessing",
+          sent.get("_submitted") is None, sent)
+
+    ctl.reg.build, ctl.client.submit = orig_build, orig_submit
+    ctl._object_info = None
+    g = prop(win, "gen")
+    g["useInputImage"] = False
+    win.setProperty("gen", g)
+    for rel in VIDEO_FAKES:
+        os.remove(os.path.join(root, rel))
+    fp.save_cache({})
+    ctl.rescan()
+    ctl.selectModelByName("alpha-model.safetensors")
+    spin(200)
+    check("the image model is back and the column with it",
+          ctl.property("isVideo") is False
+          and find(content, "TogglePanel").isVisible(), ctl.property("selectedName"))
 
 
 def test_live_bindings(win, ctl):
@@ -535,7 +682,11 @@ def test_escape(win, ctl):
     # counter cancel() zeroes, so a non-zero one surviving Escape is the proof.
     ctl._jobs = 3
     ctl._busy = True
-    sp = find(content, "Spin")
+    # A VISIBLE one: the left column carries panels that only a video family
+    # reveals, and an item inside a hidden panel still answers to `find` —
+    # clicking one lands wherever its stale geometry says, which was three
+    # unrelated failures and a model selected by a click nobody aimed.
+    sp = find(content, "Spin", pred=lambda it: it.isVisible())
     inp = find(sp, "QQuickTextInput")
     click(win, sp, dx=2, dy=sp.height() / 2)
     check("a numeric box takes focus", inp.property("activeFocus") is True)
@@ -830,6 +981,7 @@ def main():
     print("== model panel ==");       test_model_panel(win, ctl)
     print("== panes ==");             test_panes(win)
     print("== live bindings ==");     test_live_bindings(win, ctl)
+    print("== video ==");             test_video(win, ctl, tmp)
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)

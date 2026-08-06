@@ -23,14 +23,60 @@ PROMPT = "a red cube on a white table"
 MULTILINE = "line one\n\nline two\twith   spaces\nline three"
 
 
-def check_structure(built, toggles, fam):
-    """Structural assertions the validator cannot make for us."""
-    prompt = built["prompt"]
+def _roles_of(prompt):
     roles = {}
     for nid, node in prompt.items():
         r = (node.get("_meta") or {}).get("painter_role")
         if r:
             roles[r] = nid
+    return roles
+
+
+def check_dangling(prompt):
+    """Every link must point at a node that still exists."""
+    return [f"{nid}.{key} dangles to removed node {val[0]}"
+            for nid, node in prompt.items()
+            for key, val in node["inputs"].items()
+            if isinstance(val, list) and len(val) == 2 and isinstance(val[0], str)
+            and val[0] not in prompt]
+
+
+def check_video(built, want_image):
+    """The video template's two modes, which differ by three nodes.
+
+    Image-to-video reads its frame size out of the dropped image; text-to-video
+    drops that whole chain, so the check is that the size is two plain numbers
+    and that nothing is left pointing at a node that went.
+    """
+    prompt = built["prompt"]
+    roles = _roles_of(prompt)
+    problems = []
+    video = prompt[roles["video"]]["inputs"]
+    if want_image:
+        for role in ("load_image", "scale_image", "image_size"):
+            if role not in roles:
+                problems.append(f"image-to-video is missing {role}")
+        if not isinstance(video.get("width"), list):
+            problems.append("image-to-video should take its width from the image")
+        if not isinstance(video.get("first_frame"), list):
+            problems.append("image-to-video is not wired to a first frame")
+    else:
+        for role in ("load_image", "scale_image", "image_size"):
+            if role in roles:
+                problems.append(f"text-to-video still carries {role}")
+        if "first_frame" in video:
+            problems.append("text-to-video still carries a first_frame input")
+        if not isinstance(video.get("width"), int) or not isinstance(video.get("height"), int):
+            problems.append("text-to-video needs plain width/height numbers")
+    if prompt[roles["create_video"]]["inputs"].get("audio") is None:
+        problems.append("the audio track is not muxed into the video")
+    return problems + check_dangling(prompt)
+
+
+def check_structure(built, toggles, fam):
+    """Structural assertions the validator cannot make for us."""
+    prompt = built["prompt"]
+    roles = _roles_of(prompt)
     problems = []
 
     if toggles.get("negpip"):
@@ -74,13 +120,7 @@ def check_structure(built, toggles, fam):
                     f"model source, got {a} vs {b}"
                 )
 
-    # Every link must point at a node that still exists.
-    for nid, node in prompt.items():
-        for key, val in node["inputs"].items():
-            if isinstance(val, list) and len(val) == 2 and isinstance(val[0], str):
-                if val[0] not in prompt:
-                    problems.append(f"{nid}.{key} dangles to removed node {val[0]}")
-    return problems
+    return problems + check_dangling(prompt)
 
 
 def main(argv=None):
@@ -109,6 +149,8 @@ def main(argv=None):
     print("=== toggle matrix ===")
     for entry in reg.base_models():
         fam = reg.family_of(entry)
+        if (fam or {}).get("kind") == "video":
+            continue          # no toggles, no encodes; checked in its own section
         line = f"  {entry.name[:50]:<52}"
         for toggles in combos:
             tag = ("N" if toggles["negpip"] else "-") + ("M" if toggles["model_sampling"] else "-")
@@ -129,9 +171,36 @@ def main(argv=None):
                 line += f"\n        {tag}: {exc}"
         print(line)
 
+    print("\n=== video ===")
+    for entry in reg.base_models():
+        fam = reg.family_of(entry) or {}
+        if fam.get("kind") != "video":
+            continue
+        line = f"  {entry.name[:50]:<52}"
+        for tag, params in (
+            ("i2v", {"use_input_image": True, "input_image": "probe.png"}),
+            ("t2v", {"use_input_image": False}),
+        ):
+            try:
+                built = reg.build(
+                    entry,
+                    {"positive": PROMPT, "seed": 1, "steps": 4, "duration": 5.0, **params},
+                    object_info=oi,
+                )
+                probs = check_video(built, params["use_input_image"])
+                if probs:
+                    raise G.ValidationError(probs)
+                line += f" {tag}:ok({built['params']['frames']}f)"
+            except (G.GraphError, G.ValidationError) as exc:
+                failures += 1
+                line += f" {tag}:FAIL\n        {tag}: {exc}"
+        print(line)
+
     print("\n=== prompt transforms ===")
     for entry in reg.base_models():
         fam = reg.family_of(entry) or {}
+        if fam.get("kind") == "video":
+            continue          # one prompt, no negative, no transform
         want_flat = fam.get("prompt_transform") == "single_line"
         built = reg.build(entry, {"positive": MULTILINE, "negative": MULTILINE, "seed": 1})
         sent = built["params"]["positive"]

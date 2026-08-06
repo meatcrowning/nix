@@ -9,6 +9,10 @@
 #   * qtwebsockets — the ComfyUI client listens on /ws for progress, node
 #     transitions, errors and live previews, instead of polling /history the way
 #     cte did.
+#   * ffmpeg on PATH — a video family's outputs are clips, and the gallery
+#     shows each one's poster frame (extracted once into ~/.cache/painter/
+#     posters). Without it a video tile is simply blank; on book the wrapper is
+#     Fedora's python and ffmpeg comes from its PATH.
 #   * a systemd --user unit for the backend. ComfyUI is NOT packaged here: it
 #     stays the venv+nix-shell checkout at /home/lam/comfy (a symlink to
 #     Downloads/git/ComfyUI), whose shell.nix already handles the hard parts
@@ -69,6 +73,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg ]} \
             --set-default SPELL_HUNSPELL ${pkgs.hunspell}/bin/hunspell \
             --set-default SPELL_DICPATH ${pkgs.hunspellDicts.en_US}/share/hunspell \
             "''${qtWrapperArgs[@]}"

@@ -16,10 +16,11 @@ Item {
     // is WHICH PART to take: its words, its numbers, or both. That is a choice,
     // and a choice is a menu — it used to be an unlabelled right-click that took
     // everything, with no way to ask for less.
-    function menuFor(index, path) {
+    function menuFor(index, path, isVideo) {
         var p = Gallery.paramsAt(index)
         if (!p) {
-            return [{ label: "no parameters stored in this file", enabled: false },
+            return [{ label: isVideo ? "a video carries its ComfyUI graph, not these settings"
+                                     : "no parameters stored in this file", enabled: false },
                     { separator: true },
                     { label: "open in viewer", trigger: () => App.openExternally(path) }]
         }
@@ -40,7 +41,8 @@ Item {
         // Dropped rather than squeezed when the pane is narrow: the count is
         // the least of the three things this pane owes you (docs/DESIGN.md §5.4).
         PixelText {
-            text: Gallery.count + " images"
+            // "outputs", not "images": a video family's results are clips.
+            text: Gallery.count + " outputs"
             color: Theme.textDim
             visible: view.width > 190
         }
@@ -77,14 +79,52 @@ Item {
                 border.color: hover.containsMouse ? Theme.accent : Theme.border
                 border.width: 1
 
+                // A video tile shows its poster frame, extracted once into
+                // ~/.cache/painter/posters (main.py, Gallery). Until that lands
+                // — or if ffmpeg is not there at all — the cell stays empty
+                // rather than trying to decode an mp4 as an image.
                 Image {
+                    id: still
                     anchors.fill: parent
                     anchors.margins: 1
-                    source: url
+                    source: isVideo ? poster : url
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
                     cache: false
                     sourceSize.width: 420
+                }
+
+                // The play marker: this tile is a clip, not a still. DRAWN, not
+                // lettered — "▶" is glyph 0 in two of the three pixel fonts, so
+                // it is a staircase of 1px rows (docs/DESIGN.md §2.3), the same
+                // construction filer's video tiles use.
+                Loader {
+                    active: isVideo
+                    anchors { left: parent.left; top: parent.top; margins: 5 }
+                    sourceComponent: Rectangle {
+                        width: 15
+                        height: 15
+                        color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.72)
+                        border.width: 1
+                        border.color: root.winActive ? Theme.border : Theme.inactive
+                        Item {
+                            anchors.centerIn: parent
+                            width: 7
+                            height: 7
+                            Repeater {
+                                model: 7
+                                Rectangle {
+                                    required property int index
+                                    // 1,2,3,4,3,2,1 — a symmetric arrowhead.
+                                    x: 0
+                                    y: index
+                                    height: 1
+                                    width: 4 - Math.abs(index - 3)
+                                    color: root.winActive ? Theme.text : Theme.inactive
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Rectangle {
@@ -114,7 +154,7 @@ Item {
                     // right-clickable, and left-click is where he reaches first.
                     onClicked: function (m) {
                         var pt = mapToItem(null, m.x, m.y)
-                        view.menuRequested(pt.x, pt.y, view.menuFor(index, path))
+                        view.menuRequested(pt.x, pt.y, view.menuFor(index, path, isVideo))
                     }
                 }
             }

@@ -376,19 +376,30 @@ class LoraChoices(QAbstractListModel):
         self.endResetModel()
 
 
+VIDEO_SUFFIXES = (".mp4", ".webm", ".mkv")
+
+
 class Gallery(QAbstractListModel):
     PathRole = Qt.UserRole + 1
     UrlRole = Qt.UserRole + 2
     NameRole = Qt.UserRole + 3
+    VideoRole = Qt.UserRole + 4
+    PosterRole = Qt.UserRole + 5
 
     countChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = []
+        # Poster frames are extracted one at a time, off the GUI thread. A
+        # gallery of 60 videos would otherwise fork 60 ffmpegs at once on a
+        # machine that is already busy sampling.
+        self._poster_queue = []
+        self._poster_proc = None
 
     def roleNames(self):
-        return {self.PathRole: b"path", self.UrlRole: b"url", self.NameRole: b"name"}
+        return {self.PathRole: b"path", self.UrlRole: b"url", self.NameRole: b"name",
+                self.VideoRole: b"isVideo", self.PosterRole: b"poster"}
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._rows)
@@ -398,30 +409,108 @@ class Gallery(QAbstractListModel):
             return None
         r = self._rows[index.row()]
         return {self.PathRole: r["path"], self.UrlRole: r["url"],
-                self.NameRole: r["name"]}.get(role)
+                self.NameRole: r["name"], self.VideoRole: r["is_video"],
+                self.PosterRole: r["poster"]}.get(role)
+
+    def _row_for(self, path):
+        p = Path(path)
+        is_video = p.suffix.lower() in VIDEO_SUFFIXES
+        return {"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(),
+                "name": p.name, "is_video": is_video, "poster": ""}
 
     def add(self, path):
         self.beginInsertRows(QModelIndex(), 0, 0)
-        self._rows.insert(0, {"path": path, "url": QUrl.fromLocalFile(path).toString(),
-                              "name": os.path.basename(path)})
+        self._rows.insert(0, self._row_for(path))
         self.endInsertRows()
         self.countChanged.emit()
+        if self._rows[0]["is_video"]:
+            self._want_poster(self._rows[0]["path"])
 
     def load_existing(self, limit=60):
+        # Videos land in a subdirectory of their own, because that is where
+        # SaveVideo's filename_prefix puts them — a gallery that only globbed
+        # *.png here would show nothing at all for a video model.
         try:
-            files = sorted(OUT_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime,
-                           reverse=True)[:limit]
+            files = list(OUT_DIR.glob("*.png"))
+            for suffix in VIDEO_SUFFIXES:
+                files += list(OUT_DIR.glob(f"video/*{suffix}"))
+            files = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
         except OSError:
             return
         self.beginResetModel()
-        self._rows = [{"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(),
-                       "name": p.name} for p in files]
+        self._rows = [self._row_for(p) for p in files]
         self.endResetModel()
         self.countChanged.emit()
+        for r in self._rows:
+            if r["is_video"]:
+                self._want_poster(r["path"])
+
+    # -- poster frames -----------------------------------------------------
+
+    def _poster_path(self, path):
+        st = os.stat(path)
+        stem = f"{Path(path).stem}-{int(st.st_mtime)}-{st.st_size}.jpg"
+        return CACHE / "posters" / stem
+
+    def _want_poster(self, path):
+        try:
+            dest = self._poster_path(path)
+        except OSError:
+            return
+        if dest.exists():
+            self._poster_ready(path, dest)
+            return
+        self._poster_queue.append((path, dest))
+        self._next_poster()
+
+    def _next_poster(self):
+        if self._poster_proc is not None or not self._poster_queue:
+            return
+        path, dest = self._poster_queue.pop(0)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        proc = QProcess(self)
+        self._poster_proc = proc
+
+        def finished(*_):
+            # Defensive at both ends, like _run_async: at teardown the C++ side
+            # of this model (or of the process) can be gone while ffmpeg is
+            # still exiting, and an exception raised out of a signal handler is
+            # caught by nobody — it landed in the middle of startup and cost
+            # the harness three unrelated checks. A missing poster is cheap.
+            try:
+                if self._poster_proc is not proc:
+                    return
+                self._poster_proc = None
+                if dest.exists():
+                    self._poster_ready(path, dest)
+                proc.deleteLater()
+                self._next_poster()
+            except RuntimeError:
+                pass
+
+        proc.finished.connect(finished)
+        # A tile is 210px at most, and a poster that fails is simply absent —
+        # the delegate falls back to the play marker rather than showing a gap.
+        proc.errorOccurred.connect(lambda *_: None)
+        proc.start("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", "-ss", "0",
+                              "-i", path, "-frames:v", "1",
+                              "-vf", "scale=420:-1", str(dest)])
+
+    def _poster_ready(self, path, dest):
+        for i, r in enumerate(self._rows):
+            if r["path"] == path:
+                r["poster"] = QUrl.fromLocalFile(str(dest)).toString()
+                idx = self.index(i, 0)
+                self.dataChanged.emit(idx, idx, [self.PosterRole])
+                return
 
     @Slot(int, result="QVariant")
     def paramsAt(self, i):
         if not (0 <= i < len(self._rows)):
+            return None
+        # Only a PNG carries painter's parameters. A video's own metadata holds
+        # the ComfyUI graph, which is not the same thing and is not injectable.
+        if self._rows[i]["is_video"]:
             return None
         try:
             return pngmeta.load_params(Path(self._rows[i]["path"]).read_bytes())
@@ -439,6 +528,7 @@ class Painter(QObject):
     modelChanged = Signal()
     busyChanged = Signal()
     optionsChanged = Signal()
+    inputImageChanged = Signal()
     toast = Signal(str, bool)          # message, isError
 
     def __init__(self, parent=None):
@@ -464,6 +554,8 @@ class Painter(QObject):
         self._object_info = None
         self._jobs = 0
         self._unit_state = "unknown"
+        self._input_image = ""            # the first frame, as a local path
+        self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
 
         self.reg = None
         self.client = C.ComfyClient()
@@ -545,6 +637,54 @@ class Painter(QObject):
     # its header badge is the only thing left saying what will be generated with.
     selectedName = Property(str, lambda self: getattr(
         self.models.entry_at(self._selected), "name", ""), notify=modelChanged)
+    # WHAT THE SELECTED MODEL MAKES. A video family has one prompt and no
+    # negative, no CFG, a duration instead of a batch, and its frame size comes
+    # from the dropped image when there is one — so the left column follows this
+    # rather than offering controls the graph would ignore.
+    isVideo = Property(bool, lambda self: self._family_kind() == "video",
+                       notify=modelChanged)
+    inputImage = Property(str, lambda self: self._input_image, notify=inputImageChanged)
+    inputImageUrl = Property(str, lambda self: (
+        QUrl.fromLocalFile(self._input_image).toString() if self._input_image else ""),
+        notify=inputImageChanged)
+
+    def _family_kind(self):
+        entry = self.models.entry_at(self._selected)
+        if entry is None or self.reg is None:
+            return ""
+        return (self.reg.family_of(entry) or {}).get("kind", "image")
+
+    # -- the first frame ---------------------------------------------------
+
+    @Slot(str, result=bool)
+    def setInputImage(self, url):
+        """Take a dropped file as the first frame, if it is one we can send."""
+        path = QUrl(url).toLocalFile() if url.startswith("file:") else url
+        if not path or not os.path.isfile(path):
+            self.toast.emit("that is not a file painter can read", True)
+            return False
+        if Path(path).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            self.toast.emit("drop an image (png, jpg, webp)", True)
+            return False
+        self._input_image = path
+        self._uploaded = ("", "")     # a new file has not been uploaded yet
+        self.inputImageChanged.emit()
+        return True
+
+    @Slot(str)
+    def restoreInputImage(self, path):
+        """The remembered first frame, silently — a file that has since moved
+        is not something to greet him with a toast about at launch."""
+        if path and os.path.isfile(path):
+            self._input_image = path
+            self._uploaded = ("", "")
+            self.inputImageChanged.emit()
+
+    @Slot()
+    def clearInputImage(self):
+        self._input_image = ""
+        self._uploaded = ("", "")
+        self.inputImageChanged.emit()
 
     # -- backend -----------------------------------------------------------
 
@@ -769,6 +909,10 @@ class Painter(QObject):
         d["megapixels"] = res.get("megapixels", 1.0)
         d["multiple"] = res.get("multiple", 64)
         d["promptTransform"] = fam.get("prompt_transform", "none")
+        d["kind"] = fam.get("kind", "image")
+        vid = fam.get("video") or {}
+        d["duration"] = vid.get("duration", 5.0)
+        d["fps"] = vid.get("fps", 24.0)
         d["clipTypeSignificant"] = ((fam.get("text_encoder") or {})
                                     .get("clip_type_significant", True))
         return d
@@ -827,6 +971,16 @@ class Painter(QObject):
 
     # -- generating --------------------------------------------------------
 
+    @Slot(float, result=int)
+    def videoFrames(self, duration):
+        """How many frames that many seconds becomes, for the panel to show."""
+        entry = self.models.entry_at(self._selected)
+        fam = (self.reg.family_of(entry) or {}) if (entry and self.reg) else {}
+        spec = fam.get("video") or {}
+        return R.video_frames(duration, spec.get("fps", 24.0),
+                              int(spec.get("min_frames", 5)),
+                              int(spec.get("frame_chunk", 17)))
+
     @Slot("QVariantMap", int)
     def generate(self, params, count):
         entry = self.models.entry_at(self._selected)
@@ -837,6 +991,34 @@ class Painter(QObject):
             self.toast.emit("backend is not ready yet", True)
             return
 
+        # A first frame lives on THIS machine and the graph names a file in
+        # ComfyUI's input directory, so it has to be uploaded before the graph
+        # that refers to it can be built. Uploading once per file, not once per
+        # job: the same drop queued ten times is one upload.
+        if params.get("use_input_image") and self._input_image:
+            path = self._input_image
+            if self._uploaded[0] == path and self._uploaded[1]:
+                params = dict(params, input_image=self._uploaded[1])
+            else:
+                self._set_status("uploading the first frame...")
+
+                def uploaded(ref, error):
+                    if not ref:
+                        self._set_status("ready")
+                        self.toast.emit(f"could not send the first frame: {error}", True)
+                        return
+                    self._uploaded = (path, ref)
+                    self._start_jobs(entry, dict(params, input_image=ref), count)
+
+                self.client.upload_image(path, uploaded)
+                return
+        elif params.get("use_input_image"):
+            self.toast.emit("drop an image first, or turn the first frame off", True)
+            return
+
+        self._start_jobs(entry, params, count)
+
+    def _start_jobs(self, entry, params, count):
         base = dict(params)
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))
@@ -910,13 +1092,20 @@ class Painter(QObject):
             def got(data):
                 if not data:
                     return
-                try:
-                    data = pngmeta.upsert_text(
-                        data, pngmeta.describe(job.meta.get("params", {}),
-                                               job.meta.get("pairing")))
-                except ValueError:
-                    pass
-                dest = OUT_DIR / img["filename"]
+                # Only a PNG can carry the job that made it. A video goes down
+                # verbatim — SaveVideo has already written ComfyUI's own graph
+                # into its container metadata — and keeps the subfolder the
+                # backend filed it under (video/), which is where the gallery
+                # looks for it.
+                if str(img["filename"]).lower().endswith(".png"):
+                    try:
+                        data = pngmeta.upsert_text(
+                            data, pngmeta.describe(job.meta.get("params", {}),
+                                                   job.meta.get("pairing")))
+                    except ValueError:
+                        pass
+                dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
+                dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(data)
                 self.gallery.add(str(dest))
 

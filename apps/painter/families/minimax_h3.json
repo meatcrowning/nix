@@ -1,0 +1,50 @@
+{
+  "graph": "video_minimax.json",
+  "kind": "video",
+  "loader_shape": "unet",
+  "loader_class": "UNETLoader",
+  "prompt_transform": "none",
+  "toggles": {},
+  "defaults": {
+    "steps": 20,
+    "sampler_name": "res_multistep",
+    "scheduler": "simple",
+    "denoise": 1.0
+  },
+  "resolution": {
+    "megapixels": 0.3,
+    "multiple": 32,
+    "aspect": "1:1"
+  },
+  "video": {
+    "fps": 24.0,
+    "bit_depth": 8,
+    "duration": 5.0,
+    "min_frames": 5,
+    "frame_chunk": 17,
+    "upscale_method": "nearest-exact"
+  },
+  "lora": {
+    "aliases": {},
+    "loader": "LoraLoaderModelOnly"
+  },
+  "id": "minimax_h3",
+  "label": "MiniMax H3 (video)",
+  "detect": "minimax_h3",
+  "text_encoder": {
+    "te_model": "QWEN3VL",
+    "clip_type": "minimax",
+    "clip_type_significant": true,
+    "hidden": 5120
+  },
+  "vae": {
+    "arch": "flux2",
+    "prefer": ["minimax_h3_video_vae_fp16.safetensors"]
+  },
+  "vae_audio": {
+    "arch": "vae",
+    "prefer": ["minimax_h3_audio_vae_fp32.safetensors"]
+  },
+  "loader_note": "The file is comfy-quantized int8, so the fingerprinter reaches for OTUNetLoaderW8A8; the workflow these outputs came from loads it on the plain UNETLoader, which handles .comfy_quant itself. loader_class pins that.",
+  "frames_note": "Frame count is max(min_frames, round(duration*fps)) rounded UP to the next value congruent to min_frames mod frame_chunk -- 5s at 24fps is 124 frames, which is what the source workflow's ComfyMathExpression computed."
+}
