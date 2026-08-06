@@ -106,6 +106,43 @@ def main():
         check("round trip %s -> %s" % (p.replace(remote.MOUNT_ROOT, "$MP"), addr),
               back == os.path.normpath(p), repr(back))
 
+    # ---- prefetch: warms remote paths only, and never throws --------------
+    # It is fire-and-forget off the click path, so the contract is narrow: a
+    # local path must not spawn a thread at all (the kernel has already cached
+    # it, and a needless full read of a big local file is pure cost), and
+    # nothing it can hit — a vanished file, a dead mount — may reach the caller.
+    import tempfile
+    import threading
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        remote.MOUNT_ROOT = os.path.join(td, "filer-remote")
+        fake = os.path.join(remote.MOUNT_ROOT, "lam@fake")
+        os.makedirs(fake)
+        f = os.path.join(fake, "x.bin")
+        with open(f, "wb") as h:
+            h.write(b"\0" * (1 << 20))
+        r = remote.Remote()
+        before = threading.active_count()
+        r.prefetch("/etc/hostname")
+        r.prefetch("")
+        check("a local path spawns no prefetch",
+              threading.active_count() == before)
+        r.prefetch(f)
+        r.prefetch(f)                     # the second must not double up
+        check("a remote path is warmed once",
+              threading.active_count() <= before + 1)
+        for _ in range(200):              # let it finish
+            if not r._warming:
+                break
+            time.sleep(0.01)
+        check("the warm set empties again", not r._warming)
+        r.prefetch(os.path.join(fake, "gone.bin"))
+        for _ in range(200):
+            if not r._warming:
+                break
+            time.sleep(0.01)
+        check("a missing file is swallowed, not raised", not r._warming)
+
     print()
     if FAILED:
         print("%d FAILED: %s" % (len(FAILED), ", ".join(FAILED)))
