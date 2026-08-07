@@ -143,8 +143,18 @@ Item {
                 // — the first frame — and hands back ONE image per step, so
                 // that frame is all any client can be shown (its own web UI
                 // included). What refreshes is the denoising of frame 1.
+                //
+                // ...and the COUNT is there because that sentence is a claim,
+                // and a claim about a picture that looks unchanged is worth
+                // nothing without the observation beside it (docs/DESIGN.md
+                // §10.6). It is `previewTick`: how many frames have actually
+                // come down the socket for THIS job, reset at every start. If
+                // it climbs while the picture looks the same, the stream is
+                // fine and you are watching frame 1 denoise; if it sticks at 1,
+                // the previews really did stop and that is a different bug.
                 text: App.hasPreview
-                      ? (App.isVideo ? "sampling - frame 1 of the clip" : "sampling")
+                      ? ((App.isVideo ? "sampling - frame 1 of the clip, "
+                                      : "sampling - ") + App.previewTick + " updates")
                       : (pane.sourceIsVideo ? "clip" : "still")
                 color: App.hasPreview ? Theme.accent : Theme.textDim
             }
