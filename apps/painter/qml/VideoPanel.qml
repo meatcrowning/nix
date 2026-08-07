@@ -13,7 +13,7 @@ Panel {
     id: panel
     title: "video"
     badge: App.videoFrames(root.gen.duration) + "f"
-           + (root.gen.useInputImage && root.gen.loopVideo ? " loop" : "")
+           + (root.gen.useInputImage && root.gen.useLastFrame ? " +last" : "")
 
     Toggle {
         label: "first frame"
@@ -28,75 +28,11 @@ Panel {
         wrapMode: Text.Wrap
     }
 
-    // The drop target. It highlights while a drag is over it (docs/DESIGN.md
-    // §13) and says what it holds afterwards — a target that looks the same
-    // empty and full is a target you cannot check.
-    Item {
-        width: parent.width
-        height: root.gen.useInputImage ? 92 : 0
-        visible: root.gen.useInputImage
-        clip: true
-
-        Rectangle {
-            id: well
-            anchors.fill: parent
-            anchors.topMargin: 4
-            color: Theme.bg
-            border.width: 1
-            border.color: drop.containsDrag ? Theme.accent : Theme.border
-
-            Image {
-                id: shot
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.margins: 4
-                width: height
-                source: App.inputImageUrl
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                cache: false
-                sourceSize.width: 200
-                visible: App.inputImage !== ""
-            }
-
-            PixelText {
-                anchors.left: shot.visible ? shot.right : parent.left
-                anchors.leftMargin: 8
-                anchors.right: parent.right
-                anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                elide: Text.ElideMiddle
-                wrapMode: Text.Wrap
-                text: App.inputImage === ""
-                      ? (drop.containsDrag ? "drop it" : "drag an image here")
-                      : App.inputImage
-                color: App.inputImage === "" ? Theme.dim : Theme.text
-            }
-
-            DropArea {
-                id: drop
-                anchors.fill: parent
-                keys: ["text/uri-list"]
-                // NEVER decode a uri-list in QML (docs/DESIGN.md §13) — QUrl does
-                // it once, in python, in App.setInputImage.
-                onDropped: function (d) {
-                    if (d.hasUrls && d.urls.length > 0 && App.setInputImage(d.urls[0]))
-                        d.accept()
-                }
-            }
-        }
-    }
-
-    // LOOPING IS THE SAME FRAME AT BOTH ENDS — the node takes an optional
-    // `last_frame`, so the dropped image goes in twice and the clip returns to
-    // where it started. Only offered with a first frame: there is nothing to
-    // loop back to in text-to-video.
-    Toggle {
-        label: "loop (first frame = last)"
-        visible: root.gen.useInputImage
-        checked: root.gen.loopVideo
-        onToggled: function (v) { root.set("loopVideo", v) }
+    FrameWell {
+        active: root.gen.useInputImage
+        path: App.inputImage
+        url: App.inputImageUrl
+        accepts: function (u) { return App.setInputImage(u) }
     }
 
     Row {
@@ -107,6 +43,36 @@ Panel {
             tone: Theme.textDim
             winActive: root.winActive
             onClicked: App.clearInputImage()
+        }
+    }
+
+    // THE OTHER END OF THE CLIP. `last_frame` is an optional input on the node,
+    // so a second dropped image is one more link, not another graph — the clip
+    // is made to arrive at it. Only offered with a first frame: there is nothing
+    // to end on in text-to-video. Drop the SAME image in both wells to loop.
+    Toggle {
+        label: "last frame"
+        visible: root.gen.useInputImage
+        checked: root.gen.useLastFrame
+        onToggled: function (v) { root.set("useLastFrame", v) }
+    }
+
+    FrameWell {
+        active: root.gen.useInputImage && root.gen.useLastFrame
+        path: App.lastImage
+        url: App.lastImageUrl
+        emptyText: "drag the frame to end on here"
+        accepts: function (u) { return App.setLastImage(u) }
+    }
+
+    Row {
+        spacing: 8
+        visible: root.gen.useInputImage && root.gen.useLastFrame && App.lastImage !== ""
+        TextButton {
+            label: "[ clear ]"
+            tone: Theme.textDim
+            winActive: root.winActive
+            onClicked: App.clearLastImage()
         }
     }
 

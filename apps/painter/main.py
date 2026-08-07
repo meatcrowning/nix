@@ -576,6 +576,7 @@ class Painter(QObject):
     busyChanged = Signal()
     optionsChanged = Signal()
     inputImageChanged = Signal()
+    lastImageChanged = Signal()
     previewChanged = Signal()
     toast = Signal(str, bool)          # message, isError
 
@@ -606,7 +607,9 @@ class Painter(QObject):
         self.preview = None               # the live-preview image provider, set in main()
         self._preview_tick = 0            # an Image reloads on a CHANGED url, so count
         self._input_image = ""            # the first frame, as a local path
+        self._last_image = ""             # the frame to end on, likewise
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
+        self._uploaded_last = ("", "")    # the same, for the last frame
 
         self.reg = None
         self.client = C.ComfyClient()
@@ -718,6 +721,10 @@ class Painter(QObject):
     inputImageUrl = Property(str, lambda self: (
         QUrl.fromLocalFile(self._input_image).toString() if self._input_image else ""),
         notify=inputImageChanged)
+    lastImage = Property(str, lambda self: self._last_image, notify=lastImageChanged)
+    lastImageUrl = Property(str, lambda self: (
+        QUrl.fromLocalFile(self._last_image).toString() if self._last_image else ""),
+        notify=lastImageChanged)
 
     def _family_kind(self):
         entry = self.models.entry_at(self._selected)
@@ -725,21 +732,39 @@ class Painter(QObject):
             return ""
         return (self.reg.family_of(entry) or {}).get("kind", "image")
 
-    # -- the first frame ---------------------------------------------------
+    # -- the dropped frames ------------------------------------------------
+
+    def _dropped_path(self, url):
+        """A dropped url as a local image path, or "" with the reason said."""
+        path = QUrl(url).toLocalFile() if url.startswith("file:") else url
+        if not path or not os.path.isfile(path):
+            self.toast.emit("that is not a file painter can read", True)
+            return ""
+        if Path(path).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            self.toast.emit("drop an image (png, jpg, webp)", True)
+            return ""
+        return path
 
     @Slot(str, result=bool)
     def setInputImage(self, url):
         """Take a dropped file as the first frame, if it is one we can send."""
-        path = QUrl(url).toLocalFile() if url.startswith("file:") else url
-        if not path or not os.path.isfile(path):
-            self.toast.emit("that is not a file painter can read", True)
-            return False
-        if Path(path).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-            self.toast.emit("drop an image (png, jpg, webp)", True)
+        path = self._dropped_path(url)
+        if not path:
             return False
         self._input_image = path
         self._uploaded = ("", "")     # a new file has not been uploaded yet
         self.inputImageChanged.emit()
+        return True
+
+    @Slot(str, result=bool)
+    def setLastImage(self, url):
+        """The same, for the frame the clip is made to end on."""
+        path = self._dropped_path(url)
+        if not path:
+            return False
+        self._last_image = path
+        self._uploaded_last = ("", "")
+        self.lastImageChanged.emit()
         return True
 
     @Slot(str)
@@ -751,11 +776,24 @@ class Painter(QObject):
             self._uploaded = ("", "")
             self.inputImageChanged.emit()
 
+    @Slot(str)
+    def restoreLastImage(self, path):
+        if path and os.path.isfile(path):
+            self._last_image = path
+            self._uploaded_last = ("", "")
+            self.lastImageChanged.emit()
+
     @Slot()
     def clearInputImage(self):
         self._input_image = ""
         self._uploaded = ("", "")
         self.inputImageChanged.emit()
+
+    @Slot()
+    def clearLastImage(self):
+        self._last_image = ""
+        self._uploaded_last = ("", "")
+        self.lastImageChanged.emit()
 
     # -- backend -----------------------------------------------------------
 
@@ -1062,32 +1100,51 @@ class Painter(QObject):
             self.toast.emit("backend is not ready yet", True)
             return
 
-        # A first frame lives on THIS machine and the graph names a file in
+        # A dropped frame lives on THIS machine and the graph names a file in
         # ComfyUI's input directory, so it has to be uploaded before the graph
         # that refers to it can be built. Uploading once per file, not once per
         # job: the same drop queued ten times is one upload.
-        if params.get("use_input_image") and self._input_image:
-            path = self._input_image
-            if self._uploaded[0] == path and self._uploaded[1]:
-                params = dict(params, input_image=self._uploaded[1])
-            else:
-                self._set_status("uploading the first frame...")
-
-                def uploaded(ref, error):
-                    if not ref:
-                        self._set_status("ready")
-                        self.toast.emit(f"could not send the first frame: {error}", True)
-                        return
-                    self._uploaded = (path, ref)
-                    self._start_jobs(entry, dict(params, input_image=ref), count)
-
-                self.client.upload_image(path, uploaded)
-                return
-        elif params.get("use_input_image"):
+        if params.get("use_input_image") and not self._input_image:
             self.toast.emit("drop an image first, or turn the first frame off", True)
             return
+        if params.get("use_last_frame") and not self._last_image:
+            self.toast.emit("drop a last frame, or turn the last frame off", True)
+            return
 
-        self._start_jobs(entry, params, count)
+        pending = []
+        if params.get("use_input_image"):
+            pending.append(("input_image", self._input_image, "_uploaded", "first frame"))
+        if params.get("use_last_frame"):
+            pending.append(("last_image", self._last_image, "_uploaded_last", "last frame"))
+        self._upload_then_start(entry, params, count, pending)
+
+    def _upload_then_start(self, entry, params, count, pending):
+        """Send whatever dropped frames this job needs, one at a time, then go.
+
+        Uploads are async, so this walks the list by re-entering itself from the
+        callback rather than waiting on each one.
+        """
+        if not pending:
+            self._start_jobs(entry, params, count)
+            return
+        key, path, slot, label = pending[0]
+        cached = getattr(self, slot)
+        if cached[0] == path and cached[1]:
+            self._upload_then_start(entry, dict(params, **{key: cached[1]}),
+                                    count, pending[1:])
+            return
+        self._set_status(f"uploading the {label}...")
+
+        def uploaded(ref, error):
+            if not ref:
+                self._set_status("ready")
+                self.toast.emit(f"could not send the {label}: {error}", True)
+                return
+            setattr(self, slot, (path, ref))
+            self._upload_then_start(entry, dict(params, **{key: ref}),
+                                    count, pending[1:])
+
+        self.client.upload_image(path, uploaded)
 
     def _start_jobs(self, entry, params, count):
         base = dict(params)

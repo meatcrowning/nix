@@ -449,6 +449,7 @@ class Registry:
         fps = float(p.get("fps", spec.get("fps", 24.0)))
         mp = float(p.get("megapixels") or (fam.get("resolution") or {}).get("megapixels", 0.3))
         image = (p.get("input_image") or "").strip() if p.get("use_input_image") else ""
+        last = (p.get("last_image") or "").strip() if p.get("use_last_frame") else ""
 
         # --- LoRA chain (same shape as the image path) ------------------------
         loras = p.get("loras") or []
@@ -466,12 +467,15 @@ class Registry:
 
         if image:
             g.set_input("load_image", "image", image)
-            # LOOPING IS THE SAME FRAME AT BOTH ENDS. `last_frame` is an
-            # optional input on the node, so a clip that starts and finishes on
-            # the dropped image is one more link, not another graph — and it is
-            # only offered while there IS a dropped image to put there.
-            if p.get("loop_video"):
-                g.set_input("video", "last_frame", [g.id_of("load_image"), 0])
+            # THE FRAME TO END ON. `last_frame` is an optional input on the
+            # node, so a second dropped image is one more link, not another
+            # graph — and it is only offered while there IS a first frame to
+            # start from. Drop the same file in both wells and the clip loops.
+            if last:
+                g.set_input("load_image_last", "image", last)
+                g.set_input("video", "last_frame", [g.id_of("load_image_last"), 0])
+            else:
+                g.drop("load_image_last")
             g.set_input("scale_image", "megapixels", mp)
             g.set_input("scale_image", "resolution_steps",
                         int((fam.get("resolution") or {}).get("multiple", 32)))
@@ -491,6 +495,7 @@ class Registry:
             g.drop("image_size")
             g.drop("scale_image")
             g.drop("load_image")
+            g.drop("load_image_last")
 
         # --- sampling ---------------------------------------------------------
         g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "res_multistep"))
@@ -510,7 +515,8 @@ class Registry:
         params = {**p, "positive": pos, "negative": "", "frames": frames,
                   "fps": fps, "megapixels": mp, "kind": "video",
                   "input_image": image, "use_input_image": bool(image),
-                  "loop_video": bool(image and p.get("loop_video"))}
+                  "last_image": last if image else "",
+                  "use_last_frame": bool(image and last)}
         if w and h:
             params["width"], params["height"] = int(w), int(h)
         return {"prompt": prompt, "pairing": pairing, "params": params}
