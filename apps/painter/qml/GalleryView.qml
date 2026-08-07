@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtMultimedia
 import "../../qmlcommon"
 
 // Results, newest first.  Every image carries the parameters that made it in a
@@ -158,12 +159,59 @@ Item {
                     sourceSize.width: 420
                 }
 
+                // HOVER A CLIP AND IT PLAYS, silently — the preview a video
+                // thumbnail has on the web, and the reason a poster frame is
+                // not enough: which of five takes this is shows in the motion,
+                // not in frame 0. Loaded ONLY while the pointer is on the tile,
+                // so a grid of sixty clips is never sixty decoders — the mouse
+                // is in one cell at a time, and leaving it destroys the player
+                // rather than pausing one that goes on holding a file open.
+                //
+                // MUTED, and not merely quiet: the model generates sound with
+                // the picture and he listens to music while these run — the
+                // same rule the preview pane and the muted drag copy follow.
+                // The poster stays underneath, so the tile shows the frame it
+                // always did until there are real frames to draw over it.
+                Loader {
+                    id: hoverPlay
+                    anchors.fill: still
+                    // `=== true`, not a bare role: a delegate being torn down
+                    // (a gallery reset while the pointer is on a tile) evaluates
+                    // this once with its model context already gone, and a bare
+                    // `isVideo` is then `undefined` — a QML warning, which in
+                    // this app fails the harness.
+                    active: isVideo === true && tileMa.containsMouse
+                    sourceComponent: Item {
+                        // Aliased so the harness can assert what a person can
+                        // only hear: an AudioOutput is a plain QObject, not an
+                        // Item, so nothing walking the scene can reach it.
+                        property alias playing: mp.playing
+                        property alias muted: hush.muted
+                        property alias volume: hush.volume
+                        AudioOutput { id: hush; muted: true; volume: 0 }
+                        MediaPlayer {
+                            id: mp
+                            source: url
+                            videoOutput: vo
+                            audioOutput: hush
+                            loops: MediaPlayer.Infinite
+                            Component.onCompleted: play()
+                        }
+                        VideoOutput {
+                            id: vo
+                            anchors.fill: parent
+                            fillMode: VideoOutput.PreserveAspectFit
+                        }
+                    }
+                }
+
                 // The play marker: this tile is a clip, not a still. DRAWN, not
                 // lettered — "▶" is glyph 0 in two of the three pixel fonts, so
                 // it is a staircase of 1px rows (docs/DESIGN.md §2.3), the same
-                // construction filer's video tiles use.
+                // construction filer's video tiles use. It says "this is a
+                // clip", so it goes while the clip is the thing on screen.
                 Loader {
-                    active: isVideo
+                    active: isVideo === true && !hoverPlay.active
                     anchors { left: parent.left; top: parent.top; margins: 5 }
                     sourceComponent: Rectangle {
                         width: 15
