@@ -1482,7 +1482,7 @@ def QtIODeviceWriteOnly():
     return QIODevice.OpenModeFlag.WriteOnly
 
 
-def test_muted(ctl, tmp):
+def test_muted(win, ctl, tmp):
     """A muted copy is a derivative: hidden from the history, reused, and put
     on the clipboard as a file URI rather than as pixels."""
     import main as P
@@ -1525,6 +1525,25 @@ def test_muted(ctl, tmp):
           and ctl.property("hasPreview") is True
           and not ctl.preview.image.isNull(),
           (ctl.property("previewTick"), ctl.property("hasPreview")))
+    # ...and it keeps counting, which is the whole point of the count on the
+    # pane: a video job's frames all LOOK like the same picture (ComfyUI slices
+    # frame 1 out of the latent), so the number beside them is the only thing
+    # that says the stream is alive.
+    for _ in range(2):
+        ctl._on_preview(None, bytes(buf.data()), "jpeg")
+        spin(60)
+    check("every frame counts, not just the first",
+          ctl.property("previewTick") == before_tick + 3,
+          ctl.property("previewTick"))
+    win.setProperty("showPreview", True)
+    spin(150)
+    tag = find(find(win.contentItem(), "PreviewPane"), "PixelText",
+               pred=lambda it: str(it.property("text")).startswith("sampling"))
+    check("...and the pane says how many have arrived",
+          tag is not None and ("%d updates" % ctl.property("previewTick")) in tag.property("text"),
+          tag and tag.property("text"))
+    win.setProperty("showPreview", False)
+    spin(80)
     ctl._busy = False
     check("...and a finished job stops claiming to have one",
           ctl.property("hasPreview") is False)
@@ -1764,7 +1783,7 @@ def main():
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
     print("== inject ==");            test_inject(win, ctl, tmp)
-    print("== muted copies ==");      test_muted(ctl, tmp)
+    print("== muted copies ==");      test_muted(win, ctl, tmp)
     print("== split + state ==");     test_split_and_state(win, ctl, keep)
     print("== restore ==");           keep2 = test_restore(tmp)
     print("== startup ==");           test_startup(ctl)

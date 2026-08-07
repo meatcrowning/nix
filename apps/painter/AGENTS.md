@@ -220,8 +220,18 @@ own web UI included). `--preview-method auto` resolves to Latent2RGB, and the
 `x0[:1, :, :1]`, one frame again, and needs a `models/vae_approx/taehv*` that is
 not installed. **Anything more would be a local patch to
 `/home/lam/comfy/latent_preview.py`**, i.e. a fourth local commit on a checkout
-that is maintained by rebasing onto upstream tags. The pane therefore says
-`sampling - frame 1 of the clip` rather than looking frozen.
+that is maintained by rebasing onto upstream tags.
+
+So the pane says `sampling - frame 1 of the clip, N updates`. The COUNT is the
+observation beside the claim (docs/DESIGN.md §10.6): the frames all look like
+the same picture, so the number is the only thing that distinguishes a live
+stream from a dead one. If it climbs, previews are arriving and you are
+watching frame 1 denoise; **if it sticks at 1, that is a different bug** — the
+place to look is `comfy.py`'s `_on_binary` (it drops anything that is not
+BinaryEventTypes.PREVIEW_IMAGE = 1, and ComfyUI sends the newer
+PREVIEW_IMAGE_WITH_METADATA = 4 shape instead to any client that announced
+`supports_preview_metadata` in the websocket handshake; painter announces
+nothing, which is what keeps it on the old shape).
 
 Two things about the backend, both worth knowing before debugging an empty pane:
 
