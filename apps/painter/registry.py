@@ -19,6 +19,41 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FAMILY_DIR = os.path.join(HERE, "families")
 MODEL_ROOT = os.environ.get("PAINTER_MODELS", "/home/lam/models")
 
+# THE FOUR THINGS HE REACHES FOR, as one button each above the model list.
+# A mode is a SHORTCUT to a model, not a new kind of model: picking one selects
+# the file named here and greys the list out, and turning it off hands the list
+# back. `edit` additionally asks its family for the edit pipeline (see
+# `build()`), which is why it is the only one that can be unavailable for a
+# reason other than a missing file.
+#
+# `prefer` is tried in order, first as an exact filename and then as a
+# substring, so a renamed or re-quantised file still lands somewhere sensible
+# instead of the mode going dark; the last resort is the first model of the
+# family. Which file each mode means is HIS choice (krea 2 raw fp8 for `real`,
+# 2026-08-06), not something to be re-derived from what looks newest.
+MODES = [
+    {"id": "anime", "label": "anime", "family": "anima",
+     "prefer": ["anima-base-v1.0.safetensors", "base"],
+     "tip": "Anima - the anime base model"},
+    {"id": "real", "label": "real", "family": "krea2",
+     "prefer": ["krea2_raw_fp8_scaled.safetensors", "raw_fp8", "raw"],
+     "tip": "Flux Krea 2, raw"},
+    {"id": "edit", "label": "edit", "family": "flux2", "needs": "edit",
+     "prefer": ["flux-2-klein-9b-fp8.safetensors", "klein"],
+     "tip": "Edit a dropped image - Flux 2 Klein"},
+    {"id": "video", "label": "video", "family": "minimax_h3",
+     "prefer": ["minimax_h3_fl2va_pruned_int8_convrot.safetensors", "minimax"],
+     "tip": "MiniMax H3 - picture and sound"},
+]
+
+
+def mode_spec(mode_id: str):
+    for m in MODES:
+        if m["id"] == mode_id:
+            return m
+    return None
+
+
 SUB = {
     "diffusion": ("diffusion_models", "unet"),
     "checkpoint": ("checkpoints",),
@@ -177,6 +212,44 @@ class Registry:
                 return e
         return None
 
+    # -- modes -------------------------------------------------------------
+
+    def mode_model(self, mode_id: str):
+        """The base model a mode button selects, or None if it is not here.
+
+        Exact filename first, then substring, then any model of the family —
+        the mode is a shortcut and a shortcut that goes dark because a file was
+        re-quantised is worse than one that lands on the sibling next to it.
+        """
+        spec = mode_spec(mode_id)
+        if not spec:
+            return None
+        cands = [e for e in self.base_models() if e.family == spec["family"]]
+        if not cands:
+            return None
+        if spec.get("needs") == "edit":
+            cands = [e for e in cands if (self.family_of(e) or {}).get("edit")]
+            if not cands:
+                return None
+        for want in spec.get("prefer") or []:
+            for e in cands:
+                if e.name == want:
+                    return e
+        for want in spec.get("prefer") or []:
+            for e in cands:
+                if want.lower() in e.name.lower():
+                    return e
+        return cands[0]
+
+    def mode_of(self, entry: Entry) -> str:
+        """Which mode this model IS, so a hand-picked one can light its button."""
+        if entry is None:
+            return ""
+        for spec in MODES:
+            if entry.family == spec["family"] and self.mode_model(spec["id"]) is entry:
+                return spec["id"]
+        return ""
+
     # -- pairing -----------------------------------------------------------
 
     def family_of(self, entry: Entry):
@@ -331,8 +404,20 @@ class Registry:
         if pairing["problems"]:
             raise G.GraphError("; ".join(pairing["problems"]))
 
-        g = G.Graph(G.load_template(fam.get("graph", "universal.json")))
+        # EDITING IS A DIFFERENT PIPELINE, not a flag on the image one: no empty
+        # latent to sample from, no negative prompt to encode, and the size comes
+        # out of the dropped image. A family says whether it can do it at all
+        # (`edit` block, flux2 only so far) and which template that takes.
+        espec = fam.get("edit") or {}
+        edit = bool((params or {}).get("edit")) and bool(espec)
+        if (params or {}).get("edit") and not espec:
+            raise G.GraphError(f"{fam.get('label', fam['id'])} cannot edit an image")
+
+        g = G.Graph(G.load_template(
+            espec["graph"] if edit else fam.get("graph", "universal.json")))
         defaults = self.defaults_for(entry)
+        if edit:
+            defaults = {**defaults, **(espec.get("defaults") or {})}
         p = {**defaults, **(params or {})}
 
         # --- loader ---------------------------------------------------------
@@ -366,6 +451,9 @@ class Registry:
             g.set_input("vae", "vae_name", pairing["vae"].name)
             if pairing.get("vae_audio") is not None:
                 g.set_input("vae_audio", "vae_name", pairing["vae_audio"].name)
+
+        if edit:
+            return self._build_edit(entry, fam, g, p, pairing, object_info)
 
         if fam.get("kind") == "video":
             return self._build_video(entry, fam, g, p, pairing, object_info)
@@ -434,6 +522,65 @@ class Registry:
                        "width": int(w), "height": int(h), "toggles": toggles},
         }
 
+
+    # -- editing -------------------------------------------------------------
+
+    def _build_edit(self, entry, fam, g, p, pairing, object_info):
+        """The edit branch of build(): one image in, one prompt, one image out.
+
+        Everything about the size is decided by the dropped image — it is scaled
+        to the family's pixel budget and `GetImageSize` feeds both the latent and
+        Flux2Scheduler — so there is no aspect, no width/height and no batch of
+        different shapes to reconcile.  The negative conditioning is the positive
+        one ZEROED OUT rather than a second prompt, which is why the negative box
+        is gone rather than typed into nothing (the same rule the video branch
+        follows for its own missing controls).
+        """
+        spec = fam.get("edit") or {}
+        image = (p.get("input_image") or "").strip()
+        if not image:
+            raise G.GraphError("drop an image to edit first")
+
+        # --- LoRA chain (same shape as the image path; there IS a clip here) ---
+        loras = p.get("loras") or []
+        if loras:
+            g.insert_lora_chain(loras, [g.id_of("loader"), 0], [g.id_of("clip"), 0])
+
+        pos = G.apply_prompt_transform(p.get("positive", ""), fam.get("prompt_transform"))
+        g.set_input("encode_pos", "text", pos)
+        g.set_input("load_image", "image", image)
+
+        mp = float(p.get("megapixels") or spec.get("megapixels", 1.5))
+        g.set_input("scale_image", "megapixels", mp)
+        g.set_input("scale_image", "resolution_steps", int(spec.get("resolution_steps", 1)))
+        g.set_input("scale_image", "upscale_method",
+                    spec.get("upscale_method", "nearest-exact"))
+
+        g.set_input("model_sampling", "shift", float(p.get("shift", spec.get("shift", 6.0))))
+        g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "euler"))
+        g.set_input("scheduler", "steps", int(p.get("steps", 15)))
+        g.set_input("guider", "cfg", float(p.get("cfg", 1.0)))
+        g.set_input("noise", "noise_seed", int(p.get("seed", 0)))
+        g.set_input("latent", "batch_size", int(p.get("batch_size", 1)))
+        g.set_input("save", "filename_prefix",
+                    p.get("filename_prefix", spec.get("filename_prefix", "painter-edit")))
+
+        prompt = g.to_prompt()
+        if object_info is not None:
+            problems = G.validate(prompt, object_info)
+            if problems:
+                raise G.ValidationError(problems)
+        params = {**p, "positive": pos, "negative": "", "kind": "edit",
+                  "megapixels": mp, "input_image": image, "edit": True}
+        # What the recorded parameters must NOT claim: Flux2Scheduler takes a
+        # step count and the image's size and nothing else, so the family's
+        # image-path scheduler/denoise/add_noise would be three settings the PNG
+        # says were used and were not (docs/DESIGN.md §10, and "inject params"
+        # would put them back into a job that ignores them).
+        for unused in ("scheduler", "denoise", "add_noise", "width", "height",
+                       "aspect", "multiple"):
+            params.pop(unused, None)
+        return {"prompt": prompt, "pairing": pairing, "params": params}
 
     # -- video --------------------------------------------------------------
 

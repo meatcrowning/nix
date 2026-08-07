@@ -577,6 +577,7 @@ class Painter(QObject):
     optionsChanged = Signal()
     inputImageChanged = Signal()
     lastImageChanged = Signal()
+    modeChanged = Signal()
     previewChanged = Signal()
     toast = Signal(str, bool)          # message, isError
 
@@ -610,6 +611,8 @@ class Painter(QObject):
         self._last_image = ""             # the frame to end on, likewise
         self._uploaded = ("", "")         # (local path, the ref ComfyUI knows it by)
         self._uploaded_last = ("", "")    # the same, for the last frame
+        self._mode = ""                   # anime / real / edit / video, or "" for the list
+        self._want_mode = ""              # a remembered mode, until the rows land
 
         self.reg = None
         self.client = C.ComfyClient()
@@ -717,6 +720,11 @@ class Painter(QObject):
     # rather than offering controls the graph would ignore.
     isVideo = Property(bool, lambda self: self._family_kind() == "video",
                        notify=modelChanged)
+    # WHICH MODE BUTTON IS LIT, or "" when the model list is in charge. A mode
+    # is a shortcut to one model (registry.MODES), so it also decides whether
+    # the list is greyed out — and `edit` decides which pipeline is built.
+    mode = Property(str, lambda self: self._mode, notify=modeChanged)
+    isEdit = Property(bool, lambda self: self._mode == "edit", notify=modeChanged)
     inputImage = Property(str, lambda self: self._input_image, notify=inputImageChanged)
     inputImageUrl = Property(str, lambda self: (
         QUrl.fromLocalFile(self._input_image).toString() if self._input_image else ""),
@@ -954,6 +962,13 @@ class Painter(QObject):
             self.selectModel(0)
         else:
             self.selectModel(min(self._selected, len(rows) - 1))
+        # A mode outranks the remembered selection, because it IS one — and it
+        # can only be applied once there are rows to select from, which is why
+        # a restore at startup is deferred to here (same shape as _want_model).
+        want_mode = self._want_mode or self._mode
+        if want_mode:
+            self._want_mode = ""
+            self.setMode(want_mode)
         self._set_status(f"{len(rows)} models")
 
     def _retry_scan(self):
@@ -1003,6 +1018,74 @@ class Painter(QObject):
         self.choices.set_rows(rows)
         self.loras.clear()
         self.modelChanged.emit()
+
+    # -- modes -------------------------------------------------------------
+
+    @Slot(result="QVariantList")
+    def modes(self):
+        """The switcher's buttons: what each one is, and whether it can be had.
+
+        A mode whose model is not on this machine is offered DISABLED with the
+        reason on it rather than silently missing — the row of four is the same
+        four everywhere, and a button that vanished would read as a bug
+        (docs/DESIGN.md §10).
+        """
+        out = []
+        for spec in R.MODES:
+            entry = self.reg.mode_model(spec["id"]) if self.reg else None
+            out.append({
+                "id": spec["id"], "label": spec["label"],
+                "available": entry is not None,
+                "model": getattr(entry, "name", ""),
+                "tip": spec["tip"] if entry is not None
+                       else f"no {spec['family']} model found",
+            })
+        return out
+
+    @Slot(str)
+    def setMode(self, mode_id):
+        """Turn a mode on (selecting its model), or off with "".
+
+        Off does NOT change the selection: he came to this model through the
+        button, and dropping him back onto whatever was selected before would
+        undo a choice he did not make. It only hands the list back.
+        """
+        mode_id = mode_id or ""
+        if not mode_id:
+            if self._mode:
+                self._mode = ""
+                self.modeChanged.emit()
+            return
+        if self.reg is None or self.models.rowCount() == 0:
+            # The scan has not landed yet (startup restore) — remember it.
+            self._want_mode = mode_id
+            return
+        entry = self.reg.mode_model(mode_id)
+        if entry is None:
+            spec = R.mode_spec(mode_id) or {}
+            self.toast.emit(f"no {spec.get('family', mode_id)} model found here", True)
+            # A mode whose model has gone (a rescan of a mount that dropped out)
+            # must not stay lit over a list it is also greying out.
+            if self._mode == mode_id:
+                self._mode = ""
+                self.modeChanged.emit()
+            return
+        i = self.models.index_of_name(entry.name)
+        if i < 0:
+            self.toast.emit(f"{entry.name} is not in the list", True)
+            return
+        self._mode = mode_id
+        self._want_mode = ""
+        if i != self._selected:
+            self.selectModel(i)
+        self.modeChanged.emit()
+
+    @Slot(str)
+    def restoreMode(self, mode_id):
+        """The remembered mode, applied when the rows land (like the model)."""
+        self._want_mode = mode_id or ""
+        if mode_id:
+            self.setMode(mode_id)
 
     @Slot(result="QVariant")
     def modelDefaults(self):
@@ -1098,6 +1181,18 @@ class Painter(QObject):
             return
         if self._object_info is None:
             self.toast.emit("backend is not ready yet", True)
+            return
+
+        # EDITING NEEDS THE PICTURE, and it is the one input with no default —
+        # so it is checked before anything is uploaded rather than failing as a
+        # node error with an empty filename in it.
+        if params.get("edit"):
+            if not self._input_image:
+                self.toast.emit("drop an image to edit first", True)
+                return
+            self._upload_then_start(
+                entry, params, count,
+                [("input_image", self._input_image, "_uploaded", "image")])
             return
 
         # A dropped frame lives on THIS machine and the graph names a file in
@@ -1312,12 +1407,8 @@ class Painter(QObject):
         if is_muted_copy(src):
             self._clip_file(src)
             return
-        dest = src.with_name(f"{src.stem}{MUTED_TAG}{src.suffix}")
-        try:
-            fresh = dest.exists() and dest.stat().st_mtime >= src.stat().st_mtime
-        except OSError:
-            fresh = False
-        if fresh:
+        dest = self._muted_dest(src)
+        if self._muted_fresh(src, dest):
             self._clip_file(dest)
             return
 
@@ -1332,13 +1423,93 @@ class Painter(QObject):
             self._clip_file(dest)
             self._set_status("ready")
 
+        self._run_async(self._mute_argv(src, dest), done)
+
+    # The muted copy, in the three places that need it: the clipboard action
+    # above, the drag payload below, and the freshness rule both share.
+    def _muted_dest(self, src: Path) -> Path:
+        return src.with_name(f"{src.stem}{MUTED_TAG}{src.suffix}")
+
+    def _muted_fresh(self, src: Path, dest: Path) -> bool:
+        try:
+            return dest.exists() and dest.stat().st_mtime >= src.stat().st_mtime
+        except OSError:
+            return False
+
+    @staticmethod
+    def _mute_argv(src: Path, dest: Path) -> list:
         # -map 0 -map -0:a keeps everything that is not audio; -dn drops the
         # data streams an mp4 copy otherwise refuses. Same command filer's
-        # videoconv uses for "copy without audio".
-        self._run_async(["ffmpeg", "-hide_banner", "-nostdin", "-y",
-                         "-loglevel", "error", "-i", str(src),
-                         "-map", "0", "-map", "-0:a", "-c", "copy", "-dn",
-                         "-movflags", "+faststart", str(dest)], done)
+        # videoconv uses for "copy without audio" — a remux, not a re-encode,
+        # so it runs at IO speed and the picture is bit-identical.
+        return ["ffmpeg", "-hide_banner", "-nostdin", "-y",
+                "-loglevel", "error", "-i", str(src),
+                "-map", "0", "-map", "-0:a", "-c", "copy", "-dn",
+                "-movflags", "+faststart", str(dest)]
+
+    # -- dragging an output out of the window -------------------------------
+
+    @Slot(str, bool, result=str)
+    def dragUriList(self, path, original=False):
+        """The `text/uri-list` payload for dragging one output to another app.
+
+        A CLIP GOES OUT MUTED, unless the drag was started with Shift held
+        ([his] choice, 2026-08-06): the model generates sound with the picture,
+        and dropping a clip into surfer — the case he named — is a page that
+        starts playing it. The silent copy is the same `<name>-muted.mp4` the
+        right-click action makes, reused when it is already there.
+
+        Wayland cannot tell what is under the cursor, so the choice is made
+        HERE, at the press, and the file has to exist by then: a payload naming
+        a file that is still being written is a drop that lands on nothing.
+        Hence the one synchronous ffmpeg in this app — a `-c copy` remux of a
+        clip this size is tens of milliseconds, it happens only on a press on a
+        video tile, and it is bounded so a pathological file cannot wedge the
+        window. If it fails at all, the original goes out with its sound and
+        the toast says so rather than the drag quietly doing nothing.
+
+        CRLF-terminated per RFC 2483, and percent-encoded by QUrl — never by
+        hand in QML (docs/DESIGN.md §13).
+        """
+        src = Path(str(path).replace("file://", ""))
+        if not src.exists():
+            return ""
+        out = src
+        if (src.suffix.lower() in VIDEO_SUFFIXES and not original
+                and not is_muted_copy(src)):
+            out = self._mute_for_drag(src)
+        return QUrl.fromLocalFile(str(out)).toString() + "\r\n"
+
+    def _mute_for_drag(self, src: Path) -> Path:
+        """A silent copy of `src` to hand to the drag, made now if need be.
+
+        The clipboard's copy sits BESIDE the original because he asked for a
+        file; this one is plumbing, so a fresh sibling is reused when there is
+        one and otherwise the copy goes in the CACHE, keeping its name (the
+        receiving app shows it) without leaving a second file in the gallery
+        folder for every clip he happens to drag.
+        """
+        sibling = self._muted_dest(src)
+        if self._muted_fresh(src, sibling):
+            return sibling
+        try:
+            st = src.stat()
+            dest = (CACHE / "muted" / f"{int(st.st_mtime)}-{st.st_size}"
+                    / sibling.name)
+        except OSError:
+            return src
+        if dest.exists() and dest.stat().st_size > 0:
+            return dest
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            rc = subprocess.run(self._mute_argv(src, dest),
+                                capture_output=True, timeout=60).returncode
+        except (OSError, subprocess.SubprocessError):
+            rc = 1
+        if rc != 0 or not dest.exists():
+            self.toast.emit("could not mute it - dragging the original", True)
+            return src
+        return dest
 
     def _clip_file(self, path):
         """Put `path` on the clipboard as a FILE, via `pylib/clipfile.py`.

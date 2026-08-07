@@ -1,0 +1,141 @@
+{
+  "_comment": [
+    "The Flux 2 Klein EDIT graph, transcribed from the workflow that produced",
+    "the Flux2-Klein_0000*.png outputs (read back out of their embedded",
+    "`prompt` chunk).  Same rules as the other two templates: nodes are",
+    "addressed by `painter_role`, never by id.",
+    "",
+    "It is not the universal graph with an image bolted on.  Editing has no",
+    "empty latent to sample from and no negative prompt to type: the dropped",
+    "image is scaled to the pixel budget, its size becomes the latent's size",
+    "(GetImageSize) AND the scheduler's shift basis (Flux2Scheduler takes",
+    "width/height), and its VAE encoding is attached to BOTH conditionings as a",
+    "ReferenceLatent -- the negative one being the positive zeroed out, which is",
+    "what CFG 1.0 wants.  So the left column drops to an image well and one",
+    "prompt box.",
+    "",
+    "The source workflow drew the seed from `Seed (rgthree)`, a custom node.",
+    "It is inlined here as a plain integer on RandomNoise -- painter randomises",
+    "per job anyway, and a template must not need a node pack installed."
+  ],
+  "1": {
+    "inputs": { "unet_name": "", "weight_dtype": "default" },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Load Diffusion Model", "painter_role": "loader" }
+  },
+  "2": {
+    "inputs": { "clip_name": "", "type": "flux2", "device": "default" },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Load CLIP", "painter_role": "clip" }
+  },
+  "3": {
+    "inputs": { "vae_name": "" },
+    "class_type": "VAELoader",
+    "_meta": { "title": "Load VAE", "painter_role": "vae" }
+  },
+  "10": {
+    "inputs": { "image": "" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Image", "painter_role": "load_image" }
+  },
+  "11": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 1.5,
+      "resolution_steps": 1,
+      "image": ["10", 0]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": { "title": "Scale Image to Total Pixels", "painter_role": "scale_image" }
+  },
+  "12": {
+    "inputs": { "image": ["11", 0] },
+    "class_type": "GetImageSize",
+    "_meta": { "title": "Get Image Size", "painter_role": "image_size" }
+  },
+  "13": {
+    "inputs": { "pixels": ["11", 0], "vae": ["3", 0] },
+    "class_type": "VAEEncode",
+    "_meta": { "title": "VAE Encode", "painter_role": "vae_encode" }
+  },
+  "20": {
+    "inputs": { "text": "", "clip": ["2", 0] },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "CLIP Text Encode (Positive Prompt)", "painter_role": "encode_pos" }
+  },
+  "21": {
+    "inputs": { "conditioning": ["20", 0] },
+    "class_type": "ConditioningZeroOut",
+    "_meta": { "title": "Conditioning Zero Out", "painter_role": "zero_out" }
+  },
+  "22": {
+    "inputs": { "conditioning": ["20", 0], "latent": ["13", 0] },
+    "class_type": "ReferenceLatent",
+    "_meta": { "title": "Set Reference Latent", "painter_role": "ref_pos" }
+  },
+  "23": {
+    "inputs": { "conditioning": ["21", 0], "latent": ["13", 0] },
+    "class_type": "ReferenceLatent",
+    "_meta": { "title": "Set Reference Latent (negative)", "painter_role": "ref_neg" }
+  },
+  "24": {
+    "inputs": {
+      "width": ["12", 0],
+      "height": ["12", 1],
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": { "title": "Empty Flux 2 Latent", "painter_role": "latent" }
+  },
+  "30": {
+    "inputs": { "shift": 6.0, "model": ["1", 0] },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": { "title": "ModelSamplingAuraFlow", "painter_role": "model_sampling" }
+  },
+  "31": {
+    "inputs": { "sampler_name": "euler" },
+    "class_type": "KSamplerSelect",
+    "_meta": { "title": "Sampler", "painter_role": "sampler_select" }
+  },
+  "32": {
+    "inputs": { "steps": 15, "width": ["12", 0], "height": ["12", 1] },
+    "class_type": "Flux2Scheduler",
+    "_meta": { "title": "Flux2Scheduler", "painter_role": "scheduler" }
+  },
+  "33": {
+    "inputs": { "noise_seed": 0 },
+    "class_type": "RandomNoise",
+    "_meta": { "title": "Noise", "painter_role": "noise" }
+  },
+  "34": {
+    "inputs": {
+      "cfg": 1.0,
+      "model": ["30", 0],
+      "positive": ["22", 0],
+      "negative": ["23", 0]
+    },
+    "class_type": "CFGGuider",
+    "_meta": { "title": "CFG Guider", "painter_role": "guider" }
+  },
+  "35": {
+    "inputs": {
+      "noise": ["33", 0],
+      "guider": ["34", 0],
+      "sampler": ["31", 0],
+      "sigmas": ["32", 0],
+      "latent_image": ["24", 0]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": { "title": "Sampler", "painter_role": "sampler" }
+  },
+  "40": {
+    "inputs": { "samples": ["35", 0], "vae": ["3", 0] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode", "painter_role": "decode" }
+  },
+  "41": {
+    "inputs": { "filename_prefix": "painter-edit", "images": ["40", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save Image", "painter_role": "save" }
+  }
+}

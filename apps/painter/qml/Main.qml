@@ -177,6 +177,19 @@ Window {
 
     function submit() {
         var g = gen
+        // EDIT SENDS THE PROMPT AND THE SEED, and lets the family's edit block
+        // supply the rest (steps, cfg, shift, the pixel budget). The controls
+        // for those are not on screen in this mode, so sending `gen`'s values
+        // would submit numbers he was never shown — the graph would run at
+        // whatever the last image family left behind.
+        if (App.isEdit) {
+            App.generate({
+                edit: true,
+                positive: g.positive,
+                seed: g.seed, randomSeed: g.randomSeed
+            }, g.count)
+            return
+        }
         // A video job is a different set of controls, not a superset: one
         // prompt, a duration instead of a batch, no CFG and no patches. Sending
         // the image fields anyway would have painter claim settings the video
@@ -319,12 +332,27 @@ Window {
                 spacing: 10
 
                 ModelPicker { width: parent.width; persistKey: "panel.model" }
+                // EDIT MODE IS AN IMAGE AND A PROMPT, and nothing else: the
+                // graph reads the size out of the picture, has no negative to
+                // encode and carries the family's own steps/cfg/shift, so every
+                // panel below this one would be a control that changes nothing
+                // (docs/DESIGN.md §10). A Column skips invisible children, so
+                // they leave no gaps.
+                EditPanel {
+                    width: parent.width
+                    persistKey: "panel.edit"
+                    visible: App.isEdit
+                }
                 PromptEditor {
                     width: parent.width
                     persistKey: "panel.prompt"
                     onMenuRequested: (sx, sy, items) => ctxMenu.open(sx, sy, items)
                 }
-                LoraStack { width: parent.width; persistKey: "panel.lora" }
+                LoraStack {
+                    width: parent.width
+                    persistKey: "panel.lora"
+                    visible: !App.isEdit
+                }
                 // Only for a video family, and the two below it follow the same
                 // rule from the inside: no negative prompt, no CFG, no batch, and
                 // no aspect while a first frame is deciding it. A Column skips
@@ -332,12 +360,17 @@ Window {
                 VideoPanel {
                     width: parent.width
                     persistKey: "panel.video"
-                    visible: App.isVideo
+                    visible: App.isVideo && !App.isEdit
                 }
-                ParamsPanel { width: parent.width; persistKey: "panel.sampling" }
+                ParamsPanel {
+                    width: parent.width
+                    persistKey: "panel.sampling"
+                    visible: !App.isEdit
+                }
                 ResolutionPanel {
                     width: parent.width
                     persistKey: "panel.resolution"
+                    visible: !App.isEdit
                     // In image-to-video the size comes out of the dropped image,
                     // and MP is the only part of it left to choose — that is
                     // handled inside the panel, which keeps its MP box.
@@ -345,7 +378,7 @@ Window {
                 TogglePanel {
                     width: parent.width
                     persistKey: "panel.patches"
-                    visible: !App.isVideo
+                    visible: !App.isVideo && !App.isEdit
                 }
                 Item { width: 1; height: 6 }
             }
@@ -466,6 +499,16 @@ Window {
         // The model list arrives after this (the registry scan is one tick
         // later), so the remembered selection is restored when it lands.
         App.selectModelByName(Prefs.get("model") || "")
+        // ...and the mode with it, which re-selects its own model when the rows
+        // land. It is applied second because it outranks the remembered name.
+        App.restoreMode(Prefs.get("mode") || "")
+    }
+
+    // The mode changes what the left column is, and (for edit) which graph is
+    // built, so it is worth remembering as promptly as the view is.
+    Connections {
+        target: App
+        function onModeChanged() { if (root.restored) saveSoon.restart() }
     }
 
     // The one context menu, over everything: a prompt box is 64-130px tall and
@@ -581,6 +624,7 @@ Window {
         Prefs.set("splitRatio", root.splitRatio)
         Prefs.set("gen", JSON.stringify(root.gen))
         Prefs.set("model", App.selectedName)
+        Prefs.set("mode", App.mode)
         Prefs.set("inputImage", App.inputImage)
         Prefs.set("lastImage", App.lastImage)
     }

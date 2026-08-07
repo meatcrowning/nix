@@ -12,12 +12,25 @@ Panel {
     // it carries the name rather than just the count.
     badge: panel.collapsed ? App.selectedName : (Models.count + " found")
 
+    // The four modes, above the list they override. Turning one on selects its
+    // model and greys the list out (below); turning it off hands the list back
+    // with that model still selected.
+    ModeSwitcher { width: parent.width }
+
     Rectangle {
         width: parent.width
         height: 190
         color: Theme.bg
         border.color: Theme.border
         border.width: 1
+        // WHILE A MODE IS ON, THE LIST IS NOT WHAT DECIDES. It stays legible
+        // rather than disappearing — you can still see what a mode picked — but
+        // it is dimmed and takes no clicks, so there is never a moment where the
+        // list says one thing and the lit button says another. `enabled: false`
+        // is what refuses the clicks: it propagates to the delegates' own
+        // MouseAreas, so nothing has to remember to check.
+        opacity: App.mode === "" ? 1 : 0.45
+        enabled: App.mode === ""
 
         KineticListView {
             id: list

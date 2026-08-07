@@ -23,9 +23,12 @@ Panel {
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
 
-    // NO NEGATIVE PROMPT FOR VIDEO. MiniMaxH3ImageToVideo takes the prompt
+    // NO NEGATIVE PROMPT FOR VIDEO OR FOR EDIT. MiniMaxH3ImageToVideo takes the prompt
     // itself and produces the conditioning — there is no second CLIPTextEncode
     // for a negative to reach, so a box for one would be typing into nothing.
+    // The Klein edit graph has the same shape from the other direction: its
+    // negative conditioning is the POSITIVE one zeroed out (ConditioningZeroOut
+    // -> ReferenceLatent), so there is nowhere for a second prompt to go.
     //
     // Height 0 as well as invisible: a Column skips a hidden child when it
     // POSITIONS, but the panel sizes itself from `childrenRect`, which still
@@ -34,7 +37,7 @@ Panel {
     PromptBox {
         id: negative
         width: parent.width
-        visible: !App.isVideo
+        visible: !App.isVideo && !App.isEdit
         boxHeight: Prefs.get("prompt.negH") > 0 ? Prefs.get("prompt.negH") : 64
         placeholder: "negative"
         negative: true

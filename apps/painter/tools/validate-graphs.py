@@ -85,6 +85,51 @@ def check_video(built, want_image, want_last=False):
     return problems + check_dangling(prompt)
 
 
+def check_edit(built):
+    """The edit template: the dropped image decides everything about the size.
+
+    The wiring that cannot be checked by validating node contracts is the shape
+    of the conditioning — the negative side is the POSITIVE prompt zeroed out,
+    with the same reference latent attached, so a template that grew a second
+    CLIPTextEncode (or lost the zero-out) would still validate and quietly stop
+    being an edit.
+    """
+    prompt = built["prompt"]
+    roles = _roles_of(prompt)
+    problems = []
+    for role in ("load_image", "scale_image", "image_size", "vae_encode",
+                 "encode_pos", "zero_out", "ref_pos", "ref_neg", "guider", "latent"):
+        if role not in roles:
+            problems.append(f"the edit graph is missing {role}")
+    if problems:
+        return problems + check_dangling(prompt)
+
+    ins = lambda role: prompt[roles[role]]["inputs"]  # noqa: E731
+    if ins("scale_image").get("image") != [roles["load_image"], 0]:
+        problems.append("the dropped image is not what gets scaled")
+    if ins("image_size").get("image") != [roles["scale_image"], 0]:
+        problems.append("the size is measured off something other than the scaled image")
+    for key, slot in (("width", 0), ("height", 1)):
+        if ins("latent").get(key) != [roles["image_size"], slot]:
+            problems.append(f"the latent's {key} does not come from the image")
+        if ins("scheduler").get(key) != [roles["image_size"], slot]:
+            problems.append(f"the scheduler's {key} does not come from the image")
+    if ins("vae_encode").get("pixels") != [roles["scale_image"], 0]:
+        problems.append("the reference latent is not encoded from the scaled image")
+    if ins("zero_out").get("conditioning") != [roles["encode_pos"], 0]:
+        problems.append("the negative side is not the positive prompt zeroed out")
+    for role in ("ref_pos", "ref_neg"):
+        if ins(role).get("latent") != [roles["vae_encode"], 0]:
+            problems.append(f"{role} does not reference the image's latent")
+    if ins("guider").get("positive") != [roles["ref_pos"], 0]:
+        problems.append("the guider's positive is not the referenced prompt")
+    if ins("guider").get("negative") != [roles["ref_neg"], 0]:
+        problems.append("the guider's negative is not the referenced zero-out")
+    if "encode_neg" in roles:
+        problems.append("an edit graph must not carry a second text encode")
+    return problems + check_dangling(prompt)
+
+
 def check_structure(built, toggles, fam):
     """Structural assertions the validator cannot make for us."""
     prompt = built["prompt"]
@@ -211,6 +256,37 @@ def main(argv=None):
                 failures += 1
                 line += f" {tag}:FAIL\n        {tag}: {exc}"
         print(line)
+
+    print("\n=== edit ===")
+    for entry in reg.base_models():
+        fam = reg.family_of(entry) or {}
+        line = f"  {entry.name[:50]:<52}"
+        if not fam.get("edit"):
+            # A family with no edit block must REFUSE, not build something odd:
+            # that refusal is what the `edit` mode button relies on.
+            try:
+                reg.build(entry, {"positive": PROMPT, "edit": True,
+                                  "input_image": "probe.png"}, object_info=oi)
+                failures += 1
+                print(line + " cannot edit, but built a graph anyway: FAIL")
+            except G.GraphError:
+                pass
+            continue
+        try:
+            built = reg.build(
+                entry,
+                {"positive": PROMPT, "edit": True, "seed": 1,
+                 "input_image": "probe.png"},
+                object_info=oi,
+            )
+            probs = check_edit(built)
+            if probs:
+                raise G.ValidationError(probs)
+            print(line + f" edit:ok({built['params']['megapixels']}MP,"
+                          f"{built['params']['steps']} steps)")
+        except (G.GraphError, G.ValidationError) as exc:
+            failures += 1
+            print(line + f" edit:FAIL\n        {exc}")
 
     print("\n=== prompt transforms ===")
     for entry in reg.base_models():
