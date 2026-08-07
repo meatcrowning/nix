@@ -42,39 +42,42 @@ def check_dangling(prompt):
 
 
 def check_video(built, want_image, want_last=False):
-    """The video template's two modes, which differ by three nodes.
+    """The video template's four modes: first frame, last frame, both, neither.
 
-    Image-to-video reads its frame size out of the dropped image; text-to-video
-    drops that whole chain, so the check is that the size is two plain numbers
-    and that nothing is left pointing at a node that went.
+    Either dropped frame reads the size out of the image (the measuring chain
+    runs off the first when there is one, off the last when there is not);
+    text-to-video drops that whole chain, so the check is that the size is two
+    plain numbers and that nothing is left pointing at a node that went.
     """
     prompt = built["prompt"]
     roles = _roles_of(prompt)
     problems = []
     video = prompt[roles["video"]]["inputs"]
-    if want_image:
-        for role in ("load_image", "scale_image", "image_size"):
+    # A frame is present exactly when it was asked for, at both ends.
+    for want, role, key, name in ((want_image, "load_image", "first_frame", "first"),
+                                  (want_last, "load_image_last", "last_frame", "last")):
+        if want and role not in roles:
+            problems.append(f"a clip with a {name} frame is missing {role}")
+        if want and not isinstance(video.get(key), list):
+            problems.append(f"a clip with a {name} frame is not wired to one")
+        if not want and role in roles:
+            problems.append(f"a clip with no {name} frame still carries {role}")
+        if not want and key in video:
+            problems.append(f"a clip with no {name} frame carries a {key}")
+    if want_image or want_last:
+        for role in ("scale_image", "image_size"):
             if role not in roles:
-                problems.append(f"image-to-video is missing {role}")
+                problems.append(f"a clip with a dropped frame is missing {role}")
         if not isinstance(video.get("width"), list):
-            problems.append("image-to-video should take its width from the image")
-        if not isinstance(video.get("first_frame"), list):
-            problems.append("image-to-video is not wired to a first frame")
-        # The frame to end on is its own LoadImage, wired only when dropped.
-        if want_last and not isinstance(video.get("last_frame"), list):
-            problems.append("a clip with a last frame is not wired to one")
-        if want_last and "load_image_last" not in roles:
-            problems.append("a clip with a last frame is missing load_image_last")
-        if not want_last and "last_frame" in video:
-            problems.append("a clip with no last frame carries a last_frame")
-        if not want_last and "load_image_last" in roles:
-            problems.append("a clip with no last frame still carries load_image_last")
+            problems.append("a clip with a dropped frame should take its width from it")
+        # The chain measures the frame that is actually there.
+        want_src = roles.get("load_image" if want_image else "load_image_last")
+        if prompt[roles["scale_image"]]["inputs"].get("image") != [want_src, 0]:
+            problems.append("the size is measured off a frame that was not dropped")
     else:
         for role in ("load_image", "load_image_last", "scale_image", "image_size"):
             if role in roles:
                 problems.append(f"text-to-video still carries {role}")
-        if "first_frame" in video:
-            problems.append("text-to-video still carries a first_frame input")
         if not isinstance(video.get("width"), int) or not isinstance(video.get("height"), int):
             problems.append("text-to-video needs plain width/height numbers")
     if prompt[roles["create_video"]]["inputs"].get("audio") is None:
@@ -188,6 +191,7 @@ def main(argv=None):
         line = f"  {entry.name[:50]:<52}"
         for tag, params in (
             ("i2v", {"use_input_image": True, "input_image": "probe.png"}),
+            ("l2v", {"use_last_frame": True, "last_image": "probe.png"}),
             ("fl2v", {"use_input_image": True, "input_image": "probe.png",
                       "use_last_frame": True, "last_image": "probe.png"}),
             ("t2v", {"use_input_image": False}),
@@ -198,7 +202,7 @@ def main(argv=None):
                     {"positive": PROMPT, "seed": 1, "steps": 4, "duration": 5.0, **params},
                     object_info=oi,
                 )
-                probs = check_video(built, params["use_input_image"],
+                probs = check_video(built, params.get("use_input_image", False),
                                     params.get("use_last_frame", False))
                 if probs:
                     raise G.ValidationError(probs)
