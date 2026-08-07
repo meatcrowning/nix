@@ -93,6 +93,23 @@ Singleton {
         file.writeAdapter();
     }
 
+    // Logout commands that CANNOT work, repaired to the shipped default on
+    // load. A persisted setting shadows the default forever, so a machine that
+    // stored one of these back when it *was* the default kept a dead logout
+    // long after the default moved on — book's power menu did nothing at all
+    // until 2026-08-06.
+    //   - `hyprctl dispatch hl.dsp.exit()` is not even valid POSIX sh: PowerMenu
+    //     runs the stored string through `sh -c`, and the bare `()` is a syntax
+    //     error, so the WHOLE line — session-exit.sh included — died before
+    //     anything ran. execDetached surfaces no stderr, so it read as a no-op.
+    //   - `hyprctl dispatch exit` is the classic-string form this Lua-config
+    //     build rejects outright.
+    // Exact matches only: a command the user wrote themselves is theirs.
+    readonly property var deadLogoutCmds: [
+        "hyprctl dispatch hl.dsp.exit()",
+        "hyprctl dispatch exit",
+    ]
+
     // The last state we KNOW is on disk, as key -> JSON.stringify(value) (so
     // array keys like worldClocks/defaultWidgets compare by value, not by the
     // reference the adapter hands back). Refreshed on every load in
@@ -192,6 +209,13 @@ Singleton {
         // binding never observes the momentary pure-disk state (no flicker on,
         // e.g., wallpaperSolid when the panel saves gamma).
         onLoaded: {
+            // Repair a stored logout command that cannot run (deadLogoutCmds)
+            // before anything reads it. Runs on every load and is a no-op once
+            // the repaired value is on disk.
+            const repaired = root.deadLogoutCmds.indexOf(file.adapter.cmdLogout) !== -1;
+            if (repaired)
+                file.adapter.cmdLogout = root.defaults.cmdLogout;
+
             if (root._writeArmed) {
                 root._writeArmed = false;
                 for (const k in root._pendingKeys) file.adapter[k] = root._pendingKeys[k];
@@ -200,6 +224,7 @@ Singleton {
                 file.writeAdapter();
             } else {
                 root._savedSnap = root._snapshot();
+                if (repaired) file.writeAdapter();
             }
         }
 
