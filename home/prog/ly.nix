@@ -1,4 +1,4 @@
-{ lib, host, ... }:
+{ lib, pkgs, host, ... }:
 
 # book's Hyprland session gets the same crash net top has — there it is
 # sys/dsk/hyprland.nix, which rewrites the NixOS wayland-session entry so the
@@ -25,11 +25,24 @@ lib.mkIf (host == "air") {
   # the stub parses to the compiled English strings (same as Fedora's
   # en.ini). The wayland-sessions entry's Exec is hypr-supervise instead of
   # /usr/bin/start-hyprland.
+  #
+  # console-font.psf.gz is the greeter's TEXT SIZE. ly is a TUI on the
+  # framebuffer console, so the only lever is the console font: at the kernel's
+  # default 8x16 on book's 2560x1600 panel the greeter renders 320 columns of
+  # near-invisible text, while the Hyprland session it hands over to runs at
+  # scale 1.67. Terminus 14x28 (ter-128n) is 1.75x that default — the closest
+  # available step to the session's scale, and still 182x57 characters, far
+  # more than ly's box needs. tools/install-ly-supervision.sh copies it on to
+  # /usr/lib/kbd/consolefonts (lib_t, readable from any domain — under $HOME or
+  # in the store it is a read the confined greeter may be denied, the same trap
+  # config.ini hit) and adds the setfont that loads it; re-run that installer
+  # after a terminus bump to refresh the system copy.
   home.activation.lyPlainConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p "$HOME/.config/ly/lang" "$HOME/.config/ly/wayland-sessions"
     cp -f ${./ly-files/config.ini} "$HOME/.config/ly/config.ini"
     cp -f ${./ly-files/lang/en.ini} "$HOME/.config/ly/lang/en.ini"
     cp -f ${./ly-files/wayland-sessions/hyprland.desktop} "$HOME/.config/ly/wayland-sessions/hyprland.desktop"
+    cp -f ${pkgs.terminus_font}/share/consolefonts/ter-128n.psf.gz "$HOME/.config/ly/console-font.psf.gz"
   '';
 
   # Fedora's other wayland sessions, refreshed into the same dir on every
