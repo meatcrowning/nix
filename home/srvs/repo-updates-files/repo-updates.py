@@ -96,6 +96,13 @@ BRANCH = os.environ.get("REPO_UPDATES_BRANCH", "main")
 # ordinary scheduling jitter, not a sleep.
 RESUME_GAP_SEC = 30
 TICK_SEC = 60
+# How soon to look again when a check found commits but could not put a toast on
+# screen (no notification server yet — a boot races the panel).
+RETRY_SEC = 120
+
+# Cross-call state the loop reads: `retry` is set by a pass that found something
+# to say and had nowhere to say it.
+FLAGS = {"retry": False}
 
 
 def log(msg):
@@ -529,6 +536,7 @@ def check_and_offer(pending):
         pending["proc"].kill()  # superseded by newer commits
 
     summary, body = toast_text(s)
+    dry = os.environ.get("REPO_UPDATES_NOTIFY") == ""
     if not actions_drawn():
         # No buttons will be drawn, so do not ship any: name the command instead.
         notify(summary, body + "\nrun nix-pull to apply")
@@ -539,13 +547,27 @@ def check_and_offer(pending):
 
     nid, proc = notify(summary, body, wait=True,
                        actions=[("apply", "Pull & apply"), ("dismiss", "Dismiss")])
-    log(f"offered {s['behind']} commits ({s['sha'][:8]}): {s['cost']}")
-    if not hasattr(proc, "poll"):
-        # notify-send never started (or a dry run): there is nothing to wait on,
-        # and re-offering every tick would be the nag this must not become.
-        st["dismissed"] = s["sha"]
-        save_state(st)
+
+    # NOTHING WAS SHOWN — retry, never record it as answered. The unit is
+    # WantedBy default.target, so at a boot it can easily be surveying before
+    # the panel has bound org.freedesktop.Notifications, and notify-send then
+    # exits non-zero without ever printing an id. Treating that as "dismissed"
+    # would swallow the update until the NEXT push. A real notification id is
+    # always nonzero, so `nid == 0` is the whole test — it catches both a
+    # notify-send that could not start and one that started and failed.
+    if not hasattr(proc, "poll") or nid == 0:
+        if hasattr(proc, "poll"):
+            proc.kill()
+        if dry:
+            log(f"offered {s['behind']} commits ({s['sha'][:8]}): {s['cost']}")
+            st["dismissed"] = s["sha"]
+            save_state(st)
+            return None
+        log("no notification server answered — retrying shortly")
+        FLAGS["retry"] = True
         return None
+
+    log(f"offered {s['behind']} commits ({s['sha'][:8]}): {s['cost']}")
     return {"sha": s["sha"], "id": nid, "proc": proc}
 
 
@@ -593,6 +615,9 @@ def daemon():
         why = None
         if slept > RESUME_GAP_SEC:
             why = f"resumed from {int(slept)}s of suspend"
+        elif FLAGS["retry"] and now_mono - last_check > RETRY_SEC:
+            why = "retry — the last toast never reached a server"
+            FLAGS["retry"] = False
         elif now_mono - last_check > POLL_MIN * 60:
             why = "poll"
         if why:
