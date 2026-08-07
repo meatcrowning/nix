@@ -37,14 +37,21 @@ Rectangle {
             color: Theme.text
         }
         // How far, then how long. A per-cent alone cannot say whether a job is
-        // slow or stuck; the clock ticks once a second while one is running.
+        // slow or stuck; the clock ticks once a second while one is running,
+        // and then STAYS on the finished time. It used to vanish with the run,
+        // which threw away the one number the run had just measured — the only
+        // other copy was a toast that fades.
+        //
+        // The bare clock is the live one; `took` marks it as settled, borrowing
+        // the `queued N` idiom beside it rather than inventing a second one.
         PixelText {
-            visible: App.busy
+            visible: App.busy || App.lastElapsed > 0
             text: {
-                var s = Math.floor(App.elapsed)
+                var s = Math.floor(App.busy ? App.elapsed : App.lastElapsed)
                 var m = Math.floor(s / 60)
                 var r = s % 60
-                return m + ":" + (r < 10 ? "0" : "") + r
+                var clock = m + ":" + (r < 10 ? "0" : "") + r
+                return App.busy ? clock : "took " + clock
             }
             color: Theme.textDim
         }
