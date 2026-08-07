@@ -14,6 +14,83 @@ Item {
     //: PromptBox's spelling menu.
     signal menuRequested(real sx, real sy, var items)
 
+    // ------------------------------------------------------------ selection
+    //
+    // Click, ctrl-click, shift-click — a file manager's three, because that is
+    // what he asked for and what his hands already know ([his] "make it so i
+    // can shift / cntrl shift a selection of outputs"). Two rules make it
+    // behave rather than merely work:
+    //
+    //   * IT IS KEPT AS PATHS, not indices. A finished job inserts a row at 0,
+    //     which would renumber a set of indices under him mid-selection.
+    //   * A PRESS INSIDE AN EXISTING MULTI-SELECTION DOES NOT COLLAPSE IT —
+    //     the drag that may follow has to carry the whole set, so that click is
+    //     deferred to the release and applied only if no drag happened. Same
+    //     rule as filer's rows (docs/DESIGN.md §13).
+    property var selection: []
+    property string anchorPath: ""
+
+    function isSelected(p) { return view.selection.indexOf(p) >= 0 }
+
+    function setSelection(paths) {
+        view.selection = paths
+        // Warm the collage for what a drag would now carry: it is a few hundred
+        // ms of decoding and half a dozen encodes, and at the press there is no
+        // time for either (App.dragUriListFor).
+        App.prepareCollage(paths)
+    }
+
+    function selectSingle(p) {
+        view.anchorPath = p
+        view.setSelection([p])
+    }
+
+    function toggleSelect(p) {
+        var s = view.selection.slice()
+        var i = s.indexOf(p)
+        if (i >= 0) s.splice(i, 1)
+        else s.push(p)
+        view.anchorPath = p
+        view.setSelection(s)
+    }
+
+    function extendTo(p) {
+        var to = Gallery.indexOf(p)
+        var from = view.anchorPath === "" ? to : Gallery.indexOf(view.anchorPath)
+        if (to < 0) return
+        if (from < 0) from = to
+        var lo = Math.min(from, to), hi = Math.max(from, to)
+        var s = []
+        for (var i = lo; i <= hi; i++) s.push(Gallery.pathAt(i))
+        view.setSelection(s)
+    }
+
+    function clearSelection() {
+        view.anchorPath = ""
+        view.setSelection([])
+    }
+
+    // What a drag from `p` should carry: the whole selection when p is part of
+    // one, otherwise just p — pressing an unselected tile and dragging it must
+    // not hand over somebody else's set.
+    function dragPathsFor(p) {
+        return (view.isSelected(p) && view.selection.length > 1)
+               ? view.selection : [p]
+    }
+
+    // A row that goes (a file deleted outside painter, a reset) must not stay
+    // selected: the collage would be built from a path that is not there.
+    Connections {
+        target: Gallery
+        function onCountChanged() {
+            if (view.selection.length === 0) return
+            var s = []
+            for (var i = 0; i < view.selection.length; i++)
+                if (Gallery.indexOf(view.selection[i]) >= 0) s.push(view.selection[i])
+            if (s.length !== view.selection.length) view.setSelection(s)
+        }
+    }
+
     // An output's PNG carries the whole job that made it, so the useful question
     // is WHICH PART to take: its words, its numbers, or both. That is a choice,
     // and a choice is a menu — it used to be an unlabelled right-click that took
@@ -53,10 +130,21 @@ Item {
         // the least of the three things this pane owes you (docs/DESIGN.md §5.4).
         PixelText {
             // "outputs", not "images": a video family's results are clips.
-            text: Gallery.count + " outputs"
-            color: Theme.textDim
+            // A selection says so here rather than in a bar of its own — it is
+            // one number and it belongs beside the other one.
+            text: view.selection.length > 1
+                  ? (view.selection.length + " of " + Gallery.count + " selected")
+                  : (Gallery.count + " outputs")
+            color: view.selection.length > 1 ? Theme.text : Theme.textDim
             visible: view.width > 190
         }
+    }
+
+    // Empty space clears the selection, the way it does in a file manager. It
+    // sits UNDER the grid, so a click only reaches it where there is no tile.
+    MouseArea {
+        anchors.fill: grid
+        onClicked: view.clearSelection()
     }
 
     KineticGridView {
@@ -128,20 +216,34 @@ Item {
                         leftMargin: 8; rightMargin: 8
                     }
                     elide: Text.ElideMiddle
-                    text: isVideo && !tile.dragOriginal ? name + " (muted)" : name
+                    // What is actually being handed over, which for a set is one
+                    // picture and not the files: a chip saying "4 outputs" over
+                    // a drag that drops a collage would be a lie about the thing
+                    // in his hand (docs/DESIGN.md §10).
+                    text: tile.dragPaths.length > 1
+                          ? (tile.dragPaths.length + " outputs as one collage")
+                          : (isVideo && !tile.dragOriginal ? name + " (muted)" : name)
                     color: Theme.text
                 }
             }
 
-            // Shift at the moment of the press means "with its sound"; see
-            // App.dragUriList.
+            // Shift at the moment of the press means "with its sound" on a lone
+            // clip (ctrl+shift once a selection is in play, since shift is the
+            // range key); see App.dragUriList.
             property bool dragOriginal: false
+            // What the press decided this drag carries — the selection when the
+            // tile is part of one, otherwise this file alone.
+            property var dragPaths: []
 
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: 4
-                color: Theme.bgAlt
-                border.color: tileMa.containsMouse ? Theme.accent : Theme.border
+                // Selected reads as the desktop's selection everywhere else:
+                // the `highlight` fill, and the accent border a hover already
+                // uses — held rather than momentary (docs/DESIGN.md §3.1).
+                color: view.isSelected(path) ? Theme.highlight : Theme.bgAlt
+                border.color: (view.isSelected(path) || tileMa.containsMouse)
+                              ? Theme.accent : Theme.border
                 border.width: 1
 
                 // A video tile shows its poster frame, extracted once into
@@ -267,21 +369,60 @@ Item {
                     // The proxy is what moves, so the tile stays where it is.
                     // Left button only: a right-press opens the menu and must
                     // not arm a drag on the way.
+                    property bool deferSelect: false
+                    property bool dragged: false
+                    drag.onActiveChanged: if (tileMa.drag.active) tileMa.dragged = true
+
                     onPressed: function (m) {
                         tileMa.drag.target = m.button === Qt.LeftButton ? dragProxy : null
-                        if (m.button !== Qt.LeftButton) return
-                        tile.dragOriginal = (m.modifiers & Qt.ShiftModifier) !== 0
+                        if (m.button !== Qt.LeftButton) {
+                            // A right-press opens the menu; it must not collapse
+                            // a selection the menu is about to act on, and it
+                            // must not arm a drag on the way.
+                            if (!view.isSelected(path)) view.selectSingle(path)
+                            return
+                        }
+                        tileMa.dragged = false
+                        var ctrl = (m.modifiers & Qt.ControlModifier) !== 0
+                        var shift = (m.modifiers & Qt.ShiftModifier) !== 0
+                        // SHIFT MEANS RANGE HERE, so it cannot also mean "with
+                        // the sound" the way it does on a lone clip: the
+                        // original-audio drag is ctrl+shift when a selection is
+                        // in play, and plain shift only when it is a single
+                        // unselected tile being dragged.
+                        tileMa.deferSelect = false
+                        if (ctrl && shift) {
+                            tile.dragOriginal = true
+                        } else if (shift) {
+                            view.extendTo(path)
+                        } else if (ctrl) {
+                            view.toggleSelect(path)
+                        } else if (view.isSelected(path) && view.selection.length > 1) {
+                            tileMa.deferSelect = true      // let a drag carry the set
+                        } else {
+                            view.selectSingle(path)
+                        }
+                        if (!(ctrl && shift)) tile.dragOriginal = false
+
                         // Built here, not bound: for a clip this makes the muted
-                        // copy, and the payload has to name a file that exists
-                        // by the time the drop lands.
+                        // copy and for a selection it collects the collage, and
+                        // the payload has to name a file that exists by the time
+                        // the drop lands.
+                        tile.dragPaths = view.dragPathsFor(path)
                         tile.Drag.mimeData = {
-                            "text/uri-list": App.dragUriList(path, tile.dragOriginal)
+                            "text/uri-list": App.dragUriListFor(tile.dragPaths,
+                                                                tile.dragOriginal)
                         }
                         // Staged now; ready by the time the drag passes the
                         // threshold and Drag.active turns on.
                         dragBadge.grabToImage(function (res) {
                             tile.Drag.imageSource = res.url
                         })
+                    }
+
+                    onReleased: {
+                        if (tileMa.deferSelect && !tileMa.dragged) view.selectSingle(path)
+                        tileMa.deferSelect = false
                     }
                     // DOUBLE-CLICK OPENS, right-click asks what else. A single
                     // left click does nothing on purpose: the preview viewport

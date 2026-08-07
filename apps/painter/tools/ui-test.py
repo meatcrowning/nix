@@ -1135,6 +1135,133 @@ def test_drag_out(win, ctl, tmp):
     spin(120)
 
 
+def noisy_png(path, w, h):
+    """An output that will not compress away: per-pixel pseudo-random colour, so
+    the budget search has to actually spend bytes on it. Deterministic — a
+    harness has to give the same answer twice. (filer's imgconv-test has the
+    same helper for the same reason.)"""
+    from PySide6.QtGui import QImage
+    img = QImage(w, h, QImage.Format_RGB32)
+    s = 0x2545F491
+    for y in range(h):
+        for x in range(w):
+            s = (s * 1103515245 + 12345) & 0xFFFFFFFF
+            img.setPixel(x, y, ((s >> 16) & 255) << 16 | ((s >> 8) & 255) << 8 | (s & 255))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    img.save(path, "PNG")
+    return path
+
+
+def test_selection_and_collage(win, ctl, tmp):
+    """Shift and ctrl select outputs, and dragging a set hands over ONE picture.
+
+    [his] "make it so i can shift / cntrl shift a selection of outputs, and when
+    i click and drag them, what gets put down where the cursor lies is a collage
+    of them in the highest quality under 4mb".
+    """
+    import imgfit
+    content = win.contentItem()
+    view = find(content, "GalleryView")
+
+    made = [noisy_png(os.path.join(tmp, "out", "sel_0000%d_.png" % i), 300, 220)
+            for i in range(1, 5)]
+    ctl.gallery.load_existing()
+    spin(250)
+    paths = [ctl.gallery.pathAt(i) for i in range(ctl.gallery.rowCount())]
+    check("the four outputs are in the gallery",
+          all(p in paths for p in made), paths)
+
+    # --- the three gestures, through the view's own functions ---------------
+    view.metaObject().invokeMethod(view, "clearSelection")
+    spin(60)
+    check("nothing is selected to start with", len(prop(view, "selection")) == 0)
+
+    order = [p for p in paths if p in made]      # gallery order, newest first
+    invoke_str(view, "selectSingle", order[0])
+    check("a plain click selects one", prop(view, "selection") == [order[0]],
+          prop(view, "selection"))
+    invoke_str(view, "extendTo", order[2])
+    sel = prop(view, "selection")
+    check("shift extends a range from the anchor",
+          sel == order[0:3], sel)
+    invoke_str(view, "toggleSelect", order[1])
+    sel = prop(view, "selection")
+    check("ctrl takes one back out of the middle",
+          sel == [order[0], order[2]], sel)
+    invoke_str(view, "toggleSelect", order[3])
+    sel = prop(view, "selection")
+    check("...and puts another in", sorted(sel) == sorted([order[0], order[2], order[3]]),
+          sel)
+
+    # A selection survives a new output landing — it is kept as paths, so the
+    # row that inserts at 0 does not renumber it.
+    extra = noisy_png(os.path.join(tmp, "out", "sel_00099_.png"), 80, 80)
+    ctl.gallery.add(extra)
+    spin(150)
+    check("a finished job does not disturb the selection",
+          sorted(prop(view, "selection")) == sorted([order[0], order[2], order[3]]),
+          prop(view, "selection"))
+
+    # --- what a drag of that set hands over ---------------------------------
+    payload = ctl.dragUriListFor([order[0], order[2], order[3]], False)
+    check("a selection drags as ONE uri, not three",
+          payload.count("file://") == 1 and payload.endswith("\r\n"), payload)
+    out = payload.strip().replace("file://", "")
+    check("...which is a collage file that exists", os.path.exists(out), out)
+    if os.path.exists(out):
+        size = os.path.getsize(out)
+        check("...under 4MB, as asked", size <= imgfit.LIMIT, size)
+        from PySide6.QtGui import QImage
+        made_img = QImage(out)
+        check("...and decodable, laid out as a grid of them",
+              not made_img.isNull() and made_img.width() > 400 and made_img.height() > 300,
+              (made_img.width(), made_img.height()))
+
+    # Asking twice does not build twice.
+    import time as _t
+    t0 = _t.time()
+    again = ctl.dragUriListFor([order[0], order[2], order[3]], False)
+    check("...built once, then reused", again == payload and _t.time() - t0 < 1.0,
+          (again == payload, round(_t.time() - t0, 2)))
+
+    # One output is still one output — no collage, no re-encode.
+    single = ctl.dragUriListFor([order[0]], False)
+    check("a selection of one drags as the file itself",
+          single == "file://" + order[0] + "\r\n", single)
+
+    # --- the layout itself ---------------------------------------------------
+    import collage as C
+    check("the grid is as square as the count allows",
+          [C.grid_for(n) for n in (1, 2, 3, 4, 5, 9)]
+          == [(1, 1), (2, 1), (2, 2), (2, 2), (3, 2), (3, 3)],
+          [C.grid_for(n) for n in (1, 2, 3, 4, 5, 9)])
+    from PySide6.QtGui import QImage as QI
+    imgs = [QI(300, 220, QI.Format_RGB32) for _ in range(3)]
+    for im in imgs:
+        im.fill(0x204060)
+    canvas = C.render(imgs, cell=200)
+    check("a collage of three is one canvas big enough to hold them",
+          canvas is not None and canvas.width() >= 400 and canvas.height() >= 400,
+          canvas and (canvas.width(), canvas.height()))
+    check("a collage of one is that one image, not a canvas with a border",
+          C.render([imgs[0]]) is imgs[0])
+
+    view.metaObject().invokeMethod(view, "clearSelection")
+    spin(60)
+    for f in made + [extra]:
+        os.remove(f)
+    ctl.gallery.load_existing()
+    spin(150)
+
+
+def invoke_str(obj, method, arg):
+    """Call a QML function that takes one string, from Python."""
+    from PySide6.QtCore import Q_ARG, QMetaObject, Qt
+    QMetaObject.invokeMethod(obj, method, Qt.DirectConnection,
+                             Q_ARG("QVariant", arg))
+    spin(80)
+
+
 def test_hover_play(win, ctl, tmp):
     """Hovering a clip plays it, silently, and only while the pointer is there.
 
@@ -1768,6 +1895,7 @@ def main():
     print("== modes ==");             test_modes(win, ctl, tmp)
     print("== drag out ==");          test_drag_out(win, ctl, tmp)
     print("== hover play ==");        test_hover_play(win, ctl, tmp)
+    print("== selection ==");         test_selection_and_collage(win, ctl, tmp)
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)

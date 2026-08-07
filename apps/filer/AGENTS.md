@@ -569,6 +569,15 @@ desktop toast, and `finished(outPath)` so the view lands the selection on the
 new file. No dialog and no questions — a still needs no ffprobe, no encoder
 choice and no progress stream, so this one is a fraction of its sibling's size.
 
+**The SEARCH is `pylib/imgfit.py` now** (2026-08-06), not this file: painter
+needed the same budget for the collage it hands to a drag, and a second copy of
+a quality search is how two apps end up disagreeing about what "4MB" means.
+`imgconv.py` keeps what is filer's — the copy named beside the original, the
+toast, the QObject the menu talks to — and the old private names
+(`_uses_alpha`, `_encode`, `_best_under`) are aliases onto it so this guide's
+citations and the harness still hold. Everything below describes that search and
+still applies.
+
 - **Quality first, then resolution.** A lower JPEG quality costs detail you
   have to look for; discarding pixels costs detail that is simply gone. So each
   rung of `SCALES` gets a binary search over quality (~5 encodes), and the next

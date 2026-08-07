@@ -8,24 +8,14 @@ Same shape as its sibling — a copy beside the original, a desktop toast, and
 deliberately much smaller, because a still needs no ffprobe, no encoder choice
 and no progress stream.
 
-The search. There are two knobs, and they are not equal: **quality first, then
-resolution.** Re-encoding a photo at a lower JPEG quality costs detail you have
-to look for; throwing away pixels costs detail that is simply gone. So each
-scale in `SCALES` is tried with a binary search over quality, and the next
-(smaller) scale is only reached when even the floor quality at this one will not
-fit. The first size that fits wins, so an image barely over the line comes back
-full-resolution at high quality and only a genuinely huge one gets scaled.
-
-Everything is measured by encoding into memory (`QBuffer`), never by writing
-files and stat-ing them: the search does five to ten encodes and none of them
-but the winner should ever touch the disk.
-
-Format. JPEG, except when the source actually uses its alpha channel, where the
-result is WebP — lossy WebP keeps transparency, and flattening onto an invented
-background colour would be a silent, wrong answer. `hasAlphaChannel()` is not
-enough to decide that: a PNG saved by almost anything carries an alpha channel
-that is opaque everywhere, and answering "webp" for those would make the common
-case a format nobody asked for. So the alpha is *sampled* (`_uses_alpha`).
+**The search itself is `pylib/imgfit.py`** — quality first then resolution,
+measured by encoding into a QBuffer, JPEG unless the alpha is really used. It
+moved there on 2026-08-06 when painter needed the same budget for the collage
+it hands to a drag; what stays here is the part that is filer's: naming the copy
+beside the original, the toast, and the QObject the menu talks to. Everything
+that file documents applies unchanged, including its process-wide lift of Qt's
+256 MB decode ceiling — which is also what gives filer's thumbnailer preview
+tiles for very large PNGs.
 
 What it refuses, out loud, rather than doing badly: an animated source (one
 frame of a GIF is not a copy of it), an image Qt cannot decode, and one that
@@ -34,43 +24,15 @@ will not fit even at the smallest scale and lowest quality.
 import os
 import threading
 
-from PySide6.QtCore import QObject, QBuffer, QIODevice, Signal, Slot
-from PySide6.QtGui import QImage, QImageReader, QImageWriter
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Signal, Slot
 
 from notify import toast as _toast_send
+from imgfit import (LIMIT, TARGET, best_under, encode, fit, read,
+                    uses_alpha)
 
-# "4MB" as every upload form means it: 4 million bytes is under both readings
-# of the number (4e6 and 4*1024^2), so a file that passes here passes there.
-# Same reasoning as videoconv.LIMIT, and the same 7% head-room, since the
-# search measures the real encoded bytes and can stop as soon as it is under.
-LIMIT = 4_000_000
-TARGET = int(LIMIT * 0.93)
-
-# Resolution rungs, as a fraction of the source's longest side. Only reached
-# when quality alone cannot pay for the budget at the rung above.
-SCALES = (1.0, 0.85, 0.7, 0.6, 0.5, 0.4, 0.32, 0.25, 0.18, 0.12)
-
-# Quality window for the binary search. The floor is where JPEG starts to look
-# obviously chewed; below it, dropping resolution is the better trade — which
-# is exactly what the next scale does.
-Q_MIN, Q_MAX = 40, 92
-
-# A source this big is not a photograph that lost its way, it is a scan or a
-# render, and decoding it uncompressed would cost more RAM than book has.
-MAX_SRC_PIXELS = 120_000_000
-
-# Qt refuses to decode any image whose uncompressed form exceeds 256 MB, and
-# reports it as the thoroughly misleading "Unable to read image data" — so the
-# images most worth shrinking are the ones that silently could not be. Measured
-# on top: a 9000x8113 PNG (73 MP, 292 MB as ARGB32) failed outright and decoded
-# fine with the limit raised. `MAX_SRC_PIXELS` above is the real guard, so the
-# limit is set to what that allows and no more.
-#
-# This is a PROCESS-WIDE static, not a per-reader setting, so it also lifts the
-# same ceiling off filer's thumbnailer (main.py) — which is a fix, not a side
-# effect: those same PNGs had no preview tile for exactly this reason.
-QImageReader.setAllocationLimit(MAX_SRC_PIXELS * 4 // (1024 * 1024) + 1)
+# Kept as names here because filer's own harness and AGENTS.md cite them; the
+# values, and the reasoning for them, are imgfit's.
+__all__ = ["LIMIT", "TARGET", "out_path_for", "shrink", "ImgConv"]
 
 
 def out_path_for(src, ext):
@@ -93,55 +55,11 @@ def _human(b):
         b /= 1024
 
 
-def _uses_alpha(img):
-    """Whether the image is actually transparent anywhere, not merely carrying
-    an alpha channel. Sampled on a 64x64 reduction — enough to catch a logo's
-    cut-out corner, cheap enough to run on a 100-megapixel source, and the same
-    trick `videoconv._is_blank` uses to avoid touching every pixel."""
-    if not img.hasAlphaChannel():
-        return False
-    small = img.scaled(64, 64, Qt.IgnoreAspectRatio, Qt.FastTransformation)
-    small = small.convertToFormat(QImage.Format_ARGB32)
-    for y in range(small.height()):
-        for x in range(small.width()):
-            if small.pixelColor(x, y).alpha() < 255:
-                return True
-    return False
-
-
-def _encode(img, fmt, quality):
-    """`img` as `fmt` at `quality`, in memory. Returns the bytes, or None if the
-    writer refused (an unsupported format on this machine's Qt build)."""
-    # QBuffer() with no argument, using its OWN internal byte array. Handing it
-    # `QByteArray()` instead makes the buffer borrow a Python-owned temporary
-    # that is collected while the JPEG writer is still filling it — measured, a
-    # hard SEGV inside QBuffer::writeData on the first encode.
-    buf = QBuffer()
-    buf.open(QIODevice.WriteOnly)
-    w = QImageWriter(buf, fmt.encode())
-    w.setQuality(quality)
-    if not w.write(img):
-        return None
-    return bytes(buf.data())
-
-
-def _best_under(img, fmt, budget):
-    """The largest quality whose encoding of `img` fits `budget`, as (quality,
-    bytes) — or None if even Q_MIN is too big. Binary search: ~5 encodes."""
-    lo, hi, best = Q_MIN, Q_MAX, None
-    floor = _encode(img, fmt, Q_MIN)
-    if floor is None or len(floor) > budget:
-        return None
-    best = (Q_MIN, floor)
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        blob = _encode(img, fmt, mid)
-        if blob is not None and len(blob) <= budget:
-            best = (mid, blob)
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return best
+# The harness (and any caller that grew used to them) reaches these by their
+# old names; the implementations are imgfit's, so there is exactly one of each.
+_uses_alpha = uses_alpha
+_encode = encode
+_best_under = best_under
 
 
 def shrink(src, budget=TARGET):
@@ -160,50 +78,25 @@ def shrink(src, budget=TARGET):
     if size <= LIMIT:
         return {"ok": False, "reason": "already under 4MB"}
 
-    reader = QImageReader(src)
-    reader.setAutoTransform(True)      # honour the EXIF rotation, once, here
-    if not reader.canRead():
-        return {"ok": False, "reason": "not an image this machine can read"}
-    if reader.imageCount() > 1:
-        return {"ok": False, "reason": "that is an animation, not a still"}
-    dims = reader.size()
-    if dims.isValid() and dims.width() * dims.height() > MAX_SRC_PIXELS:
-        return {"ok": False, "reason": "image is too large to decode (%d MP)"
-                % (dims.width() * dims.height() // 1_000_000)}
-    img = reader.read()
-    if img.isNull():
-        return {"ok": False, "reason": reader.errorString() or "could not decode it"}
+    img, why = read(src)
+    if img is None:
+        return {"ok": False, "reason": why}
 
-    fmt = "webp" if _uses_alpha(img) else "jpeg"
-    if fmt.encode() not in [bytes(b) for b in QImageWriter.supportedImageFormats()]:
-        fmt = "jpeg"                   # no webp in this Qt build; alpha is lost
-    ext = "webp" if fmt == "webp" else "jpg"
-
-    long_side = max(img.width(), img.height())
-    for scale in SCALES:
-        cand = img if scale == 1.0 else img.scaled(
-            max(1, int(round(img.width() * scale))),
-            max(1, int(round(img.height() * scale))),
-            Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        hit = _best_under(cand, fmt, budget)
-        if hit is None:
-            continue
-        quality, blob = hit
-        dst = out_path_for(src, ext)
-        try:
-            with open(dst, "wb") as f:
-                f.write(blob)
-        except OSError as e:
-            return {"ok": False, "reason": str(e)}
-        px = "%dx%d" % (cand.width(), cand.height())
-        summary = "%s -> %s, %s" % (_human(size), _human(len(blob)), px)
-        if scale != 1.0:
-            summary += " (was %dx%d)" % (img.width(), img.height())
-        return {"ok": True, "path": dst, "bytes": len(blob), "quality": quality,
-                "summary": summary}
-    return {"ok": False,
-            "reason": "cannot get it under 4MB (tried down to %d%% of %dpx)"
-                      % (SCALES[-1] * 100, long_side)}
+    res = fit(img, budget)
+    if not res["ok"]:
+        return res
+    dst = out_path_for(src, res["ext"])
+    try:
+        with open(dst, "wb") as f:
+            f.write(res["bytes"])
+    except OSError as e:
+        return {"ok": False, "reason": str(e)}
+    px = "%dx%d" % (res["width"], res["height"])
+    summary = "%s -> %s, %s" % (_human(size), _human(len(res["bytes"])), px)
+    if res["scale"] != 1.0:
+        summary += " (was %dx%d)" % (img.width(), img.height())
+    return {"ok": True, "path": dst, "bytes": len(res["bytes"]),
+            "quality": res["quality"], "summary": summary}
 
 
 class ImgConv(QObject):

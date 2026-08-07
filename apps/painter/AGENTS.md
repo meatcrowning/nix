@@ -145,6 +145,42 @@ torn down while the pointer is on it evaluates them once with its model context
 already gone, and `undefined` assigned to a bool is a QML warning — which fails
 `ui-test.py`.
 
+## Several outputs are selected, and drag as ONE collage
+
+Click, ctrl-click and shift-click select in the gallery exactly as they do in a
+file manager ([his] *"make it so i can shift / cntrl shift a selection of
+outputs"*), and dragging a set out hands over **one picture with all of them in
+it, under 4MB** — *"what gets put down where the cursor lies is a collage of
+them in the highest quality under 4mb"*. Five files land five different ways
+depending on what catches them; one picture lands the same way everywhere.
+
+- **The selection is kept as PATHS, never indices.** A finished job inserts a
+  row at 0, which would renumber a set of indices under him mid-selection; the
+  same `Connections` drops a path whose row has gone.
+- **A press inside an existing multi-selection does not collapse it** — the drag
+  that may follow has to carry the whole set, so that click is deferred to the
+  release and applied only if no drag happened (filer's rule, docs/DESIGN.md §13).
+- **Shift is the RANGE key here, so it cannot also mean "with the sound"**: a
+  lone clip still drags muted-unless-shift, but once a selection is in play the
+  original-audio drag is ctrl+shift.
+- **The layout is `collage.py`; the budget is `pylib/imgfit.py`** — the same
+  search filer's "copy under 4MB" uses. What is painter's is the arrangement: a
+  grid whose cell takes the mean SHAPE of its contents (a set of 2:3 portraits
+  in square cells is mostly background), each image fitted and never cropped,
+  row-major in the gallery's own order. **It never upscales into a cell** — the
+  budget buys real pixels or interpolated ones at the same price, and the
+  interpolated ones carry nothing. Measured on six real Klein outputs: 2.0MB,
+  3776x2072, quality 92, 0.3s.
+- **It is built when the SELECTION changes, on a thread**, and the press joins
+  that thread (bounded, 25s) rather than starting the work. A payload has to be
+  ready in the same event as the press, and decoding six PNGs plus half a dozen
+  JPEG encodes is not. Cached under `~/.cache/painter/collage/<key>/`, keyed by
+  every source's path+mtime+size, so a re-generated output cannot be served from
+  the old picture, and written through a `.part` rename so a drag can never
+  catch a half-written file.
+- A selection of ONE is not a collage: it drags as the file itself, clip muting
+  included.
+
 ## An output is dragged out of the window
 
 The gallery's tiles are a drag SOURCE (docs/DESIGN.md §13), in filer's idiom and
