@@ -104,12 +104,44 @@ PanelWindow {
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "qs-launcher"
-    // OnDemand (not Exclusive): the runner accepts keyboard input but never
-    // fully steals focus, so you can click into a window and back again. Tied
-    // to `out`, not `open`, so the layer keeps the keyboard through the closing
-    // pull and gives it back only once the drawer is home — and holds none of
-    // it the rest of the time, which matters now that the surface is permanent.
-    WlrLayershell.keyboardFocus: launcher.out ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    // ONE FRAME OF Exclusive TO TAKE THE KEYBOARD, then OnDemand to hold it.
+    //
+    // OnDemand alone was the "the runner is open and typing goes to the window
+    // behind it" bug. This drawer opens from a KEYBIND (RunnerShortcut.qml), so
+    // the only thing that happens on open is a None->OnDemand commit — and
+    // Hyprland grants an on-demand layer surface the keyboard on the next
+    // pointer MOTION over it, never on a commit and never on a click. Tap Super
+    // with the pointer over a window and the box was drawn, QML-focused, cursor
+    // blinking, and had no wl_keyboard: `input.forceActiveFocus()` moves focus
+    // inside the scene and cannot ask the compositor for anything. So the open
+    // arms `grab`, which flips this surface to Exclusive — the one mode a commit
+    // can switch to that grabs the keyboard outright. Same fix as the dock's
+    // filter box (shell.qml's `Procs.filterGrab`), which had it first.
+    //
+    // AND THEN STRAIGHT BACK TO OnDemand, the moment the box actually holds
+    // focus. Sticky Exclusive keeps sending us the keyboard after you click into
+    // a window, so the next keystroke would land in the search box instead of
+    // what you just clicked on.
+    //
+    // The OnDemand term is tied to `out`, not `open`, so the layer keeps the
+    // keyboard through the closing pull and gives it back only once the drawer
+    // is home — and holds none of it the rest of the time, which matters now
+    // that the surface is permanent. No `filterLatch` equivalent is needed here:
+    // the bar hands back while the pointer is still over it (the case Hyprland's
+    // refocusLastWindow gets wrong), whereas this drawer is gone by then.
+    property bool grab: false
+    WlrLayershell.keyboardFocus:
+        launcher.grab ? WlrKeyboardFocus.Exclusive
+      : launcher.out  ? WlrKeyboardFocus.OnDemand
+                      : WlrKeyboardFocus.None
+
+    // Drop the grab as soon as the box has the keyboard. The timer is the
+    // backstop: if the grant never arrives, a surface left Exclusive would eat
+    // every keystroke on the desktop, so it is never held longer than this.
+    property var grabSettle: Timer {
+        interval: 400
+        onTriggered: launcher.grab = false
+    }
 
     // ----- data -----
     property var results: []
@@ -213,6 +245,12 @@ PanelWindow {
             else
                 input.text = "";
             input.forceActiveFocus();
+            // ...and ask the COMPOSITOR for the keyboard, which the line above
+            // cannot do. See `grab`.
+            launcher.grab = true;
+            grabSettle.restart();
+        } else {
+            launcher.grab = false;
         }
     }
 
@@ -473,6 +511,13 @@ PanelWindow {
                             focus: true
                             selectByMouse: true
                             onTextChanged: launcher.rebuild()
+
+                            // The window is only ACTIVE while this layer surface
+                            // holds the wl_keyboard, so this is the panel being
+                            // told the open's Exclusive grab landed. Settle to
+                            // OnDemand, which is what hands the keyboard back
+                            // when you click into a window.
+                            onActiveFocusChanged: if (activeFocus) launcher.grab = false
 
                             Keys.onPressed: (event) => {
                                 if (event.key === Qt.Key_Down) {
