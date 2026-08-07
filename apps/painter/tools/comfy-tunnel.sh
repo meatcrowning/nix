@@ -4,8 +4,10 @@
 # This is also painter's LAUNCHER on book: home/prog/painter.nix's `air` branch
 # execs `comfy-tunnel.sh -- python3 main.py`, so opening painter from the runner
 # does the whole thing by itself — probe top, forward 8188 and mount top's model
-# root at the same time, start the backend there if it is not already up, run the
-# app as soon as the port is bound, and tear both down after. It does NOT wait
+# and output roots at the same time, start the backend there if it is not already
+# up, run the app as soon as the port is bound, and tear it all down after. (The
+# output root is what makes book's history the WHOLE history: top's backend files
+# every result it produces on top, whichever machine asked for it.) It does NOT wait
 # for ComfyUI to finish loading: the window opens now and says what it is waiting
 # for.
 #
@@ -47,6 +49,8 @@ SSHFS="${COMFY_SSHFS:-/usr/sbin/sshfs}"
 FUSERMOUNT="${COMFY_FUSERMOUNT:-/usr/sbin/fusermount3}"
 MODELS_REMOTE="${COMFY_MODELS:-/home/lam/models}"
 MODELS_LOCAL="${PAINTER_MODELS_MOUNT:-${XDG_CACHE_HOME:-$HOME/.cache}/painter/models-top}"
+OUT_REMOTE="${COMFY_OUT:-/home/lam/Pictures/painter/out}"
+OUT_LOCAL="${PAINTER_PEER_OUT_MOUNT:-${XDG_CACHE_HOME:-$HOME/.cache}/painter/out-top}"
 # How long to wait for the backend to serve. A warm one is seconds; a cold one
 # is a torch import plus however many GB of weights; and if the nix-shell env
 # has been garbage-collected since the last run it is a few hundred MB of store
@@ -159,22 +163,32 @@ export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
 # The graphs are unaffected: they name a model by BASENAME and ComfyUI resolves
 # it against top's own extra_model_paths.yaml, so this mount is for
 # identification here and nothing else.
-mount_models() {
-    findmnt -rn "$MODELS_LOCAL" >/dev/null 2>&1 && { MOUNTED_BY_US=""; return 0; }
-    mkdir -p "$MODELS_LOCAL" || return 1
-    # ro: nothing here ever writes a model. follow_symlinks: the roots were
-    # consolidated in 2026-07 and the tree still holds server-side symlinks,
-    # which would otherwise arrive as dangling links.
+#
+# ro: nothing here ever writes to top. follow_symlinks: the model roots were
+# consolidated in 2026-07 and the tree still holds server-side symlinks, which
+# would otherwise arrive as dangling links.
+#
+# Only what WE mounted is unmounted again — a mount already standing belongs to
+# another painter, or to him, and pulling it out from under either is worse than
+# leaving it.
+MOUNTS=()
+
+mount_ro() {
+    local remote="$1" here="$2"
+    findmnt -rn "$here" >/dev/null 2>&1 && return 0
+    mkdir -p "$here" || return 1
     "$SSHFS" -o ro,follow_symlinks,reconnect,BatchMode=yes \
              -o ServerAliveInterval=15,ServerAliveCountMax=3 \
-             "$HOST:$MODELS_REMOTE" "$MODELS_LOCAL" 2>/dev/null || return 1
-    MOUNTED_BY_US=1
+             "$HOST:$remote" "$here" 2>/dev/null || return 1
+    MOUNTS+=("$here")
     return 0
 }
 
-unmount_models() {
-    [ -n "${MOUNTED_BY_US:-}" ] || return 0
-    "$FUSERMOUNT" -u "$MODELS_LOCAL" 2>/dev/null
+unmount_ours() {
+    local d
+    for d in ${MOUNTS[@]+"${MOUNTS[@]}"}; do
+        "$FUSERMOUNT" -u "$d" 2>/dev/null
+    done
 }
 
 if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
@@ -183,7 +197,7 @@ if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
     # that second was spent with no window on screen. main.py's scan retries
     # while the list is empty, so it picks them up as soon as the mount lands.
     export PAINTER_MODELS="$MODELS_LOCAL"
-    if mount_models; then
+    if mount_ro "$MODELS_REMOTE" "$MODELS_LOCAL"; then
         say "models from $HOST:$MODELS_REMOTE at $MODELS_LOCAL"
     else
         # Not fatal: the backend is what painter cannot work without, and the
@@ -193,6 +207,27 @@ if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
         command -v notify-send >/dev/null 2>&1 &&
             notify-send -a painter -u critical "painter" \
                 "could not mount top's models over sshfs - the model picker will be empty" 2>/dev/null
+    fi
+fi
+
+# THE HISTORY IS BOTH MACHINES' TOO. Every result book asks for is produced by
+# top's backend, which files it in TOP's output directory whoever asked; book
+# only ever holds the copy it downloaded afterwards. So top's gallery has always
+# shown everything either machine made and book's showed the tail of it. Mount
+# top's output root beside its models and hand it over as a PEER root —
+# main.py's Gallery globs it alongside the local one and shows the file that is
+# in both once (by name; the local copy wins, being the one with painter's
+# parameter chunk in it).
+#
+# Cheap, and not fatal: measured 0.14s to mount, and a failure costs the older
+# half of the history rather than the ability to generate — so it says so on
+# stderr and does not put a notification in front of him.
+if [ -z "${PAINTER_NO_PEER_OUT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
+    if mount_ro "$OUT_REMOTE" "$OUT_LOCAL"; then
+        export PAINTER_PEER_OUT="$OUT_LOCAL"
+        say "outputs from $HOST:$OUT_REMOTE at $OUT_LOCAL"
+    else
+        say "could not mount $HOST:$OUT_REMOTE - the history will show book's own outputs only"
     fi
 fi
 
@@ -208,7 +243,7 @@ if comfy_answers; then
     if [ ${#APP[@]} -gt 0 ]; then
         # Run, do not `exec`: exec replaces this shell and the EXIT trap never
         # fires, so the sshfs mount we just made would outlive the app.
-        trap unmount_models EXIT
+        trap unmount_ours EXIT
         "${APP[@]}"
         exit $?
     fi
@@ -230,7 +265,7 @@ if [ ${#APP[@]} -gt 0 ]; then
     # One trap, set once, covering every exit including the die()s below: a
     # forward left running or a mount left behind is exactly the residue that
     # makes the NEXT launch take a stale path.
-    trap 'kill "$TUN" 2>/dev/null; unmount_models' EXIT
+    trap 'kill "$TUN" 2>/dev/null; unmount_ours' EXIT
 fi
 
 # STARTING THE BACKEND IS THE APP'S JOB, NOT THIS SCRIPT'S — when there is an
