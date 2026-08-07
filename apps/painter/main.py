@@ -21,10 +21,12 @@ ComfyUI itself runs as a systemd --user unit, started on demand and left running
 so weights stay warm between launches:  journalctl --user -u comfy-painter -f
 """
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -50,6 +52,7 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font set
 from spellcheck import SpellCheck  # noqa: E402  (pylib; the prompt boxes' spelling)
 
 sys.path.insert(0, str(HERE))
+import collage as Collage  # noqa: E402
 import comfy as C  # noqa: E402
 import graph as G  # noqa: E402
 import pngmeta  # noqa: E402
@@ -551,6 +554,29 @@ class Gallery(QAbstractListModel):
     def isVideoAt(self, i):
         return bool(self._rows[i]["is_video"]) if 0 <= i < len(self._rows) else False
 
+    @Slot(str, result=int)
+    def indexOf(self, path):
+        """Row of a path, or -1. The gallery's selection is kept as PATHS (a
+        new output inserts at row 0 and would renumber a set of indices under
+        him), so extending a range needs the model to say where they sit."""
+        path = str(path)
+        for i, r in enumerate(self._rows):
+            if r["path"] == path:
+                return i
+        return -1
+
+    @Slot(str, result=str)
+    def stillFor(self, path):
+        """The picture that stands for this output — itself, or a clip's poster
+        frame. "" when a video has no poster yet."""
+        path = str(path)
+        for r in self._rows:
+            if r["path"] == path:
+                if not r["is_video"]:
+                    return path
+                return QUrl(r["poster"]).toLocalFile() if r["poster"] else ""
+        return ""
+
     @Slot(int, result="QVariant")
     def paramsAt(self, i):
         if not (0 <= i < len(self._rows)):
@@ -613,6 +639,11 @@ class Painter(QObject):
         self._uploaded_last = ("", "")    # the same, for the last frame
         self._mode = ""                   # anime / real / edit / video, or "" for the list
         self._want_mode = ""              # a remembered mode, until the rows land
+        # Collages built for a dragged selection, keyed by the files that went
+        # into them. The work is on a thread; the dict is what stops two presses
+        # building the same picture twice.
+        self._collage_lock = threading.Lock()
+        self._collage_jobs = {}
 
         self.reg = None
         self.client = C.ComfyClient()
@@ -1479,6 +1510,131 @@ class Painter(QObject):
                 and not is_muted_copy(src)):
             out = self._mute_for_drag(src)
         return QUrl.fromLocalFile(str(out)).toString() + "\r\n"
+
+    # -- dragging SEVERAL outputs: one collage ------------------------------
+
+    @Slot("QVariantList", bool, result=str)
+    def dragUriListFor(self, paths, original=False):
+        """The payload for dragging a SELECTION out: one file, always.
+
+        One output drags as itself (a clip muted — `dragUriList`). Two or more
+        drag as a COLLAGE of them, under 4MB, because five files land five
+        different ways depending on what catches them while one picture lands
+        the same way everywhere ([his] ask, 2026-08-06).
+
+        The collage is normally already built: `prepareCollage` starts it on a
+        thread the moment the selection changes, which is seconds before any
+        press. This joins that thread rather than racing it, and builds
+        synchronously if the press somehow got there first.
+        """
+        paths = [str(p) for p in paths if str(p)]
+        if len(paths) <= 1:
+            return self.dragUriList(paths[0] if paths else "", original)
+        path = self._collage_for(paths, wait=True)
+        if not path:
+            return self.dragUriList(paths[0], original)
+        return QUrl.fromLocalFile(path).toString() + "\r\n"
+
+    @Slot("QVariantList")
+    def prepareCollage(self, paths):
+        """Start building the collage for this selection, off the GUI thread.
+
+        Called on every selection change. Two or more outputs is a few hundred
+        milliseconds of decoding and half a dozen JPEG encodes — nothing to do
+        at the press, where the payload has to be ready in the same event.
+        """
+        paths = [str(p) for p in paths if str(p)]
+        if len(paths) > 1:
+            self._collage_for(paths, wait=False)
+
+    def _collage_key(self, paths):
+        """Identity of a selection AND of its files: a re-generated output at
+        the same path must not be served from the old collage."""
+        h = hashlib.sha1()
+        for p in paths:
+            try:
+                st = os.stat(p)
+                h.update(("%s|%d|%d\0" % (p, st.st_mtime_ns, st.st_size)).encode())
+            except OSError:
+                h.update((p + "|missing\0").encode())
+        return h.hexdigest()[:16]
+
+    def _collage_for(self, paths, wait):
+        """The collage file for `paths`, building it if need be.
+
+        `wait=False` starts the work and returns "" — the caller is warming the
+        cache. `wait=True` blocks on whatever is in flight (bounded) and
+        returns the path, or "" if it could not be made.
+        """
+        key = self._collage_key(paths)
+        dest = CACHE / "collage" / key / ("painter-collage-%d.jpg" % len(paths))
+        if dest.exists():
+            return str(dest)
+        with self._collage_lock:
+            thread = self._collage_jobs.get(key)
+            if thread is None:
+                thread = threading.Thread(target=self._build_collage,
+                                          args=(list(paths), dest, key), daemon=True)
+                self._collage_jobs[key] = thread
+                thread.start()
+        if not wait:
+            return ""
+        # Bounded: a drag must not be able to hang the window on a pathological
+        # set of files. Past it the caller falls back to the single-file path.
+        thread.join(timeout=25)
+        return str(dest) if dest.exists() else ""
+
+    def _build_collage(self, paths, dest, key):
+        """Decode, lay out, fit under the budget, write. Worker thread only.
+
+        A clip contributes its POSTER frame — the picture the tile shows — and
+        the frame is extracted here if the gallery has not got to it yet, since
+        this is the one place that can afford to wait for ffmpeg.
+        """
+        try:
+            stills = []
+            for p in paths:
+                still = self.gallery.stillFor(p)
+                if not still and Path(p).suffix.lower() in VIDEO_SUFFIXES:
+                    still = self._poster_now(p)
+                if still:
+                    stills.append(still)
+            images, problems = Collage.read_all(stills)
+            if problems:
+                self.toast.emit("skipped %d output(s) that would not decode"
+                                % len(problems), True)
+            res = Collage.encode(images)
+            if not res.get("ok"):
+                self.toast.emit("could not make the collage: %s"
+                                % res.get("reason", "?"), True)
+                return
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_suffix(".part")
+            tmp.write_bytes(res["bytes"])
+            os.replace(tmp, dest)       # never a half-written file for a drag
+        except Exception as exc:        # noqa: BLE001 - a thread that raises is silent
+            self.toast.emit("could not make the collage: %s" % exc, True)
+        finally:
+            with self._collage_lock:
+                self._collage_jobs.pop(key, None)
+
+    def _poster_now(self, path):
+        """A clip's poster frame, extracted synchronously (worker thread)."""
+        try:
+            dest = self.gallery._poster_path(path)
+        except OSError:
+            return ""
+        if dest.exists():
+            return str(dest)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            rc = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+                                 "-ss", "0", "-i", str(path), "-frames:v", "1",
+                                 "-vf", "scale=1280:-1", str(dest)],
+                                capture_output=True, timeout=60).returncode
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return str(dest) if rc == 0 and dest.exists() else ""
 
     def _mute_for_drag(self, src: Path) -> Path:
         """A silent copy of `src` to hand to the drag, made now if need be.

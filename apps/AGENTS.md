@@ -216,6 +216,18 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
     - Personal words live in `$XDG_STATE_HOME/spellcheck/personal.dic`, one
       per line, **shared by every app**: "add to dictionary" in editor is added
       in painter too.
+- **`imgfit.py`** — **THE "get this under N bytes" search.** Quality before
+  resolution (a binary search over JPEG quality at each resolution rung, the
+  next rung only when even `Q_MIN` will not fit), measured by encoding into a
+  `QBuffer` rather than by writing and stat-ing, JPEG unless the alpha is
+  *really* used — `hasAlphaChannel()` says yes for almost every PNG, so it is
+  sampled. It was filer's `imgconv.py` until painter needed the same budget for
+  the collage it hands to a drag; filer keeps the part that is filer's (naming
+  the copy beside the original, the toast, the menu's QObject). **Importing it
+  raises Qt's 256 MB decode ceiling process-wide** — deliberate, and also what
+  gives filer's thumbnailer preview tiles for very large PNGs. Harnesses:
+  `filer/tools/imgconv-test.py` (the search, ~21 checks over real noise) and
+  painter's `ui-test.py` → `test_selection_and_collage`.
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
 - **`clipfile.py`** — **THE way to put a FILE on the clipboard here.** Run as a
