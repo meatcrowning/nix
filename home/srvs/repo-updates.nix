@@ -44,10 +44,12 @@
     (pkgs.writeShellScriptBin "nix-pull" ''
       # nix-pull            — show what origin/main has that this checkout does not
       # nix-pull apply      — pull it, rebuild through the host's wrapper, reload
+      # nix-pull demo       — raise the toast, with its buttons, wired to nothing
       case "''${1:-check}" in
         apply|-a|--apply) exec ${pkgs.python3}/bin/python3 "$HOME/.config/scripts/repo-updates.py" --apply ;;
         check|-c|--check)  exec ${pkgs.python3}/bin/python3 "$HOME/.config/scripts/repo-updates.py" --check ;;
-        *) echo "usage: nix-pull [check|apply]" >&2; exit 2 ;;
+        demo|--demo)       exec ${pkgs.python3}/bin/python3 "$HOME/.config/scripts/repo-updates.py" --demo ;;
+        *) echo "usage: nix-pull [check|apply|demo]" >&2; exit 2 ;;
       esac
     '')
   ];
