@@ -128,6 +128,23 @@ be a box to drop the image in and a prompt box"*:
 - A family with no `edit` block **refuses** an edit build. That refusal is what
   the mode button relies on.
 
+## A clip tile plays on hover
+
+Hovering a video in the gallery plays it, muted and looped, over its own poster
+frame (docs/DESIGN.md §5 — the desktop rule, not a painter widget). The player
+lives in a `Loader` gated on `tileMa.containsMouse`, so it is **created on
+arrival and destroyed on leaving**: at most one decoder exists at a time, and
+none survives the pointer moving on. The play marker stands down while it
+plays. `test_hover_play` builds a two-second clip with ffmpeg and asserts all of
+that, including the muting — an `AudioOutput` is a plain QObject rather than an
+Item, so nothing walking the scene can find it and the holder aliases `muted` /
+`volume` for the harness.
+
+Bindings inside that delegate use `isVideo === true`, not a bare role: a tile
+torn down while the pointer is on it evaluates them once with its model context
+already gone, and `undefined` assigned to a bool is a QML warning — which fails
+`ui-test.py`.
+
 ## An output is dragged out of the window
 
 The gallery's tiles are a drag SOURCE (docs/DESIGN.md §13), in filer's idiom and
@@ -188,6 +205,23 @@ anything"*. Two states, no controls:
    plays looped and **muted** — a preview beside a music player, not playback.
    Playback is viewer, on a double-click in the grid. A single click in the grid
    does nothing at all, deliberately.
+
+**A video job previews as ONE frame, and that is the backend, not this pane.**
+[his] *"why will sampling previews only show the first frame from the
+generation"* — measured 2026-08-06: painter's side is fine. Three synthetic
+frames pushed through `_on_preview` (red, green, blue) were each grabbed off the
+real pane offscreen, so the `image://livepreview/<tick>` URL does reload per
+frame and the newest one is what is drawn. What arrives is the same picture:
+`latent_preview.Latent2RGBPreviewer.decode_latent_to_preview` does
+`x0 = x0[0, :, 0]` for a 5-D latent — the clip's first frame — and the previewer
+API hands back exactly ONE image per step, so no client can be shown more (its
+own web UI included). `--preview-method auto` resolves to Latent2RGB, and the
+`taesd`/`taehv` route is not a way out: `TAEHVPreviewerImpl` slices
+`x0[:1, :, :1]`, one frame again, and needs a `models/vae_approx/taehv*` that is
+not installed. **Anything more would be a local patch to
+`/home/lam/comfy/latent_preview.py`**, i.e. a fourth local commit on a checkout
+that is maintained by rebasing onto upstream tags. The pane therefore says
+`sampling - frame 1 of the clip` rather than looking frozen.
 
 Two things about the backend, both worth knowing before debugging an empty pane:
 

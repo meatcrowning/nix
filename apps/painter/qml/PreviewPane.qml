@@ -136,7 +136,16 @@ Item {
             PixelText {
                 id: tag
                 anchors.centerIn: parent
-                text: App.hasPreview ? "sampling" : (pane.sourceIsVideo ? "clip" : "still")
+                // A VIDEO JOB PREVIEWS AS ONE FRAME, and the label says which,
+                // because a still that never moves while a clip is being made
+                // looks like a preview that has frozen. It has not: ComfyUI's
+                // Latent2RGB previewer slices `x0[0, :, 0]` out of a 5-D latent
+                // — the first frame — and hands back ONE image per step, so
+                // that frame is all any client can be shown (its own web UI
+                // included). What refreshes is the denoising of frame 1.
+                text: App.hasPreview
+                      ? (App.isVideo ? "sampling - frame 1 of the clip" : "sampling")
+                      : (pane.sourceIsVideo ? "clip" : "still")
                 color: App.hasPreview ? Theme.accent : Theme.textDim
             }
         }

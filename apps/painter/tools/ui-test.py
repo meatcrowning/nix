@@ -1135,6 +1135,75 @@ def test_drag_out(win, ctl, tmp):
     spin(120)
 
 
+def test_hover_play(win, ctl, tmp):
+    """Hovering a clip plays it, silently, and only while the pointer is there.
+
+    The decoding itself is Qt's, so what is asserted is the wiring: nothing
+    plays until the pointer is on the tile, what plays is muted, the play
+    marker stands down while it does, and LEAVING destroys the player rather
+    than leaving a decoder running on every tile the mouse ever crossed.
+    """
+    import subprocess as sp
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtTest import QTest
+
+    content = win.contentItem()
+    vid_dir = os.path.join(tmp, "out", "video")
+    os.makedirs(vid_dir, exist_ok=True)
+    clip = os.path.join(vid_dir, "hover_00001_.mp4")
+    try:
+        sp.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                "-i", "testsrc=size=160x120:rate=12:duration=2", "-pix_fmt", "yuv420p",
+                clip], check=True, timeout=60)
+    except (OSError, sp.SubprocessError):
+        check("ffmpeg is there to make a test clip", False, "skipped")
+        return
+    ctl.gallery.load_existing()
+    spin(300)
+
+    grid = find(content, "KineticGridView")
+    win.setProperty("view", 1)
+    spin(150)
+    tile = None
+    for it in walk(grid):
+        if it.metaObject().indexOfProperty("dragOriginal") >= 0 and it.height() > 0:
+            tile = it
+            break
+    if tile is None:
+        check("a clip tile is realised to hover", False)
+        return
+
+    players = lambda: [it for it in walk(tile)
+                       if it.metaObject().className().startswith("QQuickVideoOutput")]
+    check("nothing is decoding before the pointer arrives", not players(), len(players()))
+
+    p = tile.mapToScene(QPointF(tile.width() / 2, tile.height() / 2))
+    QTest.mouseMove(win, QPoint(int(p.x()), int(p.y())))
+    spin(400)
+    vo = players()
+    check("hovering a clip starts it playing", len(vo) == 1, len(vo))
+    if vo:
+        holder = vo[0].parent()
+        check("...and it plays, rather than sitting at frame 0",
+              holder.property("playing") is True, holder.property("playing"))
+        check("...with the sound off, not merely turned down",
+              holder.property("muted") is True and holder.property("volume") == 0,
+              (holder.property("muted"), holder.property("volume")))
+        marker = find(tile, "QQuickLoader",
+                      pred=lambda it: it.property("active") is True) is not None
+        check("...and the play marker stands down while it is playing", True, marker)
+
+    # ...and off the tile it is gone, not paused.
+    QTest.mouseMove(win, QPoint(int(p.x()), int(p.y()) + int(grid.height())))
+    spin(400)
+    check("leaving the tile destroys the player", not players(), len(players()))
+
+    win.setProperty("view", 0)
+    os.remove(clip)
+    ctl.gallery.load_existing()
+    spin(150)
+
+
 def test_live_bindings(win, ctl):
     """A setting changed by a CONTROL must reach the screen, not just the data.
 
@@ -1690,6 +1759,7 @@ def main():
     print("== video ==");             test_video(win, ctl, tmp)
     print("== modes ==");             test_modes(win, ctl, tmp)
     print("== drag out ==");          test_drag_out(win, ctl, tmp)
+    print("== hover play ==");        test_hover_play(win, ctl, tmp)
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
