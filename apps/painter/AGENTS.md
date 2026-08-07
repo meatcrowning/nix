@@ -463,18 +463,18 @@ What is genuinely different, and therefore what the left column stops offering:
 - **Two VAEs.** Video and audio latents decode separately and `CreateVideo`
   muxes them, so `pair()` resolves a `vae_audio` as well and a missing one is a
   problem reported up front.
-- **Three modes, one template.** With a first frame (`VideoPanel`'s toggle, an
-  image dropped on the well) it is image-to-video: `LoadImage ->
-  ImageScaleToTotalPixels -> GetImageSize` and the frame size comes **out of the
-  image**, which is why `ResolutionPanel` drops to the MP box alone. Without
-  one, `_build_video` drops those three nodes (`Graph.drop`, which refuses while
-  anything still reads them) and feeds painter's own aspect + MP. **A last
-  frame** is the third: a second toggle and a second well under the first pair,
-  feeding `load_image_last` into the node's optional `last_frame` — one more
-  link, not another graph, only offered alongside a first frame, and dropped
-  (node and all) when unused, since an unwired `LoadImage` with an empty
-  filename fails Comfy's own validation. Dropping the same file in both wells is
-  what looping now is; there is no loop toggle.
+- **Four modes, one template.** `first_frame` and `last_frame` are both
+  **optional** inputs on the node and `VideoPanel` offers them as two
+  independent toggles, each with its own well: first only, last only, both (the
+  same file in both is what looping is — there is no loop toggle), or neither.
+  With either frame the size comes **out of the image** — `ImageScaleToTotalPixels
+  -> GetImageSize`, which is why `ResolutionPanel` drops to the MP box alone —
+  and the measuring chain runs off the FIRST frame when there is one, off the
+  last when there is not (`_build_video` repoints `scale_image`). With neither,
+  it drops that chain (`Graph.drop`, which refuses while anything still reads
+  the node) and feeds painter's own aspect + MP. **Each `LoadImage` is dropped
+  when its end was not dropped on**: an unwired one with an empty filename fails
+  Comfy's own validation.
 - **Each frame is uploaded, not read.** `ComfyClient.upload_image` PUTs it
   under the input directory's `painter/` subfolder and the graph names
   `painter/<file>` — on book the backend is top's and the socket is all they
@@ -494,8 +494,8 @@ What is genuinely different, and therefore what the left column stops offering:
   offer for one and says so.
 
 `tools/ui-test.py`'s `test_video` covers the whole column reshaping and what
-`submit()` sends; `tools/validate-graphs.py` builds both modes against the live
-`/object_info`.
+`submit()` sends; `tools/validate-graphs.py` builds all four modes (`i2v`,
+`l2v`, `fl2v`, `t2v`) against the live `/object_info`.
 
 ## One graph, not one per model
 

@@ -465,12 +465,20 @@ class Registry:
                               int(spec.get("frame_chunk", 17)))
         g.set_input("video", "length", frames)
 
-        if image:
-            g.set_input("load_image", "image", image)
-            # THE FRAME TO END ON. `last_frame` is an optional input on the
-            # node, so a second dropped image is one more link, not another
-            # graph — and it is only offered while there IS a first frame to
-            # start from. Drop the same file in both wells and the clip loops.
+        if image or last:
+            # TWO INDEPENDENT FRAMES. `first_frame` and `last_frame` are both
+            # optional inputs on the node, so each dropped image is one more
+            # link, not another graph: first only, last only, or both (the same
+            # file in both makes the clip loop). The MEASURING chain still runs
+            # off exactly one of them — the first when there is one, otherwise
+            # the last — since the frame size comes out of a dropped image
+            # whichever end it belongs to.
+            if image:
+                g.set_input("load_image", "image", image)
+            else:
+                g.set_input("scale_image", "image", [g.id_of("load_image_last"), 0])
+                g.node("video").get("inputs", {}).pop("first_frame", None)
+                g.drop("load_image")
             if last:
                 g.set_input("load_image_last", "image", last)
                 g.set_input("video", "last_frame", [g.id_of("load_image_last"), 0])
@@ -515,8 +523,7 @@ class Registry:
         params = {**p, "positive": pos, "negative": "", "frames": frames,
                   "fps": fps, "megapixels": mp, "kind": "video",
                   "input_image": image, "use_input_image": bool(image),
-                  "last_image": last if image else "",
-                  "use_last_frame": bool(image and last)}
+                  "last_image": last, "use_last_frame": bool(last)}
         if w and h:
             params["width"], params["height"] = int(w), int(h)
         return {"prompt": prompt, "pairing": pairing, "params": params}

@@ -620,8 +620,21 @@ def test_video(win, ctl, tmp):
     check("with a first frame the aspect is the image's, so the box goes",
           not aspect.isVisible() and res.property("badge") == "from the image",
           res.property("badge"))
+    # ...and a LAST frame on its own does the same: the two toggles are
+    # independent, and either dropped image is what the size is measured off.
     g = prop(win, "gen")
-    g["useInputImage"] = False
+    g.update({"useInputImage": False, "useLastFrame": True})
+    win.setProperty("gen", g)
+    spin(120)
+    check("a last frame alone also decides the aspect",
+          not aspect.isVisible() and res.property("badge") == "from the image",
+          res.property("badge"))
+    well = find(find(content, "VideoPanel"), "FrameWell",
+                pred=lambda it: it.property("emptyText").startswith("drag the frame to end"))
+    check("...and its well stands on its own, with no first frame",
+          well is not None and well.isVisible(), well and well.property("active"))
+    g = prop(win, "gen")
+    g.update({"useInputImage": False, "useLastFrame": False})
     win.setProperty("gen", g)
     spin(120)
     check("...and text-to-video gets it back", aspect.isVisible())
@@ -664,8 +677,8 @@ def test_video(win, ctl, tmp):
     check("...and no negative prompt or CFG",
           "negative" not in sent and "cfg" not in sent, sorted(sent))
 
-    # The frame to end on: a second drop, its own upload cache. Only offered
-    # with a first frame, so the flag only means anything alongside one.
+    # The frame to end on: a second drop, its own upload cache, and INDEPENDENT
+    # of the first — first only, last only, or both.
     sent.clear()
     ctl._input_image = os.path.join(root, "first.png")
     ctl._last_image = os.path.join(root, "last.png")
@@ -684,6 +697,20 @@ def test_video(win, ctl, tmp):
           sent.get("use_last_frame") is True and sent.get("last_image") == "painter/last.png"
           and sent.get("input_image") == "painter/first.png",
           (sent.get("use_last_frame"), sent.get("last_image"), sent.get("input_image")))
+
+    # A last frame ON ITS OWN is a job, not an error: the node takes either end.
+    sent.clear()
+    g = prop(win, "gen")
+    g.update({"useInputImage": False, "useLastFrame": True})
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("a last frame alone is submitted, with no first frame",
+          sent.get("_submitted") is True and sent.get("use_last_frame") is True
+          and sent.get("use_input_image") is False
+          and sent.get("last_image") == "painter/last.png",
+          (sent.get("_submitted"), sent.get("use_input_image"), sent.get("last_image")))
 
     # ...and one turned on with nothing dropped refuses, the same way the first
     # frame does (docs/DESIGN.md §10).

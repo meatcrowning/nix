@@ -4,16 +4,19 @@ import QtQuick
 // family (App.isVideo) — the left column follows what the selected model can
 // actually do rather than showing controls the graph would ignore.
 //
-// TWO MODES, ONE TOGGLE. With a first frame this is image-to-video: the
-// dropped image decides the aspect (the workflow reads the size back out of it
-// after scaling to the pixel budget), which is why ResolutionPanel drops to the
-// MP box alone. Without one it is plain text-to-video and the normal aspect +
-// MP controls come back.
+// TWO INDEPENDENT FRAMES. `first_frame` and `last_frame` are both optional
+// inputs on the node, so the two toggles are independent: first only, last
+// only, both, or neither. With EITHER of them the dropped image decides the
+// aspect (the workflow reads the size back out of it after scaling to the pixel
+// budget), which is why ResolutionPanel drops to the MP box alone; with neither
+// it is plain text-to-video and the normal aspect + MP controls come back.
+// Drop the same file in both wells for a clip that loops.
 Panel {
     id: panel
     title: "video"
     badge: App.videoFrames(root.gen.duration) + "f"
-           + (root.gen.useInputImage && root.gen.useLastFrame ? " +last" : "")
+           + (root.gen.useInputImage ? " first" : "")
+           + (root.gen.useLastFrame ? " last" : "")
 
     Toggle {
         label: "first frame"
@@ -21,17 +24,33 @@ Panel {
         onToggled: function (v) { root.set("useInputImage", v) }
     }
 
+    Toggle {
+        label: "last frame"
+        checked: root.gen.useLastFrame
+        onToggled: function (v) { root.set("useLastFrame", v) }
+    }
+
     PixelText {
-        text: "  drop an image below for image-to-video; off is text-to-video"
+        text: "  drop an image in a well below to start from it, end on it, or "
+              + "both; neither is text-to-video"
         color: Theme.dim
         width: parent.width
         wrapMode: Text.Wrap
+    }
+
+    // Each well says which end it is, because with either toggle able to stand
+    // alone the position in the column no longer says it for them.
+    PixelText {
+        text: "  first frame"
+        color: Theme.textDim
+        visible: root.gen.useInputImage
     }
 
     FrameWell {
         active: root.gen.useInputImage
         path: App.inputImage
         url: App.inputImageUrl
+        emptyText: "drag the frame to start from here"
         accepts: function (u) { return App.setInputImage(u) }
     }
 
@@ -46,19 +65,14 @@ Panel {
         }
     }
 
-    // THE OTHER END OF THE CLIP. `last_frame` is an optional input on the node,
-    // so a second dropped image is one more link, not another graph — the clip
-    // is made to arrive at it. Only offered with a first frame: there is nothing
-    // to end on in text-to-video. Drop the SAME image in both wells to loop.
-    Toggle {
-        label: "last frame"
-        visible: root.gen.useInputImage
-        checked: root.gen.useLastFrame
-        onToggled: function (v) { root.set("useLastFrame", v) }
+    PixelText {
+        text: "  last frame"
+        color: Theme.textDim
+        visible: root.gen.useLastFrame
     }
 
     FrameWell {
-        active: root.gen.useInputImage && root.gen.useLastFrame
+        active: root.gen.useLastFrame
         path: App.lastImage
         url: App.lastImageUrl
         emptyText: "drag the frame to end on here"
@@ -67,7 +81,7 @@ Panel {
 
     Row {
         spacing: 8
-        visible: root.gen.useInputImage && root.gen.useLastFrame && App.lastImage !== ""
+        visible: root.gen.useLastFrame && App.lastImage !== ""
         TextButton {
             label: "[ clear ]"
             tone: Theme.textDim
