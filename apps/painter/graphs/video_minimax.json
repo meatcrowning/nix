@@ -11,6 +11,10 @@
     "`scale_image` and `image_size` (registry._build_video) and feeds the width",
     "and height painter computed from aspect + MP straight into `video`.",
     "",
+    "`load_image_last` is the OPTIONAL frame to end on: the node's `last_frame`",
+    "input, wired only when one was dropped and the node dropped otherwise (an",
+    "unwired LoadImage with an empty filename fails Comfy's own validation).",
+    "",
     "MiniMaxH3ImageToVideo is conditioning (0) AND latent (1) in one node, and",
     "it takes the prompt itself -- there is no CLIPTextEncode and no negative",
     "prompt to encode, so the negative box is hidden for this family rather",
@@ -44,6 +48,11 @@
     "inputs": { "image": "" },
     "class_type": "LoadImage",
     "_meta": { "title": "Load Image", "painter_role": "load_image" }
+  },
+  "13": {
+    "inputs": { "image": "" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Image (last frame)", "painter_role": "load_image_last" }
   },
   "11": {
     "inputs": {

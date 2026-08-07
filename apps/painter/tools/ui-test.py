@@ -664,22 +664,39 @@ def test_video(win, ctl, tmp):
     check("...and no negative prompt or CFG",
           "negative" not in sent and "cfg" not in sent, sorted(sent))
 
-    # Looping: the dropped frame at BOTH ends. Only offered with an image, so
-    # the flag only means anything alongside one.
+    # The frame to end on: a second drop, its own upload cache. Only offered
+    # with a first frame, so the flag only means anything alongside one.
     sent.clear()
     ctl._input_image = os.path.join(root, "first.png")
+    ctl._last_image = os.path.join(root, "last.png")
     write_safetensors(os.path.join(root, "unused.safetensors"), {"x": [1]})
     open(ctl._input_image, "wb").write(b"not really a png")
+    open(ctl._last_image, "wb").write(b"not really a png either")
     ctl._uploaded = (ctl._input_image, "painter/first.png")
+    ctl._uploaded_last = (ctl._last_image, "painter/last.png")
     g = prop(win, "gen")
-    g.update({"useInputImage": True, "loopVideo": True})
+    g.update({"useInputImage": True, "useLastFrame": True})
     win.setProperty("gen", g)
     spin(60)
     win.metaObject().invokeMethod(win, "submit")
     spin(200)
-    check("looping sends the first frame as the last one too",
-          sent.get("loop_video") is True and sent.get("use_input_image") is True,
-          (sent.get("loop_video"), sent.get("use_input_image")))
+    check("a last frame is sent alongside the first",
+          sent.get("use_last_frame") is True and sent.get("last_image") == "painter/last.png"
+          and sent.get("input_image") == "painter/first.png",
+          (sent.get("use_last_frame"), sent.get("last_image"), sent.get("input_image")))
+
+    # ...and one turned on with nothing dropped refuses, the same way the first
+    # frame does (docs/DESIGN.md §10).
+    sent.clear()
+    ctl.clearLastImage()
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("a last frame with no image refuses rather than guessing",
+          sent.get("_submitted") is None, sent)
+    g = prop(win, "gen")
+    g["useLastFrame"] = False
+    win.setProperty("gen", g)
+    spin(60)
     ctl.clearInputImage()
 
     # An image-to-video job with nothing dropped must not be silently sent as

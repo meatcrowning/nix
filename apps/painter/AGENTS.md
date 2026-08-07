@@ -468,11 +468,14 @@ What is genuinely different, and therefore what the left column stops offering:
   ImageScaleToTotalPixels -> GetImageSize` and the frame size comes **out of the
   image**, which is why `ResolutionPanel` drops to the MP box alone. Without
   one, `_build_video` drops those three nodes (`Graph.drop`, which refuses while
-  anything still reads them) and feeds painter's own aspect + MP. **Looping** is
-  the third: `last_frame` is another optional input, so the dropped image goes in
-  at both ends and the clip returns to where it started — one more link, not
-  another graph, and only offered while there is an image to put there.
-- **The first frame is uploaded, not read.** `ComfyClient.upload_image` PUTs it
+  anything still reads them) and feeds painter's own aspect + MP. **A last
+  frame** is the third: a second toggle and a second well under the first pair,
+  feeding `load_image_last` into the node's optional `last_frame` — one more
+  link, not another graph, only offered alongside a first frame, and dropped
+  (node and all) when unused, since an unwired `LoadImage` with an empty
+  filename fails Comfy's own validation. Dropping the same file in both wells is
+  what looping now is; there is no loop toggle.
+- **Each frame is uploaded, not read.** `ComfyClient.upload_image` PUTs it
   under the input directory's `painter/` subfolder and the graph names
   `painter/<file>` — on book the backend is top's and the socket is all they
   share. Once per file, not once per job. `LoadImage`'s `image` enum is a live

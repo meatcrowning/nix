@@ -41,7 +41,7 @@ def check_dangling(prompt):
             and val[0] not in prompt]
 
 
-def check_video(built, want_image, want_loop=False):
+def check_video(built, want_image, want_last=False):
     """The video template's two modes, which differ by three nodes.
 
     Image-to-video reads its frame size out of the dropped image; text-to-video
@@ -60,13 +60,17 @@ def check_video(built, want_image, want_loop=False):
             problems.append("image-to-video should take its width from the image")
         if not isinstance(video.get("first_frame"), list):
             problems.append("image-to-video is not wired to a first frame")
-        # Looping is the same frame at both ends — literally the same link.
-        if want_loop and video.get("last_frame") != video.get("first_frame"):
-            problems.append("a looping clip must end on the frame it started with")
-        if not want_loop and "last_frame" in video:
-            problems.append("a non-looping clip carries a last_frame")
+        # The frame to end on is its own LoadImage, wired only when dropped.
+        if want_last and not isinstance(video.get("last_frame"), list):
+            problems.append("a clip with a last frame is not wired to one")
+        if want_last and "load_image_last" not in roles:
+            problems.append("a clip with a last frame is missing load_image_last")
+        if not want_last and "last_frame" in video:
+            problems.append("a clip with no last frame carries a last_frame")
+        if not want_last and "load_image_last" in roles:
+            problems.append("a clip with no last frame still carries load_image_last")
     else:
-        for role in ("load_image", "scale_image", "image_size"):
+        for role in ("load_image", "load_image_last", "scale_image", "image_size"):
             if role in roles:
                 problems.append(f"text-to-video still carries {role}")
         if "first_frame" in video:
@@ -184,8 +188,8 @@ def main(argv=None):
         line = f"  {entry.name[:50]:<52}"
         for tag, params in (
             ("i2v", {"use_input_image": True, "input_image": "probe.png"}),
-            ("loop", {"use_input_image": True, "input_image": "probe.png",
-                      "loop_video": True}),
+            ("fl2v", {"use_input_image": True, "input_image": "probe.png",
+                      "use_last_frame": True, "last_image": "probe.png"}),
             ("t2v", {"use_input_image": False}),
         ):
             try:
@@ -195,7 +199,7 @@ def main(argv=None):
                     object_info=oi,
                 )
                 probs = check_video(built, params["use_input_image"],
-                                    params.get("loop_video", False))
+                                    params.get("use_last_frame", False))
                 if probs:
                     raise G.ValidationError(probs)
                 line += f" {tag}:ok({built['params']['frames']}f)"

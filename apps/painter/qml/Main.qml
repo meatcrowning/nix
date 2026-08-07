@@ -76,7 +76,7 @@ Window {
         // decides the aspect, so only MP is left to choose; off, it is plain
         // text-to-video with painter's usual aspect + MP. The image itself is a
         // file path and lives on App, not in here.
-        duration: 5.0, fps: 24.0, useInputImage: false, loopVideo: false,
+        duration: 5.0, fps: 24.0, useInputImage: false, useLastFrame: false,
         negpip: false, modelSampling: false,
         ms: ({ shift_start: 3.5, shift_end: 1.2, start_percent: 0.0,
                end_percent: 0.5, curve: "ease_in", outside_window: "hold",
@@ -191,7 +191,7 @@ Window {
                 megapixels: g.megapixels,
                 width: g.width, height: g.height,
                 use_input_image: g.useInputImage,
-                loop_video: g.loopVideo
+                use_last_frame: g.useLastFrame
             }, g.count)
             return
         }
@@ -582,6 +582,7 @@ Window {
         Prefs.set("gen", JSON.stringify(root.gen))
         Prefs.set("model", App.selectedName)
         Prefs.set("inputImage", App.inputImage)
+        Prefs.set("lastImage", App.lastImage)
     }
 
     Timer {
@@ -624,6 +625,7 @@ Window {
         // The dropped first frame comes back too, quietly: a file that has since
         // moved just leaves the well empty.
         App.restoreInputImage(Prefs.get("inputImage") || "")
+        App.restoreLastImage(Prefs.get("lastImage") || "")
         root.restored = true
     }
 }
