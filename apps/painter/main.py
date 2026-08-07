@@ -631,6 +631,8 @@ class Painter(QObject):
         self._jobs = 0
         self._unit_state = "unknown"
         self._job_start = 0.0             # when the running job started, for the clock
+        self._last_elapsed = 0.0          # ...and how long the last one took, which
+                                          # the bar keeps showing once it is over
         self.preview = None               # the live-preview image provider, set in main()
         self._preview_tick = 0            # an Image reloads on a CHANGED url, so count
         self._input_image = ""            # the first frame, as a local path
@@ -727,6 +729,11 @@ class Painter(QObject):
     elapsed = Property(float, lambda self: (
         max(0.0, time.time() - self._job_start) if (self._busy and self._job_start) else 0.0),
         notify=statusChanged)
+    # `elapsed` is zero the moment the run ends, so the bar's clock had nothing
+    # left to draw and the one number worth keeping — how long that took —
+    # survived only in a toast that fades. This is that number, and it stays.
+    lastElapsed = Property(float, lambda self: self._last_elapsed,
+                           notify=statusChanged)
     ready = Property(bool, lambda self: self._object_info is not None, notify=statusChanged)
     # What systemd says about comfy-painter.service, so start/stop can be lit
     # from the world instead of from intent (docs/DESIGN.md §10).
@@ -1398,6 +1405,11 @@ class Painter(QObject):
             self._clock.stop()
             self._progress = 0.0
             self._current = ""
+            # The backend's own start/finish stamps where it has them; the bar's
+            # own clock otherwise, so a job that never reported a start still
+            # leaves a time behind rather than a blank.
+            wall = max(0.0, time.time() - self._job_start) if self._job_start else 0.0
+            self._last_elapsed = job.duration or wall
             self.previewChanged.emit()
             self.busyChanged.emit()
         took = f" in {job.duration:.1f}s" if job.duration else ""

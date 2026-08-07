@@ -540,6 +540,29 @@ def test_chrome(win, ctl):
           bool(split) and split[0].height() <= win.height() - bar.height() + 0.5,
           (split[0].height() if split else None, win.height(), bar.height()))
 
+    # The bar's clock outlives the run that measured it. It used to be
+    # `visible: App.busy`, so the one number the job had just produced went
+    # away with the job and survived only in a toast that fades.
+    def bar_texts():
+        return [it.property("text") for it in find_all(bar, "PixelText")
+                if it.isVisible()]
+
+    def set_state(busy, start=0.0, last=0.0):
+        ctl._busy, ctl._job_start, ctl._last_elapsed = busy, start, last
+        ctl.busyChanged.emit()
+        ctl.statusChanged.emit()
+        spin(80)
+
+    set_state(False)
+    check("no clock before anything has run",
+          not any(str(t).startswith("took") for t in bar_texts()), bar_texts())
+    set_state(True, start=time.time() - 75)
+    check("a running job shows a bare clock", "1:15" in bar_texts(), bar_texts())
+    set_state(False, last=311.11)
+    check("...and it stays put once the run is over, marked as settled",
+          "took 5:11" in bar_texts(), bar_texts())
+    set_state(False)
+
     # The panes swapped sides: results lead, controls trail.
     gal = find(content, "GalleryView")
     ctrl = find(content, "ModelPicker")
