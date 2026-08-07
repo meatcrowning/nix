@@ -15,7 +15,17 @@ Rectangle {
     default property alias content: inner.data
 
     width: parent ? parent.width : 320
-    implicitHeight: header.height + (collapsed ? 0 : inner.childrenRect.height + 14)
+    // A PANEL FOLLOWS ITS CONTENT DOWN AS WELL AS UP. This used to size from
+    // `inner.childrenRect.height`, which only ever GREW once a child was
+    // hidden: an invisible child keeps the y a Column last positioned it at,
+    // and childrenRect still spans to it — so with the negative prompt box
+    // hidden (any video or edit family) dragging the positive box SMALLER left
+    // the panel at its old height, with a hand-sized blank under the box.
+    // Measured offscreen against the real window, his own prefs: box 392 -> 242,
+    // panel 435 -> 435. The Column's own `implicitHeight` is the honest number —
+    // it is the sum of the children it actually LAYS OUT, so it excludes the
+    // hidden ones by construction and tracks both directions.
+    implicitHeight: header.height + (collapsed ? 0 : inner.implicitHeight + 14)
     height: implicitHeight
     color: Theme.bgAlt
     border.color: Theme.border

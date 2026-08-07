@@ -132,6 +132,22 @@ def click(win, item, dx=None, dy=None, button=None):
     spin(60)
 
 
+def key(win, k, mods=None, text=""):
+    """One key, delivered to the WINDOW — never to the item under test.
+
+    A window-level `Shortcut` sees a key before any focused item's own handler
+    (that is how Escape was once taken away from the dropdown), so a check that
+    called the editor's methods directly would pass while the keyboard did
+    nothing.
+    """
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QGuiApplication, QKeyEvent
+    mods = Qt.NoModifier if mods is None else mods
+    for typ in (QEvent.KeyPress, QEvent.KeyRelease):
+        QGuiApplication.sendEvent(win, QKeyEvent(typ, k, mods, text))
+    spin(60)
+
+
 # --------------------------------------------------------------- fake models
 def fake_models(root):
     """A model root that fingerprint.py can actually parse.
@@ -374,7 +390,8 @@ def build(tmp):
 
 # ------------------------------------------------------------------- the tests
 def test_text_boxes(win, ctl):
-    """Click anywhere in a box and you are typing in it."""
+    """Click anywhere in a box and you are typing in it — and the keys work."""
+    from PySide6.QtCore import Qt
     content = win.contentItem()
     boxes = find_all(content, "PromptBox")
     check("both prompt boxes exist", len(boxes) == 2, len(boxes))
@@ -406,6 +423,76 @@ def test_text_boxes(win, ctl):
     check("...and the caret goes to the end of the text",
           edit.property("cursorPosition") == len("one two three"),
           edit.property("cursorPosition"))
+
+    # --- the keys a text box owes you -------------------------------------
+    # Ctrl+A then Backspace is how a prompt gets replaced, and a window-level
+    # `Shortcut` sees a key BEFORE the focused item does (that is what took
+    # Escape away from the dropdown once), so every one of these is checked at
+    # the WINDOW rather than by calling the editor's own methods.
+    edit.forceActiveFocus()
+    spin(60)
+    key(win, Qt.Key_A, Qt.ControlModifier, "a")
+    check("Ctrl+A selects the whole prompt",
+          edit.property("selectedText") == "one two three",
+          (edit.property("selectionStart"), edit.property("selectionEnd")))
+    key(win, Qt.Key_Backspace)
+    check("...and Backspace deletes the selection",
+          edit.property("text") == "", edit.property("text"))
+    check("...and the model hears about it",
+          prop(win, "gen").get("positive") == "", prop(win, "gen").get("positive"))
+    key(win, Qt.Key_X, Qt.NoModifier, "x")
+    key(win, Qt.Key_Y, Qt.NoModifier, "y")
+    check("typing after that still reaches the model",
+          edit.property("text") == "xy" and prop(win, "gen").get("positive") == "xy",
+          (edit.property("text"), prop(win, "gen").get("positive")))
+    key(win, Qt.Key_Backspace)
+    check("a plain Backspace deletes one character",
+          edit.property("text") == "x", edit.property("text"))
+    # Select-all is also a menu item, and it must mean the same thing.
+    edit.setProperty("text", "one two three")
+    spin(60)
+    edit.metaObject().invokeMethod(edit, "selectAll")
+    spin(60)
+    check("the menu's select all agrees with the key",
+          edit.property("selectedText") == "one two three",
+          edit.property("selectedText"))
+    key(win, Qt.Key_Backspace)
+    check("...and Backspace clears that selection too", edit.property("text") == "",
+          edit.property("text"))
+
+    # The NEGATIVE box is a second editor, and the keys are not the positive
+    # one's by accident.
+    nedit = find(boxes[1], "QQuickTextEdit")
+    nedit.forceActiveFocus()
+    spin(60)
+    nedit.setProperty("text", "no rain")
+    spin(80)
+    key(win, Qt.Key_A, Qt.ControlModifier, "a")
+    key(win, Qt.Key_Backspace)
+    check("the negative box takes the same two keys",
+          nedit.property("text") == "" and prop(win, "gen").get("negative") == "",
+          (nedit.property("text"), prop(win, "gen").get("negative")))
+    edit.forceActiveFocus()
+    spin(60)
+
+    # --- the resize grip, in BOTH directions ------------------------------
+    # A panel used to size itself from `childrenRect`, which only ever grows
+    # once a child is hidden — so with the negative box gone (video, edit) a
+    # SHRUNK prompt box left a blank the height of the drag. Measured here as
+    # the panel tracking the box down, not just up.
+    editor = find(content, "PromptEditor")
+    box.setProperty("boxHeight", 300)
+    spin(120)
+    tall = editor.height()
+    box.setProperty("boxHeight", 120)
+    spin(120)
+    check("the prompt panel shrinks with its box, not just grows",
+          editor.height() <= tall - 175, (tall, editor.height()))
+    # (the case that was actually broken — the negative box hidden — is checked
+    # in test_video, where it is hidden by the real binding rather than by
+    # writing over it here.)
+    box.setProperty("boxHeight", 130)
+    spin(120)
 
     # A numeric box: the 5px padding strip used to be dead.
     # A VISIBLE one: the left column carries panels that only a video family
@@ -628,6 +715,21 @@ def test_video(win, ctl, tmp):
           boxes[1].height() == 0
           and editor.height() < boxes[0].height() + 60,
           (boxes[1].height(), editor.height(), boxes[0].height()))
+    # ...and the panel keeps following the box DOWN with that child hidden. It
+    # did not: an invisible child keeps the y the Column last laid it out at and
+    # `childrenRect` still spans to it, so the panel could only ever grow and a
+    # shrunk prompt box left a blank the height of the drag (his report,
+    # 2026-08-06; measured 392 -> 242 with the panel stuck at 435).
+    boxes[0].setProperty("boxHeight", 300)
+    spin(150)
+    tall = editor.height()
+    boxes[0].setProperty("boxHeight", 120)
+    spin(150)
+    check("the panel shrinks with the box even with the negative one hidden",
+          editor.height() <= tall - 175 and editor.height() >= boxes[0].height(),
+          (tall, editor.height(), boxes[0].height()))
+    boxes[0].setProperty("boxHeight", 130)
+    spin(120)
     check("the patches panel is not", not find(content, "TogglePanel").isVisible())
     cfg = find(find(content, "ParamsPanel"), "Field",
                pred=lambda it: it.property("label") == "cfg")

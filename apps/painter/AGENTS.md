@@ -250,6 +250,15 @@ empty space to Qt itself — caret at the nearest position, drag-select from
 nowhere — rather than to a MouseArea imitating it. `Spin` covers its own padding
 strips with an I-beam MouseArea under the input.
 
+**A panel follows its content DOWN as well as up.** `Panel.qml` sizes itself
+from the inner Column's `implicitHeight`, never from `childrenRect.height`: an
+invisible child keeps the y the Column last laid it out at and `childrenRect`
+still spans to it, so with the negative prompt box hidden (any video or edit
+family) a panel could only ever GROW — dragging the prompt box smaller left a
+blank the height of the drag ([his], 2026-08-06; measured offscreen against his
+own prefs, box 392 -> 242 with the panel stuck at 435). `test_video` checks the
+shrink in the state that was broken, with the box hidden by its real binding.
+
 **The bottom 5px of a prompt box is a RESIZE GRIP**, not text — dragged, clamped
 to 40-600px, and remembered per box (`prompt.posH` / `prompt.negH` in `Prefs`,
 written on release). A prompt here runs from four words to the multi-paragraph

@@ -30,10 +30,12 @@ Panel {
     // negative conditioning is the POSITIVE one zeroed out (ConditioningZeroOut
     // -> ReferenceLatent), so there is nowhere for a second prompt to go.
     //
-    // Height 0 as well as invisible: a Column skips a hidden child when it
-    // POSITIONS, but the panel sizes itself from `childrenRect`, which still
-    // counted the box that was not there — a hand-sized blank under the prompt
-    // in every video job.
+    // Height 0 as well as invisible, and it stays that way: `Panel` sizes
+    // itself from the Column's `implicitHeight` now (which skips a hidden child
+    // outright), but a box that folds to nothing is also what stops a stale
+    // height reappearing the moment it is shown again. The blank this used to
+    // leave under the prompt — and the panel that would then only ever GROW —
+    // is the story in `Panel.qml`.
     PromptBox {
         id: negative
         width: parent.width
