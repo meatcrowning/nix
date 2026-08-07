@@ -189,6 +189,10 @@ VIDEO_FAKES = {
     "text_encoders/fake-qwen3vl.safetensors": {
         "model.visual.deepstack_merger_list.0.norm.weight": [16],
         "model.layers.0.post_attention_layernorm.weight": [5120]},
+    # Both video decoders, so the family's `prefer` order is what decides which
+    # one a paired video model gets rather than which one happens to exist.
+    "vae/minimax_h3_video_vae_int8_convrot.safetensors": {
+        "decoder.conv_in.weight": [8, 16, 3, 3]},
     "vae/minimax_h3_video_vae_fp16.safetensors": {"decoder.conv_in.weight": [8, 16, 3, 3]},
     "vae/minimax_h3_audio_vae_fp32.safetensors": {"decoder.conv_in.weight": [8, 16, 3, 3]},
 }
@@ -726,6 +730,13 @@ def test_video(win, ctl, tmp):
         for rel in VIDEO_FAKES:
             os.remove(os.path.join(root, rel))
         return
+
+    # With both decoders present the int8 one wins, because it is faster and
+    # 2.3 GiB cheaper and the DiT beside it already stages 20 GB. fp16 stays in
+    # the family's `prefer` list purely as the fallback.
+    check("a video model pairs with the int8 video VAE, not the fp16 one",
+          ctl.property("vaeName") == "minimax_h3_video_vae_int8_convrot.safetensors",
+          ctl.property("vaeName"))
 
     boxes = find_all(content, "PromptBox")
     check("the negative prompt box is gone", [b.isVisible() for b in boxes] == [True, False],
