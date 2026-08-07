@@ -86,14 +86,61 @@ Item {
         wheelStep: cellHeight
 
         delegate: Item {
+            id: tile
             width: grid.cellWidth
             height: grid.cellHeight
+
+            // DRAG AN OUTPUT OUT OF THE WINDOW, into anything that takes a file
+            // — a browser upload field, filer, a chat window. Same idiom as
+            // filer's rows (docs/DESIGN.md §13), and its findings are why it is
+            // written this way: `Drag.active` bound to a MouseArea dragging an
+            // INVISIBLE proxy is what actually starts a cross-app QDrag under
+            // Wayland (a bare `Drag.startDrag()` did not), and the payload is
+            // built on PRESS rather than bound, since building it can cost real
+            // work (a clip is muted first — see below) and a binding would do
+            // that for every realised tile.
+            Drag.active: tileMa.drag.active
+            Drag.dragType: Drag.Automatic
+            Drag.supportedActions: Qt.CopyAction
+            Drag.hotSpot.x: 6
+            Drag.hotSpot.y: 6
+
+            Item { id: dragProxy }
+
+            // The chip that follows the cursor: the filename on a small badge,
+            // grabbed into Drag.imageSource on press (off-screen + layered so
+            // grabToImage always has something to render).
+            Rectangle {
+                id: dragBadge
+                x: -10000
+                width: Math.min(badgeText.implicitWidth + 16, 320)
+                height: badgeText.implicitHeight + 10
+                color: Theme.bgAlt
+                border.color: Theme.accent
+                border.width: 1
+                layer.enabled: true
+                PixelText {
+                    id: badgeText
+                    anchors {
+                        left: parent.left; right: parent.right
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: 8; rightMargin: 8
+                    }
+                    elide: Text.ElideMiddle
+                    text: isVideo && !tile.dragOriginal ? name + " (muted)" : name
+                    color: Theme.text
+                }
+            }
+
+            // Shift at the moment of the press means "with its sound"; see
+            // App.dragUriList.
+            property bool dragOriginal: false
 
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: 4
                 color: Theme.bgAlt
-                border.color: hover.containsMouse ? Theme.accent : Theme.border
+                border.color: tileMa.containsMouse ? Theme.accent : Theme.border
                 border.width: 1
 
                 // A video tile shows its poster frame, extracted once into
@@ -151,7 +198,7 @@ Item {
                     anchors.margins: 1
                     height: 18
                     color: Theme.bg
-                    opacity: hover.containsMouse ? 0.9 : 0
+                    opacity: tileMa.containsMouse ? 0.9 : 0
                     PixelText {
                         anchors.centerIn: parent
                         width: parent.width - 8
@@ -162,11 +209,32 @@ Item {
                 }
 
                 MouseArea {
-                    id: hover
+                    id: tileMa
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // Nothing above may take the press-drag and scroll with it.
+                    preventStealing: true
+                    // The proxy is what moves, so the tile stays where it is.
+                    // Left button only: a right-press opens the menu and must
+                    // not arm a drag on the way.
+                    onPressed: function (m) {
+                        tileMa.drag.target = m.button === Qt.LeftButton ? dragProxy : null
+                        if (m.button !== Qt.LeftButton) return
+                        tile.dragOriginal = (m.modifiers & Qt.ShiftModifier) !== 0
+                        // Built here, not bound: for a clip this makes the muted
+                        // copy, and the payload has to name a file that exists
+                        // by the time the drop lands.
+                        tile.Drag.mimeData = {
+                            "text/uri-list": App.dragUriList(path, tile.dragOriginal)
+                        }
+                        // Staged now; ready by the time the drag passes the
+                        // threshold and Drag.active turns on.
+                        dragBadge.grabToImage(function (res) {
+                            tile.Drag.imageSource = res.url
+                        })
+                    }
                     // DOUBLE-CLICK OPENS, right-click asks what else. A single
                     // left click does nothing on purpose: the preview viewport
                     // above shows the job that is running and then what it made
@@ -202,8 +270,11 @@ Item {
         anchors.bottomMargin: 6
         width: parent.width
         elide: Text.ElideRight
-        text: view.width > 340 ? "double-click to open in viewer, right-click for more"
-                               : "double-click opens"
+        // Dragging one out is the only affordance here with no visible handle,
+        // so it is the part the line keeps when there is no room for the rest.
+        text: view.width > 400 ? "drag one out, double-click to open, right-click for more"
+            : view.width > 250 ? "drag out, double-click opens"
+                               : "drag out"
         color: Theme.dim
     }
 

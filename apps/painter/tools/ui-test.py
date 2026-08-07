@@ -275,10 +275,32 @@ def build(tmp):
     # before that click was even the behaviour under test. Popen is recorded,
     # not run; OPENED is what the test reads back.
     class _NoLaunch:
+        # `dragUriList` catches this by name off the (patched) module.
+        SubprocessError = Exception
+
         @staticmethod
         def Popen(argv, *a, **k):
             OPENED.append(list(argv))
             return None
+
+        @staticmethod
+        def run(argv, *a, **k):
+            """The one SYNCHRONOUS call in the app — muting a clip for a drag.
+
+            Recorded rather than run, and it leaves a file where ffmpeg would
+            have, so the payload the drag hands over is the copy and not the
+            fallback."""
+            RAN.append(list(argv))
+            if os.path.basename(argv[0]) == "ffmpeg" and len(argv) > 1:
+                try:
+                    with open(argv[-1], "wb") as fh:
+                        fh.write(b"\0" * 32)
+                except OSError:
+                    pass
+
+            class _Done:
+                returncode = 0
+            return _Done()
     P.subprocess = _NoLaunch
 
     # ...and no clipfile either: it forks a holder process that OWNS his
@@ -753,6 +775,262 @@ def test_video(win, ctl, tmp):
     check("the image model is back and the column with it",
           ctl.property("isVideo") is False
           and find(content, "TogglePanel").isVisible(), ctl.property("selectedName"))
+
+
+# The four modes' models, headers only — enough for fingerprint.py to place
+# each one in its family, which is all `registry.mode_model` asks. There are TWO
+# krea2 files on purpose: `prefer` names the raw one exactly, and a mode that
+# quietly landed on turbo would generate at 8 steps for ever without saying so.
+MODE_FAKES = {
+    "unet/anima-base-v1.0.safetensors": {
+        "llm_adapter.blocks.0.cross_attn.q_proj.weight": [16, 1024],
+        "x_embedder.proj.1.weight": [16, 16],
+        "blocks.0.attn.weight": [16, 16]},
+    "unet/krea2_raw_fp8_scaled.safetensors": {
+        "txtfusion.projector.weight": [16, 16],
+        "txtfusion.layerwise_blocks.0.prenorm.scale": [2560],
+        "img_in.weight": [16, 16]},
+    "unet/krea2_turbo_fp8_scaled.safetensors": {
+        "txtfusion.projector.weight": [16, 16],
+        "txtfusion.layerwise_blocks.0.prenorm.scale": [2560],
+        "img_in.weight": [16, 16]},
+    # Named to exercise the SUBSTRING half of `prefer`: not the filename in the
+    # table, but the one word that identifies it.
+    "unet/flux-2-klein-4b-test.safetensors": {
+        "double_blocks.0.img_attn.qkv.weight": [16, 16],
+        "double_blocks.0.double_stream_modulation_img.weight": [16, 16],
+        "txt_in.weight": [16, 16]},
+}
+
+
+def test_modes(win, ctl, tmp):
+    """The switcher above the model list: four shortcuts, and the list greyed.
+
+    What is checked is the whole contract of a mode — which file it lands on,
+    that the list stops taking clicks while one is lit, that turning it off
+    hands the list back without moving the selection, and that `edit` reshapes
+    the left column into an image well and one prompt.
+    """
+    content = win.contentItem()
+    root = os.environ["PAINTER_MODELS"]
+    import fingerprint as fp
+    for rel, keys in MODE_FAKES.items():
+        write_safetensors(os.path.join(root, rel), keys)
+    fp.save_cache({})
+    ctl.rescan()
+    spin(200)
+
+    modes = {m["id"]: m for m in ctl.modes()}
+    check("the switcher offers the four modes",
+          list(modes) == ["anime", "real", "edit", "video"], list(modes))
+    check("anime is anima's base model",
+          modes["anime"]["available"] and modes["anime"]["model"] == "anima-base-v1.0.safetensors",
+          modes["anime"])
+    check("real is krea 2 RAW, not the turbo beside it",
+          modes["real"]["model"] == "krea2_raw_fp8_scaled.safetensors", modes["real"])
+    check("edit finds Klein by name even when the file is not the one in the table",
+          modes["edit"]["available"]
+          and "klein" in modes["edit"]["model"], modes["edit"])
+    check("video has no model here, and says so rather than vanishing",
+          modes["video"]["available"] is False and "minimax" in modes["video"]["tip"],
+          modes["video"])
+
+    switcher = find(content, "ModeSwitcher")
+    buttons = find_all(switcher, "TextButton")
+    check("...and there is a button for each of them", len(buttons) == 4,
+          [b.property("label") for b in buttons])
+    check("the one with no model is disabled, not missing",
+          [b.property("enabled") for b in buttons] == [True, True, True, False],
+          [(b.property("label"), b.property("enabled")) for b in buttons])
+
+    listview = find(find(content, "ModelPicker"), "KineticListView")
+    check("with no mode on, the model list takes clicks", listview.isEnabled())
+
+    ctl.setMode("real")
+    spin(150)
+    check("picking a mode selects its model",
+          ctl.property("mode") == "real"
+          and ctl.property("selectedName") == "krea2_raw_fp8_scaled.safetensors",
+          (ctl.property("mode"), ctl.property("selectedName")))
+    check("...and greys the list out, clicks and all",
+          not listview.isEnabled() and listview.parent().property("opacity") < 1,
+          (listview.isEnabled(), listview.parent().property("opacity")))
+    check("...with its own button lit",
+          [b.property("lit") for b in buttons] == [False, True, False, False],
+          [(b.property("label"), b.property("lit")) for b in buttons])
+
+    # Turning it off hands the list back and LEAVES the model where it is: he
+    # got here through the button, and jumping back would undo a choice he did
+    # not make.
+    ctl.setMode("")
+    spin(150)
+    check("turning the mode off hands the list back",
+          ctl.property("mode") == "" and listview.isEnabled()
+          and ctl.property("selectedName") == "krea2_raw_fp8_scaled.safetensors",
+          (ctl.property("mode"), ctl.property("selectedName")))
+
+    # A mode whose model is not here refuses and stays off, rather than lighting
+    # up over a selection that did not change (docs/DESIGN.md §10).
+    ctl.setMode("video")
+    spin(150)
+    check("a mode with no model refuses instead of lighting up",
+          ctl.property("mode") == "" and ctl.property("isVideo") is False,
+          ctl.property("mode"))
+
+    # --- edit: an image well and a prompt, and nothing else ------------------
+    ctl.setMode("edit")
+    spin(200)
+    check("edit selects Klein and switches the pipeline",
+          ctl.property("mode") == "edit" and ctl.property("isEdit") is True
+          and "klein" in ctl.property("selectedName"),
+          (ctl.property("mode"), ctl.property("selectedName")))
+
+    edit_panel = find(content, "EditPanel")
+    check("there is a place to drop the image", edit_panel is not None
+          and edit_panel.isVisible())
+    check("...and it is a real drop target",
+          find(edit_panel, "FrameWell") is not None
+          and find(edit_panel, "FrameWell").property("active") is True)
+    boxes = find_all(content, "PromptBox")
+    check("one prompt box, no negative",
+          [b.isVisible() for b in boxes] == [True, False],
+          [b.isVisible() for b in boxes])
+    hidden = {name: find(content, name) for name in
+              ("LoraStack", "ParamsPanel", "ResolutionPanel", "TogglePanel", "VideoPanel")}
+    check("every control the edit graph would ignore is gone",
+          all(not it.isVisible() for it in hidden.values()),
+          {k: it.isVisible() for k, it in hidden.items()})
+
+    # What submit() sends for an edit job: the prompt and the seed, and NOT the
+    # numbers whose controls are off screen — the family's edit block owns those.
+    sent = {}
+    orig_build, orig_submit = ctl.reg.build, ctl.client.submit
+
+    class FakeJob:
+        def __init__(self):
+            self.meta = {}
+
+    ctl.reg.build = lambda entry, params, object_info=None: (
+        sent.update(params) or {"prompt": {}, "params": dict(params), "pairing": {}})
+    ctl.client.submit = lambda prompt, params: (sent.update(_submitted=True) or FakeJob())
+    ctl._object_info = {"stub": True}
+
+    # ...and with nothing dropped it refuses rather than submitting a graph with
+    # an empty filename in it.
+    ctl.clearInputImage()
+    g = prop(win, "gen")
+    g.update({"positive": "make it a doll", "negative": "ignored",
+              "seed": 4242, "randomSeed": False, "count": 1})
+    win.setProperty("gen", g)
+    spin(60)
+    win.metaObject().invokeMethod(win, "submit")
+    spin(200)
+    check("edit with no image refuses rather than guessing",
+          sent.get("_submitted") is None, sent)
+
+    src = os.path.join(tmp, "to-edit.png")
+    with open(src, "wb") as fh:
+        fh.write(b"not really a png")
+    ctl._input_image = src
+    ctl._uploaded = (src, "painter/to-edit.png")   # already uploaded: no network
+    sent.clear()
+    win.metaObject().invokeMethod(win, "submit")
+    spin(250)
+    check("an edit job is submitted", sent.get("_submitted") is True, sent)
+    check("...as an edit, with the image and the prompt",
+          sent.get("edit") is True and sent.get("input_image") == "painter/to-edit.png"
+          and sent.get("positive") == "make it a doll",
+          {k: sent.get(k) for k in ("edit", "input_image", "positive")})
+    check("...and none of the controls it does not show",
+          not any(k in sent for k in ("steps", "cfg", "width", "height",
+                                      "batch_size", "negative", "toggles")),
+          sorted(sent))
+
+    ctl.reg.build, ctl.client.submit = orig_build, orig_submit
+    ctl._object_info = None
+    ctl.clearInputImage()
+    ctl.setMode("")
+    spin(60)
+    for rel in MODE_FAKES:
+        os.remove(os.path.join(root, rel))
+    fp.save_cache({})
+    ctl.rescan()
+    ctl.selectModelByName("alpha-model.safetensors")
+    spin(200)
+    check("the plain image model is back, and the column with it",
+          ctl.property("isEdit") is False
+          and find(content, "TogglePanel").isVisible(),
+          ctl.property("selectedName"))
+
+
+def test_drag_out(win, ctl, tmp):
+    """An output can be dragged into another app — and a clip goes out muted.
+
+    The gesture itself is Qt's (a cross-app QDrag, which an offscreen harness
+    cannot complete), so what is checked here is the two halves that are ours:
+    the delegate carries the drag wiring, and the PAYLOAD names the right file.
+    """
+    import main as P
+    content = win.contentItem()
+
+    still = fake_png(os.path.join(tmp, "out", "drag_00001_.png"), {"steps": 4})
+    vid_dir = os.path.join(tmp, "out", "video")
+    os.makedirs(vid_dir, exist_ok=True)
+    clip = os.path.join(vid_dir, "drag_00001_.mp4")
+    with open(clip, "wb") as fh:
+        fh.write(b"\0" * 64)
+    ctl.gallery.load_existing()
+    spin(200)
+
+    tile = None
+    for it in walk(content):
+        if it.metaObject().indexOfProperty("dragOriginal") >= 0:
+            tile = it
+            break
+    check("a gallery tile is armed for dragging out", tile is not None)
+
+    RAN.clear()
+    payload = ctl.dragUriList(still, False)
+    check("a still drags out as itself, CRLF-terminated (RFC 2483)",
+          payload == "file://" + still + "\r\n" and not RAN, (payload, RAN))
+
+    RAN.clear()
+    payload = ctl.dragUriList(clip, False)
+    made = [a for a in RAN if os.path.basename(a[0]) == "ffmpeg"]
+    check("a clip drags out MUTED, remuxed rather than re-encoded",
+          payload.strip().endswith("drag_00001_-muted.mp4")
+          and len(made) == 1 and "-c" in made[0] and "copy" in made[0], (payload, RAN))
+    check("...into the cache, not beside the original",
+          "/cache/" in payload and "drag_00001_-muted.mp4" not in os.listdir(vid_dir),
+          (payload, os.listdir(vid_dir)))
+
+    RAN.clear()
+    again = ctl.dragUriList(clip, False)
+    check("...made once, then reused", again == payload and not RAN, (again, RAN))
+
+    RAN.clear()
+    payload = ctl.dragUriList(clip, True)
+    check("Shift hands over the original, with its sound",
+          payload == "file://" + clip + "\r\n" and not RAN, (payload, RAN))
+
+    # A fresh copy already sitting beside the clip (the right-click action made
+    # one) is used as it stands rather than remade in the cache.
+    sibling = os.path.join(vid_dir, "drag_00001_-muted.mp4")
+    with open(sibling, "wb") as fh:
+        fh.write(b"\0" * 64)
+    os.utime(sibling, (time.time() + 5, time.time() + 5))
+    RAN.clear()
+    payload = ctl.dragUriList(clip, False)
+    check("an existing muted copy beside it wins over making another",
+          payload == "file://" + sibling + "\r\n" and not RAN, (payload, RAN))
+
+    check("a file that has gone hands over nothing at all",
+          ctl.dragUriList(os.path.join(tmp, "not-here.mp4"), False) == "")
+
+    for f in (still, clip, sibling):
+        os.remove(f)
+    ctl.gallery.load_existing()
+    spin(120)
 
 
 def test_live_bindings(win, ctl):
@@ -1308,6 +1586,8 @@ def main():
     print("== panes ==");             test_panes(win)
     print("== live bindings ==");     test_live_bindings(win, ctl)
     print("== video ==");             test_video(win, ctl, tmp)
+    print("== modes ==");             test_modes(win, ctl, tmp)
+    print("== drag out ==");          test_drag_out(win, ctl, tmp)
     print("== resolution ==");        test_resolution(win, ctl)
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)

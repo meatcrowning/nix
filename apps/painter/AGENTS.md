@@ -73,6 +73,83 @@ only sanctioned writers. Two corollaries, both the same rule one level down:
 
 `tools/ui-test.py` covers all of this — see below.
 
+## The four modes are shortcuts to four models
+
+Above the model list, [his] *"there should be a switcher for anime (selects
+anima base model), real (selects krea 2), edition (…Klein…), and then one for
+video (selects minimax h3)"*. `ModeSwitcher.qml` draws them; **the table of
+which file each one means is `registry.MODES`**, painter answers it through
+`App.modes()`, and nothing in QML decides it.
+
+- **A mode is a selection, not a fifth kind of model.** Turning one on selects
+  its file and greys the list (`enabled: false` *and* dimmed — docs/DESIGN.md
+  §10.1); turning it off hands the list back with that model still selected.
+- **`prefer` is exact-name, then substring, then any model of the family**, so
+  a re-quantised or renamed file lands on its sibling instead of the button
+  going dark. Which file each mode means is HIS choice — `real` is krea 2 raw
+  fp8 (2026-08-06), not whatever looks newest.
+- **A mode with nothing to select stays in the row, disabled.** `App.modes()`
+  reports availability per button and `setMode` refuses rather than lighting up
+  over an unchanged selection; a mode whose model disappears on a rescan clears
+  itself rather than greying a list it no longer overrides.
+- The mode is remembered (`Prefs` key `mode`) and applied when the rows land —
+  after the remembered model name, which it outranks.
+
+## Editing is a different pipeline, not a flag on the image one
+
+`edit` is the one mode that changes more than the selection: a family may
+declare an `edit` block (`families/flux2.json` — Flux 2 Klein, the only one) and
+`registry.build()` then branches to `_build_edit()` on `graphs/edit_flux2.json`,
+**transcribed from the workflow behind the `Flux2-Klein_0000*.png` outputs**
+(their embedded `prompt` chunk is where to look if a node contract moves).
+
+What is genuinely different, and therefore what the left column stops offering
+— [his] *"the left side of the program when edit is selected should really just
+be a box to drop the image in and a prompt box"*:
+
+- **The image decides the size.** `ImageScaleToTotalPixels -> GetImageSize`
+  feeds both the latent (`EmptyFlux2LatentImage`) and `Flux2Scheduler`, so there
+  is no aspect, no width/height and no resolution panel.
+- **One prompt.** The negative conditioning is the positive one zeroed out
+  (`ConditioningZeroOut` -> `ReferenceLatent`), which is what CFG 1.0 wants —
+  so the negative box is hidden rather than typed into nothing, exactly as for
+  video. A second `CLIPTextEncode` in that template is a bug, and
+  `validate-graphs.py`'s `check_edit` fails on one.
+- **The numbers come from the family**, not from `gen`: steps 15, cfg 1.0,
+  shift 6.0, 1.5MP. Their controls are off screen, so `submit()` sends only the
+  prompt and the seed — sending `gen`'s values would run the job at whatever
+  the last image family left behind. `_build_edit` also strips
+  `scheduler`/`denoise`/`add_noise`/`width`/`height` from the recorded
+  parameters, since Flux2Scheduler reads none of them and a PNG must not claim
+  settings that were not used.
+- **The image is the same slot as the video first frame** (`App.inputImage`),
+  uploaded the same way, and required: with nothing dropped `generate()`
+  refuses before uploading anything.
+- A family with no `edit` block **refuses** an edit build. That refusal is what
+  the mode button relies on.
+
+## An output is dragged out of the window
+
+The gallery's tiles are a drag SOURCE (docs/DESIGN.md §13), in filer's idiom and
+for its reasons: `Drag.active` bound to a MouseArea dragging an invisible proxy
+(a bare `Drag.startDrag()` does not start a cross-app drag on Wayland), the
+payload built on PRESS, a chip grabbed into `Drag.imageSource`.
+
+**A clip goes out MUTED**, with Shift at the press for the original ([his],
+2026-08-06): the model generates sound with the picture and the case he named is
+dropping one into surfer, which plays it. `App.dragUriList()` decides that at
+the press, because Wayland cannot tell what is under the cursor and the file has
+to exist before the drop lands — which is why it holds **the one synchronous
+subprocess in this app**. A `-c copy` remux is tens of milliseconds; it is
+bounded, and a failure hands over the original with a toast rather than a drag
+that quietly does nothing.
+
+Where that copy goes differs from the clipboard's on purpose: a fresh
+`<name>-muted.mp4` sitting beside the original is reused, but a new one is made
+under `~/.cache/painter/muted/<mtime>-<size>/` — same filename, so the receiving
+app shows a sensible one, without leaving a second file in the gallery folder
+for every clip he happens to drag.
+
 ## One dropdown, at the top of the scene
 
 `Picker` is the box; **the list is `pickerOverlay`** (`PickerOverlay.qml`), a
@@ -292,7 +369,12 @@ can never start ComfyUI on top or open a window on his screen:
 /usr/bin/python3 apps/painter/tools/ui-test.py     # on book
 ```
 
-It covers click-anywhere text boxes, the collapsible model panel, the pane split
+It covers the mode switcher (which file each of the four lands on, the greyed
+list, the mode that has no model staying disabled rather than vanishing), the
+edit column and what an edit job submits, dragging an output out (the payload
+for a still, a clip muted, Shift for the original, and the copy reused rather
+than remade),
+click-anywhere text boxes, the collapsible model panel, the pane split
 at seven widths, aspect+MP → pixels → header → submitted job, the dropdown
 overlay (opens, stays inside the window, picks, and the binding SURVIVES the
 pick), the live-binding regressions above, Escape (releases the box, cancels
@@ -495,7 +577,9 @@ What is genuinely different, and therefore what the left column stops offering:
 
 `tools/ui-test.py`'s `test_video` covers the whole column reshaping and what
 `submit()` sends; `tools/validate-graphs.py` builds all four modes (`i2v`,
-`l2v`, `fl2v`, `t2v`) against the live `/object_info`.
+`l2v`, `fl2v`, `t2v`) against the live `/object_info`, and its `=== edit ===`
+section does the same for the Klein edit graph plus the refusal every other
+family owes it.
 
 ## One graph, not one per model
 
