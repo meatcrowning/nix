@@ -1881,6 +1881,37 @@ org.freedesktop.Notifications /org/freedesktop/Notifications
 org.freedesktop.Notifications CloseNotification u <id>`) — by construction it
 will not go away on its own. `gdbus` is not installed here; `busctl` is.
 
+### Action buttons: the server advertised them for months and the card drew none
+
+`NotificationServer.actionsSupported` has always been bound to the
+`notifActions` setting, and `NotificationCard.qml` never rendered
+`Notification.actions` — so an app that asked the server whether it could ship
+buttons was told **yes** and then had them silently dropped. Whatever the
+capability says, the card is what makes it true.
+
+- **Buttons are a right-aligned `SetButton` row under the body**, sized to their
+  labels (`minWidth: 52`, `maxWidth: 120`) rather than the settings pages' 96px
+  floor — three of those do not fit a 300px card. Capped at three.
+- **`default` is not a button.** Per the spec it means "the notification itself
+  was clicked", so it rides the card's own MouseArea and pre-empts the plain
+  dismiss.
+- **Invoking does not close anything.** Quickshell's `invoke()` emits
+  `ActionInvoked` and stops there; the card calls `dismiss()` itself. A sender
+  blocked on `notify-send -w` gets the action key on stdout and exits.
+- **`bodyRow` sits at `z: 1`, over the fill-the-card dismiss MouseArea** — which
+  is declared last and would otherwise eat every button click. Text and images
+  accept no events, so a click anywhere else still falls through to dismiss.
+- **Rendering is gated on the same `notifActions` setting** the capability is,
+  so the panel cannot draw a control the sender was told would not be there.
+  A sender that needs the buttons should check the setting and offer a
+  text fallback — `repo-updates` (`home/srvs/repo-updates.nix`) reads
+  `settings.json` directly and names its CLI instead.
+
+**Do not test this by firing a toast.** A notification is his screen; the
+harness (`tools/repo-updates-test.py`) replaces `notify-send` with a log line,
+and `repo-updates.py --demo` exists so that raising a real one with real buttons
+is a command HE runs.
+
 ### A KDE Connect toast is titled with the PHONE, and only that one is
 
 The card's header line is the sender's `appName` — except for a notification

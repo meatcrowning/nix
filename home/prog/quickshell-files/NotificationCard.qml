@@ -23,6 +23,18 @@ import Quickshell.Io
 // mp4) while `x-open-path` points the click at the video itself. When
 // `x-open-path` differs from the thumbnail it is a path we control (a capture,
 // never in ~/Downloads), so the click opens it directly without dl-resolve.
+//
+// ACTIONS. A notification may carry freedesktop actions; they are drawn as a
+// right-aligned row of SetButtons under the text, and invoking one dismisses the
+// toast (Quickshell's invoke() only emits ActionInvoked — it closes nothing).
+// The spec's `default` action is not a button: it means "the notification itself
+// was clicked", so it rides the card's own MouseArea instead. The server
+// advertises action support only when `notifActions` is on, so that setting
+// gates the buttons too — a toast must not draw a control the sender was told
+// would not be there, and an app that respects the capability sends no actions
+// to draw anyway. repo-updates (home/srvs/repo-updates.nix) reads the same
+// setting and falls back to a "run nix-pull" instruction when it is off, so its
+// toast is never a dead end.
 Rectangle {
     id: card
 
@@ -127,6 +139,38 @@ Rectangle {
         return de ? Quickshell.iconPath(de, true) : "";
     }
 
+    // The actions this toast carries, split the way the spec splits them: the
+    // `default` one is the card's own click, everything else is a button. Capped
+    // at three so a sender cannot push the text off a 300px card.
+    readonly property var allActions:
+        (SettingsStore.d.notifActions && notif && notif.actions) ? notif.actions : []
+    readonly property var buttonActions: {
+        const out = [];
+        for (let i = 0; i < card.allActions.length && out.length < 3; i++) {
+            if (String(card.allActions[i].identifier) !== "default")
+                out.push(card.allActions[i]);
+        }
+        return out;
+    }
+    readonly property var defaultAction: {
+        for (let i = 0; i < card.allActions.length; i++) {
+            if (String(card.allActions[i].identifier) === "default")
+                return card.allActions[i];
+        }
+        return null;
+    }
+
+    // Invoke, then close: the sender is waiting on ActionInvoked (notify-send -w
+    // prints the key and exits), and a toast whose action has been taken has
+    // nothing left to say.
+    function fire(a) {
+        if (!a)
+            return;
+        a.invoke();
+        if (card.notif)
+            card.notif.dismiss();
+    }
+
     // The summary is dropped when it merely repeats the header (many apps send
     // their own name as both appName and summary), so the name shows ONCE.
     readonly property string summaryText: card.notif ? Glyphs.px(card.notif.summary) : ""
@@ -166,6 +210,10 @@ Rectangle {
 
     Row {
         id: bodyRow
+        // Over the dismiss MouseArea, which fills the card and is declared last.
+        // Only the action buttons actually take events up here — text and images
+        // accept none, so a click anywhere else still falls through to dismiss.
+        z: 1
         anchors {
             left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
             leftMargin: 14; rightMargin: 12
@@ -258,6 +306,34 @@ Rectangle {
                 elide: Text.ElideRight
                 visible: text.length > 0
             }
+
+            // action buttons — right-aligned under the text, §7.5's dialog
+            // button row. The wrapping Item is what lets a Row sit right-aligned
+            // inside a Column (a Column owns its children's x, so the Row cannot
+            // anchor itself). Sized to their labels rather than the settings
+            // pages' 96px floor: three of those would not fit a 300px card.
+            Item {
+                width: parent.width
+                height: card.buttonActions.length > 0 ? actionRow.height + 4 : 0
+                visible: card.buttonActions.length > 0
+
+                Row {
+                    id: actionRow
+                    anchors { right: parent.right; bottom: parent.bottom }
+                    spacing: 6
+
+                    Repeater {
+                        model: card.buttonActions
+                        delegate: SetButton {
+                            required property var modelData
+                            text: Notifications.plain(modelData.text || modelData.identifier)
+                            minWidth: 52
+                            maxWidth: 120
+                            onClicked: card.fire(modelData)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -290,6 +366,12 @@ Rectangle {
         onClicked: {
             if (!card.notif)
                 return;
+            // The spec's `default` action IS this click. A sender that supplied
+            // one gets it instead of a plain dismiss.
+            if (card.defaultAction) {
+                card.fire(card.defaultAction);
+                return;
+            }
             if (!card.hasOpen) {
                 card.notif.dismiss();
                 return;
