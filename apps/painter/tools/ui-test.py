@@ -1525,25 +1525,14 @@ def test_muted(win, ctl, tmp):
           and ctl.property("hasPreview") is True
           and not ctl.preview.image.isNull(),
           (ctl.property("previewTick"), ctl.property("hasPreview")))
-    # ...and it keeps counting, which is the whole point of the count on the
-    # pane: a video job's frames all LOOK like the same picture (ComfyUI slices
-    # frame 1 out of the latent), so the number beside them is the only thing
-    # that says the stream is alive.
+    # ...and every later frame lands too, not just the first: the pane draws
+    # whichever one arrived last, and the tick is what makes its URL change.
     for _ in range(2):
         ctl._on_preview(None, bytes(buf.data()), "jpeg")
         spin(60)
-    check("every frame counts, not just the first",
+    check("every frame reaches the pane, not just the first",
           ctl.property("previewTick") == before_tick + 3,
           ctl.property("previewTick"))
-    win.setProperty("showPreview", True)
-    spin(150)
-    tag = find(find(win.contentItem(), "PreviewPane"), "PixelText",
-               pred=lambda it: str(it.property("text")).startswith("sampling"))
-    check("...and the pane says how many have arrived",
-          tag is not None and ("%d updates" % ctl.property("previewTick")) in tag.property("text"),
-          tag and tag.property("text"))
-    win.setProperty("showPreview", False)
-    spin(80)
     ctl._busy = False
     check("...and a finished job stops claiming to have one",
           ctl.property("hasPreview") is False)

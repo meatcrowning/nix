@@ -136,26 +136,17 @@ Item {
             PixelText {
                 id: tag
                 anchors.centerIn: parent
-                // A VIDEO JOB PREVIEWS AS ONE FRAME, and the label says which,
-                // because a still that never moves while a clip is being made
-                // looks like a preview that has frozen. It has not: ComfyUI's
-                // Latent2RGB previewer slices `x0[0, :, 0]` out of a 5-D latent
-                // — the first frame — and hands back ONE image per step, so
-                // that frame is all any client can be shown (its own web UI
-                // included). What refreshes is the denoising of frame 1.
-                //
-                // ...and the COUNT is there because that sentence is a claim,
-                // and a claim about a picture that looks unchanged is worth
-                // nothing without the observation beside it (docs/DESIGN.md
-                // §10.6). It is `previewTick`: how many frames have actually
-                // come down the socket for THIS job, reset at every start. If
-                // it climbs while the picture looks the same, the stream is
-                // fine and you are watching frame 1 denoise; if it sticks at 1,
-                // the previews really did stop and that is a different bug.
-                text: App.hasPreview
-                      ? ((App.isVideo ? "sampling - frame 1 of the clip, "
-                                      : "sampling - ") + App.previewTick + " updates")
-                      : (pane.sourceIsVideo ? "clip" : "still")
+                // ONE WORD. A frame count and a "frame 1 of the clip" note both
+                // lived here for an afternoon, to settle whether the stream was
+                // alive during a video job (it is — ComfyUI slices `x0[0, :, 0]`
+                // out of a 5-D latent, so every step's preview is the first
+                // frame denoising, and painter draws each one as it lands). He
+                // dropped the question rather than pay for a better preview in
+                // inference time, so the readout goes back to what it says
+                // rather than what it had to prove. The finding is in
+                // apps/painter/AGENTS.md; do not re-add it to the chrome.
+                text: App.hasPreview ? "sampling"
+                                     : (pane.sourceIsVideo ? "clip" : "still")
                 color: App.hasPreview ? Theme.accent : Theme.textDim
             }
         }
