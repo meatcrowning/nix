@@ -39,12 +39,16 @@
   },
   "vae": {
     "arch": "flux2",
-    "prefer": ["minimax_h3_video_vae_fp16.safetensors"]
+    "prefer": [
+      "minimax_h3_video_vae_int8_convrot.safetensors",
+      "minimax_h3_video_vae_fp16.safetensors"
+    ]
   },
   "vae_audio": {
     "arch": "vae",
     "prefer": ["minimax_h3_audio_vae_fp32.safetensors"]
   },
+  "vae_note": "The int8_convrot decoder first, fp16 behind it. Measured on top 2026-08-06 at 5x128x128: 0.034s vs 0.047s a decode (1.38x) and 7.91 vs 10.21 GiB peak, which is the half that matters when the DiT already stages 20 GB. ComfyUI sniffs the quantised layers and swaps in mixed_precision_ops itself (Comfy-Org/ComfyUI#15334, merged 2026-08-06), so nothing else in the graph changes -- but a checkout without that commit loads it as garbage, hence fp16 staying in the list rather than being replaced.",
   "loader_note": "The file is comfy-quantized int8, so the fingerprinter reaches for OTUNetLoaderW8A8; the workflow these outputs came from loads it on the plain UNETLoader, which handles .comfy_quant itself. loader_class pins that.",
   "frames_note": "Frame count is max(min_frames, round(duration*fps)) rounded UP to the next value congruent to min_frames mod frame_chunk -- 5s at 24fps is 124 frames, which is what the source workflow's ComfyMathExpression computed."
 }
