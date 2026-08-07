@@ -203,6 +203,21 @@ def main():
         check("names nix-pull instead of shipping dead buttons",
               ("nix-pull" in tail, "actions:" in tail), (True, False))
 
+        case("a toast that never reaches a server is retried, not swallowed")
+        sb9 = Sandbox(root / "i")
+        (root / "i" / "settings.json").write_text(json.dumps({"notifActions": True}))
+        sb9.push({"apps/x.py": "1\n"}, "one")
+        # `false` stands in for notify-send with nothing on the bus yet: it exits
+        # non-zero having printed no id, which is what a boot racing the panel
+        # looks like. Recording that as answered would lose the update until the
+        # NEXT push.
+        tail = sb9.offer(REPO_UPDATES_NOTIFY="false")
+        check("says so", "no notification server" in tail, True)
+        check("records no dismissal",
+              json.loads((sb9.state / "state.json").read_text()).get("dismissed")
+              if (sb9.state / "state.json").exists() else None, None)
+        check("the next pass offers it again", "offered" in sb9.offer(), True)
+
         # ---- applying -------------------------------------------------------
         case("apply, the happy path")
         sb6 = Sandbox(root / "f")
