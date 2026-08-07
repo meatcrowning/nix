@@ -187,6 +187,10 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("nm-applet --indicator")
     hl.exec_cmd("kdeconnect-indicator")
     hl.exec_cmd("systemctl --user start easyeffects.service udiskie.service")
+    -- "The other machine pushed to ~/nix" — checked here (so a boot and a plain
+    -- login both count as a check), on resume, and on a slow poll; offers a
+    -- toast with Pull & apply / Dismiss on it. See home/srvs/repo-updates.nix.
+    hl.exec_cmd("systemctl --user start repo-updates.service")
     hl.exec_cmd("$HOME/.local/bin/wizlight-tray.py")
     -- Clipboard history: everything copied lands in cliphist's db
     -- (`cliphist list` / `cliphist decode`; picker UI is future work).

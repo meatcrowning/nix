@@ -108,6 +108,8 @@ hyprctl plugin list               # exactly one hyprvtb, at the new Version
 hyprctl configerrors              # must be empty
 hyprctl layers                    # layer namespaces + sizes
 ./tools/seed-drift.sh             # tripwire: source vs live for both mutable dotfiles; exit 1 = drift, --quiet for scripts
+nix-pull                          # what origin/main has that this checkout does not, and what applying costs
+nix-pull apply                    # pull --ff-only, rebuild through this host's wrapper, reload
 qmllint -I <import paths> qml/Main.qml
 ./tools/sandbox.sh start|exec CMD|shot|clients|stop    # off-screen monitor for GUI tests
 ```
@@ -558,6 +560,27 @@ framing. State the host in the dispatch prompt when the task touches rebuilds,
   idempotence backstop. Self-disarms via
   `~/.local/state/board-reminder/<id>.done` (delete to re-arm). Harness
   `tools/board-reminder-test.py`.
+- `home/srvs/repo-updates.nix` + `repo-updates-files/repo-updates.py` — **"the
+  other machine pushed to `~/nix`", as a toast with buttons on it.** `docs/` and
+  `~/.claude` sync themselves; the flake cannot, because pulling it is only half
+  of landing it and the other half switches the machine he is sitting at. So a
+  daemon checks `origin/main` at session start (started from `hyprland.lua`, so
+  a boot and a login both count), on resume from suspend — detected by
+  `CLOCK_BOOTTIME` outrunning `CLOCK_MONOTONIC`, which needs no system-bus match
+  rule and therefore works on book — and on a 30-minute backstop poll. The
+  persistent toast carries the commit count, a couple of subjects and what
+  applying will **cost**, read off the diff: a moved compositor pin means a
+  from-source Hyprland build on book *and* no live plugin hot-swap on either
+  host (next login), while an `apps/`-only change means no rebuild at all.
+  `Pull & apply` pulls `--ff-only`, rebuilds through the host's own wrapper
+  (which owns preflight and the shared lock) and reloads what can be reloaded,
+  morphing one progress toast in place; `Dismiss` stays quiet until a NEWER sha
+  lands. It never stashes, resets or checks out — a tree that blocks the
+  fast-forward is reported and the pull abandoned. `nix-pull [check|apply]` is
+  the same code by hand, and what the toast names when the panel's
+  `notifActions` setting is off. Kill switch
+  `~/.local/state/repo-updates/off`; log `~/.cache/repo-updates.log`; harness
+  `tools/repo-updates-test.py`.
 - `home/srvs/board-notify.nix` + `board-notify-files/board-notify.py` — **a toast
   when a finishing worker's completion lands on this host's board**, unless
   goetia is already the focused window. It is `Type=simple` — a persistent
