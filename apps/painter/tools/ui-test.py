@@ -1643,6 +1643,158 @@ def QtIODeviceWriteOnly():
     return QIODevice.OpenModeFlag.WriteOnly
 
 
+def test_peer_history(win, ctl, tmp):
+    """The history is BOTH machines': top's output root is globbed beside the
+    local one, and the file that is in both appears once."""
+    import main as P
+
+    peer = os.path.join(tmp, "peer-out")
+    os.makedirs(os.path.join(peer, "video"), exist_ok=True)
+    check("the peer root is wired up", [str(p) for p in P.PEER_OUTS] == [peer],
+          P.PEER_OUTS)
+
+    # Only on top: something book never downloaded.
+    fake_png(os.path.join(peer, "peer_00001_.png"), {"positive": "made on top"})
+    # In BOTH, and DIFFERENT SIZES — which is the real shape of it: book injects
+    # painter's parameter chunk into the copy it writes and top's has none, so
+    # a dedupe keyed on size would show this twice.
+    both = "both_00001_.png"
+    fake_png(os.path.join(peer, both), {"positive": "top's chunkless copy"})
+    fake_png(os.path.join(tmp, "out", both), {"positive": "the local copy",
+                                              "steps": 33, "cfg": 1.5})
+    # A derivative on the far side stays a derivative.
+    for f in ("peer_00002_.mp4", "peer_00002_-muted.mp4"):
+        with open(os.path.join(peer, "video", f), "wb") as fh:
+            fh.write(b"\0" * 64)
+
+    ctl.gallery.load_existing()
+    spin(200)
+    names = [ctl.gallery.data(ctl.gallery.index(i, 0), P.Gallery.NameRole)
+             for i in range(ctl.gallery.rowCount())]
+    check("top's own output is in book's history", "peer_00001_.png" in names, names)
+    check("...and its clip too", "peer_00002_.mp4" in names, names)
+    check("...but not the clip's muted copy", "peer_00002_-muted.mp4" not in names, names)
+    check("the file both machines hold appears ONCE",
+          names.count(both) == 1, names)
+
+    # ...and the one that survived is the LOCAL one, which is the only copy with
+    # painter's parameters in it — dedupe order is what makes "inject" work.
+    row = names.index(both)
+    check("...and it is the local copy",
+          ctl.gallery.pathAt(row) == os.path.join(tmp, "out", both),
+          ctl.gallery.pathAt(row))
+    p = ctl.gallery.paramsAt(row)
+    check("...so its parameters are readable", p and p.get("steps") == 33, p)
+
+    # A result landing mid-session replaces top's copy of itself rather than
+    # sitting beside it: the backend wrote one there the instant it made it.
+    fresh = "fresh_00001_.png"
+    fake_png(os.path.join(peer, fresh), {"positive": "top's"})
+    ctl.gallery.load_existing()
+    spin(150)
+    before = ctl.gallery.rowCount()
+    ctl.gallery.add(fake_png(os.path.join(tmp, "out", fresh), {"positive": "book's"}))
+    spin(120)
+    names = [ctl.gallery.data(ctl.gallery.index(i, 0), P.Gallery.NameRole)
+             for i in range(ctl.gallery.rowCount())]
+    check("a finished job does not land beside top's copy of itself",
+          ctl.gallery.rowCount() == before and names.count(fresh) == 1,
+          (before, ctl.gallery.rowCount(), names.count(fresh)))
+    check("...and it is the local copy that is showing",
+          ctl.gallery.pathAt(names.index(fresh)) == os.path.join(tmp, "out", fresh),
+          ctl.gallery.pathAt(names.index(fresh)))
+
+    # An unmounted peer root — the tunnel down, or this is top — costs nothing.
+    P.PEER_OUTS = [P.Path(tmp) / "not-mounted"]
+    ctl.gallery.load_existing()
+    spin(150)
+    names = [ctl.gallery.data(ctl.gallery.index(i, 0), P.Gallery.NameRole)
+             for i in range(ctl.gallery.rowCount())]
+    check("a peer root that is not there does not cost the local scan",
+          fresh in names and "peer_00001_.png" not in names, names)
+    P.PEER_OUTS = [P.Path(peer)]
+
+
+def test_copy_prompt(win, ctl, tmp):
+    """Right-click -> copy prompt: the words out of the FILE, onto the
+    clipboard, through a holder that outlives painter."""
+    import main as P
+
+    params = {"positive": "a lighthouse in a storm", "negative": "blurry",
+              "steps": 12}
+    path = fake_png(os.path.join(tmp, "out", "prompt_00001_.png"), params)
+    ctl.gallery.add(path)
+    spin(120)
+    check("the new output is at the top of the history",
+          ctl.gallery.indexOf(path) == 0, ctl.gallery.indexOf(path))
+
+    # Read the menu the way test_inject does — through a real right-click,
+    # `menuFor` returning a JS array that cannot cross into Python. BY POSITION,
+    # not by creation order: delegates are recycled, so "the first cell `walk`
+    # finds" is whichever item the view happened to reuse, and row 0 is the one
+    # drawn top-left.
+    from PySide6.QtCore import Qt
+    gal = find(win.contentItem(), "GalleryView")
+    menu = find(win.contentItem(), "CtxMenu")
+    grid = find(gal, "KineticGridView")
+    grid.setProperty("contentY", 0)
+    spin(80)
+
+    def row0_menu():
+        cells = [c for c in walk(grid)
+                 if c.metaObject().className().startswith("QQuickItem")
+                 and c.width() == grid.property("cellWidth")]
+        if not cells:
+            return None
+        cell = min(cells, key=lambda c: (round(c.y()), round(c.x())))
+        click(win, cell, dx=cell.width() / 2, dy=cell.height() / 2, button=Qt.RightButton)
+        spin(150)
+        out = [i.get("label") for i in (prop(menu, "items") or []) if i.get("label")]
+        menu.metaObject().invokeMethod(menu, "close")
+        spin(60)
+        return out
+
+    labels = row0_menu()
+    if labels is not None:
+        check("a still with a prompt offers to copy it",
+              "copy prompt" in labels, labels)
+        check("...below the inject items, beside the other copy-out",
+              labels.index("copy prompt") > labels.index("inject params"), labels)
+
+    RAN.clear()
+    ctl.copyPrompt(path)
+    spin(150)
+    copied = [r for r in RAN if os.path.basename(r[0]) == "wl-copy"]
+    check("copy prompt puts the file's own words on the clipboard",
+          copied and copied[-1][-1] == params["positive"], RAN)
+    check("...with no newline glued to the end", copied and "-n" in copied[-1],
+          copied[-1] if copied else RAN)
+
+    # A PNG that never went through painter has no prompt to give, and must say
+    # so rather than put an empty selection over whatever was on the clipboard.
+    plain = noisy_png(os.path.join(tmp, "out", "plain_00001_.png"), 4, 4)
+    RAN.clear()
+    ctl.copyPrompt(plain)
+    spin(120)
+    check("...and a file with no prompt copies nothing",
+          not [r for r in RAN if os.path.basename(r[0]) == "wl-copy"], RAN)
+
+    # ...which is also why the menu never puts it in front of a clip: a video
+    # carries ComfyUI's graph, not painter's parameters.
+    vid = os.path.join(tmp, "out", "video", "noprompt_00001_.mp4")
+    os.makedirs(os.path.dirname(vid), exist_ok=True)
+    with open(vid, "wb") as fh:
+        fh.write(b"\0" * 64)
+    ctl.gallery.add(vid)
+    spin(200)
+    labels = row0_menu()
+    if labels is not None:
+        check("a clip is not offered a prompt to copy",
+              "copy prompt" not in labels, labels)
+    os.unlink(vid)
+    os.unlink(plain)
+
+
 def test_muted(win, ctl, tmp):
     """A muted copy is a derivative: hidden from the history, reused, and put
     on the clipboard as a file URI rather than as pixels."""
@@ -1918,6 +2070,9 @@ def main():
     os.environ["XDG_STATE_HOME"] = os.path.join(tmp, "state")
     os.environ["XDG_CACHE_HOME"] = os.path.join(tmp, "cache")
     os.environ["PAINTER_OUT"] = os.path.join(tmp, "out")
+    # The other machine's outputs, read-only — what comfy-tunnel.sh mounts top's
+    # root at on book. Read once at import, so it has to be set before build().
+    os.environ["PAINTER_PEER_OUT"] = os.path.join(tmp, "peer-out")
 
     app, engine, win, ctl, keep = build(tmp)
     print("== text boxes ==");        test_text_boxes(win, ctl)
@@ -1934,6 +2089,8 @@ def main():
     print("== dropdowns ==");         test_dropdown(win, ctl)
     print("== escape ==");            test_escape(win, ctl)
     print("== inject ==");            test_inject(win, ctl, tmp)
+    print("== copy prompt ==");       test_copy_prompt(win, ctl, tmp)
+    print("== peer history ==");      test_peer_history(win, ctl, tmp)
     print("== muted copies ==");      test_muted(win, ctl, tmp)
     print("== split + state ==");     test_split_and_state(win, ctl, keep)
     print("== restore ==");           keep2 = test_restore(tmp)

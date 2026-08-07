@@ -313,6 +313,55 @@ browser, a chat client) is recognised by `x-special/gnome-copied-files`.
 clipfile owns the selection itself and offers both. The whole argument, and the
 headless-sway harness that proves it, is in `apps/AGENTS.md` → `pylib/`.
 
+**`copy prompt` is the one clipboard action that is TEXT, so it is `wl-copy -n`
+and not clipfile** — one mime type is all a string needs, and `-n` because
+wl-copy appends a newline to argv content otherwise. Same Wayland rule though:
+the holder wl-copy forks is what makes the prompt still pasteable after painter
+closes. It reads the words out of the FILE's `painter` chunk, not out of the
+boxes, so an output from three sessions ago hands back what IT was asked for;
+and a clip is never offered it, its metadata being ComfyUI's graph rather than
+painter's parameters (`GalleryView.commonItems`, gated on the params the menu
+already read — docs/DESIGN.md §10, an action with nothing to act on is not
+offered greyed, it is not offered).
+
+## The history is BOTH machines', with nothing shown twice
+
+**top's backend files every result on top, whichever machine asked for it** —
+book generates through the tunnel and keeps only the copy it downloads
+afterwards. So top's gallery has always been the whole history and book's was
+the tail of it.
+
+`comfy-tunnel.sh` therefore mounts `top:~/Pictures/painter/out` read-only beside
+the models (0.14s, and a failure is a stderr line rather than a notification:
+it costs the older half of a list, not the ability to generate) and exports
+`PAINTER_PEER_OUT`. `main.py`'s `PEER_OUTS` is that, colon-separated like a
+PATH; `Gallery.load_existing` globs every root in turn and `Gallery.add` drops a
+peer row for the local file that replaces it. **On top it is unset and nothing
+changes** — there is no second root to add, because top already holds
+everything. Measured on book 2026-08-06: 132 rows, 31 local, 101 from top, no
+duplicates.
+
+Two rules, both load-bearing, both regression-tested by `tools/ui-test.py`'s
+`test_peer_history`:
+
+- **The dedupe key is the NAME, never the size.** book injects painter's
+  parameter chunk into the PNG it downloads and top's copy has none, so the same
+  still is ~600 bytes bigger on book (a clip, downloaded verbatim, does match to
+  the byte — but half a rule is no rule). Names cannot collide: the backend that
+  numbers an output is top's whoever asked for it.
+- **The local root is scanned FIRST and its copy wins.** Not tidiness: that
+  chunk is only in the local copy, so `inject` reads a file that has parameters
+  in it instead of one that does not.
+
+The asymmetry that leaves: on TOP, a still book generated shows up but says *no
+parameters stored in this file*, because nothing ever wrote painter's chunk into
+top's copy of it. Fixing that means writing back over the tunnel, i.e. an `rw`
+sshfs mount of his `Pictures` — not taken.
+
+A remote row is not marked as remote in the grid, on purpose: it is an output of
+his either way, and the tile says what it is. It does go away when the tunnel
+does, which is the same thing the model picker already does.
+
 ## The layout holds at every width
 
 Both panes used to vanish below 900px unless selected, so in the parameters view
@@ -452,7 +501,7 @@ behind. Re-run it after touching `comfy-tunnel.sh`.
 
 ## `tools/ui-test.py` — the offscreen UI harness
 
-141 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
+231 checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
 synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
 can never start ComfyUI on top or open a window on his screen:
 
@@ -472,7 +521,11 @@ pick), the live-binding regressions above, Escape (releases the box, cancels
 NOTHING), the inject menu and its three subsets, the draggable divider and its
 clamps, the furniture (an elided panel badge, the splitter stopping above the
 status bar, the one scrollbar being on the results side, a prompt box taking a
-dragged height), the video column (a synthetic video family written into the scratch
+dragged height), `copy prompt` (offered on a still with words and not on a clip,
+and what reaches `wl-copy`), the merged history (`PAINTER_PEER_OUT` globbed
+beside the local root, the file both machines hold shown once and shown as the
+LOCAL copy, an unmountable peer root costing the local scan nothing), the video
+column (a synthetic video family written into the scratch
 root and removed again — a fully paired model sorts to the top of the list and
 would otherwise be every later test's selection), save-and-restore through a
 SECOND window on the same prefs file, that
@@ -529,7 +582,9 @@ family × all four toggles), `tools/coverage-test.py` (every base model actually
 loads and decodes — 19/19 on v0.30.0), and the custom-node import block in the
 startup log, since a bump silently disables a node that fails to import rather
 than refusing to start. `coverage-test.py` writes its PNGs into the real
-gallery (`~/Pictures/painter/out`, prefix `painter_cov_`) — delete them after.
+gallery (`~/Pictures/painter/out`, prefix `painter_cov_`) — delete them after,
+and note that since the history merged they show up in BOOK's gallery too,
+because that root is top's.
 
 The unit passes `--listen 127.0.0.1`, and that is a **security boundary, not a
 default**: ComfyUI has no authentication and a workflow graph is arbitrary code
@@ -596,7 +651,12 @@ identification to top's for all 57 files (role, family, loader, quant).
 backend is the precondition, not the picker), but it says so in a toast rather
 than leaving an empty list that reads as "top has no models". Generated images
 still land locally: the app downloads each result over the tunnel's `/view` and
-writes it to book's own `OUT_DIR`, so book's gallery shows what book made.
+writes it to book's own `OUT_DIR` — and since 2026-08-06 the same script mounts
+top's OUTPUT root beside the model one, so book's gallery shows what BOTH
+machines made rather than only what book downloaded. See "The history is both
+machines'" above; `mount_ro`/`unmount_ours` are shared by the two mounts and
+only ever give back what this run took, so a second painter's mount survives.
+`PAINTER_NO_PEER_OUT=1` skips the output one.
 
 ## Model identification is by tensor header, not filename
 

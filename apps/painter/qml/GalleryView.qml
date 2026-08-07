@@ -100,20 +100,27 @@ Item {
         if (!p) {
             return [{ label: isVideo ? "a video carries its ComfyUI graph, not these settings"
                                      : "no parameters stored in this file", enabled: false },
-                    { separator: true }].concat(view.commonItems(index, path, isVideo))
+                    { separator: true }].concat(view.commonItems(index, path, isVideo, p))
         }
         return [
             { label: "inject all", trigger: () => { root.injectAll(p); root.view = 0 } },
             { label: "inject prompt", trigger: () => { root.injectPrompt(p); root.view = 0 } },
             { label: "inject params", trigger: () => { root.injectParams(p); root.view = 0 } },
             { separator: true }
-        ].concat(view.commonItems(index, path, isVideo))
+        ].concat(view.commonItems(index, path, isVideo, p))
     }
 
-    // The items every output gets, parameters or not. The muted copy is
-    // video-only: there is nothing to strip off a still.
-    function commonItems(index, path, isVideo) {
+    // The items every output gets, parameters or not. The last two are offered
+    // only when there is something to offer: the prompt when the file kept one
+    // (a clip never does — its metadata is ComfyUI's graph), the muted copy on a
+    // video, there being nothing to strip off a still. An action with nothing
+    // to act on is not offered greyed, it is not offered (docs/DESIGN.md §10).
+    function commonItems(index, path, isVideo, params) {
         var items = [{ label: "open in viewer", trigger: () => App.openExternally(path) }]
+        if (params && params.positive) {
+            items.push({ label: "copy prompt",
+                         trigger: () => App.copyPrompt(path) })
+        }
         if (isVideo) {
             items.push({ label: "copy muted copy",
                          trigger: () => App.copyMuted(path) })

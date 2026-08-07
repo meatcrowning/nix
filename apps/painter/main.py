@@ -59,6 +59,13 @@ import pngmeta  # noqa: E402
 import registry as R  # noqa: E402
 
 OUT_DIR = Path(os.environ.get("PAINTER_OUT", Path.home() / "Pictures" / "painter" / "out"))
+# THE OTHER MACHINE'S OUTPUTS, read-only. book generates through top's backend,
+# and that backend writes every result into TOP's output directory whoever asked
+# for it — book keeps only the copy it downloaded. So top's history has always
+# been both machines' and book's was a fraction of it. comfy-tunnel.sh mounts
+# top's root over sshfs and names it here (colon-separated, like a PATH); on top
+# there is nothing to add, and an unset or unmounted root costs nothing.
+PEER_OUTS = [Path(p) for p in os.environ.get("PAINTER_PEER_OUT", "").split(":") if p]
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "painter"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "painter"
 PREFS = STATE / "prefs.json"
@@ -451,15 +458,41 @@ class Gallery(QAbstractListModel):
     def has_path(self, path):
         return any(r["path"] == str(path) for r in self._rows)
 
+    @staticmethod
+    def _dedup_key(path):
+        """What makes the same output on both machines ONE row.
+
+        The NAME, because the backend that numbers it is top's whoever asked —
+        book cannot mint a colliding `painter_00042_.png` of its own. Not the
+        size: book injects painter's parameter chunk into the PNG it downloads
+        and top's copy has none, so the identical still is ~600 bytes bigger
+        here (a clip does match to the byte, being downloaded verbatim, but half
+        a rule is no rule).
+        """
+        return Path(path).name
+
     def _row_for(self, path):
         p = Path(path)
         is_video = p.suffix.lower() in VIDEO_SUFFIXES
         return {"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(),
-                "name": p.name, "is_video": is_video, "poster": ""}
+                "name": p.name, "is_video": is_video, "poster": "",
+                "key": self._dedup_key(p)}
+
+    def _drop_key(self, key):
+        for i, r in enumerate(self._rows):
+            if r["key"] == key:
+                self.beginRemoveRows(QModelIndex(), i, i)
+                self._rows.pop(i)
+                self.endRemoveRows()
+                return
 
     def add(self, path):
         if is_muted_copy(path) or self.has_path(path):
             return
+        # The peer root holds top's copy of this very output, and the scan at
+        # startup may already be showing it. The local one replaces it: it is
+        # the copy with the parameters written into it.
+        self._drop_key(self._dedup_key(path))
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._rows.insert(0, self._row_for(path))
         self.endInsertRows()
@@ -471,14 +504,33 @@ class Gallery(QAbstractListModel):
         # Videos land in a subdirectory of their own, because that is where
         # SaveVideo's filename_prefix puts them — a gallery that only globbed
         # *.png here would show nothing at all for a video model.
-        try:
-            files = list(OUT_DIR.glob("*.png"))
-            for suffix in VIDEO_SUFFIXES:
-                files += list(OUT_DIR.glob(f"video/*{suffix}"))
-            files = [p for p in files if not is_muted_copy(p)]
-            files = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
-        except OSError:
-            return
+        #
+        # THE LOCAL ROOT IS SCANNED FIRST, and that ordering is load-bearing
+        # rather than tidiness: a still book generated carries painter's
+        # parameters only in the copy book wrote, so "inject" reads the local
+        # one and would find nothing at all in top's.
+        found = []
+        seen = set()
+        for root in [OUT_DIR, *PEER_OUTS]:
+            try:
+                paths = list(root.glob("*.png"))
+                for suffix in VIDEO_SUFFIXES:
+                    paths += list(root.glob(f"video/*{suffix}"))
+            except OSError:
+                # A peer root that is not mounted — the tunnel is down, or the
+                # sshfs went away mid-session — must not cost the local scan.
+                continue
+            for p in paths:
+                key = self._dedup_key(p)
+                if is_muted_copy(p) or key in seen:
+                    continue
+                try:
+                    mtime = p.stat().st_mtime
+                except OSError:
+                    continue   # deleted between the glob and the stat
+                seen.add(key)
+                found.append((mtime, p))
+        files = [p for _m, p in sorted(found, key=lambda t: t[0], reverse=True)[:limit]]
         self.beginResetModel()
         self._rows = [self._row_for(p) for p in files]
         self.endResetModel()
@@ -1425,6 +1477,43 @@ class Painter(QObject):
             self.busyChanged.emit()
         self.toast.emit(message.split("\n")[0][:200], True)
         self.statusChanged.emit()
+
+    # -- the words that made it, on the clipboard ---------------------------
+
+    @Slot(str)
+    def copyPrompt(self, path):
+        """Put this output's own prompt on the clipboard.
+
+        Read out of the PNG's `painter` chunk, not out of the boxes — so a still
+        from three sessions ago hands back what IT was asked for, whatever is
+        typed now. Nothing to offer for a clip: a video carries ComfyUI's graph
+        and not painter's parameters, which is why the menu does not put this in
+        front of one.
+
+        `wl-copy`, not Qt's clipboard, for the reason spelled out in
+        `_clip_file`: a Wayland selection dies with the process that offered it,
+        so a prompt copied out of painter would stop pasting the moment painter
+        closed. wl-copy forks a holder that outlives it. `-n` because it appends
+        a newline to argv content otherwise, and a prompt pasted into a text box
+        should not arrive with a blank line after it.
+        """
+        try:
+            params = pngmeta.load_params(Path(path.replace("file://", "")).read_bytes())
+        except (OSError, ValueError):
+            params = None
+        text = ((params or {}).get("positive") or "").strip()
+        if not text:
+            self.toast.emit("no prompt stored in this file", True)
+            return
+
+        def done(rc, out):
+            if rc != 0:
+                detail = (out.splitlines() or [f"exit {rc}"])[-1]
+                self.toast.emit(f"could not copy it: {detail}", True)
+                return
+            self.toast.emit("prompt copied", False)
+
+        self._run_async(["wl-copy", "-n", "--", text], done)
 
     # -- a soundless copy, on the clipboard ---------------------------------
 
