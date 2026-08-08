@@ -14,6 +14,17 @@
 #     IPAddressDeny in sys/hw/openrgb.nix. An allowlist naming 22 and 445 is
 #     the same decision the wired LAN already made; if something else ever
 #     needs to be reachable from air, add its port here deliberately.
+#   * `--netfilter-mode=off` is what makes that allowlist actually enforced.
+#     tailscaled's INPUT hook (`ts-input`) holds an unconditional
+#     `-i tailscale0 -j ACCEPT` that runs BEFORE nixos-fw, so with tailscale
+#     managing netfilter the allowlist below was dead code and every listener
+#     was reachable by any authenticated peer anyway (audited 2026-08-08:
+#     3407 pkts on the ts-input accept, 0 on the nixos-fw 22/445 rules). With
+#     netfilter off, tailscaled stops installing filter chains and nixos-fw —
+#     including this allowlist — governs the interface. tailscaled still manages
+#     its own routing table and ip rules, so connectivity is unaffected; it just
+#     no longer hijacks the firewall. (Verify end-to-end from book: ssh + smb
+#     to top over the tailnet still work. Revert = drop this one flag.)
 #   * nothing about this opens a WAN port: tailscaled dials OUT and
 #     hole-punches; openFirewall just unblocks its UDP port (41641) so LAN /
 #     direct paths skip the DERP relays.
@@ -40,7 +51,9 @@
   services.tailscale = {
     enable = true;
     openFirewall = true;
-    extraSetFlags = [ "--operator=lam" ];
+    # --netfilter-mode=off: let nixos-fw (below) govern tailscale0 instead of
+    # tailscaled's blanket accept. See the note above.
+    extraSetFlags = [ "--operator=lam" "--netfilter-mode=off" ];
   };
 
   # 445 = SMB (the aud share, share.nix), 22 = ssh (dbsync, art rsync, the
