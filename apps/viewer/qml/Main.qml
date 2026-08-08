@@ -5,7 +5,7 @@ import "../../qmlcommon"
 // viewer's window: a GRID of image panes with their controls in the hyprvtb
 // titlebar. The flip-through set + start index come from main.py (startImages /
 // startIndex — the opened file's sibling images, in filer's order if it passed
-// `--order`); each pane holds its own position in that one shared list, so ‹ / ›
+// `--order`); each pane holds its own position in that one shared list, so << / >>
 // move the FOCUSED pane and leave the others where they are. Being a real
 // Wayland Window, the hyprvtb plugin gives it the same vertical titlebar / drag
 // / resize / minimize as filer and surfer; `Titlebar` (context property) bridges
@@ -130,7 +130,7 @@ Window {
 
     // A drop (or `--split`): show `entries` starting in pane `p`. Paths viewer
     // has not seen are APPENDED to the shared list rather than replacing it, so
-    // ‹ / › can still walk back to whatever was open before — and so a file
+    // << / >> can still walk back to whatever was open before — and so a file
     // dropped twice keeps one slot. Extra files in one drop open extra panes
     // (that IS "open a bunch of images at once"), never overwriting panes the
     // user has already arranged.
@@ -287,7 +287,8 @@ Window {
 
     onClosing: Qt.quit()
 
-    // Quitting on our own (`q`, Escape, the × button, Ctrl+W on the last pane)
+    // Quitting on our own (`q`, Escape, Ctrl+W on the last pane, or the OUTER
+    // titlebar's [x] — this app draws no close cell of its own, docs/DESIGN.md §7.4)
     // goes through the compositor, not straight to Qt.quit(): hyprvtb rolls the
     // window up into its titlebar and fades the bar — the [x] animation — and
     // then sends us the ordinary close that `onClosing` already quits on.
@@ -322,8 +323,28 @@ Window {
     // ---- hyprvtb titlebar buttons: the viewer controls ----
     // state: 0 normal, 2 disabled (flip greys out on a single item, `xp` on a
     // single pane). They all act on the FOCUSED pane. A video swaps the zoom/fit
-    // controls for play/pause (‹ / › stay as skip prev/next); the scrub bar
+    // controls for play/pause (<< / >> stay as skip prev/next); the scrub bar
     // (below) replaces them for scrubbing.
+    //
+    // EVERY LABEL HERE IS ASCII AND IN THE DESKTOP'S VOCABULARY (docs/DESIGN.md
+    // §12.1, §2.3). Until 2026-08-07 five of them were neither, and two of those
+    // did not draw at all: measured against the shipped cmaps, `‖` (U+2016) and
+    // `▶` (U+25B6) are **glyph 0 in both DOS VGA faces** — i.e. on the default
+    // pick this app's play/pause cell clipped its own line. They are `||` and
+    // `>` now, which is what §12.1's table said all along. `‹`/`›` became the
+    // established `<<`/`>>` (the same prev/next player draws) — that also gets
+    // rid of a collision the old set hid, since a video's play `>` and a next
+    // `›` would otherwise be one glyph apart for two different verbs. `fit`
+    // was three characters where §12.1 allows two and reader had already
+    // spelt this exact function `fp`.
+    //
+    // NOT changed, deliberately: `sp`/`xp`. §12.1's split row is `|` and `_`,
+    // kitty's, and filer/reader/surfer all draw it — but theirs is a DIRECTIONAL
+    // split (`|` right, `_` below) and viewer's panes are an auto-arranged grid
+    // (`cols`/`rows`, above): there is no direction to name, `addpane` is "one
+    // more cell" and `closepane` is not a split at all. Giving a different
+    // function an existing glyph is the thing §12.1 forbids, not the thing it
+    // asks for, so these keep their own two-letter mnemonics like `fs`/`gp`/`mu`.
     readonly property var tbButtons: {
         const multi = images.length > 1 ? 0 : 2;
         const one = panes.count > 1 ? 0 : 2;
@@ -334,23 +355,23 @@ Window {
         ];
         if (current && current.isVideo) {
             return [
-                { id: "playpause", label: current.videoPlaying ? "‖" : "▶", state: 0,
+                { id: "playpause", label: current.videoPlaying ? "||" : ">", state: 0,
                   tip: current.videoPlaying ? "pause" : "play" },
-                { id: "prev",  label: "‹", state: multi, tip: "previous" },
-                { id: "next",  label: "›", state: multi, tip: "next" },
+                { id: "prev",  label: "<<", state: multi, tip: "previous" },
+                { id: "next",  label: ">>", state: multi, tip: "next" },
                 // Lit means muted — an active toggle inverts (docs/DESIGN.md
                 // §12.1). Only on a video: a still has nothing to silence.
                 { id: "mute",  label: "mu", state: win.muted ? 1 : 0,
                   tip: win.muted ? "unmute" : "mute" },
-            ].concat(split, [{ id: "close", label: "×", state: 0, tip: "close" }]);
+            ].concat(split);
         }
         return [
-            { id: "prev",    label: "‹",   state: multi, tip: "previous image" },
-            { id: "next",    label: "›",   state: multi, tip: "next image" },
+            { id: "prev",    label: "<<",  state: multi, tip: "previous image" },
+            { id: "next",    label: ">>",  state: multi, tip: "next image" },
             { id: "zoomout", label: "−",   state: 0,     tip: "zoom out" },
             { id: "zoomin",  label: "+",   state: 0,     tip: "zoom in" },
-            { id: "fit",     label: "fit", state: 0,     tip: "fit to pane" },
-        ].concat(split, [{ id: "close", label: "×", state: 0, tip: "close" }]);
+            { id: "fit",     label: "fp",  state: 0,     tip: "fit to pane" },
+        ].concat(split);
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -422,7 +443,6 @@ Window {
             case "fit":       if (win.current) win.current.fit();          break;
             case "addpane":   win.addPane();                 break;
             case "closepane": win.closePane(win.focusPane);  break;
-            case "close":     win.quit();                     break;
             }
         }
         // scrub bar dragged/scrolled in the titlebar → seek the focused pane
@@ -456,7 +476,7 @@ Window {
     }
 
     // The mouse's back/forward side buttons step through the flip order — the
-    // same move as the titlebar's ‹/› and the arrow keys, and like them it acts
+    // same move as the titlebar's <</>> and the arrow keys, and like them it acts
     // on the FOCUSED pane (win.prev/next both go through setPaneIdx(focusPane)).
     // Desktop-global rule, docs/DESIGN.md §11.
     NavButtons {
