@@ -76,8 +76,13 @@ def png(path, rgb):
 def build(app, entries, index=0, panes=1):
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
+    # Clip is real, and harmless until a menu row is clicked: it only ever
+    # spawns viewermain.CLIPFILE, which copy-test.py repoints at a stub. A
+    # MISSING context property would be a ReferenceError that takes the whole
+    # Component.onCompleted with it, so every harness loading Main.qml installs
+    # all of them.
     keep = (viewermain.Palette(viewermain.PANEL_THEME), StubTitlebar(),
-            viewermain.Files(), viewermain.Prefs())
+            viewermain.Files(), viewermain.Prefs(), viewermain.Clip())
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[0])
     # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the
@@ -86,6 +91,7 @@ def build(app, entries, index=0, panes=1):
     ctx.setContextProperty("Titlebar", keep[1])
     ctx.setContextProperty("Files", keep[2])
     ctx.setContextProperty("Prefs", keep[3])
+    ctx.setContextProperty("Clip", keep[4])
     ctx.setContextProperty("startImages", entries)
     ctx.setContextProperty("startIndex", index)
     ctx.setContextProperty("startPanes", panes)

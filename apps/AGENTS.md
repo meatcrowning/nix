@@ -231,10 +231,21 @@ Every app does `sys.path.insert(0, str(HERE.parent / "pylib"))`, so the whole
 - **`kitty-vtb.py`** — kitty's vtb integration, run from the live repo, stdlib
   only.
 - **`clipfile.py`** — **THE way to put a FILE on the clipboard here.** Run as a
-  program (`python3 clipfile.py FILE…`), not imported: it forks and stays alive
-  as the selection's owner, because a Wayland selection dies with the process
-  that offered it. Exit 0 means the clipboard is ours; the holder lets go when
-  something else takes it.
+  program (`python3 clipfile.py [--image] FILE…`), not imported: it forks and
+  stays alive as the selection's owner, because a Wayland selection dies with
+  the process that offered it. Exit 0 means the clipboard is ours; the holder
+  lets go when something else takes it.
+    - **`--image` ADDS the picture; it never replaces the file offer.** viewer's
+      "copy image" passes it: the file's own bytes go on as `image/png` (or
+      whatever its extension says) *after* the two file types, so an editor
+      that only understands pixels gets them while everything that understands
+      a file paste keeps the filename it has always had — painter's copy is
+      byte-for-byte unchanged, and the harness asserts that. There is no
+      conversion, because this file is stdlib-only: a JPEG is offered as
+      `image/jpeg`, and a consumer that insists on `image/png` falls back to
+      the file rather than being handed a lie. Ignored for a multi-file copy
+      (two images cannot both be *the* image on the clipboard) and above
+      `IMAGE_MAX`, the holder keeping every payload resident.
     - `wl-copy --type text/uri-list` is what painter used, and it is one MIME
       type short: wl-copy offers exactly one (plus the text/plain aliases it
       guesses for a `text/*` type), while GTK — and Chromium/Electron behind
@@ -413,9 +424,9 @@ characters anywhere**. goetia's inbox is a separate decision; see
 ### `CtxMenu.qml` — a menu row acts on a box that still has the keyboard
 
 Not in `qmlcommon/` (it needs `PixelText`, which a shared component cannot
-reach): filer, player, reader, editor, board and painter each hold a **verbatim
-copy**, and surfer holds the ancestor as `ContextMenu.qml`. Retune all seven or
-none.
+reach): filer, player, reader, editor, board, painter and viewer each hold a
+**verbatim copy**, and surfer holds the ancestor as `ContextMenu.qml`. Retune
+all eight or none.
 
 **Opening the menu takes the active focus** — that is how Escape and the
 outside-click scrim reach its sink — so it remembers the item it took the focus
