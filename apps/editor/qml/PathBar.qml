@@ -97,7 +97,7 @@ Rectangle {
     Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs)
                                           easing.type: motion.slideEasing } }
 
-    readonly property real rowH: Theme.fontSize + 10
+    readonly property real rowH: Theme.lineHeight + 10
     readonly property real listH: Math.min(10 * (Theme.fontSize + 2),
                                            entries.length * (Theme.fontSize + 2))
 
@@ -192,7 +192,7 @@ Rectangle {
             required property var modelData
             required property int index
             width: list.width
-            height: Theme.fontSize + 2
+            height: Theme.lineHeight + 2
             color: index === root.hi || ma.containsMouse ? Theme.highlight : "transparent"
 
             PixelText {

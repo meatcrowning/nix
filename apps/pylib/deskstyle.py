@@ -52,7 +52,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Property, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetrics
 
 # Written by the panel's SettingsStore (Quickshell.shellDir + "/settings.json").
 SETTINGS_PATH = Path.home() / ".config" / "quickshell" / "settings.json"
@@ -188,6 +188,35 @@ class DeskStyle(QObject):
         f.setHintingPreference(QFont.PreferFullHinting)
         f.setStyleStrategy(QFont.NoAntialias)
         return f
+
+    @Property(int, notify=changed)
+    def lineHeight(self):
+        """One text row: the LIVE FACE's cell, not the em size we asked for.
+
+        docs/DESIGN.md §2.1 — "a text-only row is exactly one font cell tall,
+        with zero inter-row gap", and the cell is the face's own
+        `ascent + descent`, which is only sometimes `fontSize`. The panel has
+        had this since it was written (`Theme.qml`, `Math.round(metrics.height)`
+        off a QML `FontMetrics`); the apps never did, so every app row was
+        pinned to `fontSize` and inherited whatever gap that left.
+
+        Measured on `top` 2026-08-07, `QFontMetrics.height()` per face:
+
+            px:                  10   15   17   24
+            More Perfect DOS VGA 11   15   17   24
+            Perfect DOS VGA 437  11   15   17   24
+            Botis 4x6             8   12   13   19
+
+        So the two coincide for the DOS pair only in the middle of the slider —
+        at 10px even they are a pixel out — and **Botis is 3px short at the
+        default 15**, which is the dead leading under every label in every app
+        that this property exists to remove. Bind `lineHeight` for anything that
+        means "one text row"; bind `fontSize` only for an actual font size.
+        """
+        f = QFont(self._family)
+        f.setPixelSize(self._size)
+        f.setHintingPreference(QFont.PreferFullHinting)
+        return max(1, QFontMetrics(f).height())
 
     @Property(bool, notify=changed)
     def reduceMotion(self):

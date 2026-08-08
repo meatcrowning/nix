@@ -42,7 +42,7 @@ Item {
     signal toggled()
     signal reorderRequested(real dy)
 
-    implicitHeight: Theme.fontSize + 14
+    implicitHeight: Theme.lineHeight + 14
     height: implicitHeight
 
     Rectangle {              // the row lights on hover like every other row

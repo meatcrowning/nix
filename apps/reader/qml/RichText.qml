@@ -94,7 +94,7 @@ Item {
         return out;
     }
 
-    implicitHeight: Math.max(Theme.fontSize, lines.length * Theme.fontSize)
+    implicitHeight: Math.max(Theme.lineHeight, lines.length * Theme.lineHeight)
 
     Column {
         x: root.indent * root.cellW
@@ -108,7 +108,7 @@ Item {
                 required property var modelData
                 required property int index
                 width: parent.width
-                height: Theme.fontSize
+                height: Theme.lineHeight
 
                 readonly property string lineText: {
                     var s = "";
@@ -176,7 +176,7 @@ Item {
                                 roleValue: "code"
                                 Rectangle {
                                     width: codeLabel.implicitWidth
-                                    height: Theme.fontSize
+                                    height: Theme.lineHeight
                                     color: (lineItem.hit && root.current)
                                            ? "transparent" : Theme.bgAlt
                                     PixelText {
@@ -199,7 +199,7 @@ Item {
                                 roleValue: "link"
                                 Rectangle {
                                     width: linkLabel.implicitWidth
-                                    height: Theme.fontSize
+                                    height: Theme.lineHeight
                                     color: ma.containsMouse ? Theme.highlight
                                                             : "transparent"
                                     PixelText {

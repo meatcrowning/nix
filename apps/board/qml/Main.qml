@@ -1282,7 +1282,7 @@ Component {
                         Item {
                             width: needsCol.width
                             visible: needsCol.empty
-                            implicitHeight: visible ? Theme.fontSize * 2 + 40 : 0
+                            implicitHeight: visible ? Theme.lineHeight * 2 + 40 : 0
                             height: implicitHeight
 
                             PixelText {

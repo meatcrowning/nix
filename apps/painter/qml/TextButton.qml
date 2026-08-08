@@ -32,7 +32,7 @@ Item {
     signal clicked()
 
     implicitWidth: txt.implicitWidth + 8
-    implicitHeight: Theme.fontSize + 5
+    implicitHeight: Theme.lineHeight + 5
     width: implicitWidth
     height: implicitHeight
     opacity: enabled ? 1 : 0.4

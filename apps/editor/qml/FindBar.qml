@@ -83,7 +83,7 @@ Rectangle {
     Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs)
                                           easing.type: motion.slideEasing } }
 
-    readonly property real rowH: Theme.fontSize + 10
+    readonly property real rowH: Theme.lineHeight + 10
     readonly property real fullH: (replaceMode ? 2 : 1) * rowH + (replaceMode ? 4 : 0) + 8
 
     visible: slide > 0.001

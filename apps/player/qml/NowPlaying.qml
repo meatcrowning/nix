@@ -318,7 +318,7 @@ Item {
                     width: parent.width
                     text: root.cur.artist || ""
                     clip: true
-                    height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                    height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                     color: root.fgDim
                 }
                 // Album, with its original release year trailing the name. The
@@ -326,7 +326,7 @@ Item {
                 // so a long album title clips and the date stays readable.
                 Row {
                     width: parent.width
-                    height: Theme.fontSize + 2
+                    height: Theme.lineHeight + 2
                     spacing: 6
 
                     PixelText {
@@ -335,14 +335,14 @@ Item {
                         width: Math.max(0, Math.min(implicitWidth,
                                         parent.width - (albumYear.visible
                                                         ? albumYear.width + parent.spacing : 0)))
-                        height: Theme.fontSize + 2  // descender room, as above
+                        height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                         color: root.fgDim
                     }
                     PixelText {
                         id: albumYear
                         visible: (root.cur.year || 0) > 0 && (root.cur.album || "") !== ""
                         text: root.cur.year
-                        height: Theme.fontSize + 2
+                        height: Theme.lineHeight + 2
                         color: Theme.dim
                     }
                 }

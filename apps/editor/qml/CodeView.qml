@@ -298,7 +298,7 @@ Item {
             z: -1
             x: 0
             width: flick.contentWidth
-            height: Theme.fontSize
+            height: Theme.lineHeight
             color: Theme.highlight
             visible: root.winActive
         }

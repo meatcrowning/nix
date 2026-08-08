@@ -258,7 +258,7 @@ Item {
                 id: shown
                 width: parent.width
                 visible: !card.editing
-                implicitHeight: Math.max(Theme.fontSize + 6, answerText.implicitHeight + 6)
+                implicitHeight: Math.max(Theme.lineHeight + 6, answerText.implicitHeight + 6)
                 height: implicitHeight
 
                 Rectangle {

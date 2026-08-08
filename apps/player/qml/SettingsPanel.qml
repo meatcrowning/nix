@@ -227,7 +227,7 @@ Item {
                 visible: root.scanStatus !== ""
                 text: root.scanStatus
                 clip: true
-                height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                 color: root.fgDim
             }
         }

@@ -262,14 +262,14 @@ Item {
                                     width: parent.width
                                     text: tile.a ? tile.a.album : ""
                                     clip: true
-                                    height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                                    height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                                     color: root.fgText
                                 }
                                 PixelText {
                                     width: parent.width
                                     text: tile.a ? ((tile.a.year > 0 ? tile.a.year + "  " : "") + tile.a.artist) : ""
                                     clip: true
-                                    height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                                    height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                                     color: root.fgDim
                                 }
                             }

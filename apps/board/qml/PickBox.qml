@@ -56,7 +56,7 @@ Item {
     // One font cell plus the padding every small control here uses, so the two
     // of them stack as equal rungs.
     implicitWidth: pickText.implicitWidth + 16
-    implicitHeight: Theme.fontSize + 6
+    implicitHeight: Theme.lineHeight + 6
     width: implicitWidth
     height: implicitHeight
 

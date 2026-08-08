@@ -88,7 +88,7 @@ Item {
         id: shown
         width: parent.width
         visible: !box.editing
-        implicitHeight: Math.max(Theme.fontSize + 6, msgText.implicitHeight + 6)
+        implicitHeight: Math.max(Theme.lineHeight + 6, msgText.implicitHeight + 6)
         // Fills the box, so a `minHeight` taller than the invitation gives the
         // whole of that area to the hover fill and the click target (§5.3 —
         // the target is the region, not the line of text in it).
