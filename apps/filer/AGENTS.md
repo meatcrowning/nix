@@ -412,6 +412,30 @@ notifications on the user's screen, and the assertions need the exact strings.
   - The job table is keyed **`<kind>:<src>`**, so compressing a file and
     stripping its audio are not each other's "already running".
 
+## `copy` fills TWO clipboards
+
+`clip` (in `BrowserPane.qml`) is filer's own — it carries cut-vs-copy and is
+what filer's `paste` reads. Until 2026-08-07 it was the *only* thing `copy`
+touched, which meant a copy here was invisible to every other program on the
+desktop: copy an image, paste it into painter or a chat window, and nothing
+arrived, because nothing was ever put on the system clipboard. `copy` now also
+calls `FileOps.copyToClipboard`.
+
+- **`pylib/clipfile.py`, never `QClipboard`** — a Wayland selection dies with
+  the process that offered it, so a copy owned by filer would stop being
+  pasteable the moment filer closed. See `apps/AGENTS.md` → `pylib/`.
+- **`--image` for a lone image**, so the pixels ride along with the file and an
+  editor that cannot take a file paste still gets the picture. Never for a
+  multi-file copy: two images cannot both be *the* image on the clipboard.
+- **Cut stays internal.** It is filer's own move, not an offer; `clipfile`
+  writes `copy` into `x-special/gnome-copied-files` and nothing here would make
+  another app's paste move the file.
+- **A copy that fails is toasted** (`copy failed`, with clipfile's own stderr).
+  Silence would be a paste doing nothing, minutes later, in another app.
+- `CLIPFILE` is a module constant so a harness can repoint it —
+  `fileop-test.py` does, and therefore never touches his clipboard. That
+  clipfile really owns a selection is `apps/pylib/tools/clipfile-test.sh`'s job.
+
 ## "send to phone" — KDE Connect, in the file context menu
 
 `phone.py` + `sendToPhoneItems()`/`sendToPhone()` in `qml/BrowserPane.qml`. It

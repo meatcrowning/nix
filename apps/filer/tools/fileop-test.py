@@ -35,7 +35,8 @@ from deskstyle import DeskStyle  # noqa: E402  (pylib; Theme.qml binds to it)
 
 from PySide6.QtCore import QUrl, QObject, Slot, QTimer  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent  # noqa: E402
+from PySide6.QtQml import (QQmlApplicationEngine, QQmlComponent,  # noqa: E402
+                           QQmlExpression)
 
 import main as filermain  # noqa: E402
 
@@ -47,6 +48,17 @@ def check(name, cond, detail=""):
     print(("PASS  " if cond else "FAIL  ") + name + ("  " + str(detail) if detail else ""))
     if not cond:
         FAILS.append(name)
+
+
+def qml_eval(engine, obj, js):
+    """Run a JS expression in `obj`'s own QML scope — the only way to call a
+    BrowserPane function (a QML `function` is not a slot) or to fire a menu
+    row's real closure rather than a rebuilt one. Same helper as phone-test."""
+    expr = QQmlExpression(engine.contextForObject(obj), obj, js)
+    val = expr.evaluate()
+    if expr.hasError():
+        raise SystemExit("QML expression %r: %s" % (js, expr.error().toString()))
+    return val[0] if isinstance(val, tuple) else val
 
 
 def stub_toast(title, body, urgency=None, replace_id=None, value=None, persist=False):
@@ -347,6 +359,72 @@ def main():
     settle()
     check("a 2-arg QML call that fails still reports",
           len(TOASTS) == 1 and TOASTS[0][0] == "new folder failed", TOASTS)
+
+    # ---- 15. copy reaches the SYSTEM clipboard, not just filer's own clip ----
+    # `clipfile.py` is repointed at a stub that records its argv: the real one
+    # would take HIS clipboard, which no test may do (AGENTS.md). That it really
+    # owns a Wayland selection is apps/pylib/tools/clipfile-test.sh's job.
+    del TOASTS[:]
+    log = os.path.join(tmp, "clipargv")
+    stub = os.path.join(tmp, "clipstub.py")
+    open(stub, "w").write(
+        "import sys\n"
+        "open(%r, 'a').write(repr(sys.argv[1:]) + '\\n')\n"
+        "rc = int(open(%r).read().strip())\n"
+        "sys.stderr.write('the compositor said no\\n') if rc else None\n"
+        "sys.exit(rc)\n" % (log, os.path.join(tmp, "cliprc")))
+    open(os.path.join(tmp, "cliprc"), "w").write("0")
+    filermain.CLIPFILE = stub
+
+    pic = os.path.join(src, "shot.png")
+    open(pic, "wb").write(b"not a real png, the extension is the test")
+    txt = os.path.join(src, "a.txt")
+    ops.copyToClipboard([pic])
+    check("copy hands the file to clipfile",
+          wait_for(lambda: os.path.exists(log)) and eval(open(log).read().strip()) == ["--image", pic],
+          open(log).read() if os.path.exists(log) else None)
+    os.unlink(log)
+    ops.copyToClipboard([pic, txt])
+    check("...with no --image for a multi-file copy (nor a lie about which)",
+          wait_for(lambda: os.path.exists(log)) and eval(open(log).read().strip()) == [pic, txt],
+          open(log).read() if os.path.exists(log) else None)
+    os.unlink(log)
+    ops.copyToClipboard([txt])
+    check("...and no --image for a file that is not an image",
+          wait_for(lambda: os.path.exists(log)) and eval(open(log).read().strip()) == [txt],
+          open(log).read() if os.path.exists(log) else None)
+    settle()
+    check("a copy that worked says nothing", TOASTS == [], TOASTS)
+
+    # A copy that did NOT take the clipboard must say so — the alternative is a
+    # paste doing nothing, minutes later, in another app (docs/DESIGN.md 10).
+    open(os.path.join(tmp, "cliprc"), "w").write("1")
+    del TOASTS[:]
+    ops.copyToClipboard([pic])
+    settle()
+    check("a failed copy is reported, with clipfile's own reason",
+          len(TOASTS) == 1 and TOASTS[0][0] == "copy failed"
+          and "compositor" in TOASTS[0][1], TOASTS)
+
+    # ...and the menu row is what calls it: filer's own `clip` AND the system
+    # clipboard, from one click on `copy`.
+    del TOASTS[:]
+    open(os.path.join(tmp, "cliprc"), "w").write("0")
+    if os.path.exists(log):
+        os.unlink(log)
+    view.setProperty("selection", [pic])
+    fired = qml_eval(engine, view, (
+        "(function(){var m=entryMenuItems({path:%r,isDir:false,kind:'image',size:10});"
+        "for (var i=0;i<m.length;i++) if (m[i].label==='copy'){m[i].trigger();return true}"
+        "return false})()" % pic))
+    check("the context menu's `copy` row fires it", fired is True)
+    check("...putting the selection on the system clipboard",
+          wait_for(lambda: os.path.exists(log))
+          and eval(open(log).read().strip()) == ["--image", pic],
+          open(log).read() if os.path.exists(log) else None)
+    check("...and filer's own clip still carries it, for filer's paste",
+          qml_eval(engine, view, "clip.op") == "copy"
+          and qml_eval(engine, view, "clip.paths.length") == 1)
 
     os.chmod(ro, stat.S_IRWXU)
     shutil.rmtree(tmp, ignore_errors=True)
