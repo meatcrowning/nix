@@ -2187,8 +2187,11 @@ class DarkMode(QObject):
         form controls. A page that styles its own text keeps its styles; a page
         that inherits, inherits the desktop — same family, same apparent size,
         and the same rasterisation, since the shipped faces carry fontconfig
-        pins Chromium honours. Applies in subframes too (fonts travel as the
-        `f` body, the dark filter never does).
+        pins Chromium honours. The size is divided by the shared page zoom so
+        inherited text holds the desktop's DEVICE pixel size at any zoom level
+        (a pixel face rasterised at 15 x 0.83 px is not a pixel font any more).
+        Applies in subframes too (fonts travel as the `f` body, the dark
+        filter never does).
       * system font — force the desktop font family on page text, so ALL of a
         page reads in the desktop's typeface, not just the runs a site left
         unstyled. GLOBAL since 2026-08-08, with per-site exceptions (`fontOff`
@@ -2231,10 +2234,11 @@ class DarkMode(QObject):
         except (TypeError, ValueError):
             return DarkMode._SYSTEM_SIZE
 
-    def __init__(self, prefs, parent=None, style=None):
+    def __init__(self, prefs, parent=None, style=None, zoom=None):
         super().__init__(parent)
         self._prefs = prefs
         self._style = style
+        self._zoom = zoom
         d = prefs.loadDark()
         self._enabled = bool(d.get("enabled", False))
         self._brightness = self._clamp(d.get("brightness", 100))
@@ -2445,8 +2449,24 @@ class DarkMode(QObject):
         # page's own styling — that full reskin was tried and retracted).
         # `font-synthesis:none` is §2.2's "no bold, ever" for the shipped faces:
         # they are Regular-only, and a face that HAS a real bold still gets it.
+        #
+        # ZOOM-COMPENSATED, like the injected scrollbar's width: page zoom
+        # multiplies every CSS px on its way to the screen, so at his 0.83 the
+        # "desktop size" rasterised at ~12.4 device px — visibly wrong for a
+        # pixel face, whose grid only exists at the authored size (that was
+        # "more perfect doesn't look like a pixel font anymore"). Dividing by
+        # the level keeps inherited text at the desktop's DEVICE pixels at any
+        # zoom; text a site sizes itself still zooms, as zoom means it to.
+        # Zoom.levelChanged is chained onto `changed` in main(), so open pages
+        # re-fetch this on every zoom step.
         f = json.dumps(self._fam())
-        px = str(self._px())
+        z = 1.0
+        if self._zoom is not None:
+            try:
+                z = float(self._zoom.level) or 1.0
+            except (TypeError, ValueError):
+                z = 1.0
+        px = ("%.4f" % (self._px() / z)).rstrip("0").rstrip(".")
         return (
             "@layer __surfer_inherit__{"
             ":root{font-family:" + f + ",monospace;font-size:" + px + "px}"
@@ -4047,12 +4067,15 @@ def main():
     prefs = Prefs()
     files = Files(prefs, app)
     zoom = Zoom(prefs, app)
-    darkmode = DarkMode(prefs, app, style=style)
+    darkmode = DarkMode(prefs, app, style=style, zoom=zoom)
     # A Settings > pixel font / font size change must reach OPEN pages: the
     # inherit layer (and any per-site force) reads DeskStyle live, so chaining
     # the signals makes QML's existing DarkMode.onChanged -> win.reinjectDark()
-    # re-adopt the sheet with the new family/size, no reload.
+    # re-adopt the sheet with the new family/size, no reload. Zoom too: the
+    # inherit layer divides its size by the level (see _inherit_css), so a
+    # zoom step must re-feed open pages the recomputed CSS the same way.
     style.changed.connect(darkmode.changed)
+    zoom.levelChanged.connect(darkmode.changed)
     adblocker = AdBlocker(app)
     cosmetic = Cosmetic(adblocker, app)
     download_dir = str(Path.home() / "Downloads")

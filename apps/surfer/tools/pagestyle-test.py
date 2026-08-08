@@ -317,6 +317,16 @@ def main():
         read_title()
         check("the force is GLOBAL by default (an un-excepted host is on)",
               dm.isSystemFontSite("http://somewhere-never-toggled.example/"))
+        # zoom compensation: the inherit layer divides its size by the shared
+        # page zoom, so inherited text holds the desktop's DEVICE pixel size.
+        # 0.826446... = 1/1.21 (two Ctrl+- steps); 15 / it = 18.15 CSS px.
+        class FakeZoom:
+            level = 1.0 / 1.21
+        dmz = surfer.DarkMode(prefs, dm, zoom=FakeZoom())
+        check("inherit layer zoom-compensates (15 device px at 0.826 zoom)",
+              "font-size:18.15px" in dmz._inherit_css())
+        check("inherit layer emits integer px at zoom 1 (no zoom object)",
+              "font-size:15px" in dm._inherit_css())
         check("force imposes the family but keeps the page's size",
               "More Perfect DOS VGA" in (out.get("s") or "")
               and "20px" in (out.get("s") or ""))
@@ -324,7 +334,7 @@ def main():
               "More Perfect DOS VGA" not in (out.get("ic") or "ERR")
               and "Material Icons" in (out.get("ic") or ""))
         print("probe:", json.dumps(out, sort_keys=True))
-        n = 13
+        n = 15
         print("%d/%d checks passed" % (n - len(fails), n))
         app.quit()
 

@@ -496,7 +496,16 @@ The style it carries has three parts (all computed by `DarkMode`):
   unlayered page rule, so this is an upgraded user-agent default, not a force
   — a site's own font styling always wins, which is what keeps it inside
   `docs/DESIGN.md` §16's family-only settlement. Rasterisation parity comes
-  from the faces' fontconfig pins, which Chromium honours.
+  from the faces' fontconfig pins, which Chromium honours (verified by
+  canvas raster offscreen 2026-08-08: mono glyphs, ink and advance identical
+  to the QML PixelText pipeline at 15px). The layer's size is **divided by
+  the shared page zoom** (`Zoom.levelChanged` chained onto
+  `darkmode.changed`, like `style.changed`), because zoom multiplies every
+  CSS px on the way to the screen — at his live 0.83 the pixel font was
+  rasterising at ~12.4 device px, which is what *"more perfect doesn't look
+  like a pixel font anymore"* was. Same idiom as the scrollbar's
+  zoom-compensated width. Site-styled text still zooms; only the inherited
+  default holds the desktop's device-pixel size.
 - **the dark filter** (global toggle, per-site exceptions), top frame only;
 - **the system-font force** — the desktop family imposed on page text so ALL
   of a page reads in the pick, not just the runs a site left unstyled.
