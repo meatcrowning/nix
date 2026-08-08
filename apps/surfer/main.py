@@ -2189,10 +2189,13 @@ class DarkMode(QObject):
         and the same rasterisation, since the shipped faces carry fontconfig
         pins Chromium honours. Applies in subframes too (fonts travel as the
         `f` body, the dark filter never does).
-      * system font — force the desktop pixel font on a page's text, so it reads
-        in the same typeface as the rest of the desktop. Per-site (an opt-in set
-        of hostnames); family only, so site font-sizes and layout survive —
-        forcing sizes too was tried and retracted, docs/DESIGN.md §16 — plus
+      * system font — force the desktop font family on page text, so ALL of a
+        page reads in the desktop's typeface, not just the runs a site left
+        unstyled. GLOBAL since 2026-08-08, with per-site exceptions (`fontOff`
+        hostnames — the same shape as dark mode's whitelist); icon-font
+        elements are carved out by class so pictograms don't turn to tofu.
+        Family only, so site font-sizes and layout survive — forcing sizes too
+        was tried and retracted, docs/DESIGN.md §16 — plus
         `font-synthesis:none`, §2.2's "no bold, ever": the shipped faces are
         Regular-only and Chromium's synthetic bold smears them. It combines
         with dark mode rather than replacing it.
@@ -2239,8 +2242,14 @@ class DarkMode(QObject):
         # hostnames where dark mode is turned OFF (Dark Reader's per-site
         # exceptions) — applied everywhere else when the global toggle is on.
         self._exceptions = set(str(h) for h in d.get("exceptions", []) if h)
-        # hostnames where the system-font override is turned ON (opt-in per site).
-        self._font_sites = set(str(h) for h in d.get("fontSites", []) if h)
+        # hostnames where the system-font force is turned OFF. The force is
+        # GLOBAL since 2026-08-08 (his: the inherit layer "fails to capture all
+        # the text in a given webpage" — family-only inherit leaves every
+        # site-styled run alone, which is most of the web), so the per-site bit
+        # flipped from opt-in to exception, dark mode's own shape. The old
+        # opt-in `fontSites` key is superseded and deliberately not migrated:
+        # its hosts are covered by the global default.
+        self._font_off = set(str(h) for h in d.get("fontOff", []) if h)
 
     @staticmethod
     def _clamp(v):
@@ -2262,7 +2271,7 @@ class DarkMode(QObject):
             "brightness": self._brightness,
             "contrast": self._contrast,
             "exceptions": sorted(self._exceptions),
-            "fontSites": sorted(self._font_sites),
+            "fontOff": sorted(self._font_off),
         })
 
     def _get_enabled(self):
@@ -2310,19 +2319,19 @@ class DarkMode(QObject):
 
     @Slot(str, result=bool)
     def isSystemFontSite(self, url):
-        """Whether the system-font override is on for this URL's host."""
-        h = self._host(url)
-        return bool(h) and h in self._font_sites
+        """Whether the system-font force applies to this URL's host — true by
+        default (the force is global), false only for an excepted host."""
+        return self._host(url) not in self._font_off
 
     @Slot(str)
     def toggleSystemFontSite(self, url):
         h = self._host(url)
         if not h:
             return
-        if h in self._font_sites:
-            self._font_sites.discard(h)
+        if h in self._font_off:
+            self._font_off.discard(h)
         else:
-            self._font_sites.add(h)
+            self._font_off.add(h)
         self._persist()
         self.changed.emit()
 
@@ -2448,6 +2457,17 @@ class DarkMode(QObject):
             "}"
         )
 
+    # Elements the family force must NOT touch: pictogram fonts draw PUA
+    # codepoints or ligatures that only exist in their own face, so forcing the
+    # pick there turns every icon into tofu or a stray word ("star"). There is
+    # no computed-value hook in CSS, so this is the honest heuristic: the
+    # class vocabularies of the icon systems actually in the wild.
+    _ICON_CARVE = (
+        '[class*="icon" i],[class*="fa-"],.fa,.fas,.far,.fab,.fal,'
+        '.material-icons,[class*="material-symbols" i],[class*="glyphicon"],'
+        '[class*="codicon"]'
+    )
+
     def _font_css(self):
         # Force the desktop pixel font on all page text (family only — sizes stay
         # the site's, so layout/heading hierarchy survives; forcing sizes too is
@@ -2457,7 +2477,9 @@ class DarkMode(QObject):
         # font-synthesis with !important so the forced Regular-only face is
         # never synthetically embossed, whatever the page declares.
         f = json.dumps(self._fam())
-        return ("*,*::before,*::after{font-family:" + f + ",monospace!important;"
+        el = "*:not(:is(" + DarkMode._ICON_CARVE + "))"
+        return (el + "," + el + "::before," + el + "::after{"
+                "font-family:" + f + ",monospace!important;"
                 "font-synthesis:none!important}")
 
     @Slot(str, result=str)
