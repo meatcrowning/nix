@@ -16,6 +16,9 @@ Window {
     title: "painter"
     color: Theme.bg
 
+    // The desktop's one slide duration + curve (docs/DESIGN.md 6.2).
+    Motion { id: motion }
+
     property int view: 0            // 0 = params, 1 = gallery
     property bool showSettings: false
     // The preview viewport above the history — off by default, remembered.
@@ -437,11 +440,21 @@ Window {
             color: parent.error ? Theme.crit : Theme.text
         }
 
+        // The two FADES go through motion.ms() so they follow reduceMotion and
+        // animSpeed like everything else (docs/DESIGN.md §6.2 — "never write a
+        // duration literal into a widget"). They keep their own lengths rather
+        // than taking slideMs: §6.2.1 lists a crossfade as a deliberate
+        // non-participant, because opacity has no travel to read.
+        //
+        // The PAUSE deliberately does NOT scale. It is how long the message is
+        // READABLE, not motion — and under reduceMotion `ms()` returns 0, which
+        // would blink the toast out of existence the moment it appeared. That is
+        // §10: a report the user cannot read is a report that did not happen.
         SequentialAnimation {
             id: fade
-            NumberAnimation { target: toast; property: "opacity"; to: 1; duration: 120 }
+            NumberAnimation { target: toast; property: "opacity"; to: 1; duration: motion.ms(120) }
             PauseAnimation { duration: 3200 }
-            NumberAnimation { target: toast; property: "opacity"; to: 0; duration: 400 }
+            NumberAnimation { target: toast; property: "opacity"; to: 0; duration: motion.ms(400) }
         }
     }
 

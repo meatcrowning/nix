@@ -1,4 +1,5 @@
 import QtQuick
+import "../../qmlcommon"
 
 // Backend controls and housekeeping.  Deliberately sparse: everything that
 // affects an image lives in the main panel, and everything here is about the
@@ -15,6 +16,10 @@ import QtQuick
 // not, and both refuse rather than pretending (§10). App.stopBackend() now
 // checks systemctl's exit code before it claims anything.
 Item {
+
+    // The desktop's one slide duration + curve (docs/DESIGN.md 6.2):
+    // hyprvtb's roll, scaled by reduceMotion/animSpeed. NEVER a literal.
+    Motion { id: motion }
     id: drawer
     property bool open: false
     signal closed()
@@ -32,7 +37,7 @@ Item {
         id: card
         // slide 0 (hidden, fully off the right edge) -> 1 (docked at the edge)
         property real slide: drawer.open ? 1 : 0
-        Behavior on slide { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on slide { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
 
         width: Math.min(420, drawer.width - 16)
         height: Math.min(col.implicitHeight + 24, drawer.height - 16)
