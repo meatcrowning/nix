@@ -1196,8 +1196,22 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // cross. The bar and the sliding snapshot still occlude its centre; only
     // the bottom-left L-overhang shows, collapsing as the bar sets down.
 
-    // background
-    Hl::rect(barBox, bgColor, {});
+    // The desktop's corner rounding, device px (decoration:rounding after
+    // window rules — the same global number the compositor clips the window
+    // with). Everything chrome-shaped in the bar follows it.
+    const int RND = std::max(0, (int)std::round(Hl::windowRounding(PWINDOW) * SCALE));
+
+    // background. Rounded to match the window clip: the bar sits on the
+    // window's RIGHT edge, so its window-adjacent LEFT corners must stay
+    // flush — the box is extended left by RND and the extension hides under
+    // the window (this deco renders on DECORATION_LAYER_UNDER), leaving only
+    // the outer corners visibly rounded. A rolled-up bar has no window over
+    // it, so it takes the plain box with all four corners rounded — a lone
+    // shaded bar reads as its own little window.
+    if (RND > 0 && !m_bRolledUp && m_rollAnim == ROLL_NONE)
+        Hl::rect(CBox{barBox.x - RND, barBox.y, barBox.w + RND, barBox.h}.round(), bgColor, {.round = RND});
+    else
+        Hl::rect(barBox, bgColor, {.round = RND});
 
     // local -> monitor-space helper for interior boxes (logical px in)
     auto localBox = [&](double x, double y, double w, double h) {
@@ -1217,18 +1231,23 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // caller draws the glyph in bg for the inverted look); lit -> bgAlt fill +
     // 2px outline in `hot`; otherwise 1px outline in the plain button-border
     // colour (mirrors the old QS look)
+    // Cell chrome follows the global rounding too (clamped to the cell's own
+    // half-size, like every small control on the desktop); the inner fill's
+    // radius shrinks by the outline width so the ring reads even.
+    const int CELLRND = std::min(RND, (int)std::round(CELL * SCALE / 2.0));
     auto      drawCellXY = [&](double x, double y, const CHyprColor& hot, bool lit, bool flash = false) {
         if (flash) {
             auto fc = hot;
             fc.a *= a;
-            Hl::rect(localBox(x, y, CELL, CELL), fc, {});
+            Hl::rect(localBox(x, y, CELL, CELL), fc, {.round = CELLRND});
             return;
         }
         const int bw = lit ? 2 : 1;
         auto      oc = lit ? hot : borderColor;
         oc.a *= a;
-        Hl::rect(localBox(x, y, CELL, CELL), oc, {});
-        Hl::rect(localBox(x + bw, y + bw, CELL - 2 * bw, CELL - 2 * bw), lit ? bgAltColor : bgColor, {});
+        Hl::rect(localBox(x, y, CELL, CELL), oc, {.round = CELLRND});
+        Hl::rect(localBox(x + bw, y + bw, CELL - 2 * bw, CELL - 2 * bw), lit ? bgAltColor : bgColor,
+                 {.round = std::max(0, CELLRND - (int)std::round(bw * SCALE))});
     };
 
     auto drawGlyphXY = [&](double x, double y, const std::string& glyph, const CHyprColor& color) {
@@ -1988,9 +2007,14 @@ void CVtbDeco::renderTooltip(PHLMONITOR pMonitor, const CBox& barBox, float SCAL
     CBox box = {slideX, barBox.y + CY * SCALE - H / 2.0, W, H};
     box.round();
 
-    Hl::rect(box, accent, {.damage = &clip});
+    // Rounded like the panel's tooltips: the global rounding, never below the
+    // shipped 3 (DESIGN §7/§8 exception), clamped to the flyout's half-height.
+    const int TTRND = std::min((int)(box.h / 2.0),
+                               std::max((int)std::round(3 * SCALE),
+                                        (int)std::round(Hl::windowRounding(m_pWindow.lock()) * SCALE)));
+    Hl::rect(box, accent, {.damage = &clip, .round = TTRND});
     CBox inner = {box.x + SCALE, box.y + SCALE, box.w - 2 * SCALE, box.h - 2 * SCALE};
-    Hl::rect(inner.round(), bgColor, {.damage = &clip});
+    Hl::rect(inner.round(), bgColor, {.damage = &clip, .round = std::max(0, TTRND - (int)std::round(SCALE))});
     CBox tbox = {box.x + PADPX, box.y + PADPX, (double)tex->m_size.x, (double)tex->m_size.y};
     Hl::texture(tex, tbox.round(), {.damage = &clip, .a = a});
 
@@ -4545,6 +4569,10 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
     // animation's own shadow, which has to obey the same rule).
     CRegion shadow, frames = vtbWindowFrames(pMonitor);
 
+    // Each contributing box with its window's corner rounding (device px), so
+    // the draw below can round the shadow to match the window it belongs to.
+    std::vector<std::pair<CBox, int>> shadowBoxes;
+
     for (const auto& w : Hl::windows()) {
         if (!w || !w->m_isMapped || w->isHidden())
             continue;
@@ -4583,7 +4611,9 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
         // the visible frame is that much wider; widen the shadow to match or the
         // whole bar column casts nothing. A bar-less window (scratchpad,
         // privilege prompt) spans only its own frame.
-        shadow.add(CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round());
+        const CBox SB = CBox{L.x - N, L.y + N, L.w + (vtbHasBar(w) ? BARW : 0.0), L.h}.round();
+        shadow.add(SB);
+        shadowBoxes.emplace_back(SB, std::max(0, (int)std::round(Hl::windowRounding(w) * SCALE)));
     }
 
     // In-flight roll composite's own collapsing shadow. A window at REST rolled
@@ -4606,8 +4636,10 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
         if (overBars && !(b->isRollingOut() || b->isOpening() || b->isRollingUpSlide()))
             continue;
         CBox rollShadow;
-        if (b->rollShadowBoxDev(pMonitor, rollShadow))
+        if (b->rollShadowBoxDev(pMonitor, rollShadow)) {
             shadow.add(rollShadow);
+            shadowBoxes.emplace_back(rollShadow, std::max(0, (int)std::round(Hl::windowRounding(b->getOwner()) * SCALE)));
+        }
     }
 
     if (shadow.empty())
@@ -4630,8 +4662,24 @@ void vtbRenderShadowLayer(PHLMONITOR pMonitor, bool overBars) {
     // routinely LIGHT (e.g. 0xFFDDF6F6) — which painted every window's shadow
     // near-white, i.e. no visible shadow at all. The shadow is black.
     const CHyprColor COLOR = {0.0, 0.0, 0.0, ALPHA};
-    for (const auto& r : shadow.getRects())
-        Hl::rect(CBox{(double)r.x1, (double)r.y1, (double)(r.x2 - r.x1), (double)(r.y2 - r.y1)}, COLOR);
+
+    // Rounded shadows without giving up the exactly-once rule above: each
+    // contributing box is drawn as a ROUNDED rect, clipped (.damage) to the
+    // part of the allowed region no earlier box has claimed, and then
+    // subtracted from that region — overlaps still land at exactly ALPHA,
+    // and every shadow's corners match its window's own rounding. With
+    // rounding 0 this paints pixel-identically to the old disjoint-rect loop.
+    CRegion remaining = shadow;
+    for (const auto& [sb, rnd] : shadowBoxes) {
+        if (remaining.empty())
+            break;
+        CRegion clip = remaining;
+        clip.intersect(sb);
+        if (clip.empty())
+            continue;
+        Hl::rect(sb, COLOR, {.damage = &clip, .round = rnd});
+        remaining.subtract(sb);
+    }
 }
 
 void CVtbShadowDeco::damageEntire() {

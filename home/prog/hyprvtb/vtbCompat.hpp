@@ -748,6 +748,14 @@ namespace Vtb::Hl {
             return;
         g_pHyprRenderer->damageBox(b);
     }
+    // The window's effective corner rounding (decoration:rounding after
+    // window rules), logical px. Through the seam because the accessor's
+    // return type differs across pins (int historically, float on 0.56) —
+    // the float return absorbs either.
+    inline float windowRounding(PHLWINDOW w) {
+        return w ? (float)w->rounding() : 0.f;
+    }
+
     inline void rect(const CBox& box, const CHyprColor& col, Render::GL::CHyprOpenGLImpl::SRectRenderData data = {}) {
         if (degenerate(box)) // GUARD (see file header)
             return;

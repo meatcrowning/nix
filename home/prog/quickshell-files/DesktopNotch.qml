@@ -50,7 +50,10 @@ Item {
     // Content and metrics live in the singleton, so nothing here has to survive
     // a reload for the panel's reservation to be right. See NotchModel.qml.
     readonly property int overlap: NotchModel.overlap
-    readonly property int lineW: Theme.windowBorderWidth
+    // floored at 2 to stay flush with the panel strip it detours (shell.qml
+    // binds the strip the same way — the join is a painted overlap and the
+    // two must agree)
+    readonly property int lineW: Math.max(2, Theme.windowBorderWidth)
 
     visible: NotchModel.shown
     implicitWidth: NotchModel.slabW
@@ -58,37 +61,53 @@ Item {
     width: implicitWidth
     height: implicitHeight
 
-    // The slab: the bar's background, all the way under the bar body.
+    // The slab: the bar's background, all the way under the bar body. Its
+    // desktop-facing corners follow the global rounding; the bar side is
+    // extended by the radius so the rounded far corners land invisibly on the
+    // bar's own identical background instead of letting the accent strip peek
+    // through the mouth's corners.
     Rectangle {
-        anchors.fill: parent
+        // bar side: x=0 when the bar is LEFT, x=width when it is RIGHT — the
+        // extension always reaches toward the bar.
+        x: notch.barLeft ? -radius : 0
+        y: 0
+        width: notch.width + radius
+        height: notch.height
+        radius: Theme.windowRounding
         color: Theme.bg
     }
 
-    // ---- the outline: three sides, in the bar's accent --------------------
+    // ---- the outline, in the bar's accent ---------------------------------
     // How far the horizontals run: to the panel's face plus one line width, so
     // the corner is painted rather than shared between two roundings.
     readonly property int armW: notch.width - notch.overlap + notch.lineW
 
-    Rectangle {   // the desktop-facing side
-        x: notch.barLeft ? notch.width - notch.lineW : 0
+    // One bordered, ROUNDED rect instead of the old three flat strips, so the
+    // desktop-facing corners take Theme.windowRounding like every other
+    // outline on the desktop. The bar-side edge (and its rounded corners)
+    // must not exist — the mouth OPENS into the panel — so the rect extends
+    // past this clip on the bar side by radius + line width and the clip cuts
+    // the arms off square exactly where the old strips ended. At rounding 0
+    // this paints pixel-identically to the three strips. The tee where the
+    // arms meet the panel's own strip stays square on purpose: those are
+    // CONCAVE corners, and nothing else on the desktop fillets those.
+    Item {
+        x: notch.barLeft ? notch.overlap - notch.lineW : 0
         y: 0
-        width: notch.lineW
+        width: notch.armW
         height: notch.height
-        color: Theme.accent
-    }
-    Rectangle {   // top
-        x: notch.barLeft ? notch.overlap - notch.lineW : 0
-        y: 0
-        width: notch.armW
-        height: notch.lineW
-        color: Theme.accent
-    }
-    Rectangle {   // bottom
-        x: notch.barLeft ? notch.overlap - notch.lineW : 0
-        y: notch.height - notch.lineW
-        width: notch.armW
-        height: notch.lineW
-        color: Theme.accent
+        clip: true
+        Rectangle {
+            readonly property int over: Theme.windowRounding + notch.lineW
+            x: notch.barLeft ? -over : 0
+            y: 0
+            width: parent.width + over
+            height: parent.height
+            radius: Theme.windowRounding
+            color: "transparent"
+            border.width: notch.lineW
+            border.color: Theme.accent
+        }
     }
 
     // The seals, one gap apart. The column is the width of a SEAL, not of a
