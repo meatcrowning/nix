@@ -92,7 +92,8 @@ def build(app, entries, index=0, panes=1):
     # Component.onCompleted with it, so every harness loading Main.qml installs
     # all of them.
     keep = (viewermain.Palette(viewermain.PANEL_THEME), StubTitlebar(),
-            viewermain.Files(), viewermain.Prefs(), viewermain.Clip())
+            viewermain.Files(), viewermain.Prefs(), viewermain.Clip(),
+            viewermain.FilerLink())
     _deskstyle = DeskStyle(parent=engine)
     ctx.setContextProperty("WalPalette", keep[0])
     # Theme.qml binds font/fontSize to DeskStyle (pylib/deskstyle.py), so the
@@ -102,6 +103,9 @@ def build(app, entries, index=0, panes=1):
     ctx.setContextProperty("Files", keep[2])
     ctx.setContextProperty("Prefs", keep[3])
     ctx.setContextProperty("Clip", keep[4])
+    # No token unless a test sets one: an echo with nowhere to go is a no-op,
+    # so a harness can never poke the filer the user has open.
+    ctx.setContextProperty("FilerLink", keep[5])
     ctx.setContextProperty("startImages", entries)
     ctx.setContextProperty("startIndex", index)
     ctx.setContextProperty("startPanes", panes)

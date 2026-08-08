@@ -25,6 +25,13 @@ Rectangle {
 
     property url source: ""
     property string name: ""       // basename, for the "can't display" card
+    // The same file as `source`, as a plain path. Drawn by nothing: it is what
+    // the window echoes back to filer (main.py FilerLink), and it lives here
+    // rather than being read out of `images[idx]` up there because a pane's
+    // position is a ListModel role — `paneIdx()` is a function call over
+    // `panes.get()`, which a binding cannot be trusted to re-run — while this
+    // is an ordinary property on the item `win.current` already resolves to.
+    property string path: ""
     property bool winActive: true
     // How much of the PICTURE shows while the window is unfocused (docs/DESIGN.md
     // §3.1.1, his call 2026-08-07). Handed down from the window rather than

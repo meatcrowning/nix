@@ -19,6 +19,21 @@ rebuild. See [`../AGENTS.md`](../AGENTS.md) for the shared rules.
   watches it: the order is a launch-time snapshot, so re-sorting filer while a
   viewer is open leaves that viewer alone, by design. Falls back to the plain
   scan if the file is unreadable or doesn't contain the opened path.
+- **`--select-back <sock>:<pane>` is the way back**: every time the focused pane
+  lands on a different image, viewer echoes that path at filer's socket and
+  filer selects it (`FilerLink`, main.py). So flipping through a folder here and
+  closing the window leaves filer on the picture you stopped at. The opposite of
+  `--order` in lifetime, on purpose — that is a launch-time snapshot, this is a
+  live link for as long as the window is open. It is **debounced** (120ms):
+  holding › walks the folder as fast as it decodes and each echo is a
+  synchronous round trip on the GUI thread, while what filer needs is where you
+  came to rest. A handoff **re-points** it, so a second filer's click is not
+  reported to the first one, and `viewer x.png` from a terminal echoes nowhere.
+  The path it reports comes off `ImageViewer.path` rather than
+  `images[paneIdx()]`: a pane's position is a ListModel role, and a binding over
+  `panes.get()` is not one you can trust to re-run. Harness
+  `tools/select-back-test.py`; filer's half is
+  `../filer/tools/viewer-select-test.py`.
 - Its prev/next/zoom/fit/close controls live in the **hyprvtb titlebar** (the
   same `pylib/vtbclient.py` bridge filer/surfer use), not in QML.
 

@@ -54,7 +54,7 @@ CLIPFILE = HERE.parent / "pylib" / "clipfile.py"
 
 sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient, close_animated  # noqa: E402  (needs the path insert above)
-from handoff import Listener  # noqa: E402  (pylib; the running-app socket)
+from handoff import Listener, send as handoff_send  # noqa: E402  (pylib; the running-app socket)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from glyphs import px  # noqa: E402  (pylib; docs/DESIGN.md 2.3 - map at INGEST)
 
@@ -165,25 +165,30 @@ MAX_PANES = 9
 
 
 def split_args(argv):
-    """(--order file or None, --split seen?, the remaining positional paths).
+    """(--order file or None, --split seen?, --select-back token or "", the
+    remaining positional paths).
 
     `--new-window` is consumed here and nowhere else: it is acted on at the top
     of this file, before Qt is even imported, and only has to be kept out of
     `rest` — everything left over is treated as a path to open, so a flag that
     fell through would be opened as a file."""
-    order, split, rest, it = None, False, [], iter(argv)
+    order, split, back, rest, it = None, False, "", [], iter(argv)
     for a in it:
         if a == "--order":
             order = next(it, None)
         elif a.startswith("--order="):
             order = a[len("--order="):]
+        elif a == "--select-back":
+            back = next(it, "") or ""
+        elif a.startswith("--select-back="):
+            back = a[len("--select-back="):]
         elif a == "--split":
             split = True
         elif a == "--new-window":
             pass
         else:
             rest.append(a)
-    return order, split, rest
+    return order, split, back, rest
 
 
 def images_for(argv):
@@ -198,7 +203,7 @@ def images_for(argv):
     case each path opens in its own pane (capped at MAX_PANES). It is a flag and
     not the default because several paths have always meant "flip through
     exactly these", and filer relies on that."""
-    order_file, split, argv = split_args(argv)
+    order_file, split, _back, argv = split_args(argv)
     paths = [os.path.abspath(a) for a in argv if os.path.exists(a)]
     panes = min(len(paths), MAX_PANES) if (split and len(paths) > 1) else 1
     if order_file and len(paths) == 1 and os.path.isfile(paths[0]):
@@ -376,6 +381,48 @@ class Files(QObject):
         return out
 
 
+class FilerLink(QObject):
+    """Tell the filer this window was opened from which image is showing now.
+
+    The other direction of the handoff socket. filer launches (or hands off to)
+    viewer with `--select-back <sock>:<pane>`; every time the focused pane lands
+    on a different image, QML calls `echo()` and filer selects that file and
+    scrolls it into view. So flipping through a folder here and then closing the
+    window leaves filer on the picture you stopped at, instead of on the one you
+    opened half an hour of flipping ago.
+
+    It is one-way and best-effort by design: a filer that has quit, navigated
+    away, or is not listening costs a failed connect and nothing else — the
+    person is looking at THIS window, and nothing about viewing an image may
+    depend on a file browser being there. `handoff.send`'s own timeout is the
+    whole budget, and it is short (pylib/handoff.py).
+
+    The token is not baked in at startup, because a running viewer takes later
+    opens through the socket (`_take`): each one re-points this at whichever
+    filer pane asked, so the echo always goes back to the window the current
+    images came from."""
+
+    def __init__(self, token="", parent=None):
+        super().__init__(parent)
+        self._sock = ""
+        self._pane = ""
+        self.setToken(token)
+
+    def setToken(self, token):
+        """`<socket name>:<pane key>`, or "" for "nobody asked". Split on the
+        LAST colon: a pane key is a bare word, a socket name carries a pid."""
+        token = str(token or "")
+        self._sock, _, self._pane = token.rpartition(":")
+        if not self._sock:                 # no colon at all → all socket, no pane
+            self._sock, self._pane = self._pane, ""
+
+    @Slot(str)
+    def echo(self, path):
+        if not self._sock or not path:
+            return
+        handoff_send(self._sock, {"select": str(path), "pane": self._pane})
+
+
 class Clip(QObject):
     """The context menu's "copy image" — `pylib/clipfile.py`, never QClipboard.
 
@@ -543,10 +590,12 @@ def main():
     files = Files()
     prefs = Prefs()
     clip = Clip()
+    filerlink = FilerLink(split_args(sys.argv[1:])[2])
     ctx.setContextProperty("WalPalette", palette)
     ctx.setContextProperty("DeskStyle", style)
     ctx.setContextProperty("Titlebar", titlebar)
     ctx.setContextProperty("Files", files)
+    ctx.setContextProperty("FilerLink", filerlink)
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Clip", clip)
     ctx.setContextProperty("startImages", entries)
@@ -591,6 +640,12 @@ def main():
             os.chdir(here)
         if not entries:
             raise ValueError("nothing openable in that request")
+        # Whoever just handed us these images is the one that wants to hear
+        # where we end up — re-point the echo before showing them, or a second
+        # filer's open would still be reported to the first one. An open with
+        # no token (a bare `viewer x.png` from a terminal) clears it: silence is
+        # the honest answer, not the previous filer's pane.
+        filerlink.setToken(split_args(argv)[2])
         win.openSet(entries, index)
 
     listener = Listener("viewer", _can_take, _take, parent=app)  # noqa: F841

@@ -243,6 +243,23 @@ Window {
         fn(paneL);
         if (paneRLoader.item) fn(paneRLoader.item);
     }
+    // A viewer we launched has flipped to another image: move that pane's
+    // selection with it, so closing the viewer leaves this window on the
+    // picture the person stopped at (main.py `_start_select_listener`).
+    //
+    // Routed by the pane's `watchKey`, the one filer told viewer to quote back:
+    // flipping in a viewer opened from the right-hand pane must not move the
+    // left one. A pane that has since closed falls back to the focused pane —
+    // the selection still has somewhere honest to land — and a path the pane is
+    // no longer showing (it navigated away, or you flipped past what it lists)
+    // moves nothing at all.
+    function selectFromViewer(path, pane) {
+        var target = null;
+        eachPane(p => { if (p.watchKey === pane) target = p; });
+        if (!target) target = win.pane;
+        if (target) target.revealPath(path);
+    }
+
     function refreshAll(reselect) {
         eachPane(p => {
             p.refresh();

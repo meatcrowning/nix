@@ -45,7 +45,8 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402  (needs the path insert above)
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
-from handoff import send as handoff_send, took as handoff_took  # noqa: E402  (pylib)
+from handoff import (Listener, send as handoff_send, sock_path,  # noqa: E402  (pylib)
+                     took as handoff_took)
 
 from notify import tool, toast  # noqa: E402  (next to this file; filer's one toast path)
 
@@ -695,6 +696,22 @@ class FileOps(QObject):
             return ""
 
     @Slot(str, result=str)
+    def selectBackToken(self, pane):
+        """`--select-back` for a `viewer` launch: who to tell, and which pane.
+
+        The return leg of the handoff socket. viewer echoes the image it has
+        flipped to at this token, and `selectFromViewer` (Main.qml) moves that
+        pane's selection to it — so closing the viewer leaves filer on the
+        picture you stopped at rather than the one you opened.
+
+        `<socket>:<pane>`, where the socket is THIS process (main.py listens on
+        `filer-<pid>`, so two filer windows are never confused for each other)
+        and the pane is its `watchKey`. "" when nothing is listening — a picker,
+        or a socket the runtime dir would not give us — and the caller then
+        launches viewer without the flag, exactly as it always did."""
+        return SELECT_BACK_SOCK + ":" + str(pane) if SELECT_BACK_SOCK else ""
+
+    @Slot(str, result=str)
     def expandUser(self, path):
         """~ / ~user expansion for the address bar (os.path.expanduser)."""
         return os.path.expanduser(str(path))
@@ -996,6 +1013,80 @@ class WinCtl(QObject):
             self._win.startSystemMove()
 
 
+# ---- the return leg: viewer says where it got to ---------------------------
+# Set once, in main(), to the name of the socket this process listens on
+# (`filer-<pid>`); "" while picking or if the socket could not be taken.
+# FileOps.selectBackToken hands it to `viewer`, which echoes back the image it
+# is showing. Per-PID and not a bare "filer" because two filer windows are two
+# processes, and an echo landing in the wrong one would move a selection the
+# person is not looking at.
+SELECT_BACK_SOCK = ""
+
+
+def _sweep_stale_socks():
+    """Drop `filer-<pid>.sock` files left by a filer that was killed. The
+    Listener already refuses to steal a LIVE one; this is only so the runtime
+    dir does not fill up with dead names over a long login. A pid that has been
+    reused belongs to something else's socket — `_alive` is what decides that,
+    so only names whose pid is gone are touched here."""
+    root = os.environ.get("XDG_RUNTIME_DIR")
+    if not root:
+        return
+    for name in os.listdir(root) if os.path.isdir(root) else []:
+        if not (name.startswith("filer-") and name.endswith(".sock")):
+            continue
+        try:
+            pid = int(name[len("filer-"):-len(".sock")])
+        except ValueError:
+            continue
+        try:
+            os.kill(pid, 0)          # alive (or ours) — leave it alone
+            continue
+        except PermissionError:
+            continue                 # someone else's pid: not ours to clean
+        except OSError:
+            pass
+        try:
+            os.unlink(os.path.join(root, name))
+        except OSError:
+            pass
+
+
+def _start_select_listener(app, win):
+    """Listen for `{"select": path, "pane": key}` from a viewer we launched.
+
+    Always takes it: unlike viewer's own listener there is nothing to be visibly
+    wrong about, and the whole point is that the selection has moved by the time
+    the person comes back to this window — which may well be on another
+    workspace while they flip. A path the pane is not showing simply selects
+    nothing (`selectFromViewer` says so), which is the honest answer to "I
+    flipped somewhere you are not looking"."""
+    global SELECT_BACK_SOCK
+    _sweep_stale_socks()
+
+    def take(payload):
+        path = str(payload.get("select") or "")
+        if not path:
+            raise ValueError("not a select request")
+        win.selectFromViewer(path, str(payload.get("pane") or ""))
+
+    name = "filer-%d" % os.getpid()
+    listener = Listener(name, lambda: True, take, parent=app)
+    if listener.listening:
+        SELECT_BACK_SOCK = name
+        # A crash leaves the socket file behind; the sweep above is the other
+        # half, for the process that never gets here.
+        app.aboutToQuit.connect(lambda: _unlink(sock_path(name)))
+    return listener
+
+
+def _unlink(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("filer")
@@ -1111,7 +1202,12 @@ def main():
     engine.load(QUrl.fromLocalFile(str(QML / "Main.qml")))
     if not engine.rootObjects():
         sys.exit(1)
-    winctl.setWindow(engine.rootObjects()[0])
+    win = engine.rootObjects()[0]
+    winctl.setWindow(win)
+
+    # A picker is a transient errand for another app — it opens no viewer, so
+    # it has nothing to be told about and takes no socket name.
+    listener = None if spec else _start_select_listener(app, win)  # noqa: F841
 
     sys.exit(app.exec())
 
