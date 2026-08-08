@@ -422,17 +422,23 @@ PanelWindow {
                     // Same idiom as the colour-theme grid above and DESIGN §3 —
                     // equal-width columns of the wal tokens, no invented hues.
                     // Empty (palette not generated yet) leaves the bare bgAlt.
-                    Row {
+                    // An EXACT partition, not a Row of ceil'd cells: ceil
+                    // overflowed the box right by up to n-1 px, unclipped —
+                    // same fix as SetPaperGrid/SetSwatches.
+                    Item {
                         id: paletteStrip
                         readonly property var palette: (root.palettes && root.palettes[cell.index]) || []
                         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                         anchors.margins: delegateRoot.border.width + 2
                         height: 16
+                        function cutAt(i) { return Math.round(i * width / Math.max(1, palette.length)); }
                         Repeater {
                             model: paletteStrip.palette
                             delegate: Rectangle {
+                                required property int index
                                 required property string modelData
-                                width: Math.ceil(paletteStrip.width / Math.max(1, paletteStrip.palette.length))
+                                x: paletteStrip.cutAt(index)
+                                width: paletteStrip.cutAt(index + 1) - x
                                 height: paletteStrip.height
                                 color: modelData
                             }

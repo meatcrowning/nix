@@ -363,18 +363,26 @@ Item {
 
                                     // The theme this wallpaper applies — equal
                                     // columns of its wal tokens, no invented
-                                    // hues (§3). Empty until generated.
-                                    Row {
+                                    // hues (§3). Empty until generated. An
+                                    // EXACT partition, not a Row of ceil'd
+                                    // cells: ceil overflowed the box by up to
+                                    // n-1 px past the tile's right margin
+                                    // (nothing clips it) — same fix as
+                                    // SetSwatches.
+                                    Item {
                                         id: paletteStrip
                                         readonly property var palette: (root.palettes && root.palettes[cell.gIdx]) || []
                                         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                                         anchors.margins: tile.border.width + 2
                                         height: 16
+                                        function cutAt(i) { return Math.round(i * width / Math.max(1, palette.length)); }
                                         Repeater {
                                             model: paletteStrip.palette
                                             Rectangle {
+                                                required property int index
                                                 required property string modelData
-                                                width: Math.ceil(paletteStrip.width / Math.max(1, paletteStrip.palette.length))
+                                                x: paletteStrip.cutAt(index)
+                                                width: paletteStrip.cutAt(index + 1) - x
                                                 height: paletteStrip.height
                                                 color: modelData
                                             }

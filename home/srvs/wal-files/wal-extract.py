@@ -300,9 +300,22 @@ def main():
         sys.stderr.write("wal-extract: bad accentOverride %r, falling back to "
                          "the wallpaper\n" % (accent_hex,))
 
+    # Per-wallpaper: paletteDropped maps the image's (realpath'd) absolute
+    # path -> the hexes clicked off for THAT paper, so returning to a
+    # wallpaper restores its selection instead of resetting it. Every caller
+    # hands us a realpath'd path already (wal-set/wal-prepare both realpath);
+    # re-resolving here keeps a hand-run against a symlink consistent. A bare
+    # list is the pre-per-paper format and is honoured as-is.
+    dropped = set()
     try:
-        dropped = {str(x).strip().lstrip("#").lower()
-                   for x in (cfg["paletteDropped"] or [])}
+        pd = cfg["paletteDropped"] or {}
+        if isinstance(pd, dict):
+            lst = pd.get(os.path.realpath(path) if path else "") or []
+        elif isinstance(pd, list):
+            lst = pd
+        else:
+            lst = []
+        dropped = {str(x).strip().lstrip("#").lower() for x in lst}
     except (TypeError, AttributeError):
         dropped = set()
 
