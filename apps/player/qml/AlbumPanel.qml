@@ -40,8 +40,14 @@ Item {
     readonly property int pad: 10
 
     // Not enough width for three columns → stack the track list underneath.
-    readonly property bool stacked: width < 700
-    readonly property int artSide: stacked ? Math.max(60, Math.min(150, width - 240)) : 200
+    // "Enough" is judged by what the TRACKS column would get, not by whether
+    // three columns technically fit: below ~900 the side-by-side list is ~200px
+    // and the stars/heart/duration cut every title to its first word.
+    readonly property bool stacked: width < 900
+    // Stacked art shrinks only when the width genuinely forces it — a panel
+    // that used to be side-by-side keeps its full-size cover; the ~480 narrow
+    // window keeps exactly the layout it had.
+    readonly property int artSide: stacked ? Math.max(60, Math.min(width >= 700 ? 200 : 150, width - 240)) : 200
     readonly property int metaX: pad + artSide + 12
     readonly property int metaW: Math.max(80, stacked ? width - metaX - pad
                                                       : Math.min(260, width - metaX - 212))
