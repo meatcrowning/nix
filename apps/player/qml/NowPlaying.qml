@@ -150,7 +150,7 @@ Item {
                     // just started. Leaving for the gallery is its own row.
                     coverMenu.open(p.x, p.y, [
                         { label: "play album",
-                          trigger: function() { Player.playAlbum(aid, 0); } },
+                          trigger: function() { Player.playAlbum(aid, -1); } },
                         { label: "shuffle artist",
                           enabled: art !== "",
                           trigger: function() { Player.playArtistShuffled(art); } },

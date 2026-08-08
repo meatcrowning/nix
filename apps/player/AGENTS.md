@@ -290,6 +290,17 @@ is turned off; and a removal that does **not** touch the playing row must shift
 the position readout and the play-count accumulator of a track that never
 stopped.
 
+Shuffle semantics (2026-08-08 — the "same shuffled order every time" fix):
+`playTracks(ids, start)` takes `start=-1` for a **play-all** (playlist "play
+all", album "play"/cover click) — under shuffle it pins nothing, where a real
+clicked track (`playFromModel`, `AlbumPanel.onPlayed`) still pins that row
+first via `keep_first`. Passing 0 for a play-all is the bug: it silently pins
+the first playlist track as the opener of every shuffled play. And a loop-all
+wrap goes through `_wrap_to_start()` (both the `next()` end branch and the
+mpv-ran-out `_on_idle` path), which deals a fresh shuffled order each cycle —
+never opening on the track that just finished — while leaving `_orig_queue`
+alone so unshuffle still restores the real order.
+
 ```bash
 tools/queue-ops-test.py   # headless; a Player built without __init__ (so no
                           # libmpv, no audio device) driven against a fake mpv

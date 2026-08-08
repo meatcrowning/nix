@@ -1877,7 +1877,7 @@ class Player(QObject):
             return
         # Whole mpv playlist ran out (our mirror only holds current→end).
         if self._loop == self.LOOP_ALL:
-            self.jumpTo(0)
+            self._wrap_to_start()
 
     def _maybe_count(self):
         t = self.currentTrackDict()
@@ -2103,6 +2103,10 @@ class Player(QObject):
 
     @Slot("QVariantList", int)
     def playTracks(self, ids, start=0):
+        """`start` is the queue row to play first. -1 means "no chosen track"
+        (a play-all): under shuffle it pins NOTHING, so a shuffled playlist or
+        album no longer opens on the same first song every single time —
+        `keep_first` is only for a track the user actually clicked."""
         ids = [int(i) for i in ids]
         self._queue = self._library.tracks_by_ids(ids)
         self._queue = [t for t in self._queue if os.path.exists(t["path"])] or self._queue
@@ -2112,7 +2116,7 @@ class Player(QObject):
             start = 0
         self.queueChanged.emit()
         if self._queue:
-            self._sync_mpv(min(start, len(self._queue) - 1))
+            self._sync_mpv(min(max(start, 0), len(self._queue) - 1))
 
     @Slot("QVariantList")
     def playPaths(self, paths):
@@ -2264,19 +2268,36 @@ class Player(QObject):
     @Slot(str)
     def playSmart(self, name):
         rows = self._library.smart_tracks(name)
-        self.playTracks([r["id"] for r in rows], 0)
+        self.playTracks([r["id"] for r in rows], -1)
 
     @Slot(int)
     def jumpTo(self, idx):
         if 0 <= idx < len(self._queue):
             self._sync_mpv(idx)
 
+    def _wrap_to_start(self):
+        """Loop-all ran off the end: start the queue over. With shuffle on,
+        deal a FRESH order first — replaying the identical shuffled order every
+        cycle is what made shuffle look like it never re-randomised — and keep
+        the track that just finished out of slot 0, so the wrap never plays it
+        twice in a row. `_orig_queue` is untouched: turning shuffle off still
+        restores the real order."""
+        if self._shuffle and len(self._queue) > 1:
+            last_id = None
+            if 0 <= self._index < len(self._queue):
+                last_id = self._queue[self._index]["id"]
+            self._queue = self._shuffled(self._queue)
+            if last_id is not None and self._queue[0]["id"] == last_id:
+                self._queue.append(self._queue.pop(0))
+            self.queueChanged.emit()
+        self.jumpTo(0)
+
     @Slot()
     def next(self):
         if self._index + 1 < len(self._queue):
             self.jumpTo(self._index + 1)
         elif self._loop == self.LOOP_ALL and self._queue:
-            self.jumpTo(0)
+            self._wrap_to_start()
 
     @Slot()
     def previous(self):
