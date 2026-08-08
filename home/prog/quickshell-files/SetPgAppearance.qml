@@ -31,15 +31,13 @@ Column {
             // only the IMAGE is suppressed. Stored inverted as `wallpaperSolid`,
             // so on = image, off = solid.
             label: "display wallpaper"
-            desc: "on = show your wallpaper image; off = fill the desktop with a solid block of the theme's background colour"
             SetToggle {
                 checked: !page.d.wallpaperSolid
                 onToggled: (v) => { page.d.wallpaperSolid = !v; SettingsStore.save(); }
             }
         }
         SetRow {
-            label: "wallpaper folder"
-            desc: "browsed by the picker; ~/Pictures/wall stays the auto-versioned drop folder"
+            label: "wallpaper dir"
             SetTextField {
                 fieldWidth: 220
                 value: page.d.wallpaperDir
@@ -48,7 +46,6 @@ Column {
         }
         SetRow {
             label: "fit"
-            desc: "auto decides tile vs scale from image size"
             SetSelect {
                 options: ["auto", "tile", "scale"]
                 value: page.d.wallpaperFit
