@@ -1320,30 +1320,31 @@ Window {
                 color: Theme.textDim
             }
 
-            // global on/off
+            // global on/off — a switch, not an on/off-labelled button (the
+            // desktop's toggles carry no on/off text; Toggle.qml).
             Item {
                 width: parent.width
                 height: 22
                 PixelText { anchors.verticalCenter: parent.verticalCenter; text: "extension"; color: Theme.text }
-                BrowserButton {
+                Toggle {
                     winActive: win.winActive
-                    anchors.right: parent.right
-                    label: DarkMode.enabled ? "on" : "off"
-                    onClicked: DarkMode.setEnabled(!DarkMode.enabled)
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                    checked: DarkMode.enabled
+                    onToggled: (v) => DarkMode.setEnabled(v)
                 }
             }
 
-            // per-site whitelist toggle (single button, acts on the current host)
+            // per-site whitelist toggle (acts on the current host)
             Item {
                 width: parent.width
                 height: 22
                 PixelText { anchors.verticalCenter: parent.verticalCenter; text: "this site"; color: Theme.text }
-                BrowserButton {
+                Toggle {
                     winActive: win.winActive
-                    anchors.right: parent.right
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                     enabled: win.dmHost !== ""
-                    label: win.dmSiteOn ? "on" : "off"
-                    onClicked: if (win.current) DarkMode.toggleSite(win.current.url.toString())
+                    checked: win.dmSiteOn
+                    onToggled: if (win.current) DarkMode.toggleSite(win.current.url.toString())
                 }
             }
 
@@ -1392,12 +1393,12 @@ Window {
                 width: parent.width
                 height: 22
                 PixelText { anchors.verticalCenter: parent.verticalCenter; text: "system font"; color: Theme.text }
-                BrowserButton {
+                Toggle {
                     winActive: win.winActive
-                    anchors.right: parent.right
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                     enabled: win.dmHost !== ""
-                    label: win.dmFontOn ? "on" : "off"
-                    onClicked: if (win.current) DarkMode.toggleSystemFontSite(win.current.url.toString())
+                    checked: win.dmFontOn
+                    onToggled: if (win.current) DarkMode.toggleSystemFontSite(win.current.url.toString())
                 }
             }
         }

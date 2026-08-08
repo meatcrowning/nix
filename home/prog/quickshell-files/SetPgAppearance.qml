@@ -77,23 +77,24 @@ Column {
     SetSection {
         title: "theme"
         SetRow {
-            label: "colour source"
-            desc: "auto = recolour from the wallpaper (wal); manual = fixed accent below"
-            SetSelect {
-                options: ["auto", "manual"]
-                value: page.d.themeMode
-                onChanged: (v) => { page.d.themeMode = v; SettingsStore.save(); }
+            // The stored key is still themeMode ("auto"/"manual") — the toggle
+            // is just its face: on = manual, the fixed accent below; off =
+            // recolour from the wallpaper (wal).
+            label: "manual accent"
+            SetToggle {
+                checked: page.d.themeMode === "manual"
+                onToggled: (v) => { page.d.themeMode = v ? "manual" : "auto"; SettingsStore.save(); }
             }
         }
         SetRow {
             // The picked colour supplies the HUE; the palette is still built
             // by wal-extract.py's value ladder, so the accent comes back
             // pastel-capped exactly like a wallpaper-derived one (docs/DESIGN.md
-            // 3.1). Saying so here, because "I picked #ff0000 and got a pale
-            // red" otherwise reads as the control not working.
+            // 3.1). Greyed, not hidden, while manual accent is off (§10.1) —
+            // it still shows what turning the toggle on would use.
             label: "accent colour"
-            desc: "hue used when colour source is manual; still pastel-capped like a wallpaper accent"
             SetColor {
+                enabled: page.d.themeMode === "manual"
                 value: page.d.accentOverride
                 onChanged: (h) => { page.d.accentOverride = h; SettingsStore.save(); }
             }
@@ -105,8 +106,7 @@ Column {
             // are enumerated from home/pkgs/desktop/font.nix (the selectableFaces
             // list) through the generated FontFaces singleton, so a face added to
             // font.nix appears here automatically — including Botis 4x6.
-            label: "pixel font"
-            desc: "the face the desktop draws with; more perfect is the default"
+            label: "font"
             SetSelect {
                 options: FontFaces.families
                 labels: FontFaces.labels
@@ -116,11 +116,14 @@ Column {
         }
         SetRow {
             label: "font size"
-            desc: "pixels; matched to the terminal cell"
-            SetSlider {
-                from: 10; to: 24; step: 1; unit: "px"
-                value: page.d.fontSize
-                onMoved: (v) => { page.d.fontSize = v; SettingsStore.save(); }
+            SetSelect {
+                options: {
+                    const a = [];
+                    for (let s = 10; s <= 24; s++) a.push(String(s));
+                    return a;
+                }
+                value: String(page.d.fontSize)
+                onChanged: (v) => { page.d.fontSize = parseInt(v, 10); SettingsStore.save(); }
             }
         }
         SetRow {
@@ -130,7 +133,6 @@ Column {
             // palette; every downstream surface (kitty, Qt/KDE, hyprvtb) follows
             // the twelve tokens with no further knowledge of polarity.
             label: "light mode"
-            desc: "on = a light background with dark ink, from the same wallpaper hue"
             SetToggle {
                 checked: page.d.lightMode
                 // Shared with the Meta+D keybind — see SettingsStore.setLightMode.

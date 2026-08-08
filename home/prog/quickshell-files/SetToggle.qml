@@ -20,19 +20,9 @@ Rectangle {
     border.width: 1
     border.color: (checked || ma.containsMouse) ? Theme.accent : Theme.border
 
-    // ON / OFF ghost label, so state reads even without colour
-    PixelText {
-        anchors {
-            verticalCenter: parent.verticalCenter
-            left: root.checked ? parent.left : undefined
-            right: root.checked ? undefined : parent.right
-            leftMargin: 5
-            rightMargin: 5
-        }
-        text: root.checked ? "on" : "off"
-        color: root.checked ? Theme.accent : Theme.textDim
-    }
-
+    // No on/off ghost text — [his, 2026-08-08] "on off toggles should not
+    // have the on off text on them", systemwide. The knob's side, the fill
+    // and the accent carry the state.
     Rectangle {
         width: 8
         height: parent.height - 6
