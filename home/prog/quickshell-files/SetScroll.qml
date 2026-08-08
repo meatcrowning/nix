@@ -162,6 +162,11 @@ Item {
                 grabOffset = p.y - thumb.y;
             }
             onPositionChanged: (m) => {
+                // Hover moves fire this too when hoverEnabled is on (the flat
+                // style needs it for containsMouse), and a hover "drag" against
+                // a stale grabOffset scrolled the page — crossing the thumb on
+                // the way to the titlebar walked the position down.
+                if (!drag.pressed) return;
                 const denom = scroll._avail - scroll._thumbH;
                 if (denom <= 0) return;
                 const p = mapToItem(scroll, m.x, m.y);
