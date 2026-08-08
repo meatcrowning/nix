@@ -153,6 +153,25 @@ atomically with a `seq` freshness token. Those paths are `$HOME`-relative, so a
 nested harness instance (`HOME=$RUN/home`) is isolated for free. Follow that
 pattern.
 
+**`close_pid(<pid>)` is the one an APP calls on itself** — the roll-up + fade
+that the titlebar's `[x]` runs, asked for by the program that is quitting. A Qt
+app that quits on a key tears its surface down where it stands and leaves the
+compositor nothing to animate but a fade of the last frame, so viewer's `q` and
+Escape go through here instead (`pylib/vtbclient.close_animated()`, straight
+down Hyprland's control socket — no `hyprctl` subprocess on the quit path). Two
+properties it must keep:
+
+- **Addressed by PID, never "the active window".** `hyprctl activewindow` lies
+  (see the `hyprctl-activewindow-lies` note), and a close aimed at the wrong
+  window is somebody's unsaved work, not a glitch. It takes the focused window
+  when that window is the caller's, else that pid's only window, and **refuses
+  anything ambiguous** through `error()` — which is how a Lua function returns
+  a boolean to a caller that can only read `ok`. The client falls back to
+  quitting itself, so a refusal costs the animation, never the quit.
+- **Every window handle dies before the `luaL_error`.** It longjmps past
+  destructors, the same trap `luaKineticSet` documents — hold the search in its
+  own scope and error outside it.
+
 **Empty inner column? Dump the app-button server before touching the plugin:**
 
 ```bash

@@ -855,6 +855,53 @@ static int luaCloseActive(lua_State* L) {
     return 0;
 }
 
+// close_pid(<pid>) — the same roll-up + fade close, asked for by the app ITSELF.
+// A Qt app that quits on a key (viewer's `q`) tears its surface down from under
+// the compositor, so all Hyprland has left to animate is a fade of the last
+// frame; routing the quit through here gives the keyboard the same close the
+// titlebar [x] does. Addressed by PID and not "the active window" on purpose:
+// `hyprctl activewindow` lies (it never clears), and a close aimed at the wrong
+// window is not a glitch, it is somebody's unsaved work.
+//
+// Prefers the focused window when it belongs to `pid` — an app with several
+// windows means the one being typed into — and otherwise takes that pid's only
+// window. Anything ambiguous is refused via error(), which is how a lua
+// function returns a boolean to a caller that can only read "ok" (see
+// docs/agents/ and the hyprctl-eval-returns-no-values note): the app falls back
+// to quitting itself, so a refusal costs the animation, never the quit.
+static int luaClosePid(lua_State* L) {
+    const int PID = (int)luaL_checkinteger(L, 1);
+    CVtbDeco* hit = nullptr;
+    {
+        // Every window handle must be DEAD before the luaL_error below:
+        // it longjmps, skipping the destructor of anything non-trivial still
+        // alive on this frame (the trap luaKineticSet documents).
+        int        matches = 0;
+        const auto FOCUSED = Hl::focusedWindow();
+        if (g_pGlobalState && PID > 0) {
+            for (auto& b : g_pGlobalState->bars) {
+                if (!b)
+                    continue;
+                const auto W = b->getOwner();
+                if (!W || !W->m_isMapped || (int)W->getPID() != PID)
+                    continue;
+                ++matches;
+                hit = b.get();
+                if (W == FOCUSED) {
+                    matches = 1; // the focused window settles it
+                    break;
+                }
+            }
+        }
+        if (matches != 1)
+            hit = nullptr;
+    }
+    if (!hit)
+        return luaL_error(L, "hyprvtb: no unambiguous window for pid %d", PID);
+    hit->closeWindow();
+    return 0;
+}
+
 // The last window rolled up through the no-arg keybind path, so a second press
 // of the same key un-shades it: a rolled window is hidden and can't be the
 // active window, so the toggle can't find it through focus — we remember it.
@@ -1582,6 +1629,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "minimize_active", ::luaMinimizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_maximize_active", ::luaToggleMaximizeActive);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_active", ::luaCloseActive);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_pid", ::luaClosePid);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "rollup", ::luaRollup);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
@@ -1650,7 +1698,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.15"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.16"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

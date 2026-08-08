@@ -287,6 +287,35 @@ Window {
 
     onClosing: Qt.quit()
 
+    // Quitting on our own (`q`, Escape, the × button, Ctrl+W on the last pane)
+    // goes through the compositor, not straight to Qt.quit(): hyprvtb rolls the
+    // window up into its titlebar and fades the bar — the [x] animation — and
+    // then sends us the ordinary close that `onClosing` already quits on.
+    // Qt.quit() tears the surface down where it stands, so all Hyprland has
+    // left to animate is a fade of the last frame, and the key looked visibly
+    // different from the button next to it (docs/DESIGN.md 6: one gesture, one
+    // motion, wherever it is invoked).
+    //
+    // It falls back to quitting outright whenever the compositor does not take
+    // it — an offscreen harness, a session with the plugin unloaded — and a
+    // timer quits anyway if the close never arrives, because a quit key that
+    // leaves the window sitting there is worse than an unanimated one.
+    property bool quitting: false
+    Timer { id: quitFallback; interval: 1200; onTriggered: Qt.quit() }
+    function quit() {
+        // The latch is only for the animated path — a second key during the
+        // roll-up must not ask for a second close. A declined one quits here
+        // and now, so there is nothing to re-enter.
+        if (win.quitting)
+            return;
+        if (Titlebar.requestClose && Titlebar.requestClose()) {
+            win.quitting = true;
+            quitFallback.start();
+            return;
+        }
+        Qt.quit();
+    }
+
     function next() { if (images.length) setPaneIdx(focusPane, paneIdx(focusPane) + 1); }
     function prev() { if (images.length) setPaneIdx(focusPane, paneIdx(focusPane) - 1); }
 
@@ -393,7 +422,7 @@ Window {
             case "fit":       if (win.current) win.current.fit();          break;
             case "addpane":   win.addPane();                 break;
             case "closepane": win.closePane(win.focusPane);  break;
-            case "close":     Qt.quit();                     break;
+            case "close":     win.quit();                     break;
             }
         }
         // scrub bar dragged/scrolled in the titlebar → seek the focused pane
@@ -462,7 +491,7 @@ Window {
             // by; unlike Ctrl+W it does not stop at the pane — a bare key that
             // closed one of several panes and quit on the last would be a
             // surprise, and Ctrl+W is already there for that.
-            case Qt.Key_Escape: case Qt.Key_Q:     Qt.quit();  e.accepted = true; break;
+            case Qt.Key_Escape: case Qt.Key_Q:     win.quit(); e.accepted = true; break;
             case Qt.Key_Plus: case Qt.Key_Equal:
                 if (win.current) win.current.zoomBy(1.25); e.accepted = true; break;
             case Qt.Key_Minus:
@@ -474,7 +503,7 @@ Window {
             case Qt.Key_W:
                 if (ctrl) {
                     if (panes.count > 1) win.closePane(win.focusPane);
-                    else Qt.quit();
+                    else win.quit();
                     e.accepted = true;
                 }
                 break;

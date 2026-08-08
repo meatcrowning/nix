@@ -59,6 +59,10 @@ class StubTitlebar(QObject):
     def setFooter(self, t): pass
     @Slot(bool, float)
     def setPlaybar(self, shown, pos): pass
+    # No compositor here, so the animated close is declined and `win.quit()`
+    # falls back to Qt.quit() — which is what the quit checks below assert.
+    @Slot(result=bool)
+    def requestClose(self): return False
 
 
 def unwrap(v):

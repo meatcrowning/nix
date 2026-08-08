@@ -350,3 +350,50 @@ class VtbClient:
                         self._on_wake()
                 except Exception:
                     pass  # a handler bug must not kill the reader
+
+
+# ---- animated close -------------------------------------------------------
+# Quitting on a key (viewer's `q`, Escape) is not the same thing as clicking the
+# titlebar's [x]: `Qt.quit()` tears the surface down and all the compositor has
+# left to animate is a fade of the last frame, where the [x] rolls the window up
+# into its bar first. This asks hyprvtb to run that same close on OUR window;
+# the plugin's sendClose() then arrives as an ordinary window-close event, so
+# the app still quits through whatever it already does on `closing`.
+#
+# Straight down Hyprland's own control socket rather than through `hyprctl`: no
+# subprocess on the quit path, and nothing to resolve on a PATH that a .desktop
+# launch may not carry. The reply is the plugin's answer — "ok" means it took
+# the close, anything else (no plugin, an ambiguous pid, no compositor at all)
+# means it did not, and the caller must quit itself. It cannot hit the wrong
+# window: the request names our pid, and the plugin refuses a pid it cannot
+# resolve to exactly one window.
+
+def _hypr_socket_path():
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not sig:
+        return None
+    rt = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    return os.path.join(rt, "hypr", sig, ".socket.sock")
+
+
+def close_animated(pid=None, timeout=0.5):
+    """Ask hyprvtb to close this app's window with the titlebar's animation.
+
+    True if the compositor took it (quit on the close event that follows),
+    False if it did not (quit now — never leave the window there because the
+    animation was unavailable). Never raises."""
+    path = _hypr_socket_path()
+    if not path:
+        return False
+    req = b"/eval hl.plugin.hyprvtb.close_pid(%d)" % (pid or os.getpid())
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect(path)
+            s.sendall(req)
+            return s.recv(256).strip() == b"ok"
+        finally:
+            s.close()
+    except OSError:
+        return False
