@@ -425,14 +425,18 @@ class Clip(QObject):
 class Prefs(QObject):
     """viewer's own settings file, `$XDG_CONFIG_HOME/viewer/prefs.json`.
 
-    Today it holds one thing: the split view's divider positions, as column and
-    row weights keyed by grid shape (`"2x1"`, `"2x2"`, …) — a 2x2 split's
-    dividers have nothing to say about where a 3x1's should sit, and viewer
-    reshapes its grid every time a pane is added or closed. Weights, not pixels,
-    so a resized window keeps the proportions.
+    Two things live in it. The split view's divider positions, as column and row
+    weights keyed by grid shape (`"2x1"`, `"2x2"`, …) — a 2x2 split's dividers
+    have nothing to say about where a 3x1's should sit, and viewer reshapes its
+    grid every time a pane is added or closed. Weights, not pixels, so a resized
+    window keeps the proportions. And `muted`, the titlebar's `mu` toggle, which
+    is a preference about this machine's speakers rather than about one clip and
+    so has to outlive the window.
 
     Written on RELEASE of a divider drag, never per motion event (surfer's
     `splitRatio` established that rule)."""
+
+    mutedChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -445,6 +449,29 @@ class Prefs(QObject):
             return d if isinstance(d, dict) else {}
         except (OSError, ValueError, TypeError):
             return {}
+
+    def _write(self, mutate):
+        """Read-modify-write the whole file. Small enough that a merge is not
+        worth it, and it keeps a second key from clobbering the first."""
+        d = self._read()
+        mutate(d)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(d), encoding="utf-8")
+        except OSError:
+            pass
+
+    @Property(bool, notify=mutedChanged)
+    def muted(self):
+        return bool(self._read().get("muted", False))
+
+    @Slot(bool)
+    def setMuted(self, on):
+        on = bool(on)
+        if on == self.muted:
+            return
+        self._write(lambda d: d.__setitem__("muted", on))
+        self.mutedChanged.emit()
 
     @Slot(str, result="QVariantMap")
     def loadWeights(self, shape):
@@ -463,17 +490,15 @@ class Prefs(QObject):
 
     @Slot(str, "QVariantList", "QVariantList")
     def saveWeights(self, shape, col, row):
-        d = self._read()
-        w = d.get("paneWeights")
-        if not isinstance(w, dict):
-            w = {}
-        w[str(shape)] = {"col": [float(x) for x in col], "row": [float(x) for x in row]}
-        d["paneWeights"] = w
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(d), encoding="utf-8")
-        except OSError:
-            pass
+        def put(d):
+            w = d.get("paneWeights")
+            if not isinstance(w, dict):
+                w = {}
+            w[str(shape)] = {"col": [float(x) for x in col],
+                             "row": [float(x) for x in row]}
+            d["paneWeights"] = w
+
+        self._write(put)
 
 
 def main():

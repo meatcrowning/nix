@@ -30,7 +30,8 @@ sys.path.insert(0, VIEWER)
 sys.path.insert(0, os.path.join(os.path.dirname(VIEWER), "pylib"))
 from deskstyle import DeskStyle  # noqa: E402  (pylib; Theme.qml binds to it)
 
-from PySide6.QtCore import QUrl, QObject, Slot, QMimeData, QPoint, Qt, QTimer  # noqa: E402
+from PySide6.QtCore import (QUrl, QObject, Signal, Slot, QMimeData, QPoint,  # noqa: E402
+                            Qt, QTimer)
 from PySide6.QtGui import (QGuiApplication, QImage, QColor, QKeyEvent,  # noqa: E402
                            QDragEnterEvent, QDragMoveEvent, QDropEvent)
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QJSValue  # noqa: E402
@@ -47,6 +48,11 @@ def check(name, cond, detail=""):
 
 
 class StubTitlebar(QObject):
+    # The real `clicked` signal, so a harness can press a titlebar button and
+    # exercise Main.qml's Connections rather than calling the handler by hand.
+    clicked = Signal(str)
+    seek = Signal(float)
+
     @Slot("QVariantList")
     def setButtons(self, b): pass
     @Slot(str)

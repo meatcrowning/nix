@@ -102,6 +102,40 @@ in it speaks the data-control protocol. That clipfile really owns the selection
 and offers what it claims is `apps/pylib/tools/clipfile-test.sh`, in a headless
 sway of its own. Run both the way `split-test.py` is run (below).
 
+## Video: nothing plays until the window has appeared, and `mu` is remembered
+
+- **The reveal gate.** hyprvtb shows a freshly-mapped window in two beats — the
+  titlebar fades in (`VTB_FADE_DURATION`, 160ms in `vtbDeco.cpp`), then the
+  window rolls out from behind it (`plugin:hyprvtb:slide_duration_ms`). A clip
+  used to autoplay at map time, so it was most of a second in — audio and all —
+  behind a window still unrolling. `Main.qml`'s `revealed` (a one-shot timer of
+  `motion.slideMs + 160`) gates `ImageViewer.canPlay`, and the false→true edge
+  starts whatever was waiting.
+  - **Deliberately not `motion.ms()`**: that scales by the panel's `animSpeed`
+    and returns 0 under `reduceMotion`, and what is being waited on is the
+    COMPOSITOR's animation, which neither setting touches. `slideMs` is still
+    hyprvtb's published number (`qmlcommon/Motion.qml`), so retuning the key
+    moves this with it.
+  - It is **once per window**, so a handoff into an already-open viewer
+    (`openSet`) plays immediately — there is no reveal to wait for.
+- **`mu` in the inner titlebar** toggles mute, lit when muted (docs/DESIGN.md
+  §12.1 — an active toggle inverts), offered only on a video. It is the
+  WINDOW's, not a pane's: the panes already mute themselves when unfocused, and
+  a per-pane mute would give four answers to "is this window making noise".
+  `AudioOutput.muted` is `!paneFocused || appMuted`.
+- **It outlives the window** — `Prefs.muted` in
+  `$XDG_CONFIG_HOME/viewer/prefs.json`, beside the divider weights. A mute is a
+  preference about this machine's speakers, not about one clip.
+
+Verify with `tools/video-test.py` (offscreen, 21 checks). **The clip it builds
+has no audio track on purpose**: the run must not be able to make a sound on his
+speakers even if a decoder starts, so muting is asserted on
+`ImageViewer.silent`, never by listening. It reads the pane through a
+`QQmlExpression` in the window's scope — `win.current` is a `QQuickItem*` PySide
+cannot convert, and a Repeater's delegates are not QObject-children of the
+window — and presses the titlebar button through the stub's real `clicked`
+signal, so `Main.qml`'s own `Connections` are what run.
+
 ## Video decodes on NVDEC, never VAAPI (`top`)
 
 `home/prog/viewer.nix` sets `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda` on the
