@@ -78,6 +78,7 @@ Scope {
                 || pendingY >= 0 || scroller.contentHeight <= 0)
             return;
         scrollPos[loadedPage] = scroller.contentY;
+        persist.pos = JSON.stringify(scrollPos); // mirror into the reload carrier
     }
     function restoreScroll() {
         if (pageLoader.status !== Loader.Ready)
@@ -98,6 +99,33 @@ Scope {
         id: settleScroll
         interval: 250
         onTriggered: root.pendingY = -1
+    }
+
+    // Carries the open page and the per-page scroll across a HOT RELOAD: a
+    // theme apply rewrites Theme.qml, which reloads this process's whole tree
+    // too — so changing any palette setting flung the window back to the top
+    // of page one, right out from under the control being adjusted. Direct
+    // child of the root Scope, strings only (JSON round-tripped) — both
+    // constraints are load-bearing, see shell.qml's persist block.
+    PersistentProperties {
+        id: persist
+        reloadableId: "qsSettingsState"
+        property string cur: ""
+        property string pos: ""
+        onLoaded: {
+            if (pos) {
+                try { root.scrollPos = JSON.parse(pos); } catch (e) {}
+            }
+            if (cur && cur !== root.current) {
+                root.current = cur; // Loader swaps; restoreScroll applies the saved Y
+            } else if (root.scrollPos[root.current] !== undefined) {
+                // The default page loaded before we arrived (this fires after
+                // every Component.onCompleted): re-apply its saved position.
+                root.pendingY = root.scrollPos[root.current];
+                settleScroll.restart();
+                root.restoreScroll();
+            }
+        }
     }
 
     // The body scroller is private to the window's tree, and this root is a
@@ -122,7 +150,10 @@ Scope {
         for (const p of pages) if (p.key === k) return p.label;
         return k;
     }
-    onCurrentChanged: sendButtons()
+    onCurrentChanged: {
+        persist.cur = current;
+        sendButtons();
+    }
 
     IpcHandler {
         target: "settings"

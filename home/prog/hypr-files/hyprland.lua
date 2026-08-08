@@ -334,6 +334,16 @@ hl.config({
             -- from settings.json's titleOrientation, the panel applies live
             -- changes, this line is the persisted floor across a reload.
             ["title_rotated"]     = false,
+            -- The desktop font pick — persisted like shadow_alpha above
+            -- because this file AUTO-RELOADS: wal-set.sh seds the palette in
+            -- on every theme apply, the re-run lua reverted any key living
+            -- only in the runtime override, and the titlebar font reset to
+            -- the C++ default on every colour tweak (found 2026-08-08).
+            -- apply-pixel-font.sh rewrites these from settings.json; the
+            -- values here are only the first-boot seeds.
+            ["font"]              = "More Perfect DOS VGA",
+            ["font_size"]         = 15,
+            ["font_smooth"]       = false,
             -- THE DESKTOP'S MOTION. This is not just the window roll: the roll
             -- is the REFERENCE every sliding animation on this machine is
             -- matched to (docs/DESIGN.md 6.2), so this one number is also the

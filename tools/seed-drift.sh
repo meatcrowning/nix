@@ -61,7 +61,10 @@ normalize() {
             sed -E -e 's/rgba\([0-9a-fA-F]{6,8}\)/rgba(<WAL>)/g' \
                    -e 's/GoogleDot-[A-Za-z0-9]+/GoogleDot-<ACCENT>/g' \
                    -e 's/(\["shadow_alpha"\][[:space:]]*=[[:space:]]*)[0-9.]+/\1<WAL>/g' \
-                   -e 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g'
+                   -e 's/(\["title_rotated"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g' \
+                   -e 's/(\["font"\][[:space:]]*=[[:space:]]*)"[^"]*"/\1<WAL>/g' \
+                   -e 's/(\["font_size"\][[:space:]]*=[[:space:]]*)[0-9]+/\1<WAL>/g' \
+                   -e 's/(\["font_smooth"\][[:space:]]*=[[:space:]]*)(true|false)/\1<WAL>/g'
             ;;
         *Theme.qml)
             sed -E -e 's/"#[0-9a-fA-F]{3,8}"/"<WAL>"/g'

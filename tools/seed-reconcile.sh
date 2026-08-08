@@ -83,6 +83,9 @@ case "$KIND" in
     done
     carry '[[:space:]]*\["shadow_alpha"\][[:space:]]*=[[:space:]]*' '[0-9.]+'
     carry '[[:space:]]*\["title_rotated"\][[:space:]]*=[[:space:]]*' '(true|false)'
+    carry '[[:space:]]*\["font"\][[:space:]]*=[[:space:]]*' '"[^"]*"'
+    carry '[[:space:]]*\["font_size"\][[:space:]]*=[[:space:]]*' '[0-9]+'
+    carry '[[:space:]]*\["font_smooth"\][[:space:]]*=[[:space:]]*' '(true|false)'
     # cursor-recolor.sh: the generated GoogleDot-<accent><outline> theme name.
     carry 'hl\.env\("XCURSOR_THEME", "'    'GoogleDot-[^"]*'
     carry 'hl\.env\("HYPRCURSOR_THEME", "' 'GoogleDot-[^"]*'

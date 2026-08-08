@@ -2,9 +2,9 @@ import QtQuick
 
 // The current theme's colours as ONE contiguous strip — the same look as the
 // palette strips on the paper+theme tiles at the top of this page
-// (SetPaperGrid): equal-width columns, no gaps. The colours are the clusters
+// (SetPaperGrid): equal columns, no gaps. The colours are the clusters
 // wal-extract.py quantised the wallpaper into (Wall.clusters, published by
-// wal-set.sh, dominant first).
+// wal-set.sh, dominant first), plus a reset button that re-lights everything.
 //
 // A lit column feeds the palette derivation; clicking it drops it
 // (SettingsStore.d.paletteDropped -> wal-extract.py) and the theme re-applies.
@@ -16,18 +16,24 @@ import QtQuick
 // refused with a crit border flash (§10.2): all-dropped would silently fall
 // back to using everything.
 //
+// The columns are an EXACT partition of the strip width — cell i spans
+// [round(i*w/n), round((i+1)*w/n)) — and the hit test is the same floor
+// division, so what is drawn is what is clicked. The first cut (a Row of
+// ceil(w/n)-wide cells, the tiles' recipe) overflowed the box by up to n-1 px
+// with nothing clipping it: the strip drew shifted and every click landed one
+// or two columns off its target. The tiles get away with ceil because the
+// tile clips; a bare control does not.
+//
 // ONE MouseArea over the whole strip, deliberately not one per column: the
 // drag needs it, and a per-delegate area dies with its delegate if the model
 // re-signals mid-press, taking the release with it.
-Item {
+Row {
     id: root
-    width: 240
-    height: 20
+    spacing: 8
 
     readonly property var clusters: Wall.clusters
     readonly property int count: clusters.length
     readonly property var dropped: SettingsStore.d.paletteDropped || []
-    readonly property real cellW: count > 0 ? width / count : width
 
     // an in-flight drag: the index range and the state it paints
     property int  dragA: -1
@@ -48,15 +54,19 @@ Item {
     // than draw an empty clickable box (§10.2).
     PixelText {
         anchors.verticalCenter: parent.verticalCenter
-        anchors.right: parent.right
         visible: root.count === 0
         text: "no palette yet"
         color: Theme.textDim
     }
 
-    Row {
-        anchors.fill: parent
+    Item {
+        id: strip
+        width: 220
+        height: 20
         visible: root.count > 0
+
+        function cutAt(i) { return Math.round(i * strip.width / Math.max(1, root.count)); }
+
         Repeater {
             model: root.clusters
             Rectangle {
@@ -64,83 +74,110 @@ Item {
                 required property int index
                 required property string modelData
                 readonly property bool off: root.shownDropped(index)
-                width: Math.ceil(root.width / Math.max(1, root.count))
-                height: off ? 5 : root.height
-                anchors.bottom: parent.bottom
+                x: strip.cutAt(index)
+                width: strip.cutAt(index + 1) - strip.cutAt(index)
+                height: off ? 5 : strip.height
+                y: strip.height - height
                 color: "#" + modelData
                 opacity: off ? 0.45 : 1.0
             }
         }
+
+        // hovered column marker — an accent underline tracking the pointer, so
+        // the click target is visible even between 7px columns
+        Rectangle {
+            visible: ma.containsMouse
+            x: strip.cutAt(ma.hoverIdx)
+            y: strip.height + 2
+            width: strip.cutAt(ma.hoverIdx + 1) - strip.cutAt(ma.hoverIdx)
+            height: 2
+            color: Theme.accent
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            border.width: 1
+            border.color: refuse.running ? Theme.crit
+                        : ma.containsMouse ? Theme.accent : Theme.border
+        }
+
+        Timer { id: refuse; interval: 450 }
+
+        MouseArea {
+            id: ma
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            preventStealing: true
+            readonly property int hoverIdx: idxAt(mouseX)
+            function idxAt(x) {
+                return Math.max(0, Math.min(root.count - 1,
+                    Math.floor(x * root.count / Math.max(1, strip.width))));
+            }
+            onPressed: (m) => {
+                const i = idxAt(m.x);
+                root.dragDrops = !root.isDropped(root.clusters[i]);
+                root.dragA = i;
+                root.dragB = i;
+            }
+            onPositionChanged: (m) => {
+                if (root.dragA >= 0)
+                    root.dragB = idxAt(m.x);
+            }
+            onCanceled: { root.dragA = -1; root.dragB = -1; }
+            onReleased: {
+                if (root.dragA < 0)
+                    return;
+                const lo = Math.min(root.dragA, root.dragB);
+                const hi = Math.max(root.dragA, root.dragB);
+                root.dragA = -1;
+                root.dragB = -1;
+                const cur = (SettingsStore.d.paletteDropped || []).slice();
+                for (let i = lo; i <= hi; i++) {
+                    const hx = root.clusters[i];
+                    const at = cur.indexOf(hx);
+                    if (root.dragDrops && at < 0)
+                        cur.push(hx);
+                    else if (!root.dragDrops && at >= 0)
+                        cur.splice(at, 1);
+                }
+                if (root.clusters.filter(c => cur.indexOf(c) < 0).length === 0) {
+                    refuse.restart();
+                    return;
+                }
+                SettingsStore.d.paletteDropped = cur;
+                SettingsStore.save();
+            }
+        }
     }
 
-    // hovered column marker — an accent underline tracking the pointer, so
-    // the click target is visible even between 7px columns
+    // Re-light everything. Greyed, not hidden, while nothing is dropped
+    // (§10.1) — it still shows what it would do.
     Rectangle {
-        visible: root.count > 0 && ma.containsMouse
-        x: Math.floor(ma.hoverIdx * root.cellW)
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: -3
-        width: Math.ceil(root.cellW)
-        height: 2
-        color: Theme.accent
-    }
-
-    Rectangle {
-        anchors.fill: parent
         visible: root.count > 0
+        width: resetLabel.implicitWidth + 14
+        height: 20
         color: "transparent"
+        opacity: root.dropped.length > 0 ? 1.0 : 0.4
         border.width: 1
-        border.color: refuse.running ? Theme.crit
-                    : ma.containsMouse ? Theme.accent : Theme.border
-    }
-
-    Timer { id: refuse; interval: 450 }
-
-    MouseArea {
-        id: ma
-        anchors.fill: parent
-        enabled: root.count > 0
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        preventStealing: true
-        readonly property int hoverIdx: idxAt(mouseX)
-        function idxAt(x) {
-            return Math.max(0, Math.min(root.count - 1,
-                                        Math.floor(x / root.cellW)));
+        border.color: rma.containsMouse && root.dropped.length > 0 ? Theme.accent : Theme.border
+        PixelText {
+            id: resetLabel
+            anchors.centerIn: parent
+            text: "reset"
+            color: rma.containsMouse && root.dropped.length > 0 ? Theme.text : Theme.textDim
         }
-        onPressed: (m) => {
-            const i = idxAt(m.x);
-            root.dragDrops = !root.isDropped(root.clusters[i]);
-            root.dragA = i;
-            root.dragB = i;
-        }
-        onPositionChanged: (m) => {
-            if (root.dragA >= 0)
-                root.dragB = idxAt(m.x);
-        }
-        onCanceled: { root.dragA = -1; root.dragB = -1; }
-        onReleased: {
-            if (root.dragA < 0)
-                return;
-            const lo = Math.min(root.dragA, root.dragB);
-            const hi = Math.max(root.dragA, root.dragB);
-            root.dragA = -1;
-            root.dragB = -1;
-            const cur = (SettingsStore.d.paletteDropped || []).slice();
-            for (let i = lo; i <= hi; i++) {
-                const hx = root.clusters[i];
-                const at = cur.indexOf(hx);
-                if (root.dragDrops && at < 0)
-                    cur.push(hx);
-                else if (!root.dragDrops && at >= 0)
-                    cur.splice(at, 1);
+        MouseArea {
+            id: rma
+            anchors.fill: parent
+            enabled: root.dropped.length > 0
+            hoverEnabled: root.dropped.length > 0
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                SettingsStore.d.paletteDropped = [];
+                SettingsStore.save();
             }
-            if (root.clusters.filter(c => cur.indexOf(c) < 0).length === 0) {
-                refuse.restart();
-                return;
-            }
-            SettingsStore.d.paletteDropped = cur;
-            SettingsStore.save();
         }
     }
 }

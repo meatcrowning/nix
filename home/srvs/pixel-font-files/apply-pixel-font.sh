@@ -19,9 +19,31 @@ CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 SETTINGS="$CONFIG/quickshell/settings.json"
 
 # Resolve the pick, mirroring SettingsStore.qml defaults.
+#
+# NEVER GUESS ON A FAILED READ. This script is fired mid theme-apply (wal-set
+# step 6), which is triggered by the very Settings change whose debounced
+# settings.json write can still be in flight — a jq read that lands in that
+# window fails, and the old fallthrough then actively PUSHED the default
+# family, resetting the titlebar/kitty font to More Perfect on a colour
+# change. A pick we cannot read is a pick we leave alone (docs/DESIGN.md
+# §10.2): retry briefly, then exit without touching anything. The defaults
+# below now only ever apply when settings.json genuinely does not exist yet.
 FAMILY="More Perfect DOS VGA"
 SIZE=15
 if [ -f "$SETTINGS" ]; then
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "apply-pixel-font: no jq on PATH; leaving fonts as they are" >&2
+        exit 0
+    fi
+    ok=""
+    for _ in 1 2 3 4 5; do
+        if jq -e . "$SETTINGS" >/dev/null 2>&1; then ok=1; break; fi
+        sleep 0.2
+    done
+    if [ -z "$ok" ]; then
+        echo "apply-pixel-font: $SETTINGS unreadable; leaving fonts as they are" >&2
+        exit 0
+    fi
     FAMILY="$(jq -r '.fontFamily // "More Perfect DOS VGA"' "$SETTINGS" 2>/dev/null)"
     SIZE="$(jq -r '.fontSize // 15' "$SETTINGS" 2>/dev/null)"
     # guard against a hand-edited or corrupt value
@@ -80,6 +102,23 @@ FACES="$CONFIG/quickshell/font-faces.json"
 [ -f "$FACES" ] && SMOOTH="$(jq -r --arg f "$FAMILY" '.[$f].smooth // false' "$FACES" 2>/dev/null)"
 case "$SMOOTH" in true|false) ;; *) SMOOTH=false ;; esac
 hyprctl eval "hl.config({ plugin = { hyprvtb = { [\"font\"] = \"$FAMILY\", [\"font_size\"] = $SIZE, [\"font_smooth\"] = $SMOOTH } } })" >/dev/null 2>&1 || true
+# Persist the three keys into hyprland.lua (same pattern as wal-set.sh's
+# shadow_alpha/title_rotated): Hyprland AUTO-RELOADS its config whenever that
+# file changes — and wal-set.sh seds the palette into it on EVERY theme apply —
+# so a key living only in the runtime override above reverted to the C++
+# default on every colour tweak. The titlebar font reset to More Perfect on
+# every palette change until 2026-08-08 because of exactly this. Guarded seds:
+# rewriting an already-correct line would itself fire that same autoreload.
+LUA="$CONFIG/hypr/hyprland.lua"
+if [ -f "$LUA" ]; then
+    lua_kv() { # $1 = key, $2 = lua-formatted value
+        sed -E 's/[[:space:]]+/ /g' "$LUA" | grep -qF "[\"$1\"] = $2," && return 0
+        sed -i -E "s|(\[\"$1\"\][[:space:]]*=[[:space:]]*)[^,]*,|\1$2,|" "$LUA"
+    }
+    lua_kv font "\"$FAMILY\""
+    lua_kv font_size "$SIZE"
+    lua_kv font_smooth "$SMOOTH"
+fi
 # refresh_fonts AFTER the family set (plugin >= 3.19): pango caches the
 # process's font map, so a face INSTALLED after the compositor started
 # (Phenex, 2026-08-08) never appeared on the bars — the pick silently fell
