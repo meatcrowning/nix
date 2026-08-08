@@ -171,7 +171,7 @@ Item {
         delegate: Rectangle {
             id: row
             width: list.width
-            height: Theme.fontSize + 2   // kitty-tight: one font cell + 1px each side
+            height: Theme.lineHeight + 2   // descender room: one cell + 1px each side
             readonly property bool isCurrent: root.currentRow >= 0
                                               ? index === root.currentRow
                                               : trackId === root.currentTrackId
@@ -226,7 +226,7 @@ Item {
                 anchors.right: rightBits.left
                 anchors.rightMargin: 8
                 y: 1
-                height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+                height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
                 clip: true
 
                 readonly property string artistText: root.artistLabel(artist)

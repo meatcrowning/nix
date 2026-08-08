@@ -56,7 +56,7 @@ Window {
     Rectangle {
         id: banner
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: Theme.fontSize + 18
+        height: Theme.lineHeight + 18
         color: Theme.highlight
 
         // accent rule down the left edge and along the bottom, the same 2px the
@@ -174,7 +174,7 @@ Window {
         // ---- password field ----
         Rectangle {
             width: parent.width
-            height: Theme.fontSize + 14
+            height: Theme.lineHeight + 14
             color: Theme.bgAlt
             border.width: 2
             border.color: field.activeFocus ? Theme.accent : Theme.border
@@ -247,7 +247,7 @@ Window {
                         readonly property bool primary: modelData.id === "ok"
 
                         width: Math.max(96, btnLabel.implicitWidth + 24)
-                        height: Theme.fontSize + 14
+                        height: Theme.lineHeight + 14
                         color: mouse.containsMouse ? Theme.highlight : Theme.bgAlt
                         border.width: 2
                         border.color: primary ? Theme.accent : Theme.border

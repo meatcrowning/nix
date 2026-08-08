@@ -95,7 +95,7 @@ Item {
             required property var modelData
             required property int index
             width: list.width - 4
-            height: Theme.fontSize
+            height: Theme.lineHeight
 
             readonly property bool isCurrent:
                 (modelData.kind === "head" && modelData.row === side.section)

@@ -115,7 +115,7 @@ Item {
                     // glyph fills the cell exactly) — kitty-exact, one cell per
                     // row with no dead space, vs the old fixed 22px. Separators
                     // keep their small deliberate gap.
-                    height: modelData.separator === true ? 7 : Theme.fontSize
+                    height: modelData.separator === true ? 7 : Theme.lineHeight
                     onImplicitWidthChanged: panel.remeasure()
 
                     readonly property bool en: modelData.enabled !== false

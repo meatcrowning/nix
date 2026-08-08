@@ -120,7 +120,7 @@ Item {
         typed = true;
     }
 
-    implicitHeight: Theme.fontSize * 2 + 14
+    implicitHeight: Theme.lineHeight * 2 + 14
 
     Rectangle {
         anchors.fill: parent
@@ -138,7 +138,7 @@ Item {
                 right: filterBox.left; rightMargin: 10
                 verticalCenter: parent.verticalCenter
             }
-            height: Theme.fontSize + 10
+            height: Theme.lineHeight + 10
             color: Theme.bg
             border.width: 1
             // Says whether what is in it is an answer — the accept button is
@@ -215,7 +215,7 @@ Item {
             property bool danger: false
             signal clicked()
             width: btnText.implicitWidth + 22
-            height: Theme.fontSize + 10
+            height: Theme.lineHeight + 10
             color: ma.containsMouse && btn.enabled ? Theme.highlight : "transparent"
             border.width: 1
             border.color: !root.winActive ? Theme.inactive

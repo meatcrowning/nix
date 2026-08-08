@@ -516,7 +516,7 @@ Window {
                 anchors.rightMargin: 10
                 anchors.topMargin: 10
                 width: win.searchOpen ? chipW : 0
-                height: Theme.fontSize + 10
+                height: Theme.lineHeight + 10
                 clip: true
                 visible: width > 0
 
@@ -598,7 +598,7 @@ Window {
                 anchors.rightMargin: 10
                 anchors.topMargin: 10 + (win.searchOpen ? searchClip.height + 6 : 0)
                 width: win.gotoOpen ? chipW : 0
-                height: Theme.fontSize + 10
+                height: Theme.lineHeight + 10
                 clip: true
                 visible: width > 0 && win.pdfMode
 

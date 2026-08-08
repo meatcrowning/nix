@@ -27,6 +27,16 @@ QtObject {
     readonly property int fontSize: DeskStyle.fontSize
     readonly property int clockSize: DeskStyle.fontSize
 
+    // ONE TEXT ROW: the live FACE's cell (ascent + descent), which is only
+    // sometimes the em size we asked for — docs/DESIGN.md 2.1. Measured, per
+    // face, at 10/15/17/24 px: the DOS pair gives 11/15/17/24 and Botis 4x6
+    // gives 8/12/13/19, so at the default 15 a row pinned to `fontSize` carries
+    // 3px of dead leading under Botis and is a pixel out even on the DOS pair
+    // at the slider's low end. Bind this for anything that means "one text
+    // row"; bind `fontSize` only for an actual font size. (The panel has had
+    // the same property, off a QML FontMetrics, since it was written.)
+    readonly property int lineHeight: DeskStyle.lineHeight
+
     // The same font, as a whole QFont with NoAntialias pinned — bound as
     // `font:` on the TextEdit/TextInput he types into. Editable items ignore
     // `antialiasing:false`/`renderType` and draw a scalable pixel font

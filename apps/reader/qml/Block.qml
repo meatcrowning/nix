@@ -77,7 +77,7 @@ Item {
     Component {
         id: textBlock
         Item {
-            implicitHeight: (headRule.visible ? Theme.fontSize : 0) + rich.implicitHeight
+            implicitHeight: (headRule.visible ? Theme.lineHeight : 0) + rich.implicitHeight
 
             // h1 takes an accent rule, h2 the ordinary border hairline: the two
             // structural levels of a document, told apart the way every other
@@ -145,7 +145,7 @@ Item {
         id: codeBlock
         Rectangle {
             id: box
-            implicitHeight: Math.max(Theme.fontSize, codeCol.implicitHeight) + 8
+            implicitHeight: Math.max(Theme.lineHeight, codeCol.implicitHeight) + 8
             color: Theme.bgAlt
             border.width: 1
             border.color: Theme.border
@@ -178,7 +178,7 @@ Item {
                         id: codeLine
                         required property var modelData
                         width: parent.width
-                        height: Theme.fontSize
+                        height: Theme.lineHeight
                         readonly property bool hit: root.query.length > 1
                             && String(modelData).toLowerCase().indexOf(root.query.toLowerCase()) >= 0
                         // dim for a match, accent for the one you are on — the
@@ -248,7 +248,7 @@ Item {
                         required property var modelData
                         required property int index
                         width: parent.width
-                        height: Theme.fontSize + (index === 0 ? 1 : 0)
+                        height: Theme.lineHeight + (index === 0 ? 1 : 0)
 
                         // `cellText` takes a CELL — a list of runs — and this
                         // delegate's modelData is a ROW, a list of cells. Handed
@@ -280,7 +280,7 @@ Item {
                                     required property var modelData
                                     required property int index
                                     width: (tbl.widths[index] || 4) * root.cellW
-                                    height: Theme.fontSize
+                                    height: Theme.lineHeight
                                     elide: Text.ElideRight
                                     text: tbl.cellText(modelData)
                                     // The header row is the label; the body is
@@ -309,7 +309,7 @@ Item {
     Component {
         id: ruleBlock
         Item {
-            implicitHeight: Theme.fontSize
+            implicitHeight: Theme.lineHeight
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width

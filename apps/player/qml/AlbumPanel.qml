@@ -32,7 +32,7 @@ Item {
     signal openAlbumRequested(int albumId)
     signal browseArtistRequested(string artist)
 
-    readonly property int rowH: Theme.fontSize + 2
+    readonly property int rowH: Theme.lineHeight + 2
     readonly property int pad: 10
 
     // Not enough width for three columns → stack the track list underneath.
@@ -132,7 +132,7 @@ Item {
             width: parent.width
             text: root.info.artist || ""
             clip: true
-            height: Theme.fontSize + 2  // descender room: 16px ink in the 15px line
+            height: Theme.lineHeight + 2  // descender room: one cell + 1px each side
             color: root.fgDim
         }
         PixelText {

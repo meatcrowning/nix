@@ -18,7 +18,7 @@ Rectangle {
     signal clicked()
 
     width: t.implicitWidth + 16
-    height: Theme.fontSize + 7
+    height: Theme.lineHeight + 7
     color: lit ? (winActive ? Theme.accent : Theme.inactive)
          : (ma.containsMouse && enabled ? Theme.bgAlt : "transparent")
     border.width: 1
