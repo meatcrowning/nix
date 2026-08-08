@@ -200,6 +200,17 @@ def safe_name(s, fallback):
     return s[:150]
 
 
+def safe_file(name):
+    """An exFAT-legal filename for the destination. Downloads keep the remote
+    peer's filename, which is bound by the PEER's filesystem rules — a
+    netlabel named '<_body>' makes the raw name unmovable into aud/ (exFAT
+    rejects it with EINVAL, which used to abort the whole import cycle).
+    Same sanitizer as safe_name, so '<_body> - Dial Up.flac' lands as
+    'body - Dial Up.flac', the same way its album folder did."""
+    stem, ext = os.path.splitext(name or "")
+    return safe_name(stem, "track") + (ext.lower() or "")
+
+
 # --- album placement ---------------------------------------------------------
 
 def build_album_index(conn):
@@ -375,6 +386,7 @@ def main():
     moved = 0
     skipped = 0
     parked = 0
+    failed = 0
 
     for src in sorted(find_download_files(dl_dir)):
         t = P.read_tags(str(src))
@@ -431,7 +443,7 @@ def main():
                       f"{NEEDS_ATTENTION}/ (no pipeline record, no usable tags)")
             continue
 
-        dest = dest_dir / src.name
+        dest = dest_dir / safe_file(src.name)
         if dest.exists():
             if not args.dry_run:
                 print(f"  skip (exists)   {dest}")
@@ -440,14 +452,20 @@ def main():
         if args.dry_run:
             print(f"  would move      {src} -> {dest}")
         else:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dest))
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest))
+            except OSError as e:
+                # one unmovable file must not starve the rest of the batch
+                failed += 1
+                print(f"  ! move failed   {src.name} -> {dest}: {e}")
+                continue
             for p in prune_empty_dirs(dl_dir, src):
                 print(f"  pruned empty    {dl_dir.name}/{p.relative_to(dl_dir)}")
             print(f"  moved           {src.name} -> {root.name}/{safe_name(artist, 'Unknown Artist')}/{safe_name(album, 'Unknown Album')}/")
         moved += 1
 
-    print(f"\n{moved} download(s) imported into {root}" + ("" if args.dry_run else f"; skipped {skipped} already present" if skipped else ""))
+    print(f"\n{moved} download(s) imported into {root}" + ("" if args.dry_run else f"; skipped {skipped} already present" if skipped else "") + (f"; {failed} failed" if failed else ""))
     if parked:
         print(f"  {parked} file(s) parked in {dl_dir.name}/{NEEDS_ATTENTION}/ "
               f"-- no pipeline record and no usable tags; fix by hand")
