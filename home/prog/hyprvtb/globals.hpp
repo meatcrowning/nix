@@ -163,6 +163,12 @@ struct SGlobalState {
         // doubled this one, so THIS is the only shadow anyone can adjust).
         SP<Config::Values::CFloatValue>  shadowAlpha;
 
+        // ---- title orientation (see renderTitleTex) ----
+        // false = the stacked column of upright letters; true = the whole title
+        // laid sideways, rotated 90° clockwise (reads top-to-bottom, head
+        // tilted right). Settings > appearance > title orientation.
+        SP<Config::Values::CBoolValue>   titleRotated;
+
         // ---- kinetic scrolling (see vtbKinetic.hpp) ----
         // Flat underscore names, matching bar_width / font_size. The dotted
         // `col.*` group exists only because wal-set.sh writes those keys.
@@ -269,6 +275,10 @@ namespace Vtb::Cfg {
     // The drop shadow's opacity. 0..1; 0 draws nothing at all (honest "off").
     inline float shadowAlpha() {
         return std::clamp(g_pGlobalState->config.shadowAlpha->value(), 0.f, 1.f);
+    }
+    // Title text: false = stacked upright letters, true = rotated 90° CW.
+    inline auto titleRotated() {
+        return g_pGlobalState->config.titleRotated->value();
     }
 
     // ---- kinetic scrolling ----

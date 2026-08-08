@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell.Io
 
 // Appearance = Paper + theme (the embedded chooser) + Wallpaper + Theme +
-// Palette generation + RGB lighting + Window frame + Motion.
+// Palette generation + RGB lighting + Window decorations + Motion.
 // (The wallpaper DRIVES this palette via wal, so it leads: it is the top
 // section, not a separate page.)
 Column {
@@ -206,7 +206,16 @@ Column {
     }
 
     SetSection {
-        title: "window frame"
+        title: "window decorations"
+        SetRow {
+            label: "title orientation"
+            desc: "vertical = upright letters stacked down the bar; horizontal = the whole title turned clockwise, read with your head tilted right"
+            SetSelect {
+                options: ["vertical", "horizontal"]
+                value: page.d.titleOrientation
+                onChanged: (v) => { page.d.titleOrientation = v; SettingsStore.save(); }
+            }
+        }
         SetRow {
             label: "border width"
             SetSlider {

@@ -365,6 +365,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     void                 renderTitleTex(int runLenPx, float scale, const CHyprColor& color);
     SP<Render::ITexture> renderStackedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color, int* outTextH = nullptr,
                                           int* outLines = nullptr, bool ellipsis = true, bool flatColon = false, int* outTopInk = nullptr);
+    SP<Render::ITexture> renderRotatedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color);
     SP<Render::ITexture> glyphTex(const std::string& glyph, const CHyprColor& color, float scale);
     // The window's own program icon (resolved from its class -> .desktop -> icon
     // theme), rendered square at sizePx device px. `color` styles currentColor

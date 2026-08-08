@@ -1497,6 +1497,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pGlobalState->config.shadowAlpha       = makeShared<Config::Values::CFloatValue>(
         "plugin:hyprvtb:shadow_alpha", "Opacity of the window drop shadow (0 = none)", 0.6f,
         Config::Values::SFloatValueOptions{.min = 0.f, .max = 1.f});
+    // The outer-column title's orientation. Default false keeps the shipped
+    // stacked column of upright letters; true lays the whole title sideways
+    // (rotated 90° clockwise, reads top-to-bottom with the head tilted right).
+    g_pGlobalState->config.titleRotated      = makeShared<Config::Values::CBoolValue>(
+        "plugin:hyprvtb:title_rotated", "Draw the title rotated 90deg clockwise instead of as a stacked column", false);
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.barWidth);
@@ -1575,6 +1580,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.slideDurationMs);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.rollSlideFrac);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.shadowAlpha);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.titleRotated);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kinetic);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticFriction);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_pGlobalState->config.kineticMinStartVelocity);
@@ -1718,7 +1724,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.19"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.20"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
