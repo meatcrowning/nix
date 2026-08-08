@@ -23,6 +23,11 @@ Rectangle {
     property var options: []          // array of values
     property var labels: ({})         // optional { value: "display" }
     property string value: ""
+    // The options ARE font families (the font picker): each menu row — and the
+    // closed box — draws its label in the face it names, so the menu is its
+    // own specimen sheet. Row heights stay uniform regardless: PixelText pins
+    // every line to Theme.lineHeight.
+    property bool optionsAreFonts: false
     signal changed(string value)
 
     function _display(v) { return (labels && labels[v] !== undefined) ? labels[v] : v; }
@@ -41,6 +46,7 @@ Rectangle {
         anchors { left: parent.left; leftMargin: 8; right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
         elide: Text.ElideRight
         text: root._display(root.value)
+        font.family: root.optionsAreFonts && root.value !== "" ? root.value : Theme.font
         color: ma.containsMouse ? Theme.accent : Theme.text
     }
 
@@ -140,6 +146,7 @@ Rectangle {
                                 anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                                 textFormat: Text.PlainText
                                 text: root._display(row.modelData)
+                                font.family: root.optionsAreFonts ? row.modelData : Theme.font
                                 // The row you already have reads in accent —
                                 // state said in place, not by an extra mark.
                                 color: row.modelData === root.value ? Theme.accent : Theme.text
