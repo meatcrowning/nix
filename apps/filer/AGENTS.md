@@ -271,6 +271,17 @@ Four things to know before touching any of it:
   the spec/result JSON described in `pick.py`, which is what lets each be tested
   without the other.
 
+**Three modes now: `open`, `dir` and `save`.** Save-as is surfer's — its
+`<input type=file>` runs `filer --pick` for every file dialog a page opens
+(`apps/surfer/qml/FilePicker.qml`), and Chromium's `FileModeSave` needs a mode
+the portal backend never asks for (it proxies SaveFile to the gtk/kde
+delegate). In `save` the box IS the answer (`boxDrives`), the file it names is
+**not** supposed to exist — the only mode where `missing` is fine — its folder
+must (`Picker.writable`), clicking a file fills the name rather than choosing
+it, and a name that lands on an existing file raises the overwrite confirm
+(`confirmOverwrite` → `saveOverDlg` → `doAccept`, its own dialog and not the
+paste one).
+
 **The name box in the bar is EDITABLE**, because a path from somewhere else —
 typed, or pasted out of a terminal — is the whole reason a file dialog has one.
 It was a read-only summary until 2026-08-07.

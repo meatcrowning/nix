@@ -12,7 +12,7 @@ between the two is only this file format, so either half can be exercised alone
 — which is what makes the picker testable without a bus and the backend testable
 without a GUI.
 
-  spec.json   {mode: "open"|"dir", multiple, title, accept_label,
+  spec.json   {mode: "open"|"dir"|"save", multiple, title, accept_label,
                current_folder, current_name, filters: [{name, patterns, mimes}],
                current_filter: {name,...}|null, result: "<path>"}
   result.json {uris: ["file:///..."], current_filter: "<filter name>"}
@@ -77,14 +77,25 @@ class Picker(QObject):
     @Property(str, constant=True)
     def title(self):
         return str(self._spec.get("title") or
-                   ("choose a folder" if self.mode == "dir" else "choose a file"))
+                   {"dir": "choose a folder", "save": "save as"}.get(
+                       self.mode, "choose a file"))
+
+    @Property(bool, constant=True)
+    def saving(self):
+        """Save-as: the answer is a name TYPED into the bar, and the file it
+        names need not exist. surfer's `<input type=file>` picker asks for this
+        mode (Chromium's FileModeSave); the portal backend never does — it
+        proxies SaveFile to the gtk/kde delegate, see portal.py."""
+        return self.mode == "save"
 
     @Property(str, constant=True)
     def acceptLabel(self):
         # Mnemonic underlines are allowed in the wire value; strip them, nothing
         # in this UI has mnemonics.
         lbl = str(self._spec.get("accept_label") or "").replace("_", "")
-        return lbl or ("choose" if self.mode == "dir" else "open")
+        if lbl:
+            return lbl
+        return {"dir": "choose", "save": "save"}.get(self.mode, "open")
 
     @Property(str, constant=True)
     def currentName(self):
@@ -124,6 +135,7 @@ class Picker(QObject):
             return True
         if self.mode == "dir":
             return False
+        # Save-as lists files so you can see what a name would land on top of.
         f = self._filter
         if not f:
             return True
@@ -145,7 +157,9 @@ class Picker(QObject):
     @Slot(str, result=bool)
     def selectable(self, path):
         """Whether choosing this entry is a valid answer (drives the accept
-        button's enabled state)."""
+        button's enabled state). In save mode a click only fills the name box —
+        the answer is whatever the box says — so a file is 'selectable' there
+        too."""
         is_dir = os.path.isdir(path)
         return is_dir if self.mode == "dir" else not is_dir
 
@@ -174,6 +188,13 @@ class Picker(QObject):
             path = os.path.join(base, path)
         return os.path.normpath(path)
 
+    @Slot(str, result=bool)
+    def writable(self, path):
+        """Could something be SAVED at this path? The file need not exist; the
+        folder above it must, or the app is handed a path nothing can write."""
+        p = str(path)
+        return bool(p) and os.path.isdir(os.path.dirname(p) or ".")
+
     @Slot(str, result=str)
     def kindOf(self, path):
         """`"dir"`, `"file"` or `"missing"` for an absolute path."""
@@ -192,7 +213,12 @@ class Picker(QObject):
         result must describe exactly one user decision."""
         if self._done:
             return
-        picked = [str(p) for p in paths if os.path.exists(str(p))]
+        # A save target must NOT have to exist — that is the whole point of one
+        # — but its folder must, or nothing can be written there and the app
+        # would be handed a path it cannot use.
+        keep = ((lambda p: os.path.isdir(os.path.dirname(p) or "."))
+                if self.saving else os.path.exists)
+        picked = [str(p) for p in paths if keep(str(p))]
         if not picked:
             return
         if not self.multiple:

@@ -1021,6 +1021,21 @@ Rectangle {
         }
         // A folder typed into the name box is somewhere to go, not an answer.
         onNavigate: (dir) => view.go(dir)
+        // ...and a save-as onto a file that is already there is asked about.
+        onConfirmOverwrite: (path) => {
+            saveOverDlg.text = dirNameOf(path) + " already exists.\nReplace it?";
+            saveOverDlg.open();
+        }
+    }
+
+    // The save-as overwrite confirm — its own dialog, not the paste one above:
+    // that one carries `pendingPaste` and answers into runPaste. Danger-styled,
+    // being the one thing a file dialog can do that destroys something.
+    BrowserConfirm {
+        id: saveOverDlg
+        danger: true
+        confirmLabel: "replace"
+        onConfirmed: pickBar.doAccept()
     }
 
     // Enter accepts, Escape cancels — the two keys every file dialog owes
