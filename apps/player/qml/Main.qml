@@ -320,6 +320,7 @@ Window {
             onSearchArtist: function(artist) { win.browseArtist(artist); }
         }
         PlaylistsView {
+            id: playlists
             anchors.fill: parent
             visible: win.view === "playlists"
             fgText: win.fgText
@@ -468,15 +469,23 @@ Window {
     // ---- global keys ----
     // Ctrl+F is the desktop's find key (docs/DESIGN.md §11.2). The titlebar cell
     // used to be labelled "/", which advertised a key that was never bound.
-    Shortcut { sequence: "Ctrl+F"; onActivated: win.openSearch() }
-    Shortcut { sequence: "Space";  enabled: !searchInput.activeFocus; onActivated: Player.toggle() }
+    Shortcut { sequence: "Ctrl+F"; enabled: !playlists.modal; onActivated: win.openSearch() }
+    // A Shortcut is matched before the key reaches the focused item, so any
+    // modal carrying a text field has to stand Space down explicitly or its
+    // name box can never contain one.
+    Shortcut {
+        sequence: "Space"
+        enabled: !searchInput.activeFocus && !playlists.modal
+        onActivated: Player.toggle()
+    }
     Shortcut { sequence: "Ctrl+Right"; onActivated: Player.next() }
     Shortcut { sequence: "Ctrl+Left";  onActivated: Player.previous() }
     Shortcut {
         sequence: "Escape"
         enabled: !searchInput.activeFocus
         onActivated: {
-            if (win.settingsOpen) win.settingsOpen = false;
+            if (playlists.modal) playlists.closeModal();
+            else if (win.settingsOpen) win.settingsOpen = false;
             else if (win.searching || win.searchOpen) win.closeSearch();
             else if (win.openAlbumId > 0) win.openAlbum(0);   // close the inline section
         }
