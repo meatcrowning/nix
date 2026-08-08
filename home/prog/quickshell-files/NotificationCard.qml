@@ -68,6 +68,17 @@ Rectangle {
     readonly property bool hasImage: imagePath !== ""
     readonly property int thumbSize: 48
 
+    // What the thumbnail slot draws: our own toasts' downloaded file, else the
+    // freedesktop image hint (image-path / image-data, exposed as notif.image)
+    // when the images setting is on — the same setting the server advertises
+    // `imageSupported` from, so the card renders exactly what was promised.
+    // The hint image is display-only (album art, a contact photo): it is not a
+    // file of his to open, so the click keeps its plain dismiss.
+    readonly property string thumbSource: hasImage
+        ? fileUrl(resolvedPath || imagePath)
+        : ((SettingsStore.d.notifImages && notif && notif.image)
+           ? notif.image : "")
+
     // What clicking the card opens. `x-open-path` overrides the thumbnail path
     // (a recording thumbnails a poster frame but opens the video); it falls back
     // to the thumbnail so a plain image toast keeps opening its own image.
@@ -141,8 +152,13 @@ Rectangle {
     // The sending app's icon, for the left of the header row. appIcon is the
     // Notify() app_icon field: an icon-theme NAME most of the time, but the spec
     // also allows an absolute path or a file: URI, so those are passed through
-    // untouched. When the app sent no usable icon we fall back to its
-    // desktopEntry, then to nothing — a name-only header, never a generic box.
+    // untouched. When the app sent no usable icon we resolve its DESKTOP ENTRY
+    // and use the icon that entry declares — appIcon-less senders are the rule,
+    // not the exception (kitty, KDE Connect), and the raw desktopEntry string
+    // ("org.kde.kdeconnect.daemon") is usually not itself an icon name. The
+    // appName heuristic covers senders that set no desktop-entry hint at all.
+    // Still to nothing when all of that misses — a name-only header, never a
+    // generic box.
     readonly property string iconSource: {
         if (!card.notif)
             return "";
@@ -152,6 +168,11 @@ Rectangle {
         if (ai)
             return Quickshell.iconPath(ai, true);
         const de = (card.notif.desktopEntry || "").toString();
+        const entry = de
+            ? (DesktopEntries.byId(de) ?? DesktopEntries.heuristicLookup(de))
+            : DesktopEntries.heuristicLookup((card.notif.appName || "").toString());
+        if (entry && entry.icon)
+            return Quickshell.iconPath(entry.icon, true);
         return de ? Quickshell.iconPath(de, true) : "";
     }
 
@@ -208,13 +229,13 @@ Rectangle {
             summaryLabel.visible ? summaryLabel.implicitWidth : 0,
             bodyLabel.visible ? bodyLabel.implicitWidth : 0,
             actionsBox.visible ? actionRow.implicitWidth : 0);
-        const pad = 26 + (hasImage ? thumbSize + bodyRow.spacing : 0);
+        const pad = 26 + (thumb.visible ? thumbSize + bodyRow.spacing : 0);
         return Math.min(SettingsStore.d.notifWidth, pad + Math.ceil(text));
     }
 
     width: fitW
     implicitHeight: Math.max(Theme.cell,
-                             (hasImage ? thumbSize : 0) + 20,
+                             (thumb.visible ? thumbSize : 0) + 20,
                              content.implicitHeight + 20)
     radius: 0
     color: Theme.bgAlt
@@ -305,17 +326,18 @@ Rectangle {
         }
         spacing: 10
 
-        // thumbnail of the downloaded image — only on a surfer image-download
-        // completion toast. Fixed slot (reserved only when the hint is present,
-        // so its arrival can't reflow the text). Downscaled, async, like the
-        // desktop's other thumbs (filer's PreviewTile); a file that vanished
-        // since the toast rendered just draws nothing in the box.
+        // thumbnail — a download/capture completion toast's file, or the
+        // freedesktop image hint (card.thumbSource decides). Fixed slot
+        // (reserved only when a source is present, so its arrival can't reflow
+        // the text). Downscaled, async, like the desktop's other thumbs
+        // (filer's PreviewTile); a file that vanished since the toast rendered
+        // just draws nothing in the box.
         Image {
             id: thumb
-            visible: card.hasImage
+            visible: card.thumbSource !== ""
             width: card.thumbSize
             height: card.thumbSize
-            source: card.hasImage ? card.fileUrl(card.resolvedPath || card.imagePath) : ""
+            source: card.thumbSource
             sourceSize.width: card.thumbSize * 2
             sourceSize.height: card.thumbSize * 2
             fillMode: Image.PreserveAspectFit

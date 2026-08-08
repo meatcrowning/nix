@@ -285,7 +285,7 @@ Column {
         }
         SetRow {
             label: "show images"
-            desc: "advertise image support to apps"
+            desc: "draw the image a notification carries"
             SetToggle {
                 checked: page.d.notifImages
                 onToggled: (v) => { page.d.notifImages = v; SettingsStore.save(); }
