@@ -1222,7 +1222,11 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     {
         const int    INSET = 2;
         const int    ISZ   = std::max(1, (int)std::round((CELL - 2 * INSET) * SCALE));
-        const auto&  ICLS  = !PWINDOW->m_class.empty() ? PWINDOW->m_class : PWINDOW->m_initialClass;
+        // A registered ICON override wins over the class (off the snapshot —
+        // the render path is a pure reader of m_regSnap): the Settings window's
+        // class is org.quickshell, which no lookup can turn into its own seal.
+        const auto&  ICLS  = (m_bHasReg && !m_regSnap.icon.empty()) ? m_regSnap.icon
+                           : !PWINDOW->m_class.empty() ? PWINDOW->m_class : PWINDOW->m_initialClass;
         auto         itex  = iconTex(ICLS, ISZ, textColor);
         // Dim on unfocus, like the player greys its album art (docs/DESIGN.md
         // §3.1.1): a currentColor icon greys with the title via textColor, but a

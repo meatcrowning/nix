@@ -185,7 +185,10 @@ Scope {
         return "REGISTER " + myPid + " " + parts.join("|");
     }
     function sendButtons() {
-        if (vtb.connected && myPid) { vtb.write(buildRegister() + "\n"); vtb.flush(); }
+        // ICON after REGISTER (the server learns our pid from the REGISTER):
+        // the window's class is org.quickshell, which resolves to no icon of
+        // ours, so name the titlebar icon explicitly. Deduped server-side.
+        if (vtb.connected && myPid) { vtb.write(buildRegister() + "\nICON settings\n"); vtb.flush(); }
     }
     function onVtbLine(line) {
         const s = (line || "").trim();
