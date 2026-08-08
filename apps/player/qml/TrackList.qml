@@ -312,6 +312,7 @@ Item {
                             color: favorite ? Theme.crit : Theme.dim
                         }
                         MouseArea {
+                            cursorShape: Qt.PointingHandCursor
                             anchors.fill: parent
                             onClicked: Library.setFavorite(trackId, !favorite)
                         }
@@ -336,6 +337,7 @@ Item {
                 }
             }
             MouseArea {
+                cursorShape: Qt.PointingHandCursor
                 id: rowMouse
                 anchors.fill: parent
                 // Stop short of the right-hand column so its stars/heart stay

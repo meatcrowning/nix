@@ -103,6 +103,7 @@ Item {
                            : (nameMouse.containsMouse ? root.fgText : root.fgDim)
                 }
                 MouseArea {
+                    cursorShape: Qt.PointingHandCursor
                     id: nameMouse
                     anchors.fill: parent
                     hoverEnabled: true

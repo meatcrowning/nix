@@ -26,6 +26,7 @@ Row {
                 color: root.rating >= (index + 0.5) / 5 ? root.fgAccent : Theme.dim
             }
             MouseArea {
+                cursorShape: root.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
                 anchors.fill: parent
                 enabled: root.interactive
                 onClicked: {

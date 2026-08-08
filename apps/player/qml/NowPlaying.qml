@@ -134,6 +134,7 @@ Item {
                 color: Theme.dim
             }
             MouseArea {
+                cursorShape: Qt.PointingHandCursor
                 id: artMouse
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -312,6 +313,7 @@ Item {
                                 color: root.cur.favorite ? Theme.crit : Theme.dim
                             }
                             MouseArea {
+                                cursorShape: Qt.PointingHandCursor
                                 anchors.fill: parent
                                 onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
                             }

@@ -293,6 +293,7 @@ Item {
                         }
 
                         MouseArea {
+                            cursorShape: Qt.PointingHandCursor
                             id: tileMouse
                             anchors.fill: parent
                             hoverEnabled: true
