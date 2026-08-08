@@ -258,6 +258,34 @@ Scope {
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
+                // DRAG-TO-PAN OFF. A Flickable grabs the pointer as soon as a
+                // press moves past the drag threshold, anywhere on its content
+                // — so pressing a toggle and twitching, or pulling a slider with
+                // any vertical component, panned the page out from under the
+                // control being used. That is a touch idiom on a settings form
+                // that has a scrollbar and a wheel; [his] "the user can still
+                // click on an area in the page and drag to scroll when they
+                // should not be able to". The scrollbar's own drag writes
+                // contentY directly and is unaffected.
+                interactive: false
+
+                // `interactive` gates Flickable's wheel handling too (Qt checks
+                // it first thing in wheelEvent), so the wheel has to be driven
+                // explicitly once drag is off. Pixel deltas — a touchpad, or the
+                // compositor's synthesized momentum, which reaches this window
+                // because it is a real toplevel (Kinetic.qml) — are used as
+                // given; a mouse's 120-unit notches become three text lines.
+                WheelHandler {
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: (e) => {
+                        const step = 3 * Math.max(12, Theme.fontSize + 4);
+                        const dy = e.pixelDelta.y !== 0 ? e.pixelDelta.y
+                                                        : (e.angleDelta.y / 120) * step;
+                        scroller.contentY = Math.max(0, Math.min(scroller.contentY - dy,
+                                                     Math.max(0, scroller.contentHeight - scroller.height)));
+                    }
+                }
+
                 Loader {
                     id: pageLoader
                     // Reserve the scrollbar's gutter (§9.2, VScroll's barW) plus a
